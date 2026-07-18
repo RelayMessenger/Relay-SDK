@@ -1,5 +1,6 @@
 {
   "name": "relayapp",
+  "description": "Relay channel plugin marketplace for Claude Code",
   "owner": { "name": "Relay" },
   "plugins": [
     {

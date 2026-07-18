@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { parse as parseToml } from "smol-toml";
 import {
   installClaude,
   installCodex,
+  installOpenClaw,
   mergeClaudeChannelEnv,
   mergeCodexConfigToml,
   mergeHooksJson,
+  mergeOpenClawConfig,
 } from "./install.js";
 import { CodexNotifyPolicyStore, ConfigStore } from "./store.js";
 
@@ -56,6 +58,24 @@ command = "my-custom-relayapp"
   const { toml } = mergeCodexConfigToml(existing);
   const doc = parseToml(toml) as any;
   assert.equal(doc.mcp_servers.relay.command, "my-custom-relayapp");
+});
+
+test("install-codex reports a truthful partial setup when existing integrations win", () => {
+  const codexHome = mkdtempSync(join(tmpdir(), "relayapp-codex-partial-"));
+  writeFileSync(
+    join(codexHome, "config.toml"),
+    'notify = ["other"]\n\n[mcp_servers.relay]\ncommand = "other-relay"\n',
+  );
+  const lines: string[] = [];
+  installCodex(codexHome, (line) => lines.push(line), {
+    projectRoot: mkdtempSync(join(tmpdir(), "relayapp-project-")),
+    policy: new CodexNotifyPolicyStore(mkdtempSync(join(tmpdir(), "relayapp-policy-"))),
+  });
+  const output = lines.join("\n");
+  assert.match(output, /setup is partial/);
+  assert.match(output, /MCP relay_send_message: inactive/);
+  assert.match(output, /final-message notify: inactive/);
+  assert.doesNotMatch(output, /Codex will send the final assistant message/);
 });
 
 test("install-codex: config merge is idempotent", () => {
@@ -157,17 +177,57 @@ test("install-claude securely copies paired identity without printing the token"
     agent: { id: "agt_1" },
   });
   const lines: string[] = [];
-  installClaude((line) => lines.push(line), { config, channelDir, searchFrom: relayHome });
+  const bundleDir = join(relayHome, "marketplace");
+  for (const relative of [
+    ".claude-plugin/marketplace.json",
+    "plugins/relay/.claude-plugin/plugin.json",
+    "plugins/relay/commands/configure.md",
+    "plugins/relay/runtime/server.mjs",
+    "plugins/relay/LICENSE",
+    "plugins/relay/README.md",
+  ]) {
+    const path = join(bundleDir, relative);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "fixture\n");
+  }
+  const commands: string[][] = [];
+  const options = {
+    config,
+    channelDir,
+    bundleDir,
+    installRoot: join(relayHome, "installed-claude"),
+    runClaude: (_command: string, args: string[]) => {
+      commands.push(args);
+      return { status: 0, stdout: "", stderr: "" };
+    },
+  };
+  installClaude((line) => lines.push(line), options);
   const envPath = join(channelDir, ".env");
   const contents = readFileSync(envPath, "utf8");
   assert.match(contents, /RELAY_AGENT_TOKEN=rly_secret_never_log/);
   assert.match(contents, /RELAY_BASE_URL=https:\/\/api\.relayapp\.im/);
   assert.match(contents, /RELAY_OWNER_USER_ID=usr_owner/);
   assert.equal(lines.join("\n").includes("rly_secret_never_log"), false);
+  assert.deepEqual(commands[0], ["plugin", "validate", join(bundleDir, "plugins", "relay"), "--strict"]);
+  assert.deepEqual(commands[1], ["plugin", "validate", bundleDir, "--strict"]);
+  const persistentPlugin = commands[2]![2]!;
+  const persistentMarketplace = dirname(dirname(persistentPlugin));
+  assert.match(persistentMarketplace, /installed-claude[/\\][a-f0-9]{24}[/\\]marketplace$/);
+  assert.deepEqual(commands[2], [
+    "plugin",
+    "validate",
+    persistentPlugin,
+    "--strict",
+  ]);
+  assert.deepEqual(commands[3], ["plugin", "marketplace", "add", persistentMarketplace]);
+  assert.deepEqual(commands[4], ["plugin", "install", "relay@relayapp-bundled", "--scope", "user"]);
+  assert.match(lines.join("\n"), /plugin:relay@relayapp-bundled/);
   if (process.platform !== "win32") assert.equal(statSync(envPath).mode & 0o777, 0o600);
 
-  installClaude(() => {}, { config, channelDir, searchFrom: relayHome });
+  commands.length = 0;
+  installClaude(() => {}, options);
   assert.equal(readFileSync(envPath, "utf8"), contents, "install is idempotent");
+  assert.equal(commands.length, 5, "idempotent install revalidates and refreshes the local package path");
 });
 
 test("install-claude refuses to overwrite a different channel identity", () => {
@@ -179,5 +239,66 @@ test("install-claude refuses to overwrite a different channel identity", () => {
         ownerUserId: "usr_owner",
       }),
     /different RELAY_AGENT_TOKEN/,
+  );
+});
+
+test("install-openclaw installs the bundled archive and configures owner-private identity", () => {
+  const relayHome = mkdtempSync(join(tmpdir(), "relayapp-openclaw-pair-"));
+  const openclawHome = mkdtempSync(join(tmpdir(), "relayapp-openclaw-home-"));
+  const bundleDir = mkdtempSync(join(tmpdir(), "relayapp-openclaw-bundle-"));
+  writeFileSync(join(bundleDir, "relayapp-openclaw-plugin-0.1.0.tgz"), "archive fixture");
+  const config = new ConfigStore(relayHome);
+  config.save({
+    api_origin: "https://api.relayapp.im",
+    agent_token: "rly_openclaw_secret",
+    owner_user_id: "usr_owner",
+    agent: { id: "agt_openclaw" },
+  });
+  const commands: string[][] = [];
+  const lines: string[] = [];
+  installOpenClaw((line) => lines.push(line), {
+    config,
+    openclawHome,
+    bundleDir,
+    installRoot: join(relayHome, "installed-openclaw"),
+    runOpenClaw: (_command, args) => {
+      commands.push(args);
+      return { status: 0 };
+    },
+  });
+  assert.equal(commands.length, 1);
+  assert.deepEqual(commands[0]!.slice(0, 2), ["plugins", "install"]);
+  assert.match(commands[0]![2]!, /installed-openclaw[/\\][a-f0-9]{24}[/\\]relay-openclaw-plugin\.tgz$/);
+  assert.equal(commands[0]![3], "--force");
+  const tokenPath = join(openclawHome, "secrets", "relay-agent-token");
+  assert.equal(readFileSync(tokenPath, "utf8"), "rly_openclaw_secret\n");
+  const installedConfig = JSON.parse(readFileSync(join(openclawHome, "openclaw.json"), "utf8"));
+  assert.deepEqual(installedConfig.plugins.allow, ["relay"]);
+  assert.equal(installedConfig.plugins.entries.relay.enabled, true);
+  assert.equal(installedConfig.channels.relay.tokenFile, tokenPath);
+  assert.equal(installedConfig.channels.relay.baseUrl, "https://api.relayapp.im");
+  assert.equal(lines.join("\n").includes("rly_openclaw_secret"), false);
+  if (process.platform !== "win32") {
+    assert.equal(statSync(tokenPath).mode & 0o777, 0o600);
+    assert.equal(statSync(join(openclawHome, "openclaw.json")).mode & 0o777, 0o600);
+  }
+});
+
+test("install-openclaw merge preserves unrelated config and refuses identity overwrite", () => {
+  const existing = `${JSON.stringify({ gateway: { mode: "local" }, plugins: { allow: ["other"] } })}\n`;
+  const merged = JSON.parse(mergeOpenClawConfig(existing, {
+    token: "secret",
+    tokenFile: "/private/token",
+    baseUrl: "https://api.relayapp.im",
+  }));
+  assert.equal(merged.gateway.mode, "local");
+  assert.deepEqual(merged.plugins.allow, ["other", "relay"]);
+  assert.throws(
+    () => mergeOpenClawConfig('{"channels":{"relay":{"token":"other"}}}', {
+      token: "secret",
+      tokenFile: "/private/token",
+      baseUrl: "https://api.relayapp.im",
+    }),
+    /different token/,
   );
 });

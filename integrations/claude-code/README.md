@@ -21,20 +21,26 @@ The plugin is a self-contained MCP stdio server for Claude Code's experimental
 
 ## Install
 
-From a marketplace containing this plugin:
+Install the published CLI, pair once, and install its bundled local
+marketplace:
 
-```text
-/plugin install relay@<marketplace>
+```sh
+npm install -g relayapp
+relayapp pair
+relayapp install-claude
 ```
 
-The installed plugin already contains `runtime/server.mjs` with all runtime
-dependencies bundled. Do not locate a plugin cache or run `npm install` after
-installation.
+`install-claude` strictly validates the bundled source, copies it to a stable
+content-addressed directory under the paired account's private Relay runtime,
+registers the local `relayapp-bundled` marketplace, and installs
+`relay@relayapp-bundled`. It does not depend on this GitHub repository or on
+the npm package remaining at its original install path. The installed plugin
+already contains `runtime/server.mjs` with all runtime dependencies bundled;
+do not locate a plugin cache or run `npm install` after installation.
 
 ## Configure
 
-After `relayapp pair`, configure the installed channel without exposing the
-token:
+The install command also configures the channel without exposing the token:
 
 ```text
 relayapp install-claude
@@ -81,7 +87,7 @@ Custom channels require Claude Code's development-channel flag during the
 research preview:
 
 ```text
-claude --dangerously-load-development-channels plugin:relay@<marketplace>
+claude --dangerously-load-development-channels plugin:relay@relayapp-bundled
 ```
 
 Use `server:relay` instead when registered as a bare MCP server.
@@ -158,7 +164,10 @@ npm ci
 npm run check
 npm test
 npm run build
+npm run pack:smoke
 ```
 
 `npm run build` produces the checked-in, self-contained
-`runtime/server.mjs`. `npm pack` runs that build again through `prepack`.
+`runtime/server.mjs`. `npm pack` runs that build again through `prepack`. The
+root release checks also run Claude Code's pinned `plugin validate --strict`
+against both the plugin and marketplace before npm publication.

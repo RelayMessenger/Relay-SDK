@@ -355,12 +355,13 @@ test("same conversation opened from a different repository gets a fresh session"
   }
 });
 
-test("permission.asked round trip: Allow → reply once, Deny → reply reject", async () => {
+test("permission.asked is fail-closed because OpenCode does not attest complete raw input", async () => {
   const mock = await mockOpencode();
   const engine = new OpencodeEngine(new SessionStore(tempHome()), { server: { url: mock.url } });
   try {
     const decisions: PermissionDecision[] = [
       { behavior: "selected", optionId: "once" },
+      { behavior: "selected", optionId: "reject" },
       { behavior: "selected", optionId: "reject" },
     ];
     const cb = callbacks(async () => decisions.shift()!);
@@ -375,21 +376,26 @@ test("permission.asked round trip: Allow → reply once, Deny → reply reject",
         sessionID: "ses_1",
         permission: "bash",
         patterns: ["rm -rf build"],
-        metadata: {},
+        metadata: { command: "rm -rf build", environment: { FORCE: "1" } },
         always: [],
+        tool: { messageID: "msg_1", callID: "call_1" },
       },
     });
     await waitFor(() => mock.requests.some((r) => r.path === "/permission/per_allow1/reply"));
     const allowReply = mock.requests.find((r) => r.path === "/permission/per_allow1/reply")!;
-    assert.deepEqual(allowReply.body, { reply: "once" });
+    assert.equal(allowReply.body.reply, "reject");
 
     // The ask surfaced with the binary allow/deny option shapes the broker maps.
     assert.equal(cb.asks.length, 1);
     assert.equal(cb.asks[0]!.toolName, "bash");
     assert.match(cb.asks[0]!.title!, /rm -rf build/);
+    assert.equal(cb.asks[0]!.inputComplete, false);
+    assert.match(cb.asks[0]!.inputPreview!, /"command": "rm -rf build"/);
+    assert.match(cb.asks[0]!.inputPreview!, /"FORCE": "1"/);
+    assert.match(cb.asks[0]!.inputPreview!, /"callID": "call_1"/);
     assert.deepEqual(
       cb.asks[0]!.options.map((o) => [o.optionId, o.kind]),
-      [["once", "allow_once"], ["reject", "reject_once"]],
+      [["reject", "reject_once"]],
     );
 
     mock.emit({
@@ -400,6 +406,23 @@ test("permission.asked round trip: Allow → reply once, Deny → reply reject",
     const denyReply = mock.requests.find((r) => r.path === "/permission/per_deny1/reply")!;
     assert.equal(denyReply.body.reply, "reject");
     assert.equal(typeof denyReply.body.message, "string");
+
+    const longPattern = `safe-prefix ${"x".repeat(520)} dangerous-suffix`;
+    mock.emit({
+      type: "permission.asked",
+      properties: {
+        id: "per_long1",
+        sessionID: "ses_1",
+        permission: "bash",
+        patterns: [longPattern],
+        metadata: {},
+        always: [],
+      },
+    });
+    await waitFor(() => mock.requests.some((r) => r.path === "/permission/per_long1/reply"));
+    assert.equal(mock.requests.find((r) => r.path === "/permission/per_long1/reply")!.body.reply, "reject");
+    assert.match(cb.asks[2]!.inputPreview!, /dangerous-suffix/);
+    assert.equal(cb.asks[2]!.inputPreview!.includes(longPattern), true, "pattern must not be truncated");
 
     mock.emit({ type: "session.next.text.ended", properties: { sessionID: "ses_1", textID: "t", text: "done" } });
     mock.emit({ type: "session.status", properties: { sessionID: "ses_1", status: { type: "idle" } } });

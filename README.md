@@ -11,15 +11,20 @@ Docs: https://docs.relayapp.im
 
 | Path | What it is |
 | --- | --- |
-| [`packages/relayapp`](packages/relayapp) | The `relayapp` CLI (npm): `pair` a machine with the Relay app via QR/code, `start` the bridge (long-polls Relay, drives engines over ACP or HTTP), `install-codex`, `doctor`. |
-| [`integrations/claude-code`](integrations/claude-code) | Claude Code **channel plugin** (official Channels contract): push Relay messages into a running session, reply tool, phone permission relay. This repo doubles as its plugin marketplace: `/plugin marketplace add companion-inc/relayapp`. |
-| [`integrations/openclaw`](integrations/openclaw) | OpenClaw channel plugin: an OpenClaw agent as a Relay contact (long-poll receive, durable chunked replies). |
+| [`packages/relayapp`](packages/relayapp) | The `relayapp` CLI (npm): `pair` a machine with the Relay app via QR/code, `start` the bridge (long-polls Relay, drives engines over ACP or HTTP), and install the bundled Codex, Claude Code, or OpenClaw integration. |
+| [`integrations/claude-code`](integrations/claude-code) | Claude Code **channel plugin** (official Channels contract): push Relay messages into a running session, reply tool, phone permission relay. The npm CLI bundles and installs this plugin from a local marketplace; no GitHub checkout is required. |
+| [`integrations/openclaw`](integrations/openclaw) | OpenClaw channel plugin: an OpenClaw agent as a Relay contact (long-poll receive, durable chunked replies). The npm CLI bundles its installable archive. |
 
 ## Quickstart
 
 ```sh
-npx relayapp pair        # QR + code → claim in the Relay app
+npm install -g relayapp
+relayapp pair            # QR + code → claim in the Relay app
 relayapp start --engine claude   # or codex | opencode
+
+# Or install a native channel after pairing:
+relayapp install-claude
+relayapp install-openclaw
 ```
 
 Full guide: https://docs.relayapp.im/guides/coding-agents
@@ -30,9 +35,10 @@ on macOS CI.
 
 ## relayapp npm release contract
 
-Only `packages/relayapp` is published by the automated npm release. The Claude
-channel and OpenClaw plugin remain integration artifacts with their own install
-surfaces; this workflow does not imply separate npm releases for them.
+Only `packages/relayapp` is published by the automated npm release. Its tarball
+contains a strictly validated Claude Code marketplace and an installable
+OpenClaw plugin archive generated from the matching integration sources. The
+integration workspaces are not published separately by this workflow.
 
 1. Update the CLI version and root lock metadata together:
 
@@ -51,15 +57,17 @@ surfaces; this workflow does not imply separate npm releases for them.
    missing `NPM_TOKEN` before a new publish. It never creates a repository,
    changes repository visibility, or creates/pushes a tag.
 4. CI reruns the full validation and package smokes, publishes only `relayapp`,
-   and uses npm provenance when GitHub reports a public source repository.
-   Private-source releases publish without provenance rather than changing
-   visibility.
+   strictly validates the source Claude plugin and marketplace, and proves the
+   packed OpenClaw plugin through a real isolated gateway turn. It uses npm
+   provenance when GitHub reports a public source repository. Private-source
+   releases publish without provenance rather than changing visibility.
 5. Before any retry, the workflow reconciles npm state. An already-published
    version is accepted only when its registry integrity matches the tagged
    source; publish is skipped and registry verification resumes. Finally,
    `scripts/verify-relayapp-registry.mjs` installs the exact registry version
-   into a clean directory, loads the CLI, and resolves both pinned ACP adapter
-   runtimes.
+   into a clean directory, loads the CLI, resolves both pinned ACP adapter
+   runtimes, and verifies that both bundled native-integration artifacts are
+   present.
 
 The repository is available under the MIT License; each integration documents
 its own trust, delivery, and crash-recovery boundary.

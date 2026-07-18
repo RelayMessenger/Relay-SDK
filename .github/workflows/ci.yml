@@ -72,6 +72,8 @@ jobs:
           node-version: 22.22.3
           cache: npm
       - run: npm ci
+      - run: npm run validate:claude-plugin
+      - run: npm run gateway:harness
       - run: npm run pack:check
 
   macos-relayapp-runtime:

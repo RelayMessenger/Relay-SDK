@@ -30,6 +30,7 @@
     "check": "tsc --noEmit",
     "test": "vitest run",
     "pack:smoke": "node scripts/pack-smoke.mjs",
+    "gateway:harness": "node scripts/gateway-harness.mjs",
     "prepack": "npm run build"
   },
   "devDependencies": {

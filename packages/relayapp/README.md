@@ -32,7 +32,8 @@ the engine works and posts one finalized reply per turn.
 | `relayapp pair` | `POST /v1/pairings`, shows a terminal QR + code, long-polls until you claim it in the app, stores the Agent Token in `~/.relayapp/config.json` (chmod 600) and pins your user id as the bridge owner (from `GET /v1/agents/me`; override with `RELAY_OWNER_USER_ID`). If owner lookup is interrupted after the token is saved, running the command again resumes that saved token without creating another agent. The token never appears on the phone. |
 | `relayapp start` | Receive loop: long-polls `GET /v1/events`, drives the engine over ACP, replies via `POST /v1/messages` with an `Idempotency-Key`. Flags: `--engine claude\|codex\|opencode`, `--dir <path>`. |
 | `relayapp install-codex` | Run from a project root to opt in that project only. Merges — never clobbers — `[mcp_servers.relay]` + `notify` into `~/.codex/config.toml` (comments preserved; a `.bak` of the original is kept) and a `PermissionRequest` hook into `~/.codex/hooks.json`. Other projects are suppressed until installed separately. Codex gates untrusted hook handlers: the first run may ask you to trust the relayapp handler. |
-| `relayapp install-claude` | After pairing, writes the paired token, API origin, and pinned owner to `~/.claude/channels/relay/.env` with mode 600, without printing the token; refuses to overwrite a different configured channel identity, then prints the exact marketplace install and launch commands. |
+| `relayapp install-claude` | After pairing, strictly validates the Claude plugin bundled in the installed npm package, persists its local marketplace under the paired account's private runtime directory, installs `relay@relayapp-bundled`, and writes the token/API origin/owner pin to `~/.claude/channels/relay/.env` with mode 600 without printing the token. It refuses to overwrite a different configured identity. |
+| `relayapp install-openclaw` | After pairing, persists and installs the OpenClaw plugin archive bundled in the npm package, adds only Relay's plugin/channel fields to `~/.openclaw/openclaw.json`, and writes the paired token to an owner-only file. Existing unrelated config is preserved and a different configured identity is refused. |
 | `relayapp doctor` | Checks Node, pairing, token file permissions, API reachability, installed adapter pins, and durable-state health. |
 
 ## How the wire works
@@ -97,6 +98,11 @@ curl -X POST https://api.relayapp.im/v1/messages \
   Relay message history. There is no global-all-projects opt-in; run
   `install-codex` in each
   project you choose to disclose.
+- **Codex MCP sends**: `relay_send_message` requires a caller-chosen stable
+  `send_id`. Reuse the same `send_id`, conversation, and text only after an
+  unknown outcome; a changed payload is rejected. The mapping and
+  idempotency key live in the paired account's private runtime directory, so
+  a process restart cannot turn one logical send into two messages.
 
 ## Files
 
@@ -107,6 +113,8 @@ curl -X POST https://api.relayapp.im/v1/messages \
                                            owner conversation (start-only)
 ~/.relayapp/accounts/<hash>/approvals/     one file per pending approval
 ~/.relayapp/accounts/<hash>/sessions.json  conversation → session bindings
+~/.relayapp/accounts/<hash>/mcp-sends/     durable Codex MCP logical sends
+~/.relayapp/accounts/<hash>/installed-plugins/  stable bundled plugin sources
 ```
 
 Requires Node >= 22.18.

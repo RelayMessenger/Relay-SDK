@@ -11,6 +11,8 @@
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces",
     "validate": "npm run check && npm run build && npm test",
+    "validate:claude-plugin": "npm exec --workspace relayapp -- claude plugin validate ../../integrations/claude-code --strict && npm exec --workspace relayapp -- claude plugin validate ../../ --strict",
+    "gateway:harness": "npm run gateway:harness --workspace @relayapp/openclaw-plugin",
     "pack:check": "node scripts/pack-smoke.mjs && npm run pack:smoke --workspace relay-claude-channel && npm run pack:smoke --workspace @relayapp/openclaw-plugin"
   }
 }

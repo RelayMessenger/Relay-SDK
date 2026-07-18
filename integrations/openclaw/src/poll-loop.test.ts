@@ -27,7 +27,7 @@ function memoryCursorStore() {
     },
     delete: async (key) => map.delete(key),
   };
-  return createRelayCursorStore({ store, accountId: "default", agentId: "agt_self" });
+  return createRelayCursorStore({ store, baseUrl: "https://api.relayapp.im", agentId: "agt_self" });
 }
 
 function memoryGuard(): RelayClaimableGuard {
@@ -99,7 +99,7 @@ describe("runRelayPollLoop", () => {
         abort,
       ),
       cursorStore,
-      deduper: createRelayInboundDeduper({ guard: memoryGuard(), accountId: "default" }),
+      deduper: createRelayInboundDeduper({ guard: memoryGuard(), baseUrl: "https://api.relayapp.im", agentId: "agt_self" }),
       abortSignal: abort.signal,
       handleEvent: async (event) => {
         handled.push(event.event_id);
@@ -134,9 +134,10 @@ describe("runRelayPollLoop", () => {
         abort,
       ),
       cursorStore,
-      deduper: createRelayInboundDeduper({ guard, accountId: "default" }),
+      deduper: createRelayInboundDeduper({ guard, baseUrl: "https://api.relayapp.im", agentId: "agt_self" }),
       abortSignal: abort.signal,
-      handleEvent: async (event) => {
+      handleEvent: async (event, markAttempt) => {
+        await markAttempt();
         if (event.event_id === "evt_2" && !failedOnce) {
           failedOnce = true;
           throw new Error("transient dispatch failure");
@@ -179,9 +180,10 @@ describe("runRelayPollLoop", () => {
         abort,
       ),
       cursorStore,
-      deduper: createRelayInboundDeduper({ guard, accountId: "default" }),
+      deduper: createRelayInboundDeduper({ guard, baseUrl: "https://api.relayapp.im", agentId: "agt_self" }),
       abortSignal: abort.signal,
-      handleEvent: async (event) => {
+      handleEvent: async (event, markAttempt) => {
+        await markAttempt();
         handled.push(event.event_id);
       },
       sleep: instantSleep,
@@ -190,6 +192,43 @@ describe("runRelayPollLoop", () => {
     expect(handled).toEqual(["evt_1", "evt_2"]);
     expect(cursorStore.current()).toBe(2);
   });
+
+  it.each(["resolver", "route", "session", "envelope"])(
+    "retries a safe %s preflight failure before marking the agent attempt",
+    async (stage) => {
+      const abort = new AbortController();
+      const cursorStore = memoryCursorStore();
+      await cursorStore.load();
+      let calls = 0;
+      const handled: string[] = [];
+      await runRelayPollLoop({
+        client: scriptedClient(
+          [
+            { events: [makeEvent("evt_preflight")], nextCursor: 1 },
+            { events: [makeEvent("evt_preflight")], nextCursor: 1 },
+          ],
+          abort,
+        ),
+        cursorStore,
+        deduper: createRelayInboundDeduper({
+          guard: memoryGuard(),
+          baseUrl: "https://api.relayapp.im",
+          agentId: "agt_self",
+        }),
+        abortSignal: abort.signal,
+        handleEvent: async (event, markAttempt) => {
+          calls += 1;
+          if (calls === 1) throw new Error(`${stage} unavailable`);
+          await markAttempt();
+          handled.push(event.event_id);
+        },
+        sleep: instantSleep,
+      });
+      expect(calls).toBe(2);
+      expect(handled).toEqual(["evt_preflight"]);
+      expect(cursorStore.current()).toBe(1);
+    },
+  );
 
   it("acks bookkeeping events without burning dedupe claims", async () => {
     const abort = new AbortController();
@@ -211,10 +250,11 @@ describe("runRelayPollLoop", () => {
         abort,
       ),
       cursorStore,
-      deduper: createRelayInboundDeduper({ guard, accountId: "default" }),
+      deduper: createRelayInboundDeduper({ guard, baseUrl: "https://api.relayapp.im", agentId: "agt_self" }),
       abortSignal: abort.signal,
       shouldProcess: (event) => event.event_type === "message.received",
-      handleEvent: async (event) => {
+      handleEvent: async (event, markAttempt) => {
+        await markAttempt();
         handled.push(event.event_id);
       },
       sleep: instantSleep,
@@ -242,9 +282,10 @@ describe("runRelayPollLoop", () => {
         abort,
       ),
       cursorStore,
-      deduper: createRelayInboundDeduper({ guard: memoryGuard(), accountId: "default" }),
+      deduper: createRelayInboundDeduper({ guard: memoryGuard(), baseUrl: "https://api.relayapp.im", agentId: "agt_self" }),
       abortSignal: abort.signal,
-      handleEvent: async (event) => {
+      handleEvent: async (event, markAttempt) => {
+        await markAttempt();
         handled.push(event.event_id);
       },
       sleep: instantSleep,
@@ -265,7 +306,7 @@ describe("runRelayPollLoop", () => {
           abort,
         ),
         cursorStore,
-        deduper: createRelayInboundDeduper({ guard: memoryGuard(), accountId: "default" }),
+        deduper: createRelayInboundDeduper({ guard: memoryGuard(), baseUrl: "https://api.relayapp.im", agentId: "agt_self" }),
         abortSignal: abort.signal,
         handleEvent: async () => {},
         sleep: instantSleep,
@@ -285,7 +326,7 @@ describe("runRelayPollLoop", () => {
           abort,
         ),
         cursorStore,
-        deduper: createRelayInboundDeduper({ guard: memoryGuard(), accountId: "default" }),
+        deduper: createRelayInboundDeduper({ guard: memoryGuard(), baseUrl: "https://api.relayapp.im", agentId: "agt_self" }),
         abortSignal: abort.signal,
         handleEvent: async () => {},
         sleep: instantSleep,
@@ -309,9 +350,10 @@ describe("runRelayPollLoop", () => {
         abort,
       ),
       cursorStore,
-      deduper: createRelayInboundDeduper({ guard: memoryGuard(), accountId: "default" }),
+      deduper: createRelayInboundDeduper({ guard: memoryGuard(), baseUrl: "https://api.relayapp.im", agentId: "agt_self" }),
       abortSignal: abort.signal,
-      handleEvent: async (event) => {
+      handleEvent: async (event, markAttempt) => {
+        await markAttempt();
         handled.push(event.event_id);
       },
       sleep: instantSleep,
@@ -330,7 +372,7 @@ describe("runRelayPollLoop", () => {
     await runRelayPollLoop({
       client: scriptedClient([], abort),
       cursorStore,
-      deduper: createRelayInboundDeduper({ guard: memoryGuard(), accountId: "default" }),
+      deduper: createRelayInboundDeduper({ guard: memoryGuard(), baseUrl: "https://api.relayapp.im", agentId: "agt_self" }),
       abortSignal: abort.signal,
       handleEvent: async () => {
         throw new Error("must not dispatch after abort");
@@ -362,7 +404,8 @@ describe("runRelayPollLoop", () => {
       cursorStore,
       deduper,
       abortSignal: abort.signal,
-      handleEvent: async (event) => {
+      handleEvent: async (event, markAttempt) => {
+        await markAttempt();
         handled.push(event.event_id);
       },
       sleep: instantSleep,

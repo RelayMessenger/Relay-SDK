@@ -6,25 +6,31 @@ you text like a friend.
 
 Requires `openclaw >= 2026.7.2-beta.2`.
 
-## Install from source
+## Install
+
+```sh
+npm install -g relayapp
+relayapp pair
+relayapp install-openclaw
+```
+
+The installer uses the OpenClaw archive bundled in the installed `relayapp`
+package, persists that archive in the paired account's private Relay runtime,
+and invokes `openclaw plugins install` on the stable copy. It surgically adds
+Relay to `~/.openclaw/openclaw.json`, preserves unrelated configuration,
+writes the token to an owner-only file, and never prints it. It refuses to
+replace a different configured Relay identity.
+
+For integration development from this checkout only:
 
 ```sh
 cd integrations/openclaw
 npm install
-npm pack            # builds dist/ via prepack
+npm pack
 openclaw plugins install ./relayapp-openclaw-plugin-0.1.0.tgz --force
 ```
 
-Write the token to an owner-only file without putting it in shell history:
-
-```sh
-mkdir -p ~/.openclaw/secrets
-chmod 700 ~/.openclaw/secrets
-# Use your editor to place only the Agent Token in this file.
-chmod 600 ~/.openclaw/secrets/relay-agent-token
-```
-
-Then trust and configure the plugin in `~/.openclaw/openclaw.json`:
+The installer produces the equivalent Relay-specific configuration:
 
 ```json
 {
@@ -83,23 +89,29 @@ the same agent id as a running one.
 
 ## Harness
 
-`harness/mock-relay-server.mjs` is a mock Relay API (agent identity, long-poll
-events, idempotent sends, typing/read) plus a mock OpenAI-compatible model
-endpoint used for the installed-runtime proof: point `channels.relay.baseUrl`
-and a `models.providers` entry at `http://127.0.0.1:8790`, install the packed
-plugin into an isolated `HOME`, and run `openclaw gateway`.
-`MOCK_LLM_REPLY=short` switches the model reply to a single chunk.
+Run `npm run gateway:harness` from the repository root for the clean installed-
+runtime proof. It packs the plugin, installs it into an isolated `HOME`, starts
+a real OpenClaw gateway against `harness/mock-relay-server.mjs`, receives a
+Relay event, completes a mock model turn, and verifies the reply reaches
+Relay. The release workflow requires this proof.
 
 ## Delivery and crash semantics
 
 - Every outbound platform send has a logical-send idempotency key. Durable
   queue retries reuse the same key, while intentional identical messages and
   identical chunks remain distinct.
-- Before an inbound event can start an agent turn, its attempt marker is
-  committed durably. A crash may interrupt that turn, but the event is not
-  silently replayed because local tools may already have performed a deploy,
-  deletion, shell command, or external send. The user can resend the message
-  deliberately.
+- Admission, route/session resolution, envelope building, and context
+  finalization run before an inbound event is marked attempted. Failures in
+  that replay-safe preflight release the claim and retry the event. The marker
+  is committed durably immediately before OpenClaw can dispatch the agent or
+  its tools; a failure after that boundary does not silently replay possible
+  tool side effects. The user can resend the message deliberately.
+- The long-poll cursor and inbound attempt keys are bound to the canonical
+  Relay API origin plus Relay agent id, not to a mutable local account label.
+  Renaming an account therefore retains its cursor. A missing identity starts
+  at cursor zero; corrupt, mismatched, unreadable, or unwritable state fails
+  closed instead of replaying retained history. Cursor state is independent
+  of the bounded 30-day attempt-dedupe horizon.
 - Before polling, the plugin takes an atomic per-origin/per-agent filesystem
   lock under `~/.openclaw/relay/consumer-locks`. A second OpenClaw process
   fails closed; a lock whose recorded PID is dead is recovered on startup.

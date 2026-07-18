@@ -553,13 +553,21 @@ export class OpencodeEngine implements EngineAdapter {
       requestId,
       toolName: permission,
       title: patterns.length > 0 ? `${permission}: ${patterns.join(" ")}` : permission,
+      inputPreview: opencodePermissionDetail(props),
+      // OpenCode's current permission.asked contract exposes permission,
+      // patterns, arbitrary metadata, always-patterns, and an optional tool
+      // reference. It does not promise that metadata contains the complete raw
+      // tool input. Relay therefore preserves every supplied detail without
+      // truncation for diagnosis but never offers remote Allow.
+      inputComplete: false,
       options: [
-        { optionId: "once", label: "Allow", kind: "allow_once" },
         { optionId: "reject", label: "Deny", kind: "reject_once" },
       ],
     };
     const decision = await turn.callbacks.onPermissionAsk(ask);
-    const allow = decision.behavior === "selected" && decision.optionId === "once";
+    const allow = ask.inputComplete !== false &&
+      decision.behavior === "selected" &&
+      decision.optionId === "once";
     await this.request("POST", `/permission/${requestId}/reply`, {
       directory: turn.directory,
       body: allow ? { reply: "once" } : { reply: "reject", message: "Denied from Relay" },
@@ -709,6 +717,27 @@ export class OpencodeEngine implements EngineAdapter {
     this.baseUrl = undefined;
     this.starting = undefined;
   }
+}
+
+/** Preserve the complete public permission-event payload fields verbatim. */
+export function opencodePermissionDetail(props: Record<string, unknown>): string {
+  return JSON.stringify(
+    {
+      permission: typeof props.permission === "string" ? props.permission : null,
+      patterns: Array.isArray(props.patterns) ? props.patterns : null,
+      metadata:
+        props.metadata && typeof props.metadata === "object" && !Array.isArray(props.metadata)
+          ? props.metadata
+          : null,
+      always: Array.isArray(props.always) ? props.always : null,
+      tool:
+        props.tool && typeof props.tool === "object" && !Array.isArray(props.tool)
+          ? props.tool
+          : null,
+    },
+    null,
+    2,
+  );
 }
 
 function summarizeError(error: unknown): string {

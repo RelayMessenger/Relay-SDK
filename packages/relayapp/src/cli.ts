@@ -6,6 +6,7 @@
  *   relayapp start [--engine claude|codex|opencode] [--dir <path>]
  *   relayapp install-codex
  *   relayapp install-claude
+ *   relayapp install-openclaw
  *   relayapp doctor
  *
  * Internal entrypoints (wired by install-codex): notify, mcp,
@@ -16,7 +17,7 @@ import { notifyCommand, permissionRequestHook } from "./codex.js";
 import { doctor } from "./doctor.js";
 import { AcpEngine } from "./engine/acp.js";
 import { OpencodeEngine, opencodeServerFromEnv } from "./engine/opencode.js";
-import { installClaude, installCodex } from "./install.js";
+import { installClaude, installCodex, installOpenClaw } from "./install.js";
 import { parseFlags } from "./flags.js";
 import { mcpServe } from "./mcp.js";
 import { pair } from "./pair.js";
@@ -40,6 +41,7 @@ const USAGE = `relayapp — bridge your local coding agent to Relay (https://rel
       --dir <path>            working directory for engine sessions
   relayapp install-codex   wire Codex notify + phone approvals + MCP server
   relayapp install-claude  point at the Claude Code channel plugin
+  relayapp install-openclaw install and configure the bundled OpenClaw plugin
   relayapp doctor          health checks
 
 Docs: https://docs.relayapp.im/quickstart`;
@@ -133,6 +135,9 @@ async function main(): Promise<number> {
       return 0;
     case "install-claude":
       installClaude();
+      return 0;
+    case "install-openclaw":
+      installOpenClaw();
       return 0;
     case "doctor":
       return (await doctor()) ? 0 : 1;

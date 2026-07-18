@@ -5,11 +5,12 @@
 export const RELAY_CURSOR_NAMESPACE = "relay.cursors";
 export const RELAY_CURSOR_MAX_ENTRIES = 1_000;
 
-const RECORD_VERSION = 1;
+const RECORD_VERSION = 2;
 
 export type RelayCursorRecord = {
   version: number;
   cursor: number;
+  baseUrl: string;
   agentId: string;
 };
 
@@ -25,7 +26,7 @@ export type RelayCursorStateStore = {
 };
 
 export type RelayCursorStore = {
-  /** Loads the persisted cursor; 0 when absent, invalid, or identity-rotated. */
+  /** Loads the persisted cursor; only a genuinely absent stable identity starts at 0. */
   load(): Promise<number>;
   /** Last accepted cursor (in-memory view). */
   current(): number;
@@ -43,40 +44,39 @@ function isValidCursor(value: unknown): value is number {
 
 export function createRelayCursorStore(params: {
   store: RelayCursorStateStore;
-  accountId: string;
+  baseUrl: string;
   agentId: string;
   onPersistError?: (error: unknown) => void;
 }): RelayCursorStore {
-  const key = params.accountId.trim() || "default";
+  const baseUrl = new URL(params.baseUrl).origin;
+  const key = `relay:${baseUrl}:${params.agentId}`;
   let cursor = 0;
   let loaded = false;
 
   return {
     load: async () => {
-      loaded = true;
       let record: RelayCursorRecord | undefined;
       try {
         record = await params.store.lookup(key);
       } catch (error) {
         params.onPersistError?.(error);
+        throw new Error(`relay cursor state could not be loaded: ${String(error)}`);
+      }
+      if (!record) {
         cursor = 0;
+        loaded = true;
         return cursor;
       }
       if (
-        !record ||
         record.version !== RECORD_VERSION ||
         !isValidCursor(record.cursor) ||
-        record.agentId !== params.agentId
+        record.agentId !== params.agentId ||
+        record.baseUrl !== baseUrl
       ) {
-        // Identity rotation or corrupt state: start fresh rather than acking
-        // events that belong to a different agent's sequence space.
-        if (record) {
-          await params.store.delete(key).catch((error) => params.onPersistError?.(error));
-        }
-        cursor = 0;
-        return cursor;
+        throw new Error(`relay cursor state is corrupt for ${baseUrl} ${params.agentId}; refusing cursor-zero replay`);
       }
       cursor = record.cursor;
+      loaded = true;
       return cursor;
     },
 
@@ -89,19 +89,18 @@ export function createRelayCursorStore(params: {
       if (!isValidCursor(next) || next <= cursor) {
         return;
       }
-      cursor = next;
       try {
         await params.store.register(key, {
           version: RECORD_VERSION,
           cursor: next,
+          baseUrl,
           agentId: params.agentId,
         });
       } catch (error) {
-        // Persistence is best effort: a broken state DB must not stop the
-        // receive loop; the in-memory cursor keeps the session correct and a
-        // restart replays from the last durable ack (dedupe absorbs it).
         params.onPersistError?.(error);
+        throw new Error(`relay cursor advance was not durable: ${String(error)}`);
       }
+      cursor = next;
     },
   };
 }

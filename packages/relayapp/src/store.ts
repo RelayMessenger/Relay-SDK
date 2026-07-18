@@ -61,6 +61,15 @@ export interface RelayConfig {
   opencode?: { server_url?: string; username?: string; password?: string };
 }
 
+/** Stable, non-secret identity label used inside account-scoped ledgers. */
+export function relayIdentityForConfig(
+  config: Pick<RelayConfig, "agent_token" | "agent">,
+): string {
+  if (config.agent?.id) return `agent:${config.agent.id}`;
+  if (!config.agent_token) throw new Error("Cannot identify Relay account without an agent token.");
+  return `token:${createHash("sha256").update(config.agent_token).digest("hex")}`;
+}
+
 function canonicalOrigin(value: string): string {
   const url = new URL(value);
   return url.origin;
@@ -78,9 +87,7 @@ export function runtimeHomeForConfig(
   if (!config.api_origin || !config.agent_token) {
     throw new Error("Cannot select Relay runtime state without a paired origin and agent token.");
   }
-  const identity = config.agent?.id
-    ? `agent:${config.agent.id}`
-    : `token:${createHash("sha256").update(config.agent_token).digest("hex")}`;
+  const identity = relayIdentityForConfig(config);
   const namespace = createHash("sha256")
     .update(`${canonicalOrigin(config.api_origin)}\0${identity}`)
     .digest("hex")
@@ -447,6 +454,102 @@ export class ApprovalStore {
       }
     }
     return removed;
+  }
+}
+
+export interface McpOutboundSend {
+  send_id: string;
+  api_origin: string;
+  account_identity: string;
+  conversation_id: string;
+  payload_hash: string;
+  idempotency_key: string;
+  created_at: string;
+  confirmed_at?: string;
+}
+
+/**
+ * Create-once ledger for Codex MCP logical sends. Each caller-provided send_id
+ * is permanently bound to one account, origin, conversation, and exact body.
+ * An ambiguous POST can therefore be repeated after a process restart with
+ * the same server idempotency key, while changed content fails closed.
+ */
+export class McpSendLedger {
+  constructor(
+    private readonly home: string,
+    private readonly apiOrigin: string,
+    private readonly accountIdentity: string,
+  ) {}
+
+  get dir(): string {
+    return join(this.home, "mcp-sends");
+  }
+
+  private pathFor(sendId: string): string {
+    return join(this.dir, `${createHash("sha256").update(sendId).digest("hex")}.json`);
+  }
+
+  register(sendId: string, conversationId: string, text: string): McpOutboundSend {
+    const path = this.pathFor(sendId);
+    const payloadHash = createHash("sha256")
+      .update(JSON.stringify({ conversation_id: conversationId, text }))
+      .digest("hex");
+    const expected = {
+      send_id: sendId,
+      api_origin: canonicalOrigin(this.apiOrigin),
+      account_identity: this.accountIdentity,
+      conversation_id: conversationId,
+      payload_hash: payloadHash,
+    };
+    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+
+    let existing: McpOutboundSend | undefined;
+    try {
+      existing = JSON.parse(readFileSync(path, "utf8")) as McpOutboundSend;
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") {
+        throw new Error(`Codex MCP send ledger is unreadable; refusing retry (${path})`);
+      }
+    }
+    if (existing) {
+      for (const [key, value] of Object.entries(expected)) {
+        if ((existing as unknown as Record<string, unknown>)[key] !== value) {
+          throw new Error(`send_id ${sendId} was already used for different content or account`);
+        }
+      }
+      if (typeof existing.idempotency_key !== "string" || existing.idempotency_key.length === 0) {
+        throw new Error(`Codex MCP send ledger is invalid; refusing retry (${path})`);
+      }
+      return existing;
+    }
+
+    const scopeHash = createHash("sha256")
+      .update(`${expected.api_origin}\0${this.accountIdentity}\0${sendId}`)
+      .digest("hex");
+    const created: McpOutboundSend = {
+      ...expected,
+      idempotency_key: `relay-mcp-${scopeHash}`,
+      created_at: new Date().toISOString(),
+    };
+    try {
+      const fd = openSync(path, "wx", 0o600);
+      try {
+        writeSync(fd, `${JSON.stringify(created, null, 2)}\n`);
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
+      return created;
+    } catch (error: any) {
+      if (error?.code === "EEXIST") return this.register(sendId, conversationId, text);
+      throw error;
+    }
+  }
+
+  confirm(send: McpOutboundSend): void {
+    if (send.confirmed_at) return;
+    send.confirmed_at = new Date().toISOString();
+    atomicWriteJson(this.pathFor(send.send_id), send, 0o600);
   }
 }
 

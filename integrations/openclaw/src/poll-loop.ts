@@ -18,11 +18,11 @@ export type RelayPollLoopParams = {
   deduper: RelayInboundDeduper;
   abortSignal: AbortSignal;
   /**
-   * Handle one event after its attempt marker is durable. Throwing is logged
-   * and acknowledged, not replayed, because the agent may already have run
-   * non-idempotent tools.
+   * Perform safe preflight, then call markAttempt exactly before the first
+   * non-replayable agent/tool side effect. Errors before that callback replay;
+   * errors after it are acknowledged because tools may already have run.
    */
-  handleEvent: (event: RelayEvent) => Promise<void>;
+  handleEvent: (event: RelayEvent, markAttempt: () => Promise<void>) => Promise<void>;
   /**
    * Cheap pre-dedupe classification: events returning false (receipts,
    * reactions, echoes) are acked by the batch cursor without burning a
@@ -118,32 +118,33 @@ export async function runRelayPollLoop(params: RelayPollLoopParams): Promise<voi
       }
       const claimed = await params.deduper.claimEvent(event.event_id);
       if (claimed) {
-        try {
-          // This is the side-effect boundary. A crash or thrown dispatch after
-          // this write must suppress replay, because a deploy/delete/send may
-          // already have happened even when no final reply was delivered.
+        let attempted = false;
+        const markAttempt = async () => {
+          if (attempted) return;
           await params.deduper.commitEvent(event.event_id);
+          attempted = true;
+          if (params.abortSignal.aborted) throw new Error("aborted after durable attempt");
+        };
+        try {
+          await params.handleEvent(event, markAttempt);
         } catch (error) {
-          // Nothing has been dispatched yet, so a failed attempt-marker write
-          // is safe to release and retry.
+          if (!attempted) {
+            params.deduper.releaseEvent(event.event_id);
+            log(`[relay] event ${event.event_id} safe preflight failed, will replay: ${String(error)}`);
+            batchFailed = true;
+            break;
+          }
+          log(`[relay] event ${event.event_id} dispatch failed after its attempt was committed; ` +
+            `will not replay possible tool side effects: ${String(error)}`);
+        }
+        if (!attempted) {
+          // Admission/preflight intentionally consumed no side effect; release
+          // the claim and allow the page cursor to acknowledge it.
           params.deduper.releaseEvent(event.event_id);
-          log(`[relay] event ${event.event_id} attempt commit failed, will replay: ${String(error)}`);
-          batchFailed = true;
-          break;
         }
         if (params.abortSignal.aborted) {
-          // This event's attempt is durable, but the unvisited tail is not.
-          // Never acknowledge the page-level cursor past that tail.
           batchFailed = true;
           break;
-        }
-        try {
-          await params.handleEvent(event);
-        } catch (error) {
-          log(
-            `[relay] event ${event.event_id} dispatch failed after its attempt was committed; ` +
-              `will not replay possible tool side effects: ${String(error)}`,
-          );
         }
       }
     }

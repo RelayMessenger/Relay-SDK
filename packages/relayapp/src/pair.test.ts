@@ -32,6 +32,8 @@ interface MockOptions {
   omitOwner?: boolean;
   /** Return 500 for the first N authenticated profile reads. */
   failMeWith500?: number;
+  /** Reject a specifically stale saved token while accepting the new claim. */
+  staleToken401?: boolean;
 }
 
 function mockServer(options: MockOptions = {}) {
@@ -69,6 +71,9 @@ function mockServer(options: MockOptions = {}) {
       });
     }
     if (req.method === "GET" && req.url === "/v1/agents/me") {
+      if (options.staleToken401 && req.headers.authorization === "Bearer stale-token") {
+        return json(401, { error: { code: "unauthorized", message: "revoked" } });
+      }
       if (remainingMe500 > 0) {
         remainingMe500 -= 1;
         return json(500, { error: { code: "internal", message: "profile unavailable" } });
@@ -253,6 +258,27 @@ test("pair resumes a saved token after transient owner lookup without creating a
       requests.filter((request) => request.method === "POST" && request.url === "/v1/pairings").length,
       1,
       "resume must not create or overwrite with a second paired agent",
+    );
+  } finally {
+    server.close();
+  }
+});
+
+test("pair replaces a saved same-origin token rejected with 401 instead of selecting it forever", async () => {
+  const { server, requests } = mockServer({ pendingPolls: 0, staleToken401: true });
+  const port = await listen(server);
+  const home = mkdtempSync(join(tmpdir(), "relayapp-pair-stale-"));
+  const origin = `http://127.0.0.1:${port}`;
+  const config = new ConfigStore(home);
+  config.save({ api_origin: origin, agent_token: "stale-token" });
+  try {
+    const result = await runPair(port, home);
+    assert.equal(result.config.load()?.agent_token, "rly_agent_token_abc");
+    assert.equal(result.config.load()?.owner_user_id, "usr_owner_1");
+    assert.match(result.lines.join("\n"), /rejected \(401\).*fresh pairing/);
+    assert.equal(
+      requests.filter((request) => request.method === "POST" && request.url === "/v1/pairings").length,
+      1,
     );
   } finally {
     server.close();

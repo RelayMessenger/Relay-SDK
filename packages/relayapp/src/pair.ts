@@ -60,6 +60,7 @@ async function finalizeSavedPairing(
     apiAgent = agentProfileFromMe(me);
     ownerUserId ??= ownerUserIdFromMe(me);
   } catch (error) {
+    if (error instanceof RelayApiError && error.status === 401) throw error;
     if (!ownerUserId) {
       throw new Error(
         `Agent Token is safely stored, but owner lookup failed (${error instanceof Error ? error.message : error}). ` +
@@ -97,8 +98,13 @@ export async function pair(options: PairOptions): Promise<void> {
     existing.api_origin === client.origin
   ) {
     out("Resuming owner pinning for the Agent Token already stored on this machine.");
-    await finalizeSavedPairing(existing, config, options.agentClientFor, out);
-    return;
+    try {
+      await finalizeSavedPairing(existing, config, options.agentClientFor, out);
+      return;
+    } catch (error) {
+      if (!(error instanceof RelayApiError) || error.status !== 401) throw error;
+      out("Saved Agent Token was rejected (401); starting a fresh pairing for this origin.");
+    }
   }
 
   const pairing = await client.createPairing(deviceName, options.engine);

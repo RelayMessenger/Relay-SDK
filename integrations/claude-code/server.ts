@@ -438,12 +438,16 @@ async function startChannel(): Promise<void> {
     agentId: resolution.agentId,
     sessionId: config.sessionId,
   };
+  let nextLock: ConsumerLock | null = null;
   try {
+    // StateStore construction loads and prunes shared ledgers, so exclusive
+    // ownership must be established before even constructing it.
+    nextLock = new ConsumerLock(config.dir, scope);
     const nextState = new StateStore(config.dir, scope);
-    const nextLock = new ConsumerLock(config.dir, scope);
     state = nextState;
     consumerLock = nextLock;
   } catch (error) {
+    nextLock?.release();
     log(`refusing to start channel (fail closed): ${error instanceof Error ? error.message : String(error)}`);
     return;
   }

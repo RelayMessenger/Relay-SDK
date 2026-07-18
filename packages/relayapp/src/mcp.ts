@@ -6,6 +6,7 @@
  */
 import { createInterface } from "node:readline";
 import { requireClient } from "./codex.js";
+import { McpSendLedger } from "./store.js";
 
 const TOOL = {
   name: "relay_send_message",
@@ -16,10 +17,54 @@ const TOOL = {
     type: "object",
     properties: {
       text: { type: "string", description: "Message text to send." },
+      send_id: {
+        type: "string",
+        description:
+          "Required stable logical-operation id. Reuse it only to retry the exact same message after an unknown outcome.",
+      },
     },
-    required: ["text"],
+    required: ["text", "send_id"],
   },
 };
+
+export interface McpSendDependencies {
+  requireContext?: typeof requireClient;
+}
+
+export async function sendMcpMessage(
+  input: { text?: unknown; send_id?: unknown },
+  dependencies: McpSendDependencies = {},
+): Promise<{ sent: boolean; message: string }> {
+  const text = typeof input.text === "string" ? input.text.trim() : "";
+  if (text.length === 0) throw new Error("text is required");
+  if (text.length > 7_900) throw new Error("text must be at most 7900 characters");
+  const sendId = typeof input.send_id === "string" ? input.send_id.trim() : "";
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u.test(sendId)) {
+    throw new Error("send_id is required and must be 1-200 stable identifier characters");
+  }
+
+  const context = (dependencies.requireContext ?? requireClient)();
+  if (!context.conversationId) {
+    return {
+      sent: false,
+      message:
+        "No pinned owner conversation yet — run `relayapp start` once and have " +
+        "the owner message this agent first.",
+    };
+  }
+  const ledger = new McpSendLedger(
+    context.runtimeHome,
+    context.apiOrigin,
+    context.accountIdentity,
+  );
+  const logicalSend = ledger.register(sendId, context.conversationId, text);
+  await context.client.postMessage(
+    { conversation_id: context.conversationId, parts: [{ type: "text", text }] },
+    logicalSend.idempotency_key,
+  );
+  ledger.confirm(logicalSend);
+  return { sent: true, message: "Sent." };
+}
 
 export async function mcpServe(): Promise<void> {
   const write = (message: unknown) => process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -59,29 +104,21 @@ export async function mcpServe(): Promise<void> {
             fail(-32602, `unknown tool: ${params?.name}`);
             break;
           }
-          const text = String(params?.arguments?.text ?? "").trim();
-          if (text.length === 0) {
-            fail(-32602, "text is required");
+          let result: Awaited<ReturnType<typeof sendMcpMessage>>;
+          try {
+            result = await sendMcpMessage(params?.arguments ?? {});
+          } catch (error: any) {
+            fail(-32602, String(error?.message ?? error));
             break;
           }
-          const { client, conversationId } = requireClient();
-          if (!conversationId) {
+          if (!result.sent) {
             reply({
-              content: [{
-                type: "text",
-                text:
-                  "No pinned owner conversation yet — run `relayapp start` once and have " +
-                  "the owner message this agent first.",
-              }],
+              content: [{ type: "text", text: result.message }],
               isError: true,
             });
             break;
           }
-          await client.postMessage(
-            { conversation_id: conversationId, parts: [{ type: "text", text: text.slice(0, 7900) }] },
-            `relay-mcp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-          );
-          reply({ content: [{ type: "text", text: "Sent." }] });
+          reply({ content: [{ type: "text", text: result.message }] });
           break;
         }
         case "ping":

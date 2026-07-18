@@ -197,6 +197,7 @@ async function dispatchRelayInbound(params: {
   facts: RelayInboundFacts;
   client: RelayClient;
   allowedSenderIds: readonly string[];
+  markAttempt: () => Promise<void>;
 }): Promise<void> {
   const { account, facts } = params;
   // Public Relay agents are discoverable, so contact membership is not an
@@ -263,6 +264,10 @@ async function dispatchRelayInbound(params: {
   const recordDeliveryError = (error: unknown) => {
     deliveryError ??= error;
   };
+  // Admission, runtime resolution, route/session lookup, envelope building,
+  // and context finalization above are replay-safe. The durable attempt starts
+  // immediately before OpenClaw can invoke the agent or its tools.
+  await params.markAttempt();
   await runtime.channel.inbound.dispatchReply({
     cfg: params.cfg,
     channel: RELAY_CHANNEL_ID,
@@ -340,9 +345,8 @@ async function dispatchRelayInbound(params: {
  * Durable SQLite cursor for every install: `createPluginStateSyncKeyedStore`
  * writes plugin state directly and is not behind the trusted-install gate
  * that blocks `runtime.state.openKeyedStore` for npm-pack installs
- * (plugin-state-store.ts). The in-memory fallback only remains for a broken
- * state DB — then restart replays are absorbed by the persistent inbound
- * dedupe, at the cost of re-reading the retained backlog.
+ * (plugin-state-store.ts). Failure is fatal: cursor-zero replay is unsafe once
+ * bounded attempt rows may have aged out.
  */
 function openRelayCursorStateStore(
   warn: (line: string) => void,
@@ -360,17 +364,8 @@ function openRelayCursorStateStore(
       delete: async (key) => store.delete(key),
     };
   } catch (error) {
-    warn(
-      `[relay] plugin state unavailable (${String(error)}); using in-memory cursor — restart replays are absorbed by the inbound dedupe.`,
-    );
-    const map = new Map<string, RelayCursorRecord>();
-    return {
-      lookup: async (key) => map.get(key),
-      register: async (key, value) => {
-        map.set(key, value);
-      },
-      delete: async (key) => map.delete(key),
-    };
+    warn(`[relay] plugin state unavailable; refusing unsafe cursor reset: ${String(error)}`);
+    throw error;
   }
 }
 
@@ -460,7 +455,7 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
 
     const cursorStore = createRelayCursorStore({
       store: openRelayCursorStateStore(warn),
-      accountId: account.accountId,
+      baseUrl: account.baseUrl,
       agentId: me.id,
       onPersistError: (error) => warn(`[relay] cursor persistence failed: ${String(error)}`),
     });
@@ -469,7 +464,8 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
       guard: createRelayInboundDedupeGuard({
         onDiskError: (error) => warn(`[relay] inbound dedupe persistence failed: ${String(error)}`),
       }),
-      accountId: account.accountId,
+      baseUrl: account.baseUrl,
+      agentId: me.id,
     });
 
     await runRelayPollLoop({
@@ -492,7 +488,7 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
           lastInboundAt: Date.now(),
         });
       },
-      handleEvent: async (event) => {
+      handleEvent: async (event, markAttempt) => {
         const facts = buildRelayInboundFacts(event, { agentId: me.id });
         if (!facts) {
           return;
@@ -503,6 +499,7 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
           facts,
           client,
           allowedSenderIds,
+          markAttempt,
         });
         // Read watermark after the turn is handled: read implies delivered;
         // best effort — a failed receipt must not replay the event.

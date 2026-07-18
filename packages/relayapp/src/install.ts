@@ -15,21 +15,31 @@
 import {
   chmodSync,
   closeSync,
+  cpSync,
   existsSync,
   fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
+  rmSync,
+  statSync,
   unlinkSync,
   writeSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseToml } from "smol-toml";
-import { CodexNotifyPolicyStore, ConfigStore, resolveOwnerUserId } from "./store.js";
+import {
+  CodexNotifyPolicyStore,
+  ConfigStore,
+  resolveOwnerUserId,
+  runtimeHomeForConfig,
+} from "./store.js";
 
 export interface MergeReport {
   changed: boolean;
@@ -208,11 +218,25 @@ export function installCodex(
   out(`${hooksPath}:`);
   for (const note of hooks.report.notes) out(`  - ${note}`);
 
+  const finalConfig = parseToml(merged.toml) as Record<string, any>;
+  const relayMcp = finalConfig.mcp_servers?.relay;
+  const mcpActive = relayMcp?.command === "relayapp" &&
+    JSON.stringify(relayMcp?.args) === JSON.stringify(["mcp"]);
+  const notifyActive = JSON.stringify(finalConfig.notify) === JSON.stringify(RELAY_NOTIFY);
+  const finalHooks = JSON.parse(hooks.json) as Record<string, unknown>;
+  const permissionActive = JSON.stringify(finalHooks).includes(RELAY_PERMISSION_HOOK_COMMAND);
   out("");
   out(`Relay enabled only for this project root: ${allowedRoot}`);
-  out("Codex will send the final assistant message when a turn completes and route tool");
-  out("approvals to your phone only from that project. Codex gates untrusted");
-  out("hook handlers: the first run may ask you to trust the relayapp handler.");
+  if (mcpActive && notifyActive && permissionActive) {
+    out("Codex will send the final assistant message when a turn completes and route tool");
+    out("approvals to your phone only from that project.");
+  } else {
+    out("Relay Codex setup is partial because existing non-Relay values were preserved:");
+    out(`  - MCP relay_send_message: ${mcpActive ? "active" : "inactive (existing mcp_servers.relay kept)"}`);
+    out(`  - final-message notify: ${notifyActive ? "active" : "inactive (existing notify kept)"}`);
+    out(`  - phone permission hook: ${permissionActive ? "active" : "inactive"}`);
+  }
+  out("Codex gates untrusted hook handlers: the first run may ask you to trust the relayapp handler.");
   out("Approvals require `relayapp pair` to have run on this machine.");
   out("Run install-codex separately inside each additional project you explicitly opt in.");
 }
@@ -220,7 +244,26 @@ export function installCodex(
 export interface InstallClaudeOptions {
   config?: ConfigStore;
   channelDir?: string;
-  searchFrom?: string;
+  /** Generated marketplace root; injectable only for tests. */
+  bundleDir?: string;
+  /** Stable account-scoped install root; injectable only for tests. */
+  installRoot?: string;
+  claudeCommand?: string;
+  runClaude?: (command: string, args: string[]) => {
+    status: number | null;
+    stdout?: string;
+    stderr?: string;
+    error?: Error;
+  };
+}
+
+export interface InstallOpenClawOptions {
+  config?: ConfigStore;
+  openclawHome?: string;
+  bundleDir?: string;
+  installRoot?: string;
+  openclawCommand?: string;
+  runOpenClaw?: InstallClaudeOptions["runClaude"];
 }
 
 function parseEnvValues(contents: string): Record<string, string> {
@@ -264,12 +307,135 @@ export function mergeClaudeChannelEnv(
   return `${prefix}${missing.map(([key, value]) => `${key}=${value}`).join("\n")}\n`;
 }
 
-/** Install instructions plus owner-only Claude channel credentials from pair. */
+function runExternalCommand(
+  product: string,
+  command: string,
+  args: string[],
+  stage: string,
+  runner: NonNullable<InstallClaudeOptions["runClaude"]>,
+): void {
+  const result = runner(command, args);
+  if (result.status === 0) return;
+  const detail = `${result.stderr ?? ""}\n${result.stdout ?? ""}`.trim();
+  const suffix = detail.length > 0 ? `: ${detail}` : result.error ? `: ${result.error.message}` : "";
+  throw new Error(`${product} ${stage} failed${suffix}`);
+}
+
+function makeTreePrivate(path: string): void {
+  const stat = statSync(path);
+  if (!stat.isDirectory()) {
+    chmodSync(path, 0o600);
+    return;
+  }
+  chmodSync(path, 0o700);
+  for (const name of readdirSync(path)) makeTreePrivate(join(path, name));
+}
+
+function persistClaudeMarketplace(source: string, installRoot: string): string {
+  const digest = createHash("sha256");
+  const visit = (path: string, relative = "") => {
+    for (const name of readdirSync(path).sort()) {
+      const absolute = join(path, name);
+      const child = relative ? `${relative}/${name}` : name;
+      if (statSync(absolute).isDirectory()) visit(absolute, child);
+      else {
+        digest.update(child).update("\0").update(readFileSync(absolute)).update("\0");
+      }
+    }
+  };
+  visit(source);
+  const destination = join(installRoot, digest.digest("hex").slice(0, 24), "marketplace");
+  if (existsSync(destination)) return destination;
+  mkdirSync(dirname(dirname(destination)), { recursive: true, mode: 0o700 });
+  const temporary = `${dirname(destination)}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    cpSync(source, join(temporary, "marketplace"), { recursive: true, errorOnExist: true });
+    makeTreePrivate(temporary);
+    renameSync(temporary, dirname(destination));
+  } catch (error: any) {
+    rmSync(temporary, { recursive: true, force: true });
+    if (error?.code !== "EEXIST" && error?.code !== "ENOTEMPTY") throw error;
+  }
+  if (!existsSync(destination)) throw new Error("Could not persist the bundled Claude marketplace");
+  return destination;
+}
+
+function persistOpenClawArchive(source: string, installRoot: string): string {
+  const digest = createHash("sha256").update(readFileSync(source)).digest("hex").slice(0, 24);
+  const destination = join(installRoot, digest, "relay-openclaw-plugin.tgz");
+  if (existsSync(destination)) return destination;
+  mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+  const temporary = `${destination}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    cpSync(source, temporary, { errorOnExist: true });
+    chmodSync(temporary, 0o600);
+    renameSync(temporary, destination);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+  return destination;
+}
+
+function objectAt(parent: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = parent[key];
+  if (value === undefined) {
+    const created: Record<string, unknown> = {};
+    parent[key] = created;
+    return created;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`OpenClaw config ${key} must be an object; not touching it`);
+  }
+  return value as Record<string, unknown>;
+}
+
+export function mergeOpenClawConfig(
+  existing: string,
+  desired: { token: string; tokenFile: string; baseUrl: string },
+): string {
+  let doc: Record<string, unknown>;
+  try {
+    doc = existing.trim() ? JSON.parse(existing) : {};
+  } catch {
+    throw new Error("~/.openclaw/openclaw.json exists but is not valid JSON; not touching it");
+  }
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+    throw new Error("~/.openclaw/openclaw.json root must be an object; not touching it");
+  }
+  const plugins = objectAt(doc, "plugins");
+  const allow = plugins.allow ?? [];
+  if (!Array.isArray(allow) || !allow.every((entry) => typeof entry === "string")) {
+    throw new Error("OpenClaw config plugins.allow must be a string array; not touching it");
+  }
+  if (!allow.includes("relay")) allow.push("relay");
+  plugins.allow = allow;
+  const entries = objectAt(plugins, "entries");
+  objectAt(entries, "relay").enabled = true;
+
+  const channels = objectAt(doc, "channels");
+  const relay = objectAt(channels, "relay");
+  if (typeof relay.token === "string" && relay.token !== desired.token) {
+    throw new Error("OpenClaw Relay channel already has a different token; not touching it");
+  }
+  if (typeof relay.tokenFile === "string" && relay.tokenFile !== desired.tokenFile) {
+    throw new Error("OpenClaw Relay channel already has a different tokenFile; not touching it");
+  }
+  if (typeof relay.baseUrl === "string" && new URL(relay.baseUrl).origin !== new URL(desired.baseUrl).origin) {
+    throw new Error("OpenClaw Relay channel already has a different baseUrl; not touching it");
+  }
+  relay.enabled = true;
+  relay.tokenFile = desired.tokenFile;
+  relay.baseUrl = desired.baseUrl;
+  return `${JSON.stringify(doc, null, 2)}\n`;
+}
+
+/** Install the bundled marketplace plus owner-only channel credentials. */
 export function installClaude(
   out: (line: string) => void = console.log,
   options: InstallClaudeOptions = {},
 ): void {
-  const paired = (options.config ?? new ConfigStore()).load();
+  const config = options.config ?? new ConfigStore();
+  const paired = config.load();
   if (!paired?.agent_token) throw new Error("Not paired. Run `relayapp pair` first.");
   const ownerUserId = resolveOwnerUserId(paired);
   const channelDir = options.channelDir ?? join(homedir(), ".claude", "channels", "relay");
@@ -280,6 +446,75 @@ export function installClaude(
     origin: paired.api_origin,
     ownerUserId,
   });
+
+  const bundledMarketplace = options.bundleDir ?? join(MODULE_DIR, "..", "claude-plugin", "marketplace");
+  const pluginDir = join(bundledMarketplace, "plugins", "relay");
+  for (const relative of [
+    ".claude-plugin/plugin.json",
+    "commands/configure.md",
+    "runtime/server.mjs",
+    "LICENSE",
+    "README.md",
+  ]) {
+    if (!existsSync(join(pluginDir, relative))) {
+      throw new Error(`Installed relayapp package is missing bundled Claude plugin file: ${relative}`);
+    }
+  }
+  if (!existsSync(join(bundledMarketplace, ".claude-plugin", "marketplace.json"))) {
+    throw new Error("Installed relayapp package is missing its bundled Claude marketplace manifest");
+  }
+
+  const command = options.claudeCommand ?? process.env.RELAYAPP_CLAUDE_BIN?.trim() ?? "claude";
+  const runner = options.runClaude ?? ((binary, args) => {
+    const result = spawnSync(binary, args, {
+      encoding: "utf8",
+      stdio: "pipe",
+      windowsHide: true,
+    });
+    return {
+      status: result.status,
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+      error: result.error,
+    };
+  });
+  // Validate what will actually be installed, then add the local marketplace.
+  // `marketplace add` and `plugin install` are idempotent in Claude Code and
+  // update a moved npm package path without needing GitHub access.
+  runExternalCommand("Claude Code", command, ["plugin", "validate", pluginDir, "--strict"], "plugin validation", runner);
+  runExternalCommand(
+    "Claude Code",
+    command,
+    ["plugin", "validate", bundledMarketplace, "--strict"],
+    "marketplace validation",
+    runner,
+  );
+  const marketplaceDir = persistClaudeMarketplace(
+    bundledMarketplace,
+    options.installRoot ?? join(runtimeHomeForConfig(paired, dirname(config.path)), "installed-plugins", "claude"),
+  );
+  runExternalCommand(
+    "Claude Code",
+    command,
+    ["plugin", "validate", join(marketplaceDir, "plugins", "relay"), "--strict"],
+    "persisted plugin validation",
+    runner,
+  );
+  runExternalCommand(
+    "Claude Code",
+    command,
+    ["plugin", "marketplace", "add", marketplaceDir],
+    "local marketplace installation",
+    runner,
+  );
+  runExternalCommand(
+    "Claude Code",
+    command,
+    ["plugin", "install", "relay@relayapp-bundled", "--scope", "user"],
+    "plugin installation",
+    runner,
+  );
+
   if (mergedEnv !== existingEnv) {
     if (existingEnv.length > 0 && !existsSync(`${envPath}.bak`)) {
       writePrivateText(`${envPath}.bak`, existingEnv);
@@ -290,23 +525,56 @@ export function installClaude(
   }
   out(`Configured Claude Relay channel at ${envPath} (mode 600).`);
   out(`API origin: ${paired.api_origin}; owner pin: ${ownerUserId}. Agent Token was not printed.`);
-
-  let dir = options.searchFrom ?? MODULE_DIR;
-  for (let i = 0; i < 8; i += 1) {
-    const candidate = join(dir, "integrations", "claude-code");
-    if (existsSync(candidate)) {
-      out(`Source checkout plugin: ${candidate}`);
-      break;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  out("In Claude Code, install Relay from its marketplace:");
-  out("  /plugin marketplace add companion-inc/relayapp");
-  out("  /plugin install relay@relayapp");
+  out(`Installed bundled Claude plugin relay@relayapp-bundled from ${marketplaceDir}.`);
   out("");
-  out("Then run:");
-  out("  claude --dangerously-load-development-channels plugin:relay@relayapp");
+  out("Run:");
+  out("  claude --dangerously-load-development-channels plugin:relay@relayapp-bundled");
   out("Setup guide: https://docs.relayapp.im/guides/coding-agents");
+}
+
+/** Install and configure the OpenClaw plugin from relayapp's bundled archive. */
+export function installOpenClaw(
+  out: (line: string) => void = console.log,
+  options: InstallOpenClawOptions = {},
+): void {
+  const config = options.config ?? new ConfigStore();
+  const paired = config.load();
+  if (!paired?.agent_token) throw new Error("Not paired. Run `relayapp pair` first.");
+  if (/[\r\n]/u.test(paired.agent_token)) throw new Error("Refusing newline in Agent Token");
+  const openclawHome = options.openclawHome ?? join(homedir(), ".openclaw");
+  const configPath = join(openclawHome, "openclaw.json");
+  const tokenPath = join(openclawHome, "secrets", "relay-agent-token");
+  const existingToken = existsSync(tokenPath) ? readFileSync(tokenPath, "utf8").trim() : "";
+  if (existingToken && existingToken !== paired.agent_token) {
+    throw new Error("OpenClaw Relay token file contains a different paired identity; not touching it");
+  }
+  const existingConfig = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
+  const mergedConfig = mergeOpenClawConfig(existingConfig, {
+    token: paired.agent_token,
+    tokenFile: tokenPath,
+    baseUrl: paired.api_origin,
+  });
+
+  const bundleDir = options.bundleDir ?? join(MODULE_DIR, "..", "openclaw-plugin");
+  const archives = readdirSync(bundleDir).filter((name) => name.endsWith(".tgz"));
+  if (archives.length !== 1) {
+    throw new Error(`Installed relayapp package must contain exactly one OpenClaw archive; found ${archives.length}`);
+  }
+  const archive = persistOpenClawArchive(
+    join(bundleDir, archives[0]!),
+    options.installRoot ?? join(runtimeHomeForConfig(paired, dirname(config.path)), "installed-plugins", "openclaw"),
+  );
+  const command = options.openclawCommand ?? process.env.RELAYAPP_OPENCLAW_BIN?.trim() ?? "openclaw";
+  const runner = options.runOpenClaw ?? ((binary, args) => {
+    const result = spawnSync(binary, args, { encoding: "utf8", stdio: "pipe", windowsHide: true });
+    return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "", error: result.error };
+  });
+  runExternalCommand("OpenClaw", command, ["plugins", "install", archive, "--force"], "plugin installation", runner);
+
+  writePrivateText(tokenPath, `${paired.agent_token}\n`);
+  if (mergedConfig !== existingConfig) writePrivateText(configPath, mergedConfig);
+  else if (existsSync(configPath)) chmodSync(configPath, 0o600);
+  out(`Installed bundled Relay plugin into OpenClaw from ${archive}.`);
+  out(`Configured ${configPath} and owner-private token file ${tokenPath}. Agent Token was not printed.`);
+  out("Restart the OpenClaw gateway to activate Relay.");
 }

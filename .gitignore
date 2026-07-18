@@ -1,4 +1,6 @@
 node_modules/
 dist/
+packages/relayapp/claude-plugin/
+packages/relayapp/openclaw-plugin/
 *.log
 .DS_Store

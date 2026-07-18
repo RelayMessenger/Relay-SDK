@@ -2,6 +2,7 @@
   "name": "relay",
   "description": "Relay channel for Claude Code — message your Claude Code session from your Relay agent conversation, with remote Allow/Deny permission relay. Run /relay:configure to set up.",
   "version": "0.2.0",
+  "author": { "name": "Relay" },
   "keywords": ["relay", "messaging", "channel", "mcp"],
   "mcpServers": {
     "relay": {

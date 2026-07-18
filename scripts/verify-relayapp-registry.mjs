@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +36,19 @@ try {
   const installedRoot = join(temp, "node_modules", "relayapp");
   const installedPkg = JSON.parse(readFileSync(join(installedRoot, "package.json"), "utf8"));
   assert.equal(installedPkg.version, expected.version);
+  for (const bundledFile of [
+    "claude-plugin/marketplace/.claude-plugin/marketplace.json",
+    "claude-plugin/marketplace/plugins/relay/.claude-plugin/plugin.json",
+    "claude-plugin/marketplace/plugins/relay/commands/configure.md",
+    "claude-plugin/marketplace/plugins/relay/runtime/server.mjs",
+    "claude-plugin/marketplace/plugins/relay/LICENSE",
+    "claude-plugin/marketplace/plugins/relay/README.md",
+  ]) {
+    assert.equal(existsSync(join(installedRoot, bundledFile)), true, `registry install missing ${bundledFile}`);
+  }
+  const openclawArchives = readdirSync(join(installedRoot, "openclaw-plugin"))
+    .filter((name) => name.endsWith(".tgz"));
+  assert.equal(openclawArchives.length, 1, "registry install must contain one OpenClaw plugin archive");
   const help = execFileSync(process.execPath, [join(installedRoot, "dist", "cli.js"), "--help"], {
     cwd: temp,
     encoding: "utf8",

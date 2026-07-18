@@ -37,23 +37,25 @@ function fakeGuard() {
 }
 
 describe("relay inbound dedupe key", () => {
-  it("separates account and event with NUL so printable ids cannot collide", () => {
-    expect(buildRelayInboundDedupeKey({ accountId: "a", eventId: "evt_1" })).toBe("a\0evt_1");
-    expect(buildRelayInboundDedupeKey({ accountId: "a:b", eventId: "c" })).not.toBe(
-      buildRelayInboundDedupeKey({ accountId: "a", eventId: "b:c" }),
+  it("scopes origin, agent, and event with NUL so account renames cannot replay", () => {
+    expect(buildRelayInboundDedupeKey({ baseUrl: "https://api.relayapp.im", agentId: "agt_1", eventId: "evt_1" })).toBe(
+      "https://api.relayapp.im\0agt_1\0evt_1",
+    );
+    expect(buildRelayInboundDedupeKey({ baseUrl: "https://api.relayapp.im", agentId: "a:b", eventId: "c" })).not.toBe(
+      buildRelayInboundDedupeKey({ baseUrl: "https://api.relayapp.im", agentId: "a", eventId: "b:c" }),
     );
   });
 
-  it("defaults blank account ids and rejects blank event ids", () => {
-    expect(buildRelayInboundDedupeKey({ accountId: "  ", eventId: "evt" })).toBe("default\0evt");
-    expect(buildRelayInboundDedupeKey({ accountId: "a", eventId: "  " })).toBeNull();
+  it("rejects blank event ids", () => {
+    expect(buildRelayInboundDedupeKey({ baseUrl: "https://api.relayapp.im", agentId: "agt_1", eventId: "  " })).toBeNull();
   });
 });
 
 describe("relay inbound deduper", () => {
+  const params = { baseUrl: "https://api.relayapp.im", agentId: "agt_1" };
   it("claims, commits, and suppresses replayed events", async () => {
     const { guard } = fakeGuard();
-    const deduper = createRelayInboundDeduper({ guard, accountId: "default" });
+    const deduper = createRelayInboundDeduper({ guard, ...params });
 
     expect(await deduper.claimEvent("evt_1")).toBe(true);
     await deduper.commitEvent("evt_1");
@@ -64,7 +66,7 @@ describe("relay inbound deduper", () => {
 
   it("release reopens an uncommitted event for retry", async () => {
     const { guard } = fakeGuard();
-    const deduper = createRelayInboundDeduper({ guard, accountId: "default" });
+    const deduper = createRelayInboundDeduper({ guard, ...params });
 
     expect(await deduper.claimEvent("evt_2")).toBe(true);
     deduper.releaseEvent("evt_2");
@@ -73,7 +75,7 @@ describe("relay inbound deduper", () => {
 
   it("does not double-dispatch an in-flight event", async () => {
     const { guard } = fakeGuard();
-    const deduper = createRelayInboundDeduper({ guard, accountId: "default" });
+    const deduper = createRelayInboundDeduper({ guard, ...params });
 
     expect(await deduper.claimEvent("evt_3")).toBe(true);
     expect(await deduper.claimEvent("evt_3")).toBe(false);
@@ -81,7 +83,7 @@ describe("relay inbound deduper", () => {
 
   it("fails closed for events it cannot identify", async () => {
     const { guard, log } = fakeGuard();
-    const deduper = createRelayInboundDeduper({ guard, accountId: "default" });
+    const deduper = createRelayInboundDeduper({ guard, ...params });
 
     expect(await deduper.claimEvent("")).toBe(false);
     await deduper.commitEvent("");
@@ -89,10 +91,10 @@ describe("relay inbound deduper", () => {
     expect(log).toHaveLength(0);
   });
 
-  it("scopes keys per account", async () => {
+  it("scopes keys per stable agent identity", async () => {
     const { guard } = fakeGuard();
-    const a = createRelayInboundDeduper({ guard, accountId: "a" });
-    const b = createRelayInboundDeduper({ guard, accountId: "b" });
+    const a = createRelayInboundDeduper({ guard, ...params });
+    const b = createRelayInboundDeduper({ guard, ...params, agentId: "agt_2" });
 
     expect(await a.claimEvent("evt")).toBe(true);
     expect(await b.claimEvent("evt")).toBe(true);

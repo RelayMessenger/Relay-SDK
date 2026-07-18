@@ -23,29 +23,32 @@ function memoryStore(initial?: Record<string, RelayCursorRecord>) {
 }
 
 describe("relay cursor store", () => {
+  const baseUrl = "https://api.relayapp.im";
+  const key = "relay:https://api.relayapp.im:agt_1";
+
   it("starts at 0 with no persisted record", async () => {
     const { store } = memoryStore();
-    const cursor = createRelayCursorStore({ store, accountId: "default", agentId: "agt_1" });
+    const cursor = createRelayCursorStore({ store, baseUrl, agentId: "agt_1" });
     expect(await cursor.load()).toBe(0);
     expect(cursor.current()).toBe(0);
   });
 
   it("persists monotonic advances and reloads them", async () => {
     const { store, map } = memoryStore();
-    const cursor = createRelayCursorStore({ store, accountId: "default", agentId: "agt_1" });
+    const cursor = createRelayCursorStore({ store, baseUrl, agentId: "agt_1" });
     await cursor.load();
     await cursor.advance(5);
     await cursor.advance(9);
     expect(cursor.current()).toBe(9);
-    expect(map.get("default")?.cursor).toBe(9);
+    expect(map.get(key)?.cursor).toBe(9);
 
-    const reloaded = createRelayCursorStore({ store, accountId: "default", agentId: "agt_1" });
+    const reloaded = createRelayCursorStore({ store, baseUrl, agentId: "agt_1" });
     expect(await reloaded.load()).toBe(9);
   });
 
   it("ignores non-monotonic and invalid advances", async () => {
     const { store, map } = memoryStore();
-    const cursor = createRelayCursorStore({ store, accountId: "default", agentId: "agt_1" });
+    const cursor = createRelayCursorStore({ store, baseUrl, agentId: "agt_1" });
     await cursor.load();
     await cursor.advance(10);
     await cursor.advance(10); // equal: no-op
@@ -53,33 +56,32 @@ describe("relay cursor store", () => {
     await cursor.advance(-1); // invalid
     await cursor.advance(2.5); // invalid
     expect(cursor.current()).toBe(10);
-    expect(map.get("default")?.cursor).toBe(10);
+    expect(map.get(key)?.cursor).toBe(10);
   });
 
   it("requires load() before advance() so ack ordering cannot be skipped", async () => {
     const { store } = memoryStore();
-    const cursor = createRelayCursorStore({ store, accountId: "default", agentId: "agt_1" });
+    const cursor = createRelayCursorStore({ store, baseUrl, agentId: "agt_1" });
     await expect(cursor.advance(4)).rejects.toThrow(/before load/);
   });
 
-  it("discards the persisted cursor when the token now maps to another agent", async () => {
-    const { store, calls } = memoryStore({
-      default: { version: 1, cursor: 42, agentId: "agt_old" },
-    });
-    const cursor = createRelayCursorStore({ store, accountId: "default", agentId: "agt_new" });
-    expect(await cursor.load()).toBe(0);
-    expect(calls).toContain("delete:default");
-  });
-
-  it("discards corrupt or wrong-version records", async () => {
+  it("fails closed on a mismatched or corrupt stable-identity record", async () => {
     const { store } = memoryStore({
-      default: { version: 99, cursor: 42, agentId: "agt_1" },
+      [key]: { version: 2, cursor: 42, baseUrl, agentId: "agt_old" },
     });
-    const cursor = createRelayCursorStore({ store, accountId: "default", agentId: "agt_1" });
-    expect(await cursor.load()).toBe(0);
+    const cursor = createRelayCursorStore({ store, baseUrl, agentId: "agt_1" });
+    await expect(cursor.load()).rejects.toThrow(/refusing cursor-zero replay/);
   });
 
-  it("keeps the in-memory cursor when persistence fails", async () => {
+  it("fails closed on wrong-version records", async () => {
+    const { store } = memoryStore({
+      [key]: { version: 99, cursor: 42, baseUrl, agentId: "agt_1" },
+    });
+    const cursor = createRelayCursorStore({ store, baseUrl, agentId: "agt_1" });
+    await expect(cursor.load()).rejects.toThrow(/refusing cursor-zero replay/);
+  });
+
+  it("fails closed without advancing memory when persistence fails", async () => {
     const errors: unknown[] = [];
     const store: RelayCursorStateStore = {
       lookup: async () => undefined,
@@ -90,25 +92,49 @@ describe("relay cursor store", () => {
     };
     const cursor = createRelayCursorStore({
       store,
-      accountId: "default",
+      baseUrl,
       agentId: "agt_1",
       onPersistError: (error) => errors.push(error),
     });
     await cursor.load();
-    await cursor.advance(7);
-    expect(cursor.current()).toBe(7);
+    await expect(cursor.advance(7)).rejects.toThrow(/was not durable/);
+    expect(cursor.current()).toBe(0);
     expect(errors).toHaveLength(1);
   });
 
-  it("scopes records per account id", async () => {
+  it("survives account rename and scopes records by canonical origin plus agent", async () => {
     const { store, map } = memoryStore();
-    const a = createRelayCursorStore({ store, accountId: "a", agentId: "agt_1" });
-    const b = createRelayCursorStore({ store, accountId: "b", agentId: "agt_2" });
+    const a = createRelayCursorStore({ store, baseUrl: `${baseUrl}/`, agentId: "agt_1" });
+    const renamed = createRelayCursorStore({ store, baseUrl, agentId: "agt_1" });
+    const b = createRelayCursorStore({ store, baseUrl, agentId: "agt_2" });
     await a.load();
-    await b.load();
     await a.advance(3);
+    expect(await renamed.load()).toBe(3);
+    await b.load();
     await b.advance(8);
-    expect(map.get("a")?.cursor).toBe(3);
-    expect(map.get("b")?.cursor).toBe(8);
+    expect(map.get(key)?.cursor).toBe(3);
+    expect(map.get("relay:https://api.relayapp.im:agt_2")?.cursor).toBe(8);
+  });
+
+  it("retains an ack beyond the bounded dedupe horizon", async () => {
+    const { store } = memoryStore();
+    const cursor = createRelayCursorStore({ store, baseUrl, agentId: "agt_1" });
+    await cursor.load();
+    await cursor.advance(25_001);
+    const afterDedupeEviction = createRelayCursorStore({ store, baseUrl, agentId: "agt_1" });
+    expect(await afterDedupeEviction.load()).toBe(25_001);
+  });
+
+  it("fails closed when cursor state lookup is unavailable", async () => {
+    const cursor = createRelayCursorStore({
+      baseUrl,
+      agentId: "agt_1",
+      store: {
+        lookup: async () => { throw new Error("sqlite unavailable"); },
+        register: async () => {},
+        delete: async () => false,
+      },
+    });
+    await expect(cursor.load()).rejects.toThrow(/could not be loaded/);
   });
 });

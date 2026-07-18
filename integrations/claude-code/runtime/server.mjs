@@ -25982,12 +25982,14 @@ async function startChannel() {
     agentId: resolution.agentId,
     sessionId: config2.sessionId
   };
+  let nextLock = null;
   try {
+    nextLock = new ConsumerLock(config2.dir, scope);
     const nextState = new StateStore(config2.dir, scope);
-    const nextLock = new ConsumerLock(config2.dir, scope);
     state = nextState;
     consumerLock = nextLock;
   } catch (error51) {
+    nextLock?.release();
     log(`refusing to start channel (fail closed): ${error51 instanceof Error ? error51.message : String(error51)}`);
     return;
   }

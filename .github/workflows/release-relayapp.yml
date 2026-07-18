@@ -36,6 +36,8 @@ jobs:
         run: node scripts/relayapp-release.mjs check-tag "$RELEASE_TAG"
       - run: npm ci
       - run: npm run validate
+      - run: npm run validate:claude-plugin
+      - run: npm run gateway:harness
       - run: npm run pack:check
       - name: Reconcile the version with npm before any publish retry
         id: registry

@@ -32,6 +32,7 @@ import {
   readStateSnapshot,
   resolveOwnerUserId,
   runtimeHomeForConfig,
+  relayIdentityForConfig,
   type PendingApproval,
 } from "./store.js";
 
@@ -40,6 +41,9 @@ export function requireClient(config = new ConfigStore()): {
   ownerUserId?: string;
   conversationId?: string;
   projectRoot: string;
+  runtimeHome: string;
+  apiOrigin: string;
+  accountIdentity: string;
 } {
   const projectRoot = new CodexNotifyPolicyStore().matchProject(process.cwd());
   if (!projectRoot) {
@@ -64,6 +68,9 @@ export function requireClient(config = new ConfigStore()): {
     // message — never the most recent writer.
     conversationId: readStateSnapshot(runtimeHomeForConfig(loaded, dirname(config.path))).owner_conversation_id,
     projectRoot,
+    runtimeHome: runtimeHomeForConfig(loaded, dirname(config.path)),
+    apiOrigin: loaded.api_origin,
+    accountIdentity: relayIdentityForConfig(loaded),
   };
 }
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -231,5 +231,34 @@ describe("exclusive consumer lock", () => {
     first.release();
     const next = new ConsumerLock(dir, { ...SCOPE, sessionId: "another-session" });
     next.release();
+  });
+
+  it("the losing process cannot construct StateStore or prune shared ledgers", () => {
+    const dir = tempDir();
+    const setup = new StateStore(dir, SCOPE);
+    setup.registerApproval(
+      {
+        request_id: "abcde",
+        tool_name: "Bash",
+        description: "expired",
+        input_preview: "echo safe",
+      },
+      "cnv_1",
+      false,
+      0,
+    );
+    const before = readFileSync(setup.sessionLedgerPath, "utf8");
+    const first = new ConsumerLock(dir, SCOPE);
+    try {
+      assert.throws(() => {
+        const losingLock = new ConsumerLock(dir, { ...SCOPE, sessionId: "loser" });
+        // This line is intentionally unreachable while the winner owns it.
+        new StateStore(dir, SCOPE);
+        losingLock.release();
+      }, /already has an active channel consumer/);
+      assert.equal(readFileSync(setup.sessionLedgerPath, "utf8"), before);
+    } finally {
+      first.release();
+    }
   });
 });

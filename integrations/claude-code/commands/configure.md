@@ -7,13 +7,16 @@ Configure Relay without asking the user to paste or echo a secret in chat.
 1. Use the paired relayapp flow. Ask the user to run these locally if needed:
 
    ```text
+   npm install -g relayapp
    relayapp pair
    relayapp install-claude
    ```
 
-   `install-claude` copies the paired token, API origin, and pinned owner into
-   the channel `.env` with current-user-only permissions. It never prints the
-   token and refuses to overwrite a different configured channel identity.
+   `install-claude` installs the bundled local marketplace as
+   `relay@relayapp-bundled`, then copies the paired token, API origin, and
+   pinned owner into the channel `.env` with current-user-only permissions. It
+   never prints the token and refuses to overwrite a different configured
+   channel identity.
 
 2. Determine the user's channel directory using their platform conventions:
    `~/.claude/channels/relay` on macOS/Linux or
@@ -55,7 +58,7 @@ Configure Relay without asking the user to paste or echo a secret in chat.
 6. Explain how to start the research-preview channel:
 
    ```text
-   claude --dangerously-load-development-channels plugin:relay@<marketplace>
+   claude --dangerously-load-development-channels plugin:relay@relayapp-bundled
    ```
 
    Use `server:relay` for a bare MCP registration. The agent must not have a
