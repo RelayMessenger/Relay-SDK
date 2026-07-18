@@ -22,6 +22,8 @@ export interface PermissionAsk {
    * are allowing, not just a tool title.
    */
   inputPreview?: string;
+  /** False when the adapter cannot provide the raw operation being approved. */
+  inputComplete?: boolean;
   options: Array<{ optionId: string; label: string; kind?: string }>;
 }
 

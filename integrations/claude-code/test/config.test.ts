@@ -93,7 +93,7 @@ describe("namespaced durable state", () => {
     const dir = tempDir();
     const paths = [
       sessionStateDir(dir, SCOPE),
-      sessionStateDir(dir, { ...SCOPE, baseUrl: "https://api.staging.relayapp.im" }),
+      sessionStateDir(dir, { ...SCOPE, baseUrl: "https://api.secondary.example" }),
       sessionStateDir(dir, { ...SCOPE, agentId: "agt_other" }),
       sessionStateDir(dir, { ...SCOPE, sessionId: "project:/tmp/repo-two" }),
     ];
@@ -154,20 +154,23 @@ describe("namespaced durable state", () => {
     assert.equal(new StateStore(dir, SCOPE).hasSeenEvent("evt_pending"), true);
   });
 
-  it("keeps the independent event ledger when cursor state is corrupt", () => {
+  it("fails closed when corrupt cursor state could replay events older than the dedupe window", () => {
     const dir = tempDir();
     const store = new StateStore(dir, SCOPE);
-    store.markEventSeen("evt_safe");
-    store.update({ cursor: 42 });
+    for (let i = 0; i < RECENT_EVENT_IDS_LIMIT + 10; i++) store.markEventSeen(`evt_${i}`);
+    store.update({ cursor: RECENT_EVENT_IDS_LIMIT + 10 });
+    assert.equal(store.hasSeenEvent("evt_0"), false);
     writeFileSync(store.statePath, "{broken", "utf8");
-    const recovered = new StateStore(dir, SCOPE);
-    assert.equal(recovered.get().cursor, 0);
-    assert.equal(recovered.hasSeenEvent("evt_safe"), true);
+    assert.throws(() => new StateStore(dir, SCOPE), CorruptLedgerError);
     assert.ok(
-      readdirSync(recovered.accountDir).some((name) =>
+      readdirSync(store.accountDir).some((name) =>
         name.startsWith("consumer-state.json.corrupt-"),
       ),
     );
+    assert.ok(readdirSync(store.accountDir).includes("consumer-state.blocked"));
+    // The persisted marker keeps later restarts blocked; they cannot reset to
+    // cursor zero and replay evt_0 after it aged out of the 500-id ledger.
+    assert.throws(() => new StateStore(dir, SCOPE), CorruptLedgerError);
   });
 
   it("fails closed and quarantines a corrupt event ledger", () => {

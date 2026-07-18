@@ -2,8 +2,10 @@
  * `relayapp pair` — device-code pairing.
  * POST /v1/pairings → terminal QR of the claim url + short code → long-poll
  * GET /v1/pairings/:id?wait=true until the phone claims it → store the
- * agent_token in ~/.relayapp/config.json (chmod 600). The token is delivered
- * exactly once; it never appears on the phone.
+ * agent_token in ~/.relayapp/config.json (chmod 600), then pin the owner from
+ * GET /v1/agents/me. Claimed status may recoverably re-return the token until
+ * the first successful Agent API use (or the server's claim grace expires),
+ * but the locally saved token is authoritative for interrupted finalization.
  */
 import { hostname } from "node:os";
 import qrcode from "qrcode-terminal";
@@ -36,11 +38,68 @@ export function ownerUserIdFromMe(me: Record<string, unknown>): string | undefin
   return typeof flat === "string" && flat.length > 0 ? flat : undefined;
 }
 
+function agentProfileFromMe(me: Record<string, unknown>): Record<string, unknown> | undefined {
+  return typeof me.agent === "object" && me.agent !== null
+    ? me.agent as Record<string, unknown>
+    : undefined;
+}
+
+async function finalizeSavedPairing(
+  saved: RelayConfig,
+  config: ConfigStore,
+  agentClientFor: PairOptions["agentClientFor"],
+  out: (line: string) => void,
+): Promise<void> {
+  const agentClient =
+    agentClientFor?.(saved.agent_token) ??
+    new RelayClient(saved.api_origin, saved.agent_token);
+  let ownerUserId = process.env.RELAY_OWNER_USER_ID;
+  let apiAgent: Record<string, unknown> | undefined;
+  try {
+    const me = await agentClient.getMe();
+    apiAgent = agentProfileFromMe(me);
+    ownerUserId ??= ownerUserIdFromMe(me);
+  } catch (error) {
+    if (!ownerUserId) {
+      throw new Error(
+        `Agent Token is safely stored, but owner lookup failed (${error instanceof Error ? error.message : error}). ` +
+          "Run `relayapp pair` again to resume owner pinning with this saved token; " +
+          "it will not create or overwrite an agent.",
+      );
+    }
+  }
+  if (!ownerUserId) {
+    throw new Error(
+      "Agent Token is safely stored, but the server did not report owner_user_id and " +
+        "RELAY_OWNER_USER_ID is not set. The bridge fails closed without a pinned owner. " +
+        "Set RELAY_OWNER_USER_ID, then run `relayapp pair` again to finalize this saved token.",
+    );
+  }
+  const agent = {
+    ...(saved.agent ?? {}),
+    ...(apiAgent ?? {}),
+  } as RelayConfig["agent"];
+  config.save({ ...saved, agent, owner_user_id: ownerUserId });
+  out(`Owner pinned: ${ownerUserId}. Only this user can drive the bridge.`);
+  out("Next: relayapp start --engine claude   (or --engine codex | --engine opencode)");
+}
+
 export async function pair(options: PairOptions): Promise<void> {
   const out = options.out ?? console.log;
   const config = options.config ?? new ConfigStore();
   const client = options.client ?? new RelayClient(options.origin);
   const deviceName = options.deviceName ?? hostname();
+
+  const existing = config.load();
+  if (
+    existing?.agent_token &&
+    !existing.owner_user_id &&
+    existing.api_origin === client.origin
+  ) {
+    out("Resuming owner pinning for the Agent Token already stored on this machine.");
+    await finalizeSavedPairing(existing, config, options.agentClientFor, out);
+    return;
+  }
 
   const pairing = await client.createPairing(deviceName, options.engine);
   const renderQr =
@@ -67,7 +126,8 @@ export async function pair(options: PairOptions): Promise<void> {
       }
       if (error instanceof RelayApiError && error.status === 410) {
         throw new Error(
-          "This pairing's token was already delivered. Run `relayapp pair` again for a fresh token.",
+          "This pairing claim can no longer return its token. If config.json contains an Agent " +
+            "Token, re-run `relayapp pair` to finalize that saved token; otherwise start a new pairing.",
         );
       }
       // Transient (network blip, 5xx, timeout): keep waiting until expiry.
@@ -81,8 +141,9 @@ export async function pair(options: PairOptions): Promise<void> {
     throw new Error("Pairing expired before it was claimed. Run `relayapp pair` again.");
   }
 
-  // Store the token first — it is delivered exactly once and must never be
-  // lost to a later failure in this flow.
+  // Store the token before the first Agent API call. The server may re-return
+  // it during its short claim-recovery window, while this durable local copy
+  // lets a later `relayapp pair` resume without creating another agent.
   const saved: RelayConfig = {
     api_origin: client.origin,
     agent_token: status.agent_token,
@@ -93,30 +154,5 @@ export async function pair(options: PairOptions): Promise<void> {
   out("");
   out(`Paired. Agent token stored in ${config.path} (mode 600).`);
 
-  // Pin the owner: everything the bridge does is gated on this user id.
-  const agentClient =
-    options.agentClientFor?.(status.agent_token) ??
-    new RelayClient(client.origin, status.agent_token);
-  let ownerUserId = process.env.RELAY_OWNER_USER_ID;
-  if (!ownerUserId) {
-    try {
-      const me = await agentClient.getMe();
-      ownerUserId = ownerUserIdFromMe(me);
-    } catch (error) {
-      throw new Error(
-        `Token stored, but pinning the owner failed (${error instanceof Error ? error.message : error}). ` +
-          "Re-run `relayapp pair`, or set RELAY_OWNER_USER_ID and it will be pinned on the next run.",
-      );
-    }
-  }
-  if (!ownerUserId) {
-    throw new Error(
-      "Token stored, but the server did not report owner_user_id and RELAY_OWNER_USER_ID " +
-        "is not set. The bridge fails closed without a pinned owner: upgrade the server or " +
-        "set RELAY_OWNER_USER_ID, then re-run `relayapp pair`.",
-    );
-  }
-  config.save({ ...saved, owner_user_id: ownerUserId });
-  out(`Owner pinned: ${ownerUserId}. Only this user can drive the bridge.`);
-  out("Next: relayapp start --engine claude   (or --engine codex | --engine opencode)");
+  await finalizeSavedPairing(saved, config, options.agentClientFor, out);
 }

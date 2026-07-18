@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parse as parseToml } from "smol-toml";
-import { installCodex, mergeCodexConfigToml, mergeHooksJson } from "./install.js";
+import {
+  installClaude,
+  installCodex,
+  mergeClaudeChannelEnv,
+  mergeCodexConfigToml,
+  mergeHooksJson,
+} from "./install.js";
+import { CodexNotifyPolicyStore, ConfigStore } from "./store.js";
 
 test("install-codex: fresh config.toml gets mcp server + notify", () => {
   const { toml, report } = mergeCodexConfigToml("");
@@ -114,10 +121,13 @@ test("M3: invalid config.toml is refused, not overwritten", () => {
 
 test("installCodex writes private backups and atomically replaces private live config", () => {
   const codexHome = mkdtempSync(join(tmpdir(), "relayapp-codex-"));
+  const relayHome = mkdtempSync(join(tmpdir(), "relayapp-policy-"));
+  const projectRoot = mkdtempSync(join(tmpdir(), "relayapp-project-"));
+  const options = { policy: new CodexNotifyPolicyStore(relayHome), projectRoot };
   const configPath = join(codexHome, "config.toml");
   const original = `# mine\nmodel = "gpt-5.2-codex"\n`;
   writeFileSync(configPath, original);
-  installCodex(codexHome, () => {});
+  installCodex(codexHome, () => {}, options);
   assert.equal(readFileSync(`${configPath}.bak`, "utf8"), original);
   if (process.platform !== "win32") {
     assert.equal(statSync(`${configPath}.bak`).mode & 0o777, 0o600);
@@ -126,11 +136,48 @@ test("installCodex writes private backups and atomically replaces private live c
   }
   // Second run: no changes, .bak untouched.
   const afterFirst = readFileSync(configPath, "utf8");
-  installCodex(codexHome, () => {});
+  installCodex(codexHome, () => {}, options);
   assert.equal(readFileSync(configPath, "utf8"), afterFirst);
   assert.equal(readFileSync(`${configPath}.bak`, "utf8"), original);
   // Fresh-file case: nothing to back up.
   const emptyHome = mkdtempSync(join(tmpdir(), "relayapp-codex-"));
-  installCodex(emptyHome, () => {});
+  installCodex(emptyHome, () => {}, options);
   assert.equal(existsSync(join(emptyHome, "config.toml.bak")), false);
+  assert.equal(options.policy.matchProject(projectRoot), realpathSync(projectRoot));
+});
+
+test("install-claude securely copies paired identity without printing the token", () => {
+  const relayHome = mkdtempSync(join(tmpdir(), "relayapp-claude-pair-"));
+  const channelDir = mkdtempSync(join(tmpdir(), "relayapp-claude-channel-"));
+  const config = new ConfigStore(relayHome);
+  config.save({
+    api_origin: "https://api.relayapp.im",
+    agent_token: "rly_secret_never_log",
+    owner_user_id: "usr_owner",
+    agent: { id: "agt_1" },
+  });
+  const lines: string[] = [];
+  installClaude((line) => lines.push(line), { config, channelDir, searchFrom: relayHome });
+  const envPath = join(channelDir, ".env");
+  const contents = readFileSync(envPath, "utf8");
+  assert.match(contents, /RELAY_AGENT_TOKEN=rly_secret_never_log/);
+  assert.match(contents, /RELAY_BASE_URL=https:\/\/api\.relayapp\.im/);
+  assert.match(contents, /RELAY_OWNER_USER_ID=usr_owner/);
+  assert.equal(lines.join("\n").includes("rly_secret_never_log"), false);
+  if (process.platform !== "win32") assert.equal(statSync(envPath).mode & 0o777, 0o600);
+
+  installClaude(() => {}, { config, channelDir, searchFrom: relayHome });
+  assert.equal(readFileSync(envPath, "utf8"), contents, "install is idempotent");
+});
+
+test("install-claude refuses to overwrite a different channel identity", () => {
+  assert.throws(
+    () =>
+      mergeClaudeChannelEnv("RELAY_AGENT_TOKEN=other\n", {
+        token: "paired",
+        origin: "https://api.relayapp.im",
+        ownerUserId: "usr_owner",
+      }),
+    /different RELAY_AGENT_TOKEN/,
+  );
 });

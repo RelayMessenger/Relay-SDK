@@ -1,8 +1,8 @@
 # Relay channel plugin for OpenClaw
 
-Backs a Relay contact with an OpenClaw agent: install the plugin, paste an
-Agent Token, and your OpenClaw appears in Relay as a contact you text like a
-friend.
+Backs a Relay contact with an OpenClaw agent: install the plugin, point it at
+an owner-only Agent Token file, and your OpenClaw appears in Relay as a contact
+you text like a friend.
 
 Requires `openclaw >= 2026.7.2-beta.2`.
 
@@ -13,6 +13,15 @@ cd integrations/openclaw
 npm install
 npm pack            # builds dist/ via prepack
 openclaw plugins install ./relayapp-openclaw-plugin-0.1.0.tgz --force
+```
+
+Write the token to an owner-only file without putting it in shell history:
+
+```sh
+mkdir -p ~/.openclaw/secrets
+chmod 700 ~/.openclaw/secrets
+# Use your editor to place only the Agent Token in this file.
+chmod 600 ~/.openclaw/secrets/relay-agent-token
 ```
 
 Then trust and configure the plugin in `~/.openclaw/openclaw.json`:
@@ -26,7 +35,7 @@ Then trust and configure the plugin in `~/.openclaw/openclaw.json`:
   "channels": {
     "relay": {
       "enabled": true,
-      "token": "<Agent Token from the Relay app>",
+      "tokenFile": "~/.openclaw/secrets/relay-agent-token",
       "baseUrl": "https://api.relayapp.im"
     }
   }
@@ -91,8 +100,14 @@ plugin into an isolated `HOME`, and run `openclaw gateway`.
   silently replayed because local tools may already have performed a deploy,
   deletion, shell command, or external send. The user can resend the message
   deliberately.
-- Shutdown aborts the active long poll and releases the account's in-process
-  consumer ownership before a replacement starts.
+- Before polling, the plugin takes an atomic per-origin/per-agent filesystem
+  lock under `~/.openclaw/relay/consumer-locks`. A second OpenClaw process
+  fails closed; a lock whose recorded PID is dead is recovered on startup.
+  Shutdown aborts the active long poll and releases both process-local and
+  filesystem ownership before a replacement starts.
+- Every API operation has a deadline (15 seconds for ordinary calls; the
+  configured long-poll hold plus 15 seconds for event polling). Retrying a
+  message send reuses its logical delivery idempotency key.
 
 ## v1 scope
 

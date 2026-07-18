@@ -25160,6 +25160,12 @@ function quarantineCorrupt(path) {
   renameSync(path, quarantined);
   return quarantined;
 }
+function blockAndQuarantineCorrupt(path, blockedPath) {
+  const quarantined = `${path}.corrupt-${Date.now()}`;
+  writeJsonAtomic(blockedPath, { quarantined_path: quarantined });
+  renameSync(path, quarantined);
+  return quarantined;
+}
 function defaultConsumerLedger() {
   return {
     recent_event_ids: [],
@@ -25175,7 +25181,7 @@ function defaultSessionLedger() {
 var CorruptLedgerError = class extends Error {
   quarantinedPath;
   constructor(path, quarantinedPath) {
-    super(`durable event ledger ${path} was corrupt; quarantined at ${quarantinedPath}`);
+    super(`durable state ${path} was corrupt; quarantined at ${quarantinedPath}`);
     this.name = "CorruptLedgerError";
     this.quarantinedPath = quarantinedPath;
   }
@@ -25185,6 +25191,7 @@ var StateStore = class {
   dir;
   /** Account-scoped cursor/owner state. */
   statePath;
+  stateBlockedPath;
   /** Account-scoped event dedupe and unacknowledged-delivery ledger. */
   ledgerPath;
   ledgerBlockedPath;
@@ -25199,6 +25206,7 @@ var StateStore = class {
     this.accountDir = accountStateDir(rootDir, scope2);
     this.dir = sessionStateDir(rootDir, scope2);
     this.statePath = join(this.accountDir, "consumer-state.json");
+    this.stateBlockedPath = join(this.accountDir, "consumer-state.blocked");
     this.ledgerPath = join(this.accountDir, "consumer-ledger.json");
     this.ledgerBlockedPath = join(this.accountDir, "consumer-ledger.blocked");
     this.sessionStatePath = join(this.dir, "routing.json");
@@ -25206,6 +25214,7 @@ var StateStore = class {
     this.sessionLedgerBlockedPath = join(this.dir, "session-ledger.blocked");
     ensurePrivateDir(this.accountDir);
     ensurePrivateDir(this.dir);
+    this.throwIfBlocked(this.statePath, this.stateBlockedPath);
     this.loadConsumerState();
     this.loadRoutingState();
     this.throwIfBlocked(this.ledgerPath, this.ledgerBlockedPath);
@@ -25228,13 +25237,16 @@ var StateStore = class {
     if (!existsSync(this.statePath)) return;
     try {
       const parsed = JSON.parse(readFileSync(this.statePath, "utf8"));
-      if (typeof parsed.cursor !== "number" || !Number.isFinite(parsed.cursor)) {
+      if (typeof parsed.cursor !== "number" || !Number.isSafeInteger(parsed.cursor) || parsed.cursor < 0) {
         throw new Error("invalid cursor");
       }
-      this.consumerState = { ...parsed, cursor: Math.max(0, Math.floor(parsed.cursor)) };
+      if (parsed.owner_user_id !== void 0 && (typeof parsed.owner_user_id !== "string" || parsed.owner_user_id.length === 0)) {
+        throw new Error("invalid owner user id");
+      }
+      this.consumerState = parsed;
     } catch {
-      quarantineCorrupt(this.statePath);
-      this.consumerState = { cursor: 0 };
+      const quarantined = blockAndQuarantineCorrupt(this.statePath, this.stateBlockedPath);
+      throw new CorruptLedgerError(this.statePath, quarantined);
     }
   }
   loadRoutingState() {
@@ -25259,8 +25271,7 @@ var StateStore = class {
       }
       this.consumerLedger = parsed;
     } catch {
-      const quarantined = quarantineCorrupt(this.ledgerPath);
-      writeJsonAtomic(this.ledgerBlockedPath, { quarantined_path: quarantined });
+      const quarantined = blockAndQuarantineCorrupt(this.ledgerPath, this.ledgerBlockedPath);
       throw new CorruptLedgerError(this.ledgerPath, quarantined);
     }
   }
@@ -25273,8 +25284,10 @@ var StateStore = class {
       }
       this.sessionLedger = parsed;
     } catch {
-      const quarantined = quarantineCorrupt(this.sessionLedgerPath);
-      writeJsonAtomic(this.sessionLedgerBlockedPath, { quarantined_path: quarantined });
+      const quarantined = blockAndQuarantineCorrupt(
+        this.sessionLedgerPath,
+        this.sessionLedgerBlockedPath
+      );
       throw new CorruptLedgerError(this.sessionLedgerPath, quarantined);
     }
   }

@@ -8,7 +8,7 @@
  * owns: `codex exec` hard-codes approval_policy=Never and rejects every
  * approval server-request, so no exec fallback exists here by design.
  *
- * Conversation → ACP session bindings persist in ~/.relayapp/sessions.json and
+ * Conversation → ACP session bindings persist in the paired account runtime and
  * are re-attached with `session/load` when the agent advertises loadSession.
  */
 import { spawn, type ChildProcess } from "node:child_process";
@@ -143,13 +143,14 @@ interface TurnState {
 export function permissionDetail(
   toolCall: RequestPermissionRequest["toolCall"],
 ): string | undefined {
+  // Locations and display content are supplemental. Without rawInput the
+  // phone cannot show the exact operation, so it must not offer Allow.
+  if (toolCall.rawInput === undefined) return undefined;
   const parts: string[] = [];
-  if (toolCall.rawInput !== undefined) {
-    try {
-      parts.push(JSON.stringify(toolCall.rawInput));
-    } catch {
-      parts.push(String(toolCall.rawInput));
-    }
+  try {
+    parts.push(JSON.stringify(toolCall.rawInput));
+  } catch {
+    parts.push(String(toolCall.rawInput));
   }
   if (Array.isArray(toolCall.locations) && toolCall.locations.length > 0) {
     parts.push(`paths: ${toolCall.locations.map((location) => location.path).join(", ")}`);
@@ -284,6 +285,7 @@ export class AcpEngine implements EngineAdapter {
       // The card must show WHAT is being approved, not just a tool title: a
       // generic "Bash" with the command hidden turns Allow into a blind grant.
       inputPreview: permissionDetail(params.toolCall),
+      inputComplete: params.toolCall.rawInput !== undefined,
       options: params.options.map((option) => ({
         optionId: option.optionId,
         label: option.name,

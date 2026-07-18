@@ -347,9 +347,13 @@ test("crash marker drops an interrupted tool turn instead of executing it twice"
   const { client, posted } = fakeClient();
   const state = new StateStore(home);
   const event = userMessageEvent("evt_crash", "cnv_a", "deploy it");
-  const key = turnIdempotencyKey("cnv_a", event.event_id);
+  const key = turnIdempotencyKey("cnv_a", [event.event_id]);
   state.current.pending_events.cnv_a = [event];
-  (state.current.attempted_turns ??= {}).cnv_a = key;
+  (state.current.attempted_turns ??= {}).cnv_a = {
+    turn_key: key,
+    event_ids: [event.event_id],
+    started_at: new Date().toISOString(),
+  };
   state.persist();
   const fake = fakeEngine();
   const loop = new ReceiveLoop(
@@ -367,14 +371,53 @@ test("crash marker drops an interrupted tool turn instead of executing it twice"
   loop.stop();
 });
 
+test("crash recovery drops only the attempted prefix when a new message arrived", async () => {
+  const home = tempHome();
+  const { client, posted } = fakeClient();
+  const state = new StateStore(home);
+  const attemptedEvent = userMessageEvent("evt_attempted", "cnv_a", "deploy it", 1);
+  const laterEvent = userMessageEvent("evt_later", "cnv_a", "check status", 2);
+  const key = turnIdempotencyKey("cnv_a", [attemptedEvent.event_id]);
+  state.current.pending_events.cnv_a = [attemptedEvent, laterEvent];
+  (state.current.attempted_turns ??= {}).cnv_a = {
+    turn_key: key,
+    event_ids: [attemptedEvent.event_id],
+    started_at: new Date().toISOString(),
+  };
+  state.persist();
+  const fake = fakeEngine();
+  const loop = new ReceiveLoop(
+    client,
+    new StateStore(home),
+    fake.engine,
+    new PermissionBroker(client, new ApprovalStore(home), 60_000),
+    { ownerUserId: OWNER, debounceMs: 10, cwd: "/tmp" },
+  );
+
+  await loop.runTurn("cnv_a");
+  assert.equal(fake.turns.length, 0, "attempted prefix must not execute again");
+  assert.deepEqual(
+    diskState(home).pending_events.cnv_a?.map((event) => event.event_id),
+    ["evt_later"],
+  );
+  await loop.runTurn("cnv_a");
+  assert.deepEqual(fake.turns.map((turn) => turn.prompt), ["check status"]);
+  assert.equal(posted.filter((entry) => entry.key.endsWith("-crashed")).length, 1);
+  loop.stop();
+});
+
 test("completed reply outbox redelivers after restart without rerunning the engine", async () => {
   const home = tempHome();
   const { client, posted } = fakeClient();
   const state = new StateStore(home);
   const event = userMessageEvent("evt_done", "cnv_a", "send it");
-  const key = turnIdempotencyKey("cnv_a", event.event_id);
+  const key = turnIdempotencyKey("cnv_a", [event.event_id]);
   state.current.pending_events.cnv_a = [event];
-  (state.current.attempted_turns ??= {}).cnv_a = key;
+  (state.current.attempted_turns ??= {}).cnv_a = {
+    turn_key: key,
+    event_ids: [event.event_id],
+    started_at: new Date().toISOString(),
+  };
   (state.current.pending_replies ??= {})[key] = {
     conversation_id: "cnv_a",
     event_ids: [event.event_id],
@@ -616,6 +659,23 @@ test("security-sensitive approval input is complete or the ask fails closed", as
   );
   assert.deepEqual(decision, { behavior: "selected", optionId: "deny" });
   assert.equal(posted.length, 0, "unsafe partial card must never be sent");
+
+  const incomplete = await broker.ask(
+    "cnv_a",
+    {
+      requestId: "incomplete",
+      toolName: "shell",
+      title: "Run command",
+      inputComplete: false,
+      options: [
+        { optionId: "allow", label: "Allow", kind: "allow_once" },
+        { optionId: "deny", label: "Deny", kind: "reject_once" },
+      ],
+    },
+    "claude",
+  );
+  assert.deepEqual(incomplete, { behavior: "selected", optionId: "deny" });
+  assert.equal(posted.length, 0, "missing raw input must never post an approval");
 });
 
 test("verdict parsing matches the channel plugin: data-part tap and text fallback", () => {
@@ -641,9 +701,13 @@ test("verdict parsing matches the channel plugin: data-part tap and text fallbac
   assert.equal(parseVerdictDataPart({ request_id: "toolong", option: "allow" }), null);
 });
 
-test("idempotency key is stable per turn and prompt text falls back", () => {
-  assert.equal(turnIdempotencyKey("cnv_a", "evt_9"), turnIdempotencyKey("cnv_a", "evt_9"));
-  assert.notEqual(turnIdempotencyKey("cnv_a", "evt_9"), turnIdempotencyKey("cnv_a", "evt_8"));
+test("idempotency key is stable for the exact event batch and prompt text falls back", () => {
+  assert.equal(turnIdempotencyKey("cnv_a", ["evt_9"]), turnIdempotencyKey("cnv_a", ["evt_9"]));
+  assert.notEqual(turnIdempotencyKey("cnv_a", ["evt_9"]), turnIdempotencyKey("cnv_a", ["evt_8"]));
+  assert.notEqual(
+    turnIdempotencyKey("cnv_a", ["evt_9"]),
+    turnIdempotencyKey("cnv_a", ["evt_9", "evt_10"]),
+  );
   const text = promptTextFromMessages([
     {
       id: "m1",

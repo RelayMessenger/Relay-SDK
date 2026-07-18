@@ -61,3 +61,15 @@ test("ACP approval detail includes raw input, affected paths and content", () =>
   assert.match(detail!, /\/repo\/infra\.ts/);
   assert.match(detail!, /full command context/);
 });
+
+test("ACP approval detail fails closed when raw input is unavailable", () => {
+  const detail = permissionDetail({
+    toolCallId: "tool_2",
+    title: "Shell",
+    kind: "execute",
+    status: "pending",
+    locations: [{ path: "/repo/infra.ts", line: 12 }],
+    content: [{ type: "content", content: { type: "text", text: "generic summary" } }],
+  } as any);
+  assert.equal(detail, undefined);
+});

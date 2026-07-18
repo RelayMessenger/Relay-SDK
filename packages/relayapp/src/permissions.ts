@@ -13,7 +13,7 @@
  * fallback). Request ids use Claude Code's 5-char [a-km-z] alphabet.
  *
  * Pending approvals are durable resources, not in-memory callback state: each
- * ask is created (create-once) as ~/.relayapp/approvals/<request_id>.json
+ * ask is created (create-once) in the paired account runtime's approvals/
  * BEFORE the Relay card is posted; the loop writes the resolution when the
  * tap arrives, and the waiter (this broker's ACP path, or the codex hook in
  * another process) consumes it by unlinking the file. In-window entries stay
@@ -325,6 +325,10 @@ export class PermissionBroker {
       })),
       source: "acp",
     };
+    if (askInput.inputComplete === false) {
+      this.log(`approval ${requestId} denied before posting: raw operation unavailable`);
+      return denyDecision(approval);
+    }
     let card: ReturnType<typeof buildPermissionCard>;
     try {
       card = buildPermissionCard({

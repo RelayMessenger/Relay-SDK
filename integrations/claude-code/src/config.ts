@@ -203,6 +203,16 @@ function quarantineCorrupt(path: string): string {
   return quarantined;
 }
 
+function blockAndQuarantineCorrupt(path: string, blockedPath: string): string {
+  const quarantined = `${path}.corrupt-${Date.now()}`;
+  // Persist the fail-closed marker first. If this write fails, the corrupt
+  // source remains in place and the next startup will fail on it again. If the
+  // subsequent rename fails, the marker still prevents a cursor reset.
+  writeJsonAtomic(blockedPath, { quarantined_path: quarantined });
+  renameSync(path, quarantined);
+  return quarantined;
+}
+
 function defaultConsumerLedger(): ConsumerLedger {
   return {
     recent_event_ids: [],
@@ -218,15 +228,16 @@ function defaultSessionLedger(): SessionLedger {
 }
 
 /**
- * Cursor/routing corruption is recoverable because the independent ledger
- * still contains pending and recently acknowledged event ids. Ledger
- * corruption fails closed: silently discarding it could replay side effects.
+ * Account cursor and ledger corruption fail closed: silently discarding either
+ * could replay events whose ids have already aged out of the bounded dedupe
+ * ledger. Session routing remains recoverable because it does not guard
+ * external side effects.
  */
 export class CorruptLedgerError extends Error {
   readonly quarantinedPath: string;
 
   constructor(path: string, quarantinedPath: string) {
-    super(`durable event ledger ${path} was corrupt; quarantined at ${quarantinedPath}`);
+    super(`durable state ${path} was corrupt; quarantined at ${quarantinedPath}`);
     this.name = "CorruptLedgerError";
     this.quarantinedPath = quarantinedPath;
   }
@@ -237,6 +248,7 @@ export class StateStore {
   readonly dir: string;
   /** Account-scoped cursor/owner state. */
   readonly statePath: string;
+  readonly stateBlockedPath: string;
   /** Account-scoped event dedupe and unacknowledged-delivery ledger. */
   readonly ledgerPath: string;
   readonly ledgerBlockedPath: string;
@@ -252,6 +264,7 @@ export class StateStore {
     this.accountDir = accountStateDir(rootDir, scope);
     this.dir = sessionStateDir(rootDir, scope);
     this.statePath = join(this.accountDir, "consumer-state.json");
+    this.stateBlockedPath = join(this.accountDir, "consumer-state.blocked");
     this.ledgerPath = join(this.accountDir, "consumer-ledger.json");
     this.ledgerBlockedPath = join(this.accountDir, "consumer-ledger.blocked");
     this.sessionStatePath = join(this.dir, "routing.json");
@@ -259,6 +272,7 @@ export class StateStore {
     this.sessionLedgerBlockedPath = join(this.dir, "session-ledger.blocked");
     ensurePrivateDir(this.accountDir);
     ensurePrivateDir(this.dir);
+    this.throwIfBlocked(this.statePath, this.stateBlockedPath);
     this.loadConsumerState();
     this.loadRoutingState();
     this.throwIfBlocked(this.ledgerPath, this.ledgerBlockedPath);
@@ -286,13 +300,23 @@ export class StateStore {
     if (!existsSync(this.statePath)) return;
     try {
       const parsed = JSON.parse(readFileSync(this.statePath, "utf8")) as Partial<ConsumerState>;
-      if (typeof parsed.cursor !== "number" || !Number.isFinite(parsed.cursor)) {
+      if (
+        typeof parsed.cursor !== "number" ||
+        !Number.isSafeInteger(parsed.cursor) ||
+        parsed.cursor < 0
+      ) {
         throw new Error("invalid cursor");
       }
-      this.consumerState = { ...parsed, cursor: Math.max(0, Math.floor(parsed.cursor)) };
+      if (
+        parsed.owner_user_id !== undefined &&
+        (typeof parsed.owner_user_id !== "string" || parsed.owner_user_id.length === 0)
+      ) {
+        throw new Error("invalid owner user id");
+      }
+      this.consumerState = parsed as ConsumerState;
     } catch {
-      quarantineCorrupt(this.statePath);
-      this.consumerState = { cursor: 0 };
+      const quarantined = blockAndQuarantineCorrupt(this.statePath, this.stateBlockedPath);
+      throw new CorruptLedgerError(this.statePath, quarantined);
     }
   }
 
@@ -326,8 +350,7 @@ export class StateStore {
       }
       this.consumerLedger = parsed as ConsumerLedger;
     } catch {
-      const quarantined = quarantineCorrupt(this.ledgerPath);
-      writeJsonAtomic(this.ledgerBlockedPath, { quarantined_path: quarantined });
+      const quarantined = blockAndQuarantineCorrupt(this.ledgerPath, this.ledgerBlockedPath);
       throw new CorruptLedgerError(this.ledgerPath, quarantined);
     }
   }
@@ -346,8 +369,10 @@ export class StateStore {
       }
       this.sessionLedger = parsed as SessionLedger;
     } catch {
-      const quarantined = quarantineCorrupt(this.sessionLedgerPath);
-      writeJsonAtomic(this.sessionLedgerBlockedPath, { quarantined_path: quarantined });
+      const quarantined = blockAndQuarantineCorrupt(
+        this.sessionLedgerPath,
+        this.sessionLedgerBlockedPath,
+      );
       throw new CorruptLedgerError(this.sessionLedgerPath, quarantined);
     }
   }

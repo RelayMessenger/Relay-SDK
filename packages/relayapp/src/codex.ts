@@ -19,16 +19,19 @@
  * These entrypoints run in their own processes and never write state.json;
  * that file is owned exclusively by the `start` loop. They read the pinned
  * owner conversation via readStateSnapshot() and coordinate approvals only
- * through per-request files in ~/.relayapp/approvals/.
+ * through per-request files in the active account runtime's approvals/.
  */
 import { randomBytes } from "node:crypto";
+import { basename, dirname } from "node:path";
 import { RelayClient } from "./api.js";
 import { buildPermissionCard, newRequestId, verdictFromMessage } from "./permissions.js";
 import {
   ApprovalStore,
+  CodexNotifyPolicyStore,
   ConfigStore,
   readStateSnapshot,
   resolveOwnerUserId,
+  runtimeHomeForConfig,
   type PendingApproval,
 } from "./store.js";
 
@@ -36,7 +39,14 @@ export function requireClient(config = new ConfigStore()): {
   client: RelayClient;
   ownerUserId?: string;
   conversationId?: string;
+  projectRoot: string;
 } {
+  const projectRoot = new CodexNotifyPolicyStore().matchProject(process.cwd());
+  if (!projectRoot) {
+    throw new Error(
+      "This project is not opted in to Relay. Run `relayapp install-codex` from its root first.",
+    );
+  }
   const loaded = config.load();
   if (!loaded?.agent_token) {
     throw new Error("Not paired. Run `relayapp pair` first.");
@@ -52,11 +62,22 @@ export function requireClient(config = new ConfigStore()): {
     ownerUserId,
     // The owner's conversation, pinned by the loop at the first owner
     // message — never the most recent writer.
-    conversationId: readStateSnapshot().owner_conversation_id,
+    conversationId: readStateSnapshot(runtimeHomeForConfig(loaded, dirname(config.path))).owner_conversation_id,
+    projectRoot,
   };
 }
 
-export async function notifyCommand(argv: string[], out: (line: string) => void = console.log): Promise<void> {
+export interface NotifyCommandDependencies {
+  config?: ConfigStore;
+  policy?: CodexNotifyPolicyStore;
+  client?: RelayClient;
+}
+
+export async function notifyCommand(
+  argv: string[],
+  out: (line: string) => void = console.log,
+  dependencies: NotifyCommandDependencies = {},
+): Promise<void> {
   const raw = argv[argv.length - 1];
   let payload: any = {};
   try {
@@ -67,7 +88,18 @@ export async function notifyCommand(argv: string[], out: (line: string) => void 
   }
   if (payload.type && payload.type !== "agent-turn-complete") return;
 
-  const { client, conversationId } = requireClient();
+  const projectRoot = (dependencies.policy ?? new CodexNotifyPolicyStore()).matchProject(payload.cwd);
+  if (!projectRoot) {
+    out("relayapp notify: suppressed — this project was not explicitly opted in.");
+    return;
+  }
+  const config = dependencies.config ?? new ConfigStore();
+  const loaded = config.load();
+  if (!loaded?.agent_token) throw new Error("Not paired. Run `relayapp pair` first.");
+  const conversationId = readStateSnapshot(
+    runtimeHomeForConfig(loaded, dirname(config.path)),
+  ).owner_conversation_id;
+  const client = dependencies.client ?? new RelayClient(loaded.api_origin, loaded.agent_token);
   if (!conversationId) {
     out(
       "relayapp notify: no pinned owner conversation yet — run `relayapp start` once and " +
@@ -76,15 +108,14 @@ export async function notifyCommand(argv: string[], out: (line: string) => void 
     return;
   }
   const last = payload["last-assistant-message"];
-  const inputs: string[] = Array.isArray(payload["input-messages"]) ? payload["input-messages"] : [];
   const summary = typeof last === "string" && last.trim().length > 0
     ? last.trim()
-    : `Codex finished a turn${inputs.length > 0 ? ` on: ${inputs[0]}` : ""}.`;
+    : "Codex finished a turn.";
   const turnId = payload["turn-id"] ?? randomBytes(6).toString("hex");
   await client.postMessage(
     {
       conversation_id: conversationId,
-      parts: [{ type: "text", text: `Codex (${payload.cwd ?? "local"}): ${summary}`.slice(0, 7900) }],
+      parts: [{ type: "text", text: `Codex (${basename(projectRoot)}): ${summary}`.slice(0, 7900) }],
     },
     `relay-notify-${turnId}`,
   );
@@ -109,7 +140,11 @@ export async function permissionRequestHook(
   }
 
   const config = new ConfigStore().load();
-  const conversationId = readStateSnapshot().owner_conversation_id;
+  const projectRoot = new CodexNotifyPolicyStore().matchProject(input.cwd);
+  if (!projectRoot) return 0;
+  const conversationId = config?.agent_token
+    ? readStateSnapshot(runtimeHomeForConfig(config)).owner_conversation_id
+    : undefined;
   let ownerUserId: string | undefined;
   try {
     ownerUserId = config ? resolveOwnerUserId(config) : undefined;

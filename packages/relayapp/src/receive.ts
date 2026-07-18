@@ -28,8 +28,10 @@ export interface ReceiveLoopOptions {
   setTimeoutImpl?: typeof setTimeout;
 }
 
-export function turnIdempotencyKey(conversationId: string, lastEventId: string): string {
-  const digest = createHash("sha256").update(`${conversationId}\n${lastEventId}`).digest("hex");
+export function turnIdempotencyKey(conversationId: string, eventIds: string[]): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify([conversationId, eventIds]))
+    .digest("hex");
   return `relay-turn-${digest.slice(0, 40)}`;
 }
 
@@ -55,8 +57,6 @@ export class ReceiveLoop {
   private readonly debounceTimers = new Map<string, NodeJS.Timeout>();
   /** Serializes turns per conversation. */
   private readonly turnChains = new Map<string, Promise<void>>();
-  /** Turn keys whose attempt marker was written by THIS process. */
-  private readonly attemptedHere = new Set<string>();
   private stopped = false;
 
   constructor(
@@ -161,9 +161,10 @@ export class ReceiveLoop {
       // New messages arrived mid-turn; run again.
       this.scheduleFlush(conversationId);
     }
-    const attemptedKey = (this.state.current.attempted_turns ??= {})[conversationId];
-    delete this.state.current.attempted_turns![conversationId];
-    if (attemptedKey) this.attemptedHere.delete(attemptedKey);
+    const attempted = (this.state.current.attempted_turns ??= {})[conversationId];
+    if (attempted && (!turnKey || attempted.turn_key === turnKey)) {
+      delete this.state.current.attempted_turns![conversationId];
+    }
     if (turnKey) delete (this.state.current.pending_replies ??= {})[turnKey];
     this.state.persist();
   }
@@ -228,6 +229,34 @@ export class ReceiveLoop {
       return;
     }
 
+    // Recover the exact prefix a previous invocation durably claimed before
+    // it disappeared. Later events may already be queued; they must survive
+    // and run separately, while the attempted prefix is never re-executed.
+    const attempted = (this.state.current.attempted_turns ??= {})[conversationId];
+    if (attempted) {
+      const queue = this.state.current.pending_events[conversationId] ?? [];
+      const prefix = queue.slice(0, attempted.event_ids.length);
+      if (
+        prefix.length !== attempted.event_ids.length ||
+        prefix.some((event, index) => event.event_id !== attempted.event_ids[index])
+      ) {
+        throw new Error(
+          `attempt ledger mismatch for ${conversationId}; refusing to execute queued events`,
+        );
+      }
+      this.log(
+        `turn ${attempted.turn_key} was interrupted — dropping its ${prefix.length}-event prefix, not re-executing`,
+      );
+      this.clearBatch(conversationId, prefix, attempted.turn_key);
+      await this.postNotice(
+        conversationId,
+        "The bridge restarted while working on your last message, so it was not retried " +
+          "automatically (its tools may have partially run). Send it again to retry.",
+        `${attempted.turn_key}-crashed`,
+      );
+      return;
+    }
+
     // Snapshot: routeEvent keeps appending to the live queue while the turn
     // runs, and the post-turn filter must only remove what THIS turn consumed.
     const events = [...(this.state.current.pending_events[conversationId] ?? [])];
@@ -236,7 +265,6 @@ export class ReceiveLoop {
       .map((event) => event.data?.message)
       .filter((message): message is RelayMessage => message !== undefined);
     const promptText = promptTextFromMessages(messages);
-    const lastEventId = events[events.length - 1]!.event_id;
     if (promptText.length === 0) {
       // Nothing promptable; drop the batch durably.
       delete this.state.current.pending_events[conversationId];
@@ -245,25 +273,15 @@ export class ReceiveLoop {
     }
 
     // Crash semantics: engine/tool side effects are at-most-once per batch.
-    // The attempt marker is persisted BEFORE the engine starts; a marker found
-    // for this exact batch that this process did not write means a previous
-    // process crashed mid-turn — the batch is dropped with a notice instead of
-    // silently re-running deploys/deletes/sends.
-    const turnKey = turnIdempotencyKey(conversationId, lastEventId);
-    const attempted = this.state.current.attempted_turns ??= {};
-    if (attempted[conversationId] === turnKey && !this.attemptedHere.has(turnKey)) {
-      this.log(`turn ${turnKey} was interrupted by a crash — dropping, not re-executing`);
-      this.clearBatch(conversationId, events, turnKey);
-      await this.postNotice(
-        conversationId,
-        "The bridge restarted while working on your last message, so it was not retried " +
-          "automatically (its tools may have partially run). Send it again to retry.",
-        `${turnKey}-crashed`,
-      );
-      return;
-    }
-    attempted[conversationId] = turnKey;
-    this.attemptedHere.add(turnKey);
+    // The exact event-id batch is persisted BEFORE the engine starts. A later
+    // message cannot change or overwrite which prefix was already attempted.
+    const eventIds = events.map((event) => event.event_id);
+    const turnKey = turnIdempotencyKey(conversationId, eventIds);
+    (this.state.current.attempted_turns ??= {})[conversationId] = {
+      turn_key: turnKey,
+      event_ids: eventIds,
+      started_at: new Date().toISOString(),
+    };
     this.state.persist();
 
     const typing = this.startTyping(conversationId);

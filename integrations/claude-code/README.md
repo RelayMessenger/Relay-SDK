@@ -33,7 +33,15 @@ installation.
 
 ## Configure
 
-Run `/relay:configure`, or create the platform-equivalent of:
+After `relayapp pair`, configure the installed channel without exposing the
+token:
+
+```text
+relayapp install-claude
+```
+
+That command writes the paired token, API origin, and owner pin to the
+platform-equivalent of:
 
 ```text
 ~/.claude/channels/relay/.env
@@ -52,11 +60,14 @@ RELAY_BASE_URL=https://api.relayapp.im
 #RELAY_ALLOW_TOFU=1
 ```
 
+The file is mode 600/current-user-only. The command never prints the token and
+refuses to overwrite a different existing channel identity. Run
+`/relay:configure` for verification or for manual setup when relayapp is not
+available and you already have a token through another secure route.
+
 `RELAY_BASE_URL` must be an HTTPS origin with no path, query, fragment, or
 embedded credentials. Plain HTTP is accepted only for `localhost`,
-`127.0.0.1`, or `::1` development servers. Use
-`https://api.staging.relayapp.im` for staging; a production token is not
-automatically valid or safe to use there.
+`127.0.0.1`, or `::1` development servers.
 
 Verify without printing the token:
 
@@ -134,11 +145,11 @@ subdirectory separately contains `routing.json` and `session-ledger.json` for
 last-conversation routing, permission registrations, and logical outbound
 sends. A new session cannot answer an old session's permission card.
 
-Writes use owner-only files and atomic rename. If consumer state is corrupt, it
-is quarantined and the independent consumer ledger still contains replay
-guards. If either security-critical ledger is corrupt, startup fails closed and
-preserves a block marker plus the quarantined file instead of silently
-replaying old events.
+Writes use owner-only files and atomic rename. If consumer cursor state or
+either security-critical ledger is corrupt, startup fails closed and preserves
+a block marker plus the quarantined file instead of resetting the cursor or
+silently replaying old events. Session routing state may be quarantined and
+reset because it does not guard event delivery or external side effects.
 
 ## Development
 

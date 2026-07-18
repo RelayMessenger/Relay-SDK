@@ -4,12 +4,27 @@ description: Configure and verify the self-contained Relay channel
 
 Configure Relay without asking the user to paste or echo a secret in chat.
 
-1. Determine the user's channel directory using their platform conventions:
+1. Use the paired relayapp flow. Ask the user to run these locally if needed:
+
+   ```text
+   relayapp pair
+   relayapp install-claude
+   ```
+
+   `install-claude` copies the paired token, API origin, and pinned owner into
+   the channel `.env` with current-user-only permissions. It never prints the
+   token and refuses to overwrite a different configured channel identity.
+
+2. Determine the user's channel directory using their platform conventions:
    `~/.claude/channels/relay` on macOS/Linux or
    `%USERPROFILE%\.claude\channels\relay` on Windows. Create it with access
    restricted to the current user.
 
-2. If `.env` does not exist, create it with current-user-only access:
+   Verify that `.env` exists. Do not read or display its contents.
+
+3. If relayapp is unavailable and the user already obtained an Agent Token
+   through another secure route, they may create `.env` themselves with
+   current-user-only access:
 
    ```dotenv
    RELAY_AGENT_TOKEN=
@@ -22,9 +37,7 @@ Configure Relay without asking the user to paste or echo a secret in chat.
    `RELAY_ALLOW_TOFU=1` is an explicit fallback only for an agent no one else
    can message. Normally the owner comes from `GET /v1/agents/me`.
 
-3. Tell the user to paste their Agent Token after `RELAY_AGENT_TOKEN=` in their
-   own editor. Never request, print, or place the token in a command argument.
-   Use `https://api.staging.relayapp.im` only with a staging token.
+   Never request, print, or place the token in a command argument.
 
 4. Do not run `npm install`. The installed plugin's
    `runtime/server.mjs` already contains its runtime dependencies.

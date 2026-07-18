@@ -24,14 +24,21 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseToml } from "smol-toml";
+import { CodexNotifyPolicyStore, ConfigStore, resolveOwnerUserId } from "./store.js";
 
 export interface MergeReport {
   changed: boolean;
   notes: string[];
+}
+
+export interface InstallCodexOptions {
+  projectRoot?: string;
+  policy?: CodexNotifyPolicyStore;
 }
 
 const RELAY_NOTIFY = ["relayapp", "notify"];
@@ -153,8 +160,26 @@ export function mergeHooksJson(existing: string): { json: string; report: MergeR
   return { json: `${JSON.stringify(doc, null, 2)}\n`, report: { changed, notes } };
 }
 
-export function installCodex(codexHome = join(homedir(), ".codex"), out: (line: string) => void = console.log): void {
+function currentProjectRoot(cwd = process.cwd()): string {
+  const git = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+    cwd,
+    encoding: "utf8",
+    timeout: 5_000,
+    windowsHide: true,
+  });
+  return git.status === 0 && git.stdout.trim().length > 0 ? git.stdout.trim() : cwd;
+}
+
+export function installCodex(
+  codexHome = join(homedir(), ".codex"),
+  out: (line: string) => void = console.log,
+  options: InstallCodexOptions = {},
+): void {
   mkdirSync(codexHome, { recursive: true });
+
+  const allowedRoot = (options.policy ?? new CodexNotifyPolicyStore()).allowProject(
+    options.projectRoot ?? currentProjectRoot(),
+  );
 
   const configPath = join(codexHome, "config.toml");
   const existingToml = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
@@ -184,19 +209,89 @@ export function installCodex(codexHome = join(homedir(), ".codex"), out: (line: 
   for (const note of hooks.report.notes) out(`  - ${note}`);
 
   out("");
-  out("Codex will now ping Relay when a turn completes (notify) and route tool");
-  out("approvals to your phone (PermissionRequest hook). Codex gates untrusted");
+  out(`Relay enabled only for this project root: ${allowedRoot}`);
+  out("Codex will send the final assistant message when a turn completes and route tool");
+  out("approvals to your phone only from that project. Codex gates untrusted");
   out("hook handlers: the first run may ask you to trust the relayapp handler.");
   out("Approvals require `relayapp pair` to have run on this machine.");
+  out("Run install-codex separately inside each additional project you explicitly opt in.");
 }
 
-/**
- * install-claude: the repository is a Claude plugin marketplace. Print the
- * same install/run identity whether this command runs from a source checkout
- * or the published CLI package.
- */
-export function installClaude(out: (line: string) => void = console.log, searchFrom = MODULE_DIR): void {
-  let dir = searchFrom;
+export interface InstallClaudeOptions {
+  config?: ConfigStore;
+  channelDir?: string;
+  searchFrom?: string;
+}
+
+function parseEnvValues(contents: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const raw of contents.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const match = /^(?:export\s+)?([A-Z0-9_]+)=(.*)$/u.exec(line);
+    if (!match) continue;
+    let value = match[2]!.trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    values[match[1]!] = value;
+  }
+  return values;
+}
+
+export function mergeClaudeChannelEnv(
+  existing: string,
+  desired: { token: string; origin: string; ownerUserId: string },
+): string {
+  const values = parseEnvValues(existing);
+  const required: Record<string, string> = {
+    RELAY_AGENT_TOKEN: desired.token,
+    RELAY_BASE_URL: desired.origin,
+    RELAY_OWNER_USER_ID: desired.ownerUserId,
+  };
+  for (const [key, value] of Object.entries(required)) {
+    if (/[\r\n]/u.test(value)) throw new Error(`Refusing newline in ${key}`);
+    if (values[key] && values[key] !== value) {
+      throw new Error(
+        `Claude Relay channel already has a different ${key}. ` +
+          "Its .env was not changed; move it aside deliberately before installing this paired agent.",
+      );
+    }
+  }
+  const missing = Object.entries(required).filter(([key]) => values[key] !== required[key]);
+  if (missing.length === 0) return existing;
+  const prefix = existing.length === 0 || existing.endsWith("\n") ? existing : `${existing}\n`;
+  return `${prefix}${missing.map(([key, value]) => `${key}=${value}`).join("\n")}\n`;
+}
+
+/** Install instructions plus owner-only Claude channel credentials from pair. */
+export function installClaude(
+  out: (line: string) => void = console.log,
+  options: InstallClaudeOptions = {},
+): void {
+  const paired = (options.config ?? new ConfigStore()).load();
+  if (!paired?.agent_token) throw new Error("Not paired. Run `relayapp pair` first.");
+  const ownerUserId = resolveOwnerUserId(paired);
+  const channelDir = options.channelDir ?? join(homedir(), ".claude", "channels", "relay");
+  const envPath = join(channelDir, ".env");
+  const existingEnv = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+  const mergedEnv = mergeClaudeChannelEnv(existingEnv, {
+    token: paired.agent_token,
+    origin: paired.api_origin,
+    ownerUserId,
+  });
+  if (mergedEnv !== existingEnv) {
+    if (existingEnv.length > 0 && !existsSync(`${envPath}.bak`)) {
+      writePrivateText(`${envPath}.bak`, existingEnv);
+    }
+    writePrivateText(envPath, mergedEnv);
+  } else if (existsSync(envPath)) {
+    chmodSync(envPath, 0o600);
+  }
+  out(`Configured Claude Relay channel at ${envPath} (mode 600).`);
+  out(`API origin: ${paired.api_origin}; owner pin: ${ownerUserId}. Agent Token was not printed.`);
+
+  let dir = options.searchFrom ?? MODULE_DIR;
   for (let i = 0; i < 8; i += 1) {
     const candidate = join(dir, "integrations", "claude-code");
     if (existsSync(candidate)) {

@@ -121,6 +121,8 @@ export type RelayClientOptions = {
   baseUrl?: string;
   token: string;
   fetchImpl?: FetchLike;
+  /** Bounds non-poll API operations; long polls use hold time plus slack. */
+  requestTimeoutMs?: number;
 };
 
 export type RelayClient = {
@@ -171,6 +173,7 @@ async function readErrorDetail(
 export function createRelayClient(options: RelayClientOptions): RelayClient {
   const baseUrl = normalizeRelayBaseUrl(options.baseUrl);
   const fetchImpl: FetchLike = options.fetchImpl ?? ((input, init) => fetch(input, init));
+  const requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
 
   const request = async (params: {
     method: string;
@@ -179,6 +182,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     body?: unknown;
     headers?: Record<string, string>;
     signal?: AbortSignal;
+    timeoutMs?: number;
   }): Promise<Response> => {
     const url = new URL(`${baseUrl}${params.path}`);
     for (const [key, value] of Object.entries(params.query ?? {})) {
@@ -187,6 +191,10 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       }
     }
     let response: Response;
+    const timeoutSignal = AbortSignal.timeout(params.timeoutMs ?? requestTimeoutMs);
+    const signal = params.signal
+      ? AbortSignal.any([params.signal, timeoutSignal])
+      : timeoutSignal;
     try {
       response = await fetchImpl(url.toString(), {
         method: params.method,
@@ -196,9 +204,15 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
           ...params.headers,
         },
         ...(params.body === undefined ? {} : { body: JSON.stringify(params.body) }),
-        ...(params.signal ? { signal: params.signal } : {}),
+        signal,
       });
     } catch (error) {
+      if (timeoutSignal.aborted && !params.signal?.aborted) {
+        throw new RelayApiError(
+          `relay: ${params.method} ${params.path} timed out after ${params.timeoutMs ?? requestTimeoutMs}ms`,
+          { kind: "retryable" },
+        );
+      }
       if (isAbortError(error)) {
         throw error;
       }
@@ -234,10 +248,6 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       const timeoutSeconds = Math.min(Math.max(params.timeoutSeconds ?? 30, 1), 30);
       // Guard against a wedged connection: the server holds <= timeout seconds,
       // so anything past timeout + slack is a dead socket, not a slow poll.
-      const guards = [AbortSignal.timeout((timeoutSeconds + 15) * 1_000)];
-      if (params.signal) {
-        guards.push(params.signal);
-      }
       const response = await request({
         method: "GET",
         path: "/v1/events",
@@ -246,7 +256,8 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
           timeout: timeoutSeconds,
           ...(params.limit === undefined ? {} : { limit: params.limit }),
         },
-        signal: AbortSignal.any(guards),
+        signal: params.signal,
+        timeoutMs: (timeoutSeconds + 15) * 1_000,
       });
       const body = (await response.json()) as {
         events?: RelayEventsPage["events"];

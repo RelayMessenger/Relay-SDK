@@ -2,8 +2,8 @@
 /**
  * relayapp — bridge your local coding agent to Relay.
  *
- *   relayapp pair [--staging] [--engine claude|codex|opencode] [--name <device-name>]
- *   relayapp start [--engine claude|codex|opencode] [--dir <path>] [--staging]
+ *   relayapp pair [--engine claude|codex|opencode] [--name <device-name>]
+ *   relayapp start [--engine claude|codex|opencode] [--dir <path>]
  *   relayapp install-codex
  *   relayapp install-claude
  *   relayapp doctor
@@ -11,50 +11,26 @@
  * Internal entrypoints (wired by install-codex): notify, mcp,
  * hook permission-request.
  */
-import { resolve } from "node:path";
-import { PRODUCTION_ORIGIN, RelayClient, STAGING_ORIGIN } from "./api.js";
+import { PRODUCTION_ORIGIN, RelayClient } from "./api.js";
 import { notifyCommand, permissionRequestHook } from "./codex.js";
 import { doctor } from "./doctor.js";
 import { AcpEngine } from "./engine/acp.js";
 import { OpencodeEngine, opencodeServerFromEnv } from "./engine/opencode.js";
 import { installClaude, installCodex } from "./install.js";
+import { parseFlags } from "./flags.js";
 import { mcpServe } from "./mcp.js";
 import { pair } from "./pair.js";
 import { PermissionBroker } from "./permissions.js";
 import { ReceiveLoop } from "./receive.js";
-import { ApprovalStore, ConfigStore, resolveOwnerUserId, SessionStore, StateStore } from "./store.js";
-
-interface Flags {
-  staging: boolean;
-  engine: "claude" | "codex" | "opencode";
-  dir?: string;
-  name?: string;
-  rest: string[];
-}
-
-function parseFlags(argv: string[]): Flags {
-  const flags: Flags = { staging: false, engine: "claude", rest: [] };
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i]!;
-    if (arg === "--staging") flags.staging = true;
-    else if (arg === "--engine") {
-      const value = argv[++i];
-      if (value !== "claude" && value !== "codex" && value !== "opencode") {
-        throw new Error(`--engine must be "claude", "codex", or "opencode", got ${value ?? "(nothing)"}`);
-      }
-      flags.engine = value;
-    } else if (arg === "--dir") {
-      const value = argv[++i];
-      if (!value) throw new Error("--dir needs a path");
-      flags.dir = resolve(value);
-    } else if (arg === "--name") {
-      const value = argv[++i];
-      if (!value) throw new Error("--name needs a value");
-      flags.name = value;
-    } else flags.rest.push(arg);
-  }
-  return flags;
-}
+import {
+  ApprovalStore,
+  ConfigStore,
+  resolveOwnerUserId,
+  RuntimeLock,
+  runtimeHomeForConfig,
+  SessionStore,
+  StateStore,
+} from "./store.js";
 
 const USAGE = `relayapp — bridge your local coding agent to Relay (https://relayapp.im)
 
@@ -62,7 +38,6 @@ const USAGE = `relayapp — bridge your local coding agent to Relay (https://rel
   relayapp start           receive messages and drive the engine
       --engine claude|codex|opencode   (default claude)
       --dir <path>            working directory for engine sessions
-      --staging               use api.staging.relayapp.im
   relayapp install-codex   wire Codex notify + phone approvals + MCP server
   relayapp install-claude  point at the Claude Code channel plugin
   relayapp doctor          health checks
@@ -76,7 +51,7 @@ async function main(): Promise<number> {
 
   switch (command) {
     case "pair": {
-      const origin = flags.staging ? STAGING_ORIGIN : PRODUCTION_ORIGIN;
+      const origin = PRODUCTION_ORIGIN;
       await pair({ origin, engine: flags.engine, deviceName: flags.name });
       return 0;
     }
@@ -87,70 +62,71 @@ async function main(): Promise<number> {
         return 1;
       }
       const ownerUserId = resolveOwnerUserId(config); // fail closed without a pinned owner
-      // The token is scoped to the origin it was paired against. Never send a
-      // saved token to a different origin because a flag changed.
-      if (flags.staging && config.api_origin !== STAGING_ORIGIN) {
-        console.error(
-          `This machine is paired against ${config.api_origin}, not staging. ` +
-            "Run `relayapp pair --staging` first — tokens never cross origins.",
-        );
-        return 1;
-      }
       const origin = config.api_origin;
       const client = new RelayClient(origin, config.agent_token);
-      const state = new StateStore();
-      const sessions = new SessionStore();
-      const approvals = new ApprovalStore();
-      const engine =
-        flags.engine === "opencode"
-          ? new OpencodeEngine(
-              sessions,
-              {
-                server: opencodeServerFromEnv(
-                  config.opencode
-                    ? {
-                        url: config.opencode.server_url,
-                        username: config.opencode.username,
-                        password: config.opencode.password,
-                      }
-                    : undefined,
-                ),
-              },
-              log,
-            )
-          : new AcpEngine(flags.engine, sessions, log);
-      const broker = new PermissionBroker(client, approvals, undefined, log);
-      const loop = new ReceiveLoop(client, state, engine, broker, {
-        ownerUserId,
-        cwd: flags.dir ?? process.cwd(),
-        log,
-      });
-      let shuttingDown: Promise<void> | undefined;
-      const shutdown = () => {
-        if (shuttingDown) return shuttingDown;
-        shuttingDown = (async () => {
-          log("shutting down…");
-          loop.stop();
-          // Dispose first: this rejects/aborts any live engine turn so settle()
-          // cannot wait forever on a child process we intend to terminate.
-          await engine.dispose();
-          await loop.settle();
-          process.exit(0);
-        })();
-        return shuttingDown;
-      };
-      process.on("SIGINT", shutdown);
-      process.on("SIGTERM", shutdown);
-      log(`bridge running: engine=${flags.engine} dir=${flags.dir ?? process.cwd()} api=${origin}`);
+      const runtimeHome = runtimeHomeForConfig(config);
+      const runtimeLock = new RuntimeLock(runtimeHome);
+      // Acquire before any state/session/approval object can read or rewrite
+      // whole-file ledgers for this paired identity.
+      runtimeLock.acquire();
       try {
-        await loop.run();
+        const state = new StateStore(runtimeHome);
+        const sessions = new SessionStore(runtimeHome);
+        const approvals = new ApprovalStore(runtimeHome);
+        const engine =
+          flags.engine === "opencode"
+            ? new OpencodeEngine(
+                sessions,
+                {
+                  server: opencodeServerFromEnv(
+                    config.opencode
+                      ? {
+                          url: config.opencode.server_url,
+                          username: config.opencode.username,
+                          password: config.opencode.password,
+                        }
+                      : undefined,
+                  ),
+                },
+                log,
+              )
+            : new AcpEngine(flags.engine, sessions, log);
+        const broker = new PermissionBroker(client, approvals, undefined, log);
+        const loop = new ReceiveLoop(client, state, engine, broker, {
+          ownerUserId,
+          cwd: flags.dir ?? process.cwd(),
+          log,
+        });
+        let shuttingDown: Promise<void> | undefined;
+        const shutdown = () => {
+          if (shuttingDown) return shuttingDown;
+          shuttingDown = (async () => {
+            log("shutting down…");
+            loop.stop();
+            // Dispose first: this rejects/aborts any live engine turn so settle()
+            // cannot wait forever on a child process we intend to terminate.
+            await engine.dispose();
+            await loop.settle();
+            runtimeLock.release();
+            process.exit(0);
+          })();
+          return shuttingDown;
+        };
+        process.on("SIGINT", shutdown);
+        process.on("SIGTERM", shutdown);
+        log(`bridge running: engine=${flags.engine} dir=${flags.dir ?? process.cwd()} api=${origin}`);
+        try {
+          await loop.run();
+        } finally {
+          // Fatal loop exits (409/401 throws) must not leave a detached engine
+          // process group running without its bridge.
+          loop.stop();
+          await engine.dispose().catch(() => {});
+        }
+        return 0;
       } finally {
-        // Fatal loop exits (409/401 throws) must not leave a detached engine
-        // process group running without its bridge.
-        loop.stop();
-        await engine.dispose().catch(() => {});
+        runtimeLock.release();
       }
-      return 0;
     }
     case "install-codex":
       installCodex();

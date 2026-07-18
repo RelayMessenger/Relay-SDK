@@ -6,7 +6,6 @@
 import type { RelayEvent, RelayMessage } from "./store.js";
 
 export const PRODUCTION_ORIGIN = "https://api.relayapp.im";
-export const STAGING_ORIGIN = "https://api.staging.relayapp.im";
 
 function isLoopbackHost(hostname: string): boolean {
   const host = hostname.toLowerCase();

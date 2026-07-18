@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeRelayBaseUrl } from "./client.js";
+import { createRelayClient, normalizeRelayBaseUrl } from "./client.js";
 
 describe("Relay API origin safety", () => {
   it("canonicalizes equivalent HTTPS origins", () => {
@@ -33,5 +33,64 @@ describe("Relay API origin safety", () => {
     expect(() => normalizeRelayBaseUrl("https://api.relayapp.im/proxy")).toThrow(/without a path/);
     expect(() => normalizeRelayBaseUrl("https://api.relayapp.im?env=prod")).toThrow(/query/);
     expect(() => normalizeRelayBaseUrl("https://api.relayapp.im#token")).toThrow(/fragment/);
+  });
+});
+
+describe("Relay API operation deadlines", () => {
+  it("fails a hung endpoint with a retryable timeout", async () => {
+    const fetchImpl = (_input: string, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          { once: true },
+        );
+      });
+    const client = createRelayClient({
+      baseUrl: "https://api.test",
+      token: "tok",
+      fetchImpl,
+      requestTimeoutMs: 20,
+    });
+    await expect(client.getMe()).rejects.toMatchObject({
+      kind: "retryable",
+      message: expect.stringMatching(/timed out after 20ms/),
+    });
+  });
+
+  it("reuses the caller's idempotency key after an ambiguous timeout", async () => {
+    const keys: string[] = [];
+    let attempt = 0;
+    const fetchImpl = async (_input: string, init?: RequestInit): Promise<Response> => {
+      keys.push(new Headers(init?.headers).get("idempotency-key") ?? "");
+      attempt += 1;
+      if (attempt === 1) {
+        return await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+            { once: true },
+          );
+        });
+      }
+      return new Response(JSON.stringify({ message_id: "msg_1", message: {} }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const client = createRelayClient({
+      baseUrl: "https://api.test",
+      token: "tok",
+      fetchImpl,
+      requestTimeoutMs: 20,
+    });
+    const params = {
+      conversationId: "cnv_1",
+      parts: [{ type: "text", text: "hello" }],
+      idempotencyKey: "relay-send:stable:0",
+    };
+    await expect(client.sendMessage(params)).rejects.toThrow(/timed out/);
+    await client.sendMessage(params);
+    expect(keys).toEqual(["relay-send:stable:0", "relay-send:stable:0"]);
   });
 });

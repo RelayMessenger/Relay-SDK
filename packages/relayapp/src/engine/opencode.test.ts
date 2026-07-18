@@ -6,7 +6,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SessionStore } from "../store.js";
 import type { PermissionAsk, PermissionDecision, TurnCallbacks } from "./types.js";
-import { OpencodeEngine, opencodeServerFromEnv, parseServerUrl } from "./opencode.js";
+import {
+  OpencodeEngine,
+  normalizeOpencodeServerUrl,
+  opencodeServerFromEnv,
+  parseServerUrl,
+} from "./opencode.js";
 
 function tempHome(): string {
   return mkdtempSync(join(tmpdir(), "relayapp-opencode-test-"));
@@ -31,11 +36,12 @@ interface RecordedRequest {
 }
 
 /** Minimal mock of the `opencode serve` HTTP surface the adapter drives. */
-async function mockOpencode() {
+async function mockOpencode(options: { sendConnected?: boolean } = {}) {
   const requests: RecordedRequest[] = [];
   const sseClients: http.ServerResponse[] = [];
   const sessionIds: string[] = [];
   const failingPaths = new Set<string>();
+  const hangingPaths = new Set<string>();
   let sessionSeq = 0;
 
   const server = http.createServer((req, res) => {
@@ -53,9 +59,13 @@ async function mockOpencode() {
       };
       requests.push(entry);
 
+      if (hangingPaths.has(url.pathname)) return;
+
       if (req.method === "GET" && url.pathname === "/event") {
         res.writeHead(200, { "content-type": "text/event-stream" });
-        res.write(`data: ${JSON.stringify({ id: "evt_0", type: "server.connected", properties: {} })}\n\n`);
+        if (options.sendConnected !== false) {
+          res.write(`data: ${JSON.stringify({ id: "evt_0", type: "server.connected", properties: {} })}\n\n`);
+        }
         sseClients.push(res);
         return;
       }
@@ -106,6 +116,9 @@ async function mockOpencode() {
     failPath(path: string) {
       failingPaths.add(path);
     },
+    hangPath(path: string) {
+      hangingPaths.add(path);
+    },
     async close() {
       this.killStreams();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -152,6 +165,70 @@ test("opencodeServerFromEnv resolves url + basic-auth settings", () => {
     opencodeServerFromEnv(undefined, { OPENCODE_SERVER_URL: "http://env", OPENCODE_SERVER_USERNAME: "ops" }),
     { url: "http://env", username: "ops", password: undefined },
   );
+});
+
+test("attach URL accepts only a credential-free origin with loopback HTTP or HTTPS", () => {
+  assert.equal(normalizeOpencodeServerUrl("http://127.0.0.1:4096/"), "http://127.0.0.1:4096");
+  assert.equal(normalizeOpencodeServerUrl("http://[::1]:4096"), "http://[::1]:4096");
+  assert.equal(normalizeOpencodeServerUrl("https://opencode.example"), "https://opencode.example");
+  for (const unsafe of [
+    "http://opencode.example",
+    "https://user:pass@opencode.example",
+    "https://opencode.example/api",
+    "https://opencode.example?token=x",
+    "https://opencode.example#fragment",
+    "file:///tmp/socket",
+  ]) {
+    assert.throws(() => normalizeOpencodeServerUrl(unsafe));
+  }
+});
+
+test("HTTP, SSE readiness, and turn lifecycle waits are bounded", async () => {
+  const requestMock = await mockOpencode();
+  requestMock.hangPath("/session");
+  const requestEngine = new OpencodeEngine(new SessionStore(tempHome()), {
+    server: { url: requestMock.url },
+    requestTimeoutMs: 30,
+  });
+  try {
+    await assert.rejects(
+      requestEngine.startTurn({ conversationId: "cnv_http", cwd: "/w" }, "hello", callbacks()),
+      /POST \/session timed out after 30ms/,
+    );
+  } finally {
+    await requestEngine.dispose();
+    await requestMock.close();
+  }
+
+  const streamMock = await mockOpencode({ sendConnected: false });
+  const streamEngine = new OpencodeEngine(new SessionStore(tempHome()), {
+    server: { url: streamMock.url },
+    streamConnectTimeoutMs: 30,
+  });
+  try {
+    await assert.rejects(
+      streamEngine.startTurn({ conversationId: "cnv_sse", cwd: "/w" }, "hello", callbacks()),
+      /event stream did not become ready after 30ms/,
+    );
+  } finally {
+    await streamEngine.dispose();
+    await streamMock.close();
+  }
+
+  const turnMock = await mockOpencode();
+  const turnEngine = new OpencodeEngine(new SessionStore(tempHome()), {
+    server: { url: turnMock.url },
+    turnTimeoutMs: 30,
+  });
+  try {
+    await assert.rejects(
+      turnEngine.startTurn({ conversationId: "cnv_turn", cwd: "/w" }, "hello", callbacks()),
+      /lifecycle timed out after 30ms/,
+    );
+  } finally {
+    await turnEngine.dispose();
+    await turnMock.close();
+  }
 });
 
 test("session create + prompt_async + SSE deltas coalesce into one finalized reply", async () => {

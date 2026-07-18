@@ -19,6 +19,7 @@ import {
   resolveDefaultRelayAccountId,
   resolveRelayAccount,
 } from "./accounts.js";
+import { RelayAccountLock } from "./account-lock.js";
 import {
   createRelayClient,
   isAbortError,
@@ -398,6 +399,7 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
   const lifecycle = relayAccountLifecycles.acquire(account.accountId, ctx.abortSignal);
   const abortSignal = lifecycle.signal;
   let agentKey: string | undefined;
+  let accountLock: RelayAccountLock | undefined;
 
   const markTerminalDisconnect = (error: Error) => {
     // Operator action required: flag terminalDisconnect so the supervisor
@@ -437,6 +439,14 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
       );
       markTerminalDisconnect(error);
       throw error;
+    }
+    accountLock = new RelayAccountLock(account.baseUrl, me.id, account.accountId);
+    try {
+      accountLock.acquire();
+    } catch (error) {
+      const lockError = error instanceof Error ? error : new Error(String(error));
+      markTerminalDisconnect(lockError);
+      throw lockError;
     }
     runningRelayAgentAccounts.set(agentKey, account.accountId);
 
@@ -519,6 +529,7 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
     if (agentKey && runningRelayAgentAccounts.get(agentKey) === account.accountId) {
       runningRelayAgentAccounts.delete(agentKey);
     }
+    accountLock?.release();
     lifecycle.release();
     ctx.setStatus({
       accountId: account.accountId,

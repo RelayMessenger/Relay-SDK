@@ -8,7 +8,7 @@
  *    operator-run server via url + basic auth (OPENCODE_SERVER_PASSWORD /
  *    OPENCODE_SERVER_USERNAME semantics match opencode's own).
  *  - Sessions: POST /session per conversation; the binding persists in
- *    ~/.relayapp/sessions.json alongside the ACP bindings and is validated
+ *    the paired account's sessions.json alongside ACP bindings and is validated
  *    with GET /session/:id before reuse.
  *  - Turns: POST /session/:id/prompt_async (fire-and-forget matches messaging
  *    semantics), then consume the SSE GET /event stream
@@ -45,7 +45,36 @@ export interface OpencodeEngineOptions {
   /** OPENCODE_CONFIG_CONTENT for the spawned server (per their SDK). */
   config?: Record<string, unknown>;
   spawnTimeoutMs?: number;
+  requestTimeoutMs?: number;
+  streamConnectTimeoutMs?: number;
+  streamIdleTimeoutMs?: number;
+  turnTimeoutMs?: number;
   fetchImpl?: typeof fetch;
+}
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** Validate attach mode before credentials can be sent anywhere. */
+export function normalizeOpencodeServerUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("opencode server URL must be an absolute HTTP(S) origin");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("opencode server URL must use HTTPS (or HTTP on loopback)");
+  }
+  if (url.protocol === "http:" && !LOOPBACK_HOSTS.has(url.hostname)) {
+    throw new Error("opencode server URL must use HTTPS unless it is loopback");
+  }
+  if (url.username || url.password) {
+    throw new Error("opencode server URL must not contain credentials");
+  }
+  if (url.pathname !== "/" || url.search || url.hash) {
+    throw new Error("opencode server URL must be an origin without path, query, or fragment");
+  }
+  return url.origin;
 }
 
 /** Resolve attach-mode settings from env (opencode's own variable names). */
@@ -75,6 +104,7 @@ interface EventStream {
   abort: AbortController;
   ready: Promise<void>;
   closed: boolean;
+  failure?: Error;
 }
 
 interface TurnState {
@@ -90,6 +120,7 @@ interface TurnState {
   settled: boolean;
   resolve(result: TurnResult): void;
   reject(error: Error): void;
+  timer: NodeJS.Timeout;
 }
 
 export class OpencodeEngine implements EngineAdapter {
@@ -98,6 +129,10 @@ export class OpencodeEngine implements EngineAdapter {
   private readonly attach?: OpencodeServerConfig;
   private readonly config: Record<string, unknown>;
   private readonly spawnTimeoutMs: number;
+  private readonly requestTimeoutMs: number;
+  private readonly streamConnectTimeoutMs: number;
+  private readonly streamIdleTimeoutMs: number;
+  private readonly turnTimeoutMs: number;
   private readonly fetchImpl: typeof fetch;
 
   private child: ChildProcess | undefined;
@@ -116,9 +151,15 @@ export class OpencodeEngine implements EngineAdapter {
     private readonly log: (line: string) => void = () => {},
   ) {
     this.binary = options.binary ?? "opencode";
-    this.attach = options.server?.url ? options.server : undefined;
+    this.attach = options.server?.url
+      ? { ...options.server, url: normalizeOpencodeServerUrl(options.server.url) }
+      : undefined;
     this.config = options.config ?? {};
     this.spawnTimeoutMs = options.spawnTimeoutMs ?? 15_000;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
+    this.streamConnectTimeoutMs = options.streamConnectTimeoutMs ?? 15_000;
+    this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? 90_000;
+    this.turnTimeoutMs = options.turnTimeoutMs ?? 30 * 60_000;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -234,6 +275,7 @@ export class OpencodeEngine implements EngineAdapter {
       this.turns.delete(sessionId);
       if (!turn.settled) {
         turn.settled = true;
+        clearTimeout(turn.timer);
         turn.reject(error);
       }
     }
@@ -249,15 +291,30 @@ export class OpencodeEngine implements EngineAdapter {
     const base = await this.ensureServer();
     const url = new URL(base + path);
     if (opts.directory) url.searchParams.set("directory", opts.directory);
-    const response = await this.fetchImpl(url, {
-      method,
-      headers: {
-        ...this.authHeaders(),
-        ...(opts.body !== undefined ? { "content-type": "application/json" } : {}),
-      },
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    });
-    const text = await response.text();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    timer.unref?.();
+    let response: Response;
+    let text: string;
+    try {
+      response = await this.fetchImpl(url, {
+        method,
+        headers: {
+          ...this.authHeaders(),
+          ...(opts.body !== undefined ? { "content-type": "application/json" } : {}),
+        },
+        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+        signal: controller.signal,
+      });
+      text = await response.text();
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(`opencode ${method} ${path} timed out after ${this.requestTimeoutMs}ms`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
     if (!response.ok) {
       throw new Error(`opencode ${method} ${path} failed (${response.status}): ${text.slice(0, 300)}`);
     }
@@ -294,6 +351,25 @@ export class OpencodeEngine implements EngineAdapter {
     markReady: () => void,
     failReady: (error: Error) => void,
   ): Promise<void> {
+    let readySeen = false;
+    let idleTimer: NodeJS.Timeout | undefined;
+    const failAfter = (message: string) => {
+      stream.failure = new Error(message);
+      stream.abort.abort();
+    };
+    const readyTimer = setTimeout(
+      () => failAfter(`opencode event stream did not become ready after ${this.streamConnectTimeoutMs}ms`),
+      this.streamConnectTimeoutMs,
+    );
+    readyTimer.unref?.();
+    const resetIdleTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(
+        () => failAfter(`opencode event stream was idle for ${this.streamIdleTimeoutMs}ms`),
+        this.streamIdleTimeoutMs,
+      );
+      idleTimer.unref?.();
+    };
     try {
       const base = await this.ensureServer();
       const url = new URL(`${base}/event`);
@@ -311,6 +387,7 @@ export class OpencodeEngine implements EngineAdapter {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (readySeen) resetIdleTimer();
         buffer += decoder.decode(value, { stream: true });
         let boundary: number;
         while ((boundary = buffer.indexOf("\n\n")) !== -1) {
@@ -329,17 +406,25 @@ export class OpencodeEngine implements EngineAdapter {
           } catch {
             continue;
           }
-          if (event.type === "server.connected") markReady();
+          if (event.type === "server.connected" && !readySeen) {
+            readySeen = true;
+            clearTimeout(readyTimer);
+            resetIdleTimer();
+            markReady();
+          }
           this.dispatch(directory, event);
         }
       }
       throw new Error("opencode event stream closed");
     } catch (error: any) {
+      clearTimeout(readyTimer);
+      if (idleTimer) clearTimeout(idleTimer);
       stream.closed = true;
       if (this.streams.get(directory) === stream) this.streams.delete(directory);
-      if (stream.abort.signal.aborted) return; // deliberate close
+      if (stream.abort.signal.aborted && !stream.failure) return; // deliberate close
       const wrapped =
-        error instanceof Error ? error : new Error(`opencode event stream error: ${error}`);
+        stream.failure ??
+        (error instanceof Error ? error : new Error(`opencode event stream error: ${error}`));
       failReady(wrapped);
       this.log(`event stream for ${directory} died: ${wrapped.message}`);
       // Turns blocked on this stream can never finish: surface the failure.
@@ -428,6 +513,7 @@ export class OpencodeEngine implements EngineAdapter {
     this.log(message);
     if (turn.settled) return;
     turn.settled = true;
+    clearTimeout(turn.timer);
     this.turns.delete(sessionId);
     // The server may still be blocked on the permission/question whose reply
     // failed. Never reuse that session: abort best-effort and force the next
@@ -443,6 +529,7 @@ export class OpencodeEngine implements EngineAdapter {
   private finishTurn(sessionId: string, turn: TurnState): void {
     if (turn.settled) return;
     turn.settled = true;
+    clearTimeout(turn.timer);
     this.turns.delete(sessionId);
     const text = [...turn.texts.values()].filter((chunk) => chunk.length > 0).join("\n\n");
     if (text.length === 0 && turn.lastError) {
@@ -561,7 +648,12 @@ export class OpencodeEngine implements EngineAdapter {
     const sessionId = await this.openSession(ref);
 
     return await new Promise<TurnResult>((resolve, reject) => {
-      const turn: TurnState = {
+      const turn = {} as TurnState;
+      turn.timer = setTimeout(() => {
+        this.failTurn(sessionId, turn, `lifecycle timed out after ${this.turnTimeoutMs}ms`);
+      }, this.turnTimeoutMs);
+      turn.timer.unref?.();
+      Object.assign(turn, {
         conversationId: ref.conversationId,
         directory: ref.cwd,
         callbacks,
@@ -571,7 +663,7 @@ export class OpencodeEngine implements EngineAdapter {
         settled: false,
         resolve,
         reject,
-      };
+      });
       this.turns.set(sessionId, turn);
       // Fire-and-forget prompt: the reply arrives via the event stream.
       this.request("POST", `/session/${sessionId}/prompt_async`, {
@@ -580,6 +672,7 @@ export class OpencodeEngine implements EngineAdapter {
       }).catch((error) => {
         if (turn.settled) return;
         turn.settled = true;
+        clearTimeout(turn.timer);
         this.turns.delete(sessionId);
         reject(error instanceof Error ? error : new Error(String(error)));
       });
@@ -605,6 +698,7 @@ export class OpencodeEngine implements EngineAdapter {
       this.turns.delete(sessionId);
       if (!turn.settled) {
         turn.settled = true;
+        clearTimeout(turn.timer);
         turn.reject(new Error("opencode engine disposed"));
       }
     }

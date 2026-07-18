@@ -29,10 +29,10 @@ the engine works and posts one finalized reply per turn.
 
 | Command | What it does |
 | --- | --- |
-| `relayapp pair` | `POST /v1/pairings`, shows a terminal QR + code, long-polls until you claim it in the app, stores the Agent Token in `~/.relayapp/config.json` (chmod 600) and pins your user id as the bridge owner (from `GET /v1/agents/me`; override with `RELAY_OWNER_USER_ID`). The token never appears on the phone. |
-| `relayapp start` | Receive loop: long-polls `GET /v1/events`, drives the engine over ACP, replies via `POST /v1/messages` with an `Idempotency-Key`. Flags: `--engine claude\|codex\|opencode`, `--dir <path>`, `--staging`. |
-| `relayapp install-codex` | Merges — never clobbers — `[mcp_servers.relay]` + `notify` into `~/.codex/config.toml` (comments preserved; a `.bak` of the original is kept) and a `PermissionRequest` hook into `~/.codex/hooks.json`, so plain `codex` runs ping Relay on turn completion and route approvals to your phone. Codex gates untrusted hook handlers: the first run may ask you to trust the relayapp handler. |
-| `relayapp install-claude` | Prints the exact Claude marketplace install and development-channel launch commands for `relay@relayapp`. |
+| `relayapp pair` | `POST /v1/pairings`, shows a terminal QR + code, long-polls until you claim it in the app, stores the Agent Token in `~/.relayapp/config.json` (chmod 600) and pins your user id as the bridge owner (from `GET /v1/agents/me`; override with `RELAY_OWNER_USER_ID`). If owner lookup is interrupted after the token is saved, running the command again resumes that saved token without creating another agent. The token never appears on the phone. |
+| `relayapp start` | Receive loop: long-polls `GET /v1/events`, drives the engine over ACP, replies via `POST /v1/messages` with an `Idempotency-Key`. Flags: `--engine claude\|codex\|opencode`, `--dir <path>`. |
+| `relayapp install-codex` | Run from a project root to opt in that project only. Merges — never clobbers — `[mcp_servers.relay]` + `notify` into `~/.codex/config.toml` (comments preserved; a `.bak` of the original is kept) and a `PermissionRequest` hook into `~/.codex/hooks.json`. Other projects are suppressed until installed separately. Codex gates untrusted hook handlers: the first run may ask you to trust the relayapp handler. |
+| `relayapp install-claude` | After pairing, writes the paired token, API origin, and pinned owner to `~/.claude/channels/relay/.env` with mode 600, without printing the token; refuses to overwrite a different configured channel identity, then prints the exact marketplace install and launch commands. |
 | `relayapp doctor` | Checks Node, pairing, token file permissions, API reachability, installed adapter pins, and durable-state health. |
 
 ## How the wire works
@@ -48,7 +48,7 @@ curl -H "Authorization: Bearer $AGENT_TOKEN" \
 # what the bridge sends per finished turn
 curl -X POST https://api.relayapp.im/v1/messages \
   -H "Authorization: Bearer $AGENT_TOKEN" \
-  -H "Idempotency-Key: relay-turn-<sha256(conversation,last-event)>" \
+  -H "Idempotency-Key: relay-turn-<sha256(conversation,event-id-batch)>" \
   -H "Content-Type: application/json" \
   -d '{"conversation_id":"cnv_…","parts":[{"type":"text","text":"done"}]}'
 ```
@@ -62,7 +62,7 @@ curl -X POST https://api.relayapp.im/v1/messages \
   own HTTP API: the bridge spawns `opencode serve` (or attaches to an
   operator-run server via `OPENCODE_SERVER_URL` + basic auth), sends
   `prompt_async`, and consumes the SSE `/event` stream. Conversation →
-  session bindings persist in `~/.relayapp/sessions.json`, so a conversation
+  session bindings persist in the paired account's runtime directory, so a conversation
   keeps its engine context.
 - **Approvals**: an engine `session/request_permission` becomes a Relay
   message with a text part plus a `claude_permission_request` data part
@@ -75,10 +75,10 @@ curl -X POST https://api.relayapp.im/v1/messages \
   content is interpreted.
 - **Reliability**: the receive cursor advances only in the same atomic
   (fsync + rename) write that persists the event queue
-  (`~/.relayapp/state.json`), event ids are deduped, rapid messages debounce
+  (`~/.relayapp/accounts/<origin-agent-hash>/state.json`), event ids are deduped, rapid messages debounce
   ~800 ms into one turn, and the poll loop restarts with capped exponential
   backoff + jitter. Each pending approval is its own create-once file under
-  `~/.relayapp/approvals/`, so a bridge restart cannot lose one and no two
+  that account's `approvals/`, so a bridge restart cannot lose one and no two
   processes ever rewrite a shared snapshot. Engine/tool turns are at-most-once:
   an attempt marker is durable before execution, so a crash never silently
   repeats a deploy, deletion, command, or external send. Completed replies use
@@ -88,16 +88,25 @@ curl -X POST https://api.relayapp.im/v1/messages \
 - Long-poll is exclusive: an enabled webhook endpoint or a second poller gets
   `409` (Telegram semantics). One consumer per token. A `401` stops the loop
   with re-pair guidance instead of retrying.
+- **Codex notification privacy**: `install-codex` stores an explicit local
+  allowlist entry for the current project root in
+  `~/.relayapp/codex-notify.json`. A completed turn from any other project is
+  suppressed. For an allowed project, Relay receives the project directory's
+  basename plus Codex's complete `last-assistant-message`; input messages and
+  the absolute working-directory path are not sent. That text is retained in
+  Relay message history. There is no global-all-projects opt-in; run
+  `install-codex` in each
+  project you choose to disclose.
 
 ## Files
 
 ```
 ~/.relayapp/config.json    agent token, API origin, pinned owner   (chmod 600)
-~/.relayapp/state.json     cursor, queued events/replies, owner conversation
-                           (written only by `relayapp start`)
-~/.relayapp/approvals/     one file per pending approval
-~/.relayapp/sessions.json  conversation → engine session bindings
+~/.relayapp/codex-notify.json  locally allowed Codex project roots (not sent)
+~/.relayapp/accounts/<hash>/state.json     cursor, queued events/replies,
+                                           owner conversation (start-only)
+~/.relayapp/accounts/<hash>/approvals/     one file per pending approval
+~/.relayapp/accounts/<hash>/sessions.json  conversation → session bindings
 ```
 
-Requires Node >= 22.18. Staging: pass `--staging` to `pair`/`start`
-(`https://api.staging.relayapp.im`).
+Requires Node >= 22.18.

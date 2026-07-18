@@ -2,16 +2,17 @@
  * Durable local state for the relayapp bridge.
  *
  * Everything lives under ~/.relayapp (override with RELAYAPP_HOME):
- *   config.json    — agent token, API origin, owner_user_id (chmod 600)
- *   state.json     — receive cursor, dedupe set, pending events. EXCLUSIVELY
+ *   config.json    — active agent token, API origin, owner_user_id (chmod 600)
+ *   accounts/<origin-agent-hash>/state.json — receive cursor, dedupe set,
+ *                    pending events. EXCLUSIVELY
  *                    owned (written) by the `start` loop process; other
  *                    entrypoints (codex hook, notify, mcp) may only read it
  *                    via readStateSnapshot().
- *   approvals/<request_id>.json — one file per pending approval (create-once
+ *   accounts/<hash>/approvals/<request_id>.json — pending approval (create-once
  *                    by whoever arms it, resolution written by the loop,
  *                    consumed+unlinked by the waiter). No read-modify-write
  *                    of shared snapshots across processes.
- *   sessions.json  — conversation_id → engine session binding
+ *   accounts/<hash>/sessions.json — conversation_id → engine session binding
  *
  * Writes are atomic: content is fsync'd to a tmp file, then renamed into
  * place, so a crash can never leave a half-written file. Cursor + pending
@@ -21,18 +22,21 @@
 import {
   chmodSync,
   closeSync,
+  existsSync,
   fsyncSync,
   mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
+  rmdirSync,
   unlinkSync,
-  writeFileSync,
   writeSync,
 } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 export function relayappHome(): string {
   return process.env.RELAYAPP_HOME ?? join(homedir(), ".relayapp");
@@ -55,6 +59,39 @@ export interface RelayConfig {
    * OPENCODE_SERVER_URL / OPENCODE_SERVER_USERNAME / OPENCODE_SERVER_PASSWORD.
    */
   opencode?: { server_url?: string; username?: string; password?: string };
+}
+
+function canonicalOrigin(value: string): string {
+  const url = new URL(value);
+  return url.origin;
+}
+
+/**
+ * Durable bridge state is scoped to one authenticated Relay identity. The
+ * agent id is preferred; a token fingerprint is the fail-safe fallback for
+ * legacy servers that do not expose it. Raw tokens/origins never enter paths.
+ */
+export function runtimeHomeForConfig(
+  config: Pick<RelayConfig, "api_origin" | "agent_token" | "agent">,
+  baseHome = relayappHome(),
+): string {
+  if (!config.api_origin || !config.agent_token) {
+    throw new Error("Cannot select Relay runtime state without a paired origin and agent token.");
+  }
+  const identity = config.agent?.id
+    ? `agent:${config.agent.id}`
+    : `token:${createHash("sha256").update(config.agent_token).digest("hex")}`;
+  const namespace = createHash("sha256")
+    .update(`${canonicalOrigin(config.api_origin)}\0${identity}`)
+    .digest("hex")
+    .slice(0, 40);
+  return join(baseHome, "accounts", namespace);
+}
+
+export function activeRuntimeHome(baseHome = relayappHome()): string {
+  const config = new ConfigStore(baseHome).load();
+  if (!config?.agent_token) throw new Error("Not paired. Run `relayapp pair` first.");
+  return runtimeHomeForConfig(config, baseHome);
 }
 
 /** Resolve the pinned owner, failing closed when it is missing. */
@@ -114,7 +151,10 @@ export interface BridgeState {
    * instead of re-executed, so engine/tool side effects (deploys, deletions,
    * sends) run at most once per owner message.
    */
-  attempted_turns?: Record<string, string>;
+  attempted_turns?: Record<
+    string,
+    { turn_key: string; event_ids: string[]; started_at: string }
+  >;
   /**
    * Engine-completed replies waiting for idempotent Relay delivery. The full
    * reply is persisted before the POST, so a restart can redeliver it without
@@ -147,6 +187,100 @@ function readJson<T>(path: string): T | undefined {
   } catch {
     return undefined;
   }
+}
+
+function stateBlockedPath(home: string): string {
+  return join(home, "state.blocked.json");
+}
+
+function blockInvalidState(home: string, path: string, reason: string): never {
+  mkdirSync(home, { recursive: true, mode: 0o700 });
+  const blocked = stateBlockedPath(home);
+  const quarantined = `${path}.corrupt-${Date.now()}-${process.pid}`;
+  try {
+    renameSync(path, quarantined);
+  } catch {
+    // The persistent block remains the fail-closed boundary.
+  }
+  atomicWriteJson(
+    blocked,
+    { blocked_at: new Date().toISOString(), reason, quarantined },
+    0o600,
+  );
+  throw new Error(`Invalid Relay runtime state was quarantined; startup is blocked (${blocked}).`);
+}
+
+function bridgeStateIsValid(raw: Partial<BridgeState>): boolean {
+  const objectOfArrays = (value: unknown, itemValid: (item: any) => boolean) =>
+    !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.values(value).every(
+      (items) => Array.isArray(items) && items.every((item) => itemValid(item)),
+    );
+  const objectOfRecords = (value: unknown, recordValid: (item: any) => boolean) =>
+    value === undefined ||
+    (!!value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.values(value).every(recordValid));
+  return (
+    Number.isSafeInteger(raw.cursor) &&
+    (raw.cursor as number) >= 0 &&
+    Array.isArray(raw.seen_event_ids) &&
+    raw.seen_event_ids.every((id) => typeof id === "string") &&
+    objectOfArrays(
+      raw.pending_events,
+      (event) =>
+        !!event && typeof event.event_id === "string" && typeof event.event_type === "string",
+    ) &&
+    objectOfRecords(
+      raw.attempted_turns,
+      (attempt) =>
+        !!attempt &&
+        typeof attempt.turn_key === "string" &&
+        typeof attempt.started_at === "string" &&
+        Array.isArray(attempt.event_ids) &&
+        attempt.event_ids.length > 0 &&
+        attempt.event_ids.every((id: unknown) => typeof id === "string"),
+    ) &&
+    objectOfRecords(
+      raw.pending_replies,
+      (reply) =>
+        !!reply &&
+        typeof reply.conversation_id === "string" &&
+        typeof reply.text === "string" &&
+        typeof reply.created_at === "string" &&
+        Array.isArray(reply.event_ids) &&
+        reply.event_ids.every((id: unknown) => typeof id === "string"),
+    ) &&
+    (raw.owner_conversation_id === undefined || typeof raw.owner_conversation_id === "string")
+  );
+}
+
+function loadBridgeState(home: string): BridgeState {
+  const path = join(home, "state.json");
+  const blocked = stateBlockedPath(home);
+  if (existsSync(blocked)) {
+    throw new Error(
+      `Relay runtime state is blocked after corruption (${blocked}). ` +
+        "Inspect the quarantined state and re-pair or remove the account state deliberately.",
+    );
+  }
+  let raw: Partial<BridgeState> | undefined;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8")) as Partial<BridgeState>;
+  } catch (error: any) {
+    if (error?.code === "ENOENT") return normalizeState({});
+    return blockInvalidState(home, path, "state.json could not be parsed");
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return blockInvalidState(home, path, "state.json root is not an object");
+  }
+  if (!bridgeStateIsValid(raw)) {
+    return blockInvalidState(home, path, "state.json fields violate the durable state schema");
+  }
+  return normalizeState(raw);
 }
 
 export function atomicWriteJson(path: string, value: unknown, mode: number): void {
@@ -197,15 +331,15 @@ function normalizeState(raw: Partial<BridgeState>): BridgeState {
  * Those processes MUST NOT construct a StateStore: only the `start` loop
  * writes state.json.
  */
-export function readStateSnapshot(home = relayappHome()): BridgeState {
-  return normalizeState(readJson<Partial<BridgeState>>(join(home, "state.json")) ?? {});
+export function readStateSnapshot(home?: string): BridgeState {
+  return loadBridgeState(home ?? activeRuntimeHome());
 }
 
 export class StateStore {
   private state: BridgeState;
 
-  constructor(private readonly home = relayappHome()) {
-    this.state = normalizeState(readJson<Partial<BridgeState>>(this.path) ?? {});
+  constructor(private readonly home = activeRuntimeHome()) {
+    this.state = loadBridgeState(this.home);
   }
 
   get path(): string {
@@ -233,14 +367,14 @@ export class StateStore {
 }
 
 /**
- * Per-request approval files: ~/.relayapp/approvals/<request_id>.json.
+ * Per-request approval files in the active account runtime directory.
  * Create-once by whoever arms the approval (loop or codex hook), resolution
  * written by the loop when the tap arrives, consumed + unlinked by the waiter.
  * Each file has a single writer at a time, so there is no read-modify-write
  * of a shared snapshot across processes.
  */
 export class ApprovalStore {
-  constructor(private readonly home = relayappHome()) {}
+  constructor(private readonly home = activeRuntimeHome()) {}
 
   get dir(): string {
     return join(this.home, "approvals");
@@ -319,7 +453,7 @@ export class ApprovalStore {
 export class SessionStore {
   private sessions: Record<string, SessionBinding>;
 
-  constructor(private readonly home = relayappHome()) {
+  constructor(private readonly home = activeRuntimeHome()) {
     this.sessions = readJson<Record<string, SessionBinding>>(this.path) ?? {};
   }
 
@@ -343,5 +477,126 @@ export class SessionStore {
 
   all(): Record<string, SessionBinding> {
     return this.sessions;
+  }
+}
+
+export interface CodexNotifyPolicy {
+  allowed_project_roots: string[];
+}
+
+function canonicalLocalPath(path: string): string {
+  const absolute = resolve(path);
+  try {
+    return realpathSync(absolute);
+  } catch {
+    return absolute;
+  }
+}
+
+/** Local, non-secret project opt-ins shared across Relay re-pairs. */
+export class CodexNotifyPolicyStore {
+  constructor(private readonly home = relayappHome()) {}
+
+  get path(): string {
+    return join(this.home, "codex-notify.json");
+  }
+
+  load(): CodexNotifyPolicy {
+    const raw = readJson<Partial<CodexNotifyPolicy>>(this.path);
+    return {
+      allowed_project_roots: Array.isArray(raw?.allowed_project_roots)
+        ? [...new Set(raw.allowed_project_roots.filter((entry): entry is string => typeof entry === "string").map(canonicalLocalPath))]
+        : [],
+    };
+  }
+
+  allowProject(projectRoot: string): string {
+    const root = canonicalLocalPath(projectRoot);
+    const policy = this.load();
+    if (!policy.allowed_project_roots.includes(root)) policy.allowed_project_roots.push(root);
+    atomicWriteJson(this.path, policy, 0o600);
+    return root;
+  }
+
+  matchProject(cwd: string | undefined): string | undefined {
+    if (!cwd || !isAbsolute(cwd)) return undefined;
+    const candidate = canonicalLocalPath(cwd);
+    return this.load().allowed_project_roots.find((root) => {
+      const child = relative(root, candidate);
+      return child === "" || (!child.startsWith("..") && !isAbsolute(child));
+    });
+  }
+}
+
+/** One live `relayapp start` process per origin+agent runtime namespace. */
+export class RuntimeLock {
+  private readonly nonce = randomBytes(16).toString("hex");
+  private held = false;
+
+  constructor(private readonly runtimeHome: string) {}
+
+  get dir(): string {
+    return join(this.runtimeHome, "start.lock");
+  }
+
+  private ownerPath(dir = this.dir): string {
+    return join(dir, "owner.json");
+  }
+
+  acquire(): void {
+    mkdirSync(this.runtimeHome, { recursive: true, mode: 0o700 });
+    for (;;) {
+      try {
+        mkdirSync(this.dir, { mode: 0o700 });
+        atomicWriteJson(
+          this.ownerPath(),
+          { pid: process.pid, nonce: this.nonce, acquired_at: new Date().toISOString() },
+          0o600,
+        );
+        this.held = true;
+        return;
+      } catch (error: any) {
+        if (error?.code !== "EEXIST") throw error;
+        const owner = readJson<{ pid?: number; nonce?: string }>(this.ownerPath());
+        const pid = owner?.pid;
+        let alive = false;
+        if (typeof pid === "number" && Number.isInteger(pid) && pid > 0) {
+          try {
+            process.kill(pid, 0);
+            alive = true;
+          } catch (probe: any) {
+            alive = probe?.code === "EPERM";
+          }
+        }
+        if (alive || !owner?.nonce) {
+          throw new Error(
+            `Another relayapp start process owns this paired agent (${this.dir}${pid ? `, pid ${pid}` : ""}).`,
+          );
+        }
+        const stale = `${this.dir}.stale-${Date.now()}-${process.pid}-${this.nonce.slice(0, 8)}`;
+        try {
+          renameSync(this.dir, stale);
+        } catch (renameError: any) {
+          if (renameError?.code === "ENOENT") continue;
+          throw new Error(`Could not recover stale Relay runtime lock ${this.dir}: ${renameError}`);
+        }
+      }
+    }
+  }
+
+  release(): void {
+    if (!this.held) return;
+    const owner = readJson<{ nonce?: string }>(this.ownerPath());
+    if (owner?.nonce !== this.nonce) {
+      this.held = false;
+      return;
+    }
+    try {
+      unlinkSync(this.ownerPath());
+      rmdirSync(this.dir);
+    } catch {
+      // A process exit still makes the pid-based lock recoverable.
+    }
+    this.held = false;
   }
 }

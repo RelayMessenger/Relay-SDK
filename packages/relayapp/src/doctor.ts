@@ -2,10 +2,15 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { RelayClient } from "./api.js";
 import { ADAPTER_PACKAGES, ADAPTER_VERSIONS, adapterEntrypoint } from "./engine/acp.js";
-import { ApprovalStore, ConfigStore, readStateSnapshot, relayappHome } from "./store.js";
+import {
+  ApprovalStore,
+  ConfigStore,
+  readStateSnapshot,
+  runtimeHomeForConfig,
+} from "./store.js";
 
 export async function doctor(out: (line: string) => void = console.log): Promise<boolean> {
   let healthy = true;
@@ -47,17 +52,26 @@ export async function doctor(out: (line: string) => void = console.log): Promise
     out("     run `relayapp pair` to connect this machine to a Relay agent");
   }
 
-  const state = readStateSnapshot();
-  const pendingEvents = Object.values(state.pending_events).reduce(
-    (sum, queue) => sum + queue.length,
-    0,
-  );
-  const pendingApprovals = new ApprovalStore().list().length;
-  out(
-    `info  state: cursor=${state.cursor}, pending_events=${pendingEvents}, ` +
-      `pending_approvals=${pendingApprovals}, owner_conversation=${state.owner_conversation_id ?? "unset"} ` +
-      `(${join(relayappHome(), "state.json")})`,
-  );
+  if (loaded?.agent_token) {
+    const runtimeHome = runtimeHomeForConfig(loaded, dirname(config.path));
+    try {
+      const state = readStateSnapshot(runtimeHome);
+      const pendingEvents = Object.values(state.pending_events).reduce(
+        (sum, queue) => sum + queue.length,
+        0,
+      );
+      const pendingApprovals = new ApprovalStore(runtimeHome).list().length;
+      out(
+        `info  state: cursor=${state.cursor}, pending_events=${pendingEvents}, ` +
+          `pending_approvals=${pendingApprovals}, owner_conversation=${state.owner_conversation_id ?? "unset"} ` +
+          `(${join(runtimeHome, "state.json")})`,
+      );
+    } catch (error) {
+      check(false, "runtime state readable", String(error));
+    }
+  } else {
+    out("info  runtime state unavailable until this machine is paired");
+  }
 
   for (const [engine, pkg] of Object.entries(ADAPTER_PACKAGES)) {
     try {

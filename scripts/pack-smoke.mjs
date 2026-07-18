@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -69,13 +70,42 @@ try {
   });
   assert.match(help, /relayapp pair/);
   assert.match(help, /relayapp start/);
+  assert.doesNotMatch(help, /staging/i);
+
+  const smokeHome = join(temp, "home");
+  const smokeRelayHome = join(smokeHome, ".relayapp");
+  mkdirSync(smokeRelayHome, { recursive: true });
+  writeFileSync(
+    join(smokeRelayHome, "config.json"),
+    `${JSON.stringify({
+      api_origin: "https://api.relayapp.im",
+      agent_token: "rly_pack_smoke_secret",
+      owner_user_id: "usr_pack_owner",
+      agent: { id: "agt_pack" },
+    })}\n`,
+  );
+  chmodSync(join(smokeRelayHome, "config.json"), 0o600);
 
   const installClaude = execFileSync(
     process.execPath,
     [join(installed, "dist", "cli.js"), "install-claude"],
-    { cwd: installDir, encoding: "utf8" },
+    {
+      cwd: installDir,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: smokeHome,
+        USERPROFILE: smokeHome,
+        RELAYAPP_HOME: smokeRelayHome,
+      },
+    },
   );
   assert.match(installClaude, /plugin install relay@relayapp/);
+  assert.doesNotMatch(installClaude, /rly_pack_smoke_secret/);
+  assert.match(
+    readFileSync(join(smokeHome, ".claude", "channels", "relay", ".env"), "utf8"),
+    /RELAY_AGENT_TOKEN=rly_pack_smoke_secret/,
+  );
 
   for (const adapter of [
     "@agentclientprotocol/claude-agent-acp/dist/index.js",

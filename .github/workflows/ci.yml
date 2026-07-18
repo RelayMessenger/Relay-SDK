@@ -73,3 +73,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run pack:check
+
+  macos-relayapp-runtime:
+    name: macOS installed relayapp Claude/Codex runtime smoke
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci --workspace relayapp
+      # Packs, installs into a clean temp project, loads the CLI runtime and
+      # resolves both pinned ACP adapter entrypoints from the installed tree.
+      - run: node scripts/pack-smoke.mjs
