@@ -3,7 +3,8 @@ import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import crossSpawn from "cross-spawn";
-import { RelayClient } from "./api.js";
+import { resolveApiOrigin, RelayClient } from "./api.js";
+import { claudeBypassWarning } from "./claude-settings.js";
 import { ADAPTER_PACKAGES, ADAPTER_VERSIONS, adapterEntrypoint } from "./engine/acp.js";
 import { EXTERNAL_ENGINE_SPECS } from "./engine/catalog.js";
 import {
@@ -41,20 +42,39 @@ export async function doctor(out: (line: string) => void = console.log): Promise
       "owner pinned (owner_user_id)",
       owner ?? "missing — re-run `relayapp pair` or set RELAY_OWNER_USER_ID",
     );
+    let origin = loaded!.api_origin;
     try {
-      const client = new RelayClient(loaded!.api_origin, loaded!.agent_token);
+      origin = resolveApiOrigin(loaded!.api_origin);
+      if (process.env.RELAY_API_ORIGIN) {
+        out(`info  RELAY_API_ORIGIN override active (${origin}) — development/testing only`);
+      }
+    } catch (error: any) {
+      check(false, "RELAY_API_ORIGIN valid", String(error?.message ?? error));
+    }
+    try {
+      const client = new RelayClient(origin, loaded!.agent_token);
       const me = (await client.getMe()) as any;
       const handle = me?.agent?.handle ?? me?.handle;
-      check(true, `API reachable (${loaded!.api_origin})`, handle ? `@${handle}` : undefined);
+      check(true, `API reachable (${origin})`, handle ? `@${handle}` : undefined);
     } catch (error: any) {
-      check(false, `API reachable (${loaded!.api_origin})`, String(error?.message ?? error));
+      check(false, `API reachable (${origin})`, String(error?.message ?? error));
     }
   } else {
     out("     run `relayapp pair` to connect this machine to a Relay agent");
   }
 
   if (loaded?.agent_token) {
-    const runtimeHome = runtimeHomeForConfig(loaded, dirname(config.path));
+    // Match `start`: durable state is scoped to the effective origin.
+    let effectiveOrigin = loaded.api_origin;
+    try {
+      effectiveOrigin = resolveApiOrigin(loaded.api_origin);
+    } catch {
+      // Invalid override already reported above; fall back to the paired origin.
+    }
+    const runtimeHome = runtimeHomeForConfig(
+      { ...loaded, api_origin: effectiveOrigin },
+      dirname(config.path),
+    );
     try {
       const state = readStateSnapshot(runtimeHome);
       const pendingEvents = Object.values(state.pending_events).reduce(
@@ -119,6 +139,10 @@ export async function doctor(out: (line: string) => void = console.log): Promise
       );
     }
   }
+
+  // Warn (not fail) when Claude settings disable phone approvals entirely.
+  const bypass = claudeBypassWarning();
+  if (bypass) out(`warn  ${bypass}`);
 
   const codexConfig = join(homedir(), ".codex", "config.toml");
   out(

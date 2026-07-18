@@ -12,7 +12,8 @@
  * Internal entrypoints (wired by install-codex): notify, mcp,
  * hook permission-request.
  */
-import { PRODUCTION_ORIGIN, RelayClient } from "./api.js";
+import { resolveApiOrigin, RelayClient } from "./api.js";
+import { claudeBypassWarning } from "./claude-settings.js";
 import { notifyCommand, permissionRequestHook } from "./codex.js";
 import { doctor } from "./doctor.js";
 import { AcpEngine } from "./engine/acp.js";
@@ -54,7 +55,8 @@ async function main(): Promise<number> {
 
   switch (command) {
     case "pair": {
-      const origin = PRODUCTION_ORIGIN;
+      // RELAY_API_ORIGIN is a development/testing override; production default.
+      const origin = resolveApiOrigin();
       await pair({ origin, engine: flags.engine, deviceName: flags.name });
       return 0;
     }
@@ -65,9 +67,16 @@ async function main(): Promise<number> {
         return 1;
       }
       const ownerUserId = resolveOwnerUserId(config); // fail closed without a pinned owner
-      const origin = config.api_origin;
+      // RELAY_API_ORIGIN (development/testing) overrides the paired origin.
+      const origin = resolveApiOrigin(config.api_origin);
       const client = new RelayClient(origin, config.agent_token);
-      const runtimeHome = runtimeHomeForConfig(config);
+      // Scope durable state to the effective origin so an override never
+      // replays or advances the paired production cursor/ledgers.
+      const runtimeHome = runtimeHomeForConfig({ ...config, api_origin: origin });
+      if (flags.engine === "claude") {
+        const bypass = claudeBypassWarning(flags.dir ?? process.cwd());
+        if (bypass) log(`warning: ${bypass}`);
+      }
       const runtimeLock = new RuntimeLock(runtimeHome);
       // Acquire before any state/session/approval object can read or rewrite
       // whole-file ledgers for this paired identity.

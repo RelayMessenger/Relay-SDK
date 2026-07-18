@@ -33,6 +33,17 @@ export function normalizeApiOrigin(value: string): string {
   return url.origin;
 }
 
+/**
+ * Development/testing override for the Relay API origin. Production stays the
+ * default; when RELAY_API_ORIGIN is set it passes normalizeApiOrigin, so the
+ * loopback carve-out there remains the only place plain HTTP is accepted.
+ */
+export function resolveApiOrigin(fallback: string = PRODUCTION_ORIGIN): string {
+  const override = process.env.RELAY_API_ORIGIN?.trim();
+  if (!override) return fallback;
+  return normalizeApiOrigin(override);
+}
+
 export class RelayApiError extends Error {
   constructor(
     readonly status: number,

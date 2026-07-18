@@ -106,6 +106,23 @@ curl -X POST https://api.relayapp.im/v1/messages \
   idempotency key live in the paired account's private runtime directory, so
   a process restart cannot turn one logical send into two messages.
 
+## Development and testing
+
+- `RELAY_API_ORIGIN` points `pair`, `start`, and `doctor` at a
+  non-production Relay API origin, e.g. a local dev server:
+  `RELAY_API_ORIGIN=http://127.0.0.1:8787 relayapp pair`. This is a
+  development/testing mechanism only — production
+  (`https://api.relayapp.im`) stays the default, the value must be an
+  origin with no path/query/credentials, and plain HTTP is accepted only
+  for loopback hosts (same rule as every other origin the bridge uses).
+  Durable bridge state is scoped per effective origin, so an override
+  never replays or advances production cursors and ledgers.
+- With `--engine claude`, the bundled adapter inherits your Claude Code
+  settings. If the resolved `permissions.defaultMode` is
+  `bypassPermissions`, the engine never asks for approval, so phone
+  Allow/Deny cards will not appear; `relayapp start` and `relayapp doctor`
+  print a warning when they detect this.
+
 ## Files
 
 ```

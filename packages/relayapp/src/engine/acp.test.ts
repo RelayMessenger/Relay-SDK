@@ -4,7 +4,9 @@ import { test } from "node:test";
 import {
   ADAPTER_PACKAGES,
   ADAPTER_VERSIONS,
+  AcpEngine,
   adapterEntrypoint,
+  AgentTextBuffer,
   engineEnv,
   engineProcessSpec,
   mergeToolCall,
@@ -123,4 +125,51 @@ test("ACP approval detail fails closed when exact input is unavailable", () => {
     content: [{ type: "content", content: { type: "text", text: "generic summary" } }],
   }), false);
   assert.equal(permissionInputComplete({ toolCallId: "tool_4", rawInput: null }), false);
+});
+
+test("streamed chunks inside one message stay concatenated verbatim", () => {
+  const buffer = new AgentTextBuffer();
+  buffer.append("Hel");
+  buffer.append("lo, ");
+  buffer.append("world.");
+  assert.equal(buffer.toString(), "Hello, world.");
+});
+
+test("distinct message segments join with a blank line, not word fusion", () => {
+  const buffer = new AgentTextBuffer();
+  buffer.append("I'll create the ");
+  buffer.append("file.");
+  buffer.endSegment();
+  buffer.append("Created the helper and its test.\n");
+  assert.equal(
+    buffer.toString(),
+    "I'll create the file.\n\nCreated the helper and its test.",
+  );
+});
+
+test("segment boundaries dedupe whitespace and drop empty segments", () => {
+  const buffer = new AgentTextBuffer();
+  buffer.endSegment(); // tool call before any text
+  buffer.append("First message.\n\n");
+  buffer.endSegment();
+  buffer.endSegment(); // consecutive tool calls with no text between
+  buffer.append("\n Second message.");
+  assert.equal(buffer.toString(), "First message.\n\nSecond message.");
+});
+
+test("tool-call updates split turn text into separate reply paragraphs", () => {
+  const engine = new AcpEngine("claude", {} as any);
+  const turn = {
+    callbacks: { onPermissionAsk: async () => ({ behavior: "cancelled" as const }) },
+    text: new AgentTextBuffer(),
+    toolCalls: new Map(),
+  };
+  (engine as any).turns.set("sess_1", turn);
+  const update = (payload: unknown) =>
+    (engine as any).handleUpdate({ sessionId: "sess_1", update: payload });
+  update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Writing the file." } });
+  update({ sessionUpdate: "tool_call", toolCallId: "tool_1", title: "Write", status: "pending" });
+  update({ sessionUpdate: "tool_call_update", toolCallId: "tool_1", status: "completed" });
+  update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Created the test." } });
+  assert.equal(turn.text.toString(), "Writing the file.\n\nCreated the test.");
 });

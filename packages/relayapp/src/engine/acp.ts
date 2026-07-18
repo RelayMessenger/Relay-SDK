@@ -161,9 +161,42 @@ export function engineEnv(parent: NodeJS.ProcessEnv = process.env): NodeJS.Proce
   return env;
 }
 
+/**
+ * Accumulates one turn's streamed assistant text. Chunks stream into the
+ * current message segment; a tool-call boundary ends the segment, so the next
+ * chunk starts a distinct message. Distinct segments join with a blank line —
+ * a plain "" join would fuse back-to-back messages into one word
+ * ("…the file." + "Created…" → "file.Created").
+ */
+export class AgentTextBuffer {
+  private readonly segments: string[] = [];
+  private open = false;
+
+  append(chunk: string): void {
+    if (!this.open) {
+      this.segments.push("");
+      this.open = true;
+    }
+    this.segments[this.segments.length - 1] += chunk;
+  }
+
+  /** Mark a message boundary: the next appended chunk starts a new segment. */
+  endSegment(): void {
+    this.open = false;
+  }
+
+  /** Segments trimmed (no doubled blank lines), empty segments dropped. */
+  toString(): string {
+    return this.segments
+      .map((segment) => segment.trim())
+      .filter((segment) => segment.length > 0)
+      .join("\n\n");
+  }
+}
+
 interface TurnState {
   callbacks: TurnCallbacks;
-  text: string[];
+  text: AgentTextBuffer;
   /** Latest complete view of each ACP tool call, assembled from deltas. */
   toolCalls: Map<string, ToolCallUpdate>;
 }
@@ -330,9 +363,11 @@ export class AcpEngine implements EngineAdapter {
     if (!turn) return;
     const update = notification.update;
     if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
-      turn.text.push(update.content.text);
+      turn.text.append(update.content.text);
       turn.callbacks.onDelta?.(update.content.text);
     } else if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
+      // A tool call between text chunks means the next text is a new message.
+      turn.text.endSegment();
       const { sessionUpdate: _sessionUpdate, ...incoming } = update;
       turn.toolCalls.set(
         incoming.toolCallId,
@@ -418,7 +453,7 @@ export class AcpEngine implements EngineAdapter {
   async startTurn(ref: SessionRef, promptText: string, callbacks: TurnCallbacks): Promise<TurnResult> {
     const ctx = await this.ensureConnected();
     const sessionId = await this.openSession(ctx, ref);
-    const turn: TurnState = { callbacks, text: [], toolCalls: new Map() };
+    const turn: TurnState = { callbacks, text: new AgentTextBuffer(), toolCalls: new Map() };
     this.turns.set(sessionId, turn);
     try {
       // No request timeout: a coding-agent turn can legitimately run for a
@@ -427,7 +462,7 @@ export class AcpEngine implements EngineAdapter {
         sessionId,
         prompt: [{ type: "text", text: promptText }],
       });
-      return { text: turn.text.join(""), stopReason: response.stopReason };
+      return { text: turn.text.toString(), stopReason: response.stopReason };
     } finally {
       this.turns.delete(sessionId);
     }
