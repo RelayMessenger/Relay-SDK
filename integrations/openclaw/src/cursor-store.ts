@@ -2,8 +2,11 @@
 // monotonic writes only, bound to the agent identity so a token that now
 // resolves to a different agent discards the stale cursor instead of acking
 // another contact's event stream.
+import { createPluginStateSyncKeyedStore } from "openclaw/plugin-sdk/runtime-doctor";
+
 export const RELAY_CURSOR_NAMESPACE = "relay.cursors";
 export const RELAY_CURSOR_MAX_ENTRIES = 1_000;
+export const RELAY_CURSOR_OVERFLOW_POLICY = "reject-new" as const;
 
 const RECORD_VERSION = 2;
 
@@ -37,6 +40,35 @@ export type RelayCursorStore = {
    */
   advance(cursor: number): Promise<void>;
 };
+
+/**
+ * Open the durable SQLite namespace with fail-closed capacity semantics. A
+ * cursor is permanent safety state: evicting an old identity to admit a new
+ * one could replay retained events when the old identity returns.
+ */
+export function openRelayCursorStateStore(
+  warn: (line: string) => void,
+  options: { env?: NodeJS.ProcessEnv; maxEntries?: number } = {},
+): RelayCursorStateStore {
+  try {
+    const store = createPluginStateSyncKeyedStore<RelayCursorRecord>("relay", {
+      namespace: RELAY_CURSOR_NAMESPACE,
+      maxEntries: options.maxEntries ?? RELAY_CURSOR_MAX_ENTRIES,
+      overflowPolicy: RELAY_CURSOR_OVERFLOW_POLICY,
+      ...(options.env ? { env: options.env } : {}),
+    });
+    return {
+      lookup: async (key) => store.lookup(key),
+      register: async (key, value) => {
+        store.register(key, value);
+      },
+      delete: async (key) => store.delete(key),
+    };
+  } catch (error) {
+    warn(`[relay] plugin state unavailable; refusing unsafe cursor reset: ${String(error)}`);
+    throw error;
+  }
+}
 
 function isValidCursor(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;

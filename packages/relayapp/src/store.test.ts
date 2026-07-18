@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { atomicWriteJson, RuntimeLock, StateStore } from "./store.js";
+import { atomicWriteJson, blockInvalidState, RuntimeLock, StateStore } from "./store.js";
 
 function tempHome(): string {
   return mkdtempSync(join(tmpdir(), "relayapp-store-test-"));
@@ -34,6 +34,52 @@ test("semantically invalid cursor state cannot silently reset to zero", () => {
   assert.throws(() => new StateStore(home), /quarantined|blocked/i);
   assert.ok(existsSync(join(home, "state.blocked.json")));
   assert.throws(() => new StateStore(home), /blocked/i);
+});
+
+test("block marker failure leaves corrupt state in place for a fail-closed retry", () => {
+  const home = tempHome();
+  const statePath = join(home, "state.json");
+  writeFileSync(statePath, "corrupt");
+  assert.throws(
+    () => blockInvalidState(home, statePath, "invalid", {
+      writeBlock: () => { throw new Error("disk refused marker"); },
+    }),
+    /disk refused marker/,
+  );
+  assert.equal(existsSync(statePath), true, "state must not move before the marker is durable");
+  assert.equal(existsSync(join(home, "state.blocked.json")), false);
+  assert.throws(() => new StateStore(home), /blocked|quarantined/i);
+  assert.equal(existsSync(join(home, "state.blocked.json")), true);
+});
+
+test("quarantine failure leaves a durable block marker and never resets cursor zero", () => {
+  const home = tempHome();
+  const statePath = join(home, "state.json");
+  writeFileSync(statePath, "corrupt");
+  assert.throws(
+    () => blockInvalidState(home, statePath, "invalid", {
+      quarantine: () => { throw new Error("rename failed"); },
+    }),
+    /could not be quarantined/,
+  );
+  assert.equal(existsSync(statePath), true);
+  assert.equal(existsSync(join(home, "state.blocked.json")), true);
+  assert.throws(() => new StateStore(home), /blocked after corruption/i);
+});
+
+test("crash between durable marker and quarantine stays blocked on next startup", () => {
+  const home = tempHome();
+  const statePath = join(home, "state.json");
+  writeFileSync(statePath, "corrupt");
+  assert.throws(
+    () => blockInvalidState(home, statePath, "invalid", {
+      afterBlockPersisted: () => { throw new Error("simulated process crash"); },
+    }),
+    /simulated process crash/,
+  );
+  assert.equal(existsSync(statePath), true);
+  assert.equal(existsSync(join(home, "state.blocked.json")), true);
+  assert.throws(() => new StateStore(home), /blocked after corruption/i);
 });
 
 test("origin+agent runtime lock rejects a second process and safely recovers a dead owner", () => {

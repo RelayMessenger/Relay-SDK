@@ -24,9 +24,10 @@ const plugin = join(marketplace, "plugins", "relay");
 const openclawGenerated = join(scratch, "openclaw-plugin");
 const openclawTarget = join(packageRoot, "openclaw-plugin");
 
-function run(command, args, cwd = repoRoot) {
+function run(command, args, cwd = repoRoot, env = process.env) {
   const result = spawnSync(command, args, {
     cwd,
+    env,
     encoding: "utf8",
     stdio: "pipe",
     windowsHide: true,
@@ -88,13 +89,25 @@ try {
   renameSync(generated, target);
   mkdirSync(openclawGenerated, { recursive: true });
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  run(npm, [
-    "pack",
-    "--workspace",
-    "@relayapp/openclaw-plugin",
-    "--pack-destination",
-    openclawGenerated,
-  ]);
+  run(
+    npm,
+    [
+      "pack",
+      "--workspace",
+      "@relayapp/openclaw-plugin",
+      "--pack-destination",
+      openclawGenerated,
+    ],
+    repoRoot,
+    {
+      ...process.env,
+      // An outer `npm pack --dry-run` exports this lifecycle setting. The
+      // nested pack is an artifact build, not a preview: it must still create
+      // the OpenClaw archive that the outer relayapp manifest inspects.
+      npm_config_dry_run: "false",
+      NPM_CONFIG_DRY_RUN: "false",
+    },
+  );
   const openclawArchives = readdirSync(openclawGenerated).filter((name) => name.endsWith(".tgz"));
   if (openclawArchives.length !== 1) {
     throw new Error(`expected one generated OpenClaw archive, found ${openclawArchives.length}`);

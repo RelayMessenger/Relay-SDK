@@ -200,21 +200,39 @@ function stateBlockedPath(home: string): string {
   return join(home, "state.blocked.json");
 }
 
-function blockInvalidState(home: string, path: string, reason: string): never {
+export interface BlockInvalidStateOperations {
+  writeBlock?: typeof atomicWriteJson;
+  quarantine?: typeof renameSync;
+  /** Test-only crash boundary after the fail-closed marker is durable. */
+  afterBlockPersisted?: () => void;
+}
+
+export function blockInvalidState(
+  home: string,
+  path: string,
+  reason: string,
+  operations: BlockInvalidStateOperations = {},
+): never {
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const blocked = stateBlockedPath(home);
   const quarantined = `${path}.corrupt-${Date.now()}-${process.pid}`;
-  try {
-    renameSync(path, quarantined);
-  } catch {
-    // The persistent block remains the fail-closed boundary.
-  }
-  atomicWriteJson(
+  // The marker is the fail-closed boundary. Persist it before moving the
+  // corrupt state so a crash can never leave both state.json absent and the
+  // block marker missing, which would otherwise look like a fresh cursor 0.
+  (operations.writeBlock ?? atomicWriteJson)(
     blocked,
     { blocked_at: new Date().toISOString(), reason, quarantined },
     0o600,
   );
-  throw new Error(`Invalid Relay runtime state was quarantined; startup is blocked (${blocked}).`);
+  operations.afterBlockPersisted?.();
+  let quarantineError: unknown;
+  try {
+    (operations.quarantine ?? renameSync)(path, quarantined);
+  } catch (error) {
+    quarantineError = error;
+  }
+  const disposition = quarantineError ? "could not be quarantined" : "was quarantined";
+  throw new Error(`Invalid Relay runtime state ${disposition}; startup is blocked (${blocked}).`);
 }
 
 function bridgeStateIsValid(raw: Partial<BridgeState>): boolean {

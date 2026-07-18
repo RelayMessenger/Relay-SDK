@@ -12,7 +12,6 @@ import {
 } from "openclaw/plugin-sdk/channel-outbound";
 import { resolveInboundRouteEnvelopeBuilderWithRuntime } from "openclaw/plugin-sdk/inbound-envelope";
 import { chunkText } from "openclaw/plugin-sdk/reply-chunking";
-import { createPluginStateSyncKeyedStore } from "openclaw/plugin-sdk/runtime-doctor";
 import {
   DEFAULT_ACCOUNT_ID,
   listRelayAccountIds,
@@ -27,8 +26,7 @@ import {
   RelayApiError,
 } from "./client.js";
 import type { RelayClient } from "./client.js";
-import { createRelayCursorStore, RELAY_CURSOR_MAX_ENTRIES, RELAY_CURSOR_NAMESPACE } from "./cursor-store.js";
-import type { RelayCursorRecord } from "./cursor-store.js";
+import { createRelayCursorStore, openRelayCursorStateStore } from "./cursor-store.js";
 import { createRelayInboundDedupeGuard, createRelayInboundDeduper } from "./inbound-dedupe.js";
 import { buildRelayInboundFacts } from "./inbound.js";
 import type { RelayInboundFacts } from "./inbound.js";
@@ -340,34 +338,6 @@ async function dispatchRelayInbound(params: {
 // ---------------------------------------------------------------------------
 // Gateway lifecycle.
 // ---------------------------------------------------------------------------
-
-/**
- * Durable SQLite cursor for every install: `createPluginStateSyncKeyedStore`
- * writes plugin state directly and is not behind the trusted-install gate
- * that blocks `runtime.state.openKeyedStore` for npm-pack installs
- * (plugin-state-store.ts). Failure is fatal: cursor-zero replay is unsafe once
- * bounded attempt rows may have aged out.
- */
-function openRelayCursorStateStore(
-  warn: (line: string) => void,
-): Parameters<typeof createRelayCursorStore>[0]["store"] {
-  try {
-    const store = createPluginStateSyncKeyedStore<RelayCursorRecord>(RELAY_CHANNEL_ID, {
-      namespace: RELAY_CURSOR_NAMESPACE,
-      maxEntries: RELAY_CURSOR_MAX_ENTRIES,
-    });
-    return {
-      lookup: async (key) => store.lookup(key),
-      register: async (key, value) => {
-        store.register(key, value);
-      },
-      delete: async (key) => store.delete(key),
-    };
-  } catch (error) {
-    warn(`[relay] plugin state unavailable; refusing unsafe cursor reset: ${String(error)}`);
-    throw error;
-  }
-}
 
 /**
  * One long-poll consumer per agent token: two configured

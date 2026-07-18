@@ -1,5 +1,8 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createRelayCursorStore } from "./cursor-store.js";
+import { createRelayCursorStore, openRelayCursorStateStore } from "./cursor-store.js";
 import type { RelayCursorRecord, RelayCursorStateStore } from "./cursor-store.js";
 
 function memoryStore(initial?: Record<string, RelayCursorRecord>) {
@@ -136,5 +139,25 @@ describe("relay cursor store", () => {
       },
     });
     await expect(cursor.load()).rejects.toThrow(/could not be loaded/);
+  });
+
+  it("rejects a new identity at capacity without evicting an old durable cursor", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "relay-cursor-capacity-"));
+    const store = openRelayCursorStateStore(() => {}, {
+      env: { ...process.env, OPENCLAW_STATE_DIR: stateDir },
+      maxEntries: 2,
+    });
+    const first = createRelayCursorStore({ store, baseUrl, agentId: "agt_capacity_1" });
+    const second = createRelayCursorStore({ store, baseUrl, agentId: "agt_capacity_2" });
+    const rejected = createRelayCursorStore({ store, baseUrl, agentId: "agt_capacity_3" });
+    await first.load();
+    await first.advance(101);
+    await second.load();
+    await second.advance(202);
+    await rejected.load();
+    await expect(rejected.advance(303)).rejects.toThrow(/was not durable/);
+
+    const reloaded = createRelayCursorStore({ store, baseUrl, agentId: "agt_capacity_1" });
+    expect(await reloaded.load()).toBe(101);
   });
 });

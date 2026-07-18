@@ -31,7 +31,7 @@ import {
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseToml } from "smol-toml";
 import {
@@ -313,12 +313,40 @@ function runExternalCommand(
   args: string[],
   stage: string,
   runner: NonNullable<InstallClaudeOptions["runClaude"]>,
-): void {
+): ReturnType<NonNullable<InstallClaudeOptions["runClaude"]>> {
   const result = runner(command, args);
-  if (result.status === 0) return;
+  if (result.status === 0) return result;
   const detail = `${result.stderr ?? ""}\n${result.stdout ?? ""}`.trim();
   const suffix = detail.length > 0 ? `: ${detail}` : result.error ? `: ${result.error.message}` : "";
   throw new Error(`${product} ${stage} failed${suffix}`);
+}
+
+export function platformCliCommand(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform !== "win32" || /\.(?:bat|cmd|com|exe)$/iu.test(command)) return command;
+  return `${command}.cmd`;
+}
+
+function resolveOpenClawConfigPath(
+  command: string,
+  runner: NonNullable<InstallClaudeOptions["runClaude"]>,
+): string {
+  const result = runExternalCommand(
+    "OpenClaw",
+    command,
+    ["config", "file"],
+    "config path lookup",
+    runner,
+  );
+  const lines = (result.stdout ?? "").split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+  const reported = lines.at(-1) ?? "";
+  if (!reported || /[\0\r\n]/u.test(reported)) {
+    throw new Error("OpenClaw config path lookup returned no usable path");
+  }
+  if (/^~[\\/]/u.test(reported)) return join(homedir(), reported.slice(2));
+  return isAbsolute(reported) ? reported : resolve(reported);
 }
 
 function makeTreePrivate(path: string): void {
@@ -466,9 +494,10 @@ export function installClaude(
 
   const command = options.claudeCommand ?? process.env.RELAYAPP_CLAUDE_BIN?.trim() ?? "claude";
   const runner = options.runClaude ?? ((binary, args) => {
-    const result = spawnSync(binary, args, {
+    const result = spawnSync(platformCliCommand(binary), args, {
       encoding: "utf8",
       stdio: "pipe",
+      shell: process.platform === "win32",
       windowsHide: true,
     });
     return {
@@ -542,18 +571,33 @@ export function installOpenClaw(
   if (!paired?.agent_token) throw new Error("Not paired. Run `relayapp pair` first.");
   if (/[\r\n]/u.test(paired.agent_token)) throw new Error("Refusing newline in Agent Token");
   const openclawHome = options.openclawHome ?? join(homedir(), ".openclaw");
-  const configPath = join(openclawHome, "openclaw.json");
+  const command = options.openclawCommand ?? process.env.RELAYAPP_OPENCLAW_BIN?.trim() ?? "openclaw";
+  const runner = options.runOpenClaw ?? ((binary, args) => {
+    const result = spawnSync(platformCliCommand(binary), args, {
+      encoding: "utf8",
+      stdio: "pipe",
+      shell: process.platform === "win32",
+      windowsHide: true,
+    });
+    return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "", error: result.error };
+  });
+  // OpenClaw can relocate its config via environment/state settings. Ask its
+  // own CLI for the authoritative path instead of assuming ~/.openclaw.
+  const configPath = resolveOpenClawConfigPath(command, runner);
   const tokenPath = join(openclawHome, "secrets", "relay-agent-token");
   const existingToken = existsSync(tokenPath) ? readFileSync(tokenPath, "utf8").trim() : "";
   if (existingToken && existingToken !== paired.agent_token) {
     throw new Error("OpenClaw Relay token file contains a different paired identity; not touching it");
   }
   const existingConfig = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
-  const mergedConfig = mergeOpenClawConfig(existingConfig, {
+  const desired = {
     token: paired.agent_token,
     tokenFile: tokenPath,
     baseUrl: paired.api_origin,
-  });
+  };
+  // Identity conflicts must fail before the official installer changes any
+  // external state. This first merge is validation-only.
+  mergeOpenClawConfig(existingConfig, desired);
 
   const bundleDir = options.bundleDir ?? join(MODULE_DIR, "..", "openclaw-plugin");
   const archives = readdirSync(bundleDir).filter((name) => name.endsWith(".tgz"));
@@ -564,16 +608,31 @@ export function installOpenClaw(
     join(bundleDir, archives[0]!),
     options.installRoot ?? join(runtimeHomeForConfig(paired, dirname(config.path)), "installed-plugins", "openclaw"),
   );
-  const command = options.openclawCommand ?? process.env.RELAYAPP_OPENCLAW_BIN?.trim() ?? "openclaw";
-  const runner = options.runOpenClaw ?? ((binary, args) => {
-    const result = spawnSync(binary, args, { encoding: "utf8", stdio: "pipe", windowsHide: true });
-    return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "", error: result.error };
-  });
   runExternalCommand("OpenClaw", command, ["plugins", "install", archive, "--force"], "plugin installation", runner);
 
+  // The official installer stamps root metadata and records install
+  // provenance/update/uninstall state. Re-read after it returns; a merge
+  // computed before that command would overwrite the newly authoritative
+  // state. Apply only Relay's fields through OpenClaw's config writer so the
+  // resulting write is validated and freshly stamped by OpenClaw itself.
+  const installedConfig = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
+  const mergedConfig = JSON.parse(mergeOpenClawConfig(installedConfig, desired)) as Record<string, any>;
+  const configUpdates = [
+    { path: "plugins.allow", value: mergedConfig.plugins.allow },
+    { path: "plugins.entries.relay.enabled", value: true },
+    { path: "channels.relay.enabled", value: true },
+    { path: "channels.relay.tokenFile", value: tokenPath },
+    { path: "channels.relay.baseUrl", value: paired.api_origin },
+  ];
   writePrivateText(tokenPath, `${paired.agent_token}\n`);
-  if (mergedConfig !== existingConfig) writePrivateText(configPath, mergedConfig);
-  else if (existsSync(configPath)) chmodSync(configPath, 0o600);
+  runExternalCommand(
+    "OpenClaw",
+    command,
+    ["config", "set", "--batch-json", JSON.stringify(configUpdates)],
+    "Relay config merge",
+    runner,
+  );
+  if (existsSync(configPath)) chmodSync(configPath, 0o600);
   out(`Installed bundled Relay plugin into OpenClaw from ${archive}.`);
   out(`Configured ${configPath} and owner-private token file ${tokenPath}. Agent Token was not printed.`);
   out("Restart the OpenClaw gateway to activate Relay.");

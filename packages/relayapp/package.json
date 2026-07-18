@@ -38,12 +38,5 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/companion-inc/relayapp.git"
-  },
-  "bugs": {
-    "url": "https://github.com/companion-inc/relayapp/issues"
-  }
+  "license": "MIT"
 }

@@ -12,6 +12,7 @@ import {
   mergeCodexConfigToml,
   mergeHooksJson,
   mergeOpenClawConfig,
+  platformCliCommand,
 } from "./install.js";
 import { CodexNotifyPolicyStore, ConfigStore } from "./store.js";
 
@@ -21,6 +22,14 @@ test("install-codex: fresh config.toml gets mcp server + notify", () => {
   const doc = parseToml(toml) as any;
   assert.deepEqual(doc.mcp_servers.relay, { command: "relayapp", args: ["mcp"] });
   assert.deepEqual(doc.notify, ["relayapp", "notify"]);
+});
+
+test("external CLI shims resolve to Windows .cmd launchers", () => {
+  assert.equal(platformCliCommand("claude", "win32"), "claude.cmd");
+  assert.equal(platformCliCommand("openclaw", "win32"), "openclaw.cmd");
+  assert.equal(platformCliCommand("C:\\tools\\claude.exe", "win32"), "C:\\tools\\claude.exe");
+  assert.equal(platformCliCommand("openclaw.cmd", "win32"), "openclaw.cmd");
+  assert.equal(platformCliCommand("claude", "linux"), "claude");
 });
 
 test("install-codex: merge never clobbers existing user config", () => {
@@ -256,6 +265,7 @@ test("install-openclaw installs the bundled archive and configures owner-private
   });
   const commands: string[][] = [];
   const lines: string[] = [];
+  const openclawConfigPath = join(openclawHome, "openclaw.json");
   installOpenClaw((line) => lines.push(line), {
     config,
     openclawHome,
@@ -263,13 +273,47 @@ test("install-openclaw installs the bundled archive and configures owner-private
     installRoot: join(relayHome, "installed-openclaw"),
     runOpenClaw: (_command, args) => {
       commands.push(args);
-      return { status: 0 };
+      if (args[0] === "config" && args[1] === "file") {
+        return { status: 0, stdout: `${openclawConfigPath}\n` };
+      }
+      if (args[0] === "plugins" && args[1] === "install") {
+        // Model the authoritative state written by OpenClaw's official
+        // installer after Relay's preflight read.
+        writeFileSync(openclawConfigPath, `${JSON.stringify({
+          unrelated: { survives: true },
+          plugins: {
+            entries: { relay: { enabled: true } },
+            installs: { relay: { source: "archive", installPath: "/official/relay" } },
+          },
+          meta: {
+            lastTouchedVersion: "2026.7.2-beta.2",
+            lastTouchedAt: "2026-07-18T00:00:00.000Z",
+          },
+        })}\n`);
+        return { status: 0 };
+      }
+      if (args[0] === "config" && args[1] === "set") {
+        const doc = JSON.parse(readFileSync(openclawConfigPath, "utf8"));
+        const updates = JSON.parse(args[3]!);
+        for (const update of updates) {
+          const parts = update.path.split(".");
+          let cursor = doc;
+          for (const part of parts.slice(0, -1)) cursor = (cursor[part] ??= {});
+          cursor[parts.at(-1)] = update.value;
+        }
+        doc.meta.lastTouchedAt = "2026-07-18T00:00:01.000Z";
+        writeFileSync(openclawConfigPath, `${JSON.stringify(doc)}\n`);
+        return { status: 0 };
+      }
+      return { status: 1, stderr: `unexpected command: ${args.join(" ")}` };
     },
   });
-  assert.equal(commands.length, 1);
-  assert.deepEqual(commands[0]!.slice(0, 2), ["plugins", "install"]);
-  assert.match(commands[0]![2]!, /installed-openclaw[/\\][a-f0-9]{24}[/\\]relay-openclaw-plugin\.tgz$/);
-  assert.equal(commands[0]![3], "--force");
+  assert.equal(commands.length, 3);
+  assert.deepEqual(commands[0], ["config", "file"]);
+  assert.deepEqual(commands[1]!.slice(0, 2), ["plugins", "install"]);
+  assert.match(commands[1]![2]!, /installed-openclaw[/\\][a-f0-9]{24}[/\\]relay-openclaw-plugin\.tgz$/);
+  assert.equal(commands[1]![3], "--force");
+  assert.deepEqual(commands[2]!.slice(0, 3), ["config", "set", "--batch-json"]);
   const tokenPath = join(openclawHome, "secrets", "relay-agent-token");
   assert.equal(readFileSync(tokenPath, "utf8"), "rly_openclaw_secret\n");
   const installedConfig = JSON.parse(readFileSync(join(openclawHome, "openclaw.json"), "utf8"));
@@ -277,6 +321,11 @@ test("install-openclaw installs the bundled archive and configures owner-private
   assert.equal(installedConfig.plugins.entries.relay.enabled, true);
   assert.equal(installedConfig.channels.relay.tokenFile, tokenPath);
   assert.equal(installedConfig.channels.relay.baseUrl, "https://api.relayapp.im");
+  assert.equal(installedConfig.unrelated.survives, true);
+  assert.equal(installedConfig.meta.lastTouchedVersion, "2026.7.2-beta.2");
+  assert.equal(installedConfig.meta.lastTouchedAt, "2026-07-18T00:00:01.000Z");
+  assert.equal(installedConfig.plugins.installs.relay.source, "archive");
+  assert.equal(installedConfig.plugins.installs.relay.installPath, "/official/relay");
   assert.equal(lines.join("\n").includes("rly_openclaw_secret"), false);
   if (process.platform !== "win32") {
     assert.equal(statSync(tokenPath).mode & 0o777, 0o600);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   chmodSync,
@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -23,6 +23,25 @@ function npm(args, cwd = repoRoot) {
   const command = process.platform === "win32" ? "npm.cmd" : "npm";
   return execFileSync(command, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
+
+function cli(name, args, options = {}) {
+  const command = process.platform === "win32" ? `${name}.cmd` : name;
+  const result = spawnSync(command, args, {
+    ...options,
+    encoding: "utf8",
+    stdio: "pipe",
+    shell: process.platform === "win32",
+    windowsHide: true,
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `${command} ${args.join(" ")} failed:\n${result.stdout ?? ""}\n${result.stderr ?? ""}`,
+    );
+  }
+  return { stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+}
+
+const toolPath = `${join(repoRoot, "node_modules", ".bin")}${delimiter}${process.env.PATH ?? ""}`;
 
 try {
   mkdirSync(packDir, { recursive: true });
@@ -105,7 +124,7 @@ try {
         HOME: smokeHome,
         USERPROFILE: smokeHome,
         RELAYAPP_HOME: smokeRelayHome,
-        PATH: `${join(repoRoot, "node_modules", ".bin")}:${process.env.PATH ?? ""}`,
+        PATH: toolPath,
       },
     },
   );
@@ -119,21 +138,19 @@ try {
     ...process.env,
     HOME: smokeHome,
     USERPROFILE: smokeHome,
-    PATH: `${join(repoRoot, "node_modules", ".bin")}:${process.env.PATH ?? ""}`,
+    PATH: toolPath,
   };
-  const claudePlugins = JSON.parse(execFileSync("claude", ["plugin", "list", "--json"], {
+  const claudePlugins = JSON.parse(cli("claude", ["plugin", "list", "--json"], {
     cwd: installDir,
-    encoding: "utf8",
     env: claudeEnv,
-  }));
+  }).stdout);
   const relayClaude = claudePlugins.find((plugin) => plugin.id === "relay@relayapp-bundled");
   assert.ok(relayClaude?.installPath, "bundled Claude plugin was not installed");
   assert.equal(existsSync(join(relayClaude.installPath, "commands", "configure.md")), true);
   assert.doesNotMatch(relayClaude.installPath, /integrations[/\\]claude-code/);
   rmSync(join(installed, "claude-plugin"), { recursive: true, force: true });
-  execFileSync("claude", ["plugin", "validate", relayClaude.installPath, "--strict"], {
+  cli("claude", ["plugin", "validate", relayClaude.installPath, "--strict"], {
     cwd: installDir,
-    stdio: "pipe",
     env: claudeEnv,
   });
 
@@ -149,7 +166,7 @@ try {
         HOME: openclawHome,
         USERPROFILE: openclawHome,
         RELAYAPP_HOME: smokeRelayHome,
-        PATH: `${join(repoRoot, "node_modules", ".bin")}:${process.env.PATH ?? ""}`,
+        PATH: toolPath,
       },
     },
   );
@@ -159,20 +176,36 @@ try {
     ...process.env,
     HOME: openclawHome,
     USERPROFILE: openclawHome,
-    PATH: `${join(repoRoot, "node_modules", ".bin")}:${process.env.PATH ?? ""}`,
+    PATH: toolPath,
   };
-  const openclawPlugins = JSON.parse(execFileSync("openclaw", ["plugins", "list", "--json"], {
+  const openclawConfig = JSON.parse(
+    readFileSync(join(openclawHome, ".openclaw", "openclaw.json"), "utf8"),
+  );
+  assert.equal(typeof openclawConfig.meta?.lastTouchedVersion, "string");
+  assert.equal(typeof openclawConfig.meta?.lastTouchedAt, "string");
+  const openclawList = cli("openclaw", ["plugins", "list", "--json"], {
     cwd: installDir,
-    encoding: "utf8",
     env: openclawEnv,
-  }));
+  });
+  assert.doesNotMatch(openclawList.stderr, /Config observe anomaly/);
+  const openclawPlugins = JSON.parse(openclawList.stdout);
   assert.ok(openclawPlugins.plugins?.some((plugin) => plugin.id === "relay"), "OpenClaw did not load Relay");
-  rmSync(join(installed, "openclaw-plugin"), { recursive: true, force: true });
-  const openclawAfterSourceRemoval = JSON.parse(execFileSync("openclaw", ["plugins", "list", "--json"], {
+  const openclawInspect = JSON.parse(cli("openclaw", ["plugins", "inspect", "relay", "--json"], {
     cwd: installDir,
-    encoding: "utf8",
     env: openclawEnv,
-  }));
+  }).stdout);
+  assert.equal(openclawInspect.install?.source, "archive");
+  assert.match(
+    openclawInspect.install?.sourcePath ?? "",
+    /[\\/]installed-plugins[\\/]openclaw[\\/][a-f0-9]{24}[\\/]relay-openclaw-plugin\.tgz$/,
+  );
+  rmSync(join(installed, "openclaw-plugin"), { recursive: true, force: true });
+  const afterSourceRemoval = cli("openclaw", ["plugins", "list", "--json"], {
+    cwd: installDir,
+    env: openclawEnv,
+  });
+  assert.doesNotMatch(afterSourceRemoval.stderr, /Config observe anomaly/);
+  const openclawAfterSourceRemoval = JSON.parse(afterSourceRemoval.stdout);
   assert.ok(openclawAfterSourceRemoval.plugins?.some((plugin) => plugin.id === "relay"));
 
   for (const adapter of [

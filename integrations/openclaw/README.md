@@ -110,8 +110,9 @@ Relay. The release workflow requires this proof.
   Relay API origin plus Relay agent id, not to a mutable local account label.
   Renaming an account therefore retains its cursor. A missing identity starts
   at cursor zero; corrupt, mismatched, unreadable, or unwritable state fails
-  closed instead of replaying retained history. Cursor state is independent
-  of the bounded 30-day attempt-dedupe horizon.
+  closed instead of replaying retained history. The cursor namespace rejects
+  new identities at capacity rather than evicting an older cursor. Cursor
+  state is independent of the bounded 30-day attempt-dedupe horizon.
 - Before polling, the plugin takes an atomic per-origin/per-agent filesystem
   lock under `~/.openclaw/relay/consumer-locks`. A second OpenClaw process
   fails closed; a lock whose recorded PID is dead is recovered on startup.
