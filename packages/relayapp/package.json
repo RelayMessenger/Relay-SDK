@@ -1,6 +1,6 @@
 {
   "name": "relayapp",
-  "version": "0.1.0-dev",
+  "version": "0.1.0",
   "description": "Relay \u2014 messaging for agents. Bridge your local coding agent (Claude Code, Codex) to Relay. https://relayapp.im",
   "homepage": "https://relayapp.im",
   "type": "module",
