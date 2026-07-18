@@ -30,6 +30,7 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import crossSpawn from "cross-spawn";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -494,10 +495,9 @@ export function installClaude(
 
   const command = options.claudeCommand ?? process.env.RELAYAPP_CLAUDE_BIN?.trim() ?? "claude";
   const runner = options.runClaude ?? ((binary, args) => {
-    const result = spawnSync(platformCliCommand(binary), args, {
+    const result = crossSpawn.sync(platformCliCommand(binary), args, {
       encoding: "utf8",
       stdio: "pipe",
-      shell: process.platform === "win32",
       windowsHide: true,
     });
     return {
@@ -573,10 +573,9 @@ export function installOpenClaw(
   const openclawHome = options.openclawHome ?? join(homedir(), ".openclaw");
   const command = options.openclawCommand ?? process.env.RELAYAPP_OPENCLAW_BIN?.trim() ?? "openclaw";
   const runner = options.runOpenClaw ?? ((binary, args) => {
-    const result = spawnSync(platformCliCommand(binary), args, {
+    const result = crossSpawn.sync(platformCliCommand(binary), args, {
       encoding: "utf8",
       stdio: "pipe",
-      shell: process.platform === "win32",
       windowsHide: true,
     });
     return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "", error: result.error };

@@ -110,7 +110,7 @@ async function runPair(port: number, home: string) {
   return { origin, config, lines, qrPayloads };
 }
 
-test("pair: QR + code, long-poll until claimed, token + pinned owner stored chmod 600", async () => {
+test("pair: QR + code, long-poll until claimed, token + pinned owner stored privately where supported", async () => {
   const { server, requests, pollCount } = mockServer({ pendingPolls: 1 });
   const port = await listen(server);
   const home = mkdtempSync(join(tmpdir(), "relayapp-pair-"));
@@ -130,12 +130,15 @@ test("pair: QR + code, long-poll until claimed, token + pinned owner stored chmo
     const me = requests.find((entry) => entry.url === "/v1/agents/me");
     assert.equal(me?.auth, "Bearer rly_agent_token_abc");
 
-    // Token + owner durably stored, mode 600.
+    // Token + owner are durably stored. POSIX platforms also expose the
+    // owner-only mode bits; Windows ACLs do not map to a meaningful 0o600.
     const stored = JSON.parse(readFileSync(config.path, "utf8"));
     assert.equal(stored.agent_token, "rly_agent_token_abc");
     assert.equal(stored.owner_user_id, "usr_owner_1");
     assert.equal(stored.api_origin, origin);
-    assert.equal(statSync(config.path).mode & 0o777, 0o600);
+    if (process.platform !== "win32") {
+      assert.equal(statSync(config.path).mode & 0o777, 0o600);
+    }
   } finally {
     server.close();
   }
