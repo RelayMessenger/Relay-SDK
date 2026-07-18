@@ -174,7 +174,7 @@ describe("verdict data-part tap", () => {
   it("parses an origin-tagged option tap", () => {
     const verdict = parseVerdictDataPart({
       kind: "option_tap",
-      origin: { kind: "claude_permission_request", request_id: "abcde" },
+      origin: { kind: "agent_permission_request", request_id: "abcde" },
       option_id: "allow",
     });
     assert.deepEqual(verdict, { request_id: "abcde", behavior: "allow" });
@@ -182,7 +182,7 @@ describe("verdict data-part tap", () => {
 
   it("parses a deny tap with flat request_id", () => {
     const verdict = parseVerdictDataPart({
-      kind: "claude_permission_request",
+      kind: "agent_permission_request",
       request_id: "kmnop",
       behavior: "deny",
     });
@@ -206,7 +206,7 @@ describe("verdict data-part tap", () => {
             type: "data",
             data: {
               kind: "option_tap",
-              origin: { kind: "claude_permission_request", request_id: "abcde" },
+              origin: { kind: "agent_permission_request", request_id: "abcde" },
               option_id: "deny",
             },
           },
@@ -310,7 +310,7 @@ describe("permission card", () => {
       },
       "cnv_9",
     );
-    assert.equal(card.idempotencyKey, "claude-perm-abcde");
+    assert.equal(card.idempotencyKey, "agent-perm-abcde");
     assert.ok(card.idempotencyKey.length >= 8);
     assert.equal(card.body.conversation_id, "cnv_9");
     assert.equal(card.body.parts.length, 2);
@@ -328,7 +328,7 @@ describe("permission card", () => {
       request_id: string;
       options: { id: string; label: string; origin: { request_id: string } }[];
     };
-    assert.equal(payload.kind, "claude_permission_request");
+    assert.equal(payload.kind, "agent_permission_request");
     assert.equal(payload.request_id, "abcde");
     assert.deepEqual(
       payload.options.map((o) => o.id),

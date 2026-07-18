@@ -1,8 +1,8 @@
 /**
- * ACP engine adapter. One adapter drives both engines by spawning the official
- * ACP wrappers over stdio (agentclientprotocol.com), installed as exact,
- * lockfile-pinned runtime dependencies and launched with a minimized
- * environment. No session executes mutable registry "latest" code.
+ * ACP engine adapter. One adapter drives every supported runtime over stdio
+ * (agentclientprotocol.com). Claude/Codex wrappers are exact lockfile-pinned
+ * dependencies; other presets launch an already-installed user CLI. No
+ * session executes a mutable registry "latest" package or a shell command.
  *
  * ACP is the only interactive-approval path for Codex sessions the bridge
  * owns: `codex exec` hard-codes approval_policy=Never and rejects every
@@ -11,9 +11,10 @@
  * Conversation → ACP session bindings persist in the paired account runtime and
  * are re-attached with `session/load` when the agent advertises loadSession.
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { Readable, Writable } from "node:stream";
+import crossSpawn from "cross-spawn";
 import {
   client,
   ndJsonStream,
@@ -23,6 +24,7 @@ import {
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionNotification,
+  type ToolCallUpdate,
 } from "@agentclientprotocol/sdk";
 import type {
   EngineAdapter,
@@ -33,6 +35,11 @@ import type {
 } from "./types.js";
 import type { SessionStore } from "../store.js";
 import { terminateProcessTree } from "./process.js";
+import {
+  EXTERNAL_ENGINE_SPECS,
+  engineDisplayName,
+  type EngineName,
+} from "./catalog.js";
 
 export const ADAPTER_PACKAGES: Record<string, string> = {
   claude: "@agentclientprotocol/claude-agent-acp",
@@ -53,6 +60,29 @@ export function adapterEntrypoint(engine: "claude" | "codex"): string {
     return require.resolve("@agentclientprotocol/claude-agent-acp/dist/index.js");
   }
   return require.resolve("@agentclientprotocol/codex-acp");
+}
+
+export interface EngineProcessSpec {
+  command: string;
+  args: string[];
+  display: string;
+}
+
+/** Shell-free, deterministic process descriptor for one ACP runtime. */
+export function engineProcessSpec(engine: EngineName): EngineProcessSpec {
+  if (engine === "claude" || engine === "codex") {
+    return {
+      command: process.execPath,
+      args: [adapterEntrypoint(engine)],
+      display: `${ADAPTER_PACKAGES[engine]}@${ADAPTER_VERSIONS[engine]}`,
+    };
+  }
+  const spec = EXTERNAL_ENGINE_SPECS[engine];
+  return {
+    command: spec.command,
+    args: [...spec.args],
+    display: `${spec.displayName} (${spec.command} ${spec.args.join(" ")})`,
+  };
 }
 
 /**
@@ -101,11 +131,12 @@ const ENGINE_ENV_EXACT = new Set([
 const ENGINE_ENV_PREFIXES = [
   "LC_",
   "XDG_",
-  // Engine/provider credentials and settings for the two supported adapters.
+  // Engine/provider credentials and settings for supported local runtimes.
   "ANTHROPIC_",
   "CLAUDE_",
   "OPENAI_",
   "CODEX_",
+  "HERMES_",
 ];
 
 export function engineEnv(parent: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -133,6 +164,21 @@ export function engineEnv(parent: NodeJS.ProcessEnv = process.env): NodeJS.Proce
 interface TurnState {
   callbacks: TurnCallbacks;
   text: string[];
+  /** Latest complete view of each ACP tool call, assembled from deltas. */
+  toolCalls: Map<string, ToolCallUpdate>;
+}
+
+/** Merge a sparse ACP tool-call update without erasing previously known fields. */
+export function mergeToolCall(
+  previous: ToolCallUpdate | undefined,
+  incoming: ToolCallUpdate,
+): ToolCallUpdate {
+  const merged: Record<string, unknown> = { ...(previous ?? {}) };
+  for (const [key, value] of Object.entries(incoming)) {
+    if (value !== undefined) merged[key] = value;
+  }
+  merged.toolCallId = incoming.toolCallId;
+  return merged as ToolCallUpdate;
 }
 
 /**
@@ -143,14 +189,13 @@ interface TurnState {
 export function permissionDetail(
   toolCall: RequestPermissionRequest["toolCall"],
 ): string | undefined {
-  // Locations and display content are supplemental. Without rawInput the
-  // phone cannot show the exact operation, so it must not offer Allow.
-  if (toolCall.rawInput === undefined) return undefined;
   const parts: string[] = [];
-  try {
-    parts.push(JSON.stringify(toolCall.rawInput));
-  } catch {
-    parts.push(String(toolCall.rawInput));
+  if (toolCall.rawInput !== undefined && toolCall.rawInput !== null) {
+    try {
+      parts.push(JSON.stringify(toolCall.rawInput));
+    } catch {
+      parts.push(String(toolCall.rawInput));
+    }
   }
   if (Array.isArray(toolCall.locations) && toolCall.locations.length > 0) {
     parts.push(`paths: ${toolCall.locations.map((location) => location.path).join(", ")}`);
@@ -159,13 +204,34 @@ export function permissionDetail(
     if (content.type === "content" && content.content.type === "text") {
       parts.push(content.content.text);
     } else if (content.type === "diff") {
-      parts.push(`diff ${content.path}`);
+      parts.push(
+        [
+          `diff ${content.path}`,
+          "--- before",
+          content.oldText ?? "(new file)",
+          "+++ after",
+          content.newText,
+        ].join("\n"),
+      );
     } else if (content.type === "terminal") {
       parts.push(`terminal ${content.terminalId}`);
     }
   }
   const joined = parts.filter((part) => part && part.length > 0).join("\n");
   return joined.length > 0 ? joined : undefined;
+}
+
+/** True only when the phone can display the full operation being approved. */
+export function permissionInputComplete(
+  toolCall: RequestPermissionRequest["toolCall"],
+): boolean {
+  if (toolCall.rawInput !== undefined && toolCall.rawInput !== null) return true;
+  return (toolCall.content ?? []).some(
+    (content) =>
+      content.type === "diff" &&
+      typeof content.path === "string" &&
+      typeof content.newText === "string",
+  );
 }
 
 export class AcpEngine implements EngineAdapter {
@@ -181,7 +247,7 @@ export class AcpEngine implements EngineAdapter {
   private permissionSeq = 0;
 
   constructor(
-    readonly engine: "claude" | "codex",
+    readonly engine: EngineName,
     private readonly sessions: SessionStore,
     private readonly log: (line: string) => void = () => {},
   ) {}
@@ -201,10 +267,9 @@ export class AcpEngine implements EngineAdapter {
   }
 
   private async connect(): Promise<void> {
-    const pkg = `${ADAPTER_PACKAGES[this.engine]}@${ADAPTER_VERSIONS[this.engine]}`;
-    const entrypoint = adapterEntrypoint(this.engine);
-    this.log(`spawning installed ${pkg}`);
-    const child = spawn(process.execPath, [entrypoint], {
+    const processSpec = engineProcessSpec(this.engine);
+    this.log(`spawning ${processSpec.display}`);
+    const child = crossSpawn(processSpec.command, processSpec.args, {
       stdio: ["pipe", "pipe", "inherit"],
       env: engineEnv(),
       // POSIX: own process group so dispose() reaches adapter descendants.
@@ -213,11 +278,11 @@ export class AcpEngine implements EngineAdapter {
     });
     this.child = child;
     child.on("error", (error) => {
-      this.log(`${pkg} spawn error: ${error.message}`);
+      this.log(`${processSpec.display} spawn error: ${error.message}`);
       this.resetConnection();
     });
     child.on("exit", (code) => {
-      this.log(`${pkg} exited with code ${code}`);
+      this.log(`${processSpec.display} exited with code ${code}`);
       this.resetConnection();
     });
 
@@ -238,11 +303,17 @@ export class AcpEngine implements EngineAdapter {
 
     const init = await this.ctx.request("initialize", {
       protocolVersion: PROTOCOL_VERSION,
-      clientInfo: { name: "relayapp", version: "0.1.0" },
+      clientInfo: { name: "relayapp", version: "0.2.0" },
       clientCapabilities: {},
     });
+    if (init.protocolVersion !== PROTOCOL_VERSION) {
+      throw new Error(
+        `${engineDisplayName(this.engine)} returned unsupported ACP protocol ` +
+          `${init.protocolVersion}; relayapp requires ${PROTOCOL_VERSION}`,
+      );
+    }
     this.loadSessionSupported = init.agentCapabilities?.loadSession === true;
-    this.log(`initialized ${pkg} (protocol v${init.protocolVersion})`);
+    this.log(`initialized ${processSpec.display} (protocol v${init.protocolVersion})`);
   }
 
   private resetConnection(): void {
@@ -262,6 +333,11 @@ export class AcpEngine implements EngineAdapter {
       turn.text.push(update.content.text);
       turn.callbacks.onDelta?.(update.content.text);
     } else if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
+      const { sessionUpdate: _sessionUpdate, ...incoming } = update;
+      turn.toolCalls.set(
+        incoming.toolCallId,
+        mergeToolCall(turn.toolCalls.get(incoming.toolCallId), incoming),
+      );
       turn.callbacks.onToolEvent?.({
         kind: update.sessionUpdate,
         title: "title" in update ? (update.title ?? undefined) : undefined,
@@ -278,14 +354,19 @@ export class AcpEngine implements EngineAdapter {
       return { outcome: { outcome: "cancelled" } };
     }
     this.permissionSeq += 1;
+    const toolCall = mergeToolCall(
+      turn.toolCalls.get(params.toolCall.toolCallId),
+      params.toolCall,
+    );
+    turn.toolCalls.set(toolCall.toolCallId, toolCall);
     const ask: PermissionAsk = {
       requestId: `perm_${Date.now().toString(36)}_${this.permissionSeq}`,
-      toolName: params.toolCall.title ?? params.toolCall.toolCallId,
-      title: params.toolCall.title ?? undefined,
+      toolName: toolCall.title ?? toolCall.toolCallId,
+      title: toolCall.title ?? undefined,
       // The card must show WHAT is being approved, not just a tool title: a
       // generic "Bash" with the command hidden turns Allow into a blind grant.
-      inputPreview: permissionDetail(params.toolCall),
-      inputComplete: params.toolCall.rawInput !== undefined,
+      inputPreview: permissionDetail(toolCall),
+      inputComplete: permissionInputComplete(toolCall),
       options: params.options.map((option) => ({
         optionId: option.optionId,
         label: option.name,
@@ -337,7 +418,7 @@ export class AcpEngine implements EngineAdapter {
   async startTurn(ref: SessionRef, promptText: string, callbacks: TurnCallbacks): Promise<TurnResult> {
     const ctx = await this.ensureConnected();
     const sessionId = await this.openSession(ctx, ref);
-    const turn: TurnState = { callbacks, text: [] };
+    const turn: TurnState = { callbacks, text: [], toolCalls: new Map() };
     this.turns.set(sessionId, turn);
     try {
       // No request timeout: a coding-agent turn can legitimately run for a

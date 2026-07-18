@@ -171,6 +171,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (typeof chat_id !== "string" || !chat_id.startsWith("cnv_")) {
     return toolError("chat_id must be a Relay conversation id (cnv_…)");
   }
+  if (!state.hasObservedConversation(chat_id)) {
+    return toolError(
+      "chat_id was not observed in an owner-authenticated Relay delivery for this Claude session",
+    );
+  }
   if (typeof text !== "string" || text.length === 0) return toolError("text must be non-empty");
   if (typeof send_id !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(send_id)) {
     return toolError("send_id must be 1-128 letters, digits, dot, underscore, colon, or hyphen");
@@ -221,10 +226,10 @@ mcp.setNotificationHandler(PermissionRequestSchema, async ({ params }) => {
     log(`permission request ${params.request_id} not relayed: channel state is not ready`);
     return;
   }
-  const conversationId = state.get().last_conversation_id;
+  const conversationId = state.permissionConversationId();
   if (!conversationId) {
     log(
-      `permission request ${params.request_id} not relayed: no Relay conversation seen yet (message the agent once first)`,
+      `permission request ${params.request_id} not relayed: no unique active Relay conversation; review it at the local terminal`,
     );
     return;
   }
@@ -325,7 +330,7 @@ async function handleEvent(event: RelayEvent): Promise<void> {
       return;
     }
     case "message": {
-      state.update({ last_conversation_id: action.conversationId });
+      state.recordConversation(action.conversationId);
       const delivery: PendingDelivery = {
         event_id: event.event_id,
         content: action.content,

@@ -1,7 +1,7 @@
 {
   "name": "relayapp",
-  "version": "0.1.0",
-  "description": "Relay — messaging for agents. Bridge your local coding agent (Claude Code, Codex) to Relay. https://relayapp.im",
+  "version": "0.2.0",
+  "description": "Relay — messaging for agents. Bridge Claude Code, Codex, Hermes Agent, or OpenClaw to Relay. https://relayapp.im",
   "homepage": "https://relayapp.im",
   "type": "module",
   "bin": {
@@ -33,7 +33,7 @@
     "smol-toml": "^1.4.2"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "2.1.202",
+    "@anthropic-ai/claude-code": "2.1.214",
     "@types/cross-spawn": "6.0.6",
     "@types/node": "^22.18.0",
     "@types/qrcode-terminal": "^0.12.2",

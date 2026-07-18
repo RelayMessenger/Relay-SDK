@@ -468,21 +468,21 @@ test("permission card reply is consumed by the broker, not forwarded to the engi
   assert.equal(pending.length, 1);
   const requestId = pending[0]!.request_id;
   assert.match(requestId, /^[a-km-z]{5}$/);
-  const card = posted.find((entry) => entry.key === `claude-perm-${requestId}`);
+  const card = posted.find((entry) => entry.key === `agent-perm-${requestId}`);
   assert.ok(card, "permission card was posted");
   // Channel-plugin wire shape: text part with the yes/no fallback + data part.
   assert.equal(card!.body.parts[0].type, "text");
   assert.match(card!.body.parts[0].text, new RegExp(`yes ${requestId}`));
   const data = card!.body.parts[1];
   assert.equal(data.type, "data");
-  assert.equal(data.data.kind, "claude_permission_request");
+  assert.equal(data.data.kind, "agent_permission_request");
   assert.equal(data.data.request_id, requestId);
   assert.deepEqual(
     data.data.options.map((option: any) => option.id),
     ["allow", "deny"],
   );
   assert.deepEqual(data.data.options[0].origin, {
-    kind: "claude_permission_request",
+    kind: "agent_permission_request",
     request_id: requestId,
   });
   assert.deepEqual(card!.body.suggestions, [
@@ -685,7 +685,7 @@ test("verdict parsing matches the channel plugin: data-part tap and text fallbac
   assert.equal(parseVerdictText("sounds good"), null);
   assert.deepEqual(
     parseVerdictDataPart({
-      origin: { kind: "claude_permission_request", request_id: "abcde" },
+      origin: { kind: "agent_permission_request", request_id: "abcde" },
       option_id: "allow",
     }),
     { request_id: "abcde", behavior: "allow" },
@@ -695,7 +695,7 @@ test("verdict parsing matches the channel plugin: data-part tap and text fallbac
     { request_id: "abcde", behavior: "deny" },
   );
   assert.deepEqual(
-    parseVerdictDataPart({ kind: "claude_permission_request", request_id: "mnopq", behavior: "reject" }),
+    parseVerdictDataPart({ kind: "agent_permission_request", request_id: "mnopq", behavior: "reject" }),
     { request_id: "mnopq", behavior: "deny" },
   );
   assert.equal(parseVerdictDataPart({ request_id: "toolong", option: "allow" }), null);

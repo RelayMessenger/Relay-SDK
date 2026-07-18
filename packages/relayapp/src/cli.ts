@@ -2,8 +2,8 @@
 /**
  * relayapp — bridge your local coding agent to Relay.
  *
- *   relayapp pair [--engine claude|codex|opencode] [--name <device-name>]
- *   relayapp start [--engine claude|codex|opencode] [--dir <path>]
+ *   relayapp pair [--engine <preset>] [--name <device-name>]
+ *   relayapp start [--engine <preset>] [--dir <path>]
  *   relayapp install-codex
  *   relayapp install-claude
  *   relayapp install-openclaw
@@ -16,7 +16,7 @@ import { PRODUCTION_ORIGIN, RelayClient } from "./api.js";
 import { notifyCommand, permissionRequestHook } from "./codex.js";
 import { doctor } from "./doctor.js";
 import { AcpEngine } from "./engine/acp.js";
-import { OpencodeEngine, opencodeServerFromEnv } from "./engine/opencode.js";
+import { ENGINE_HELP, enginePermissionTimeoutMs } from "./engine/catalog.js";
 import { installClaude, installCodex, installOpenClaw } from "./install.js";
 import { parseFlags } from "./flags.js";
 import { mcpServe } from "./mcp.js";
@@ -37,7 +37,8 @@ const USAGE = `relayapp — bridge your local coding agent to Relay (https://rel
 
   relayapp pair            pair this machine with the Relay app (QR + code)
   relayapp start           receive messages and drive the engine
-      --engine claude|codex|opencode   (default claude)
+      --engine <preset>       (default claude)
+      presets: ${ENGINE_HELP}
       --dir <path>            working directory for engine sessions
   relayapp install-codex   wire Codex notify + phone approvals + MCP server
   relayapp install-claude  point at the Claude Code channel plugin
@@ -75,25 +76,13 @@ async function main(): Promise<number> {
         const state = new StateStore(runtimeHome);
         const sessions = new SessionStore(runtimeHome);
         const approvals = new ApprovalStore(runtimeHome);
-        const engine =
-          flags.engine === "opencode"
-            ? new OpencodeEngine(
-                sessions,
-                {
-                  server: opencodeServerFromEnv(
-                    config.opencode
-                      ? {
-                          url: config.opencode.server_url,
-                          username: config.opencode.username,
-                          password: config.opencode.password,
-                        }
-                      : undefined,
-                  ),
-                },
-                log,
-              )
-            : new AcpEngine(flags.engine, sessions, log);
-        const broker = new PermissionBroker(client, approvals, undefined, log);
+        const engine = new AcpEngine(flags.engine, sessions, log);
+        const broker = new PermissionBroker(
+          client,
+          approvals,
+          enginePermissionTimeoutMs(flags.engine),
+          log,
+        );
         const loop = new ReceiveLoop(client, state, engine, broker, {
           ownerUserId,
           cwd: flags.dir ?? process.cwd(),

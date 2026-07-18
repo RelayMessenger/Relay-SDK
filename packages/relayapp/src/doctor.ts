@@ -1,10 +1,11 @@
 /** `relayapp doctor` — environment and pairing health checks. */
-import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import crossSpawn from "cross-spawn";
 import { RelayClient } from "./api.js";
 import { ADAPTER_PACKAGES, ADAPTER_VERSIONS, adapterEntrypoint } from "./engine/acp.js";
+import { EXTERNAL_ENGINE_SPECS } from "./engine/catalog.js";
 import {
   ApprovalStore,
   ConfigStore,
@@ -86,26 +87,37 @@ export async function doctor(out: (line: string) => void = console.log): Promise
     }
   }
 
-  // opencode is an optional engine: absence is informational, but a binary
-  // that is present yet cannot report a version is a real failure.
-  const opencodeLookup = spawnSync(process.platform === "win32" ? "where.exe" : "which", ["opencode"], {
-    encoding: "utf8",
-    windowsHide: true,
-  });
-  if (opencodeLookup.status !== 0) {
-    out("info  no opencode binary on PATH — install https://opencode.ai to use --engine opencode");
-  } else {
-    const opencodeProbe = spawnSync("opencode", ["--version"], {
+  for (const [engine, spec] of Object.entries(EXTERNAL_ENGINE_SPECS)) {
+    const lookup = crossSpawn.sync(process.platform === "win32" ? "where.exe" : "which", [spec.command], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    if (lookup.status !== 0) {
+      out(`info  ${engine}: not installed — ${spec.docsUrl}`);
+      continue;
+    }
+    const version = crossSpawn.sync(spec.command, spec.versionArgs, {
       encoding: "utf8",
       timeout: 20_000,
-      shell: process.platform === "win32",
       windowsHide: true,
     });
     check(
-      opencodeProbe.status === 0,
-      "opencode binary present",
-      opencodeProbe.stdout?.trim() || opencodeProbe.stderr?.trim(),
+      version.status === 0,
+      `${engine} binary present`,
+      version.stdout?.trim() || version.stderr?.trim(),
     );
+    if (spec.checkArgs) {
+      const readiness = crossSpawn.sync(spec.command, spec.checkArgs, {
+        encoding: "utf8",
+        timeout: 30_000,
+        windowsHide: true,
+      });
+      check(
+        readiness.status === 0,
+        `${engine} ACP readiness`,
+        readiness.stdout?.trim() || readiness.stderr?.trim(),
+      );
+    }
   }
 
   const codexConfig = join(homedir(), ".codex", "config.toml");

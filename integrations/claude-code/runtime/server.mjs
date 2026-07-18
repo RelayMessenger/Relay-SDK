@@ -24902,18 +24902,18 @@ function buildPermissionCard(request, conversationId) {
     {
       id: "allow",
       label: "Allow",
-      origin: { kind: "claude_permission_request", request_id: id }
+      origin: { kind: "agent_permission_request", request_id: id }
     },
     {
       id: "deny",
       label: "Deny",
-      origin: { kind: "claude_permission_request", request_id: id }
+      origin: { kind: "agent_permission_request", request_id: id }
     }
   ] : [
     {
       id: "deny",
       label: "Deny",
-      origin: { kind: "claude_permission_request", request_id: id }
+      origin: { kind: "agent_permission_request", request_id: id }
     }
   ];
   return {
@@ -24924,7 +24924,7 @@ function buildPermissionCard(request, conversationId) {
         {
           type: "data",
           data: {
-            kind: "claude_permission_request",
+            kind: "agent_permission_request",
             request_id: id,
             tool_name: toolName,
             description,
@@ -24938,7 +24938,7 @@ function buildPermissionCard(request, conversationId) {
     },
     // Deterministic per request id: a retried relay of the same prompt can
     // never post the card twice. (Server requires 8..255 chars.)
-    idempotencyKey: `claude-perm-${id}`,
+    idempotencyKey: `agent-perm-${id}`,
     remoteAllowEnabled
   };
 }
@@ -25070,6 +25070,7 @@ var DEFAULT_BASE_URL = "https://api.relayapp.im";
 var RECENT_EVENT_IDS_LIMIT = 500;
 var OUTBOUND_SENDS_LIMIT = 500;
 var PENDING_DELIVERIES_LIMIT = 1e3;
+var OBSERVED_CONVERSATIONS_LIMIT = 100;
 var DEFAULT_APPROVAL_TTL_MS = 10 * 60 * 1e3;
 function channelDir(env = process.env) {
   return env.RELAY_CHANNEL_DIR ?? join(homedir(), ".claude", "channels", "relay");
@@ -25256,7 +25257,16 @@ var StateStore = class {
       if (parsed.last_conversation_id !== void 0 && typeof parsed.last_conversation_id !== "string") {
         throw new Error("invalid routing state");
       }
-      this.routingState = parsed;
+      if (parsed.observed_conversation_ids !== void 0 && (!Array.isArray(parsed.observed_conversation_ids) || parsed.observed_conversation_ids.some(
+        (conversationId) => typeof conversationId !== "string" || !conversationId.startsWith("cnv_")
+      ))) {
+        throw new Error("invalid observed conversations");
+      }
+      const observed = parsed.observed_conversation_ids ?? (parsed.last_conversation_id ? [parsed.last_conversation_id] : []);
+      this.routingState = {
+        ...parsed,
+        observed_conversation_ids: [...new Set(observed)].slice(-OBSERVED_CONVERSATIONS_LIMIT)
+      };
     } catch {
       quarantineCorrupt(this.sessionStatePath);
       this.routingState = {};
@@ -25292,7 +25302,11 @@ var StateStore = class {
     }
   }
   get() {
-    return { ...this.consumerState, ...this.routingState };
+    return {
+      ...this.consumerState,
+      ...this.routingState,
+      observed_conversation_ids: [...this.routingState.observed_conversation_ids ?? []]
+    };
   }
   update(patch) {
     if (patch.cursor !== void 0 || patch.owner_user_id !== void 0) {
@@ -25304,12 +25318,43 @@ var StateStore = class {
       writeJsonAtomic(this.statePath, this.consumerState);
     }
     if (patch.last_conversation_id !== void 0) {
-      this.routingState = {
-        ...this.routingState,
-        last_conversation_id: patch.last_conversation_id
-      };
-      writeJsonAtomic(this.sessionStatePath, this.routingState);
+      this.recordConversation(patch.last_conversation_id);
     }
+  }
+  /** Record only after the sender gate accepted a real inbound Relay event. */
+  recordConversation(conversationId) {
+    if (!conversationId.startsWith("cnv_")) {
+      throw new Error("conversation id must start with cnv_");
+    }
+    const observed = (this.routingState.observed_conversation_ids ?? []).filter(
+      (id) => id !== conversationId
+    );
+    observed.push(conversationId);
+    this.routingState = {
+      last_conversation_id: conversationId,
+      observed_conversation_ids: observed.slice(-OBSERVED_CONVERSATIONS_LIMIT)
+    };
+    writeJsonAtomic(this.sessionStatePath, this.routingState);
+  }
+  hasObservedConversation(conversationId) {
+    return (this.routingState.observed_conversation_ids ?? []).includes(conversationId);
+  }
+  /**
+   * Bind a permission notification to its only safe active destination.
+   * Claude's channel permission payload has no chat id. A pending delivery is
+   * the strongest available causal link; if multiple conversations are
+   * pending, fail closed instead of sending an approval card to the wrong chat.
+   */
+  permissionConversationId() {
+    const pending = new Set(
+      Object.values(this.consumerLedger.pending_deliveries).map(
+        (delivery) => delivery.conversation_id
+      )
+    );
+    if (pending.size === 1) return pending.values().next().value;
+    if (pending.size > 1) return void 0;
+    const observed = this.routingState.observed_conversation_ids ?? [];
+    return observed.length === 1 ? observed[0] : void 0;
   }
   saveConsumerLedger() {
     writeJsonAtomic(this.ledgerPath, this.consumerLedger);
@@ -25580,8 +25625,9 @@ function startPoller(options) {
             options.log(`long-poll conflict (${error51.code}): ${error51.message}; retrying in ${CONFLICT_BACKOFF_MS / 1e3}s`);
             waitMs = CONFLICT_BACKOFF_MS;
           } else if (error51.status === 401) {
-            options.log("agent token rejected (401); check ~/.claude/channels/relay/.env, retrying in 60s");
-            waitMs = MAX_BACKOFF_MS;
+            options.log("agent token rejected (401); stopping channel \u2014 check ~/.claude/channels/relay/.env");
+            controller.abort();
+            return;
           } else {
             options.log(`long-poll failed (${error51.status} ${error51.code}); backing off ${Math.round(waitMs / 1e3)}s`);
           }
@@ -25747,6 +25793,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (typeof chat_id !== "string" || !chat_id.startsWith("cnv_")) {
     return toolError("chat_id must be a Relay conversation id (cnv_\u2026)");
   }
+  if (!state.hasObservedConversation(chat_id)) {
+    return toolError(
+      "chat_id was not observed in an owner-authenticated Relay delivery for this Claude session"
+    );
+  }
   if (typeof text !== "string" || text.length === 0) return toolError("text must be non-empty");
   if (typeof send_id !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(send_id)) {
     return toolError("send_id must be 1-128 letters, digits, dot, underscore, colon, or hyphen");
@@ -25793,10 +25844,10 @@ mcp.setNotificationHandler(PermissionRequestSchema, async ({ params }) => {
     log(`permission request ${params.request_id} not relayed: channel state is not ready`);
     return;
   }
-  const conversationId = state.get().last_conversation_id;
+  const conversationId = state.permissionConversationId();
   if (!conversationId) {
     log(
-      `permission request ${params.request_id} not relayed: no Relay conversation seen yet (message the agent once first)`
+      `permission request ${params.request_id} not relayed: no unique active Relay conversation; review it at the local terminal`
     );
     return;
   }
@@ -25882,7 +25933,7 @@ async function handleEvent(event) {
       return;
     }
     case "message": {
-      state.update({ last_conversation_id: action.conversationId });
+      state.recordConversation(action.conversationId);
       const delivery = {
         event_id: event.event_id,
         content: action.content,

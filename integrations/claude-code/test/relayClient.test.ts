@@ -125,7 +125,7 @@ describe("RelayClient against a mocked Relay server", () => {
 
     const request = relay.requests.at(-1);
     assert.ok(request);
-    assert.equal(request.headers["idempotency-key"], "claude-perm-abcde");
+    assert.equal(request.headers["idempotency-key"], "agent-perm-abcde");
     const body = request.body as { parts: { type: string }[] };
     assert.deepEqual(body.parts.map((p) => p.type), ["text", "data"]);
   });

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { RelayClient } from "./api.js";
-import { sendMcpMessage } from "./mcp.js";
+import { MCP_PROTOCOL_VERSION, negotiateMcpProtocolVersion, sendMcpMessage } from "./mcp.js";
 
 function context(home: string, postMessage: RelayClient["postMessage"]) {
   return () => ({
@@ -66,4 +66,10 @@ test("Codex MCP requires a bounded caller-stable send_id", async () => {
     sendMcpMessage({ text: "hi" }, { requireContext: context(home, postMessage) }),
     /send_id is required/,
   );
+});
+
+test("MCP negotiation never echoes an unsupported client protocol", () => {
+  assert.equal(negotiateMcpProtocolVersion(MCP_PROTOCOL_VERSION), MCP_PROTOCOL_VERSION);
+  assert.equal(negotiateMcpProtocolVersion("2099-01-01"), MCP_PROTOCOL_VERSION);
+  assert.equal(negotiateMcpProtocolVersion(undefined), MCP_PROTOCOL_VERSION);
 });

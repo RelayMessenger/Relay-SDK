@@ -77,6 +77,8 @@ interface ConsumerState {
 
 interface SessionRoutingState {
   last_conversation_id?: string;
+  /** Conversations whose owner-authenticated messages reached this session. */
+  observed_conversation_ids?: string[];
 }
 
 export interface ChannelState extends ConsumerState, SessionRoutingState {}
@@ -94,6 +96,7 @@ interface SessionLedger {
 export const RECENT_EVENT_IDS_LIMIT = 500;
 export const OUTBOUND_SENDS_LIMIT = 500;
 export const PENDING_DELIVERIES_LIMIT = 1_000;
+export const OBSERVED_CONVERSATIONS_LIMIT = 100;
 const DEFAULT_APPROVAL_TTL_MS = 10 * 60 * 1000;
 
 export function channelDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -330,7 +333,25 @@ export class StateStore {
       ) {
         throw new Error("invalid routing state");
       }
-      this.routingState = parsed;
+      if (
+        parsed.observed_conversation_ids !== undefined &&
+        (!Array.isArray(parsed.observed_conversation_ids) ||
+          parsed.observed_conversation_ids.some(
+            (conversationId) =>
+              typeof conversationId !== "string" || !conversationId.startsWith("cnv_"),
+          ))
+      ) {
+        throw new Error("invalid observed conversations");
+      }
+      // Migrate the pre-0.2 routing shape without weakening the outbound
+      // allowlist: an old last_conversation_id was itself learned from an
+      // owner-authenticated inbound delivery.
+      const observed = parsed.observed_conversation_ids ??
+        (parsed.last_conversation_id ? [parsed.last_conversation_id] : []);
+      this.routingState = {
+        ...parsed,
+        observed_conversation_ids: [...new Set(observed)].slice(-OBSERVED_CONVERSATIONS_LIMIT),
+      };
     } catch {
       quarantineCorrupt(this.sessionStatePath);
       this.routingState = {};
@@ -378,7 +399,11 @@ export class StateStore {
   }
 
   get(): ChannelState {
-    return { ...this.consumerState, ...this.routingState };
+    return {
+      ...this.consumerState,
+      ...this.routingState,
+      observed_conversation_ids: [...(this.routingState.observed_conversation_ids ?? [])],
+    };
   }
 
   update(patch: Partial<ChannelState>): void {
@@ -391,12 +416,46 @@ export class StateStore {
       writeJsonAtomic(this.statePath, this.consumerState);
     }
     if (patch.last_conversation_id !== undefined) {
-      this.routingState = {
-        ...this.routingState,
-        last_conversation_id: patch.last_conversation_id,
-      };
-      writeJsonAtomic(this.sessionStatePath, this.routingState);
+      this.recordConversation(patch.last_conversation_id);
     }
+  }
+
+  /** Record only after the sender gate accepted a real inbound Relay event. */
+  recordConversation(conversationId: string): void {
+    if (!conversationId.startsWith("cnv_")) {
+      throw new Error("conversation id must start with cnv_");
+    }
+    const observed = (this.routingState.observed_conversation_ids ?? []).filter(
+      (id) => id !== conversationId,
+    );
+    observed.push(conversationId);
+    this.routingState = {
+      last_conversation_id: conversationId,
+      observed_conversation_ids: observed.slice(-OBSERVED_CONVERSATIONS_LIMIT),
+    };
+    writeJsonAtomic(this.sessionStatePath, this.routingState);
+  }
+
+  hasObservedConversation(conversationId: string): boolean {
+    return (this.routingState.observed_conversation_ids ?? []).includes(conversationId);
+  }
+
+  /**
+   * Bind a permission notification to its only safe active destination.
+   * Claude's channel permission payload has no chat id. A pending delivery is
+   * the strongest available causal link; if multiple conversations are
+   * pending, fail closed instead of sending an approval card to the wrong chat.
+   */
+  permissionConversationId(): string | undefined {
+    const pending = new Set(
+      Object.values(this.consumerLedger.pending_deliveries).map(
+        (delivery) => delivery.conversation_id,
+      ),
+    );
+    if (pending.size === 1) return pending.values().next().value;
+    if (pending.size > 1) return undefined;
+    const observed = this.routingState.observed_conversation_ids ?? [];
+    return observed.length === 1 ? observed[0] : undefined;
   }
 
   private saveConsumerLedger(): void {

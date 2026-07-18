@@ -6,8 +6,12 @@ import {
   ADAPTER_VERSIONS,
   adapterEntrypoint,
   engineEnv,
+  engineProcessSpec,
+  mergeToolCall,
   permissionDetail,
+  permissionInputComplete,
 } from "./acp.js";
+import { ENGINE_NAMES, EXTERNAL_ENGINE_SPECS } from "./catalog.js";
 
 test("ACP adapters are exact runtime dependencies with installed entrypoints", () => {
   const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
@@ -18,6 +22,24 @@ test("ACP adapters are exact runtime dependencies with installed entrypoints", (
       `${engine} adapter dependency must be exact`,
     );
     assert.equal(existsSync(adapterEntrypoint(engine)), true);
+  }
+});
+
+test("every named external engine uses its documented shell-free ACP argv", () => {
+  for (const engine of ENGINE_NAMES) {
+    const processSpec = engineProcessSpec(engine);
+    assert.equal(processSpec.command.length > 0, true, `${engine} command`);
+    assert.equal(processSpec.args.length > 0, true, `${engine} args`);
+    if (engine === "claude" || engine === "codex") {
+      assert.equal(processSpec.command, process.execPath);
+    } else {
+      assert.deepEqual(processSpec, {
+        command: EXTERNAL_ENGINE_SPECS[engine].command,
+        args: EXTERNAL_ENGINE_SPECS[engine].args,
+        display: `${EXTERNAL_ENGINE_SPECS[engine].displayName} (` +
+          `${EXTERNAL_ENGINE_SPECS[engine].command} ${EXTERNAL_ENGINE_SPECS[engine].args.join(" ")})`,
+      });
+    }
   }
 });
 
@@ -60,16 +82,45 @@ test("ACP approval detail includes raw input, affected paths and content", () =>
   assert.match(detail!, /deploy --production/);
   assert.match(detail!, /\/repo\/infra\.ts/);
   assert.match(detail!, /full command context/);
+  assert.match(detail!, /--- before\na\n\+\+\+ after\nb/);
+  assert.equal(permissionInputComplete({
+    toolCallId: "tool_1",
+    rawInput: { command: "deploy --production" },
+  }), true);
 });
 
-test("ACP approval detail fails closed when raw input is unavailable", () => {
-  const detail = permissionDetail({
+test("ACP approval detail accepts a complete cached diff without raw input", () => {
+  const first = mergeToolCall(undefined, {
     toolCallId: "tool_2",
+    title: "Update app.ts",
+    content: [
+      { type: "diff", path: "/repo/app.ts", oldText: "old", newText: "new" },
+    ],
+  });
+  const permission = mergeToolCall(first, {
+    toolCallId: "tool_2",
+    status: "pending",
+  });
+  const detail = permissionDetail(permission);
+  assert.match(detail!, /diff \/repo\/app\.ts/);
+  assert.match(detail!, /--- before\nold\n\+\+\+ after\nnew/);
+  assert.equal(permissionInputComplete(permission), true);
+});
+
+test("ACP approval detail fails closed when exact input is unavailable", () => {
+  const detail = permissionDetail({
+    toolCallId: "tool_3",
     title: "Shell",
     kind: "execute",
     status: "pending",
     locations: [{ path: "/repo/infra.ts", line: 12 }],
     content: [{ type: "content", content: { type: "text", text: "generic summary" } }],
   } as any);
-  assert.equal(detail, undefined);
+  assert.equal(detail, "paths: /repo/infra.ts\ngeneric summary");
+  assert.equal(permissionInputComplete({
+    toolCallId: "tool_3",
+    locations: [{ path: "/repo/infra.ts", line: 12 }],
+    content: [{ type: "content", content: { type: "text", text: "generic summary" } }],
+  }), false);
+  assert.equal(permissionInputComplete({ toolCallId: "tool_4", rawInput: null }), false);
 });

@@ -63,9 +63,9 @@ function normalizeBehavior(value: unknown): PermissionBehavior | null {
  * card we send tags each option with the request id (see buildPermissionCard);
  * the app's tap reply echoes the origin. Accepted shapes, checked in order:
  *
- *   { origin: { kind: "claude_permission_request", request_id }, option_id }
+ *   { origin: { kind: "agent_permission_request", request_id }, option_id }
  *   { origin: { request_id }, option: "allow" | "deny" }
- *   { kind: "claude_permission_request", request_id, behavior | option_id }
+ *   { kind: "agent_permission_request", request_id, behavior | option_id }
  *
  * The request id must match the Claude Code alphabet; the option value must
  * normalize to allow/deny. Anything else is not a verdict.
@@ -321,19 +321,19 @@ export function buildPermissionCard(
         {
           id: "allow",
           label: "Allow",
-          origin: { kind: "claude_permission_request", request_id: id },
+          origin: { kind: "agent_permission_request", request_id: id },
         },
         {
           id: "deny",
           label: "Deny",
-          origin: { kind: "claude_permission_request", request_id: id },
+          origin: { kind: "agent_permission_request", request_id: id },
         },
       ]
     : [
         {
           id: "deny",
           label: "Deny",
-          origin: { kind: "claude_permission_request", request_id: id },
+          origin: { kind: "agent_permission_request", request_id: id },
         },
       ];
 
@@ -345,7 +345,7 @@ export function buildPermissionCard(
         {
           type: "data",
           data: {
-            kind: "claude_permission_request",
+            kind: "agent_permission_request",
             request_id: id,
             tool_name: toolName,
             description,
@@ -359,7 +359,7 @@ export function buildPermissionCard(
     },
     // Deterministic per request id: a retried relay of the same prompt can
     // never post the card twice. (Server requires 8..255 chars.)
-    idempotencyKey: `claude-perm-${id}`,
+    idempotencyKey: `agent-perm-${id}`,
     remoteAllowEnabled,
   };
 }

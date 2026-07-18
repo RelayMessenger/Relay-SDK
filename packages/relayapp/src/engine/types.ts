@@ -1,7 +1,6 @@
 /**
  * Narrow engine-adapter boundary. The receive loop only knows this interface;
- * AcpEngine (claude/codex over stdio) and OpencodeEngine (HTTP: session
- * create / prompt_async / permission reply-by-id) both slot in without the
+ * AcpEngine drives every supported coding runtime over ACP stdio without the
  * loop knowing which. `SessionRef` is opaque per engine — adapters own their
  * own binding from conversation_id to whatever session identity they need.
  */

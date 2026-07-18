@@ -219,7 +219,7 @@ describe("server.ts end to end against a mock Relay", () => {
     );
     await waitFor(() => posted.length > 0, "permission card POST");
     const post = posted[0];
-    assert.equal(post.headers["idempotency-key"], "claude-perm-abcde");
+    assert.equal(post.headers["idempotency-key"], "agent-perm-abcde");
     assert.equal(post.headers.authorization, "Bearer rly_e2e_token");
     const body = post.body as { conversation_id: string; parts: { type: string; text?: string }[] };
     assert.equal(body.conversation_id, "cnv_e2e");
@@ -254,7 +254,7 @@ describe("server.ts end to end against a mock Relay", () => {
   });
 
   it("uses a persisted logical send id for retry-safe outbound delivery", async () => {
-    const call = (id: number, text: string): void => {
+    const call = (id: number, text: string, chatId = "cnv_e2e"): void => {
       child.stdin?.write(
         `${JSON.stringify({
           jsonrpc: "2.0",
@@ -262,11 +262,18 @@ describe("server.ts end to end against a mock Relay", () => {
           method: "tools/call",
           params: {
             name: "reply",
-            arguments: { chat_id: "cnv_e2e", text, send_id: "reply-to-evt-1" },
+            arguments: { chat_id: chatId, text, send_id: "reply-to-evt-1" },
           },
         })}\n`,
       );
     };
+
+    const postsBeforeUnknownReply = posted.length;
+    call(19, "wrong destination", "cnv_unseen");
+    await waitFor(() => rpcResponses.has(19), "unobserved reply tool response");
+    const unobserved = rpcResponses.get(19) as { result?: { isError?: boolean } };
+    assert.equal(unobserved.result?.isError, true);
+    assert.equal(posted.length, postsBeforeUnknownReply);
 
     call(20, "done");
     await waitFor(() => rpcResponses.has(20), "first reply tool response");

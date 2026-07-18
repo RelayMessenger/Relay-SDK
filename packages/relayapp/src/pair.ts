@@ -82,7 +82,7 @@ async function finalizeSavedPairing(
   } as RelayConfig["agent"];
   config.save({ ...saved, agent, owner_user_id: ownerUserId });
   out(`Owner pinned: ${ownerUserId}. Only this user can drive the bridge.`);
-  out("Next: relayapp start --engine claude   (or --engine codex | --engine opencode)");
+  out("Next: relayapp start --engine claude   (run `relayapp help` for every ACP preset)");
 }
 
 export async function pair(options: PairOptions): Promise<void> {

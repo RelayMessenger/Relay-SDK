@@ -82,8 +82,12 @@ export function startPoller(options: PollerOptions): { stop: () => void; done: P
             options.log(`long-poll conflict (${error.code}): ${error.message}; retrying in ${CONFLICT_BACKOFF_MS / 1000}s`);
             waitMs = CONFLICT_BACKOFF_MS;
           } else if (error.status === 401) {
-            options.log("agent token rejected (401); check ~/.claude/channels/relay/.env, retrying in 60s");
-            waitMs = MAX_BACKOFF_MS;
+            // Authentication cannot recover through polling. Stop cleanly so
+            // a supervisor/user sees a terminal failure instead of an
+            // endless unauthorized request loop.
+            options.log("agent token rejected (401); stopping channel — check ~/.claude/channels/relay/.env");
+            controller.abort();
+            return;
           } else {
             options.log(`long-poll failed (${error.status} ${error.code}); backing off ${Math.round(waitMs / 1000)}s`);
           }

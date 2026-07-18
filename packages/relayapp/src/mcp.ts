@@ -27,6 +27,13 @@ const TOOL = {
   },
 };
 
+/** The one MCP revision this deliberately small server implements. */
+export const MCP_PROTOCOL_VERSION = "2025-06-18";
+
+export function negotiateMcpProtocolVersion(_requested: unknown): string {
+  return MCP_PROTOCOL_VERSION;
+}
+
 export interface McpSendDependencies {
   requireContext?: typeof requireClient;
 }
@@ -89,7 +96,7 @@ export async function mcpServe(): Promise<void> {
       switch (method) {
         case "initialize":
           reply({
-            protocolVersion: params?.protocolVersion ?? "2025-06-18",
+            protocolVersion: negotiateMcpProtocolVersion(params?.protocolVersion),
             capabilities: { tools: {} },
             serverInfo: { name: "relayapp", version: "0.1.0" },
           });

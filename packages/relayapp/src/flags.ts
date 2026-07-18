@@ -1,7 +1,8 @@
 import { resolve } from "node:path";
+import { ENGINE_HELP, isEngineName, type EngineName } from "./engine/catalog.js";
 
 export interface CliFlags {
-  engine: "claude" | "codex" | "opencode";
+  engine: EngineName;
   dir?: string;
   name?: string;
   rest: string[];
@@ -15,8 +16,8 @@ export function parseFlags(argv: string[]): CliFlags {
       throw new Error("--staging is unavailable because Relay has no live staging API origin.");
     } else if (arg === "--engine") {
       const value = argv[++i];
-      if (value !== "claude" && value !== "codex" && value !== "opencode") {
-        throw new Error(`--engine must be "claude", "codex", or "opencode", got ${value ?? "(nothing)"}`);
+      if (!isEngineName(value)) {
+        throw new Error(`--engine must be one of ${ENGINE_HELP}, got ${value ?? "(nothing)"}`);
       }
       flags.engine = value;
     } else if (arg === "--dir") {

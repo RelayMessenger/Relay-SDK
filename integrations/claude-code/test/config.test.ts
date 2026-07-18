@@ -118,6 +118,7 @@ describe("namespaced durable state", () => {
       created_at: 1,
     });
     sessionA.update({ cursor: 17, last_conversation_id: "cnv_1" });
+    assert.equal(sessionA.hasObservedConversation("cnv_1"), true);
     sessionA.acknowledgeDelivery("evt_session_a");
     sessionA.registerApproval(
       { request_id: "abcde", tool_name: "Bash", description: "List", input_preview: '{"command":"ls"}' },
@@ -130,6 +131,7 @@ describe("namespaced durable state", () => {
     assert.equal(sessionB.hasSeenEvent("evt_session_a"), true);
     assert.equal(sessionB.pendingDeliveries().length, 0);
     assert.equal(sessionB.get().last_conversation_id, undefined);
+    assert.deepEqual(sessionB.get().observed_conversation_ids, []);
     assert.equal(sessionB.pendingApproval("abcde"), undefined);
   });
 
@@ -159,6 +161,33 @@ describe("namespaced durable state", () => {
     assert.equal(reloaded.acknowledgeDelivery("evt_pending"), true);
     assert.equal(new StateStore(dir, SCOPE).pendingDeliveries().length, 0);
     assert.equal(new StateStore(dir, SCOPE).hasSeenEvent("evt_pending"), true);
+  });
+
+  it("binds permissions only when pending deliveries identify one conversation", () => {
+    const dir = tempDir();
+    const store = new StateStore(dir, SCOPE);
+    store.recordConversation("cnv_1");
+    assert.equal(store.permissionConversationId(), "cnv_1");
+    store.queueDelivery({
+      event_id: "evt_one",
+      content: "first",
+      meta: { chat_id: "cnv_1", sender: "usr_1" },
+      conversation_id: "cnv_1",
+      created_at: 1,
+    });
+    store.recordConversation("cnv_2");
+    store.queueDelivery({
+      event_id: "evt_two",
+      content: "second",
+      meta: { chat_id: "cnv_2", sender: "usr_1" },
+      conversation_id: "cnv_2",
+      created_at: 2,
+    });
+    assert.equal(store.hasObservedConversation("cnv_2"), true);
+    assert.equal(store.hasObservedConversation("cnv_unseen"), false);
+    assert.equal(store.permissionConversationId(), undefined);
+    store.acknowledgeDelivery("evt_one");
+    assert.equal(store.permissionConversationId(), "cnv_2");
   });
 
   it("fails closed when corrupt cursor state could replay events older than the dedupe window", () => {

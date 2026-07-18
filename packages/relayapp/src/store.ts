@@ -53,12 +53,6 @@ export interface RelayConfig {
   owner_user_id?: string;
   agent?: { id?: string; handle?: string; display_name?: string };
   paired_at?: string;
-  /**
-   * Optional operator-run opencode server for `--engine opencode` attach
-   * mode. Absent → the bridge spawns `opencode serve` itself. Env overrides:
-   * OPENCODE_SERVER_URL / OPENCODE_SERVER_USERNAME / OPENCODE_SERVER_PASSWORD.
-   */
-  opencode?: { server_url?: string; username?: string; password?: string };
 }
 
 /** Stable, non-secret identity label used inside account-scoped ledgers. */

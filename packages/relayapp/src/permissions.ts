@@ -6,7 +6,7 @@
  * (integrations/claude-code/src/bridge.ts): one Relay message with a
  * human-readable text part (including the "yes <id>" / "no <id>" text
  * fallback) plus a `data` part
- *   { kind: "claude_permission_request", request_id, tool_name, description,
+ *   { kind: "agent_permission_request", request_id, tool_name, description,
  *     input_preview, options: [{ id: "allow"|"deny", label,
  *     origin: { kind, request_id } }] }
  * and the same tolerant reply parser (origin-tagged data-part tap or text
@@ -24,10 +24,11 @@ import { randomInt } from "node:crypto";
 import type { RelayClient } from "./api.js";
 import type { ApprovalStore, PendingApproval, RelayMessage } from "./store.js";
 import type { PermissionAsk, PermissionDecision } from "./engine/types.js";
+import { engineDisplayName } from "./engine/catalog.js";
 
 export const APPROVAL_TIMEOUT_MS = 10 * 60 * 1000;
 
-export const PERMISSION_CARD_KIND = "claude_permission_request";
+export const PERMISSION_CARD_KIND = "agent_permission_request";
 
 /** Claude Code request-id alphabet: five lowercase letters, never "l". */
 const REQUEST_ID_ALPHABET = "abcdefghijkmnopqrstuvwxyz";
@@ -68,9 +69,9 @@ function normalizeBehavior(value: unknown): "allow" | "deny" | null {
  * Parses an origin-tagged option tap carried in a `data` part. Accepted
  * shapes, checked in order (identical to the channel plugin):
  *
- *   { origin: { kind: "claude_permission_request", request_id }, option_id }
+ *   { origin: { kind: "agent_permission_request", request_id }, option_id }
  *   { origin: { request_id }, option: "allow" | "deny" }
- *   { kind: "claude_permission_request", request_id, behavior | option_id }
+ *   { kind: "agent_permission_request", request_id, behavior | option_id }
  */
 export function parseVerdictDataPart(data: unknown): PermissionVerdict | null {
   if (typeof data !== "object" || data === null) return null;
@@ -166,7 +167,7 @@ export function sanitizePermissionPreview(value: string): string {
 export interface PermissionCardInput {
   requestId: string;
   conversationId: string;
-  /** Human name for the asking engine: "Claude", "Codex". */
+  /** Human name for the asking engine. */
   engineLabel: string;
   toolName?: string;
   description?: string;
@@ -215,7 +216,7 @@ export function buildPermissionCard(input: PermissionCardInput): {
       // Chip text IS the sent text, so the chips carry the parseable fallback.
       suggestions: [{ text: `yes ${id}` }, { text: `no ${id}` }],
     },
-    idempotencyKey: `claude-perm-${id}`,
+    idempotencyKey: `agent-perm-${id}`,
   };
 }
 
@@ -334,7 +335,7 @@ export class PermissionBroker {
       card = buildPermissionCard({
         requestId,
         conversationId,
-        engineLabel: engine === "codex" ? "Codex" : engine === "opencode" ? "opencode" : "Claude",
+        engineLabel: engineDisplayName(engine),
         toolName: askInput.toolName,
         description: askInput.title,
         inputPreview: askInput.inputPreview,
