@@ -47,12 +47,19 @@ describe("config loading", () => {
     assert.equal(config.agentToken, "rly_from_file");
   });
 
-  it("tightens .env to mode 600", () => {
+  it("tightens .env to user-only permissions where POSIX modes are enforced", () => {
     const dir = tempDir();
     const envPath = join(dir, ".env");
     writeFileSync(envPath, "RELAY_AGENT_TOKEN=rly_x\n", { mode: 0o644 });
     loadConfig({ RELAY_CHANNEL_DIR: dir } as NodeJS.ProcessEnv);
-    assert.equal(statSync(envPath).mode & 0o777, 0o600);
+    if (process.platform !== "win32") {
+      assert.equal(statSync(envPath).mode & 0o777, 0o600);
+    } else {
+      // Windows reports synthetic POSIX mode bits; chmod cannot express its
+      // ACL model. The load still exercises the hardening call without
+      // pretending those bits prove Windows access control.
+      assert.equal(readFileSync(envPath, "utf8"), "RELAY_AGENT_TOKEN=rly_x\n");
+    }
   });
 
   it("TOFU is off unless RELAY_ALLOW_TOFU=1", () => {

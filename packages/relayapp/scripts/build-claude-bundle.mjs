@@ -25,17 +25,25 @@ const openclawGenerated = join(scratch, "openclaw-plugin");
 const openclawTarget = join(packageRoot, "openclaw-plugin");
 
 function run(command, args, cwd = repoRoot, env = process.env) {
-  const result = spawnSync(command, args, {
+  const resolvedCommand = process.platform === "win32"
+    && !/[\\/]/.test(command)
+    && !/\.(?:exe|cmd|bat)$/i.test(command)
+    ? `${command}.cmd`
+    : command;
+  const result = spawnSync(resolvedCommand, args, {
     cwd,
     env,
     encoding: "utf8",
     stdio: "pipe",
+    shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(resolvedCommand),
     windowsHide: true,
   });
   if (result.status !== 0) {
     process.stderr.write(result.stdout ?? "");
     process.stderr.write(result.stderr ?? "");
-    throw new Error(`${command} ${args.join(" ")} failed with status ${result.status ?? "unknown"}`);
+    throw new Error(
+      `${resolvedCommand} ${args.join(" ")} failed with status ${result.status ?? "unknown"}`,
+    );
   }
 }
 
