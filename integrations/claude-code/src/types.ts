@@ -1,0 +1,72 @@
+/**
+ * Relay wire shapes used by the channel server. These mirror the /v1 contract
+ * (plan/12-coding-agent-bridge.md §A, server/src/domain/commitMessage.ts and
+ * server/src/domain/events.ts). The plugin keeps its own copies on purpose:
+ * it ships standalone under ${CLAUDE_PLUGIN_ROOT} and must not import from
+ * the monorepo workspaces.
+ */
+
+export type RelayPartType = "text" | "media" | "voice_memo" | "link_preview" | "data";
+
+export interface RelayPart {
+  part_index?: number;
+  type: RelayPartType;
+  text?: string;
+  url?: string;
+  attachment_id?: string;
+  duration_ms?: number;
+  data?: unknown;
+}
+
+export interface RelaySender {
+  kind: "user" | "agent" | "system";
+  id: string;
+}
+
+export interface RelayMessage {
+  id: string;
+  conversation_id: string;
+  sequence: number;
+  sender: RelaySender;
+  parts: RelayPart[];
+  reply_to?: { message_id: string; part_index?: number } | null;
+  fallback_text?: string;
+  status?: string;
+  created_at: string;
+}
+
+/** Developer-facing event envelope from GET /v1/events (AgentEventEnvelope). */
+export interface RelayEvent {
+  event_id: string;
+  event_type: string;
+  agent_id: string;
+  created_at: string;
+  data: unknown;
+}
+
+export interface PollEventsResponse {
+  events: RelayEvent[];
+  next_cursor: number;
+}
+
+/** Body for POST /v1/messages (agent bearer auth). */
+export interface SendMessageBody {
+  conversation_id: string;
+  parts: RelayPart[];
+  suggestions?: { text: string }[];
+}
+
+/** Fields of notifications/claude/channel/permission_request params. */
+export interface PermissionRequest {
+  request_id: string;
+  tool_name: string;
+  description: string;
+  input_preview: string;
+}
+
+export type PermissionBehavior = "allow" | "deny";
+
+export interface PermissionVerdict {
+  request_id: string;
+  behavior: PermissionBehavior;
+}

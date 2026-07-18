@@ -1,0 +1,260 @@
+/**
+ * Receive loop: long-poll GET /v1/events → durable queue → engine turn →
+ * one finalized POST /v1/messages per turn.
+ *
+ * Reliability contract (patterns from research/sdk-integrations/01 §1.4):
+ *  - Durable-before-ack: inbound events are appended to state.json's
+ *    pending_events queue in the SAME atomic write that advances the cursor,
+ *    so an acked event is always durable and a crash replays, never drops.
+ *  - Dedupe: delivery is at-least-once; event_id is checked against a
+ *    persisted seen-set before enqueueing.
+ *  - Debounce: rapid messages in one conversation coalesce for ~800 ms into a
+ *    single engine turn.
+ *  - Supervisor: poll/turn failures restart with exponential backoff + jitter.
+ */
+import { createHash } from "node:crypto";
+import type { RelayClient } from "./api.js";
+import type { RelayEvent, RelayMessage, StateStore } from "./store.js";
+import type { EngineAdapter } from "./engine/types.js";
+import { PermissionBroker } from "./permissions.js";
+
+export interface ReceiveLoopOptions {
+  /** Pinned Relay user id allowed to drive this bridge (required). */
+  ownerUserId: string;
+  debounceMs?: number;
+  cwd?: string;
+  log?: (line: string) => void;
+  /** Injected for tests. */
+  setTimeoutImpl?: typeof setTimeout;
+}
+
+export function turnIdempotencyKey(conversationId: string, lastEventId: string): string {
+  const digest = createHash("sha256").update(`${conversationId}\n${lastEventId}`).digest("hex");
+  return `relay-turn-${digest.slice(0, 40)}`;
+}
+
+export function promptTextFromMessages(messages: RelayMessage[]): string {
+  const chunks: string[] = [];
+  for (const message of messages) {
+    const text = message.parts
+      .filter((part) => part.type === "text" && typeof part.text === "string")
+      .map((part) => part.text as string)
+      .join("\n")
+      .trim();
+    chunks.push(text.length > 0 ? text : message.fallback_text);
+  }
+  return chunks.filter((chunk) => chunk && chunk.length > 0).join("\n\n");
+}
+
+export class ReceiveLoop {
+  private readonly ownerUserId: string;
+  private readonly debounceMs: number;
+  private readonly cwd: string;
+  private readonly log: (line: string) => void;
+  private readonly setTimeoutImpl: typeof setTimeout;
+  private readonly debounceTimers = new Map<string, NodeJS.Timeout>();
+  /** Serializes turns per conversation. */
+  private readonly turnChains = new Map<string, Promise<void>>();
+  private stopped = false;
+
+  constructor(
+    private readonly client: RelayClient,
+    private readonly state: StateStore,
+    private readonly engine: EngineAdapter,
+    readonly broker: PermissionBroker,
+    options: ReceiveLoopOptions,
+  ) {
+    this.ownerUserId = options.ownerUserId;
+    this.debounceMs = options.debounceMs ?? 800;
+    this.cwd = options.cwd ?? process.cwd();
+    this.log = options.log ?? (() => {});
+    this.setTimeoutImpl = options.setTimeoutImpl ?? setTimeout;
+  }
+
+  /**
+   * One poll cycle: fetch, dedupe, durably enqueue + ack, schedule flushes.
+   * Exposed for tests; `run()` supervises it forever.
+   */
+  async pollOnce(timeoutS = 25): Promise<number> {
+    const page = await this.client.getEvents(this.state.current.cursor, timeoutS);
+    const touched = new Set<string>();
+    let accepted = 0;
+    for (const event of page.events ?? []) {
+      if (!event.event_id || this.state.hasSeen(event.event_id)) continue;
+      this.state.markSeen(event.event_id);
+      const routed = this.routeEvent(event);
+      if (routed) {
+        touched.add(routed);
+        accepted += 1;
+      }
+    }
+    // Durable-before-ack: queue mutation and cursor advance are one atomic write.
+    if (typeof page.next_cursor === "number") {
+      this.state.current.cursor = page.next_cursor;
+    }
+    this.state.persist();
+    for (const conversationId of touched) this.scheduleFlush(conversationId);
+    return accepted;
+  }
+
+  /** Returns the conversation id when the event was enqueued for the engine. */
+  private routeEvent(event: RelayEvent): string | undefined {
+    if (event.event_type !== "message.received") return undefined;
+    const message = event.data?.message;
+    if (!message || message.sender?.kind !== "user") return undefined;
+    // Owner gate before any content is interpreted: non-owner senders can
+    // neither prompt the engine nor answer a permission card.
+    if (message.sender.id !== this.ownerUserId) {
+      this.log(`ignoring message from non-owner sender ${message.sender.id}`);
+      return undefined;
+    }
+    // First owner message pins the default notify/MCP conversation.
+    this.state.current.owner_conversation_id ??= message.conversation_id;
+    if (this.broker.consumeReply(message)) return undefined;
+    const queue = (this.state.current.pending_events[message.conversation_id] ??= []);
+    queue.push(event);
+    return message.conversation_id;
+  }
+
+  private scheduleFlush(conversationId: string): void {
+    const existing = this.debounceTimers.get(conversationId);
+    if (existing) clearTimeout(existing);
+    const timer = this.setTimeoutImpl(() => {
+      this.debounceTimers.delete(conversationId);
+      this.chainTurn(conversationId);
+    }, this.debounceMs);
+    (timer as NodeJS.Timeout).unref?.();
+    this.debounceTimers.set(conversationId, timer as NodeJS.Timeout);
+  }
+
+  private chainTurn(conversationId: string): void {
+    const previous = this.turnChains.get(conversationId) ?? Promise.resolve();
+    const next = previous
+      .then(() => this.runTurn(conversationId))
+      .catch((error) => {
+        this.log(`turn failed for ${conversationId}: ${error}`);
+      });
+    this.turnChains.set(conversationId, next);
+  }
+
+  /** Waits for in-flight turns (tests + graceful shutdown). */
+  async settle(): Promise<void> {
+    await Promise.allSettled([...this.turnChains.values()]);
+  }
+
+  async runTurn(conversationId: string): Promise<void> {
+    // Snapshot: routeEvent keeps appending to the live queue while the turn
+    // runs, and the post-turn filter must only remove what THIS turn consumed.
+    const events = [...(this.state.current.pending_events[conversationId] ?? [])];
+    if (events.length === 0) return;
+    const messages = events
+      .map((event) => event.data?.message)
+      .filter((message): message is RelayMessage => message !== undefined);
+    const promptText = promptTextFromMessages(messages);
+    const lastEventId = events[events.length - 1]!.event_id;
+    if (promptText.length === 0) {
+      // Nothing promptable; drop the batch durably.
+      delete this.state.current.pending_events[conversationId];
+      this.state.persist();
+      return;
+    }
+
+    const typing = this.startTyping(conversationId);
+    try {
+      const result = await this.engine.startTurn(
+        { conversationId, cwd: this.cwd },
+        promptText,
+        {
+          onToolEvent: (event) => typing.setLabel(event.title ?? "Working…"),
+          onPermissionAsk: (ask) => this.broker.ask(conversationId, ask, this.engine.engine),
+        },
+      );
+      const text = result.text.trim().length > 0
+        ? result.text.trim()
+        : `(turn finished: ${result.stopReason})`;
+      // Quiet finalization: exactly one POST per turn, idempotent on the turn id.
+      await this.client.postMessage(
+        { conversation_id: conversationId, parts: [{ type: "text", text }] },
+        turnIdempotencyKey(conversationId, lastEventId),
+      );
+      // Success → clear exactly the events this turn consumed.
+      const queue = this.state.current.pending_events[conversationId] ?? [];
+      this.state.current.pending_events[conversationId] = queue.filter(
+        (event) => !events.some((consumed) => consumed.event_id === event.event_id),
+      );
+      if (this.state.current.pending_events[conversationId]!.length === 0) {
+        delete this.state.current.pending_events[conversationId];
+      } else {
+        // New messages arrived mid-turn; run again.
+        this.scheduleFlush(conversationId);
+      }
+      this.state.persist();
+    } finally {
+      await typing.stop();
+    }
+  }
+
+  private startTyping(conversationId: string) {
+    let label: string | undefined;
+    let active = true;
+    const push = () => {
+      if (!active) return;
+      this.client.setTyping(conversationId, true, label).catch(() => {});
+    };
+    push();
+    const interval = setInterval(push, 20_000);
+    interval.unref?.();
+    return {
+      setLabel: (next: string) => {
+        label = next.slice(0, 80);
+        push();
+      },
+      stop: async () => {
+        active = false;
+        clearInterval(interval);
+        await this.client.setTyping(conversationId, false).catch(() => {});
+      },
+    };
+  }
+
+  stop(): void {
+    this.stopped = true;
+    for (const timer of this.debounceTimers.values()) clearTimeout(timer);
+    this.debounceTimers.clear();
+  }
+
+  /** Supervisor: restart the poll loop on failure with capped backoff + jitter. */
+  async run(): Promise<void> {
+    let failures = 0;
+    // Replay anything a previous process left behind.
+    this.broker.sweep();
+    for (const conversationId of Object.keys(this.state.current.pending_events)) {
+      this.scheduleFlush(conversationId);
+    }
+    while (!this.stopped) {
+      try {
+        this.broker.sweep();
+        await this.pollOnce();
+        failures = 0;
+      } catch (error: any) {
+        if (error?.status === 409) {
+          // Another consumer (webhook or second long-poll) owns this token.
+          this.log(`fatal: ${error.message}`);
+          throw error;
+        }
+        if (error?.status === 401) {
+          this.log("fatal: agent token rejected (401) — run `relayapp pair` again.");
+          throw error;
+        }
+        failures += 1;
+        const base = Math.min(500 * 2 ** Math.min(failures, 6), 30_000);
+        const jitter = base * (0.7 + Math.random() * 0.6);
+        this.log(`poll failed (attempt ${failures}), retrying in ${Math.round(jitter)}ms: ${error}`);
+        await new Promise((resolve) => {
+          const timer = this.setTimeoutImpl(resolve, jitter);
+          (timer as NodeJS.Timeout).unref?.();
+        });
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "relayapp",
+  "owner": { "name": "Relay" },
+  "plugins": [
+    {
+      "name": "relay",
+      "source": "./integrations/claude-code",
+      "description": "Text your Claude Code from the Relay app: chat bridge + phone Allow/Deny permission relay"
+    }
+  ]
+}

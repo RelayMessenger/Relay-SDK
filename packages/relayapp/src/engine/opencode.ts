@@ -1,0 +1,604 @@
+/**
+ * opencode engine adapter: drives `opencode serve` over its HTTP API, modeled
+ * on opencode's own Slack bot (packages/slack) and JS SDK server helper.
+ *
+ *  - Server: spawn `opencode serve --hostname=127.0.0.1 --port=0` and parse
+ *    the "opencode server listening on <url>" line (config injected via
+ *    OPENCODE_CONFIG_CONTENT, same as their SDK), or attach to an
+ *    operator-run server via url + basic auth (OPENCODE_SERVER_PASSWORD /
+ *    OPENCODE_SERVER_USERNAME semantics match opencode's own).
+ *  - Sessions: POST /session per conversation; the binding persists in
+ *    ~/.relayapp/sessions.json alongside the ACP bindings and is validated
+ *    with GET /session/:id before reuse.
+ *  - Turns: POST /session/:id/prompt_async (fire-and-forget matches messaging
+ *    semantics), then consume the SSE GET /event stream
+ *    (server.connected/heartbeat framing). session.next.text.* deltas
+ *    coalesce into the single finalized reply; session.next.tool.called is
+ *    surfaced as a typing label; the turn ends on session.status idle.
+ *  - permission.asked → onPermissionAsk; the phone's Allow/Deny maps onto
+ *    POST /permission/:requestID/reply {reply: "once" | "reject"}.
+ *  - question.asked → a single question with structured options is surfaced
+ *    as a permission-style card (Allow = first option); anything richer is
+ *    auto-rejected with a log so the turn cannot hang on the phone.
+ */
+import { spawn, type ChildProcess } from "node:child_process";
+import type {
+  EngineAdapter,
+  PermissionAsk,
+  SessionRef,
+  TurnCallbacks,
+  TurnResult,
+} from "./types.js";
+import type { SessionStore } from "../store.js";
+
+export interface OpencodeServerConfig {
+  /** Attach to an operator-run server instead of spawning one. */
+  url?: string;
+  username?: string;
+  password?: string;
+}
+
+export interface OpencodeEngineOptions {
+  server?: OpencodeServerConfig;
+  binary?: string;
+  /** OPENCODE_CONFIG_CONTENT for the spawned server (per their SDK). */
+  config?: Record<string, unknown>;
+  spawnTimeoutMs?: number;
+  fetchImpl?: typeof fetch;
+}
+
+/** Resolve attach-mode settings from env (opencode's own variable names). */
+export function opencodeServerFromEnv(
+  base?: OpencodeServerConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): OpencodeServerConfig | undefined {
+  const url = env.OPENCODE_SERVER_URL ?? base?.url;
+  const password = env.OPENCODE_SERVER_PASSWORD ?? base?.password;
+  const username = env.OPENCODE_SERVER_USERNAME ?? base?.username;
+  if (!url && !password && !username) return undefined;
+  return { url, username, password };
+}
+
+/** Parses the spawn banner: "opencode server listening on http://…". */
+export function parseServerUrl(line: string): string | undefined {
+  if (!line.startsWith("opencode server listening")) return undefined;
+  return /on\s+(https?:\/\/[^\s]+)/.exec(line)?.[1];
+}
+
+interface OpencodeEvent {
+  type: string;
+  properties?: Record<string, unknown>;
+}
+
+interface EventStream {
+  abort: AbortController;
+  ready: Promise<void>;
+  closed: boolean;
+}
+
+interface TurnState {
+  conversationId: string;
+  directory: string;
+  callbacks: TurnCallbacks;
+  /** textID → accumulated text; text.ended replaces with the full value. */
+  texts: Map<string, string>;
+  /** Set once any activity for this session is seen; gates idle completion. */
+  live: boolean;
+  stopReason: string;
+  lastError?: string;
+  settled: boolean;
+  resolve(result: TurnResult): void;
+  reject(error: Error): void;
+}
+
+export class OpencodeEngine implements EngineAdapter {
+  readonly engine = "opencode";
+  private readonly binary: string;
+  private readonly attach?: OpencodeServerConfig;
+  private readonly config: Record<string, unknown>;
+  private readonly spawnTimeoutMs: number;
+  private readonly fetchImpl: typeof fetch;
+
+  private child: ChildProcess | undefined;
+  private baseUrl: string | undefined;
+  private starting: Promise<void> | undefined;
+  /** One SSE subscription per working directory (server routes by directory). */
+  private readonly streams = new Map<string, EventStream>();
+  /** Live turn state keyed by opencode session id. */
+  private readonly turns = new Map<string, TurnState>();
+  /** conversation_id → opencode session id for this process. */
+  private readonly liveSessions = new Map<string, string>();
+
+  constructor(
+    private readonly sessions: SessionStore,
+    options: OpencodeEngineOptions = {},
+    private readonly log: (line: string) => void = () => {},
+  ) {
+    this.binary = options.binary ?? "opencode";
+    this.attach = options.server?.url ? options.server : undefined;
+    this.config = options.config ?? {};
+    this.spawnTimeoutMs = options.spawnTimeoutMs ?? 15_000;
+    this.fetchImpl = options.fetchImpl ?? fetch;
+  }
+
+  // ---------------------------------------------------------------- server
+
+  private authHeaders(): Record<string, string> {
+    if (!this.attach?.password) return {};
+    const username = this.attach.username ?? "opencode";
+    const token = Buffer.from(`${username}:${this.attach.password}`).toString("base64");
+    return { authorization: `Basic ${token}` };
+  }
+
+  private async ensureServer(): Promise<string> {
+    if (this.attach?.url) return this.attach.url.replace(/\/$/, "");
+    if (this.baseUrl && this.child && this.child.exitCode === null) return this.baseUrl;
+    if (!this.starting) {
+      this.starting = this.spawnServer();
+      this.starting.catch(() => {
+        this.starting = undefined;
+      });
+    }
+    await this.starting;
+    return this.baseUrl!;
+  }
+
+  private spawnServer(): Promise<void> {
+    this.log(`spawning ${this.binary} serve`);
+    const child = spawn(this.binary, ["serve", "--hostname=127.0.0.1", "--port=0"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, OPENCODE_CONFIG_CONTENT: JSON.stringify(this.config) },
+      // Own process group so dispose() can kill the whole tree.
+      detached: true,
+    });
+    this.child = child;
+    child.on("exit", (code) => {
+      this.log(`opencode server exited with code ${code}`);
+      this.resetServer(new Error(`opencode server exited with code ${code}`));
+    });
+
+    return new Promise<void>((resolve, reject) => {
+      let output = "";
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
+        this.killChild();
+        reject(new Error(`timeout waiting for opencode server after ${this.spawnTimeoutMs}ms`));
+      }, this.spawnTimeoutMs);
+      timer.unref?.();
+      child.stdout!.on("data", (chunk: Buffer) => {
+        if (resolved) return;
+        output += chunk.toString();
+        for (const line of output.split("\n")) {
+          const url = parseServerUrl(line);
+          if (url) {
+            resolved = true;
+            clearTimeout(timer);
+            this.baseUrl = url;
+            this.log(`opencode server listening on ${url}`);
+            resolve();
+            return;
+          }
+        }
+      });
+      child.stderr!.on("data", (chunk: Buffer) => {
+        output += chunk.toString();
+      });
+      child.on("error", (error) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        reject(new Error(`failed to spawn ${this.binary}: ${error.message}`));
+      });
+      child.on("exit", (code) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        reject(new Error(`opencode server exited with code ${code} before listening\n${output.trim()}`));
+      });
+    });
+  }
+
+  private killChild(): void {
+    if (this.child && this.child.exitCode === null && this.child.pid) {
+      try {
+        process.kill(-this.child.pid, "SIGTERM");
+      } catch {
+        this.child.kill("SIGTERM");
+      }
+    }
+    this.child = undefined;
+  }
+
+  /** Server or stream loss: fail live turns so the supervisor sees the error. */
+  private resetServer(error: Error): void {
+    this.baseUrl = undefined;
+    this.starting = undefined;
+    this.child = undefined;
+    this.liveSessions.clear();
+    for (const stream of this.streams.values()) {
+      stream.closed = true;
+      stream.abort.abort();
+    }
+    this.streams.clear();
+    for (const [sessionId, turn] of [...this.turns]) {
+      this.turns.delete(sessionId);
+      if (!turn.settled) {
+        turn.settled = true;
+        turn.reject(error);
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ http
+
+  private async request<T>(
+    method: string,
+    path: string,
+    opts: { directory?: string; body?: unknown } = {},
+  ): Promise<T> {
+    const base = await this.ensureServer();
+    const url = new URL(base + path);
+    if (opts.directory) url.searchParams.set("directory", opts.directory);
+    const response = await this.fetchImpl(url, {
+      method,
+      headers: {
+        ...this.authHeaders(),
+        ...(opts.body !== undefined ? { "content-type": "application/json" } : {}),
+      },
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`opencode ${method} ${path} failed (${response.status}): ${text.slice(0, 300)}`);
+    }
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      return undefined as T;
+    }
+  }
+
+  // ------------------------------------------------------------ event feed
+
+  private async ensureStream(directory: string): Promise<void> {
+    const existing = this.streams.get(directory);
+    if (existing && !existing.closed) return existing.ready;
+    const abort = new AbortController();
+    let markReady!: () => void;
+    let failReady!: (error: Error) => void;
+    const ready = new Promise<void>((resolve, reject) => {
+      markReady = resolve;
+      failReady = reject;
+    });
+    // A never-consumed rejection (ready already resolved) must not crash.
+    ready.catch(() => {});
+    const stream: EventStream = { abort, ready, closed: false };
+    this.streams.set(directory, stream);
+    void this.readEvents(directory, stream, markReady, failReady);
+    return ready;
+  }
+
+  private async readEvents(
+    directory: string,
+    stream: EventStream,
+    markReady: () => void,
+    failReady: (error: Error) => void,
+  ): Promise<void> {
+    try {
+      const base = await this.ensureServer();
+      const url = new URL(`${base}/event`);
+      url.searchParams.set("directory", directory);
+      const response = await this.fetchImpl(url, {
+        headers: { ...this.authHeaders(), accept: "text/event-stream" },
+        signal: stream.abort.signal,
+      });
+      if (!response.ok || !response.body) {
+        throw new Error(`opencode GET /event failed (${response.status})`);
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let boundary: number;
+        while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const data = frame
+            .split("\n")
+            .map((line) => line.replace(/\r$/, ""))
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).replace(/^ /, ""))
+            .join("\n");
+          if (!data) continue;
+          let event: OpencodeEvent;
+          try {
+            event = JSON.parse(data) as OpencodeEvent;
+          } catch {
+            continue;
+          }
+          if (event.type === "server.connected") markReady();
+          this.dispatch(directory, event);
+        }
+      }
+      throw new Error("opencode event stream closed");
+    } catch (error: any) {
+      stream.closed = true;
+      if (this.streams.get(directory) === stream) this.streams.delete(directory);
+      if (stream.abort.signal.aborted) return; // deliberate close
+      const wrapped =
+        error instanceof Error ? error : new Error(`opencode event stream error: ${error}`);
+      failReady(wrapped);
+      this.log(`event stream for ${directory} died: ${wrapped.message}`);
+      // Turns blocked on this stream can never finish: surface the failure.
+      for (const [sessionId, turn] of [...this.turns]) {
+        if (turn.directory !== directory || turn.settled) continue;
+        this.turns.delete(sessionId);
+        turn.settled = true;
+        turn.reject(new Error(`opencode server connection lost mid-turn: ${wrapped.message}`));
+      }
+    }
+  }
+
+  private dispatch(directory: string, event: OpencodeEvent): void {
+    const props = event.properties ?? {};
+    const sessionId = typeof props.sessionID === "string" ? props.sessionID : undefined;
+    if (!sessionId) return;
+    const turn = this.turns.get(sessionId);
+    if (!turn) return;
+
+    switch (event.type) {
+      case "session.next.text.delta": {
+        turn.live = true;
+        const textId = String(props.textID ?? "text");
+        const delta = typeof props.delta === "string" ? props.delta : "";
+        turn.texts.set(textId, (turn.texts.get(textId) ?? "") + delta);
+        turn.callbacks.onDelta?.(delta);
+        return;
+      }
+      case "session.next.text.ended": {
+        turn.live = true;
+        // Full-value boundary: replaces whatever the deltas accumulated.
+        if (typeof props.text === "string") {
+          turn.texts.set(String(props.textID ?? "text"), props.text);
+        }
+        return;
+      }
+      case "session.next.tool.called": {
+        turn.live = true;
+        turn.callbacks.onToolEvent?.({
+          kind: "tool_call",
+          title: typeof props.tool === "string" ? props.tool : undefined,
+        });
+        return;
+      }
+      case "session.next.step.ended": {
+        turn.live = true;
+        if (typeof props.finish === "string") turn.stopReason = props.finish;
+        return;
+      }
+      case "session.next.step.failed":
+      case "session.error": {
+        turn.live = true;
+        turn.lastError = summarizeError(props.error ?? props);
+        return;
+      }
+      case "session.status": {
+        const status = props.status as { type?: string } | undefined;
+        if (status?.type === "idle") {
+          if (turn.live) this.finishTurn(sessionId, turn);
+        } else if (status?.type) {
+          turn.live = true;
+        }
+        return;
+      }
+      case "permission.asked": {
+        void this.handlePermissionAsked(turn, props).catch((error) => {
+          this.log(`permission reply failed: ${error}`);
+        });
+        return;
+      }
+      case "question.asked": {
+        void this.handleQuestionAsked(turn, props).catch((error) => {
+          this.log(`question reply failed: ${error}`);
+        });
+        return;
+      }
+      default:
+        turn.live = true;
+    }
+  }
+
+  private finishTurn(sessionId: string, turn: TurnState): void {
+    if (turn.settled) return;
+    turn.settled = true;
+    this.turns.delete(sessionId);
+    const text = [...turn.texts.values()].filter((chunk) => chunk.length > 0).join("\n\n");
+    if (text.length === 0 && turn.lastError) {
+      turn.reject(new Error(`opencode turn failed: ${turn.lastError}`));
+      return;
+    }
+    turn.resolve({ text, stopReason: turn.stopReason });
+  }
+
+  // ------------------------------------------------------------- approvals
+
+  private async handlePermissionAsked(
+    turn: TurnState,
+    props: Record<string, unknown>,
+  ): Promise<void> {
+    const requestId = String(props.id ?? "");
+    if (!requestId) return;
+    const permission = typeof props.permission === "string" ? props.permission : "a tool";
+    const patterns = Array.isArray(props.patterns) ? props.patterns.map(String) : [];
+    const ask: PermissionAsk = {
+      requestId,
+      toolName: permission,
+      title: patterns.length > 0 ? `${permission}: ${patterns.join(" ")}` : permission,
+      options: [
+        { optionId: "once", label: "Allow", kind: "allow_once" },
+        { optionId: "reject", label: "Deny", kind: "reject_once" },
+      ],
+    };
+    const decision = await turn.callbacks.onPermissionAsk(ask);
+    const allow = decision.behavior === "selected" && decision.optionId === "once";
+    await this.request("POST", `/permission/${requestId}/reply`, {
+      directory: turn.directory,
+      body: allow ? { reply: "once" } : { reply: "reject", message: "Denied from Relay" },
+    });
+  }
+
+  private async handleQuestionAsked(
+    turn: TurnState,
+    props: Record<string, unknown>,
+  ): Promise<void> {
+    const requestId = String(props.id ?? "");
+    if (!requestId) return;
+    const questions = Array.isArray(props.questions) ? props.questions : [];
+    const first = questions[0] as
+      | { question?: string; header?: string; options?: Array<{ label?: string }> }
+      | undefined;
+    const firstOption = first?.options?.[0]?.label;
+    // Cheap structured path: exactly one question with concrete options maps
+    // onto the binary card (Allow = first option). Anything richer cannot be
+    // represented, so skip it instead of hanging the turn on the phone.
+    if (questions.length !== 1 || !firstOption) {
+      this.log(`question ${requestId} not representable as a binary card — rejecting`);
+      await this.request("POST", `/question/${requestId}/reject`, { directory: turn.directory });
+      return;
+    }
+    const ask: PermissionAsk = {
+      requestId,
+      toolName: "question",
+      title: `${first?.question ?? first?.header ?? "Question"} — Allow answers "${firstOption}"`,
+      options: [
+        { optionId: "accept", label: firstOption, kind: "allow_once" },
+        { optionId: "reject", label: "Skip", kind: "reject_once" },
+      ],
+    };
+    const decision = await turn.callbacks.onPermissionAsk(ask);
+    if (decision.behavior === "selected" && decision.optionId === "accept") {
+      await this.request("POST", `/question/${requestId}/reply`, {
+        directory: turn.directory,
+        body: { answers: [[firstOption]] },
+      });
+    } else {
+      await this.request("POST", `/question/${requestId}/reject`, { directory: turn.directory });
+    }
+  }
+
+  // -------------------------------------------------------------- sessions
+
+  private async openSession(ref: SessionRef): Promise<string> {
+    const live = this.liveSessions.get(ref.conversationId);
+    if (live) return live;
+
+    const stored = this.sessions.get(ref.conversationId);
+    if (stored && stored.engine === this.engine) {
+      try {
+        await this.request("GET", `/session/${stored.session_id}`, { directory: ref.cwd });
+        this.liveSessions.set(ref.conversationId, stored.session_id);
+        return stored.session_id;
+      } catch (error) {
+        this.log(`stored opencode session invalid for ${ref.conversationId}, creating fresh: ${error}`);
+        this.sessions.delete(ref.conversationId);
+      }
+    }
+
+    const created = await this.request<{ id: string }>("POST", "/session", {
+      directory: ref.cwd,
+      body: { title: `Relay ${ref.conversationId}` },
+    });
+    this.liveSessions.set(ref.conversationId, created.id);
+    this.sessions.set(ref.conversationId, {
+      engine: this.engine,
+      session_id: created.id,
+      cwd: ref.cwd,
+      created_at: new Date().toISOString(),
+    });
+    return created.id;
+  }
+
+  // ----------------------------------------------------------------- turns
+
+  async startTurn(ref: SessionRef, promptText: string, callbacks: TurnCallbacks): Promise<TurnResult> {
+    await this.ensureServer();
+    await this.ensureStream(ref.cwd);
+    const sessionId = await this.openSession(ref);
+
+    return await new Promise<TurnResult>((resolve, reject) => {
+      const turn: TurnState = {
+        conversationId: ref.conversationId,
+        directory: ref.cwd,
+        callbacks,
+        texts: new Map(),
+        live: false,
+        stopReason: "end_turn",
+        settled: false,
+        resolve,
+        reject,
+      };
+      this.turns.set(sessionId, turn);
+      // Fire-and-forget prompt: the reply arrives via the event stream.
+      this.request("POST", `/session/${sessionId}/prompt_async`, {
+        directory: ref.cwd,
+        body: { parts: [{ type: "text", text: promptText }] },
+      }).catch((error) => {
+        if (turn.settled) return;
+        turn.settled = true;
+        this.turns.delete(sessionId);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
+    });
+  }
+
+  async abort(ref: SessionRef): Promise<void> {
+    const sessionId = this.liveSessions.get(ref.conversationId);
+    if (!sessionId) return;
+    await this.request("POST", `/session/${sessionId}/abort`, { directory: ref.cwd }).catch((error) => {
+      this.log(`abort failed for ${ref.conversationId}: ${error}`);
+    });
+  }
+
+  async dispose(): Promise<void> {
+    for (const stream of this.streams.values()) {
+      stream.closed = true;
+      stream.abort.abort();
+    }
+    this.streams.clear();
+    for (const [sessionId, turn] of [...this.turns]) {
+      this.turns.delete(sessionId);
+      if (!turn.settled) {
+        turn.settled = true;
+        turn.reject(new Error("opencode engine disposed"));
+      }
+    }
+    this.turns.clear();
+    this.liveSessions.clear();
+    this.killChild();
+    this.baseUrl = undefined;
+    this.starting = undefined;
+  }
+}
+
+function summarizeError(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    for (const key of ["message", "name", "type", "_tag"]) {
+      if (typeof record[key] === "string" && (record[key] as string).length > 0) {
+        return record[key] as string;
+      }
+    }
+    try {
+      return JSON.stringify(error).slice(0, 300);
+    } catch {
+      /* fall through */
+    }
+  }
+  return String(error);
+}
