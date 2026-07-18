@@ -30,8 +30,6 @@ jobs:
         with:
           node-version: 22.22.3
           cache: npm
-      - name: Install an npm CLI with trusted publishing support
-        run: npm install --global npm@12.0.1
       - name: Refuse a mismatched version or tag
         run: node scripts/relayapp-release.mjs check-tag "$RELEASE_TAG"
       - run: npm ci
@@ -42,6 +40,11 @@ jobs:
       - name: Reconcile the version with npm before any publish retry
         id: registry
         run: node scripts/relayapp-release.mjs registry-state
+      # npm 12 blocks unapproved dependency install scripts during `npm ci`.
+      # Keep the setup-node npm for the locked install/Claude native validator,
+      # then upgrade only for OIDC trusted publishing after all artifacts pass.
+      - name: Install an npm CLI with trusted publishing support
+        run: npm install --global npm@12.0.1
       - name: Publish relayapp through npm trusted publishing
         if: ${{ steps.registry.outputs.published != 'true' }}
         run: npm publish --workspace relayapp --access public
