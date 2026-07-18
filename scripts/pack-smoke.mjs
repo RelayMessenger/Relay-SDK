@@ -21,7 +21,19 @@ const installDir = join(temp, "installed");
 
 function npm(args, cwd = repoRoot) {
   const command = process.platform === "win32" ? "npm.cmd" : "npm";
-  return execFileSync(command, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: "utf8",
+    stdio: "pipe",
+    shell: process.platform === "win32",
+    windowsHide: true,
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `${command} ${args.join(" ")} failed:\n${result.stdout ?? ""}\n${result.stderr ?? ""}`,
+    );
+  }
+  return result.stdout ?? "";
 }
 
 function cli(name, args, options = {}) {
