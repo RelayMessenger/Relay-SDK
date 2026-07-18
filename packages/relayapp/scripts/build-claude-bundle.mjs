@@ -9,7 +9,6 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,7 +16,9 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(packageRoot, "../..");
 const integrationRoot = join(repoRoot, "integrations", "claude-code");
 const target = join(packageRoot, "claude-plugin");
-const scratch = mkdtempSync(join(tmpdir(), "relayapp-claude-bundle-"));
+// Keep generated artifacts on the package volume so the final rename remains
+// atomic on Windows runners whose system temp and checkout use different drives.
+const scratch = mkdtempSync(join(packageRoot, ".relayapp-claude-bundle-"));
 const generated = join(scratch, "claude-plugin");
 const marketplace = join(generated, "marketplace");
 const plugin = join(marketplace, "plugins", "relay");
