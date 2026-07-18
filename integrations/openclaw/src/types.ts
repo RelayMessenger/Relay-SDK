@@ -1,6 +1,5 @@
-// Relay wire types (docs/api-reference/openapi.yaml) plus the plugin's config
-// and resolved-account shapes. The long-poll receive contract targets
-// plan/12-coding-agent-bridge.md §A2: GET /v1/events?cursor&timeout&limit ->
+// Relay wire types plus the plugin's config and resolved-account shapes. The
+// long-poll receive contract is GET /v1/events?cursor&timeout&limit ->
 // { events, next_cursor }, cursor N acknowledges everything <= N.
 
 export type RelaySender = {
@@ -86,6 +85,7 @@ export type RelayEvent = {
 
 export type RelayAgentProfile = {
   id: string;
+  owner_user_id?: string;
   handle: string;
   display_name: string;
   tagline?: string;
@@ -114,7 +114,6 @@ export type RelayAccountConfig = {
   token?: string;
   tokenFile?: string;
   baseUrl?: string;
-  dmPolicy?: "open" | "allowlist";
   allowFrom?: Array<string | number>;
   pollTimeoutSeconds?: number;
 };

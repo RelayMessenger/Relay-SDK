@@ -16,18 +16,27 @@ export interface PollerOptions {
   log: (message: string) => void;
   timeoutSeconds?: number;
   /** Test hook: sleep implementation. */
-  sleep?: (ms: number) => Promise<void>;
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
 const BASE_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 60_000;
 const CONFLICT_BACKOFF_MS = 30_000;
 
-function defaultSleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(finish, ms);
+    function finish(): void {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    }
+    signal.addEventListener("abort", finish, { once: true });
+  });
 }
 
-export function startPoller(options: PollerOptions): { stop: () => void } {
+export function startPoller(options: PollerOptions): { stop: () => void; done: Promise<void> } {
   const controller = new AbortController();
   const sleep = options.sleep ?? defaultSleep;
   let backoffMs = BASE_BACKOFF_MS;
@@ -58,7 +67,7 @@ export function startPoller(options: PollerOptions): { stop: () => void } {
           }
         }
         if (batchFailed) {
-          await sleep(BASE_BACKOFF_MS + Math.floor(Math.random() * 500));
+          await sleep(BASE_BACKOFF_MS + Math.floor(Math.random() * 500), controller.signal);
           continue;
         }
         if (batch.next_cursor > options.getCursor()) {
@@ -82,11 +91,11 @@ export function startPoller(options: PollerOptions): { stop: () => void } {
           options.log(`long-poll failed (${String(error)}); backing off ${Math.round(waitMs / 1000)}s`);
         }
         backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
-        await sleep(waitMs + Math.floor(Math.random() * 500));
+        await sleep(waitMs + Math.floor(Math.random() * 500), controller.signal);
       }
     }
   };
 
-  void loop();
-  return { stop: () => controller.abort() };
+  const done = loop();
+  return { stop: () => controller.abort(), done };
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildRelayInboundDedupeKey,
+  createRelayInboundDedupeGuard,
   createRelayInboundDeduper,
 } from "./inbound-dedupe.js";
 import type { RelayClaimableGuard } from "./inbound-dedupe.js";
@@ -78,11 +79,11 @@ describe("relay inbound deduper", () => {
     expect(await deduper.claimEvent("evt_3")).toBe(false);
   });
 
-  it("fails open for events it cannot identify", async () => {
+  it("fails closed for events it cannot identify", async () => {
     const { guard, log } = fakeGuard();
     const deduper = createRelayInboundDeduper({ guard, accountId: "default" });
 
-    expect(await deduper.claimEvent("")).toBe(true);
+    expect(await deduper.claimEvent("")).toBe(false);
     await deduper.commitEvent("");
     deduper.releaseEvent("");
     expect(log).toHaveLength(0);
@@ -95,5 +96,44 @@ describe("relay inbound deduper", () => {
 
     expect(await a.claimEvent("evt")).toBe(true);
     expect(await b.claimEvent("evt")).toBe(true);
+  });
+});
+
+describe("strict durable attempt guard", () => {
+  it("records an attempt before a restart can claim the same event", async () => {
+    const rows = new Map<string, { attemptedAt: number }>();
+    const guard = createRelayInboundDedupeGuard({
+      store: {
+        lookup: (key) => rows.get(key),
+        register: (key, value) => {
+          rows.set(key, value);
+        },
+      },
+    });
+
+    expect((await guard.claim("account\0event", { namespace: "global" })).kind).toBe("claimed");
+    await guard.commit("account\0event", { namespace: "global" });
+    expect((await guard.claim("account\0event", { namespace: "global" })).kind).toBe(
+      "duplicate",
+    );
+  });
+
+  it("propagates a persistence failure instead of dispatching with memory-only state", async () => {
+    const errors: unknown[] = [];
+    const guard = createRelayInboundDedupeGuard({
+      store: {
+        lookup: () => undefined,
+        register: () => {
+          throw new Error("sqlite unavailable");
+        },
+      },
+      onDiskError: (error) => errors.push(error),
+    });
+
+    expect((await guard.claim("account\0event", { namespace: "global" })).kind).toBe("claimed");
+    await expect(guard.commit("account\0event", { namespace: "global" })).rejects.toThrow(
+      /sqlite unavailable/,
+    );
+    expect(errors).toHaveLength(1);
   });
 });

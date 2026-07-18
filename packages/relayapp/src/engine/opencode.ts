@@ -30,6 +30,7 @@ import type {
   TurnResult,
 } from "./types.js";
 import type { SessionStore } from "../store.js";
+import { terminateProcessTree } from "./process.js";
 
 export interface OpencodeServerConfig {
   /** Attach to an operator-run server instead of spawning one. */
@@ -106,8 +107,8 @@ export class OpencodeEngine implements EngineAdapter {
   private readonly streams = new Map<string, EventStream>();
   /** Live turn state keyed by opencode session id. */
   private readonly turns = new Map<string, TurnState>();
-  /** conversation_id → opencode session id for this process. */
-  private readonly liveSessions = new Map<string, string>();
+  /** conversation_id → opencode session + repository for this process. */
+  private readonly liveSessions = new Map<string, { sessionId: string; cwd: string }>();
 
   constructor(
     private readonly sessions: SessionStore,
@@ -148,8 +149,11 @@ export class OpencodeEngine implements EngineAdapter {
     const child = spawn(this.binary, ["serve", "--hostname=127.0.0.1", "--port=0"], {
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, OPENCODE_CONFIG_CONTENT: JSON.stringify(this.config) },
-      // Own process group so dispose() can kill the whole tree.
-      detached: true,
+      // POSIX: own process group so dispose() can kill the whole tree.
+      detached: process.platform !== "win32",
+      // npm-installed command shims are .cmd files on Windows.
+      shell: process.platform === "win32",
+      windowsHide: true,
     });
     this.child = child;
     child.on("exit", (code) => {
@@ -202,10 +206,14 @@ export class OpencodeEngine implements EngineAdapter {
 
   private killChild(): void {
     if (this.child && this.child.exitCode === null && this.child.pid) {
-      try {
-        process.kill(-this.child.pid, "SIGTERM");
-      } catch {
-        this.child.kill("SIGTERM");
+      if (process.platform === "win32") {
+        this.child.kill();
+      } else {
+        try {
+          process.kill(-this.child.pid, "SIGTERM");
+        } catch {
+          this.child.kill("SIGTERM");
+        }
       }
     }
     this.child = undefined;
@@ -398,19 +406,38 @@ export class OpencodeEngine implements EngineAdapter {
       }
       case "permission.asked": {
         void this.handlePermissionAsked(turn, props).catch((error) => {
-          this.log(`permission reply failed: ${error}`);
+          // An undelivered permission reply leaves the engine waiting forever
+          // and the conversation queue blocked behind it: fail the turn so the
+          // supervisor surfaces the error instead of stranding it.
+          this.failTurn(sessionId, turn, `permission reply failed: ${error}`);
         });
         return;
       }
       case "question.asked": {
         void this.handleQuestionAsked(turn, props).catch((error) => {
-          this.log(`question reply failed: ${error}`);
+          this.failTurn(sessionId, turn, `question reply failed: ${error}`);
         });
         return;
       }
       default:
         turn.live = true;
     }
+  }
+
+  private failTurn(sessionId: string, turn: TurnState, message: string): void {
+    this.log(message);
+    if (turn.settled) return;
+    turn.settled = true;
+    this.turns.delete(sessionId);
+    // The server may still be blocked on the permission/question whose reply
+    // failed. Never reuse that session: abort best-effort and force the next
+    // owner message onto a fresh session instead of queueing behind it.
+    this.liveSessions.delete(turn.conversationId);
+    this.sessions.delete(turn.conversationId);
+    void this.request("POST", `/session/${sessionId}/abort`, { directory: turn.directory }).catch(
+      (error) => this.log(`failed to abort stranded opencode session ${sessionId}: ${error}`),
+    );
+    turn.reject(new Error(`opencode turn failed: ${message}`));
   }
 
   private finishTurn(sessionId: string, turn: TurnState): void {
@@ -495,13 +522,16 @@ export class OpencodeEngine implements EngineAdapter {
 
   private async openSession(ref: SessionRef): Promise<string> {
     const live = this.liveSessions.get(ref.conversationId);
-    if (live) return live;
+    if (live?.cwd === ref.cwd) return live.sessionId;
+    if (live) this.liveSessions.delete(ref.conversationId);
 
     const stored = this.sessions.get(ref.conversationId);
-    if (stored && stored.engine === this.engine) {
+    // Same-engine AND same-directory only: a binding from another repository
+    // would reload that repo's history and act against the wrong tree.
+    if (stored && stored.engine === this.engine && stored.cwd === ref.cwd) {
       try {
         await this.request("GET", `/session/${stored.session_id}`, { directory: ref.cwd });
-        this.liveSessions.set(ref.conversationId, stored.session_id);
+        this.liveSessions.set(ref.conversationId, { sessionId: stored.session_id, cwd: ref.cwd });
         return stored.session_id;
       } catch (error) {
         this.log(`stored opencode session invalid for ${ref.conversationId}, creating fresh: ${error}`);
@@ -513,7 +543,7 @@ export class OpencodeEngine implements EngineAdapter {
       directory: ref.cwd,
       body: { title: `Relay ${ref.conversationId}` },
     });
-    this.liveSessions.set(ref.conversationId, created.id);
+    this.liveSessions.set(ref.conversationId, { sessionId: created.id, cwd: ref.cwd });
     this.sessions.set(ref.conversationId, {
       engine: this.engine,
       session_id: created.id,
@@ -557,14 +587,15 @@ export class OpencodeEngine implements EngineAdapter {
   }
 
   async abort(ref: SessionRef): Promise<void> {
-    const sessionId = this.liveSessions.get(ref.conversationId);
-    if (!sessionId) return;
-    await this.request("POST", `/session/${sessionId}/abort`, { directory: ref.cwd }).catch((error) => {
+    const live = this.liveSessions.get(ref.conversationId);
+    if (!live || live.cwd !== ref.cwd) return;
+    await this.request("POST", `/session/${live.sessionId}/abort`, { directory: ref.cwd }).catch((error) => {
       this.log(`abort failed for ${ref.conversationId}: ${error}`);
     });
   }
 
   async dispose(): Promise<void> {
+    const child = this.child;
     for (const stream of this.streams.values()) {
       stream.closed = true;
       stream.abort.abort();
@@ -579,7 +610,8 @@ export class OpencodeEngine implements EngineAdapter {
     }
     this.turns.clear();
     this.liveSessions.clear();
-    this.killChild();
+    this.child = undefined;
+    if (child) await terminateProcessTree(child);
     this.baseUrl = undefined;
     this.starting = undefined;
   }

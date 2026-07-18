@@ -1,7 +1,6 @@
-// startAccount receive engine (doc 03 §3): abort-aware long poll over
-// GET /v1/events with claim -> dispatch -> commit dedup per event and the
-// cursor advanced only after the batch's commits (durable-before-ack,
-// Telegram model). The supervisor owns restart/backoff: this loop settles
+// startAccount receive engine: abort-aware long poll over GET /v1/events with
+// claim -> durable attempt commit -> dispatch per event and the cursor advanced
+// only after the batch's commits. The supervisor owns restart/backoff: this loop settles
 // (throws) on terminal auth failure and consumer conflicts, and only sleeps
 // in-loop for transient errors.
 import { RelayApiError, isAbortError } from "./client.js";
@@ -19,9 +18,9 @@ export type RelayPollLoopParams = {
   deduper: RelayInboundDeduper;
   abortSignal: AbortSignal;
   /**
-   * Durably handle one event (dispatch to the agent or record bookkeeping).
-   * Throwing marks the event retryable: its claim is released, the cursor is
-   * not advanced past it, and the next poll replays it.
+   * Handle one event after its attempt marker is durable. Throwing is logged
+   * and acknowledged, not replayed, because the agent may already have run
+   * non-idempotent tools.
    */
   handleEvent: (event: RelayEvent) => Promise<void>;
   /**
@@ -90,8 +89,8 @@ export async function runRelayPollLoop(params: RelayPollLoopParams): Promise<voi
         throw error;
       }
       if (error instanceof RelayApiError && error.kind === "conflict") {
-        // Another consumer took the long poll (plan 12 §A2, Telegram
-        // semantics). Settle and let the supervisor's backoff arbitrate.
+        // Another consumer took the long poll. Settle and let the
+        // supervisor's backoff arbitrate.
         log(`[relay] long poll terminated by another consumer: ${error.message}`);
         throw error;
       }
@@ -120,23 +119,38 @@ export async function runRelayPollLoop(params: RelayPollLoopParams): Promise<voi
       const claimed = await params.deduper.claimEvent(event.event_id);
       if (claimed) {
         try {
-          await params.handleEvent(event);
+          // This is the side-effect boundary. A crash or thrown dispatch after
+          // this write must suppress replay, because a deploy/delete/send may
+          // already have happened even when no final reply was delivered.
+          await params.deduper.commitEvent(event.event_id);
         } catch (error) {
-          // Retryable dispatch failure: reopen the event and stop the batch so
-          // the cursor never acks past it; the next poll replays the tail and
-          // committed predecessors are suppressed by the dedupe.
+          // Nothing has been dispatched yet, so a failed attempt-marker write
+          // is safe to release and retry.
           params.deduper.releaseEvent(event.event_id);
-          log(`[relay] event ${event.event_id} dispatch failed, will replay: ${String(error)}`);
+          log(`[relay] event ${event.event_id} attempt commit failed, will replay: ${String(error)}`);
           batchFailed = true;
           break;
         }
-        await params.deduper.commitEvent(event.event_id);
+        if (params.abortSignal.aborted) {
+          // This event's attempt is durable, but the unvisited tail is not.
+          // Never acknowledge the page-level cursor past that tail.
+          batchFailed = true;
+          break;
+        }
+        try {
+          await params.handleEvent(event);
+        } catch (error) {
+          log(
+            `[relay] event ${event.event_id} dispatch failed after its attempt was committed; ` +
+              `will not replay possible tool side effects: ${String(error)}`,
+          );
+        }
       }
     }
 
     // The server's next_cursor covers the whole page (cursor N acks <= N), so
-    // only a fully handled batch may ack it; a mid-batch failure acks nothing
-    // and the dedupe absorbs the replayed head of the page.
+    // only a batch with durable attempt markers may ack it. A marker-write
+    // failure acks nothing and committed predecessors absorb the replay.
     if (!batchFailed) {
       await params.cursorStore.advance(page.nextCursor);
     } else {

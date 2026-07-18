@@ -5,7 +5,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { EventsPage, RelayClient } from "./api.js";
 import type { EngineAdapter, TurnCallbacks } from "./engine/types.js";
-import { PermissionBroker, parseVerdictDataPart, parseVerdictText } from "./permissions.js";
+import {
+  MAX_PERMISSION_PREVIEW_CHARS,
+  PermissionBroker,
+  buildPermissionCard,
+  parseVerdictDataPart,
+  parseVerdictText,
+} from "./permissions.js";
 import { ReceiveLoop, promptTextFromMessages, turnIdempotencyKey } from "./receive.js";
 import {
   ApprovalStore,
@@ -307,9 +313,9 @@ test("owner gate: non-owner messages are ignored; first owner message pins the c
   loop.stop();
 });
 
-test("turn failure keeps events durably queued for replay", async () => {
+test("turn failure is surfaced and not replayed because tools may have partially run", async () => {
   const home = tempHome();
-  const { client } = fakeClient({
+  const { client, posted } = fakeClient({
     pages: [{ events: [userMessageEvent("evt_1", "cnv_a", "hello")], next_cursor: 1 }],
   });
   const state = new StateStore(home);
@@ -329,7 +335,69 @@ test("turn failure keeps events durably queued for replay", async () => {
   await loop.pollOnce();
   await sleep(60);
   await loop.settle();
-  assert.equal(diskState(home).pending_events.cnv_a?.length, 1);
+  assert.equal(diskState(home).pending_events.cnv_a, undefined);
+  assert.equal(diskState(home).attempted_turns?.cnv_a, undefined);
+  assert.equal(posted.length, 1);
+  assert.match(posted[0]!.body.parts[0].text, /turn failed/i);
+  loop.stop();
+});
+
+test("crash marker drops an interrupted tool turn instead of executing it twice", async () => {
+  const home = tempHome();
+  const { client, posted } = fakeClient();
+  const state = new StateStore(home);
+  const event = userMessageEvent("evt_crash", "cnv_a", "deploy it");
+  const key = turnIdempotencyKey("cnv_a", event.event_id);
+  state.current.pending_events.cnv_a = [event];
+  (state.current.attempted_turns ??= {}).cnv_a = key;
+  state.persist();
+  const fake = fakeEngine();
+  const loop = new ReceiveLoop(
+    client,
+    new StateStore(home),
+    fake.engine,
+    new PermissionBroker(client, new ApprovalStore(home), 60_000),
+    { ownerUserId: OWNER, debounceMs: 10, cwd: "/tmp" },
+  );
+  await loop.runTurn("cnv_a");
+  assert.equal(fake.turns.length, 0, "interrupted engine turn must not run again");
+  assert.equal(diskState(home).pending_events.cnv_a, undefined);
+  assert.equal(posted.length, 1);
+  assert.match(posted[0]!.body.parts[0].text, /not retried automatically/);
+  loop.stop();
+});
+
+test("completed reply outbox redelivers after restart without rerunning the engine", async () => {
+  const home = tempHome();
+  const { client, posted } = fakeClient();
+  const state = new StateStore(home);
+  const event = userMessageEvent("evt_done", "cnv_a", "send it");
+  const key = turnIdempotencyKey("cnv_a", event.event_id);
+  state.current.pending_events.cnv_a = [event];
+  (state.current.attempted_turns ??= {}).cnv_a = key;
+  (state.current.pending_replies ??= {})[key] = {
+    conversation_id: "cnv_a",
+    event_ids: [event.event_id],
+    text: "finished before the crash",
+    created_at: new Date().toISOString(),
+  };
+  state.persist();
+  const fake = fakeEngine();
+  const loop = new ReceiveLoop(
+    client,
+    new StateStore(home),
+    fake.engine,
+    new PermissionBroker(client, new ApprovalStore(home), 60_000),
+    { ownerUserId: OWNER, debounceMs: 10, cwd: "/tmp" },
+  );
+  await loop.runTurn("cnv_a");
+  assert.equal(fake.turns.length, 0);
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0]!.key, key);
+  assert.equal(posted[0]!.body.parts[0].text, "finished before the crash");
+  const persisted = diskState(home);
+  assert.equal(persisted.pending_events.cnv_a, undefined);
+  assert.equal(persisted.pending_replies?.[key], undefined);
   loop.stop();
 });
 
@@ -477,6 +545,77 @@ test("approval timeout denies via the reject option and consumes the file", asyn
   assert.deepEqual(decision, { behavior: "selected", optionId: "opt_deny" });
   assert.equal(posted.length, 1);
   assert.equal(approvals.list().length, 0);
+});
+
+test("approval waiter is armed before posting, so an immediate phone reply wins", async () => {
+  const home = tempHome();
+  const approvals = new ApprovalStore(home);
+  let broker!: PermissionBroker;
+  const client = {
+    origin: "https://api.relayapp.im",
+    async postMessage(body: any) {
+      const requestId = body.parts[1].data.request_id as string;
+      const tap = userMessageEvent("evt_fast", "cnv_a", `yes ${requestId}`, 2);
+      assert.equal(broker.consumeReply(tap.data!.message!), true);
+      return { message_id: "msg_card", message: { sequence: 1 } };
+    },
+  } as unknown as RelayClient;
+  broker = new PermissionBroker(client, approvals, 60_000);
+  const decision = await broker.ask(
+    "cnv_a",
+    {
+      requestId: "engine_request",
+      toolName: "bash",
+      inputPreview: "git status",
+      options: [
+        { optionId: "allow", label: "Allow", kind: "allow_once" },
+        { optionId: "deny", label: "Deny", kind: "reject_once" },
+      ],
+    },
+    "claude",
+  );
+  assert.deepEqual(decision, { behavior: "selected", optionId: "allow" });
+  assert.equal(approvals.list().length, 0);
+});
+
+test("security-sensitive approval input is complete or the ask fails closed", async () => {
+  const full = `printf start\n${"x".repeat(2_000)}\nprintf dangerous-suffix`;
+  const card = buildPermissionCard({
+    requestId: "abcde",
+    conversationId: "cnv_a",
+    engineLabel: "Codex",
+    toolName: "shell",
+    inputPreview: full,
+  });
+  assert.equal(card.body.parts[1]!.data.input_preview, full);
+  assert.match(card.body.parts[0]!.text as string, /dangerous-suffix$/m);
+  assert.throws(
+    () =>
+      buildPermissionCard({
+        requestId: "abcde",
+        conversationId: "cnv_a",
+        engineLabel: "Codex",
+        inputPreview: "x".repeat(MAX_PERMISSION_PREVIEW_CHARS + 1),
+      }),
+    /only permits approval when the full/,
+  );
+
+  const { client, posted } = fakeClient();
+  const broker = new PermissionBroker(client, new ApprovalStore(tempHome()), 60_000);
+  const decision = await broker.ask(
+    "cnv_a",
+    {
+      requestId: "too_large",
+      inputPreview: "x".repeat(MAX_PERMISSION_PREVIEW_CHARS + 1),
+      options: [
+        { optionId: "allow", label: "Allow", kind: "allow_once" },
+        { optionId: "deny", label: "Deny", kind: "reject_once" },
+      ],
+    },
+    "codex",
+  );
+  assert.deepEqual(decision, { behavior: "selected", optionId: "deny" });
+  assert.equal(posted.length, 0, "unsafe partial card must never be sent");
 });
 
 test("verdict parsing matches the channel plugin: data-part tap and text fallback", () => {

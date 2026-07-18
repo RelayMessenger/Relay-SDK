@@ -1,11 +1,38 @@
 /**
  * Minimal Relay HTTP client for the channel server. Speaks the /v1 agent
- * surface only: GET /v1/events (long-poll, plan/12 §A2) and POST /v1/messages.
- * Self-contained on purpose — the plugin ships standalone and must not import
- * monorepo workspaces.
+ * surface only: GET /v1/events, POST /v1/messages, and GET /v1/agents/me.
+ * Self-contained on purpose: the installed plugin has no sibling-package
+ * runtime dependency.
  */
 
 import type { PollEventsResponse, SendMessageBody } from "./types.ts";
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * Canonicalize and validate the credential destination. Bearer tokens are
+ * only sent to HTTPS origins; plain HTTP is allowed solely for a loopback
+ * development server. Paths, query strings, fragments, and embedded
+ * credentials are rejected so two spellings cannot identify one consumer.
+ */
+export function normalizeRelayBaseUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("RELAY_BASE_URL must be an absolute URL");
+  }
+  if (url.username || url.password) {
+    throw new Error("RELAY_BASE_URL must not contain credentials");
+  }
+  if (url.pathname !== "/" || url.search || url.hash) {
+    throw new Error("RELAY_BASE_URL must be an origin without a path, query, or fragment");
+  }
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname))) {
+    throw new Error("RELAY_BASE_URL must use HTTPS (HTTP is allowed only for loopback development)");
+  }
+  return url.origin;
+}
 
 export class RelayApiError extends Error {
   readonly status: number;
@@ -31,7 +58,7 @@ export class RelayClient {
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: RelayClientOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.baseUrl = normalizeRelayBaseUrl(options.baseUrl);
     this.token = options.token;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }

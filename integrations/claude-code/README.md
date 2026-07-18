@@ -1,145 +1,153 @@
 # Relay channel for Claude Code
 
-Message your Claude Code session from your Relay agent conversation. This
-plugin is an MCP stdio server implementing the Claude Code
-[channels contract](https://code.claude.com/docs/en/channels-reference)
-(research preview):
+Message a running Claude Code session through your Relay agent conversation.
+The plugin is a self-contained MCP stdio server for Claude Code's experimental
+[channels contract](https://code.claude.com/docs/en/channels-reference).
 
-- **Inbound**: long-polls Relay `GET /v1/events` with your Agent Token and
-  forwards the owner's messages into the session as
-  `notifications/claude/channel` events
-  (`<channel source="relay" chat_id="cnv_…" sender="usr_…">`).
-- **Outbound**: a `reply` MCP tool that `POST /v1/messages` back into the
-  conversation (with an `Idempotency-Key`, so retries never duplicate).
-- **Permission relay**: when Claude Code opens a tool-approval dialog, the
-  prompt is posted to your Relay conversation as a card with Allow/Deny
-  options tagged with the request id. Tap an option, or text
-  `yes <id>` / `no <id>`, and the verdict is returned as
-  `notifications/claude/channel/permission`. The local terminal dialog stays
-  live; the first answer wins.
+- Owner-authenticated Relay messages enter the session as
+  `notifications/claude/channel` events.
+- The `reply` tool sends a logical message back with retry-safe idempotency.
+- Permission prompts can be reviewed and denied from Relay. Remote Allow is
+  available only when Claude supplies a complete, verifiable tool-input JSON;
+  otherwise approval remains local.
 
 ## Requirements
 
-- Node.js >= 22.18 (the server runs TypeScript natively) — or Bun
-- A Relay agent and its Agent Token (Relay app → your agent → Agent Token)
-- The agent must **not** have an enabled webhook endpoint: Relay's event
-  stream is long-poll XOR webhook, and `GET /v1/events` returns
-  `409 conflict` while a webhook is enabled
+- Node.js 20.11 or newer
+- Claude Code with channel support (channels remain a research preview)
+- A Relay agent and Agent Token
+- No webhook enabled for that agent: Relay permits one event consumer, so
+  long-polling and webhook delivery are mutually exclusive
 
 ## Install
 
-From a marketplace that lists this plugin:
+From a marketplace containing this plugin:
 
-```
+```text
 /plugin install relay@<marketplace>
 ```
 
-Then install the server's dependencies in the installed plugin directory
-(where this README lives):
-
-```
-npm install --omit=dev
-```
+The installed plugin already contains `runtime/server.mjs` with all runtime
+dependencies bundled. Do not locate a plugin cache or run `npm install` after
+installation.
 
 ## Configure
 
-Run `/relay:configure` for guided setup, or create
-`~/.claude/channels/relay/.env` yourself:
+Run `/relay:configure`, or create the platform-equivalent of:
 
+```text
+~/.claude/channels/relay/.env
 ```
+
+with owner-only permissions and these values:
+
+```dotenv
 RELAY_AGENT_TOKEN=<your agent token>
 RELAY_BASE_URL=https://api.relayapp.im
-# Pin the only user allowed to reach this session (usr_…). If unset, the
-# owner is fetched from GET /v1/agents/me; if that also fails, the channel
-# refuses to start.
-#RELAY_OWNER_USER_ID=
-# Explicit opt-in: pin the FIRST user who messages the agent as owner.
-# Only use this for private agents you alone can message.
+# Optional explicit owner pin. Otherwise GET /v1/agents/me must return one.
+#RELAY_OWNER_USER_ID=usr_...
+# Optional stable session namespace. Defaults to the Claude project directory.
+#RELAY_CHANNEL_SESSION_ID=my-repository
+# Explicit opt-in for a private agent only: trust the first user sender.
 #RELAY_ALLOW_TOFU=1
 ```
 
-Use `RELAY_BASE_URL=https://api.staging.relayapp.im` against staging. The
-long-poll cursor and learned routing state persist in `state.json` in the same
-directory.
+`RELAY_BASE_URL` must be an HTTPS origin with no path, query, fragment, or
+embedded credentials. Plain HTTP is accepted only for `localhost`,
+`127.0.0.1`, or `::1` development servers. Use
+`https://api.staging.relayapp.im` for staging; a production token is not
+automatically valid or safe to use there.
 
-## Run (research preview)
+Verify without printing the token:
 
-Channels are in research preview and custom channels are not on the approved
-allowlist, so start Claude Code with the development flag:
-
+```text
+node <installed-plugin-directory>/runtime/server.mjs --check
 ```
-# installed as a plugin
+
+## Run
+
+Custom channels require Claude Code's development-channel flag during the
+research preview:
+
+```text
 claude --dangerously-load-development-channels plugin:relay@<marketplace>
-
-# or, registered as a bare MCP server in .mcp.json
-claude --dangerously-load-development-channels server:relay
 ```
 
-Claude Code shows a full-screen development-channels warning, then registers
-the channel: messages you send to your agent in the Relay app appear directly
-in the session.
+Use `server:relay` instead when registered as a bare MCP server.
 
-## Security model
+Only one live Claude session may consume an agent's event stream. A second
+session fails closed instead of stealing the long-poll consumer. Use a
+different Relay agent when two sessions must receive messages concurrently.
 
-- **Sender gate (fail closed)**: only the agent's **owner** user id passes.
-  The owner is resolved from `RELAY_OWNER_USER_ID` in `.env`, else from
-  `owner_user_id` in `GET /v1/agents/me`. If neither is available the channel
-  refuses to start — a stranger messaging a public agent can never silently
-  become the session's owner. Trust-on-first-use pinning (first user sender
-  becomes owner, persisted in `state.json`) is available only as an explicit
-  opt-in via `RELAY_ALLOW_TOFU=1` and logs a warning when it pins. Every
-  non-owner sender is dropped before any content reaches Claude — including
-  permission verdicts.
-- **Verdict interception, gated on open requests**: option taps and
-  `yes <id>` / `no <id>` replies are consumed and emitted as verdict
-  notifications **only while that request id is outstanding** (opened by a
-  `permission_request`, closed by the first verdict, expired after 10
-  minutes). Anything verdict-shaped without an open id — like the ordinary
-  sentence "no worry" — falls through to Claude as normal chat, and an id can
-  never be answered twice or after expiry.
-- **Replay containment**: the cursor only advances past events whose
-  notification was written to the session (a failed handoff keeps the cursor
-  and retries), and a bounded persisted dedupe set of recent event ids stops
-  a cursor reset or corrupt `state.json` from replaying the event log into
-  Claude's context.
-- **Untrusted display fields**: `description` and `input_preview` from
-  permission requests are sanitized (bidi/invisible characters stripped,
-  whitespace folded, length clamped) before being sent to Relay, on top of
-  the client-side sanitization in Claude Code >= 2.1.211.
-- The Agent Token stays in `~/.claude/channels/relay/.env` (never in chat, in
-  the transcript, or in this repository).
+## Delivery and retry contract
 
-## Wire contract notes
+Channel notifications are unacknowledged at the Claude transport layer. This
+plugin therefore stages each inbound event in an atomic local ledger before
+notifying Claude and includes `delivery_id="evt_..."` on the channel tag.
+Claude calls the `acknowledge` tool after fully handling it. Until then, the
+delivery is re-notified every 30 seconds and replayed after a channel restart.
+This is **at-least-once**, not exactly-once, delivery.
 
-- `GET /v1/events?cursor=<n>&timeout=<1..30>&limit=<1..100>` →
-  `{ events: [{ event_id, event_type, agent_id, created_at, data }], next_cursor }`;
-  passing the cursor acknowledges everything at or below it (Telegram
-  getUpdates model). Cursor is persisted after each processed batch.
-- Inbound messages are `message.received` events whose `data.message` is the
-  canonical Relay message; `chat_id` is `message.conversation_id`, `sender`
-  is `message.sender.id`.
-- The permission card is one Relay message with a text part (human-readable,
-  includes the text fallback instructions) and a `data` part:
-  `{ kind: "claude_permission_request", request_id, tool_name, description,
-  input_preview, options: [{ id: "allow"|"deny", label, origin: { kind,
-  request_id } }] }`. A tap reply arrives as a `data` part echoing the origin
-  tag plus the chosen option; the text fallback matches
-  `/^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$/i`.
+A crash after an external side effect but before acknowledgement can replay the
+request. Before repeating a deploy, deletion, payment, shell command, or other
+non-idempotent action, reconcile whether it already succeeded. The bridge
+cannot make arbitrary tools exactly-once.
+
+Outbound `reply` calls require a `send_id`. Reuse the same `send_id`,
+conversation, and text for an unknown-outcome retry; use a new `send_id` for an
+intentional repeat. The mapping is persisted before the HTTP request, and
+reusing an id with different content is rejected.
+
+## Permission safety and data boundary
+
+Claude's channel permission notification exposes `input_preview`, documented
+as JSON truncated at 200 characters. The plugin no longer truncates or folds
+that field: it sends every character it receives and makes invisible controls
+visible. When the value is shorter than the truncation boundary and parses as
+complete JSON, the Relay card offers Allow and Deny. Otherwise it clearly says
+the input may be incomplete, offers only Deny, and requires local-terminal
+review to approve. This prevents a hidden destructive suffix from being
+approved remotely.
+
+Permission cards cross a data boundary: tool names, descriptions, shell
+commands, local paths, and prefixes or complete contents supplied in the input
+are uploaded to the configured Relay API and retained in Relay message history.
+Do not enable permission relay for repositories or commands whose details must
+not leave the machine. The Agent Token itself remains only in the local `.env`.
+
+Only the agent owner's Relay user id can inject messages or verdicts. The owner
+comes from `RELAY_OWNER_USER_ID` or `GET /v1/agents/me`; without one, startup
+fails closed unless `RELAY_ALLOW_TOFU=1` was explicitly set. TOFU is suitable
+only for an agent no one else can message.
+
+## Durable state
+
+State lives below `~/.claude/channels/relay/state/`, namespaced first by the
+canonical API origin and Relay agent id. The account directory contains:
+
+- `consumer-state.json` for the shared cursor and TOFU owner pin
+- `consumer-ledger.json` for unacknowledged deliveries and recent event ids
+
+Those two files are account-scoped so a later Claude session inherits the
+consumer position instead of replaying retained history. Each hashed session
+subdirectory separately contains `routing.json` and `session-ledger.json` for
+last-conversation routing, permission registrations, and logical outbound
+sends. A new session cannot answer an old session's permission card.
+
+Writes use owner-only files and atomic rename. If consumer state is corrupt, it
+is quarantined and the independent consumer ledger still contains replay
+guards. If either security-critical ledger is corrupt, startup fails closed and
+preserves a block marker plus the quarantined file instead of silently
+replaying old events.
 
 ## Development
 
-```
-npm install       # includes dev deps
-npm run typecheck # tsc --noEmit
-npm test          # node --test (unit tests, mocked Relay server)
+```text
+npm ci
+npm run check
+npm test
+npm run build
 ```
 
-## Verification status
-
-- Verified: unit tests (event→notification mapping, verdict parsing — text and
-  data-part tap, sender gating, permission card build, reply/long-poll client
-  against a mocked Relay HTTP server) and `tsc --noEmit`.
-- **Unverified**: live end-to-end channel run (`claude
-  --dangerously-load-development-channels` against a deployed `GET /v1/events`).
-  The long-poll endpoint ships on a parallel server branch and was not deployed
-  when this plugin was built; run the loop against staging once it lands.
+`npm run build` produces the checked-in, self-contained
+`runtime/server.mjs`. `npm pack` runs that build again through `prepack`.

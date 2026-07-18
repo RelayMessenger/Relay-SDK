@@ -1,11 +1,11 @@
-// Multi-account resolution (doc 03 §2): channels.relay.accounts.<id> with a
+// Multi-account resolution: channels.relay.accounts.<id> with a
 // default-account fallback, so one OpenClaw can back several Relay contacts
 // (one Agent Token each). Env vars cover the single-account quickstart.
 import { createAccountListHelpers } from "openclaw/plugin-sdk/account-helpers";
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "openclaw/plugin-sdk/account-id";
 import { resolveMergedAccountConfig } from "openclaw/plugin-sdk/account-resolution-runtime";
 import { tryReadSecretFileSync } from "openclaw/plugin-sdk/channel-core";
-import { DEFAULT_RELAY_BASE_URL } from "./client.js";
+import { DEFAULT_RELAY_BASE_URL, normalizeRelayBaseUrl } from "./client.js";
 import type { RelayAccountConfig, RelayCoreConfig, ResolvedRelayAccount } from "./types.js";
 
 export const RELAY_TOKEN_ENV_VAR = "RELAY_AGENT_TOKEN";
@@ -74,10 +74,11 @@ export function resolveRelayAccount(params: {
   const baseEnabled = params.cfg.channels?.relay?.enabled !== false;
   const enabled = baseEnabled && merged.enabled !== false;
   const token = resolveToken({ merged, accountId, env });
-  const baseUrl =
+  const baseUrl = normalizeRelayBaseUrl(
     merged.baseUrl?.trim() ||
-    (accountId === DEFAULT_ACCOUNT_ID ? env[RELAY_BASE_URL_ENV_VAR]?.trim() : undefined) ||
-    DEFAULT_RELAY_BASE_URL;
+      (accountId === DEFAULT_ACCOUNT_ID ? env[RELAY_BASE_URL_ENV_VAR]?.trim() : undefined) ||
+      DEFAULT_RELAY_BASE_URL,
+  );
   const pollTimeoutSeconds = Math.min(
     Math.max(merged.pollTimeoutSeconds ?? DEFAULT_POLL_TIMEOUT_SECONDS, 1),
     30,

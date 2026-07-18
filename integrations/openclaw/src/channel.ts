@@ -1,4 +1,4 @@
-// Relay channel plugin assembly (doc 03): config/multi-account resolution,
+// Relay channel plugin assembly: config/multi-account resolution,
 // gateway long-poll lifecycle, durable message adapter, and inbound dispatch
 // wiring. Transport logic lives in client/poll-loop/inbound/outbound modules;
 // this file owns the OpenClaw adapter surfaces.
@@ -19,15 +19,20 @@ import {
   resolveDefaultRelayAccountId,
   resolveRelayAccount,
 } from "./accounts.js";
-import { createRelayClient, isRelayWebhookConflict, RelayApiError } from "./client.js";
+import {
+  createRelayClient,
+  isAbortError,
+  isRelayWebhookConflict,
+  RelayApiError,
+} from "./client.js";
 import type { RelayClient } from "./client.js";
 import { createRelayCursorStore, RELAY_CURSOR_MAX_ENTRIES, RELAY_CURSOR_NAMESPACE } from "./cursor-store.js";
 import type { RelayCursorRecord } from "./cursor-store.js";
 import { createRelayInboundDedupeGuard, createRelayInboundDeduper } from "./inbound-dedupe.js";
 import { buildRelayInboundFacts } from "./inbound.js";
 import type { RelayInboundFacts } from "./inbound.js";
+import { createRelayAccountLifecycleRegistry } from "./lifecycle.js";
 import {
-  deriveRelayContentIdempotencyKey,
   deriveRelayIdempotencyKey,
   RELAY_TEXT_CHUNK_LIMIT,
   reconcileRelayUnknownSend,
@@ -35,6 +40,7 @@ import {
 } from "./outbound.js";
 import { runRelayPollLoop } from "./poll-loop.js";
 import { getRelayRuntime } from "./runtime.js";
+import { relaySenderIsAllowed, resolveRelayAllowedSenderIds } from "./security.js";
 import type { RelayCoreConfig, ResolvedRelayAccount } from "./types.js";
 
 export const RELAY_CHANNEL_ID = "relay" as const;
@@ -48,7 +54,7 @@ const relayMeta = {
   blurb: "Text your OpenClaw like a friend.",
   systemImage: "message",
   // Relay renders plain text plus typed parts; no markdown dialect, so core
-  // strips formatting instead of leaking `**` (doc 03 §7).
+  // strips formatting instead of leaking `**`.
   markdownCapable: false,
 };
 
@@ -57,7 +63,7 @@ function relayClientForAccount(account: ResolvedRelayAccount): RelayClient {
 }
 
 // ---------------------------------------------------------------------------
-// Outbound: durable message adapter (doc 03 §5).
+// Outbound: durable message adapter.
 // ---------------------------------------------------------------------------
 
 /**
@@ -174,14 +180,14 @@ const relayMessageAdapter = defineChannelMessageAdapter({
     },
   },
   receive: {
-    // Cursor acks after the claim/commit dance around agent dispatch (doc 03 §4).
+    // Cursor acks after a durable at-most-once attempt marker is written.
     defaultAckPolicy: "after_agent_dispatch",
     supportedAckPolicies: ["after_receive_record", "after_agent_dispatch"],
   },
 });
 
 // ---------------------------------------------------------------------------
-// Inbound dispatch (doc 03 §4) — qa-channel-shaped runtime wiring.
+// Inbound dispatch — qa-channel-shaped runtime wiring.
 // ---------------------------------------------------------------------------
 
 async function dispatchRelayInbound(params: {
@@ -189,25 +195,14 @@ async function dispatchRelayInbound(params: {
   account: ResolvedRelayAccount;
   facts: RelayInboundFacts;
   client: RelayClient;
+  allowedSenderIds: readonly string[];
 }): Promise<void> {
-  const runtime = getRelayRuntime();
   const { account, facts } = params;
-  const { route, buildEnvelope } = resolveInboundRouteEnvelopeBuilderWithRuntime({
-    cfg: params.cfg,
-    channel: RELAY_CHANNEL_ID,
-    accountId: account.accountId,
-    peer: { kind: "direct", id: facts.conversationId },
-    runtime: runtime.channel,
-    sessionStore: (params.cfg as RelayCoreConfig).session?.store,
-  });
-  // Default allow-all only under the "open" policy (Relay DMs are already
-  // scoped to users who added the contact, doc 03 §6) — core's open gate
-  // still requires a wildcard or explicit entry (sender-gates.ts), and a
-  // configured list narrows it. In "allowlist" mode the configured list
-  // passes through unchanged so an absent/empty allowFrom denies.
-  const dmPolicy = account.config.dmPolicy ?? "open";
-  const allowFrom =
-    dmPolicy === "open" ? (account.config.allowFrom ?? ["*"]) : account.config.allowFrom;
+  // Public Relay agents are discoverable, so contact membership is not an
+  // authorization boundary. Only the API-pinned owner and explicit operator
+  // allowlist entries may start an OpenClaw turn.
+  const dmPolicy = "allowlist" as const;
+  const allowFrom = [...params.allowedSenderIds];
   const access = await resolveStableChannelMessageIngress({
     channelId: RELAY_CHANNEL_ID,
     accountId: account.accountId,
@@ -220,11 +215,16 @@ async function dispatchRelayInbound(params: {
   if (access.ingress.admission !== "dispatch") {
     return;
   }
-  // Control commands only for senders the operator explicitly listed; the
-  // open-DM default authorizes conversation, not configuration.
-  const commandAuthorized = (account.config.allowFrom ?? [])
-    .map((entry) => String(entry))
-    .includes(facts.senderId);
+  const runtime = getRelayRuntime();
+  const { route, buildEnvelope } = resolveInboundRouteEnvelopeBuilderWithRuntime({
+    cfg: params.cfg,
+    channel: RELAY_CHANNEL_ID,
+    accountId: account.accountId,
+    peer: { kind: "direct", id: facts.conversationId },
+    runtime: runtime.channel,
+    sessionStore: (params.cfg as RelayCoreConfig).session?.store,
+  });
+  const commandAuthorized = relaySenderIsAllowed(params.allowedSenderIds, facts.senderId);
   const { storePath, body } = buildEnvelope({
     channel: relayMeta.label,
     from: facts.senderId,
@@ -255,9 +255,10 @@ async function dispatchRelayInbound(params: {
     CommandAuthorized: commandAuthorized,
   });
   // A consumed inbound message with a silently lost reply is the worst
-  // outcome, so delivery failures must fail the turn: the caller releases the
-  // dedupe claim and the event replays.
+  // outcome. Delivery failures are surfaced, but the inbound attempt marker
+  // prevents replaying an agent turn whose tools may already have run.
   let deliveryError: unknown;
+  let fallbackDeliveryIndex = 0;
   const recordDeliveryError = (error: unknown) => {
     deliveryError ??= error;
   };
@@ -287,8 +288,9 @@ async function dispatchRelayInbound(params: {
         requiredCapabilities: { reconcileUnknownSend: true },
       },
       // Fallback for payloads the durable path does not carry (non-final
-      // visible blocks): chunk here and use content-derived keys so a
-      // transport retry cannot duplicate a visible send.
+      // visible blocks). The event id + block/chunk ordinals identify each
+      // logical send: retries reuse it while identical intentional blocks and
+      // chunks remain distinct.
       deliver: async (payload) => {
         const text =
           payload && typeof payload === "object" && "text" in payload
@@ -297,17 +299,21 @@ async function dispatchRelayInbound(params: {
         if (!text.trim()) {
           return;
         }
+        const logicalBlockId = `${facts.eventId}:block:${fallbackDeliveryIndex}`;
+        fallbackDeliveryIndex += 1;
         try {
+          let chunkIndex = 0;
           for (const chunk of chunkText(text, RELAY_TEXT_CHUNK_LIMIT)) {
             await sendRelayText({
               client: params.client,
               conversationId: facts.conversationId,
               text: chunk,
-              idempotencyKey: deriveRelayContentIdempotencyKey({
-                conversationId: facts.conversationId,
-                text: chunk,
+              idempotencyKey: deriveRelayIdempotencyKey({
+                deliveryQueueId: logicalBlockId,
+                deliveryPartIndex: chunkIndex,
               }),
             });
+            chunkIndex += 1;
           }
         } catch (error) {
           recordDeliveryError(error);
@@ -326,7 +332,7 @@ async function dispatchRelayInbound(params: {
 }
 
 // ---------------------------------------------------------------------------
-// Gateway lifecycle (doc 03 §3).
+// Gateway lifecycle.
 // ---------------------------------------------------------------------------
 
 /**
@@ -368,13 +374,14 @@ function openRelayCursorStateStore(
 }
 
 /**
- * One long-poll consumer per agent token (plan 12 §A2): two configured
+ * One long-poll consumer per agent token: two configured
  * accounts sharing a token would otherwise fight over the server's consumer
  * slot in an endless 409 loop. Keyed by (baseUrl, agentId) from getMe.
  */
 const runningRelayAgentAccounts = new Map<string, string>();
+const relayAccountLifecycles = createRelayAccountLifecycleRegistry();
 
-function relayAgentAccountKey(baseUrl: string, agentId: string): string {
+export function relayAgentAccountKey(baseUrl: string, agentId: string): string {
   return `${baseUrl}\0${agentId}`;
 }
 
@@ -388,6 +395,9 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
   const log = (line: string) => ctx.log?.info?.(line);
   const warn = (line: string) => ctx.log?.warn?.(line);
   const client = relayClientForAccount(account);
+  const lifecycle = relayAccountLifecycles.acquire(account.accountId, ctx.abortSignal);
+  const abortSignal = lifecycle.signal;
+  let agentKey: string | undefined;
 
   const markTerminalDisconnect = (error: Error) => {
     // Operator action required: flag terminalDisconnect so the supervisor
@@ -401,39 +411,43 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
     });
   };
 
-  let me;
   try {
-    me = await client.getMe({ signal: ctx.abortSignal });
-  } catch (error) {
-    if (error instanceof RelayApiError && error.terminal) {
+    const me = await client.getMe({ signal: abortSignal });
+    const allowedSenderIds = resolveRelayAllowedSenderIds({
+      profile: me,
+      allowFrom: account.config.allowFrom,
+    });
+    if (allowedSenderIds.length === 0) {
+      const error = new Error(
+        `relay: account "${account.accountId}" has no owner pin. ` +
+          "The Relay API did not return owner_user_id and channels.relay.allowFrom is empty.",
+      );
       markTerminalDisconnect(error);
+      throw error;
     }
-    throw error;
-  }
 
-  // Two accounts configured with the same token would fight over the
-  // server's single consumer slot forever; keep the second one down until
-  // the operator fixes the config.
-  const agentKey = relayAgentAccountKey(account.baseUrl, me.id);
-  const owner = runningRelayAgentAccounts.get(agentKey);
-  if (owner !== undefined && owner !== account.accountId) {
-    const error = new Error(
-      `relay: agent ${me.id} is already polled by account "${owner}"; account "${account.accountId}" appears to reuse the same Agent Token. Give each account its own token.`,
-    );
-    markTerminalDisconnect(error);
-    throw error;
-  }
-  runningRelayAgentAccounts.set(agentKey, account.accountId);
+    // Two accounts configured with the same token would fight over the
+    // server's single consumer slot forever; keep the second one down until
+    // the operator fixes the config. account.baseUrl is already canonical.
+    agentKey = relayAgentAccountKey(account.baseUrl, me.id);
+    const owner = runningRelayAgentAccounts.get(agentKey);
+    if (owner !== undefined) {
+      const error = new Error(
+        `relay: agent ${me.id} is already polled by account "${owner}"; account "${account.accountId}" appears to reuse the same Agent Token. Give each account its own token.`,
+      );
+      markTerminalDisconnect(error);
+      throw error;
+    }
+    runningRelayAgentAccounts.set(agentKey, account.accountId);
 
-  ctx.setStatus({
-    accountId: account.accountId,
-    running: true,
-    connected: true,
-    configured: true,
-    enabled: account.enabled,
-  });
+    ctx.setStatus({
+      accountId: account.accountId,
+      running: true,
+      connected: true,
+      configured: true,
+      enabled: account.enabled,
+    });
 
-  try {
     const cursorStore = createRelayCursorStore({
       store: openRelayCursorStateStore(warn),
       accountId: account.accountId,
@@ -452,13 +466,13 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
       client,
       cursorStore,
       deduper,
-      abortSignal: ctx.abortSignal,
+      abortSignal,
       timeoutSeconds: account.pollTimeoutSeconds,
       limit: 100,
       log,
       // Receipts, reactions, and echoes are acked without a dedupe row or a
-      // dispatch (doc 03 §4: reaction.* observe-only at v1, delivered/read
-      // are bookkeeping).
+      // dispatch: reaction.* is observe-only at v1, delivered/read
+      // are bookkeeping.
       shouldProcess: (event) => buildRelayInboundFacts(event, { agentId: me.id }) !== null,
       onBatch: () => {
         ctx.setStatus({
@@ -473,7 +487,13 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
         if (!facts) {
           return;
         }
-        await dispatchRelayInbound({ cfg: ctx.cfg, account, facts, client });
+        await dispatchRelayInbound({
+          cfg: ctx.cfg,
+          account,
+          facts,
+          client,
+          allowedSenderIds,
+        });
         // Read watermark after the turn is handled: read implies delivered;
         // best effort — a failed receipt must not replay the event.
         await client
@@ -482,10 +502,13 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
       },
     });
   } catch (error) {
+    if (abortSignal.aborted || isAbortError(error)) {
+      return;
+    }
     if (error instanceof RelayApiError && error.terminal) {
       markTerminalDisconnect(error);
     } else if (isRelayWebhookConflict(error)) {
-      // Webhook XOR (plan 12 §A2): long polling stays 409 until the operator
+      // Webhook XOR: long polling stays 409 until the operator
       // disables the webhook endpoint — restarting cannot fix it.
       // `terminated_by_other_consumer` intentionally falls through to the
       // supervisor's normal restart/backoff arbitration.
@@ -493,13 +516,28 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
     }
     throw error;
   } finally {
-    runningRelayAgentAccounts.delete(agentKey);
+    if (agentKey && runningRelayAgentAccounts.get(agentKey) === account.accountId) {
+      runningRelayAgentAccounts.delete(agentKey);
+    }
+    lifecycle.release();
     ctx.setStatus({
       accountId: account.accountId,
       running: false,
       connected: false,
     });
   }
+}
+
+async function stopRelayAccount(
+  ctx: ChannelGatewayContext<ResolvedRelayAccount>,
+): Promise<void> {
+  relayAccountLifecycles.stop(ctx.accountId);
+  ctx.setStatus({
+    accountId: ctx.accountId,
+    running: false,
+    connected: false,
+  });
+  ctx.log?.info?.(`[relay] stopped account "${ctx.accountId}"`);
 }
 
 // ---------------------------------------------------------------------------
@@ -512,7 +550,7 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> = createCha
     meta: relayMeta,
     capabilities: {
       // v1: direct conversations only; media flips on when the agent
-      // attachment path ships (doc 03 §7, doc 06). Reactions are observe-only.
+      // attachment path ships. Reactions are observe-only.
       chatTypes: ["direct"],
       reply: true,
       threads: false,
@@ -563,7 +601,11 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> = createCha
         };
       },
       resolveAllowFrom: ({ cfg, accountId }) =>
-        resolveRelayAccount({ cfg: cfg as RelayCoreConfig, accountId }).config.allowFrom,
+        resolveRelayAllowedSenderIds({
+          profile: {},
+          allowFrom: resolveRelayAccount({ cfg: cfg as RelayCoreConfig, accountId }).config
+            .allowFrom,
+        }),
     },
     messaging: {
       targetResolver: {
@@ -573,9 +615,10 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> = createCha
     },
     gateway: {
       startAccount: startRelayAccount,
+      stopAccount: stopRelayAccount,
     },
     heartbeat: {
-      // Ephemeral typing indicator (doc 03 §5): POST typing start/stop.
+      // Ephemeral typing indicator: POST typing start/stop.
       sendTyping: async ({ cfg, to, accountId }) => {
         const account = resolveRelayAccount({ cfg: cfg as RelayCoreConfig, accountId });
         if (!account.configured) {
@@ -596,18 +639,17 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> = createCha
   security: {
     dm: {
       channelKey: RELAY_CHANNEL_ID,
-      resolvePolicy: (account) => account.config.dmPolicy,
-      resolveAllowFrom: (account) => account.config.allowFrom,
-      // Allow-all by default: Relay DMs are already scoped to users who added
-      // the agent as a contact (doc 03 §6).
-      defaultPolicy: "open",
+      resolvePolicy: () => "allowlist",
+      resolveAllowFrom: (account) =>
+        resolveRelayAllowedSenderIds({ profile: {}, allowFrom: account.config.allowFrom }),
+      defaultPolicy: "allowlist",
     },
   },
   outbound: {
     base: {
       deliveryMode: "direct",
       // Core's renderer splits long replies before the adapter sees them
-      // (doc 03 §5): without a chunker the plan falls back to one oversized
+      // without a chunker the plan falls back to one oversized
       // unit, which the server 422s at its 8 KiB per-part cap.
       chunker: (text, limit) => chunkText(text, limit),
       chunkerMode: "text",
@@ -615,7 +657,8 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> = createCha
     },
     attachedResults: {
       channel: RELAY_CHANNEL_ID,
-      sendText: async ({ cfg, to, text, accountId, replyToId }) => {
+      sendText: async (ctx) => {
+        const { cfg, to, text, accountId, replyToId } = ctx;
         const account = resolveRelayAccount({ cfg: cfg as RelayCoreConfig, accountId });
         if (!account.configured) {
           throw new Error(`relay: account "${account.accountId}" has no Agent Token configured`);
@@ -626,12 +669,11 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> = createCha
           conversationId: to,
           text,
           replyToId: normalizedReplyToId,
-          // No durable queue id on this compat path: derive the key from the
-          // content so a caller retry replays instead of duplicating.
-          idempotencyKey: deriveRelayContentIdempotencyKey({
-            conversationId: to,
-            text,
-            replyToId: normalizedReplyToId,
+          // Stable when core supplies a logical queue id; otherwise fresh for
+          // this invocation so two intentional identical sends remain two.
+          idempotencyKey: deriveRelayIdempotencyKey({
+            deliveryQueueId: ctx.deliveryQueueId,
+            deliveryPartIndex: ctx.deliveryPartIndex,
           }),
         });
         return { messageId: result.messageId };

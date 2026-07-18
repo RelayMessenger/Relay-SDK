@@ -24,6 +24,6 @@ relayapp start --engine claude   # or codex | opencode
 
 Full guide: https://docs.relayapp.im/guides/coding-agents
 
----
-
-Exported from the Relay monorepo at `companion-inc/relay@b918dd60` (2026-07-17).
+All three developer surfaces are release-gated together on Linux and Windows.
+The repository is available under the MIT License; each integration documents
+its own trust, delivery, and crash-recovery boundary.

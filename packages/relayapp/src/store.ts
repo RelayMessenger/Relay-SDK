@@ -108,6 +108,23 @@ export interface BridgeState {
   seen_event_ids: string[];
   pending_events: Record<string, RelayEvent[]>;
   /**
+   * conversation_id → turn idempotency key persisted immediately BEFORE the
+   * engine turn starts and cleared on success. A marker found at startup means
+   * a previous process crashed mid-turn: that batch is dropped with a notice
+   * instead of re-executed, so engine/tool side effects (deploys, deletions,
+   * sends) run at most once per owner message.
+   */
+  attempted_turns?: Record<string, string>;
+  /**
+   * Engine-completed replies waiting for idempotent Relay delivery. The full
+   * reply is persisted before the POST, so a restart can redeliver it without
+   * executing the engine or its tools again.
+   */
+  pending_replies?: Record<
+    string,
+    { conversation_id: string; event_ids: string[]; text: string; created_at: string }
+  >;
+  /**
    * The owner's conversation with this agent, persisted by the loop when the
    * first owner message arrives. Default target for notify/MCP sends. Never
    * derived from the most recent writer.
@@ -169,6 +186,8 @@ function normalizeState(raw: Partial<BridgeState>): BridgeState {
     cursor: typeof raw.cursor === "number" ? raw.cursor : 0,
     seen_event_ids: Array.isArray(raw.seen_event_ids) ? raw.seen_event_ids : [],
     pending_events: raw.pending_events ?? {},
+    attempted_turns: raw.attempted_turns ?? {},
+    pending_replies: raw.pending_replies ?? {},
     owner_conversation_id: raw.owner_conversation_id,
   };
 }

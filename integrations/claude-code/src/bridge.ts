@@ -21,6 +21,7 @@ import type {
 export type InboundAction =
   | { kind: "ignore"; reason: string }
   | { kind: "blocked_sender"; sender: string }
+  | { kind: "rejected_verdict"; verdict: PermissionVerdict; reason: string }
   | { kind: "verdict"; verdict: PermissionVerdict }
   | {
       kind: "message";
@@ -167,6 +168,7 @@ export function classifyEvent(
   event: RelayEvent,
   ownerUserId: string | null,
   isPendingRequest: (requestId: string) => boolean = () => false,
+  canAcceptVerdict: (verdict: PermissionVerdict) => boolean = () => true,
 ): InboundAction {
   if (event.event_type !== "message.received") {
     return { kind: "ignore", reason: `unhandled event_type ${event.event_type}` };
@@ -188,11 +190,27 @@ export function classifyEvent(
   for (const part of message.parts) {
     if (part.type !== "data") continue;
     const verdict = parseVerdictDataPart(part.data);
-    if (verdict && isPendingRequest(verdict.request_id)) return { kind: "verdict", verdict };
+    if (verdict && isPendingRequest(verdict.request_id)) {
+      if (!canAcceptVerdict(verdict)) {
+        return {
+          kind: "rejected_verdict",
+          verdict,
+          reason: "remote allow is disabled because Claude did not disclose complete tool input",
+        };
+      }
+      return { kind: "verdict", verdict };
+    }
   }
   const text = textOfMessage(message);
   const textVerdict = parseVerdictText(text);
   if (textVerdict && isPendingRequest(textVerdict.request_id)) {
+    if (!canAcceptVerdict(textVerdict)) {
+      return {
+        kind: "rejected_verdict",
+        verdict: textVerdict,
+        reason: "remote allow is disabled because Claude did not disclose complete tool input",
+      };
+    }
     return { kind: "verdict", verdict: textVerdict };
   }
 
@@ -211,7 +229,7 @@ export function classifyEvent(
 // ---------------------------------------------------------------------------
 
 const MAX_DESCRIPTION_CHARS = 500;
-const MAX_PREVIEW_CHARS = 1500;
+const CLAUDE_DOCUMENTED_PREVIEW_LIMIT = 200;
 
 /**
  * Defense-in-depth over the client-side sanitization Claude Code >=2.1.211
@@ -228,9 +246,37 @@ export function sanitizeRelayedText(value: string, maxChars: number): string {
   return `${cleaned.slice(0, maxChars - 1)}…`;
 }
 
+/**
+ * Preserve every character Claude supplied for the security-sensitive input.
+ * Invisible/control characters become visible escapes instead of disappearing
+ * or changing line structure in the approval card.
+ */
+export function renderPermissionInput(value: string): string {
+  return value.replace(
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+/**
+ * Claude's current channel contract truncates input_preview at 200 characters
+ * and supplies no truncation flag. Remote Allow is therefore enabled only
+ * when the preview is shorter than that boundary and is complete JSON.
+ */
+export function hasCompletePermissionInput(value: string): boolean {
+  if (value.length === 0 || value.length >= CLAUDE_DOCUMENTED_PREVIEW_LIMIT) return false;
+  try {
+    JSON.parse(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface PermissionCard {
   body: SendMessageBody;
   idempotencyKey: string;
+  remoteAllowEnabled: boolean;
 }
 
 /**
@@ -246,12 +292,50 @@ export function buildPermissionCard(
 ): PermissionCard {
   const toolName = sanitizeRelayedText(request.tool_name, 100) || "a tool";
   const description = sanitizeRelayedText(request.description, MAX_DESCRIPTION_CHARS);
-  const inputPreview = sanitizeRelayedText(request.input_preview, MAX_PREVIEW_CHARS);
+  const inputPreview = renderPermissionInput(request.input_preview);
+  const remoteAllowEnabled = hasCompletePermissionInput(request.input_preview);
   const id = request.request_id;
 
   const lines = [`Claude wants to run ${toolName}: ${description}`];
-  if (inputPreview.length > 0) lines.push("", inputPreview);
-  lines.push("", `Reply "yes ${id}" to allow or "no ${id}" to deny.`);
+  if (inputPreview.length > 0) {
+    lines.push(
+      "",
+      remoteAllowEnabled
+        ? "Complete tool input supplied by Claude:"
+        : "Tool input preview (Claude may have truncated it):",
+      inputPreview,
+    );
+  }
+  if (remoteAllowEnabled) {
+    lines.push("", `Reply "yes ${id}" to allow or "no ${id}" to deny.`);
+  } else {
+    lines.push(
+      "",
+      "Remote Allow is disabled because the complete tool input is unavailable. Review and approve at the local terminal, or reply " +
+        `"no ${id}" to deny.`,
+    );
+  }
+
+  const options = remoteAllowEnabled
+    ? [
+        {
+          id: "allow",
+          label: "Allow",
+          origin: { kind: "claude_permission_request", request_id: id },
+        },
+        {
+          id: "deny",
+          label: "Deny",
+          origin: { kind: "claude_permission_request", request_id: id },
+        },
+      ]
+    : [
+        {
+          id: "deny",
+          label: "Deny",
+          origin: { kind: "claude_permission_request", request_id: id },
+        },
+      ];
 
   return {
     body: {
@@ -266,18 +350,9 @@ export function buildPermissionCard(
             tool_name: toolName,
             description,
             input_preview: inputPreview,
-            options: [
-              {
-                id: "allow",
-                label: "Allow",
-                origin: { kind: "claude_permission_request", request_id: id },
-              },
-              {
-                id: "deny",
-                label: "Deny",
-                origin: { kind: "claude_permission_request", request_id: id },
-              },
-            ],
+            input_disclosure: remoteAllowEnabled ? "complete" : "truncated_or_unverifiable",
+            remote_allow_enabled: remoteAllowEnabled,
+            options,
           },
         },
       ],
@@ -285,6 +360,7 @@ export function buildPermissionCard(
     // Deterministic per request id: a retried relay of the same prompt can
     // never post the card twice. (Server requires 8..255 chars.)
     idempotencyKey: `claude-perm-${id}`,
+    remoteAllowEnabled,
   };
 }
 

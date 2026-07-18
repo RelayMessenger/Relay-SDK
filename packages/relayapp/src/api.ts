@@ -1,12 +1,38 @@
 /**
  * Thin client for the Relay public API (https://docs.relayapp.im).
- * Wire shapes follow docs/api-reference/openapi.yaml plus the pairing +
- * long-poll additions from plan/12-coding-agent-bridge.md §A.
+ * Wire shapes follow Relay's public OpenAPI contract at
+ * https://docs.relayapp.im/api-reference/openapi.yaml.
  */
 import type { RelayEvent, RelayMessage } from "./store.js";
 
 export const PRODUCTION_ORIGIN = "https://api.relayapp.im";
 export const STAGING_ORIGIN = "https://api.staging.relayapp.im";
+
+function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "localhost" || host.endsWith(".localhost") || host === "::1" || host === "[::1]" || /^127\./.test(host);
+}
+
+/**
+ * Bearer tokens may only leave over HTTPS. Plain HTTP is accepted solely for
+ * explicit loopback development servers, and base URLs cannot smuggle a path,
+ * query, credentials, or fragment into request construction.
+ */
+export function normalizeApiOrigin(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`Invalid Relay API origin: ${value}`);
+  }
+  if (url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== "/")) {
+    throw new Error("Relay API origin must contain only scheme and host (no credentials, path, query, or fragment)");
+  }
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHost(url.hostname))) {
+    throw new Error("Relay API origin must use HTTPS (plain HTTP is allowed only on loopback)");
+  }
+  return url.origin;
+}
 
 export class RelayApiError extends Error {
   constructor(
@@ -44,11 +70,15 @@ export interface PostMessageBody {
 }
 
 export class RelayClient {
+  readonly origin: string;
+
   constructor(
-    readonly origin: string,
+    origin: string,
     private readonly token?: string,
     private readonly fetchImpl: typeof fetch = fetch,
-  ) {}
+  ) {
+    this.origin = normalizeApiOrigin(origin);
+  }
 
   private async request<T>(
     method: string,

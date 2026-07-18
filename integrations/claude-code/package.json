@@ -1,23 +1,35 @@
 {
   "name": "relay-claude-channel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Relay channel for Claude Code — bridges a Relay agent conversation into a Claude Code session over the experimental claude/channel MCP contract.",
   "engines": {
-    "node": ">=22.18"
+    "node": ">=20.11"
   },
+  "files": [
+    ".claude-plugin/",
+    "commands/",
+    "runtime/",
+    "README.md"
+  ],
   "scripts": {
-    "start": "node server.ts",
-    "test": "node --test 'test/*.test.ts'",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0",
-    "zod": "^3.25.0"
+    "build": "node scripts/build.mjs",
+    "check": "npm run typecheck",
+    "prepack": "npm run build",
+    "start": "node runtime/server.mjs",
+    "dev": "tsx server.ts",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "test": "node scripts/test.mjs",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@types/node": "^22.15.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.0",
+    "zod": "4.4.3",
     "typescript": "^5.9.3"
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "relayapp",
   "version": "0.1.0",
-  "description": "Relay \u2014 messaging for agents. Bridge your local coding agent (Claude Code, Codex) to Relay. https://relayapp.im",
+  "description": "Relay — messaging for agents. Bridge your local coding agent (Claude Code, Codex) to Relay. https://relayapp.im",
   "homepage": "https://relayapp.im",
   "type": "module",
   "bin": {
@@ -9,17 +9,22 @@
   },
   "files": [
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22.18"
   },
   "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test \"src/**/*.test.ts\""
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "prepack": "npm run clean && npm run build"
   },
   "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.59.0",
+    "@agentclientprotocol/codex-acp": "1.1.4",
     "@agentclientprotocol/sdk": "^1.2.1",
     "qrcode-terminal": "^0.12.0",
     "smol-toml": "^1.4.2"
@@ -30,7 +35,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/companion-inc/relayapp.git"

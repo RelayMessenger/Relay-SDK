@@ -32,8 +32,8 @@ the engine works and posts one finalized reply per turn.
 | `relayapp pair` | `POST /v1/pairings`, shows a terminal QR + code, long-polls until you claim it in the app, stores the Agent Token in `~/.relayapp/config.json` (chmod 600) and pins your user id as the bridge owner (from `GET /v1/agents/me`; override with `RELAY_OWNER_USER_ID`). The token never appears on the phone. |
 | `relayapp start` | Receive loop: long-polls `GET /v1/events`, drives the engine over ACP, replies via `POST /v1/messages` with an `Idempotency-Key`. Flags: `--engine claude\|codex\|opencode`, `--dir <path>`, `--staging`. |
 | `relayapp install-codex` | Merges — never clobbers — `[mcp_servers.relay]` + `notify` into `~/.codex/config.toml` (comments preserved; a `.bak` of the original is kept) and a `PermissionRequest` hook into `~/.codex/hooks.json`, so plain `codex` runs ping Relay on turn completion and route approvals to your phone. Codex gates untrusted hook handlers: the first run may ask you to trust the relayapp handler. |
-| `relayapp install-claude` | Points at the Claude Code channel plugin (`integrations/claude-code`) when present; otherwise says so and falls back to `relayapp start`. |
-| `relayapp doctor` | Checks node/npx, pairing, token file perms, API reachability, adapter resolvability, and durable-state health. |
+| `relayapp install-claude` | Prints the exact Claude marketplace install and development-channel launch commands for `relay@relayapp`. |
+| `relayapp doctor` | Checks Node, pairing, token file permissions, API reachability, installed adapter pins, and durable-state health. |
 
 ## How the wire works
 
@@ -55,7 +55,10 @@ curl -X POST https://api.relayapp.im/v1/messages \
 
 - **Engines**: Claude and Codex are spawned as official ACP adapters over
   stdio (`@agentclientprotocol/claude-agent-acp`,
-  `@agentclientprotocol/codex-acp` via `npx`). opencode is driven over its
+  `@agentclientprotocol/codex-acp`). Both adapters are exact runtime
+  dependencies resolved from the installed package; the bridge never runs
+  mutable registry `latest` code. Adapter subprocesses receive platform and
+  engine/provider variables, not the complete parent environment. opencode is driven over its
   own HTTP API: the bridge spawns `opencode serve` (or attaches to an
   operator-run server via `OPENCODE_SERVER_URL` + basic auth), sends
   `prompt_async`, and consumes the SSE `/event` stream. Conversation →
@@ -64,7 +67,9 @@ curl -X POST https://api.relayapp.im/v1/messages \
 - **Approvals**: an engine `session/request_permission` becomes a Relay
   message with a text part plus a `claude_permission_request` data part
   (origin-tagged Allow/Deny options and quick-reply chips). Tap a chip or text
-  `yes <id>` / `no <id>`. No answer within 10 minutes → deny.
+  `yes <id>` / `no <id>`. The full security-relevant tool input and affected
+  paths must fit in the card; an operation that cannot be represented in full
+  is denied instead of shown partially. No answer within 10 minutes → deny.
 - **Owner gate**: only the user pinned at pair time can prompt the engine or
   answer an approval card; messages from anyone else are ignored before their
   content is interpreted.
@@ -74,7 +79,12 @@ curl -X POST https://api.relayapp.im/v1/messages \
   ~800 ms into one turn, and the poll loop restarts with capped exponential
   backoff + jitter. Each pending approval is its own create-once file under
   `~/.relayapp/approvals/`, so a bridge restart cannot lose one and no two
-  processes ever rewrite a shared snapshot.
+  processes ever rewrite a shared snapshot. Engine/tool turns are at-most-once:
+  an attempt marker is durable before execution, so a crash never silently
+  repeats a deploy, deletion, command, or external send. Completed replies use
+  a durable outbox and stable idempotency key, so delivery can retry without
+  rerunning those tools. An interrupted turn is reported and must be retried
+  explicitly by the owner.
 - Long-poll is exclusive: an enabled webhook endpoint or a second poller gets
   `409` (Telegram semantics). One consumer per token. A `401` stops the loop
   with re-pair guidance instead of retrying.
@@ -83,11 +93,11 @@ curl -X POST https://api.relayapp.im/v1/messages \
 
 ```
 ~/.relayapp/config.json    agent token, API origin, pinned owner   (chmod 600)
-~/.relayapp/state.json     cursor, queued events, owner conversation
+~/.relayapp/state.json     cursor, queued events/replies, owner conversation
                            (written only by `relayapp start`)
 ~/.relayapp/approvals/     one file per pending approval
 ~/.relayapp/sessions.json  conversation → engine session bindings
 ```
 
-Requires Node >= 18. Staging: pass `--staging` to `pair`/`start`
+Requires Node >= 22.18. Staging: pass `--staging` to `pair`/`start`
 (`https://api.staging.relayapp.im`).

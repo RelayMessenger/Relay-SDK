@@ -109,6 +109,7 @@ const server = http.createServer(async (req, res) => {
       JSON.stringify({
         agent: {
           id: "agt_harness",
+          owner_user_id: "usr_harness",
           handle: "harness",
           display_name: "Harness",
           tagline: "",

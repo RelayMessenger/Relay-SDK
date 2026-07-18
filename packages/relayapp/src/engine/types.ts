@@ -16,6 +16,12 @@ export interface PermissionAsk {
   requestId: string;
   toolName?: string;
   title?: string;
+  /**
+   * Security-relevant detail of the operation being approved (raw tool input,
+   * affected paths). Rendered on the phone card so the owner sees what they
+   * are allowing, not just a tool title.
+   */
+  inputPreview?: string;
   options: Array<{ optionId: string; label: string; kind?: string }>;
 }
 

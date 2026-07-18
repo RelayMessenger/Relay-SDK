@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -112,13 +112,18 @@ test("M3: invalid config.toml is refused, not overwritten", () => {
   assert.throws(() => mergeCodexConfigToml("this = = broken"), /not valid TOML/);
 });
 
-test("M3: installCodex writes a .bak of the original before first modification", () => {
+test("installCodex writes private backups and atomically replaces private live config", () => {
   const codexHome = mkdtempSync(join(tmpdir(), "relayapp-codex-"));
   const configPath = join(codexHome, "config.toml");
   const original = `# mine\nmodel = "gpt-5.2-codex"\n`;
   writeFileSync(configPath, original);
   installCodex(codexHome, () => {});
   assert.equal(readFileSync(`${configPath}.bak`, "utf8"), original);
+  if (process.platform !== "win32") {
+    assert.equal(statSync(`${configPath}.bak`).mode & 0o777, 0o600);
+    assert.equal(statSync(configPath).mode & 0o777, 0o600);
+    assert.equal(statSync(join(codexHome, "hooks.json")).mode & 0o777, 0o600);
+  }
   // Second run: no changes, .bak untouched.
   const afterFirst = readFileSync(configPath, "utf8");
   installCodex(codexHome, () => {});

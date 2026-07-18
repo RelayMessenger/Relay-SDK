@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { RelayClient } from "./api.js";
-import { pair } from "./pair.js";
+import { ownerUserIdFromMe, pair } from "./pair.js";
 import { ConfigStore } from "./store.js";
 
 function listen(server: Server): Promise<number> {
@@ -59,10 +59,13 @@ function mockServer(options: MockOptions = {}) {
       });
     }
     if (req.method === "GET" && req.url === "/v1/agents/me") {
+      // Live wire shape: the profile is nested under `agent`.
       return json(200, {
-        id: "agt_1",
-        handle: "laptop",
-        ...(options.omitOwner ? {} : { owner_user_id: "usr_owner_1" }),
+        agent: {
+          id: "agt_1",
+          handle: "laptop",
+          ...(options.omitOwner ? {} : { owner_user_id: "usr_owner_1" }),
+        },
       });
     }
     json(404, { error: { code: "not_found", message: "nope" } });
@@ -117,6 +120,16 @@ test("pair: QR + code, long-poll until claimed, token + pinned owner stored chmo
   } finally {
     server.close();
   }
+});
+
+test("regression: owner id is parsed from the live nested { agent: { owner_user_id } } shape", () => {
+  assert.equal(ownerUserIdFromMe({ agent: { owner_user_id: "usr_nested" } }), "usr_nested");
+  // Tolerated legacy/flat shape.
+  assert.equal(ownerUserIdFromMe({ owner_user_id: "usr_flat" }), "usr_flat");
+  // Missing/empty fails closed (undefined → pair() errors with guidance).
+  assert.equal(ownerUserIdFromMe({ agent: { handle: "x" } }), undefined);
+  assert.equal(ownerUserIdFromMe({ agent: { owner_user_id: "" } }), undefined);
+  assert.equal(ownerUserIdFromMe({}), undefined);
 });
 
 test("pair (L3): transient poll failures retry until the claim lands", async () => {

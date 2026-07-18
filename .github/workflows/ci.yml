@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Node ${{ matrix.node }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # Exercise every Node release line declared by the OpenClaw peer range.
+        node: [22.22.3, 24.15.0, 25.9.0]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run validate
+
+  minimum-node:
+    name: ${{ matrix.name }} minimum Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: relayapp CLI
+            node: 22.18.0
+            directory: .
+            install: npm ci --workspace relayapp
+            verify: npm run check --workspace relayapp && npm run build --workspace relayapp && npm test --workspace relayapp
+          - name: Claude channel
+            node: 20.11.0
+            directory: integrations/claude-code
+            install: npm ci
+            verify: npm run verify
+          - name: OpenClaw plugin
+            node: 22.22.3
+            directory: integrations/openclaw
+            install: npm ci
+            verify: npm run check && npm run build && npm test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: ${{ matrix.install }}
+        working-directory: ${{ matrix.directory }}
+      - run: ${{ matrix.verify }}
+        working-directory: ${{ matrix.directory }}
+
+  package-smoke:
+    name: Clean package and installed-tarball smokes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - run: npm run pack:check

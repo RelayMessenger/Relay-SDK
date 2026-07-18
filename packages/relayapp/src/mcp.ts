@@ -46,7 +46,7 @@ export async function mcpServe(): Promise<void> {
           reply({
             protocolVersion: params?.protocolVersion ?? "2025-06-18",
             capabilities: { tools: {} },
-            serverInfo: { name: "relayapp", version: "0.1.0-dev" },
+            serverInfo: { name: "relayapp", version: "0.1.0" },
           });
           break;
         case "notifications/initialized":

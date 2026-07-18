@@ -8,8 +8,9 @@
  *
  * `relayapp hook permission-request` — Codex's hooks engine pipes
  * {session_id, turn_id, cwd, tool_name, tool_input, permission_mode} on stdin
- * and accepts a decision on stdout:
- *   exit 0 + {"hookSpecificOutput":{"decision":{"behavior":"allow"|"deny"}}}
+ * and accepts a decision on stdout (developers.openai.com/codex/hooks):
+ *   exit 0 + {"hookSpecificOutput":{"hookEventName":"PermissionRequest",
+ *             "decision":{"behavior":"allow"|"deny"}}}
  *   exit 0 + no decision → fall through to Codex's normal approval flow
  * The hook posts an Allow/Deny card to Relay and blocks on the phone tap
  * (watching its per-request approval file — which a running `relayapp start`
@@ -137,20 +138,35 @@ export async function permissionRequestHook(
     ],
     source: "hook",
   };
+  let card: ReturnType<typeof buildPermissionCard>;
+  try {
+    card = buildPermissionCard({
+      requestId,
+      conversationId,
+      engineLabel: "Codex",
+      toolName: input.tool_name,
+      inputPreview: input.tool_input !== undefined ? JSON.stringify(input.tool_input) : undefined,
+    });
+  } catch (error) {
+    process.stderr.write(`relayapp: refusing concealed approval input (${error}) — denying.\n`);
+    write(decisionJson(false));
+    return 0;
+  }
+
   // Durable (create-once) before the card goes out. A running `relayapp
   // start` loop sees the tap on the event stream and writes the resolution
   // into this file; this process is the waiter that consumes it.
   approvals.create(approval);
 
-  const card = buildPermissionCard({
-    requestId,
-    conversationId,
-    engineLabel: "Codex",
-    toolName: input.tool_name,
-    inputPreview:
-      input.tool_input !== undefined ? JSON.stringify(input.tool_input).slice(0, 1500) : undefined,
-  });
-  const posted = await client.postMessage(card.body, card.idempotencyKey);
+  let posted;
+  try {
+    posted = await client.postMessage(card.body, card.idempotencyKey);
+  } catch (error) {
+    approvals.consume(requestId);
+    process.stderr.write(`relayapp: approval card could not be delivered (${error}) — denying.\n`);
+    write(decisionJson(false));
+    return 0;
+  }
   const cardSequence = posted.message.sequence;
 
   const finish = (allow: boolean): number => {
@@ -193,6 +209,18 @@ export async function permissionRequestHook(
   return finish(false);
 }
 
-function decisionJson(allow: boolean): unknown {
-  return { hookSpecificOutput: { decision: { behavior: allow ? "allow" : "deny" } } };
+/**
+ * Exact PermissionRequest hook envelope from the Codex hooks reference:
+ * hookSpecificOutput.hookEventName is required — without it Codex treats the
+ * output as invalid and the phone decision is dropped.
+ */
+export function decisionJson(allow: boolean): unknown {
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PermissionRequest",
+      decision: allow
+        ? { behavior: "allow" }
+        : { behavior: "deny", message: "Denied from the Relay app." },
+    },
+  };
 }

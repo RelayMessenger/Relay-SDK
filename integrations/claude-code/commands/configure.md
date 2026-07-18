@@ -1,69 +1,55 @@
 ---
-description: Set up the Relay channel — credentials file, dependency install, and connectivity check
+description: Configure and verify the self-contained Relay channel
 ---
 
-Configure the Relay channel for Claude Code. Follow these steps in order.
+Configure Relay without asking the user to paste or echo a secret in chat.
 
-1. **Create the credentials directory and file.** The channel server reads
-   `~/.claude/channels/relay/.env`. Create the directory if needed and write a
-   template file if one does not exist:
+1. Determine the user's channel directory using their platform conventions:
+   `~/.claude/channels/relay` on macOS/Linux or
+   `%USERPROFILE%\.claude\channels\relay` on Windows. Create it with access
+   restricted to the current user.
 
-   ```
-   mkdir -p ~/.claude/channels/relay
-   chmod 700 ~/.claude/channels/relay
-   ```
+2. If `.env` does not exist, create it with current-user-only access:
 
-   Template for `~/.claude/channels/relay/.env` (mode 600):
-
-   ```
-   # Relay agent credentials for the Claude Code channel
+   ```dotenv
    RELAY_AGENT_TOKEN=
    RELAY_BASE_URL=https://api.relayapp.im
-   # Pin the only user allowed to reach this session (usr_…). If unset, the
-   # owner is looked up from GET /v1/agents/me; if that fails too, the
-   # channel refuses to start (fail closed).
-   #RELAY_OWNER_USER_ID=
-   # Explicit opt-in: pin the FIRST user who messages the agent as owner.
-   # Only for private agents the user alone can message.
+   #RELAY_OWNER_USER_ID=usr_...
+   #RELAY_CHANNEL_SESSION_ID=my-repository
    #RELAY_ALLOW_TOFU=1
    ```
 
-2. **Have the user add their Agent Token.** Never ask the user to paste the
-   token into chat and never echo it. Tell them: open the Relay app, create or
-   open their agent, copy the Agent Token, and paste it after
-   `RELAY_AGENT_TOKEN=` in `~/.claude/channels/relay/.env` in their own editor.
-   For staging, set `RELAY_BASE_URL=https://api.staging.relayapp.im`.
+   `RELAY_ALLOW_TOFU=1` is an explicit fallback only for an agent no one else
+   can message. Normally the owner comes from `GET /v1/agents/me`.
 
-3. **Install server dependencies** in the plugin directory (the MCP server
-   needs `node_modules` next to `server.ts`). Run `npm install --omit=dev` in
-   the plugin root (the directory containing this plugin's `package.json`).
-   Node >= 22.18 is required (the server runs TypeScript natively).
+3. Tell the user to paste their Agent Token after `RELAY_AGENT_TOKEN=` in their
+   own editor. Never request, print, or place the token in a command argument.
+   Use `https://api.staging.relayapp.im` only with a staging token.
 
-4. **Verify the token** once the user says the file is filled in. Without
-   printing the token, run a connectivity check:
+4. Do not run `npm install`. The installed plugin's
+   `runtime/server.mjs` already contains its runtime dependencies.
 
-   ```
-   set -a; source ~/.claude/channels/relay/.env; set +a
-   curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $RELAY_AGENT_TOKEN" "${RELAY_BASE_URL:-https://api.relayapp.im}/v1/agents/me"
+5. After the user confirms the file is ready, run this from the installed
+   plugin directory using a platform-native path:
+
+   ```text
+   node runtime/server.mjs --check
    ```
 
-   `200` means the token works. `401` means the token is wrong or revoked.
-   Report only the status, never the token value.
+   Report only success, agent id, or the sanitized error. Never display the
+   `.env` file or token. The check also rejects non-HTTPS remote origins.
 
-5. **Explain how to start the channel.** Channels are a research preview, so
-   the session must be started with the development flag:
+6. Explain how to start the research-preview channel:
 
-   ```
+   ```text
    claude --dangerously-load-development-channels plugin:relay@<marketplace>
    ```
 
-   (Use `server:relay` instead if the server is registered through `.mcp.json`
-   rather than as an installed plugin.) Also note: the agent must not have a
-   webhook endpoint enabled — Relay's event stream is long-poll XOR webhook,
-   and an enabled webhook makes `/v1/events` return `409 conflict`.
+   Use `server:relay` for a bare MCP registration. The agent must not have a
+   webhook enabled, and only one live Claude session can consume that agent.
 
-6. **Confirm the loop.** Tell the user to message their agent from the Relay
-   app; the message should appear in this session as a `<channel source="relay">`
-   event. Permission prompts will be relayed to the same conversation with
-   Allow/Deny options, and can also be answered by texting `yes <id>` or
-   `no <id>`.
+7. Ask the user to message the agent from Relay. Explain that messages are
+   delivered at least once until Claude acknowledges them. Permission cards
+   upload the displayed tool details to Relay history; an incomplete
+   200-character Claude preview can be denied remotely but must be approved at
+   the local terminal.

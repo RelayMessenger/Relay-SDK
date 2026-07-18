@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createRelayClient, isRelayWebhookConflict, RelayApiError } from "./client.js";
 import {
-  deriveRelayContentIdempotencyKey,
   deriveRelayIdempotencyKey,
   reconcileRelayUnknownSend,
   RELAY_TEXT_CHUNK_LIMIT,
@@ -93,25 +92,22 @@ describe("deriveRelayIdempotencyKey", () => {
   });
 });
 
-describe("deriveRelayContentIdempotencyKey", () => {
-  it("is stable for identical content so a retry replays instead of duplicating", () => {
-    const a = deriveRelayContentIdempotencyKey({ conversationId: "cnv_1", text: "hi" });
-    const b = deriveRelayContentIdempotencyKey({ conversationId: "cnv_1", text: "hi" });
-    expect(a).toBe(b);
-    expect(a).toMatch(/^relay-send:h:[0-9a-f]{48}$/);
+describe("logical-send idempotency", () => {
+  it("preserves two intentional identical sends when no queue id exists", () => {
+    const values = ["uuid-a", "uuid-b"];
+    const random = () => values.shift()!;
+    const a = deriveRelayIdempotencyKey({ random });
+    const b = deriveRelayIdempotencyKey({ random });
+    expect(a).toBe("relay-send:uuid-a");
+    expect(b).toBe("relay-send:uuid-b");
   });
 
-  it("varies by conversation, reply target, and text", () => {
-    const base = deriveRelayContentIdempotencyKey({ conversationId: "cnv_1", text: "hi" });
-    expect(deriveRelayContentIdempotencyKey({ conversationId: "cnv_2", text: "hi" })).not.toBe(
-      base,
-    );
-    expect(deriveRelayContentIdempotencyKey({ conversationId: "cnv_1", text: "hi!" })).not.toBe(
-      base,
-    );
-    expect(
-      deriveRelayContentIdempotencyKey({ conversationId: "cnv_1", text: "hi", replyToId: "m1" }),
-    ).not.toBe(base);
+  it("hashes an oversized logical id without collapsing distinct chunks", () => {
+    const queueId = "q".repeat(400);
+    const a = deriveRelayIdempotencyKey({ deliveryQueueId: queueId, deliveryPartIndex: 0 });
+    const b = deriveRelayIdempotencyKey({ deliveryQueueId: queueId, deliveryPartIndex: 1 });
+    expect(a).toMatch(/^relay-send:h:[0-9a-f]{64}$/);
+    expect(a).not.toBe(b);
   });
 });
 
@@ -182,6 +178,40 @@ describe("sendRelayText", () => {
     await sendRelayText({ client, conversationId: "cnv_1", text: "hi", idempotencyKey: key });
 
     expect(requests.map((request) => request.headers["idempotency-key"])).toEqual([key, key]);
+  });
+
+  it("reuses one logical-send key for bounded unknown-outcome retries", async () => {
+    const keys: string[] = [];
+    let attempts = 0;
+    const client = {
+      getMe: async () => {
+        throw new Error("not used");
+      },
+      pollEvents: async () => {
+        throw new Error("not used");
+      },
+      sendMessage: async (params: { idempotencyKey: string }) => {
+        keys.push(params.idempotencyKey);
+        attempts += 1;
+        if (attempts === 1) {
+          throw new RelayApiError("connection reset", { kind: "retryable" });
+        }
+        const sent = sentMessage("msg_after_retry");
+        return { messageId: sent.message_id, message: sent.message };
+      },
+      setTyping: async () => {},
+      markRead: async () => {},
+    } as unknown as Parameters<typeof sendRelayText>[0]["client"];
+
+    const result = await sendRelayText({
+      client,
+      conversationId: "cnv_1",
+      text: "same logical send",
+      idempotencyKey: "relay-send:logical-1:0",
+    });
+
+    expect(result.messageId).toBe("msg_after_retry");
+    expect(keys).toEqual(["relay-send:logical-1:0", "relay-send:logical-1:0"]);
   });
 });
 

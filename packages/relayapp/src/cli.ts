@@ -87,7 +87,16 @@ async function main(): Promise<number> {
         return 1;
       }
       const ownerUserId = resolveOwnerUserId(config); // fail closed without a pinned owner
-      const origin = flags.staging ? STAGING_ORIGIN : config.api_origin;
+      // The token is scoped to the origin it was paired against. Never send a
+      // saved token to a different origin because a flag changed.
+      if (flags.staging && config.api_origin !== STAGING_ORIGIN) {
+        console.error(
+          `This machine is paired against ${config.api_origin}, not staging. ` +
+            "Run `relayapp pair --staging` first — tokens never cross origins.",
+        );
+        return 1;
+      }
+      const origin = config.api_origin;
       const client = new RelayClient(origin, config.agent_token);
       const state = new StateStore();
       const sessions = new SessionStore();
@@ -116,17 +125,31 @@ async function main(): Promise<number> {
         cwd: flags.dir ?? process.cwd(),
         log,
       });
-      const shutdown = async () => {
-        log("shutting down…");
-        loop.stop();
-        await loop.settle();
-        await engine.dispose();
-        process.exit(0);
+      let shuttingDown: Promise<void> | undefined;
+      const shutdown = () => {
+        if (shuttingDown) return shuttingDown;
+        shuttingDown = (async () => {
+          log("shutting down…");
+          loop.stop();
+          // Dispose first: this rejects/aborts any live engine turn so settle()
+          // cannot wait forever on a child process we intend to terminate.
+          await engine.dispose();
+          await loop.settle();
+          process.exit(0);
+        })();
+        return shuttingDown;
       };
       process.on("SIGINT", shutdown);
       process.on("SIGTERM", shutdown);
       log(`bridge running: engine=${flags.engine} dir=${flags.dir ?? process.cwd()} api=${origin}`);
-      await loop.run();
+      try {
+        await loop.run();
+      } finally {
+        // Fatal loop exits (409/401 throws) must not leave a detached engine
+        // process group running without its bridge.
+        loop.stop();
+        await engine.dispose().catch(() => {});
+      }
       return 0;
     }
     case "install-codex":

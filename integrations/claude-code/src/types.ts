@@ -1,9 +1,7 @@
 /**
  * Relay wire shapes used by the channel server. These mirror the /v1 contract
- * (plan/12-coding-agent-bridge.md §A, server/src/domain/commitMessage.ts and
- * server/src/domain/events.ts). The plugin keeps its own copies on purpose:
- * it ships standalone under ${CLAUDE_PLUGIN_ROOT} and must not import from
- * the monorepo workspaces.
+ * from Relay's public agent API. The plugin keeps its own copies because the
+ * installed runtime is standalone under ${CLAUDE_PLUGIN_ROOT}.
  */
 
 export type RelayPartType = "text" | "media" | "voice_memo" | "link_preview" | "data";

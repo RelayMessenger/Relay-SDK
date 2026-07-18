@@ -1,8 +1,8 @@
 /**
  * ACP engine adapter. One adapter drives both engines by spawning the official
- * ACP wrappers over stdio (agentclientprotocol.com):
- *   claude → npx -y @agentclientprotocol/claude-agent-acp
- *   codex  → npx -y @agentclientprotocol/codex-acp
+ * ACP wrappers over stdio (agentclientprotocol.com), installed as exact,
+ * lockfile-pinned runtime dependencies and launched with a minimized
+ * environment. No session executes mutable registry "latest" code.
  *
  * ACP is the only interactive-approval path for Codex sessions the bridge
  * owns: `codex exec` hard-codes approval_policy=Never and rejects every
@@ -12,6 +12,7 @@
  * are re-attached with `session/load` when the agent advertises loadSession.
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import { createRequire } from "node:module";
 import { Readable, Writable } from "node:stream";
 import {
   client,
@@ -31,15 +32,139 @@ import type {
   TurnResult,
 } from "./types.js";
 import type { SessionStore } from "../store.js";
+import { terminateProcessTree } from "./process.js";
 
 export const ADAPTER_PACKAGES: Record<string, string> = {
   claude: "@agentclientprotocol/claude-agent-acp",
   codex: "@agentclientprotocol/codex-acp",
 };
 
+/** Versions must exactly match package.json; tests enforce the lock. */
+export const ADAPTER_VERSIONS: Record<string, string> = {
+  claude: "0.59.0",
+  codex: "1.1.4",
+};
+
+const require = createRequire(import.meta.url);
+
+/** Resolve the installed, lockfile-pinned executable without invoking npm. */
+export function adapterEntrypoint(engine: "claude" | "codex"): string {
+  if (engine === "claude") {
+    return require.resolve("@agentclientprotocol/claude-agent-acp/dist/index.js");
+  }
+  return require.resolve("@agentclientprotocol/codex-acp");
+}
+
+/**
+ * Minimized environment for the adapter subprocess. The full parent env can
+ * carry unrelated cloud/deploy/CI secrets; the adapter (and the agent it
+ * execs) only needs the platform basics plus its own provider credentials.
+ * Extend with RELAYAPP_ENGINE_ENV="VAR1,VAR2,MYPREFIX_*". Deliberately no
+ * "inherit" escape hatch exists: unrelated deploy and cloud credentials must
+ * never be handed wholesale to a coding-agent subprocess.
+ */
+const ENGINE_ENV_EXACT = new Set([
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "LANG",
+  "TZ",
+  "TERM",
+  "COLORTERM",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+  // Windows process basics.
+  "SYSTEMROOT",
+  "SYSTEMDRIVE",
+  "COMSPEC",
+  "PATHEXT",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "USERNAME",
+  "PROGRAMFILES",
+  "PROGRAMDATA",
+  "OS",
+  "WINDIR",
+]);
+const ENGINE_ENV_PREFIXES = [
+  "LC_",
+  "XDG_",
+  // Engine/provider credentials and settings for the two supported adapters.
+  "ANTHROPIC_",
+  "CLAUDE_",
+  "OPENAI_",
+  "CODEX_",
+];
+
+export function engineEnv(parent: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const extra = (parent.RELAYAPP_ENGINE_ENV ?? "").trim();
+  const extraExact = new Set<string>();
+  const extraPrefixes: string[] = [];
+  for (const raw of extra.split(",")) {
+    const entry = raw.trim();
+    if (entry.length === 0) continue;
+    if (entry.endsWith("*")) extraPrefixes.push(entry.slice(0, -1));
+    else extraExact.add(entry);
+  }
+  const allowed = (key: string): boolean => {
+    if (ENGINE_ENV_EXACT.has(key) || ENGINE_ENV_EXACT.has(key.toUpperCase())) return true;
+    if (extraExact.has(key)) return true;
+    return [...ENGINE_ENV_PREFIXES, ...extraPrefixes].some((prefix) => key.startsWith(prefix));
+  };
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(parent)) {
+    if (value !== undefined && allowed(key)) env[key] = value;
+  }
+  return env;
+}
+
 interface TurnState {
   callbacks: TurnCallbacks;
   text: string[];
+}
+
+/**
+ * Flatten the security-relevant parts of an ACP tool call — raw input,
+ * affected locations, content — into one preview string for the approval
+ * card. Length is clamped downstream (head + tail) by the card builder.
+ */
+export function permissionDetail(
+  toolCall: RequestPermissionRequest["toolCall"],
+): string | undefined {
+  const parts: string[] = [];
+  if (toolCall.rawInput !== undefined) {
+    try {
+      parts.push(JSON.stringify(toolCall.rawInput));
+    } catch {
+      parts.push(String(toolCall.rawInput));
+    }
+  }
+  if (Array.isArray(toolCall.locations) && toolCall.locations.length > 0) {
+    parts.push(`paths: ${toolCall.locations.map((location) => location.path).join(", ")}`);
+  }
+  for (const content of toolCall.content ?? []) {
+    if (content.type === "content" && content.content.type === "text") {
+      parts.push(content.content.text);
+    } else if (content.type === "diff") {
+      parts.push(`diff ${content.path}`);
+    } else if (content.type === "terminal") {
+      parts.push(`terminal ${content.terminalId}`);
+    }
+  }
+  const joined = parts.filter((part) => part && part.length > 0).join("\n");
+  return joined.length > 0 ? joined : undefined;
 }
 
 export class AcpEngine implements EngineAdapter {
@@ -50,8 +175,8 @@ export class AcpEngine implements EngineAdapter {
   private loadSessionSupported = false;
   /** Live turn state keyed by ACP session id. */
   private readonly turns = new Map<string, TurnState>();
-  /** conversation_id → ACP session id for the live process. */
-  private readonly liveSessions = new Map<string, string>();
+  /** conversation_id → ACP session + repository for the live process. */
+  private readonly liveSessions = new Map<string, { sessionId: string; cwd: string }>();
   private permissionSeq = 0;
 
   constructor(
@@ -75,14 +200,15 @@ export class AcpEngine implements EngineAdapter {
   }
 
   private async connect(): Promise<void> {
-    const pkg = ADAPTER_PACKAGES[this.engine];
-    this.log(`spawning ${pkg} via npx`);
-    const child = spawn("npx", ["-y", pkg], {
+    const pkg = `${ADAPTER_PACKAGES[this.engine]}@${ADAPTER_VERSIONS[this.engine]}`;
+    const entrypoint = adapterEntrypoint(this.engine);
+    this.log(`spawning installed ${pkg}`);
+    const child = spawn(process.execPath, [entrypoint], {
       stdio: ["pipe", "pipe", "inherit"],
-      env: process.env,
-      // Own process group so dispose() can kill the npx wrapper AND the
-      // adapter grandchild it execs.
-      detached: true,
+      env: engineEnv(),
+      // POSIX: own process group so dispose() reaches adapter descendants.
+      detached: process.platform !== "win32",
+      windowsHide: true,
     });
     this.child = child;
     child.on("error", (error) => {
@@ -111,7 +237,7 @@ export class AcpEngine implements EngineAdapter {
 
     const init = await this.ctx.request("initialize", {
       protocolVersion: PROTOCOL_VERSION,
-      clientInfo: { name: "relayapp", version: "0.1.0-dev" },
+      clientInfo: { name: "relayapp", version: "0.1.0" },
       clientCapabilities: {},
     });
     this.loadSessionSupported = init.agentCapabilities?.loadSession === true;
@@ -155,6 +281,9 @@ export class AcpEngine implements EngineAdapter {
       requestId: `perm_${Date.now().toString(36)}_${this.permissionSeq}`,
       toolName: params.toolCall.title ?? params.toolCall.toolCallId,
       title: params.toolCall.title ?? undefined,
+      // The card must show WHAT is being approved, not just a tool title: a
+      // generic "Bash" with the command hidden turns Allow into a blind grant.
+      inputPreview: permissionDetail(params.toolCall),
       options: params.options.map((option) => ({
         optionId: option.optionId,
         label: option.name,
@@ -170,17 +299,21 @@ export class AcpEngine implements EngineAdapter {
 
   private async openSession(ctx: ClientContext, ref: SessionRef): Promise<string> {
     const live = this.liveSessions.get(ref.conversationId);
-    if (live) return live;
+    if (live?.cwd === ref.cwd) return live.sessionId;
+    if (live) this.liveSessions.delete(ref.conversationId);
 
     const stored = this.sessions.get(ref.conversationId);
-    if (stored && stored.engine === this.engine && this.loadSessionSupported) {
+    // Reuse only bindings from the same engine AND the same working
+    // directory: reloading another repository's session would leak its
+    // history/instructions into this tree and act against the wrong files.
+    if (stored && stored.engine === this.engine && stored.cwd === ref.cwd && this.loadSessionSupported) {
       try {
         await ctx.request("session/load", {
           sessionId: stored.session_id,
           cwd: ref.cwd,
           mcpServers: [],
         });
-        this.liveSessions.set(ref.conversationId, stored.session_id);
+        this.liveSessions.set(ref.conversationId, { sessionId: stored.session_id, cwd: ref.cwd });
         return stored.session_id;
       } catch (error) {
         this.log(`session/load failed for ${ref.conversationId}, creating fresh: ${error}`);
@@ -189,7 +322,7 @@ export class AcpEngine implements EngineAdapter {
     }
 
     const created = await ctx.request("session/new", { cwd: ref.cwd, mcpServers: [] });
-    this.liveSessions.set(ref.conversationId, created.sessionId);
+    this.liveSessions.set(ref.conversationId, { sessionId: created.sessionId, cwd: ref.cwd });
     this.sessions.set(ref.conversationId, {
       engine: this.engine,
       session_id: created.sessionId,
@@ -218,21 +351,15 @@ export class AcpEngine implements EngineAdapter {
   }
 
   async abort(ref: SessionRef): Promise<void> {
-    const sessionId = this.liveSessions.get(ref.conversationId);
-    if (!sessionId || !this.ctx) return;
-    await this.ctx.notify("session/cancel", { sessionId });
+    const live = this.liveSessions.get(ref.conversationId);
+    if (!live || live.cwd !== ref.cwd || !this.ctx) return;
+    await this.ctx.notify("session/cancel", { sessionId: live.sessionId });
   }
 
   async dispose(): Promise<void> {
+    const child = this.child;
     this.resetConnection();
-    if (this.child && this.child.exitCode === null && this.child.pid) {
-      try {
-        // Negative pid: signal the whole process group (npx + adapter).
-        process.kill(-this.child.pid, "SIGTERM");
-      } catch {
-        this.child.kill("SIGTERM");
-      }
-    }
     this.child = undefined;
+    if (child) await terminateProcessTree(child);
   }
 }

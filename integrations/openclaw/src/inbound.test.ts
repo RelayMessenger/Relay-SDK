@@ -36,7 +36,7 @@ function event(overrides: Partial<RelayEvent> = {}): RelayEvent {
 }
 
 describe("classifyRelayEvent", () => {
-  it("maps event types per doc 03 §4", () => {
+  it("maps Relay event types", () => {
     expect(classifyRelayEvent({ event_type: "message.received" })).toBe("message");
     expect(classifyRelayEvent({ event_type: "reaction.added" })).toBe("reaction");
     expect(classifyRelayEvent({ event_type: "reaction.removed" })).toBe("reaction");
@@ -108,6 +108,14 @@ describe("buildRelayInboundFacts", () => {
   it("returns null for echoes of our own agent", () => {
     const facts = buildRelayInboundFacts(
       event({ data: { message: message({ sender: { kind: "agent", id: AGENT_ID } }) } }),
+      { agentId: AGENT_ID },
+    );
+    expect(facts).toBeNull();
+  });
+
+  it("returns null for messages authored by any other agent", () => {
+    const facts = buildRelayInboundFacts(
+      event({ data: { message: message({ sender: { kind: "agent", id: "agt_other" } }) } }),
       { agentId: AGENT_ID },
     );
     expect(facts).toBeNull();

@@ -22,7 +22,6 @@
           "token": { "type": "string" },
           "tokenFile": { "type": "string" },
           "baseUrl": { "type": "string" },
-          "dmPolicy": { "type": "string", "enum": ["open", "allowlist"] },
           "allowFrom": {
             "type": "array",
             "items": { "type": "string" }
@@ -40,7 +39,6 @@
                 "token": { "type": "string" },
                 "tokenFile": { "type": "string" },
                 "baseUrl": { "type": "string" },
-                "dmPolicy": { "type": "string", "enum": ["open", "allowlist"] },
                 "allowFrom": {
                   "type": "array",
                   "items": { "type": "string" }

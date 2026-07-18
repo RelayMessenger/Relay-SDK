@@ -1,4 +1,4 @@
-// Durable outbound sends (doc 03 §5): every logical send carries an
+// Durable outbound sends: every logical send carries an
 // Idempotency-Key; internal retries and unknown-send reconciliation replay
 // the same key, so a retry can never duplicate a visible message
 // (server contract: commitMessage.ts idempotent replay).
@@ -9,8 +9,7 @@ import type { RelayMessage } from "./types.js";
 
 /**
  * Per-part text ceiling declared to core's renderer so long agent replies are
- * split into multiple messages instead of truncated (doc 03 §5 — the exact
- * Hermes-adapter bug). Server caps a text part at 8 KiB UTF-8
+ * split into multiple messages instead of truncated. Server caps a text part at 8 KiB UTF-8
  * (server/src/domain/commitMessage.ts MAX_TEXT_BYTES); 2000 chars is safe for
  * any UTF-8 content (4 bytes/char worst case).
  */
@@ -21,8 +20,8 @@ const IDEMPOTENCY_KEY_MAX = 255;
 /**
  * Idempotency key for one logical send. When core supplies a durable delivery
  * queue id, the key is a stable function of (queueId, partIndex) so internal
- * retries and reconciliation replay the exact same key; otherwise a fresh
- * UUID-based key is minted per logical send.
+ * retries and reconciliation replay the exact same key. Without a queue id a
+ * fresh key is minted: identical intentional sends must remain distinct.
  */
 export function deriveRelayIdempotencyKey(params: {
   deliveryQueueId?: string;
@@ -34,27 +33,12 @@ export function deriveRelayIdempotencyKey(params: {
     ? `relay-send:${queueId}:${params.deliveryPartIndex ?? 0}`
     : `relay-send:${(params.random ?? (() => crypto.randomUUID()))()}`;
   // Server accepts 8-255 chars; the prefix guarantees the minimum.
-  return key.length > IDEMPOTENCY_KEY_MAX ? key.slice(0, IDEMPOTENCY_KEY_MAX) : key;
-}
-
-/**
- * Content-derived idempotency key for send paths that have no durable queue
- * id (compat outbound adapter, non-final block delivery). A caller retry with
- * the same target and text replays the same key, so the server commit stays
- * single. Tradeoff: an intentional identical duplicate send inside the
- * server's idempotency window is also collapsed — acceptable for these
- * delivery paths, where every retry is a transport retry, not a new intent.
- */
-export function deriveRelayContentIdempotencyKey(params: {
-  conversationId: string;
-  text: string;
-  replyToId?: string | null;
-}): string {
-  const digest = createHash("sha256")
-    .update(`relay\0${params.conversationId}\0${params.replyToId ?? ""}\0${params.text}`)
-    .digest("hex")
-    .slice(0, 48);
-  return `relay-send:h:${digest}`;
+  if (key.length <= IDEMPOTENCY_KEY_MAX) {
+    return key;
+  }
+  // Preserve uniqueness when an opaque core queue id is unusually long; a
+  // simple prefix slice could erase the part index and collapse two chunks.
+  return `relay-send:h:${createHash("sha256").update(key).digest("hex")}`;
 }
 
 export type RelayOutboundSendResult = {
@@ -70,14 +54,25 @@ export async function sendRelayText(params: {
   idempotencyKey: string;
   signal?: AbortSignal;
 }): Promise<RelayOutboundSendResult> {
-  const result = await params.client.sendMessage({
-    conversationId: params.conversationId,
-    parts: [{ type: "text", text: params.text }],
-    ...(params.replyToId ? { replyTo: { message_id: params.replyToId } } : {}),
-    idempotencyKey: params.idempotencyKey,
-    ...(params.signal ? { signal: params.signal } : {}),
-  });
-  return { messageId: result.messageId, message: result.message };
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const result = await params.client.sendMessage({
+        conversationId: params.conversationId,
+        parts: [{ type: "text", text: params.text }],
+        ...(params.replyToId ? { replyTo: { message_id: params.replyToId } } : {}),
+        idempotencyKey: params.idempotencyKey,
+        ...(params.signal ? { signal: params.signal } : {}),
+      });
+      return { messageId: result.messageId, message: result.message };
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof RelayApiError) || !error.retryable || params.signal?.aborted) {
+        throw error;
+      }
+    }
+  }
+  throw lastError;
 }
 
 export type RelayUnknownSendVerdict =
@@ -86,8 +81,7 @@ export type RelayUnknownSendVerdict =
   | { status: "unresolved"; error?: string; retryable?: boolean };
 
 /**
- * Reconcile a send whose platform outcome is unknown (doc 03 §5,
- * message/types.ts reconcileUnknownSend): replay the POST with the same
+ * Reconcile a send whose platform outcome is unknown: replay the POST with the same
  * idempotency key and body. By server contract the replay either performs the
  * send exactly once or returns the originally committed message — either way
  * the visible outcome is a single message.

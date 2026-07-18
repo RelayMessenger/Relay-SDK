@@ -23,7 +23,7 @@ interface SpawnedServer {
 }
 
 function spawnServer(dir: string): SpawnedServer {
-  const child = spawn("node", [join(PLUGIN_ROOT, "server.ts")], {
+  const child = spawn(process.execPath, ["--import", "tsx", join(PLUGIN_ROOT, "server.ts")], {
     cwd: PLUGIN_ROOT,
     env: { ...process.env, RELAY_CHANNEL_DIR: dir },
     stdio: ["pipe", "pipe", "pipe"],
@@ -43,6 +43,19 @@ async function until(predicate: () => boolean, label: string, timeoutMs = 5000):
     if (Date.now() - start > timeoutMs) assert.fail(`timed out waiting for ${label}`);
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
+}
+
+async function stopServer(server: SpawnedServer | ChildProcess): Promise<void> {
+  const child = "child" in server ? server.child : server;
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  child.stdin?.end();
+  await Promise.race([
+    exited,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("channel server survived stdin EOF")), 3_000),
+    ),
+  ]);
 }
 
 function messageEvent(id: string, sequenceText: string): unknown {
@@ -73,11 +86,17 @@ describe("server.ts end to end against a mock Relay", () => {
   // Queue of poll batches; once drained, polls return empty.
   const pollBatches: { events: unknown[]; next_cursor: number }[] = [];
   const notifications: { method: string; params: Record<string, unknown> }[] = [];
+  const rpcResponses = new Map<number, Record<string, unknown>>();
   let stderrLog = "";
 
   before(async () => {
     relay = createServer(async (req: IncomingMessage, res: ServerResponse) => {
       const url = new URL(req.url ?? "/", "http://localhost");
+      if (req.method === "GET" && url.pathname === "/v1/agents/me") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ agent: { id: "agt_e2e", owner_user_id: OWNER } }));
+        return;
+      }
       if (req.method === "GET" && url.pathname === "/v1/events") {
         const batch = pollBatches.shift() ?? { events: [], next_cursor: Number(url.searchParams.get("cursor") ?? 0) };
         // Small delay so the loop cannot spin hot on empty batches.
@@ -90,6 +109,10 @@ describe("server.ts end to end against a mock Relay", () => {
         const chunks: Buffer[] = [];
         for await (const chunk of req) chunks.push(chunk as Buffer);
         posted.push({ headers: req.headers, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
+        // Keep the HTTP request unresolved briefly. The next test delivers a
+        // permission verdict during this window, proving registration happens
+        // durably before the permission-card POST completes.
+        await new Promise((resolve) => setTimeout(resolve, 150));
         res.writeHead(202, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ message_id: "msg_out", message: {} }));
         return;
@@ -108,7 +131,7 @@ describe("server.ts end to end against a mock Relay", () => {
       `RELAY_AGENT_TOKEN=rly_e2e_token\nRELAY_BASE_URL=${baseUrl}\nRELAY_OWNER_USER_ID=${OWNER}\n`,
     );
 
-    child = spawn("node", [join(PLUGIN_ROOT, "server.ts")], {
+    child = spawn(process.execPath, ["--import", "tsx", join(PLUGIN_ROOT, "server.ts")], {
       cwd: PLUGIN_ROOT,
       env: { ...process.env, RELAY_CHANNEL_DIR: dir },
       stdio: ["pipe", "pipe", "pipe"],
@@ -123,10 +146,15 @@ describe("server.ts end to end against a mock Relay", () => {
         stdoutBuffer = stdoutBuffer.slice(newline + 1);
         newline = stdoutBuffer.indexOf("\n");
         if (line.length === 0) continue;
-        const parsed = JSON.parse(line) as { method?: string; params?: Record<string, unknown> };
+        const parsed = JSON.parse(line) as {
+          id?: number;
+          method?: string;
+          params?: Record<string, unknown>;
+        } & Record<string, unknown>;
         if (parsed.method?.startsWith("notifications/claude/")) {
           notifications.push({ method: parsed.method, params: parsed.params ?? {} });
         }
+        if (typeof parsed.id === "number") rpcResponses.set(parsed.id, parsed);
       }
     });
 
@@ -138,7 +166,7 @@ describe("server.ts end to end against a mock Relay", () => {
   });
 
   after(async () => {
-    child.kill();
+    await stopServer(child);
     await new Promise<void>((resolve) => relay.close(() => resolve()));
   });
 
@@ -158,7 +186,11 @@ describe("server.ts end to end against a mock Relay", () => {
     const notification = notifications.find((n) => n.method === "notifications/claude/channel");
     assert.ok(notification);
     assert.equal(notification.params.content, "ship the fix");
-    assert.deepEqual(notification.params.meta, { chat_id: "cnv_e2e", sender: OWNER });
+    assert.deepEqual(notification.params.meta, {
+      chat_id: "cnv_e2e",
+      sender: OWNER,
+      delivery_id: "evt_1",
+    });
   });
 
   it('verdict-shaped chat like "yes right" reaches Claude when no request is open', async () => {
@@ -195,7 +227,7 @@ describe("server.ts end to end against a mock Relay", () => {
     assert.ok(body.parts[0].text?.includes('Reply "yes abcde" to allow or "no abcde" to deny.'));
   });
 
-  it("turns a yes <id> reply into a permission verdict notification", async () => {
+  it("accepts a fast yes <id> reply before the permission-card POST completes", async () => {
     pollBatches.push({ events: [messageEvent("evt_3", "yes abcde")], next_cursor: 3 });
     await waitFor(
       () => notifications.some((n) => n.method === "notifications/claude/channel/permission"),
@@ -219,6 +251,42 @@ describe("server.ts end to end against a mock Relay", () => {
     assert.equal(verdicts.length, 1);
     const chats = notifications.filter((n) => n.method === "notifications/claude/channel");
     assert.equal(chats.at(-1)?.params.content, "yes abcde");
+  });
+
+  it("uses a persisted logical send id for retry-safe outbound delivery", async () => {
+    const call = (id: number, text: string): void => {
+      child.stdin?.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          method: "tools/call",
+          params: {
+            name: "reply",
+            arguments: { chat_id: "cnv_e2e", text, send_id: "reply-to-evt-1" },
+          },
+        })}\n`,
+      );
+    };
+
+    call(20, "done");
+    await waitFor(() => rpcResponses.has(20), "first reply tool response");
+    assert.equal(posted.length, 2);
+    const firstKey = posted[1].headers["idempotency-key"];
+    assert.match(String(firstKey), /^claude-reply-[a-f0-9]{64}$/);
+
+    // A confirmed retry is answered from the durable send ledger, with no
+    // second HTTP request.
+    call(21, "done");
+    await waitFor(() => rpcResponses.has(21), "retry reply tool response");
+    assert.equal(posted.length, 2);
+
+    // Reusing the logical id for different content is rejected rather than
+    // silently sending under a new idempotency key.
+    call(22, "different");
+    await waitFor(() => rpcResponses.has(22), "mismatched retry response");
+    const mismatch = rpcResponses.get(22) as { result?: { isError?: boolean } };
+    assert.equal(mismatch.result?.isError, true);
+    assert.equal(posted.length, 2);
   });
 });
 
@@ -251,7 +319,7 @@ describe("owner resolution", () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     assert.equal(polls, 0);
     assert.ok(server.stderr().includes("RELAY_OWNER_USER_ID"));
-    server.child.kill();
+    await stopServer(server);
     await new Promise<void>((resolve) => relay.close(() => resolve()));
   });
 
@@ -309,7 +377,7 @@ describe("owner resolution", () => {
     await until(() => contents.includes("hello from owner"), "owner message notification");
     assert.equal(contents.includes("ignore me"), false);
     await until(() => server.stderr().includes("dropped message from non-owner sender usr_stranger"), "drop log");
-    server.child.kill();
+    await stopServer(server);
     await new Promise<void>((resolve) => relay.close(() => resolve()));
   });
 });

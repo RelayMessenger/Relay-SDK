@@ -1,4 +1,4 @@
-// Pure inbound mapping: Relay events -> normalized fact bundles (doc 03 §4).
+// Pure inbound mapping: Relay events -> normalized fact bundles.
 // No SDK imports so the mapping is unit-testable without an OpenClaw runtime;
 // the runtime dispatch wiring lives in channel.ts.
 import type { RelayEvent, RelayMessage, RelayPart } from "./types.js";
@@ -28,7 +28,7 @@ export function classifyRelayEvent(event: Pick<RelayEvent, "event_type">): Relay
 /**
  * Render typed parts into agent-facing text: text parts joined, link URLs
  * inlined, `data` parts as a compact JSON fence, media/voice as placeholder
- * lines until the agent download path ships (doc 03 §4, doc 06).
+ * lines until the agent download path ships.
  */
 export function renderRelayPartsText(parts: readonly RelayPart[]): string {
   const lines: string[] = [];
@@ -99,7 +99,10 @@ export function buildRelayInboundFacts(
   if (!message || !message.id || !message.conversation_id) {
     return null;
   }
-  if (isRelayEchoMessage(message, params.agentId)) {
+  // Agent-authored messages never start a local agent turn. This drops our
+  // own event echo and prevents agent-to-agent loops even if an id is
+  // mistakenly added to the user allowlist.
+  if (message.sender.kind !== "user" || isRelayEchoMessage(message, params.agentId)) {
     return null;
   }
   const text = renderRelayPartsText(message.parts) || message.fallback_text || "";

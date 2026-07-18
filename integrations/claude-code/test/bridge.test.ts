@@ -7,8 +7,10 @@ import {
   buildPermissionCard,
   buildReply,
   classifyEvent,
+  hasCompletePermissionInput,
   parseVerdictDataPart,
   parseVerdictText,
+  renderPermissionInput,
   sanitizeRelayedText,
 } from "../src/bridge.ts";
 import type { RelayEvent } from "../src/types.ts";
@@ -349,6 +351,65 @@ describe("permission card", () => {
     const text = card.body.parts[0].text ?? "";
     assert.ok(!text.includes("‮"));
     assert.ok(text.includes("run evil command trailing"));
+  });
+
+  it("preserves the entire supplied input and makes invisible controls visible", () => {
+    const raw = '{"command":"echo one\nthen‮ hidden"}';
+    const rendered = renderPermissionInput(raw);
+    assert.ok(rendered.includes("\n"));
+    assert.ok(rendered.includes("\\u202e"));
+    assert.ok(!rendered.includes("‮"));
+  });
+
+  it("disables remote Allow when Claude's 200-character preview may be truncated", () => {
+    const truncated = '{"command":"' + "x".repeat(220);
+    assert.equal(hasCompletePermissionInput(truncated), false);
+    const card = buildPermissionCard(
+      {
+        request_id: "abcde",
+        tool_name: "Bash",
+        description: "Run command",
+        input_preview: truncated,
+      },
+      "cnv_9",
+    );
+    assert.equal(card.remoteAllowEnabled, false);
+    assert.ok(card.body.parts[0].text?.includes("Remote Allow is disabled"));
+    const data = card.body.parts[1].data as {
+      remote_allow_enabled: boolean;
+      options: { id: string }[];
+      input_preview: string;
+    };
+    assert.equal(data.remote_allow_enabled, false);
+    assert.deepEqual(data.options.map((option) => option.id), ["deny"]);
+    assert.equal(data.input_preview.length, truncated.length);
+  });
+
+  it("enables remote Allow only for complete JSON below Claude's truncation boundary", () => {
+    assert.equal(hasCompletePermissionInput('{"command":"ls -la"}'), true);
+    assert.equal(hasCompletePermissionInput("ls -la"), false);
+  });
+});
+
+describe("unsafe remote verdict", () => {
+  it("consumes but rejects Allow when the registered approval lacks full input", () => {
+    const action = classifyEvent(
+      messageEvent({ parts: [{ part_index: 0, type: "text", text: "yes abcde" }] }),
+      OWNER,
+      (id) => id === "abcde",
+      (verdict) => verdict.behavior === "deny",
+    );
+    assert.equal(action.kind, "rejected_verdict");
+  });
+
+  it("still accepts Deny for an incomplete preview", () => {
+    const action = classifyEvent(
+      messageEvent({ parts: [{ part_index: 0, type: "text", text: "no abcde" }] }),
+      OWNER,
+      (id) => id === "abcde",
+      (verdict) => verdict.behavior === "deny",
+    );
+    assert.equal(action.kind, "verdict");
   });
 });
 

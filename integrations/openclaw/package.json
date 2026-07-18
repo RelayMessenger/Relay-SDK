@@ -1,8 +1,20 @@
 {
   "name": "@relayapp/openclaw-plugin",
   "version": "0.1.0",
-  "private": true,
   "description": "Relay channel plugin for OpenClaw — text your OpenClaw like a friend.",
+  "license": "MIT",
+  "keywords": [
+    "openclaw",
+    "relay",
+    "messaging",
+    "agent"
+  ],
+  "engines": {
+    "node": ">=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "files": [
     "README.md",
@@ -17,6 +29,7 @@
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc --noEmit",
     "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "npm run build"
   },
   "devDependencies": {

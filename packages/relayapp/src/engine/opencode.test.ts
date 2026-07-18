@@ -35,6 +35,7 @@ async function mockOpencode() {
   const requests: RecordedRequest[] = [];
   const sseClients: http.ServerResponse[] = [];
   const sessionIds: string[] = [];
+  const failingPaths = new Set<string>();
   let sessionSeq = 0;
 
   const server = http.createServer((req, res) => {
@@ -77,6 +78,11 @@ async function mockOpencode() {
         }
         return;
       }
+      if (failingPaths.has(url.pathname)) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "injected failure" }));
+        return;
+      }
       // prompt_async, abort, permission reply, question reply/reject.
       res.writeHead(200, { "content-type": "application/json" });
       res.end("true");
@@ -96,6 +102,9 @@ async function mockOpencode() {
     killStreams() {
       for (const client of sseClients) client.destroy();
       sseClients.length = 0;
+    },
+    failPath(path: string) {
+      failingPaths.add(path);
     },
     async close() {
       this.killStreams();
@@ -242,6 +251,33 @@ test("stored session binding is validated and reused across engine restarts", as
   }
 });
 
+test("same conversation opened from a different repository gets a fresh session", async () => {
+  const home = tempHome();
+  const mock = await mockOpencode();
+  const sessions = new SessionStore(home);
+  const engine = new OpencodeEngine(sessions, { server: { url: mock.url } });
+  try {
+    const first = engine.startTurn({ conversationId: "cnv_a", cwd: "/repo/one" }, "first", callbacks());
+    await waitFor(() => mock.requests.some((r) => r.path === "/session/ses_1/prompt_async"));
+    mock.emit({ type: "session.status", properties: { sessionID: "ses_1", status: { type: "busy" } } });
+    mock.emit({ type: "session.next.text.ended", properties: { sessionID: "ses_1", textID: "t", text: "one" } });
+    mock.emit({ type: "session.status", properties: { sessionID: "ses_1", status: { type: "idle" } } });
+    await first;
+
+    const second = engine.startTurn({ conversationId: "cnv_a", cwd: "/repo/two" }, "second", callbacks());
+    await waitFor(() => mock.requests.some((r) => r.path === "/session/ses_2/prompt_async"));
+    assert.equal(mock.requests.filter((r) => r.method === "POST" && r.path === "/session").length, 2);
+    assert.equal(sessions.get("cnv_a")?.cwd, "/repo/two");
+    mock.emit({ type: "session.status", properties: { sessionID: "ses_2", status: { type: "busy" } } });
+    mock.emit({ type: "session.next.text.ended", properties: { sessionID: "ses_2", textID: "t", text: "two" } });
+    mock.emit({ type: "session.status", properties: { sessionID: "ses_2", status: { type: "idle" } } });
+    assert.equal((await second).text, "two");
+  } finally {
+    await engine.dispose();
+    await mock.close();
+  }
+});
+
 test("permission.asked round trip: Allow → reply once, Deny → reply reject", async () => {
   const mock = await mockOpencode();
   const engine = new OpencodeEngine(new SessionStore(tempHome()), { server: { url: mock.url } });
@@ -291,6 +327,32 @@ test("permission.asked round trip: Allow → reply once, Deny → reply reject",
     mock.emit({ type: "session.next.text.ended", properties: { sessionID: "ses_1", textID: "t", text: "done" } });
     mock.emit({ type: "session.status", properties: { sessionID: "ses_1", status: { type: "idle" } } });
     assert.equal((await turn).text, "done");
+  } finally {
+    await engine.dispose();
+    await mock.close();
+  }
+});
+
+test("failed permission reply aborts and invalidates the stranded session", async () => {
+  const mock = await mockOpencode();
+  const sessions = new SessionStore(tempHome());
+  const engine = new OpencodeEngine(sessions, { server: { url: mock.url } });
+  try {
+    mock.failPath("/permission/per_fail/reply");
+    const turn = engine.startTurn(
+      { conversationId: "cnv_a", cwd: "/w" },
+      "run it",
+      callbacks(async () => ({ behavior: "selected", optionId: "once" })),
+    );
+    await waitFor(() => mock.requests.some((r) => r.path.endsWith("/prompt_async")));
+    mock.emit({ type: "session.status", properties: { sessionID: "ses_1", status: { type: "busy" } } });
+    mock.emit({
+      type: "permission.asked",
+      properties: { id: "per_fail", sessionID: "ses_1", permission: "bash", patterns: ["deploy"] },
+    });
+    await assert.rejects(turn, /permission reply failed/);
+    await waitFor(() => mock.requests.some((r) => r.path === "/session/ses_1/abort"));
+    assert.equal(sessions.get("cnv_a"), undefined);
   } finally {
     await engine.dispose();
     await mock.close();

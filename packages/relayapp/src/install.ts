@@ -12,9 +12,21 @@
  * Existing user values are preserved: a different notify command or an
  * existing hook list is left alone (we append/skip, and report what we did).
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse as parseToml } from "smol-toml";
 
 export interface MergeReport {
@@ -29,6 +41,40 @@ const RELAY_PERMISSION_HOOK_ENTRY = {
   matcher: "*",
   hooks: [{ type: "command", command: RELAY_PERMISSION_HOOK_COMMAND }],
 };
+
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+
+/** Secret-bearing Codex config writes are private and crash-atomic. */
+export function writePrivateText(path: string, value: string): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+  let fd = openSync(tmp, "wx", 0o600);
+  let installed = false;
+  try {
+    writeSync(fd, value);
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = -1;
+    renameSync(tmp, path);
+    chmodSync(path, 0o600);
+    installed = true;
+  } finally {
+    if (fd !== -1) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Preserve the original write failure.
+      }
+    }
+    if (!installed) {
+      try {
+        unlinkSync(tmp);
+      } catch {
+        // Best effort cleanup; preserve the original failure.
+      }
+    }
+  }
+}
 
 /**
  * Pure merge for tests: returns the new TOML text plus a report.
@@ -116,10 +162,10 @@ export function installCodex(codexHome = join(homedir(), ".codex"), out: (line: 
   if (merged.report.changed) {
     // Keep a copy of the pristine original before our first modification.
     if (existingToml.length > 0 && !existsSync(`${configPath}.bak`)) {
-      writeFileSync(`${configPath}.bak`, existingToml);
+      writePrivateText(`${configPath}.bak`, existingToml);
       merged.report.notes.push(`original saved to ${configPath}.bak`);
     }
-    writeFileSync(configPath, merged.toml);
+    writePrivateText(configPath, merged.toml);
   }
   out(`${configPath}:`);
   for (const note of merged.report.notes) out(`  - ${note}`);
@@ -129,10 +175,10 @@ export function installCodex(codexHome = join(homedir(), ".codex"), out: (line: 
   const hooks = mergeHooksJson(existingHooks);
   if (hooks.report.changed) {
     if (existingHooks.length > 0 && !existsSync(`${hooksPath}.bak`)) {
-      writeFileSync(`${hooksPath}.bak`, existingHooks);
+      writePrivateText(`${hooksPath}.bak`, existingHooks);
       hooks.report.notes.push(`original saved to ${hooksPath}.bak`);
     }
-    writeFileSync(hooksPath, hooks.json);
+    writePrivateText(hooksPath, hooks.json);
   }
   out(`${hooksPath}:`);
   for (const note of hooks.report.notes) out(`  - ${note}`);
@@ -145,24 +191,27 @@ export function installCodex(codexHome = join(homedir(), ".codex"), out: (line: 
 }
 
 /**
- * install-claude: the Claude Code channel plugin lives in integrations/claude-code
- * (separate branch, plan/12 §C). Point at it when present; no-op gracefully when not.
+ * install-claude: the repository is a Claude plugin marketplace. Print the
+ * same install/run identity whether this command runs from a source checkout
+ * or the published CLI package.
  */
-export function installClaude(out: (line: string) => void = console.log, searchFrom = import.meta.dirname): void {
+export function installClaude(out: (line: string) => void = console.log, searchFrom = MODULE_DIR): void {
   let dir = searchFrom;
   for (let i = 0; i < 8; i += 1) {
     const candidate = join(dir, "integrations", "claude-code");
     if (existsSync(candidate)) {
-      out(`Found the Claude Code channel plugin at ${candidate}.`);
-      out("Load it for development with:");
-      out("  claude --dangerously-load-development-channels server:relay-channel");
-      return;
+      out(`Source checkout plugin: ${candidate}`);
+      break;
     }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  out("The Claude Code channel plugin isn't available in this build yet.");
-  out("For now, run the bridge directly: `relayapp start --engine claude`.");
-  out("Setup guide: https://docs.relayapp.im/quickstart");
+  out("In Claude Code, install Relay from its marketplace:");
+  out("  /plugin marketplace add companion-inc/relayapp");
+  out("  /plugin install relay@relayapp");
+  out("");
+  out("Then run:");
+  out("  claude --dangerously-load-development-channels plugin:relay@relayapp");
+  out("Setup guide: https://docs.relayapp.im/guides/coding-agents");
 }

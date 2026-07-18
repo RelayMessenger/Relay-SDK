@@ -1,10 +1,16 @@
 {
   "name": "relayapp-dev",
   "private": true,
-  "workspaces": ["packages/relayapp"],
+  "workspaces": [
+    "packages/relayapp",
+    "integrations/claude-code",
+    "integrations/openclaw"
+  ],
   "scripts": {
     "check": "npm run check --workspaces",
     "build": "npm run build --workspaces",
-    "test": "npm run test --workspaces"
+    "test": "npm run test --workspaces",
+    "validate": "npm run check && npm run build && npm test",
+    "pack:check": "node scripts/pack-smoke.mjs && npm run pack:smoke --workspace relay-claude-channel && npm run pack:smoke --workspace @relayapp/openclaw-plugin"
   }
 }

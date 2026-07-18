@@ -115,13 +115,14 @@ describe("runRelayPollLoop", () => {
     expect(cursorStore.current()).toBe(2);
   });
 
-  it("does not advance the cursor past a failed event and replays it", async () => {
+  it("does not replay a dispatch that may already have run tool side effects", async () => {
     const abort = new AbortController();
     const cursorStore = memoryCursorStore();
     await cursorStore.load();
     const guard = memoryGuard();
     const handled: string[] = [];
     let failedOnce = false;
+    const logs: string[] = [];
 
     await runRelayPollLoop({
       client: scriptedClient(
@@ -142,11 +143,50 @@ describe("runRelayPollLoop", () => {
         }
         handled.push(event.event_id);
       },
+      log: (line) => logs.push(line),
       sleep: instantSleep,
     });
 
-    // evt_1 dispatched exactly once (dedupe suppressed the replay); evt_2
-    // replayed after its release.
+    // evt_2 may have run tools before its handler failed, so its durable
+    // attempt suppresses the server replay instead of executing it twice.
+    expect(handled).toEqual(["evt_1"]);
+    expect(cursorStore.current()).toBe(2);
+    expect(logs.join("\n")).toMatch(/will not replay possible tool side effects/);
+  });
+
+  it("replays only when the durable attempt marker fails before dispatch", async () => {
+    const abort = new AbortController();
+    const cursorStore = memoryCursorStore();
+    await cursorStore.load();
+    const guard = memoryGuard();
+    const originalCommit = guard.commit;
+    let commitFailed = false;
+    guard.commit = async (key, opts) => {
+      if (key.includes("evt_2") && !commitFailed) {
+        commitFailed = true;
+        throw new Error("state db unavailable");
+      }
+      return originalCommit(key, opts);
+    };
+    const handled: string[] = [];
+
+    await runRelayPollLoop({
+      client: scriptedClient(
+        [
+          { events: [makeEvent("evt_1"), makeEvent("evt_2")], nextCursor: 2 },
+          { events: [makeEvent("evt_1"), makeEvent("evt_2")], nextCursor: 2 },
+        ],
+        abort,
+      ),
+      cursorStore,
+      deduper: createRelayInboundDeduper({ guard, accountId: "default" }),
+      abortSignal: abort.signal,
+      handleEvent: async (event) => {
+        handled.push(event.event_id);
+      },
+      sleep: instantSleep,
+    });
+
     expect(handled).toEqual(["evt_1", "evt_2"]);
     expect(cursorStore.current()).toBe(2);
   });
@@ -297,5 +337,39 @@ describe("runRelayPollLoop", () => {
       },
       sleep: instantSleep,
     });
+  });
+
+  it("does not acknowledge the unprocessed tail when abort fires after an attempt commit", async () => {
+    const abort = new AbortController();
+    const cursorStore = memoryCursorStore();
+    await cursorStore.load();
+    const committed: string[] = [];
+    const deduper = {
+      claimEvent: async () => true,
+      commitEvent: async (eventId: string) => {
+        committed.push(eventId);
+        abort.abort();
+      },
+      releaseEvent: () => {},
+    };
+    const handled: string[] = [];
+
+    await runRelayPollLoop({
+      client: scriptedClient(
+        [{ events: [makeEvent("evt_1"), makeEvent("evt_tail")], nextCursor: 2 }],
+        abort,
+      ),
+      cursorStore,
+      deduper,
+      abortSignal: abort.signal,
+      handleEvent: async (event) => {
+        handled.push(event.event_id);
+      },
+      sleep: instantSleep,
+    });
+
+    expect(committed).toEqual(["evt_1"]);
+    expect(handled).toEqual([]);
+    expect(cursorStore.current()).toBe(0);
   });
 });

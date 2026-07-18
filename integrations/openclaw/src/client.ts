@@ -1,7 +1,8 @@
 // Thin Relay REST client for the OpenClaw channel plugin. Bespoke fetch until
-// the Relay SDK ships (doc 03 §1). Owns the abort-aware long poll, idempotent
+// the Relay SDK ships. Owns the abort-aware long poll, idempotent
 // sends, typing, and read watermarks. No SDK imports so unit tests run
 // without an OpenClaw runtime.
+import { isIP } from "node:net";
 import type {
   RelayAgentProfile,
   RelayEventsPage,
@@ -11,6 +12,49 @@ import type {
 } from "./types.js";
 
 export const DEFAULT_RELAY_BASE_URL = "https://api.relayapp.im";
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const ipVersion = isIP(normalized);
+  if (ipVersion === 4) {
+    return normalized.split(".")[0] === "127";
+  }
+  if (ipVersion === 6) {
+    return normalized === "::1";
+  }
+  return (
+    normalized === "localhost" ||
+    normalized.endsWith(".localhost")
+  );
+}
+
+/**
+ * Validate and canonicalize the API origin before a bearer token can be sent
+ * to it. Production/custom remote origins must use HTTPS. Plain HTTP remains
+ * available only for an explicit loopback development server.
+ */
+export function normalizeRelayBaseUrl(raw?: string): string {
+  const candidate = raw?.trim() || DEFAULT_RELAY_BASE_URL;
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new Error(`relay: invalid baseUrl ${JSON.stringify(candidate)}`);
+  }
+  if (url.username || url.password) {
+    throw new Error("relay: baseUrl must not contain credentials");
+  }
+  if (url.search || url.hash) {
+    throw new Error("relay: baseUrl must not contain a query or fragment");
+  }
+  if (!/^\/+$/u.test(url.pathname)) {
+    throw new Error("relay: baseUrl must be an origin without a path");
+  }
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHostname(url.hostname))) {
+    throw new Error("relay: baseUrl must use HTTPS (HTTP is allowed only for loopback development)");
+  }
+  return url.origin;
+}
 
 export type RelayApiErrorKind = "auth" | "conflict" | "retryable" | "rejected";
 
@@ -125,7 +169,7 @@ async function readErrorDetail(
 }
 
 export function createRelayClient(options: RelayClientOptions): RelayClient {
-  const baseUrl = (options.baseUrl?.trim() || DEFAULT_RELAY_BASE_URL).replace(/\/+$/, "");
+  const baseUrl = normalizeRelayBaseUrl(options.baseUrl);
   const fetchImpl: FetchLike = options.fetchImpl ?? ((input, init) => fetch(input, init));
 
   const request = async (params: {

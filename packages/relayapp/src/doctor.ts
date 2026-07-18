@@ -4,7 +4,7 @@ import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { RelayClient } from "./api.js";
-import { ADAPTER_PACKAGES } from "./engine/acp.js";
+import { ADAPTER_PACKAGES, ADAPTER_VERSIONS, adapterEntrypoint } from "./engine/acp.js";
 import { ApprovalStore, ConfigStore, readStateSnapshot, relayappHome } from "./store.js";
 
 export async function doctor(out: (line: string) => void = console.log): Promise<boolean> {
@@ -15,17 +15,20 @@ export async function doctor(out: (line: string) => void = console.log): Promise
     return ok;
   };
 
-  const [major] = process.versions.node.split(".").map(Number);
-  check((major ?? 0) >= 18, "node >= 18", `running ${process.versions.node}`);
-
-  const npx = spawnSync("npx", ["--version"], { encoding: "utf8" });
-  check(npx.status === 0, "npx available", npx.stdout?.trim());
+  const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number);
+  check(
+    (nodeMajor ?? 0) > 22 || (nodeMajor === 22 && (nodeMinor ?? 0) >= 18),
+    "node >= 22.18",
+    `running ${process.versions.node}`,
+  );
 
   const config = new ConfigStore();
   const loaded = config.load();
   if (check(Boolean(loaded?.agent_token), "paired (config.json has agent_token)", config.path)) {
-    const mode = statSync(config.path).mode & 0o777;
-    check(mode === 0o600, "config.json is chmod 600", `mode ${mode.toString(8)}`);
+    if (process.platform !== "win32") {
+      const mode = statSync(config.path).mode & 0o777;
+      check(mode === 0o600, "config.json is chmod 600", `mode ${mode.toString(8)}`);
+    }
     const owner = process.env.RELAY_OWNER_USER_ID ?? loaded?.owner_user_id;
     check(
       Boolean(owner),
@@ -35,7 +38,8 @@ export async function doctor(out: (line: string) => void = console.log): Promise
     try {
       const client = new RelayClient(loaded!.api_origin, loaded!.agent_token);
       const me = (await client.getMe()) as any;
-      check(true, `API reachable (${loaded!.api_origin})`, me?.handle ? `@${me.handle}` : undefined);
+      const handle = me?.agent?.handle ?? me?.handle;
+      check(true, `API reachable (${loaded!.api_origin})`, handle ? `@${handle}` : undefined);
     } catch (error: any) {
       check(false, `API reachable (${loaded!.api_origin})`, String(error?.message ?? error));
     }
@@ -56,16 +60,33 @@ export async function doctor(out: (line: string) => void = console.log): Promise
   );
 
   for (const [engine, pkg] of Object.entries(ADAPTER_PACKAGES)) {
-    const probe = spawnSync("npm", ["view", pkg, "version"], { encoding: "utf8", timeout: 20_000 });
-    check(probe.status === 0, `${engine} adapter resolvable (${pkg})`, probe.stdout?.trim());
+    try {
+      const entrypoint = adapterEntrypoint(engine as "claude" | "codex");
+      check(
+        existsSync(entrypoint),
+        `${engine} adapter installed (${pkg}@${ADAPTER_VERSIONS[engine]})`,
+        entrypoint,
+      );
+    } catch (error) {
+      check(false, `${engine} adapter installed (${pkg}@${ADAPTER_VERSIONS[engine]})`, String(error));
+    }
   }
 
   // opencode is an optional engine: absence is informational, but a binary
   // that is present yet cannot report a version is a real failure.
-  const opencodeProbe = spawnSync("opencode", ["--version"], { encoding: "utf8", timeout: 20_000 });
-  if (opencodeProbe.error && (opencodeProbe.error as NodeJS.ErrnoException).code === "ENOENT") {
+  const opencodeLookup = spawnSync(process.platform === "win32" ? "where.exe" : "which", ["opencode"], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (opencodeLookup.status !== 0) {
     out("info  no opencode binary on PATH — install https://opencode.ai to use --engine opencode");
   } else {
+    const opencodeProbe = spawnSync("opencode", ["--version"], {
+      encoding: "utf8",
+      timeout: 20_000,
+      shell: process.platform === "win32",
+      windowsHide: true,
+    });
     check(
       opencodeProbe.status === 0,
       "opencode binary present",

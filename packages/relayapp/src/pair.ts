@@ -1,5 +1,5 @@
 /**
- * `relayapp pair` — device-code pairing (plan/12 §A1/§B).
+ * `relayapp pair` — device-code pairing.
  * POST /v1/pairings → terminal QR of the claim url + short code → long-poll
  * GET /v1/pairings/:id?wait=true until the phone claims it → store the
  * agent_token in ~/.relayapp/config.json (chmod 600). The token is delivered
@@ -20,6 +20,20 @@ export interface PairOptions {
   agentClientFor?: (agentToken: string) => RelayClient;
   out?: (line: string) => void;
   renderQr?: (url: string) => void;
+}
+
+/**
+ * The live API nests the profile: GET /v1/agents/me → { agent: { owner_user_id } }.
+ * A bare top-level owner_user_id is accepted too for forward/backward tolerance.
+ */
+export function ownerUserIdFromMe(me: Record<string, unknown>): string | undefined {
+  const agent = me.agent;
+  if (typeof agent === "object" && agent !== null) {
+    const nested = (agent as Record<string, unknown>).owner_user_id;
+    if (typeof nested === "string" && nested.length > 0) return nested;
+  }
+  const flat = me.owner_user_id;
+  return typeof flat === "string" && flat.length > 0 ? flat : undefined;
 }
 
 export async function pair(options: PairOptions): Promise<void> {
@@ -86,8 +100,8 @@ export async function pair(options: PairOptions): Promise<void> {
   let ownerUserId = process.env.RELAY_OWNER_USER_ID;
   if (!ownerUserId) {
     try {
-      const me = (await agentClient.getMe()) as { owner_user_id?: string };
-      ownerUserId = typeof me.owner_user_id === "string" ? me.owner_user_id : undefined;
+      const me = await agentClient.getMe();
+      ownerUserId = ownerUserIdFromMe(me);
     } catch (error) {
       throw new Error(
         `Token stored, but pinning the owner failed (${error instanceof Error ? error.message : error}). ` +

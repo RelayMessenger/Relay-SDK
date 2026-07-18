@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { after, before, describe, it } from "node:test";
 
 import { buildPermissionCard, buildReply } from "../src/bridge.ts";
-import { RelayApiError, RelayClient } from "../src/relayClient.ts";
+import { RelayApiError, RelayClient, normalizeRelayBaseUrl } from "../src/relayClient.ts";
 import { startPoller } from "../src/poller.ts";
 import type { RelayEvent } from "../src/types.ts";
 
@@ -144,6 +144,28 @@ describe("RelayClient against a mocked Relay server", () => {
         return true;
       },
     );
+  });
+});
+
+describe("Relay origin validation", () => {
+  it("canonicalizes equivalent HTTPS origins", () => {
+    assert.equal(normalizeRelayBaseUrl("https://API.RELAYAPP.IM:443/"), "https://api.relayapp.im");
+  });
+
+  it("allows HTTP only for loopback development", () => {
+    assert.equal(normalizeRelayBaseUrl("http://127.0.0.1:8787/"), "http://127.0.0.1:8787");
+    assert.throws(() => normalizeRelayBaseUrl("http://api.relayapp.im"), /HTTPS/);
+  });
+
+  it("rejects paths, query strings, fragments, and embedded credentials", () => {
+    for (const value of [
+      "https://api.relayapp.im/v1",
+      "https://api.relayapp.im?token=x",
+      "https://api.relayapp.im/#x",
+      "https://user:pass@api.relayapp.im",
+    ]) {
+      assert.throws(() => normalizeRelayBaseUrl(value));
+    }
   });
 });
 

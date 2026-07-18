@@ -2,7 +2,7 @@
  * Receive loop: long-poll GET /v1/events → durable queue → engine turn →
  * one finalized POST /v1/messages per turn.
  *
- * Reliability contract (patterns from research/sdk-integrations/01 §1.4):
+ * Reliability contract:
  *  - Durable-before-ack: inbound events are appended to state.json's
  *    pending_events queue in the SAME atomic write that advances the cursor,
  *    so an acked event is always durable and a crash replays, never drops.
@@ -14,7 +14,7 @@
  */
 import { createHash } from "node:crypto";
 import type { RelayClient } from "./api.js";
-import type { RelayEvent, RelayMessage, StateStore } from "./store.js";
+import type { BridgeState, RelayEvent, RelayMessage, StateStore } from "./store.js";
 import type { EngineAdapter } from "./engine/types.js";
 import { PermissionBroker } from "./permissions.js";
 
@@ -55,6 +55,8 @@ export class ReceiveLoop {
   private readonly debounceTimers = new Map<string, NodeJS.Timeout>();
   /** Serializes turns per conversation. */
   private readonly turnChains = new Map<string, Promise<void>>();
+  /** Turn keys whose attempt marker was written by THIS process. */
+  private readonly attemptedHere = new Set<string>();
   private stopped = false;
 
   constructor(
@@ -117,6 +119,7 @@ export class ReceiveLoop {
   }
 
   private scheduleFlush(conversationId: string): void {
+    if (this.stopped) return;
     const existing = this.debounceTimers.get(conversationId);
     if (existing) clearTimeout(existing);
     const timer = this.setTimeoutImpl(() => {
@@ -135,6 +138,9 @@ export class ReceiveLoop {
         this.log(`turn failed for ${conversationId}: ${error}`);
       });
     this.turnChains.set(conversationId, next);
+    void next.finally(() => {
+      if (this.turnChains.get(conversationId) === next) this.turnChains.delete(conversationId);
+    });
   }
 
   /** Waits for in-flight turns (tests + graceful shutdown). */
@@ -142,7 +148,86 @@ export class ReceiveLoop {
     await Promise.allSettled([...this.turnChains.values()]);
   }
 
+  /** Removes THIS turn's consumed events (and its attempt marker) durably. */
+  private clearBatch(conversationId: string, events: RelayEvent[], turnKey?: string): void {
+    const queue = this.state.current.pending_events[conversationId] ?? [];
+    const remaining = queue.filter(
+      (event) => !events.some((consumed) => consumed.event_id === event.event_id),
+    );
+    if (remaining.length === 0) {
+      delete this.state.current.pending_events[conversationId];
+    } else {
+      this.state.current.pending_events[conversationId] = remaining;
+      // New messages arrived mid-turn; run again.
+      this.scheduleFlush(conversationId);
+    }
+    const attemptedKey = (this.state.current.attempted_turns ??= {})[conversationId];
+    delete this.state.current.attempted_turns![conversationId];
+    if (attemptedKey) this.attemptedHere.delete(attemptedKey);
+    if (turnKey) delete (this.state.current.pending_replies ??= {})[turnKey];
+    this.state.persist();
+  }
+
+  private async postNotice(conversationId: string, text: string, key: string): Promise<void> {
+    try {
+      await this.client.postMessage(
+        { conversation_id: conversationId, parts: [{ type: "text", text }] },
+        key,
+      );
+    } catch (error) {
+      this.log(`notice post failed for ${conversationId}: ${error}`);
+    }
+  }
+
+  private pendingReplyForConversation(conversationId: string):
+    | [string, NonNullable<BridgeState["pending_replies"]>[string]]
+    | undefined {
+    return Object.entries(this.state.current.pending_replies ?? {}).find(
+      ([, reply]) => reply.conversation_id === conversationId,
+    );
+  }
+
+  /** Idempotently deliver an engine-completed reply without rerunning tools. */
+  private async deliverPendingReply(
+    turnKey: string,
+    reply: NonNullable<BridgeState["pending_replies"]>[string],
+  ): Promise<boolean> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await this.client.postMessage(
+          { conversation_id: reply.conversation_id, parts: [{ type: "text", text: reply.text }] },
+          turnKey,
+        );
+        return true;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) {
+          await new Promise((resolve) => this.setTimeoutImpl(resolve, 1_000 * (attempt + 1)));
+        }
+      }
+    }
+    this.log(`final reply post failed for ${reply.conversation_id}: ${lastError}`);
+    return false;
+  }
+
   async runTurn(conversationId: string): Promise<void> {
+    // Delivery is its own durable phase. Finish an older reply before looking
+    // at newer queued prompts, otherwise appending a message after an unknown
+    // POST outcome could cause the older tool turn to execute again.
+    const queuedReply = this.pendingReplyForConversation(conversationId);
+    if (queuedReply) {
+      const [turnKey, reply] = queuedReply;
+      const queuedEvents = this.state.current.pending_events[conversationId] ?? [];
+      const consumed = queuedEvents.filter((event) => reply.event_ids.includes(event.event_id));
+      if (await this.deliverPendingReply(turnKey, reply)) {
+        this.clearBatch(conversationId, consumed, turnKey);
+      } else {
+        this.scheduleFlush(conversationId);
+      }
+      return;
+    }
+
     // Snapshot: routeEvent keeps appending to the live queue while the turn
     // runs, and the post-turn filter must only remove what THIS turn consumed.
     const events = [...(this.state.current.pending_events[conversationId] ?? [])];
@@ -159,36 +244,74 @@ export class ReceiveLoop {
       return;
     }
 
+    // Crash semantics: engine/tool side effects are at-most-once per batch.
+    // The attempt marker is persisted BEFORE the engine starts; a marker found
+    // for this exact batch that this process did not write means a previous
+    // process crashed mid-turn — the batch is dropped with a notice instead of
+    // silently re-running deploys/deletes/sends.
+    const turnKey = turnIdempotencyKey(conversationId, lastEventId);
+    const attempted = this.state.current.attempted_turns ??= {};
+    if (attempted[conversationId] === turnKey && !this.attemptedHere.has(turnKey)) {
+      this.log(`turn ${turnKey} was interrupted by a crash — dropping, not re-executing`);
+      this.clearBatch(conversationId, events, turnKey);
+      await this.postNotice(
+        conversationId,
+        "The bridge restarted while working on your last message, so it was not retried " +
+          "automatically (its tools may have partially run). Send it again to retry.",
+        `${turnKey}-crashed`,
+      );
+      return;
+    }
+    attempted[conversationId] = turnKey;
+    this.attemptedHere.add(turnKey);
+    this.state.persist();
+
     const typing = this.startTyping(conversationId);
     try {
-      const result = await this.engine.startTurn(
-        { conversationId, cwd: this.cwd },
-        promptText,
-        {
-          onToolEvent: (event) => typing.setLabel(event.title ?? "Working…"),
-          onPermissionAsk: (ask) => this.broker.ask(conversationId, ask, this.engine.engine),
-        },
-      );
+      let result;
+      try {
+        result = await this.engine.startTurn(
+          { conversationId, cwd: this.cwd },
+          promptText,
+          {
+            onToolEvent: (event) => typing.setLabel(event.title ?? "Working…"),
+            onPermissionAsk: (ask) => this.broker.ask(conversationId, ask, this.engine.engine),
+          },
+        );
+      } catch (error) {
+        // A failed engine turn is not silently retried (its side effects may
+        // have partially run) and must not strand the queue: tell the owner
+        // and clear the batch so the conversation stays usable.
+        this.log(`engine turn failed for ${conversationId}: ${error}`);
+        this.clearBatch(conversationId, events, turnKey);
+        await this.postNotice(
+          conversationId,
+          `The ${this.engine.engine} turn failed: ${String(error instanceof Error ? error.message : error).slice(0, 300)}\n` +
+            "Send your message again to retry.",
+          `${turnKey}-failed`,
+        );
+        return;
+      }
       const text = result.text.trim().length > 0
         ? result.text.trim()
         : `(turn finished: ${result.stopReason})`;
-      // Quiet finalization: exactly one POST per turn, idempotent on the turn id.
-      await this.client.postMessage(
-        { conversation_id: conversationId, parts: [{ type: "text", text }] },
-        turnIdempotencyKey(conversationId, lastEventId),
-      );
-      // Success → clear exactly the events this turn consumed.
-      const queue = this.state.current.pending_events[conversationId] ?? [];
-      this.state.current.pending_events[conversationId] = queue.filter(
-        (event) => !events.some((consumed) => consumed.event_id === event.event_id),
-      );
-      if (this.state.current.pending_events[conversationId]!.length === 0) {
-        delete this.state.current.pending_events[conversationId];
+      // Persist the completed output BEFORE delivery. Any crash from here on
+      // can retry this idempotent POST without rerunning the engine or tools.
+      const pendingReply = {
+        conversation_id: conversationId,
+        event_ids: events.map((event) => event.event_id),
+        text,
+        created_at: new Date().toISOString(),
+      };
+      (this.state.current.pending_replies ??= {})[turnKey] = pendingReply;
+      this.state.persist();
+      if (await this.deliverPendingReply(turnKey, pendingReply)) {
+        this.clearBatch(conversationId, events, turnKey);
       } else {
-        // New messages arrived mid-turn; run again.
+        // Keep the queue, attempt marker and completed reply. The scheduled
+        // retry enters the delivery-only path above.
         this.scheduleFlush(conversationId);
       }
-      this.state.persist();
     } finally {
       await typing.stop();
     }
@@ -250,10 +373,7 @@ export class ReceiveLoop {
         const base = Math.min(500 * 2 ** Math.min(failures, 6), 30_000);
         const jitter = base * (0.7 + Math.random() * 0.6);
         this.log(`poll failed (attempt ${failures}), retrying in ${Math.round(jitter)}ms: ${error}`);
-        await new Promise((resolve) => {
-          const timer = this.setTimeoutImpl(resolve, jitter);
-          (timer as NodeJS.Timeout).unref?.();
-        });
+        await new Promise((resolve) => this.setTimeoutImpl(resolve, jitter));
       }
     }
   }
