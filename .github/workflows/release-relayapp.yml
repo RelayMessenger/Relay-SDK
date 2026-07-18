@@ -21,7 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,7 +30,8 @@ jobs:
         with:
           node-version: 22.22.3
           cache: npm
-          registry-url: https://registry.npmjs.org
+      - name: Install an npm CLI with trusted publishing support
+        run: npm install --global npm@12.0.1
       - name: Refuse a mismatched version or tag
         run: node scripts/relayapp-release.mjs check-tag "$RELEASE_TAG"
       - run: npm ci
@@ -42,18 +42,8 @@ jobs:
       - name: Reconcile the version with npm before any publish retry
         id: registry
         run: node scripts/relayapp-release.mjs registry-state
-      - name: Refuse a missing publish credential
+      - name: Publish relayapp through npm trusted publishing
         if: ${{ steps.registry.outputs.published != 'true' }}
-        run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "NPM_TOKEN is not configured; refusing to publish." >&2
-            exit 1
-          fi
-      - name: Publish relayapp with npm provenance
-        if: ${{ steps.registry.outputs.published != 'true' && github.event.repository.visibility == 'public' }}
-        run: npm publish --workspace relayapp --access public --provenance
-      - name: Publish relayapp without provenance for a private source repository
-        if: ${{ steps.registry.outputs.published != 'true' && github.event.repository.visibility != 'public' }}
         run: npm publish --workspace relayapp --access public
       - name: Verify the registry-installed artifact
         run: node scripts/verify-relayapp-registry.mjs
