@@ -15,6 +15,7 @@ Docs: https://docs.relayapp.im
 | [`packages/relayapp`](packages/relayapp) | The `relayapp` CLI (npm): `pair` a machine with the Relay app via QR/code, drive Claude Code, Codex, or Hermes Agent over ACP, and install the bundled Codex, Claude Code, or OpenClaw integration. |
 | [`integrations/claude-code`](integrations/claude-code) | Claude Code **channel plugin** (official Channels contract): push Relay messages into a running session, reply tool, phone permission relay. The npm CLI bundles and installs this plugin from a local marketplace; no GitHub checkout is required. |
 | [`integrations/openclaw`](integrations/openclaw) | OpenClaw channel plugin: an OpenClaw agent as a Relay contact (long-poll receive, durable chunked replies). The npm CLI bundles its installable archive. |
+| [`integrations/vercel-ai`](integrations/vercel-ai) | Vercel AI SDK webhook plugin (`@relayapp/vercel-ai`): verify signed Relay webhooks, then stream `streamText(...)` back as one canonical message. |
 
 ## Quickstart
 

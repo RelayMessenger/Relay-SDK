@@ -5,7 +5,7 @@
   "homepage": "https://relayapp.im",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/companion-inc/relayapp.git"
+    "url": "git+https://github.com/relaymessenger/relayapp.git"
   },
   "type": "module",
   "bin": {

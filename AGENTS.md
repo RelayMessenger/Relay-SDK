@@ -1,7 +1,8 @@
 # AGENTS.md
 
-- Supported integrations are exactly Claude Code, Codex, and Hermes over ACP plus
-  the OpenClaw channel plugin. Load `.agents/skills/acp-adapter-authoring/SKILL.md`
+- Supported integrations are exactly Claude Code, Codex, and Hermes over ACP,
+  the OpenClaw channel plugin, and the Vercel AI SDK webhook plugin
+  (`integrations/vercel-ai`, published as `@relayapp/vercel-ai`). Load `.agents/skills/acp-adapter-authoring/SKILL.md`
   before adding, changing, or auditing any coding-agent integration.
 - Load `.agents/skills/npm-package-authoring/SKILL.md` before changing package
   metadata, exports, packaging, or anything that ships in the npm tarball.
