@@ -1,0 +1,51 @@
+{
+  "name": "@relayapp/vercel-ai",
+  "version": "0.1.0",
+  "description": "Relay plugin for the Vercel AI SDK: receive signed Relay webhooks and stream replies as one canonical message.",
+  "license": "MIT",
+  "keywords": [
+    "relay",
+    "vercel",
+    "ai-sdk",
+    "messaging",
+    "agent",
+    "webhook"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "dist/**/*.js",
+    "dist/**/*.d.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/relaymessenger/relayapp.git",
+    "directory": "integrations/vercel-ai"
+  }
+}
