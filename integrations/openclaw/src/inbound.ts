@@ -27,8 +27,9 @@ export function classifyRelayEvent(event: Pick<RelayEvent, "event_type">): Relay
 
 /**
  * Render typed parts into agent-facing text: text parts joined, link URLs
- * inlined, `data` parts as a compact JSON fence, media/voice as placeholder
- * lines until the agent download path ships.
+ * inlined, `data` parts as a compact JSON fence, media/voice as a labeled
+ * fetchable URL. The URL is a capability link: it is the authorization, so
+ * any HTTP client can fetch the bytes without an Agent Token.
  */
 export function renderRelayPartsText(parts: readonly RelayPart[]): string {
   const lines: string[] = [];
@@ -53,10 +54,14 @@ export function renderRelayPartsText(parts: readonly RelayPart[]): string {
         break;
       }
       case "media":
-        lines.push("<media:attachment>");
+        lines.push(`[attachment] ${part.url}`);
         break;
       case "voice_memo":
-        lines.push("<media:voice>");
+        lines.push(
+          part.duration_ms
+            ? `[voice memo, ${Math.round(part.duration_ms / 1000)}s] ${part.url}`
+            : `[voice memo] ${part.url}`,
+        );
         break;
     }
   }

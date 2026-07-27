@@ -63,13 +63,21 @@ describe("renderRelayPartsText", () => {
     );
   });
 
-  it("renders media and voice placeholders until the download path ships", () => {
+  it("renders media and voice parts as labeled fetchable capability URLs", () => {
     expect(
       renderRelayPartsText([
         { part_index: 0, type: "media", url: "https://cdn/x.png" },
         { part_index: 1, type: "voice_memo", url: "https://cdn/y.m4a" },
       ]),
-    ).toBe("<media:attachment>\n<media:voice>");
+    ).toBe("[attachment] https://cdn/x.png\n[voice memo] https://cdn/y.m4a");
+  });
+
+  it("includes rounded duration for voice memos when present", () => {
+    expect(
+      renderRelayPartsText([
+        { part_index: 0, type: "voice_memo", url: "https://cdn/y.m4a", duration_ms: 18400 },
+      ]),
+    ).toBe("[voice memo, 18s] https://cdn/y.m4a");
   });
 });
 

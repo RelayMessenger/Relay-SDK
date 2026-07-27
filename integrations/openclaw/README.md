@@ -124,8 +124,10 @@ Relay. The release workflow requires this proof.
 
 ## v1 scope
 
-Direct conversations, text only. Inbound media/voice render placeholder
-lines until Relay's agent attachment download path ships; reactions are
-observe-only; receipts (`message.delivered`/`message.read`) never start a
-turn. Final agent replies are delivered durably (chunked to Relay's 8 KiB
-per-part cap, idempotency-keyed, retry-safe).
+Direct conversations only. Inbound text renders as-is; inbound media and
+voice memos render as a labeled fetchable capability URL (the URL is itself
+the authorization, so no Agent Token is needed to fetch the bytes) rather
+than the agent seeing the file inline; reactions are observe-only; receipts
+(`message.delivered`/`message.read`) never start a turn. Final agent replies
+are delivered durably (chunked to Relay's 8 KiB per-part cap,
+idempotency-keyed, retry-safe).
