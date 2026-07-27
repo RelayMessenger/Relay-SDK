@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -78,6 +80,11 @@ jobs:
 
   macos-relayapp-runtime:
     name: macOS installed relayapp Claude/Codex runtime smoke
+    # macOS runners bill at a 10x per-minute multiplier. Every PR already gets
+    # the Linux validate/minimum-node/package-smoke jobs; this real-OS smoke
+    # runs on merge to main and the tag-driven release workflow re-proves it,
+    # so it does not need to re-run on every PR push too.
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -92,6 +99,9 @@ jobs:
 
   windows-relayapp-runtime:
     name: Windows installed relayapp integration smoke
+    # Windows runners bill at a 2x per-minute multiplier; same reasoning as
+    # the macOS smoke job above.
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
