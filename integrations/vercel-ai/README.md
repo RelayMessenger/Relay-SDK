@@ -1,4 +1,4 @@
-# @relayapp/vercel-ai
+# @relaymessenger/vercel-ai
 
 Relay plugin for the [Vercel AI SDK](https://ai-sdk.dev): receive signed
 `message.received` webhooks and stream a model reply back to Relay as one
@@ -7,7 +7,7 @@ tools, and hosting. Raw HTTPS remains the canonical contract — this package
 is a thin, dependency-free binding of it.
 
 ```ts
-import { createRelay } from "@relayapp/vercel-ai";
+import { createRelay } from "@relaymessenger/vercel-ai";
 import { streamText } from "ai";
 
 const relay = createRelay({
