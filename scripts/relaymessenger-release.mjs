@@ -6,17 +6,17 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const pkg = JSON.parse(readFileSync(resolve(repoRoot, "packages/relayapp/package.json"), "utf8"));
+const pkg = JSON.parse(readFileSync(resolve(repoRoot, "packages/relaymessenger/package.json"), "utf8"));
 const lock = JSON.parse(readFileSync(resolve(repoRoot, "package-lock.json"), "utf8"));
-const expectedTag = `relayapp-v${pkg.version}`;
+const expectedTag = `relaymessenger-v${pkg.version}`;
 
 function checkVersionMetadata() {
-  assert.equal(pkg.name, "relayapp", "release workflow only publishes the relayapp package");
+  assert.equal(pkg.name, "relaymessenger", "release workflow only publishes the relaymessenger package");
   assert.match(pkg.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u, "invalid package version");
   assert.equal(
-    lock.packages?.["packages/relayapp"]?.version,
+    lock.packages?.["packages/relaymessenger"]?.version,
     pkg.version,
-    "package-lock relayapp version does not match package.json",
+    "package-lock relaymessenger version does not match package.json",
   );
 }
 
@@ -55,13 +55,13 @@ export function parseTrailingNpmJson(output) {
   throw new Error(`npm output did not end in a JSON document:\n${output.trim()}`);
 }
 
-function packRelayappJson(destination, dryRun = false) {
+function packRelaymessengerJson(destination, dryRun = false) {
   const output = execFileSync(
     process.platform === "win32" ? "npm.cmd" : "npm",
     [
       "pack",
       "--workspace",
-      "relayapp",
+      "relaymessenger",
       "--json",
       "--silent",
       ...(dryRun ? ["--dry-run"] : []),
@@ -71,7 +71,7 @@ function packRelayappJson(destination, dryRun = false) {
     { cwd: repoRoot, encoding: "utf8" },
   );
   const packed = parseTrailingNpmJson(output);
-  assert.ok(Array.isArray(packed) && packed.length === 1, "npm pack must describe one relayapp archive");
+  assert.ok(Array.isArray(packed) && packed.length === 1, "npm pack must describe one relaymessenger archive");
   assert.match(output, /generated and strictly validated Claude marketplace plus/);
   const paths = new Set((packed[0]?.files ?? []).map((file) => file.path));
   for (const required of [
@@ -88,15 +88,15 @@ function packRelayappJson(destination, dryRun = false) {
 }
 
 function packJsonSmoke() {
-  const destination = mkdtempSync(resolve(tmpdir(), "relayapp-release-pack-json-"));
+  const destination = mkdtempSync(resolve(tmpdir(), "relaymessenger-release-pack-json-"));
   try {
-    const packed = packRelayappJson(destination);
+    const packed = packRelaymessengerJson(destination);
     assert.match(packed[0]?.integrity ?? "", /^sha512-/u);
-    packRelayappJson(destination, true);
+    packRelaymessengerJson(destination, true);
   } finally {
     rmSync(destination, { recursive: true, force: true });
   }
-  process.stdout.write("relayapp prepack JSON and outer npm pack --dry-run smoke passed\n");
+  process.stdout.write("relaymessenger prepack JSON and outer npm pack --dry-run smoke passed\n");
 }
 
 function registryState() {
@@ -109,9 +109,9 @@ function registryState() {
   if (result.status === 0) {
     const registryVersion = JSON.parse(result.stdout);
     assert.equal(registryVersion, pkg.version);
-    const destination = mkdtempSync(resolve(tmpdir(), "relayapp-release-pack-"));
+    const destination = mkdtempSync(resolve(tmpdir(), "relaymessenger-release-pack-"));
     try {
-      const packed = packRelayappJson(destination);
+      const packed = packRelaymessengerJson(destination);
       const localIntegrity = packed[0]?.integrity;
       const registryIntegrity = JSON.parse(
         execFileSync(
@@ -145,5 +145,5 @@ if (command === "check-tag") checkTag(value ?? "");
 else if (command === "registry-state") registryState();
 else if (command === "pack-json-smoke") packJsonSmoke();
 else throw new Error(
-  "usage: relayapp-release.mjs check-tag <relayapp-vX.Y.Z> | registry-state | pack-json-smoke",
+  "usage: relaymessenger-release.mjs check-tag <relaymessenger-vX.Y.Z> | registry-state | pack-json-smoke",
 );

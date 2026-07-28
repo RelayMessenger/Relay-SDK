@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/vercel-ai",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Relay plugin for the Vercel AI SDK: receive signed Relay webhooks and stream replies as one canonical message.",
   "license": "MIT",
   "keywords": [

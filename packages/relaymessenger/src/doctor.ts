@@ -1,4 +1,4 @@
-/** `relayapp doctor` — environment and pairing health checks. */
+/** `relaymessenger doctor` — environment and pairing health checks. */
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -40,7 +40,7 @@ export async function doctor(out: (line: string) => void = console.log): Promise
     check(
       Boolean(owner),
       "owner pinned (owner_user_id)",
-      owner ?? "missing — re-run `relayapp pair` or set RELAY_OWNER_USER_ID",
+      owner ?? "missing — re-run `relaymessenger pair` or set RELAY_OWNER_USER_ID",
     );
     let origin = loaded!.api_origin;
     try {
@@ -60,7 +60,7 @@ export async function doctor(out: (line: string) => void = console.log): Promise
       check(false, `API reachable (${origin})`, String(error?.message ?? error));
     }
   } else {
-    out("     run `relayapp pair` to connect this machine to a Relay agent");
+    out("     run `relaymessenger pair` to connect this machine to a Relay agent");
   }
 
   if (loaded?.agent_token) {
@@ -147,7 +147,7 @@ export async function doctor(out: (line: string) => void = console.log): Promise
   const codexConfig = join(homedir(), ".codex", "config.toml");
   out(
     existsSync(codexConfig)
-      ? `info  codex config present (${codexConfig}); run \`relayapp install-codex\` to wire notify + approvals`
+      ? `info  codex config present (${codexConfig}); run \`relaymessenger install-codex\` to wire notify + approvals`
       : "info  no ~/.codex/config.toml — install Codex or skip install-codex",
   );
 

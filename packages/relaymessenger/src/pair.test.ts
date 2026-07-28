@@ -113,7 +113,7 @@ async function runPair(port: number, home: string) {
 test("pair: QR + code, long-poll until claimed, token + pinned owner stored privately where supported", async () => {
   const { server, requests, pollCount } = mockServer({ pendingPolls: 1 });
   const port = await listen(server);
-  const home = mkdtempSync(join(tmpdir(), "relayapp-pair-"));
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-"));
   try {
     const { origin, config, lines, qrPayloads } = await runPair(port, home);
 
@@ -157,7 +157,7 @@ test("regression: owner id is parsed from the live nested { agent: { owner_user_
 test("re-pair isolates cursor, queued work, approvals, destinations, and engine sessions", async () => {
   const { server } = mockServer({ pendingPolls: 0 });
   const port = await listen(server);
-  const home = mkdtempSync(join(tmpdir(), "relayapp-pair-isolation-"));
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-isolation-"));
   const origin = `http://127.0.0.1:${port}`;
   const oldConfig: RelayConfig = {
     api_origin: origin,
@@ -216,7 +216,7 @@ test("re-pair isolates cursor, queued work, approvals, destinations, and engine 
 test("pair (L3): transient poll failures retry until the claim lands", async () => {
   const { server } = mockServer({ failPollsWith500: 2, pendingPolls: 0 });
   const port = await listen(server);
-  const home = mkdtempSync(join(tmpdir(), "relayapp-pair-"));
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-"));
   try {
     const { config } = await runPair(port, home);
     const stored = JSON.parse(readFileSync(config.path, "utf8"));
@@ -229,7 +229,7 @@ test("pair (L3): transient poll failures retry until the claim lands", async () 
 test("pair (H3): fails closed when the server reports no owner, but keeps the token", async () => {
   const { server } = mockServer({ pendingPolls: 0, omitOwner: true });
   const port = await listen(server);
-  const home = mkdtempSync(join(tmpdir(), "relayapp-pair-"));
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-"));
   const hadEnv = process.env.RELAY_OWNER_USER_ID;
   delete process.env.RELAY_OWNER_USER_ID;
   try {
@@ -247,7 +247,7 @@ test("pair (H3): fails closed when the server reports no owner, but keeps the to
 test("pair resumes a saved token after transient owner lookup without creating another agent", async () => {
   const { server, requests } = mockServer({ pendingPolls: 0, failMeWith500: 1 });
   const port = await listen(server);
-  const home = mkdtempSync(join(tmpdir(), "relayapp-pair-resume-"));
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-resume-"));
   try {
     await assert.rejects(() => runPair(port, home), /resume owner pinning with this saved token/);
     const saved = new ConfigStore(home).load()!;
@@ -270,7 +270,7 @@ test("pair resumes a saved token after transient owner lookup without creating a
 test("pair replaces a saved same-origin token rejected with 401 instead of selecting it forever", async () => {
   const { server, requests } = mockServer({ pendingPolls: 0, staleToken401: true });
   const port = await listen(server);
-  const home = mkdtempSync(join(tmpdir(), "relayapp-pair-stale-"));
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-stale-"));
   const origin = `http://127.0.0.1:${port}`;
   const config = new ConfigStore(home);
   config.save({ api_origin: origin, agent_token: "stale-token" });
@@ -307,7 +307,7 @@ test("pair: expired pairing surfaces a clear error", async () => {
     res.end(JSON.stringify({ error: { code: "not_found", message: "expired" } }));
   });
   const port = await listen(server);
-  const home = mkdtempSync(join(tmpdir(), "relayapp-pair-"));
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-"));
   const origin = `http://127.0.0.1:${port}`;
   try {
     await assert.rejects(

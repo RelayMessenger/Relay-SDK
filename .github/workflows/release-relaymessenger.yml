@@ -1,13 +1,13 @@
-name: Release relayapp to npm
+name: Release relaymessenger to npm
 
 on:
   push:
     tags:
-      - "relayapp-v*"
+      - "relaymessenger-v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing relayapp-vX.Y.Z tag to release
+        description: Existing relaymessenger-vX.Y.Z tag to release
         required: true
         type: string
 
@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   publish:
-    name: Validate, publish, and verify relayapp
+    name: Validate, publish, and verify relaymessenger
     runs-on: blacksmith-2vcpu-ubuntu-2404
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -31,7 +31,7 @@ jobs:
           node-version: 22.22.3
           cache: npm
       - name: Refuse a mismatched version or tag
-        run: node scripts/relayapp-release.mjs check-tag "$RELEASE_TAG"
+        run: node scripts/relaymessenger-release.mjs check-tag "$RELEASE_TAG"
       - run: npm ci
       - run: npm run validate
       - run: npm run validate:claude-plugin
@@ -39,14 +39,14 @@ jobs:
       - run: npm run pack:check
       - name: Reconcile the version with npm before any publish retry
         id: registry
-        run: node scripts/relayapp-release.mjs registry-state
+        run: node scripts/relaymessenger-release.mjs registry-state
       # npm 12 blocks unapproved dependency install scripts during `npm ci`.
       # Keep the setup-node npm for the locked install/Claude native validator,
       # then upgrade only for OIDC trusted publishing after all artifacts pass.
       - name: Install an npm CLI with trusted publishing support
         run: npm install --global npm@12.0.1
-      - name: Publish relayapp through npm trusted publishing
+      - name: Publish relaymessenger through npm trusted publishing
         if: ${{ steps.registry.outputs.published != 'true' }}
-        run: npm publish --workspace relayapp --access public
+        run: npm publish --workspace relaymessenger --access public
       - name: Verify the registry-installed artifact
-        run: node scripts/verify-relayapp-registry.mjs
+        run: node scripts/verify-relaymessenger-registry.mjs

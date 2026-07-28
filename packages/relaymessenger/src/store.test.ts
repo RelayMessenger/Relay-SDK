@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { atomicWriteJson, blockInvalidState, RuntimeLock, StateStore } from "./store.js";
 
 function tempHome(): string {
-  return mkdtempSync(join(tmpdir(), "relayapp-store-test-"));
+  return mkdtempSync(join(tmpdir(), "relaymessenger-store-test-"));
 }
 
 test("corrupt security state is quarantined and persistently blocks cursor-zero replay", () => {
@@ -87,7 +87,7 @@ test("origin+agent runtime lock rejects a second process and safely recovers a d
   const first = new RuntimeLock(home);
   const second = new RuntimeLock(home);
   first.acquire();
-  assert.throws(() => second.acquire(), /another relayapp start process/i);
+  assert.throws(() => second.acquire(), /another relaymessenger start process/i);
   first.release();
   second.acquire();
   second.release();

@@ -19,7 +19,7 @@ function context(home: string, postMessage: RelayClient["postMessage"]) {
 }
 
 test("Codex MCP lost-response retry reuses its caller-stable idempotency key across restart", async () => {
-  const home = mkdtempSync(join(tmpdir(), "relayapp-mcp-send-"));
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-mcp-send-"));
   const keys: string[] = [];
   let calls = 0;
   const postMessage = (async (_body: unknown, key: string) => {
@@ -37,7 +37,7 @@ test("Codex MCP lost-response retry reuses its caller-stable idempotency key acr
 });
 
 test("Codex MCP same send_id accepts exact retries but rejects changed content or account", async () => {
-  const home = mkdtempSync(join(tmpdir(), "relayapp-mcp-bind-"));
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-mcp-bind-"));
   const postMessage = (async () => ({ message_id: "msg_1", message: {} })) as RelayClient["postMessage"];
   const deps = { requireContext: context(home, postMessage) };
   await sendMcpMessage({ text: "same", send_id: "logical-1" }, deps);
@@ -60,7 +60,7 @@ test("Codex MCP same send_id accepts exact retries but rejects changed content o
 });
 
 test("Codex MCP requires a bounded caller-stable send_id", async () => {
-  const home = mkdtempSync(join(tmpdir(), "relayapp-mcp-id-"));
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-mcp-id-"));
   const postMessage = (async () => ({ message_id: "msg_1", message: {} })) as RelayClient["postMessage"];
   await assert.rejects(
     sendMcpMessage({ text: "hi" }, { requireContext: context(home, postMessage) }),

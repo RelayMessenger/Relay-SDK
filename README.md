@@ -1,4 +1,4 @@
-# relayapp
+# relaymessenger
 
 Developer tools for [Relay](https://relayapp.im) — messaging for agents.
 Message Claude Code, Codex, or Hermes Agent from your phone, or use Relay as
@@ -12,7 +12,7 @@ Docs: https://docs.relayapp.im
 
 | Path | What it is |
 | --- | --- |
-| [`packages/relayapp`](packages/relayapp) | The `relayapp` CLI (npm): `pair` a machine with the Relay app via QR/code, drive Claude Code, Codex, or Hermes Agent over ACP, and install the bundled Codex, Claude Code, or OpenClaw integration. |
+| [`packages/relaymessenger`](packages/relaymessenger) | The `relaymessenger` CLI (npm): `pair` a machine with the Relay app via QR/code, drive Claude Code, Codex, or Hermes Agent over ACP, and install the bundled Codex, Claude Code, or OpenClaw integration. |
 | [`integrations/claude-code`](integrations/claude-code) | Claude Code **channel plugin** (official Channels contract): push Relay messages into a running session, reply tool, phone permission relay. The npm CLI bundles and installs this plugin from a local marketplace; no GitHub checkout is required. |
 | [`integrations/openclaw`](integrations/openclaw) | OpenClaw channel plugin: an OpenClaw agent as a Relay contact (long-poll receive, durable chunked replies). The npm CLI bundles its installable archive. |
 | [`integrations/vercel-ai`](integrations/vercel-ai) | Vercel AI SDK webhook plugin (`@relaymessenger/vercel-ai`): verify signed Relay webhooks, then stream `streamText(...)` back as one canonical message. |
@@ -20,24 +20,24 @@ Docs: https://docs.relayapp.im
 ## Quickstart
 
 ```sh
-npm install -g relayapp
-relayapp pair            # QR + code → claim in the Relay app
-relayapp start --engine claude   # or codex | hermes
+npm install -g relaymessenger
+relaymessenger pair            # QR + code → claim in the Relay app
+relaymessenger start --engine claude   # or codex | hermes
 
 # Or install a native channel after pairing:
-relayapp install-claude
-relayapp install-openclaw
+relaymessenger install-claude
+relaymessenger install-openclaw
 ```
 
 Full guide: https://docs.relayapp.im/guides/coding-agents
 
 All four integration surfaces are release-gated together on Linux and Windows;
-the installed `relayapp` tarball and its Claude/Codex adapter runtime also run
+the installed `relaymessenger` tarball and its Claude/Codex adapter runtime also run
 on macOS CI.
 
-## relayapp npm release contract
+## relaymessenger npm release contract
 
-Only `packages/relayapp` is published by the automated npm release. Its tarball
+Only `packages/relaymessenger` is published by the automated npm release. Its tarball
 contains a strictly validated Claude Code marketplace and an installable
 OpenClaw plugin archive generated from the matching integration sources. The
 integration workspaces are not published separately by this workflow.
@@ -45,20 +45,20 @@ integration workspaces are not published separately by this workflow.
 1. Update the CLI version and root lock metadata together:
 
    ```sh
-   npm version 0.2.0 --workspace relayapp --no-git-tag-version
+   npm version 0.2.0 --workspace relaymessenger --no-git-tag-version
    npm run validate
    npm run pack:check
    ```
 
 2. Merge that exact version change, then create and push an existing-commit
-   tag named `relayapp-v0.2.0`. The version in
-   `packages/relayapp/package.json`, the workspace entry in `package-lock.json`,
+   tag named `relaymessenger-v0.2.0`. The version in
+   `packages/relaymessenger/package.json`, the workspace entry in `package-lock.json`,
    and the tag must match exactly.
-3. The tag starts `.github/workflows/release-relayapp.yml`; a manual dispatch
+3. The tag starts `.github/workflows/release-relaymessenger.yml`; a manual dispatch
    accepts an existing tag for a controlled retry. The workflow refuses a
    missing `NPM_TOKEN` before a new publish. It never creates a repository,
    changes repository visibility, or creates/pushes a tag.
-4. CI reruns the full validation and package smokes, publishes only `relayapp`,
+4. CI reruns the full validation and package smokes, publishes only `relaymessenger`,
    strictly validates the source Claude plugin and marketplace, and proves the
    packed OpenClaw plugin through a real isolated gateway turn. It uses npm
    provenance when GitHub reports a public source repository. Private-source
@@ -66,7 +66,7 @@ integration workspaces are not published separately by this workflow.
 5. Before any retry, the workflow reconciles npm state. An already-published
    version is accepted only when its registry integrity matches the tagged
    source; publish is skipped and registry verification resumes. Finally,
-   `scripts/verify-relayapp-registry.mjs` installs the exact registry version
+   `scripts/verify-relaymessenger-registry.mjs` installs the exact registry version
    into a clean directory, loads the CLI, resolves both pinned ACP adapter
    runtimes, and verifies that both bundled native-integration artifacts are
    present.

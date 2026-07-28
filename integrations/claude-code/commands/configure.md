@@ -4,16 +4,16 @@ description: Configure and verify the self-contained Relay channel
 
 Configure Relay without asking the user to paste or echo a secret in chat.
 
-1. Use the paired relayapp flow. Ask the user to run these locally if needed:
+1. Use the paired relaymessenger flow. Ask the user to run these locally if needed:
 
    ```text
-   npm install -g relayapp
-   relayapp pair
-   relayapp install-claude
+   npm install -g relaymessenger
+   relaymessenger pair
+   relaymessenger install-claude
    ```
 
    `install-claude` installs the bundled local marketplace as
-   `relay@relayapp-bundled`, then copies the paired token, API origin, and
+   `relay@relaymessenger-bundled`, then copies the paired token, API origin, and
    pinned owner into the channel `.env` with current-user-only permissions. It
    never prints the token and refuses to overwrite a different configured
    channel identity.
@@ -25,7 +25,7 @@ Configure Relay without asking the user to paste or echo a secret in chat.
 
    Verify that `.env` exists. Do not read or display its contents.
 
-3. If relayapp is unavailable and the user already obtained an Agent Token
+3. If relaymessenger is unavailable and the user already obtained an Agent Token
    through another secure route, they may create `.env` themselves with
    current-user-only access:
 
@@ -58,7 +58,7 @@ Configure Relay without asking the user to paste or echo a secret in chat.
 6. Explain how to start the research-preview channel:
 
    ```text
-   claude --dangerously-load-development-channels plugin:relay@relayapp-bundled
+   claude --dangerously-load-development-channels plugin:relay@relaymessenger-bundled
    ```
 
    Use `server:relay` for a bare MCP registration. The agent must not have a

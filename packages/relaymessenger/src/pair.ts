@@ -1,8 +1,8 @@
 /**
- * `relayapp pair` — device-code pairing.
+ * `relaymessenger pair` — device-code pairing.
  * POST /v1/pairings → terminal QR of the claim url + short code → long-poll
  * GET /v1/pairings/:id?wait=true until the phone claims it → store the
- * agent_token in ~/.relayapp/config.json (chmod 600), then pin the owner from
+ * agent_token in ~/.relaymessenger/config.json (chmod 600), then pin the owner from
  * GET /v1/agents/me. Claimed status may recoverably re-return the token until
  * the first successful Agent API use (or the server's claim grace expires),
  * but the locally saved token is authoritative for interrupted finalization.
@@ -64,7 +64,7 @@ async function finalizeSavedPairing(
     if (!ownerUserId) {
       throw new Error(
         `Agent Token is safely stored, but owner lookup failed (${error instanceof Error ? error.message : error}). ` +
-          "Run `relayapp pair` again to resume owner pinning with this saved token; " +
+          "Run `relaymessenger pair` again to resume owner pinning with this saved token; " +
           "it will not create or overwrite an agent.",
       );
     }
@@ -73,7 +73,7 @@ async function finalizeSavedPairing(
     throw new Error(
       "Agent Token is safely stored, but the server did not report owner_user_id and " +
         "RELAY_OWNER_USER_ID is not set. The bridge fails closed without a pinned owner. " +
-        "Set RELAY_OWNER_USER_ID, then run `relayapp pair` again to finalize this saved token.",
+        "Set RELAY_OWNER_USER_ID, then run `relaymessenger pair` again to finalize this saved token.",
     );
   }
   const agent = {
@@ -82,7 +82,7 @@ async function finalizeSavedPairing(
   } as RelayConfig["agent"];
   config.save({ ...saved, agent, owner_user_id: ownerUserId });
   out(`Owner pinned: ${ownerUserId}. Only this user can drive the bridge.`);
-  out("Next: relayapp start --engine claude   (run `relayapp help` for every ACP preset)");
+  out("Next: relaymessenger start --engine claude   (run `relaymessenger help` for every ACP preset)");
 }
 
 export async function pair(options: PairOptions): Promise<void> {
@@ -128,12 +128,12 @@ export async function pair(options: PairOptions): Promise<void> {
       status = await client.waitPairing(pairing.pairing_id, pairing.poll_token);
     } catch (error) {
       if (error instanceof RelayApiError && error.status === 404) {
-        throw new Error("Pairing expired before it was claimed. Run `relayapp pair` again.");
+        throw new Error("Pairing expired before it was claimed. Run `relaymessenger pair` again.");
       }
       if (error instanceof RelayApiError && error.status === 410) {
         throw new Error(
           "This pairing claim can no longer return its token. If config.json contains an Agent " +
-            "Token, re-run `relayapp pair` to finalize that saved token; otherwise start a new pairing.",
+            "Token, re-run `relaymessenger pair` to finalize that saved token; otherwise start a new pairing.",
         );
       }
       // Transient (network blip, 5xx, timeout): keep waiting until expiry.
@@ -144,12 +144,12 @@ export async function pair(options: PairOptions): Promise<void> {
     if (status.status === "claimed") break;
   }
   if (!status || status.status !== "claimed") {
-    throw new Error("Pairing expired before it was claimed. Run `relayapp pair` again.");
+    throw new Error("Pairing expired before it was claimed. Run `relaymessenger pair` again.");
   }
 
   // Store the token before the first Agent API call. The server may re-return
   // it during its short claim-recovery window, while this durable local copy
-  // lets a later `relayapp pair` resume without creating another agent.
+  // lets a later `relaymessenger pair` resume without creating another agent.
   const saved: RelayConfig = {
     api_origin: client.origin,
     agent_token: status.agent_token,

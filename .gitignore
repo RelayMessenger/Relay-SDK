@@ -1,6 +1,6 @@
 node_modules/
 dist/
-packages/relayapp/claude-plugin/
-packages/relayapp/openclaw-plugin/
+packages/relaymessenger/claude-plugin/
+packages/relaymessenger/openclaw-plugin/
 *.log
 .DS_Store

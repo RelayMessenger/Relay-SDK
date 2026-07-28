@@ -18,7 +18,7 @@ const integrationRoot = join(repoRoot, "integrations", "claude-code");
 const target = join(packageRoot, "claude-plugin");
 // Keep generated artifacts on the package volume so the final rename remains
 // atomic on Windows runners whose system temp and checkout use different drives.
-const scratch = mkdtempSync(join(packageRoot, ".relayapp-claude-bundle-"));
+const scratch = mkdtempSync(join(packageRoot, ".relaymessenger-claude-bundle-"));
 const generated = join(scratch, "claude-plugin");
 const marketplace = join(generated, "marketplace");
 const plugin = join(marketplace, "plugins", "relay");
@@ -71,7 +71,7 @@ try {
   cpSync(join(repoRoot, "LICENSE"), join(plugin, "LICENSE"));
 
   const manifest = {
-    name: "relayapp-bundled",
+    name: "relaymessenger-bundled",
     description: "Bundled Relay channel plugin for Claude Code",
     owner: { name: "Relay" },
     plugins: [
@@ -88,9 +88,9 @@ try {
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
 
-  // This exact CLI version is a dev dependency of relayapp, so strict
+  // This exact CLI version is a dev dependency of relaymessenger, so strict
   // validation runs in every source pack and release lane.
-  const claude = process.env.RELAYAPP_CLAUDE_BIN?.trim() || "claude";
+  const claude = process.env.RELAYMESSENGER_CLAUDE_BIN?.trim() || "claude";
   run(claude, ["plugin", "validate", plugin, "--strict"]);
   run(claude, ["plugin", "validate", marketplace, "--strict"]);
 
@@ -103,7 +103,7 @@ try {
     [
       "pack",
       "--workspace",
-      "@relayapp/openclaw-plugin",
+      "@relaymessenger/openclaw-plugin",
       "--pack-destination",
       openclawGenerated,
     ],
@@ -112,7 +112,7 @@ try {
       ...process.env,
       // An outer `npm pack --dry-run` exports this lifecycle setting. The
       // nested pack is an artifact build, not a preview: it must still create
-      // the OpenClaw archive that the outer relayapp manifest inspects.
+      // the OpenClaw archive that the outer relaymessenger manifest inspects.
       npm_config_dry_run: "false",
       NPM_CONFIG_DRY_RUN: "false",
     },

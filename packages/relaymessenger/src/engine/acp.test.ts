@@ -55,7 +55,7 @@ test("ACP subprocess environment excludes unrelated parent secrets", () => {
     RELAY_AGENT_TOKEN: "must-not-cross",
     NPM_TOKEN: "must-not-cross",
     NODE_OPTIONS: "--require /tmp/inject.js",
-    RELAYAPP_ENGINE_ENV: "CUSTOM_ONE,CUSTOM_PREFIX_*",
+    RELAYMESSENGER_ENGINE_ENV: "CUSTOM_ONE,CUSTOM_PREFIX_*",
     CUSTOM_ONE: "one",
     CUSTOM_PREFIX_TWO: "two",
   });

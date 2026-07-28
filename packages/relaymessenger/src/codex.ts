@@ -1,19 +1,19 @@
 /**
- * Codex-side entrypoints installed by `relayapp install-codex`:
+ * Codex-side entrypoints installed by `relaymessenger install-codex`:
  *
- * `relayapp notify` — Codex appends its notification JSON as the final argv
+ * `relaymessenger notify` — Codex appends its notification JSON as the final argv
  * arg (kebab-case): {"type":"agent-turn-complete","thread-id":…,"turn-id":…,
  * "cwd":…,"input-messages":[…],"last-assistant-message":…}. That is the only
  * notify event Codex emits; approvals come through the PermissionRequest hook.
  *
- * `relayapp hook permission-request` — Codex's hooks engine pipes
+ * `relaymessenger hook permission-request` — Codex's hooks engine pipes
  * {session_id, turn_id, cwd, tool_name, tool_input, permission_mode} on stdin
  * and accepts a decision on stdout (developers.openai.com/codex/hooks):
  *   exit 0 + {"hookSpecificOutput":{"hookEventName":"PermissionRequest",
  *             "decision":{"behavior":"allow"|"deny"}}}
  *   exit 0 + no decision → fall through to Codex's normal approval flow
  * The hook posts an Allow/Deny card to Relay and blocks on the phone tap
- * (watching its per-request approval file — which a running `relayapp start`
+ * (watching its per-request approval file — which a running `relaymessenger start`
  * loop resolves — and polling the conversation directly). Timeout → deny.
  *
  * These entrypoints run in their own processes and never write state.json;
@@ -48,12 +48,12 @@ export function requireClient(config = new ConfigStore()): {
   const projectRoot = new CodexNotifyPolicyStore().matchProject(process.cwd());
   if (!projectRoot) {
     throw new Error(
-      "This project is not opted in to Relay. Run `relayapp install-codex` from its root first.",
+      "This project is not opted in to Relay. Run `relaymessenger install-codex` from its root first.",
     );
   }
   const loaded = config.load();
   if (!loaded?.agent_token) {
-    throw new Error("Not paired. Run `relayapp pair` first.");
+    throw new Error("Not paired. Run `relaymessenger pair` first.");
   }
   let ownerUserId: string | undefined;
   try {
@@ -97,19 +97,19 @@ export async function notifyCommand(
 
   const projectRoot = (dependencies.policy ?? new CodexNotifyPolicyStore()).matchProject(payload.cwd);
   if (!projectRoot) {
-    out("relayapp notify: suppressed — this project was not explicitly opted in.");
+    out("relaymessenger notify: suppressed — this project was not explicitly opted in.");
     return;
   }
   const config = dependencies.config ?? new ConfigStore();
   const loaded = config.load();
-  if (!loaded?.agent_token) throw new Error("Not paired. Run `relayapp pair` first.");
+  if (!loaded?.agent_token) throw new Error("Not paired. Run `relaymessenger pair` first.");
   const conversationId = readStateSnapshot(
     runtimeHomeForConfig(loaded, dirname(config.path)),
   ).owner_conversation_id;
   const client = dependencies.client ?? new RelayClient(loaded.api_origin, loaded.agent_token);
   if (!conversationId) {
     out(
-      "relayapp notify: no pinned owner conversation yet — run `relayapp start` once and " +
+      "relaymessenger notify: no pinned owner conversation yet — run `relaymessenger start` once and " +
         "message the agent from the Relay app first.",
     );
     return;
@@ -190,12 +190,12 @@ export async function permissionRequestHook(
       inputPreview: input.tool_input !== undefined ? JSON.stringify(input.tool_input) : undefined,
     });
   } catch (error) {
-    process.stderr.write(`relayapp: refusing concealed approval input (${error}) — denying.\n`);
+    process.stderr.write(`relaymessenger: refusing concealed approval input (${error}) — denying.\n`);
     write(decisionJson(false));
     return 0;
   }
 
-  // Durable (create-once) before the card goes out. A running `relayapp
+  // Durable (create-once) before the card goes out. A running `relaymessenger
   // start` loop sees the tap on the event stream and writes the resolution
   // into this file; this process is the waiter that consumes it.
   approvals.create(approval);
@@ -205,7 +205,7 @@ export async function permissionRequestHook(
     posted = await client.postMessage(card.body, card.idempotencyKey);
   } catch (error) {
     approvals.consume(requestId);
-    process.stderr.write(`relayapp: approval card could not be delivered (${error}) — denying.\n`);
+    process.stderr.write(`relaymessenger: approval card could not be delivered (${error}) — denying.\n`);
     write(decisionJson(false));
     return 0;
   }
@@ -227,7 +227,7 @@ export async function permissionRequestHook(
       // Aged out from under us — treat as deny.
       break;
     }
-    // Path 2: poll the conversation directly (works without `relayapp start`).
+    // Path 2: poll the conversation directly (works without `relaymessenger start`).
     try {
       const { messages } = await client.listMessages(conversationId, 10);
       const verdict = messages
@@ -247,7 +247,7 @@ export async function permissionRequestHook(
     }
   }
 
-  process.stderr.write("relayapp: no approval from Relay within the window — denying.\n");
+  process.stderr.write("relaymessenger: no approval from Relay within the window — denying.\n");
   return finish(false);
 }
 

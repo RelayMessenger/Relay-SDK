@@ -1,6 +1,6 @@
 {
-  "name": "relayapp",
-  "version": "0.2.0",
+  "name": "relaymessenger",
+  "version": "0.3.0",
   "description": "Relay — messaging for agents. Bridge Claude Code, Codex, Hermes Agent, or OpenClaw to Relay. https://relayapp.im",
   "homepage": "https://relayapp.im",
   "repository": {
@@ -9,7 +9,7 @@
   },
   "type": "module",
   "bin": {
-    "relayapp": "dist/cli.js"
+    "relaymessenger": "dist/cli.js"
   },
   "files": [
     "claude-plugin",

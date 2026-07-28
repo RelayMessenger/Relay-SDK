@@ -7,21 +7,21 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const expected = JSON.parse(
-  readFileSync(resolve(repoRoot, "packages/relayapp/package.json"), "utf8"),
+  readFileSync(resolve(repoRoot, "packages/relaymessenger/package.json"), "utf8"),
 );
-const temp = mkdtempSync(join(tmpdir(), "relayapp-registry-smoke-"));
+const temp = mkdtempSync(join(tmpdir(), "relaymessenger-registry-smoke-"));
 
 try {
   writeFileSync(
     join(temp, "package.json"),
-    `${JSON.stringify({ name: "relayapp-registry-smoke", private: true }, null, 2)}\n`,
+    `${JSON.stringify({ name: "relaymessenger-registry-smoke", private: true }, null, 2)}\n`,
   );
   let installed = false;
   let lastFailure = "";
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     const result = spawnSync(
       process.platform === "win32" ? "npm.cmd" : "npm",
-      ["install", "--no-audit", "--no-fund", "--prefer-online", `relayapp@${expected.version}`],
+      ["install", "--no-audit", "--no-fund", "--prefer-online", `relaymessenger@${expected.version}`],
       { cwd: temp, encoding: "utf8" },
     );
     if (result.status === 0) {
@@ -33,7 +33,7 @@ try {
   }
   assert.equal(installed, true, `registry install did not converge:\n${lastFailure}`);
 
-  const installedRoot = join(temp, "node_modules", "relayapp");
+  const installedRoot = join(temp, "node_modules", "relaymessenger");
   const installedPkg = JSON.parse(readFileSync(join(installedRoot, "package.json"), "utf8"));
   assert.equal(installedPkg.version, expected.version);
   for (const bundledFile of [
@@ -53,7 +53,7 @@ try {
     cwd: temp,
     encoding: "utf8",
   });
-  assert.match(help, /relayapp pair/);
+  assert.match(help, /relaymessenger pair/);
   for (const adapter of [
     "@agentclientprotocol/claude-agent-acp/dist/index.js",
     "@agentclientprotocol/codex-acp/dist/index.js",
@@ -65,7 +65,7 @@ try {
     );
     assert.equal(existsSync(path), true, `registry install missing ${adapter}`);
   }
-  process.stdout.write(`registry-installed relayapp@${expected.version} smoke passed\n`);
+  process.stdout.write(`registry-installed relaymessenger@${expected.version} smoke passed\n`);
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }
