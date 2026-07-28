@@ -39,11 +39,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: relayapp CLI
+          - name: relaymessenger CLI
             node: 22.18.0
             directory: .
-            install: npm ci --workspace relayapp
-            verify: npm run check --workspace relayapp && npm run build --workspace relayapp && npm test --workspace relayapp
+            install: npm ci --workspace relaymessenger
+            verify: npm run check --workspace relaymessenger && npm run build --workspace relaymessenger && npm test --workspace relaymessenger
           - name: Claude channel
             node: 20.11.0
             directory: integrations/claude-code
@@ -78,8 +78,8 @@ jobs:
       - run: npm run gateway:harness
       - run: npm run pack:check
 
-  macos-relayapp-runtime:
-    name: macOS installed relayapp Claude/Codex runtime smoke
+  macos-relaymessenger-runtime:
+    name: macOS installed relaymessenger Claude/Codex runtime smoke
     # macOS runner minutes stay the most expensive in the fleet. Every PR
     # already gets the Linux validate/minimum-node/package-smoke jobs; this smoke
     # runs on merge to main and the tag-driven release workflow re-proves it,
@@ -97,8 +97,8 @@ jobs:
       # resolves both pinned ACP adapter entrypoints from the installed tree.
       - run: node scripts/pack-smoke.mjs
 
-  windows-relayapp-runtime:
-    name: Windows installed relayapp integration smoke
+  windows-relaymessenger-runtime:
+    name: Windows installed relaymessenger integration smoke
     # Same merge-only reasoning as the macOS smoke job above.
     if: github.event_name != 'pull_request'
     runs-on: blacksmith-2vcpu-windows-2025

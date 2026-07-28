@@ -1,5 +1,5 @@
 {
-  "name": "@relayapp/openclaw-plugin",
+  "name": "@relaymessenger/openclaw-plugin",
   "version": "0.1.0",
   "description": "Relay channel plugin for OpenClaw — text your OpenClaw like a friend.",
   "license": "MIT",

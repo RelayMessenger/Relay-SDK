@@ -24,7 +24,7 @@ import {
 const OWNER = "usr_owner";
 
 function tempHome(): string {
-  return mkdtempSync(join(tmpdir(), "relayapp-test-"));
+  return mkdtempSync(join(tmpdir(), "relaymessenger-test-"));
 }
 
 function userMessageEvent(

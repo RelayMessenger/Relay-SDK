@@ -89,7 +89,7 @@ export function engineProcessSpec(engine: EngineName): EngineProcessSpec {
  * Minimized environment for the adapter subprocess. The full parent env can
  * carry unrelated cloud/deploy/CI secrets; the adapter (and the agent it
  * execs) only needs the platform basics plus its own provider credentials.
- * Extend with RELAYAPP_ENGINE_ENV="VAR1,VAR2,MYPREFIX_*". Deliberately no
+ * Extend with RELAYMESSENGER_ENGINE_ENV="VAR1,VAR2,MYPREFIX_*". Deliberately no
  * "inherit" escape hatch exists: unrelated deploy and cloud credentials must
  * never be handed wholesale to a coding-agent subprocess.
  */
@@ -140,7 +140,7 @@ const ENGINE_ENV_PREFIXES = [
 ];
 
 export function engineEnv(parent: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const extra = (parent.RELAYAPP_ENGINE_ENV ?? "").trim();
+  const extra = (parent.RELAYMESSENGER_ENGINE_ENV ?? "").trim();
   const extraExact = new Set<string>();
   const extraPrefixes: string[] = [];
   for (const raw of extra.split(",")) {
@@ -324,7 +324,7 @@ export class AcpEngine implements EngineAdapter {
       Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>,
     );
 
-    const app = client({ name: "relayapp" })
+    const app = client({ name: "relaymessenger" })
       .onRequest("session/request_permission", async (c) => this.handlePermission(c.params))
       .onNotification("session/update", (c) => {
         this.handleUpdate(c.params);
@@ -336,13 +336,13 @@ export class AcpEngine implements EngineAdapter {
 
     const init = await this.ctx.request("initialize", {
       protocolVersion: PROTOCOL_VERSION,
-      clientInfo: { name: "relayapp", version: "0.2.0" },
+      clientInfo: { name: "relaymessenger", version: "0.2.0" },
       clientCapabilities: {},
     });
     if (init.protocolVersion !== PROTOCOL_VERSION) {
       throw new Error(
         `${engineDisplayName(this.engine)} returned unsupported ACP protocol ` +
-          `${init.protocolVersion}; relayapp requires ${PROTOCOL_VERSION}`,
+          `${init.protocolVersion}; relaymessenger requires ${PROTOCOL_VERSION}`,
       );
     }
     this.loadSessionSupported = init.agentCapabilities?.loadSession === true;

@@ -1,11 +1,11 @@
 /**
- * `relayapp install-codex` / `relayapp install-claude`.
+ * `relaymessenger install-codex` / `relaymessenger install-claude`.
  *
  * install-codex merges — never clobbers — three things into the user's Codex
  * setup:
- *   ~/.codex/config.toml  [mcp_servers.relay]  → `relayapp mcp` stdio server
- *   ~/.codex/config.toml  notify               → `relayapp notify` turn-complete ping
- *   ~/.codex/hooks.json   PermissionRequest    → `relayapp hook permission-request`
+ *   ~/.codex/config.toml  [mcp_servers.relay]  → `relaymessenger mcp` stdio server
+ *   ~/.codex/config.toml  notify               → `relaymessenger notify` turn-complete ping
+ *   ~/.codex/hooks.json   PermissionRequest    → `relaymessenger hook permission-request`
  *                                                (phone-tap approvals; Codex hooks
  *                                                answer with decision JSON on stdout)
  *
@@ -52,8 +52,8 @@ export interface InstallCodexOptions {
   policy?: CodexNotifyPolicyStore;
 }
 
-const RELAY_NOTIFY = ["relayapp", "notify"];
-const RELAY_PERMISSION_HOOK_COMMAND = "relayapp hook permission-request";
+const RELAY_NOTIFY = ["relaymessenger", "notify"];
+const RELAY_PERMISSION_HOOK_COMMAND = "relaymessenger hook permission-request";
 // Codex's hooks engine is Claude-style: matcher groups wrapping command handlers.
 const RELAY_PERMISSION_HOOK_ENTRY = {
   matcher: "*",
@@ -116,7 +116,7 @@ export function mergeCodexConfigToml(existing: string): { toml: string; report: 
   let toml = existing;
   const servers = doc.mcp_servers as Record<string, unknown> | undefined;
   if (servers?.relay === undefined) {
-    const suffix = `[mcp_servers.relay]\ncommand = "relayapp"\nargs = ["mcp"]\n`;
+    const suffix = `[mcp_servers.relay]\ncommand = "relaymessenger"\nargs = ["mcp"]\n`;
     toml = toml.length === 0 || toml.endsWith("\n\n") ? `${toml}${suffix}`
       : toml.endsWith("\n") ? `${toml}\n${suffix}`
       : `${toml}\n\n${suffix}`;
@@ -128,15 +128,15 @@ export function mergeCodexConfigToml(existing: string): { toml: string; report: 
 
   if (doc.notify === undefined) {
     // Top-level keys must precede any [table]; prepending is always valid.
-    toml = `notify = ["relayapp", "notify"]\n${toml.length > 0 && !toml.startsWith("\n") ? "\n" : ""}${toml}`;
-    notes.push('set notify = ["relayapp", "notify"]');
+    toml = `notify = ["relaymessenger", "notify"]\n${toml.length > 0 && !toml.startsWith("\n") ? "\n" : ""}${toml}`;
+    notes.push('set notify = ["relaymessenger", "notify"]');
     changed = true;
   } else if (JSON.stringify(doc.notify) === JSON.stringify(RELAY_NOTIFY)) {
-    notes.push("notify already points at relayapp");
+    notes.push("notify already points at relaymessenger");
   } else {
     notes.push(
       `left existing notify unchanged (${JSON.stringify(doc.notify)}); ` +
-        "chain relayapp notify from your own script if you want both",
+        "chain relaymessenger notify from your own script if you want both",
     );
   }
 
@@ -165,7 +165,7 @@ export function mergeHooksJson(existing: string): { json: string; report: MergeR
     notes.push("PermissionRequest hook already installed");
   } else {
     list.push(RELAY_PERMISSION_HOOK_ENTRY);
-    notes.push("appended relayapp PermissionRequest hook");
+    notes.push("appended relaymessenger PermissionRequest hook");
     changed = true;
   }
   return { json: `${JSON.stringify(doc, null, 2)}\n`, report: { changed, notes } };
@@ -221,7 +221,7 @@ export function installCodex(
 
   const finalConfig = parseToml(merged.toml) as Record<string, any>;
   const relayMcp = finalConfig.mcp_servers?.relay;
-  const mcpActive = relayMcp?.command === "relayapp" &&
+  const mcpActive = relayMcp?.command === "relaymessenger" &&
     JSON.stringify(relayMcp?.args) === JSON.stringify(["mcp"]);
   const notifyActive = JSON.stringify(finalConfig.notify) === JSON.stringify(RELAY_NOTIFY);
   const finalHooks = JSON.parse(hooks.json) as Record<string, unknown>;
@@ -237,8 +237,8 @@ export function installCodex(
     out(`  - final-message notify: ${notifyActive ? "active" : "inactive (existing notify kept)"}`);
     out(`  - phone permission hook: ${permissionActive ? "active" : "inactive"}`);
   }
-  out("Codex gates untrusted hook handlers: the first run may ask you to trust the relayapp handler.");
-  out("Approvals require `relayapp pair` to have run on this machine.");
+  out("Codex gates untrusted hook handlers: the first run may ask you to trust the relaymessenger handler.");
+  out("Approvals require `relaymessenger pair` to have run on this machine.");
   out("Run install-codex separately inside each additional project you explicitly opt in.");
 }
 
@@ -465,7 +465,7 @@ export function installClaude(
 ): void {
   const config = options.config ?? new ConfigStore();
   const paired = config.load();
-  if (!paired?.agent_token) throw new Error("Not paired. Run `relayapp pair` first.");
+  if (!paired?.agent_token) throw new Error("Not paired. Run `relaymessenger pair` first.");
   const ownerUserId = resolveOwnerUserId(paired);
   const channelDir = options.channelDir ?? join(homedir(), ".claude", "channels", "relay");
   const envPath = join(channelDir, ".env");
@@ -486,14 +486,14 @@ export function installClaude(
     "README.md",
   ]) {
     if (!existsSync(join(pluginDir, relative))) {
-      throw new Error(`Installed relayapp package is missing bundled Claude plugin file: ${relative}`);
+      throw new Error(`Installed relaymessenger package is missing bundled Claude plugin file: ${relative}`);
     }
   }
   if (!existsSync(join(bundledMarketplace, ".claude-plugin", "marketplace.json"))) {
-    throw new Error("Installed relayapp package is missing its bundled Claude marketplace manifest");
+    throw new Error("Installed relaymessenger package is missing its bundled Claude marketplace manifest");
   }
 
-  const command = options.claudeCommand ?? process.env.RELAYAPP_CLAUDE_BIN?.trim() ?? "claude";
+  const command = options.claudeCommand ?? process.env.RELAYMESSENGER_CLAUDE_BIN?.trim() ?? "claude";
   const runner = options.runClaude ?? ((binary, args) => {
     const result = crossSpawn.sync(platformCliCommand(binary), args, {
       encoding: "utf8",
@@ -539,7 +539,7 @@ export function installClaude(
   runExternalCommand(
     "Claude Code",
     command,
-    ["plugin", "install", "relay@relayapp-bundled", "--scope", "user"],
+    ["plugin", "install", "relay@relaymessenger-bundled", "--scope", "user"],
     "plugin installation",
     runner,
   );
@@ -554,24 +554,24 @@ export function installClaude(
   }
   out(`Configured Claude Relay channel at ${envPath} (mode 600).`);
   out(`API origin: ${paired.api_origin}; owner pin: ${ownerUserId}. Agent Token was not printed.`);
-  out(`Installed bundled Claude plugin relay@relayapp-bundled from ${marketplaceDir}.`);
+  out(`Installed bundled Claude plugin relay@relaymessenger-bundled from ${marketplaceDir}.`);
   out("");
   out("Run:");
-  out("  claude --dangerously-load-development-channels plugin:relay@relayapp-bundled");
+  out("  claude --dangerously-load-development-channels plugin:relay@relaymessenger-bundled");
   out("Setup guide: https://docs.relayapp.im/guides/coding-agents");
 }
 
-/** Install and configure the OpenClaw plugin from relayapp's bundled archive. */
+/** Install and configure the OpenClaw plugin from relaymessenger's bundled archive. */
 export function installOpenClaw(
   out: (line: string) => void = console.log,
   options: InstallOpenClawOptions = {},
 ): void {
   const config = options.config ?? new ConfigStore();
   const paired = config.load();
-  if (!paired?.agent_token) throw new Error("Not paired. Run `relayapp pair` first.");
+  if (!paired?.agent_token) throw new Error("Not paired. Run `relaymessenger pair` first.");
   if (/[\r\n]/u.test(paired.agent_token)) throw new Error("Refusing newline in Agent Token");
   const openclawHome = options.openclawHome ?? join(homedir(), ".openclaw");
-  const command = options.openclawCommand ?? process.env.RELAYAPP_OPENCLAW_BIN?.trim() ?? "openclaw";
+  const command = options.openclawCommand ?? process.env.RELAYMESSENGER_OPENCLAW_BIN?.trim() ?? "openclaw";
   const runner = options.runOpenClaw ?? ((binary, args) => {
     const result = crossSpawn.sync(platformCliCommand(binary), args, {
       encoding: "utf8",
@@ -601,7 +601,7 @@ export function installOpenClaw(
   const bundleDir = options.bundleDir ?? join(MODULE_DIR, "..", "openclaw-plugin");
   const archives = readdirSync(bundleDir).filter((name) => name.endsWith(".tgz"));
   if (archives.length !== 1) {
-    throw new Error(`Installed relayapp package must contain exactly one OpenClaw archive; found ${archives.length}`);
+    throw new Error(`Installed relaymessenger package must contain exactly one OpenClaw archive; found ${archives.length}`);
   }
   const archive = persistOpenClawArchive(
     join(bundleDir, archives[0]!),

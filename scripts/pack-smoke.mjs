@@ -15,7 +15,7 @@ import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const temp = mkdtempSync(join(tmpdir(), "relayapp-pack-smoke-"));
+const temp = mkdtempSync(join(tmpdir(), "relaymessenger-pack-smoke-"));
 const packDir = join(temp, "pack");
 const installDir = join(temp, "installed");
 
@@ -60,18 +60,18 @@ try {
   mkdirSync(installDir, { recursive: true });
   // prepack always deletes dist before rebuilding, so this proves the package
   // does not depend on a locally stale ignored artifact.
-  npm(["pack", "--workspace", "relayapp", "--pack-destination", packDir]);
+  npm(["pack", "--workspace", "relaymessenger", "--pack-destination", packDir]);
   const tarballs = readdirSync(packDir).filter((name) => name.endsWith(".tgz"));
-  assert.equal(tarballs.length, 1, "expected exactly one relayapp tarball");
+  assert.equal(tarballs.length, 1, "expected exactly one relaymessenger tarball");
   const tarball = join(packDir, tarballs[0]);
 
   writeFileSync(
     join(temp, "package.json"),
-    `${JSON.stringify({ name: "relayapp-installed-smoke", private: true }, null, 2)}\n`,
+    `${JSON.stringify({ name: "relaymessenger-installed-smoke", private: true }, null, 2)}\n`,
   );
   npm(["install", "--no-audit", "--no-fund", tarball], temp);
 
-  const installed = join(temp, "node_modules", "relayapp");
+  const installed = join(temp, "node_modules", "relaymessenger");
   for (const required of [
     "LICENSE",
     "README.md",
@@ -91,13 +91,13 @@ try {
   const openclawArchives = readdirSync(join(installed, "openclaw-plugin")).filter((name) => name.endsWith(".tgz"));
   assert.equal(openclawArchives.length, 1, "expected one bundled OpenClaw plugin archive");
   assert.equal(
-    existsSync(join(temp, "node_modules", ".bin", process.platform === "win32" ? "relayapp.cmd" : "relayapp")),
+    existsSync(join(temp, "node_modules", ".bin", process.platform === "win32" ? "relaymessenger.cmd" : "relaymessenger")),
     true,
-    "npm did not install the relayapp executable",
+    "npm did not install the relaymessenger executable",
   );
 
   const pkg = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
-  assert.equal(pkg.bin.relayapp, "dist/cli.js");
+  assert.equal(pkg.bin.relaymessenger, "dist/cli.js");
   assert.equal(pkg.engines.node, ">=22.18");
   assert.equal(pkg.license, "MIT");
   assert.equal(pkg.dependencies["@agentclientprotocol/claude-agent-acp"], "0.59.0");
@@ -107,12 +107,12 @@ try {
     cwd: installDir,
     encoding: "utf8",
   });
-  assert.match(help, /relayapp pair/);
-  assert.match(help, /relayapp start/);
+  assert.match(help, /relaymessenger pair/);
+  assert.match(help, /relaymessenger start/);
   assert.doesNotMatch(help, /staging/i);
 
   const smokeHome = join(temp, "home");
-  const smokeRelayHome = join(smokeHome, ".relayapp");
+  const smokeRelayHome = join(smokeHome, ".relaymessenger");
   mkdirSync(smokeRelayHome, { recursive: true });
   writeFileSync(
     join(smokeRelayHome, "config.json"),
@@ -135,12 +135,12 @@ try {
         ...process.env,
         HOME: smokeHome,
         USERPROFILE: smokeHome,
-        RELAYAPP_HOME: smokeRelayHome,
+        RELAYMESSENGER_HOME: smokeRelayHome,
         PATH: toolPath,
       },
     },
   );
-  assert.match(installClaude, /Installed bundled Claude plugin relay@relayapp-bundled/);
+  assert.match(installClaude, /Installed bundled Claude plugin relay@relaymessenger-bundled/);
   assert.doesNotMatch(installClaude, /rly_pack_smoke_secret/);
   assert.match(
     readFileSync(join(smokeHome, ".claude", "channels", "relay", ".env"), "utf8"),
@@ -156,7 +156,7 @@ try {
     cwd: installDir,
     env: claudeEnv,
   }).stdout);
-  const relayClaude = claudePlugins.find((plugin) => plugin.id === "relay@relayapp-bundled");
+  const relayClaude = claudePlugins.find((plugin) => plugin.id === "relay@relaymessenger-bundled");
   assert.ok(relayClaude?.installPath, "bundled Claude plugin was not installed");
   assert.equal(existsSync(join(relayClaude.installPath, "commands", "configure.md")), true);
   assert.doesNotMatch(relayClaude.installPath, /integrations[/\\]claude-code/);
@@ -177,7 +177,7 @@ try {
         ...process.env,
         HOME: openclawHome,
         USERPROFILE: openclawHome,
-        RELAYAPP_HOME: smokeRelayHome,
+        RELAYMESSENGER_HOME: smokeRelayHome,
         PATH: toolPath,
       },
     },
@@ -232,7 +232,7 @@ try {
     assert.equal(existsSync(resolved), true, `installed adapter missing: ${adapter}`);
   }
 
-  process.stdout.write(`relayapp installed-tarball smoke passed (${tarballs[0]})\n`);
+  process.stdout.write(`relaymessenger installed-tarball smoke passed (${tarballs[0]})\n`);
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

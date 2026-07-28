@@ -12,7 +12,7 @@ function settingsDir(root: string): string {
 }
 
 function tempRoot(): string {
-  return mkdtempSync(join(tmpdir(), "relayapp-claude-settings-"));
+  return mkdtempSync(join(tmpdir(), "relaymessenger-claude-settings-"));
 }
 
 test("bypassPermissions in user settings produces a warning, not a failure", () => {

@@ -9,12 +9,12 @@ Requires `openclaw >= 2026.7.2-beta.2`.
 ## Install
 
 ```sh
-npm install -g relayapp
-relayapp pair
-relayapp install-openclaw
+npm install -g relaymessenger
+relaymessenger pair
+relaymessenger install-openclaw
 ```
 
-The installer uses the OpenClaw archive bundled in the installed `relayapp`
+The installer uses the OpenClaw archive bundled in the installed `relaymessenger`
 package, persists that archive in the paired account's private Relay runtime,
 and invokes `openclaw plugins install` on the stable copy. It surgically adds
 Relay to `~/.openclaw/openclaw.json`, preserves unrelated configuration,
@@ -27,7 +27,7 @@ For integration development from this checkout only:
 cd integrations/openclaw
 npm install
 npm pack
-openclaw plugins install ./relayapp-openclaw-plugin-0.1.0.tgz --force
+openclaw plugins install ./relaymessenger-openclaw-plugin-0.1.0.tgz --force
 ```
 
 The installer produces the equivalent Relay-specific configuration:
@@ -68,7 +68,7 @@ Token**:
 
 - A newer poll takes the slot; the older consumer's request ends with
   `409 terminated_by_other_consumer`. Running this plugin and another
-  long-poll consumer (for example `relayapp start`, or a second OpenClaw) on
+  long-poll consumer (for example `relaymessenger start`, or a second OpenClaw) on
   the same token makes them steal the slot from each other forever. Give each
   consumer its own agent/token.
 - Long polling is **XOR with webhooks**: while a webhook endpoint is enabled

@@ -7,11 +7,11 @@ import { client, ndJsonStream, PROTOCOL_VERSION } from "@agentclientprotocol/sdk
 
 const engine = process.argv[2];
 const packageRoot = process.argv[3] ? resolve(process.argv[3]) : undefined;
-assert.ok(["claude", "codex", "hermes"].includes(engine), "usage: acp-runtime-smoke.mjs <claude|codex|hermes> [installed-relayapp-root]");
+assert.ok(["claude", "codex", "hermes"].includes(engine), "usage: acp-runtime-smoke.mjs <claude|codex|hermes> [installed-relaymessenger-root]");
 
 function processSpec() {
   if (engine === "hermes") return { command: "hermes", args: ["acp"] };
-  assert.ok(packageRoot, `${engine} smoke requires the installed relayapp package root`);
+  assert.ok(packageRoot, `${engine} smoke requires the installed relaymessenger package root`);
   const installedRequire = createRequire(resolve(packageRoot, "package.json"));
   const entrypoint = engine === "claude"
     ? installedRequire.resolve("@agentclientprotocol/claude-agent-acp/dist/index.js")
@@ -40,10 +40,10 @@ try {
     Writable.toWeb(child.stdin),
     Readable.toWeb(child.stdout),
   );
-  const connection = client({ name: "relayapp-runtime-smoke" }).connect(stream);
+  const connection = client({ name: "relaymessenger-runtime-smoke" }).connect(stream);
   const response = await connection.agent.request("initialize", {
     protocolVersion: PROTOCOL_VERSION,
-    clientInfo: { name: "relayapp-runtime-smoke", version: "0.2.0" },
+    clientInfo: { name: "relaymessenger-runtime-smoke", version: "0.2.0" },
     clientCapabilities: {},
   });
   assert.equal(

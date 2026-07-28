@@ -1,7 +1,7 @@
 /**
- * Durable local state for the relayapp bridge.
+ * Durable local state for the relaymessenger bridge.
  *
- * Everything lives under ~/.relayapp (override with RELAYAPP_HOME):
+ * Everything lives under ~/.relaymessenger (override with RELAYMESSENGER_HOME):
  *   config.json    — active agent token, API origin, owner_user_id (chmod 600)
  *   accounts/<origin-agent-hash>/state.json — receive cursor, dedupe set,
  *                    pending events. EXCLUSIVELY
@@ -38,8 +38,16 @@ import { createHash, randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
-export function relayappHome(): string {
-  return process.env.RELAYAPP_HOME ?? join(homedir(), ".relayapp");
+export function relaymessengerHome(): string {
+  if (process.env.RELAYMESSENGER_HOME) return process.env.RELAYMESSENGER_HOME;
+  const home = join(homedir(), ".relaymessenger");
+  // The CLI shipped as `relayapp` through 0.2.0. Adopt that state dir once so
+  // an existing pairing survives the rename; never merge two live dirs.
+  const legacy = join(homedir(), ".relayapp");
+  if (!existsSync(home) && existsSync(legacy)) {
+    renameSync(legacy, home);
+  }
+  return home;
 }
 
 export interface RelayConfig {
@@ -76,7 +84,7 @@ function canonicalOrigin(value: string): string {
  */
 export function runtimeHomeForConfig(
   config: Pick<RelayConfig, "api_origin" | "agent_token" | "agent">,
-  baseHome = relayappHome(),
+  baseHome = relaymessengerHome(),
 ): string {
   if (!config.api_origin || !config.agent_token) {
     throw new Error("Cannot select Relay runtime state without a paired origin and agent token.");
@@ -89,9 +97,9 @@ export function runtimeHomeForConfig(
   return join(baseHome, "accounts", namespace);
 }
 
-export function activeRuntimeHome(baseHome = relayappHome()): string {
+export function activeRuntimeHome(baseHome = relaymessengerHome()): string {
   const config = new ConfigStore(baseHome).load();
-  if (!config?.agent_token) throw new Error("Not paired. Run `relayapp pair` first.");
+  if (!config?.agent_token) throw new Error("Not paired. Run `relaymessenger pair` first.");
   return runtimeHomeForConfig(config, baseHome);
 }
 
@@ -100,7 +108,7 @@ export function resolveOwnerUserId(config: RelayConfig | undefined): string {
   const owner = process.env.RELAY_OWNER_USER_ID ?? config?.owner_user_id;
   if (!owner) {
     throw new Error(
-      "No pinned owner_user_id. Re-run `relayapp pair` against a server that reports " +
+      "No pinned owner_user_id. Re-run `relaymessenger pair` against a server that reports " +
         "the agent owner, or set RELAY_OWNER_USER_ID explicitly.",
     );
   }
@@ -319,7 +327,7 @@ export function atomicWriteJson(path: string, value: unknown, mode: number): voi
 }
 
 export class ConfigStore {
-  constructor(private readonly home = relayappHome()) {}
+  constructor(private readonly home = relaymessengerHome()) {}
 
   get path(): string {
     return join(this.home, "config.json");
@@ -610,7 +618,7 @@ function canonicalLocalPath(path: string): string {
 
 /** Local, non-secret project opt-ins shared across Relay re-pairs. */
 export class CodexNotifyPolicyStore {
-  constructor(private readonly home = relayappHome()) {}
+  constructor(private readonly home = relaymessengerHome()) {}
 
   get path(): string {
     return join(this.home, "codex-notify.json");
@@ -643,7 +651,7 @@ export class CodexNotifyPolicyStore {
   }
 }
 
-/** One live `relayapp start` process per origin+agent runtime namespace. */
+/** One live `relaymessenger start` process per origin+agent runtime namespace. */
 export class RuntimeLock {
   private readonly nonce = randomBytes(16).toString("hex");
   private held = false;
@@ -685,7 +693,7 @@ export class RuntimeLock {
         }
         if (alive || !owner?.nonce) {
           throw new Error(
-            `Another relayapp start process owns this paired agent (${this.dir}${pid ? `, pid ${pid}` : ""}).`,
+            `Another relaymessenger start process owns this paired agent (${this.dir}${pid ? `, pid ${pid}` : ""}).`,
           );
         }
         const stale = `${this.dir}.stale-${Date.now()}-${process.pid}-${this.nonce.slice(0, 8)}`;

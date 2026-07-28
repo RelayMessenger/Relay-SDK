@@ -20,8 +20,8 @@ test("install-codex: fresh config.toml gets mcp server + notify", () => {
   const { toml, report } = mergeCodexConfigToml("");
   assert.equal(report.changed, true);
   const doc = parseToml(toml) as any;
-  assert.deepEqual(doc.mcp_servers.relay, { command: "relayapp", args: ["mcp"] });
-  assert.deepEqual(doc.notify, ["relayapp", "notify"]);
+  assert.deepEqual(doc.mcp_servers.relay, { command: "relaymessenger", args: ["mcp"] });
+  assert.deepEqual(doc.notify, ["relaymessenger", "notify"]);
 });
 
 test("external CLI shims resolve to Windows .cmd launchers", () => {
@@ -55,30 +55,30 @@ model = "gpt-5.2-codex-mini"
   assert.deepEqual(doc.mcp_servers.github, { command: "gh-mcp", args: ["serve"] });
   assert.equal(doc.profiles.fast.model, "gpt-5.2-codex-mini");
   // And the relay server is added alongside.
-  assert.deepEqual(doc.mcp_servers.relay, { command: "relayapp", args: ["mcp"] });
+  assert.deepEqual(doc.mcp_servers.relay, { command: "relaymessenger", args: ["mcp"] });
   assert.ok(report.notes.some((note) => note.includes("left existing notify unchanged")));
 });
 
 test("install-codex: existing relay mcp server entry is preserved as-is", () => {
   const existing = `
 [mcp_servers.relay]
-command = "my-custom-relayapp"
+command = "my-custom-relaymessenger"
 `;
   const { toml } = mergeCodexConfigToml(existing);
   const doc = parseToml(toml) as any;
-  assert.equal(doc.mcp_servers.relay.command, "my-custom-relayapp");
+  assert.equal(doc.mcp_servers.relay.command, "my-custom-relaymessenger");
 });
 
 test("install-codex reports a truthful partial setup when existing integrations win", () => {
-  const codexHome = mkdtempSync(join(tmpdir(), "relayapp-codex-partial-"));
+  const codexHome = mkdtempSync(join(tmpdir(), "relaymessenger-codex-partial-"));
   writeFileSync(
     join(codexHome, "config.toml"),
     'notify = ["other"]\n\n[mcp_servers.relay]\ncommand = "other-relay"\n',
   );
   const lines: string[] = [];
   installCodex(codexHome, (line) => lines.push(line), {
-    projectRoot: mkdtempSync(join(tmpdir(), "relayapp-project-")),
-    policy: new CodexNotifyPolicyStore(mkdtempSync(join(tmpdir(), "relayapp-policy-"))),
+    projectRoot: mkdtempSync(join(tmpdir(), "relaymessenger-project-")),
+    policy: new CodexNotifyPolicyStore(mkdtempSync(join(tmpdir(), "relaymessenger-policy-"))),
   });
   const output = lines.join("\n");
   assert.match(output, /setup is partial/);
@@ -111,7 +111,7 @@ test("install-codex: hooks.json gains PermissionRequest handler, append-only", (
   assert.equal(doc.hooks.PermissionRequest[0].hooks[0].command, "my-audit-hook");
   assert.equal(
     doc.hooks.PermissionRequest[1].hooks[0].command,
-    "relayapp hook permission-request",
+    "relaymessenger hook permission-request",
   );
   assert.equal(doc.hooks.PreToolUse[0].hooks[0].command, "other");
   // Idempotent.
@@ -141,7 +141,7 @@ command = "gh-mcp"   # keep me
   assert.ok(toml.indexOf("notify = ") < toml.indexOf("[mcp_servers.github]"));
   // relay table appended; result still parses.
   const doc = parseToml(toml) as any;
-  assert.deepEqual(doc.mcp_servers.relay, { command: "relayapp", args: ["mcp"] });
+  assert.deepEqual(doc.mcp_servers.relay, { command: "relaymessenger", args: ["mcp"] });
 });
 
 test("M3: invalid config.toml is refused, not overwritten", () => {
@@ -149,9 +149,9 @@ test("M3: invalid config.toml is refused, not overwritten", () => {
 });
 
 test("installCodex writes private backups and atomically replaces private live config", () => {
-  const codexHome = mkdtempSync(join(tmpdir(), "relayapp-codex-"));
-  const relayHome = mkdtempSync(join(tmpdir(), "relayapp-policy-"));
-  const projectRoot = mkdtempSync(join(tmpdir(), "relayapp-project-"));
+  const codexHome = mkdtempSync(join(tmpdir(), "relaymessenger-codex-"));
+  const relayHome = mkdtempSync(join(tmpdir(), "relaymessenger-policy-"));
+  const projectRoot = mkdtempSync(join(tmpdir(), "relaymessenger-project-"));
   const options = { policy: new CodexNotifyPolicyStore(relayHome), projectRoot };
   const configPath = join(codexHome, "config.toml");
   const original = `# mine\nmodel = "gpt-5.2-codex"\n`;
@@ -169,15 +169,15 @@ test("installCodex writes private backups and atomically replaces private live c
   assert.equal(readFileSync(configPath, "utf8"), afterFirst);
   assert.equal(readFileSync(`${configPath}.bak`, "utf8"), original);
   // Fresh-file case: nothing to back up.
-  const emptyHome = mkdtempSync(join(tmpdir(), "relayapp-codex-"));
+  const emptyHome = mkdtempSync(join(tmpdir(), "relaymessenger-codex-"));
   installCodex(emptyHome, () => {}, options);
   assert.equal(existsSync(join(emptyHome, "config.toml.bak")), false);
   assert.equal(options.policy.matchProject(projectRoot), realpathSync(projectRoot));
 });
 
 test("install-claude securely copies paired identity without printing the token", () => {
-  const relayHome = mkdtempSync(join(tmpdir(), "relayapp-claude-pair-"));
-  const channelDir = mkdtempSync(join(tmpdir(), "relayapp-claude-channel-"));
+  const relayHome = mkdtempSync(join(tmpdir(), "relaymessenger-claude-pair-"));
+  const channelDir = mkdtempSync(join(tmpdir(), "relaymessenger-claude-channel-"));
   const config = new ConfigStore(relayHome);
   config.save({
     api_origin: "https://api.relayapp.im",
@@ -229,8 +229,8 @@ test("install-claude securely copies paired identity without printing the token"
     "--strict",
   ]);
   assert.deepEqual(commands[3], ["plugin", "marketplace", "add", persistentMarketplace]);
-  assert.deepEqual(commands[4], ["plugin", "install", "relay@relayapp-bundled", "--scope", "user"]);
-  assert.match(lines.join("\n"), /plugin:relay@relayapp-bundled/);
+  assert.deepEqual(commands[4], ["plugin", "install", "relay@relaymessenger-bundled", "--scope", "user"]);
+  assert.match(lines.join("\n"), /plugin:relay@relaymessenger-bundled/);
   if (process.platform !== "win32") assert.equal(statSync(envPath).mode & 0o777, 0o600);
 
   commands.length = 0;
@@ -252,10 +252,10 @@ test("install-claude refuses to overwrite a different channel identity", () => {
 });
 
 test("install-openclaw installs the bundled archive and configures owner-private identity", () => {
-  const relayHome = mkdtempSync(join(tmpdir(), "relayapp-openclaw-pair-"));
-  const openclawHome = mkdtempSync(join(tmpdir(), "relayapp-openclaw-home-"));
-  const bundleDir = mkdtempSync(join(tmpdir(), "relayapp-openclaw-bundle-"));
-  writeFileSync(join(bundleDir, "relayapp-openclaw-plugin-0.1.0.tgz"), "archive fixture");
+  const relayHome = mkdtempSync(join(tmpdir(), "relaymessenger-openclaw-pair-"));
+  const openclawHome = mkdtempSync(join(tmpdir(), "relaymessenger-openclaw-home-"));
+  const bundleDir = mkdtempSync(join(tmpdir(), "relaymessenger-openclaw-bundle-"));
+  writeFileSync(join(bundleDir, "relaymessenger-openclaw-plugin-0.1.0.tgz"), "archive fixture");
   const config = new ConfigStore(relayHome);
   config.save({
     api_origin: "https://api.relayapp.im",

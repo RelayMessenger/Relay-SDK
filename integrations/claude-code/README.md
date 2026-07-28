@@ -25,15 +25,15 @@ Install the published CLI, pair once, and install its bundled local
 marketplace:
 
 ```sh
-npm install -g relayapp
-relayapp pair
-relayapp install-claude
+npm install -g relaymessenger
+relaymessenger pair
+relaymessenger install-claude
 ```
 
 `install-claude` strictly validates the bundled source, copies it to a stable
 content-addressed directory under the paired account's private Relay runtime,
-registers the local `relayapp-bundled` marketplace, and installs
-`relay@relayapp-bundled`. It does not depend on this GitHub repository or on
+registers the local `relaymessenger-bundled` marketplace, and installs
+`relay@relaymessenger-bundled`. It does not depend on this GitHub repository or on
 the npm package remaining at its original install path. The installed plugin
 already contains `runtime/server.mjs` with all runtime dependencies bundled;
 do not locate a plugin cache or run `npm install` after installation.
@@ -43,7 +43,7 @@ do not locate a plugin cache or run `npm install` after installation.
 The install command also configures the channel without exposing the token:
 
 ```text
-relayapp install-claude
+relaymessenger install-claude
 ```
 
 That command writes the paired token, API origin, and owner pin to the
@@ -68,7 +68,7 @@ RELAY_BASE_URL=https://api.relayapp.im
 
 The file is mode 600/current-user-only. The command never prints the token and
 refuses to overwrite a different existing channel identity. Run
-`/relay:configure` for verification or for manual setup when relayapp is not
+`/relay:configure` for verification or for manual setup when relaymessenger is not
 available and you already have a token through another secure route.
 
 `RELAY_BASE_URL` must be an HTTPS origin with no path, query, fragment, or
@@ -87,7 +87,7 @@ Custom channels require Claude Code's development-channel flag during the
 research preview:
 
 ```text
-claude --dangerously-load-development-channels plugin:relay@relayapp-bundled
+claude --dangerously-load-development-channels plugin:relay@relaymessenger-bundled
 ```
 
 Use `server:relay` instead when registered as a bare MCP server.

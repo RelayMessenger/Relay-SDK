@@ -1,5 +1,5 @@
 /**
- * `relayapp mcp` — minimal MCP stdio server exposing one tool,
+ * `relaymessenger mcp` — minimal MCP stdio server exposing one tool,
  * relay_send_message, so a Codex session (via [mcp_servers.relay]) can message
  * its owner over Relay mid-run. Hand-rolled JSON-RPC over newline-delimited
  * stdio; only the handshake + tools surface is implemented.
@@ -55,7 +55,7 @@ export async function sendMcpMessage(
     return {
       sent: false,
       message:
-        "No pinned owner conversation yet — run `relayapp start` once and have " +
+        "No pinned owner conversation yet — run `relaymessenger start` once and have " +
         "the owner message this agent first.",
     };
   }
@@ -98,7 +98,7 @@ export async function mcpServe(): Promise<void> {
           reply({
             protocolVersion: negotiateMcpProtocolVersion(params?.protocolVersion),
             capabilities: { tools: {} },
-            serverInfo: { name: "relayapp", version: "0.1.0" },
+            serverInfo: { name: "relaymessenger", version: "0.1.0" },
           });
           break;
         case "notifications/initialized":

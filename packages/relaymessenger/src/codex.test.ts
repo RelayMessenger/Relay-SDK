@@ -33,7 +33,7 @@ test("regression: hook decisions carry the exact Codex PermissionRequest envelop
 });
 
 test("Codex notify suppresses other repositories and sends only opted-in project content", async () => {
-  const home = mkdtempSync(join(tmpdir(), "relayapp-codex-notify-"));
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-codex-notify-"));
   const allowed = join(home, "allowed-project");
   const nested = join(allowed, "packages", "app");
   const other = join(home, "private-other-project");

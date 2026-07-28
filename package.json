@@ -1,8 +1,8 @@
 {
-  "name": "relayapp-dev",
+  "name": "relaymessenger-dev",
   "private": true,
   "workspaces": [
-    "packages/relayapp",
+    "packages/relaymessenger",
     "integrations/claude-code",
     "integrations/openclaw",
     "integrations/vercel-ai"
@@ -12,9 +12,9 @@
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces",
     "validate": "npm run check && npm run build && npm test",
-    "validate:claude-plugin": "npm exec --workspace relayapp -- claude plugin validate ../../integrations/claude-code --strict && npm exec --workspace relayapp -- claude plugin validate ../../ --strict",
+    "validate:claude-plugin": "npm exec --workspace relaymessenger -- claude plugin validate ../../integrations/claude-code --strict && npm exec --workspace relaymessenger -- claude plugin validate ../../ --strict",
     "runtime:smoke": "node scripts/acp-runtime-smoke.mjs",
-    "gateway:harness": "npm run gateway:harness --workspace @relayapp/openclaw-plugin",
-    "pack:check": "node scripts/relayapp-release.mjs pack-json-smoke && node scripts/pack-smoke.mjs && npm run pack:smoke --workspace relay-claude-channel && npm run pack:smoke --workspace @relayapp/openclaw-plugin"
+    "gateway:harness": "npm run gateway:harness --workspace @relaymessenger/openclaw-plugin",
+    "pack:check": "node scripts/relaymessenger-release.mjs pack-json-smoke && node scripts/pack-smoke.mjs && npm run pack:smoke --workspace relay-claude-channel && npm run pack:smoke --workspace @relaymessenger/openclaw-plugin"
   }
 }

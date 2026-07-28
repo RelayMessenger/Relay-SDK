@@ -384,7 +384,7 @@ export class ReceiveLoop {
           throw error;
         }
         if (error?.status === 401) {
-          this.log("fatal: agent token rejected (401) — run `relayapp pair` again.");
+          this.log("fatal: agent token rejected (401) — run `relaymessenger pair` again.");
           throw error;
         }
         failures += 1;

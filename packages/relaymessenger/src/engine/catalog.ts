@@ -1,8 +1,8 @@
 /**
- * ACP runtime presets supported by relayapp.
+ * ACP runtime presets supported by relaymessenger.
  *
  * Bundled adapters are exact npm dependencies resolved by acp.ts. External
- * runtimes are always user-installed binaries: relayapp never downloads a
+ * runtimes are always user-installed binaries: relaymessenger never downloads a
  * mutable CLI at startup and never passes a command through a shell.
  */
 

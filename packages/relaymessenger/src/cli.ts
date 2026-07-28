@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * relayapp — bridge your local coding agent to Relay.
+ * relaymessenger — bridge your local coding agent to Relay.
  *
- *   relayapp pair [--engine <preset>] [--name <device-name>]
- *   relayapp start [--engine <preset>] [--dir <path>]
- *   relayapp install-codex
- *   relayapp install-claude
- *   relayapp install-openclaw
- *   relayapp doctor
+ *   relaymessenger pair [--engine <preset>] [--name <device-name>]
+ *   relaymessenger start [--engine <preset>] [--dir <path>]
+ *   relaymessenger install-codex
+ *   relaymessenger install-claude
+ *   relaymessenger install-openclaw
+ *   relaymessenger doctor
  *
  * Internal entrypoints (wired by install-codex): notify, mcp,
  * hook permission-request.
@@ -34,24 +34,24 @@ import {
   StateStore,
 } from "./store.js";
 
-const USAGE = `relayapp — bridge your local coding agent to Relay (https://relayapp.im)
+const USAGE = `relaymessenger — bridge your local coding agent to Relay (https://relayapp.im)
 
-  relayapp pair            pair this machine with the Relay app (QR + code)
-  relayapp start           receive messages and drive the engine
+  relaymessenger pair            pair this machine with the Relay app (QR + code)
+  relaymessenger start           receive messages and drive the engine
       --engine <preset>       (default claude)
       presets: ${ENGINE_HELP}
       --dir <path>            working directory for engine sessions
-  relayapp install-codex   wire Codex notify + phone approvals + MCP server
-  relayapp install-claude  point at the Claude Code channel plugin
-  relayapp install-openclaw install and configure the bundled OpenClaw plugin
-  relayapp doctor          health checks
+  relaymessenger install-codex   wire Codex notify + phone approvals + MCP server
+  relaymessenger install-claude  point at the Claude Code channel plugin
+  relaymessenger install-openclaw install and configure the bundled OpenClaw plugin
+  relaymessenger doctor          health checks
 
 Docs: https://docs.relayapp.im/quickstart`;
 
 async function main(): Promise<number> {
   const [command, ...restArgv] = process.argv.slice(2);
   const flags = parseFlags(restArgv);
-  const log = (line: string) => console.error(`[relayapp] ${line}`);
+  const log = (line: string) => console.error(`[relaymessenger] ${line}`);
 
   switch (command) {
     case "pair": {
@@ -63,7 +63,7 @@ async function main(): Promise<number> {
     case "start": {
       const config = new ConfigStore().load();
       if (!config?.agent_token) {
-        console.error("Not paired. Run `relayapp pair` first.");
+        console.error("Not paired. Run `relaymessenger pair` first.");
         return 1;
       }
       const ownerUserId = resolveOwnerUserId(config); // fail closed without a pinned owner
@@ -170,7 +170,7 @@ main().then(
     if (code !== 0) process.exitCode = code;
   },
   (error) => {
-    console.error(`relayapp: ${error?.message ?? error}`);
+    console.error(`relaymessenger: ${error?.message ?? error}`);
     process.exitCode = 1;
   },
 );
