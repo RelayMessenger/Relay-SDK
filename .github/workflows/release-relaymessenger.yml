@@ -47,6 +47,6 @@ jobs:
         run: npm install --global npm@12.0.1
       - name: Publish relaymessenger through npm trusted publishing
         if: ${{ steps.registry.outputs.published != 'true' }}
-        run: npm publish --workspace relaymessenger --access public
+        run: npm publish --workspace @relaymessenger/cli --access public
       - name: Verify the registry-installed artifact
         run: node scripts/verify-relaymessenger-registry.mjs

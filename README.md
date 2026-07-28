@@ -20,7 +20,7 @@ Docs: https://docs.relayapp.im
 ## Quickstart
 
 ```sh
-npm install -g relaymessenger
+npm install -g @relaymessenger/cli
 relaymessenger pair            # QR + code → claim in the Relay app
 relaymessenger start --engine claude   # or codex | hermes
 

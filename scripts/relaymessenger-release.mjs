@@ -11,7 +11,7 @@ const lock = JSON.parse(readFileSync(resolve(repoRoot, "package-lock.json"), "ut
 const expectedTag = `relaymessenger-v${pkg.version}`;
 
 function checkVersionMetadata() {
-  assert.equal(pkg.name, "relaymessenger", "release workflow only publishes the relaymessenger package");
+  assert.equal(pkg.name, "@relaymessenger/cli", "release workflow only publishes the relaymessenger package");
   assert.match(pkg.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u, "invalid package version");
   assert.equal(
     lock.packages?.["packages/relaymessenger"]?.version,
@@ -61,7 +61,7 @@ function packRelaymessengerJson(destination, dryRun = false) {
     [
       "pack",
       "--workspace",
-      "relaymessenger",
+      "@relaymessenger/cli",
       "--json",
       "--silent",
       ...(dryRun ? ["--dry-run"] : []),

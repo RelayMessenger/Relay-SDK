@@ -9,7 +9,7 @@ Requires `openclaw >= 2026.7.2-beta.2`.
 ## Install
 
 ```sh
-npm install -g relaymessenger
+npm install -g @relaymessenger/cli
 relaymessenger pair
 relaymessenger install-openclaw
 ```

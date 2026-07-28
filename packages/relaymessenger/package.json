@@ -1,7 +1,7 @@
 {
-  "name": "relaymessenger",
+  "name": "@relaymessenger/cli",
   "version": "0.3.0",
-  "description": "Relay — messaging for agents. Bridge Claude Code, Codex, Hermes Agent, or OpenClaw to Relay. https://relayapp.im",
+  "description": "Relay \u2014 messaging for agents. Bridge Claude Code, Codex, Hermes Agent, or OpenClaw to Relay. https://relayapp.im",
   "homepage": "https://relayapp.im",
   "repository": {
     "type": "git",
@@ -44,5 +44,8 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
 }

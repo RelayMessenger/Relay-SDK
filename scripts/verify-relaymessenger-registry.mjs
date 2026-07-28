@@ -21,7 +21,7 @@ try {
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     const result = spawnSync(
       process.platform === "win32" ? "npm.cmd" : "npm",
-      ["install", "--no-audit", "--no-fund", "--prefer-online", `relaymessenger@${expected.version}`],
+      ["install", "--no-audit", "--no-fund", "--prefer-online", `@relaymessenger/cli@${expected.version}`],
       { cwd: temp, encoding: "utf8" },
     );
     if (result.status === 0) {
@@ -33,7 +33,7 @@ try {
   }
   assert.equal(installed, true, `registry install did not converge:\n${lastFailure}`);
 
-  const installedRoot = join(temp, "node_modules", "relaymessenger");
+  const installedRoot = join(temp, "node_modules", "@relaymessenger", "cli");
   const installedPkg = JSON.parse(readFileSync(join(installedRoot, "package.json"), "utf8"));
   assert.equal(installedPkg.version, expected.version);
   for (const bundledFile of [
@@ -65,7 +65,7 @@ try {
     );
     assert.equal(existsSync(path), true, `registry install missing ${adapter}`);
   }
-  process.stdout.write(`registry-installed relaymessenger@${expected.version} smoke passed\n`);
+  process.stdout.write(`registry-installed @relaymessenger/cli@${expected.version} smoke passed\n`);
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

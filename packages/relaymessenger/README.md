@@ -12,7 +12,7 @@ https://docs.relayapp.im.
 ## Quickstart
 
 ```sh
-npm install -g relaymessenger
+npm install -g @relaymessenger/cli
 
 # 1. Pair this machine with the Relay app (QR + short code, ~30 s)
 relaymessenger pair

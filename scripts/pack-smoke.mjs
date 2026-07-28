@@ -60,7 +60,7 @@ try {
   mkdirSync(installDir, { recursive: true });
   // prepack always deletes dist before rebuilding, so this proves the package
   // does not depend on a locally stale ignored artifact.
-  npm(["pack", "--workspace", "relaymessenger", "--pack-destination", packDir]);
+  npm(["pack", "--workspace", "@relaymessenger/cli", "--pack-destination", packDir]);
   const tarballs = readdirSync(packDir).filter((name) => name.endsWith(".tgz"));
   assert.equal(tarballs.length, 1, "expected exactly one relaymessenger tarball");
   const tarball = join(packDir, tarballs[0]);
@@ -71,7 +71,7 @@ try {
   );
   npm(["install", "--no-audit", "--no-fund", tarball], temp);
 
-  const installed = join(temp, "node_modules", "relaymessenger");
+  const installed = join(temp, "node_modules", "@relaymessenger", "cli");
   for (const required of [
     "LICENSE",
     "README.md",

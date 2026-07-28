@@ -12,7 +12,7 @@
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces",
     "validate": "npm run check && npm run build && npm test",
-    "validate:claude-plugin": "npm exec --workspace relaymessenger -- claude plugin validate ../../integrations/claude-code --strict && npm exec --workspace relaymessenger -- claude plugin validate ../../ --strict",
+    "validate:claude-plugin": "npm exec --workspace @relaymessenger/cli -- claude plugin validate ../../integrations/claude-code --strict && npm exec --workspace @relaymessenger/cli -- claude plugin validate ../../ --strict",
     "runtime:smoke": "node scripts/acp-runtime-smoke.mjs",
     "gateway:harness": "npm run gateway:harness --workspace @relaymessenger/openclaw-plugin",
     "pack:check": "node scripts/relaymessenger-release.mjs pack-json-smoke && node scripts/pack-smoke.mjs && npm run pack:smoke --workspace relay-claude-channel && npm run pack:smoke --workspace @relaymessenger/openclaw-plugin"
