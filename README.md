@@ -35,34 +35,39 @@ All four integration surfaces are release-gated together on Linux and Windows;
 the installed `relaymessenger` tarball and its Claude/Codex adapter runtime also run
 on macOS CI.
 
-## relaymessenger npm release contract
+## npm release contracts
 
 Only `packages/relaymessenger` is published by the automated npm release. Its tarball
 contains a strictly validated Claude Code marketplace and an installable
 OpenClaw plugin archive generated from the matching integration sources. The
-integration workspaces are not published separately by this workflow.
+Claude Code and OpenClaw workspaces are bundled artifacts, not independent npm
+packages. `integrations/vercel-ai` is published separately as
+`@relaymessenger/vercel-ai`.
 
 1. Update the CLI version and root lock metadata together:
 
    ```sh
-   npm version 0.2.0 --workspace relaymessenger --no-git-tag-version
+   npm version 0.3.1 --workspace @relaymessenger/cli --no-git-tag-version
    npm run validate
    npm run pack:check
    ```
 
 2. Merge that exact version change, then create and push an existing-commit
-   tag named `relaymessenger-v0.2.0`. The version in
+   tag named `relaymessenger-v0.3.1`. The version in
    `packages/relaymessenger/package.json`, the workspace entry in `package-lock.json`,
    and the tag must match exactly.
 3. The tag starts `.github/workflows/release-relaymessenger.yml`; a manual dispatch
-   accepts an existing tag for a controlled retry. The workflow refuses a
-   missing `NPM_TOKEN` before a new publish. It never creates a repository,
-   changes repository visibility, or creates/pushes a tag.
-4. CI reruns the full validation and package smokes, publishes only `relaymessenger`,
+   accepts an existing tag for a controlled retry. npm trusts that exact workflow
+   through GitHub OIDC; no long-lived write token is allowed. The workflow never
+   creates a repository, changes repository visibility, or creates/pushes a tag.
+4. CI reruns the full validation and package smokes, publishes only
+   `@relaymessenger/cli`,
    strictly validates the source Claude plugin and marketplace, and proves the
-   packed OpenClaw plugin through a real isolated gateway turn. It uses npm
-   provenance when GitHub reports a public source repository. Private-source
-   releases publish without provenance rather than changing visibility.
+   packed OpenClaw plugin through a real isolated gateway turn. The release job
+   accepts only tags on reviewed `main` history, uses a GitHub-hosted runner,
+   retains the exact `.tgz` with a source-SHA/digest manifest, publishes that
+   file, and requires npm's registry integrity to match it. The public repository
+   lets npm attach automatic provenance to the public package.
 5. Before any retry, the workflow reconciles npm state. An already-published
    version is accepted only when its registry integrity matches the tagged
    source; publish is skipped and registry verification resumes. Finally,
@@ -70,6 +75,9 @@ integration workspaces are not published separately by this workflow.
    into a clean directory, loads the CLI, resolves both pinned ACP adapter
    runtimes, and verifies that both bundled native-integration artifacts are
    present.
+
+`@relaymessenger/vercel-ai` follows the same contract through
+`.github/workflows/release-vercel-ai.yml` and tags named `vercel-ai-vX.Y.Z`.
 
 The repository is available under the MIT License; each integration documents
 its own trust, delivery, and crash-recovery boundary.

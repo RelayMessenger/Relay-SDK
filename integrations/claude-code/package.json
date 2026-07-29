@@ -25,11 +25,11 @@
     "verify": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/node": "^22.15.0",
     "esbuild": "^0.25.0",
     "tsx": "^4.20.0",
-    "zod": "4.4.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "zod": "4.4.3"
   }
 }

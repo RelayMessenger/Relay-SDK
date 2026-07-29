@@ -18,24 +18,104 @@ permissions:
 jobs:
   publish:
     name: Validate, publish, and verify @relaymessenger/vercel-ai
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # npm trusted publishing accepts GitHub-hosted runners, not third-party
+    # runner labels. Keep ordinary CI on Blacksmith; releases use GitHub here.
+    runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.22.3
-          cache: npm
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
       - name: Refuse a mismatched version or tag
         run: node scripts/vercel-ai-release.mjs check-tag "$RELEASE_TAG"
+      - name: Resolve and require a reviewed source commit
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          tag_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+          test "$tag_sha" = "$source_sha"
+          git merge-base --is-ancestor "$source_sha" origin/main
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+          printf 'reviewed source: %s\n' "$source_sha"
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run check --workspace @relaymessenger/vercel-ai
       - run: npm test --workspace @relaymessenger/vercel-ai
       - run: npm run build --workspace @relaymessenger/vercel-ai
+      - name: Pack and retain the exact release artifact
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .release-tmp
+          mkdir -p .release-tmp
+          npm pack --workspace @relaymessenger/vercel-ai --pack-destination .release-tmp
+          mapfile -t tarballs < <(find .release-tmp -maxdepth 1 -type f -name '*.tgz' -print)
+          test "${#tarballs[@]}" -eq 1
+          tarball="${tarballs[0]}"
+          integrity="$(
+            node -e "
+              const { createHash } = require('node:crypto');
+              const { readFileSync } = require('node:fs');
+              const digest = createHash('sha512')
+                .update(readFileSync(process.argv[1]))
+                .digest('base64');
+              process.stdout.write('sha512-' + digest);
+            " "$tarball"
+          )"
+          sha256="$(sha256sum "$tarball" | cut -d' ' -f1)"
+          SOURCE_SHA="${{ steps.source.outputs.sha }}" \
+          TARBALL="$tarball" \
+          SHA256="$sha256" \
+          INTEGRITY="$integrity" \
+          node <<'NODE'
+          const { statSync, writeFileSync } = require("node:fs");
+          const { basename } = require("node:path");
+          const pkg = require("./integrations/vercel-ai/package.json");
+          const manifest = {
+            schemaVersion: 1,
+            repository: process.env.GITHUB_REPOSITORY,
+            sourceSha: process.env.SOURCE_SHA,
+            tag: process.env.RELEASE_TAG,
+            workflowRunId: process.env.GITHUB_RUN_ID,
+            workflowRunAttempt: process.env.GITHUB_RUN_ATTEMPT,
+            package: pkg.name,
+            version: pkg.version,
+            artifact: basename(process.env.TARBALL),
+            size: statSync(process.env.TARBALL).size,
+            sha256: process.env.SHA256,
+            integrity: process.env.INTEGRITY,
+          };
+          writeFileSync(
+            ".release-tmp/release-manifest.json",
+            `${JSON.stringify(manifest, null, 2)}\n`,
+          );
+          NODE
+          {
+            echo "tarball=$tarball"
+            echo "manifest=.release-tmp/release-manifest.json"
+            echo "integrity=$integrity"
+            echo "sha256=$sha256"
+          } >> "$GITHUB_OUTPUT"
+          printf 'retained artifact: %s\nsha256: %s\nintegrity: %s\n' "$tarball" "$sha256" "$integrity"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vercel-ai-${{ steps.source.outputs.sha }}
+          path: |
+            ${{ steps.artifact.outputs.tarball }}
+            ${{ steps.artifact.outputs.manifest }}
+          if-no-files-found: error
+          retention-days: 90
       - name: Reconcile the version with npm before any publish retry
         id: registry
         run: node scripts/vercel-ai-release.mjs registry-state
@@ -46,6 +126,23 @@ jobs:
         run: npm install --global npm@12.0.1
       - name: Publish through npm trusted publishing
         if: ${{ steps.registry.outputs.published != 'true' }}
-        run: npm publish --workspace @relaymessenger/vercel-ai --access public
+        run: npm publish "${{ steps.artifact.outputs.tarball }}" --access public
+      - name: Verify the published artifact integrity
+        env:
+          EXPECTED_INTEGRITY: ${{ steps.artifact.outputs.integrity }}
+        run: |
+          node <<'NODE'
+          const { execFileSync } = require("node:child_process");
+          const pkg = require("./integrations/vercel-ai/package.json");
+          const actual = JSON.parse(execFileSync(
+            "npm",
+            ["view", `${pkg.name}@${pkg.version}`, "dist.integrity", "--json"],
+            { encoding: "utf8" },
+          ));
+          if (actual !== process.env.EXPECTED_INTEGRITY) {
+            throw new Error(`registry integrity ${actual} != retained artifact ${process.env.EXPECTED_INTEGRITY}`);
+          }
+          process.stdout.write(`registry integrity matches retained artifact: ${actual}\n`);
+          NODE
       - name: Verify the registry-installed artifact
         run: node scripts/vercel-ai-release.mjs verify-registry
