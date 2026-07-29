@@ -18,6 +18,25 @@ function requirePositiveInteger(value, name) {
   return parsed;
 }
 
+export function parseNpmViewIntegrity(output) {
+  let parsed;
+  try {
+    parsed = JSON.parse(output);
+  } catch (error) {
+    throw new Error(
+      `npm view returned invalid JSON:\n${output.trim()}`,
+      { cause: error },
+    );
+  }
+  const integrity = Array.isArray(parsed) && parsed.length === 1 ? parsed[0] : parsed;
+  if (typeof integrity !== "string") {
+    throw new Error(
+      `npm view returned an unexpected integrity shape: ${JSON.stringify(parsed)}`,
+    );
+  }
+  return integrity;
+}
+
 function queryRegistryIntegrity(packageSpec) {
   const result = spawnSync(
     npm,
@@ -25,15 +44,7 @@ function queryRegistryIntegrity(packageSpec) {
     { encoding: "utf8", shell: process.platform === "win32" },
   );
   if (result.status === 0) {
-    let integrity;
-    try {
-      integrity = JSON.parse(result.stdout);
-    } catch (error) {
-      throw new Error(
-        `npm view returned invalid JSON for ${packageSpec}:\n${result.stdout.trim()}`,
-        { cause: error },
-      );
-    }
+    const integrity = parseNpmViewIntegrity(result.stdout);
     return { integrity };
   }
   return {

@@ -6,10 +6,35 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { verifyNpmRegistryIntegrity } from "./verify-npm-registry-integrity.mjs";
+import {
+  parseNpmViewIntegrity,
+  verifyNpmRegistryIntegrity,
+} from "./verify-npm-registry-integrity.mjs";
 
 const packageSpec = "@relaymessenger/example@1.2.3";
 const expectedIntegrity = "sha512-YWJj";
+
+test("accepts npm 10 string and npm 12 single-field array output", () => {
+  assert.equal(
+    parseNpmViewIntegrity(JSON.stringify(expectedIntegrity)),
+    expectedIntegrity,
+  );
+  assert.equal(
+    parseNpmViewIntegrity(JSON.stringify([expectedIntegrity])),
+    expectedIntegrity,
+  );
+});
+
+test("rejects ambiguous npm view integrity output", () => {
+  assert.throws(
+    () => parseNpmViewIntegrity(JSON.stringify([expectedIntegrity, expectedIntegrity])),
+    /unexpected integrity shape/u,
+  );
+  assert.throws(
+    () => parseNpmViewIntegrity(JSON.stringify({ integrity: expectedIntegrity })),
+    /unexpected integrity shape/u,
+  );
+});
 
 test("retries propagation E404 responses until integrity is available", async () => {
   const results = [
