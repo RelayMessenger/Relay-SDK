@@ -26,9 +26,12 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           fetch-depth: 0
+      # Trusted publishing exchanges the OIDC token against the registry npm
+      # resolves for the publish, so the registry has to be configured here.
       - uses: actions/setup-node@v7
         with:
           node-version: 22.22.3
+          registry-url: https://registry.npmjs.org
           cache: npm
       - name: Refuse a mismatched version or tag
         run: node scripts/relaymessenger-release.mjs check-tag "$RELEASE_TAG"
