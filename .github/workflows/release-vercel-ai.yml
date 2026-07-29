@@ -61,7 +61,7 @@ jobs:
           node --check "$helper"
           printf 'path=%s\n' "$helper" >> "$GITHUB_OUTPUT"
       - run: npm ci
-      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --workspace @relaymessenger/vercel-ai --omit=dev --audit-level=high
       - run: npm run check --workspace @relaymessenger/vercel-ai
       - run: npm test --workspace @relaymessenger/vercel-ai
       - run: npm run build --workspace @relaymessenger/vercel-ai
