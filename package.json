@@ -16,5 +16,8 @@
     "runtime:smoke": "node scripts/acp-runtime-smoke.mjs",
     "gateway:harness": "npm run gateway:harness --workspace @relaymessenger/openclaw-plugin",
     "pack:check": "node scripts/relaymessenger-release.mjs pack-json-smoke && node scripts/pack-smoke.mjs && npm run pack:smoke --workspace relay-claude-channel && npm run pack:smoke --workspace @relaymessenger/openclaw-plugin"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^2.0.12"
   }
 }

@@ -1,0 +1,57 @@
+name: Bug report
+description: Report a reproducible defect in a released Relay developer tool.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include Agent Tokens, npm credentials, or private conversation data.
+        Report security issues through the private advisory link in SECURITY.md.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - relaymessenger CLI
+        - Claude Code channel
+        - Codex integration
+        - Hermes ACP bridge
+        - OpenClaw channel
+        - Vercel AI SDK plugin
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Package and version
+      placeholder: "@relaymessenger/cli@0.3.1"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "macOS 26.0, Node 24.18.1"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Give the smallest complete sequence that reproduces the defect.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
