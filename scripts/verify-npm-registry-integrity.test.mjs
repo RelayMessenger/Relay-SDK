@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { verifyNpmRegistryIntegrity } from "./verify-npm-registry-integrity.mjs";
 
@@ -92,4 +97,24 @@ test("fails after the bounded E404 propagation window", async () => {
     /did not expose .* after 3 attempts/su,
   );
   assert.equal(queries, 3);
+});
+
+test("runs the CLI entrypoint even when invoked through a symlink", () => {
+  const temp = mkdtempSync(join(tmpdir(), "npm-registry-verifier-symlink-"));
+  try {
+    const link = join(temp, "verify.mjs");
+    symlinkSync(
+      fileURLToPath(new URL("./verify-npm-registry-integrity.mjs", import.meta.url)),
+      link,
+      "file",
+    );
+    const result = spawnSync(process.execPath, [link], { encoding: "utf8" });
+    assert.notEqual(result.status, 0);
+    assert.match(
+      `${result.stdout ?? ""}\n${result.stderr ?? ""}`,
+      /usage: verify-npm-registry-integrity\.mjs/u,
+    );
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
 });
