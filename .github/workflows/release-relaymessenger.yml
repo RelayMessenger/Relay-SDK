@@ -131,19 +131,9 @@ jobs:
       - name: Verify the published artifact integrity
         env:
           EXPECTED_INTEGRITY: ${{ steps.artifact.outputs.integrity }}
-        run: |
-          node <<'NODE'
-          const { execFileSync } = require("node:child_process");
-          const pkg = require("./packages/relaymessenger/package.json");
-          const actual = JSON.parse(execFileSync(
-            "npm",
-            ["view", `${pkg.name}@${pkg.version}`, "dist.integrity", "--json"],
-            { encoding: "utf8" },
-          ));
-          if (actual !== process.env.EXPECTED_INTEGRITY) {
-            throw new Error(`registry integrity ${actual} != retained artifact ${process.env.EXPECTED_INTEGRITY}`);
-          }
-          process.stdout.write(`registry integrity matches retained artifact: ${actual}\n`);
-          NODE
+        run: >-
+          node scripts/verify-npm-registry-integrity.mjs
+          packages/relaymessenger/package.json
+          "$EXPECTED_INTEGRITY"
       - name: Verify the registry-installed artifact
         run: node scripts/verify-relaymessenger-registry.mjs
