@@ -46,13 +46,31 @@ export const ADAPTER_PACKAGES: Record<string, string> = {
   codex: "@agentclientprotocol/codex-acp",
 };
 
-/** Versions must exactly match package.json; tests enforce the lock. */
-export const ADAPTER_VERSIONS: Record<string, string> = {
-  claude: "0.59.0",
-  codex: "1.1.4",
-};
-
 const require = createRequire(import.meta.url);
+
+/** An exact pin: a bare semver with no range operator. */
+const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+/**
+ * Adapter versions are read from the manifest rather than restated here, so a
+ * dependency bump cannot leave the runtime reporting a version it is not
+ * running. The pins must stay exact; a range would let npm resolve an adapter
+ * the lockfile never vetted.
+ */
+export const ADAPTER_VERSIONS: Record<string, string> = Object.fromEntries(
+  Object.entries(ADAPTER_PACKAGES).map(([engine, adapterPackage]) => {
+    const manifest = require("../../package.json") as {
+      dependencies: Record<string, string>;
+    };
+    const pinned = manifest.dependencies[adapterPackage];
+    if (!pinned || !EXACT_VERSION.test(pinned)) {
+      throw new Error(
+        `${adapterPackage} must be pinned to an exact version, found ${pinned ?? "no dependency"}`,
+      );
+    }
+    return [engine, pinned];
+  }),
+);
 
 /** Resolve the installed, lockfile-pinned executable without invoking npm. */
 export function adapterEntrypoint(engine: "claude" | "codex"): string {

@@ -100,8 +100,21 @@ try {
   assert.equal(pkg.bin.relaymessenger, "dist/cli.js");
   assert.equal(pkg.engines.node, ">=22.18");
   assert.equal(pkg.license, "MIT");
-  assert.equal(pkg.dependencies["@agentclientprotocol/claude-agent-acp"], "0.59.0");
-  assert.equal(pkg.dependencies["@agentclientprotocol/codex-acp"], "1.1.4");
+  // The packed adapter pins must stay exact and match the workspace manifest.
+  // Comparing against the manifest instead of a literal keeps dependency bumps
+  // from failing this smoke for no reason.
+  const sourcePkg = JSON.parse(
+    readFileSync(join(repoRoot, "packages", "relaymessenger", "package.json"), "utf8"),
+  );
+  for (const adapter of ["@agentclientprotocol/claude-agent-acp", "@agentclientprotocol/codex-acp"]) {
+    const pinned = sourcePkg.dependencies[adapter];
+    assert.match(
+      pinned ?? "",
+      /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/,
+      `${adapter} must be pinned to an exact version, found ${pinned ?? "no dependency"}`,
+    );
+    assert.equal(pkg.dependencies[adapter], pinned, `${adapter} pin must survive packing`);
+  }
 
   const help = execFileSync(process.execPath, [join(installed, "dist", "cli.js"), "--help"], {
     cwd: installDir,
