@@ -1,9 +1,11 @@
 // Multi-account resolution: channels.relay.accounts.<id> with a
 // default-account fallback, so one OpenClaw can back several Relay contacts
 // (one Agent Token each). Env vars cover the single-account quickstart.
-import { createAccountListHelpers } from "openclaw/plugin-sdk/account-helpers";
+import {
+  createAccountListHelpers,
+  resolveMergedAccountConfig,
+} from "openclaw/plugin-sdk/account-helpers";
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "openclaw/plugin-sdk/account-id";
-import { resolveMergedAccountConfig } from "openclaw/plugin-sdk/account-resolution-runtime";
 import { tryReadSecretFileSync } from "openclaw/plugin-sdk/channel-core";
 import { DEFAULT_RELAY_BASE_URL, normalizeRelayBaseUrl } from "./client.js";
 import type { RelayAccountConfig, RelayCoreConfig, ResolvedRelayAccount } from "./types.js";

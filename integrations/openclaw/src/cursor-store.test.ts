@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -16,10 +16,6 @@ function memoryStore(initial?: Record<string, RelayCursorRecord>) {
     register: async (key, value) => {
       calls.push(`register:${key}:${value.cursor}`);
       map.set(key, value);
-    },
-    delete: async (key) => {
-      calls.push(`delete:${key}`);
-      return map.delete(key);
     },
   };
   return { store, map, calls };
@@ -91,7 +87,6 @@ describe("relay cursor store", () => {
       register: async () => {
         throw new Error("disk broken");
       },
-      delete: async () => false,
     };
     const cursor = createRelayCursorStore({
       store,
@@ -135,29 +130,56 @@ describe("relay cursor store", () => {
       store: {
         lookup: async () => { throw new Error("sqlite unavailable"); },
         register: async () => {},
-        delete: async () => false,
       },
     });
     await expect(cursor.load()).rejects.toThrow(/could not be loaded/);
   });
 
+  it("fails closed on corrupt Relay-owned cursor state without overwriting it", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "relay-cursor-corrupt-"));
+    const warnings: string[] = [];
+    try {
+      const store = openRelayCursorStateStore((line) => warnings.push(line), {
+        env: { ...process.env, OPENCLAW_STATE_DIR: stateDir },
+      });
+      const filePath = join(stateDir, "relay", "state", "cursors.json");
+      const corrupt = '{"version":1,"entries":{"not-a-hash":{"cursor":4}}}\n';
+      writeFileSync(filePath, corrupt, { mode: 0o600 });
+      await expect(store.lookup("relay:https://api.relayapp.im:agt_1")).rejects.toThrow(
+        /state is corrupt/u,
+      );
+      expect(warnings.join("\n")).toMatch(/refusing unsafe cursor reset/u);
+      expect(readFileSync(filePath, "utf8")).toBe(corrupt);
+    } finally {
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a new identity at capacity without evicting an old durable cursor", async () => {
     const stateDir = mkdtempSync(join(tmpdir(), "relay-cursor-capacity-"));
-    const store = openRelayCursorStateStore(() => {}, {
-      env: { ...process.env, OPENCLAW_STATE_DIR: stateDir },
-      maxEntries: 2,
-    });
-    const first = createRelayCursorStore({ store, baseUrl, agentId: "agt_capacity_1" });
-    const second = createRelayCursorStore({ store, baseUrl, agentId: "agt_capacity_2" });
-    const rejected = createRelayCursorStore({ store, baseUrl, agentId: "agt_capacity_3" });
-    await first.load();
-    await first.advance(101);
-    await second.load();
-    await second.advance(202);
-    await rejected.load();
-    await expect(rejected.advance(303)).rejects.toThrow(/was not durable/);
+    try {
+      const store = openRelayCursorStateStore(() => {}, {
+        env: { ...process.env, OPENCLAW_STATE_DIR: stateDir },
+        maxEntries: 2,
+      });
+      const first = createRelayCursorStore({ store, baseUrl, agentId: "agt_capacity_1" });
+      const second = createRelayCursorStore({ store, baseUrl, agentId: "agt_capacity_2" });
+      const rejected = createRelayCursorStore({ store, baseUrl, agentId: "agt_capacity_3" });
+      await first.load();
+      await first.advance(101);
+      await second.load();
+      await second.advance(202);
+      await rejected.load();
+      await expect(rejected.advance(303)).rejects.toThrow(/was not durable/);
 
-    const reloaded = createRelayCursorStore({ store, baseUrl, agentId: "agt_capacity_1" });
-    expect(await reloaded.load()).toBe(101);
+      const reloaded = createRelayCursorStore({ store, baseUrl, agentId: "agt_capacity_1" });
+      expect(await reloaded.load()).toBe(101);
+    } finally {
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects invalid capacity before opening durable state", () => {
+    expect(() => openRelayCursorStateStore(() => {}, { maxEntries: 0 })).toThrow(/maxEntries/u);
   });
 });

@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildRelayInboundDedupeKey,
@@ -120,6 +123,28 @@ describe("strict durable attempt guard", () => {
     );
   });
 
+  it("serializes concurrent claims while the durable lookup is pending", async () => {
+    let releaseLookup!: () => void;
+    const lookupBlocked = new Promise<void>((resolve) => {
+      releaseLookup = resolve;
+    });
+    const guard = createRelayInboundDedupeGuard({
+      store: {
+        lookup: async () => {
+          await lookupBlocked;
+          return undefined;
+        },
+        register: () => {},
+      },
+    });
+
+    const first = guard.claim("account\0event", { namespace: "global" });
+    const second = guard.claim("account\0event", { namespace: "global" });
+    expect((await second).kind).toBe("inflight");
+    releaseLookup();
+    expect((await first).kind).toBe("claimed");
+  });
+
   it("propagates a persistence failure instead of dispatching with memory-only state", async () => {
     const errors: unknown[] = [];
     const guard = createRelayInboundDedupeGuard({
@@ -137,5 +162,90 @@ describe("strict durable attempt guard", () => {
       /sqlite unavailable/,
     );
     expect(errors).toHaveLength(1);
+  });
+
+  it("persists attempts across guard instances without trusted host state", async () => {
+    const stateDir = mkdtempSync(`${tmpdir()}/relay-attempt-persistence-`);
+    const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
+    try {
+      const first = createRelayInboundDedupeGuard({ env });
+      expect((await first.claim("account\0event", { namespace: "global" })).kind).toBe("claimed");
+      await first.commit("account\0event", { namespace: "global" });
+
+      const restarted = createRelayInboundDedupeGuard({ env });
+      expect((await restarted.claim("account\0event", { namespace: "global" })).kind).toBe(
+        "duplicate",
+      );
+    } finally {
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed on corrupt Relay-owned attempt state", async () => {
+    const stateDir = mkdtempSync(`${tmpdir()}/relay-attempt-corrupt-`);
+    const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
+    const errors: unknown[] = [];
+    try {
+      const guard = createRelayInboundDedupeGuard({
+        env,
+        onDiskError: (error) => errors.push(error),
+      });
+      writeFileSync(
+        join(stateDir, "relay", "state", "inbound-attempts.json"),
+        '{"version":1,"entries":{"not-a-hash":{"attemptedAt":1,"expiresAt":2}}}\n',
+        { mode: 0o600 },
+      );
+      await expect(guard.claim("account\0event", { namespace: "global" })).rejects.toThrow(
+        /state is corrupt/u,
+      );
+      expect(errors).toHaveLength(1);
+    } finally {
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("expires old attempts and evicts the oldest live row at capacity", async () => {
+    const stateDir = mkdtempSync(`${tmpdir()}/relay-attempt-bounds-`);
+    const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
+    let now = 1_000;
+    try {
+      const guard = createRelayInboundDedupeGuard({
+        env,
+        maxEntries: 2,
+        ttlMs: 100,
+        now: () => now,
+      });
+      for (const event of ["oldest", "middle", "newest"]) {
+        expect((await guard.claim(event, { namespace: "global" })).kind).toBe("claimed");
+        await guard.commit(event, { namespace: "global" });
+        now += 1;
+      }
+
+      const afterEviction = createRelayInboundDedupeGuard({
+        env,
+        maxEntries: 2,
+        ttlMs: 100,
+        now: () => now,
+      });
+      expect((await afterEviction.claim("oldest", { namespace: "global" })).kind).toBe("claimed");
+      expect((await afterEviction.claim("middle", { namespace: "global" })).kind).toBe("duplicate");
+      expect((await afterEviction.claim("newest", { namespace: "global" })).kind).toBe("duplicate");
+
+      now = 1_200;
+      const afterTtl = createRelayInboundDedupeGuard({
+        env,
+        maxEntries: 2,
+        ttlMs: 100,
+        now: () => now,
+      });
+      expect((await afterTtl.claim("middle", { namespace: "global" })).kind).toBe("claimed");
+    } finally {
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects invalid bounds before opening durable state", () => {
+    expect(() => createRelayInboundDedupeGuard({ ttlMs: 0 })).toThrow(/ttlMs/u);
+    expect(() => createRelayInboundDedupeGuard({ maxEntries: 0 })).toThrow(/maxEntries/u);
   });
 });

@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -207,7 +208,9 @@ try {
     readFileSync(join(openclawHome, ".openclaw", "openclaw.json"), "utf8"),
   );
   assert.equal(typeof openclawConfig.meta?.lastTouchedVersion, "string");
-  assert.equal(typeof openclawConfig.meta?.lastTouchedAt, "string");
+  // beta.5 migrated lastTouchedAt to shared machine state; the JSON config
+  // retains only the compatibility-enforced writer version.
+  assert.equal(openclawConfig.meta?.lastTouchedAt, undefined);
   const openclawList = cli("openclaw", ["plugins", "list", "--json"], {
     cwd: installDir,
     env: openclawEnv,
@@ -219,10 +222,23 @@ try {
     cwd: installDir,
     env: openclawEnv,
   }).stdout);
-  assert.equal(openclawInspect.install?.source, "archive");
+  assert.equal(openclawInspect.install?.source, "npm");
+  assert.equal(openclawInspect.install?.artifactKind, "npm-pack");
   assert.match(
     openclawInspect.install?.sourcePath ?? "",
     /[\\/]installed-plugins[\\/]openclaw[\\/][a-f0-9]{24}[\\/]relay-openclaw-plugin\.tgz$/,
+  );
+  assert.match(
+    openclawInspect.install?.installPath ?? "",
+    /[\\/]\.openclaw[\\/]npm[\\/]projects[\\/].+[\\/]node_modules[\\/]@relaymessenger[\\/]openclaw-plugin$/,
+  );
+  const openclawPluginRequire = createRequire(
+    join(openclawInspect.install.installPath, "package.json"),
+  );
+  assert.equal(
+    openclawPluginRequire("@openclaw/fs-safe/package.json").version,
+    "0.5.0",
+    "managed OpenClaw install did not resolve Relay's declared state dependency",
   );
   rmSync(join(installed, "openclaw-plugin"), { recursive: true, force: true });
   const afterSourceRemoval = cli("openclaw", ["plugins", "list", "--json"], {

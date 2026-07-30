@@ -283,11 +283,16 @@ test("install-openclaw installs the bundled archive and configures owner-private
           unrelated: { survives: true },
           plugins: {
             entries: { relay: { enabled: true } },
-            installs: { relay: { source: "archive", installPath: "/official/relay" } },
+            installs: {
+              relay: {
+                source: "npm",
+                artifactKind: "npm-pack",
+                installPath: "/official/relay",
+              },
+            },
           },
           meta: {
-            lastTouchedVersion: "2026.7.2-beta.2",
-            lastTouchedAt: "2026-07-18T00:00:00.000Z",
+            lastTouchedVersion: "2026.7.2-beta.5",
           },
         })}\n`);
         return { status: 0 };
@@ -301,7 +306,6 @@ test("install-openclaw installs the bundled archive and configures owner-private
           for (const part of parts.slice(0, -1)) cursor = (cursor[part] ??= {});
           cursor[parts.at(-1)] = update.value;
         }
-        doc.meta.lastTouchedAt = "2026-07-18T00:00:01.000Z";
         writeFileSync(openclawConfigPath, `${JSON.stringify(doc)}\n`);
         return { status: 0 };
       }
@@ -311,7 +315,10 @@ test("install-openclaw installs the bundled archive and configures owner-private
   assert.equal(commands.length, 3);
   assert.deepEqual(commands[0], ["config", "file"]);
   assert.deepEqual(commands[1]!.slice(0, 2), ["plugins", "install"]);
-  assert.match(commands[1]![2]!, /installed-openclaw[/\\][a-f0-9]{24}[/\\]relay-openclaw-plugin\.tgz$/);
+  assert.match(
+    commands[1]![2]!,
+    /^npm-pack:.*installed-openclaw[/\\][a-f0-9]{24}[/\\]relay-openclaw-plugin\.tgz$/,
+  );
   assert.equal(commands[1]![3], "--force");
   assert.deepEqual(commands[2]!.slice(0, 3), ["config", "set", "--batch-json"]);
   const tokenPath = join(openclawHome, "secrets", "relay-agent-token");
@@ -322,9 +329,10 @@ test("install-openclaw installs the bundled archive and configures owner-private
   assert.equal(installedConfig.channels.relay.tokenFile, tokenPath);
   assert.equal(installedConfig.channels.relay.baseUrl, "https://api.relayapp.im");
   assert.equal(installedConfig.unrelated.survives, true);
-  assert.equal(installedConfig.meta.lastTouchedVersion, "2026.7.2-beta.2");
-  assert.equal(installedConfig.meta.lastTouchedAt, "2026-07-18T00:00:01.000Z");
-  assert.equal(installedConfig.plugins.installs.relay.source, "archive");
+  assert.equal(installedConfig.meta.lastTouchedVersion, "2026.7.2-beta.5");
+  assert.equal(installedConfig.meta.lastTouchedAt, undefined);
+  assert.equal(installedConfig.plugins.installs.relay.source, "npm");
+  assert.equal(installedConfig.plugins.installs.relay.artifactKind, "npm-pack");
   assert.equal(installedConfig.plugins.installs.relay.installPath, "/official/relay");
   assert.equal(lines.join("\n").includes("rly_openclaw_secret"), false);
   if (process.platform !== "win32") {

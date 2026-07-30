@@ -4,7 +4,7 @@ Backs a Relay contact with an OpenClaw agent: install the plugin, point it at
 an owner-only Agent Token file, and your OpenClaw appears in Relay as a contact
 you text like a friend.
 
-Requires `openclaw >= 2026.7.2-beta.2`.
+Requires `openclaw >= 2026.7.2-beta.5`.
 
 ## Install
 
@@ -16,8 +16,9 @@ relaymessenger install-openclaw
 
 The installer uses the OpenClaw archive bundled in the installed `relaymessenger`
 package, persists that archive in the paired account's private Relay runtime,
-and invokes `openclaw plugins install` on the stable copy. It surgically adds
-Relay to `~/.openclaw/openclaw.json`, preserves unrelated configuration,
+and invokes OpenClaw's managed `npm-pack:` installer on the stable copy so
+declared runtime dependencies are installed with the plugin. It surgically
+adds Relay to `~/.openclaw/openclaw.json`, preserves unrelated configuration,
 writes the token to an owner-only file, and never prints it. It refuses to
 replace a different configured Relay identity.
 
@@ -27,7 +28,7 @@ For integration development from this checkout only:
 cd integrations/openclaw
 npm install
 npm pack
-openclaw plugins install ./relaymessenger-openclaw-plugin-0.1.0.tgz --force
+openclaw plugins install npm-pack:./relaymessenger-openclaw-plugin-0.1.0.tgz --force
 ```
 
 The installer produces the equivalent Relay-specific configuration:
@@ -112,7 +113,11 @@ Relay. The release workflow requires this proof.
   at cursor zero; corrupt, mismatched, unreadable, or unwritable state fails
   closed instead of replaying retained history. The cursor namespace rejects
   new identities at capacity rather than evicting an older cursor. Cursor
-  state is independent of the bounded 30-day attempt-dedupe horizon.
+  state is independent of the bounded 30-day attempt-dedupe horizon. Both
+  namespaces are private, lock-protected, atomically replaced Relay-owned
+  files under `$OPENCLAW_STATE_DIR/relay/state` (normally
+  `~/.openclaw/relay/state`); the plugin never requests trusted-only OpenClaw
+  host SQLite access.
 - Before polling, the plugin takes an atomic per-origin/per-agent filesystem
   lock under `~/.openclaw/relay/consumer-locks`. A second OpenClaw process
   fails closed; a lock whose recorded PID is dead is recovered on startup.
