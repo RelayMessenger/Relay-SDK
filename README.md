@@ -56,10 +56,14 @@ packages. `integrations/vercel-ai` is published separately as
    tag named `relaymessenger-v0.3.1`. The version in
    `packages/relaymessenger/package.json`, the workspace entry in `package-lock.json`,
    and the tag must match exactly.
-3. The tag starts `.github/workflows/release-relaymessenger.yml`; a manual dispatch
-   accepts an existing tag for a controlled retry. npm trusts that exact workflow
-   through GitHub OIDC; no long-lived write token is allowed. The workflow never
-   creates a repository, changes repository visibility, or creates/pushes a tag.
+3. The tag starts `.github/workflows/release-relaymessenger.yml`. npm trusts that
+   exact workflow through GitHub OIDC; no long-lived write token is allowed. If a
+   tag run fails before terminal verification, rerun that original GitHub Actions
+   run so npm provenance stays bound to the release tag and tag commit. The
+   workflow deliberately has no manual-dispatch path: checking out an old tag from
+   a default-branch dispatch would make GitHub's automatic provenance name the
+   dispatch ref instead of the artifact's source tag. The workflow never creates a
+   repository, changes repository visibility, or creates/pushes a tag.
 4. CI reruns the full validation and package smokes, publishes only
    `@relaymessenger/cli`,
    strictly validates the source Claude plugin and marketplace, and proves the
