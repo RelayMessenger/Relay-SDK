@@ -56,12 +56,12 @@ Choose one installation tier:
 Use this for Relay-shipped Claude/Codex-style wrappers:
 
 1. Add the adapter as an **exact** dependency in `packages/relaymessenger/package.json`; update `package-lock.json` with the package manager, never by hand.
-2. Add its package and exact version to `ADAPTER_PACKAGES` and `ADAPTER_VERSIONS` in `engine/acp.ts`.
+2. Add its package name to `ADAPTER_PACKAGES` in `engine/acp.ts`. Do not add a version literal: `ADAPTER_VERSIONS` is derived from the manifest at load time and throws if the pin is not exact.
 3. Resolve the installed executable module with `createRequire(import.meta.url).resolve(...)`.
 4. Launch it with `process.execPath` and one resolved entrypoint argument.
 5. Prove the dependency value, lockfile, resolved file, packed tarball, and installed tarball agree.
 
-The authoring checkout pins Claude to `@agentclientprotocol/claude-agent-acp@0.59.0` and Codex to `@agentclientprotocol/codex-acp@1.1.4`. Re-read the manifest before relying on those values; change them only as an explicit, tested dependency update.
+`packages/relaymessenger/package.json` is the single source of the adapter versions. Read it for the current pins rather than trusting a version quoted anywhere else, and change a pin only as an explicit, tested dependency update.
 
 ### Use an external runtime
 

@@ -18,11 +18,13 @@ import { ENGINE_NAMES, EXTERNAL_ENGINE_SPECS } from "./catalog.js";
 test("ACP adapters are exact runtime dependencies with installed entrypoints", () => {
   const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
   for (const engine of ["claude", "codex"] as const) {
-    assert.equal(
-      pkg.dependencies[ADAPTER_PACKAGES[engine]],
-      ADAPTER_VERSIONS[engine],
-      `${engine} adapter dependency must be exact`,
+    const pinned = pkg.dependencies[ADAPTER_PACKAGES[engine]];
+    assert.match(
+      pinned ?? "",
+      /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/,
+      `${engine} adapter dependency must be an exact pin, found ${pinned ?? "no dependency"}`,
     );
+    assert.equal(ADAPTER_VERSIONS[engine], pinned, `${engine} adapter version must track the manifest`);
     assert.equal(existsSync(adapterEntrypoint(engine)), true);
   }
 });
