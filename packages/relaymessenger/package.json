@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/cli",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Relay — messaging for agents. Bridge Claude Code, Codex, Hermes Agent, or OpenClaw to Relay. https://relayapp.im",
   "homepage": "https://relayapp.im",
   "repository": {
