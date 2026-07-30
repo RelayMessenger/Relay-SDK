@@ -79,6 +79,13 @@ interface SessionRoutingState {
   last_conversation_id?: string;
   /** Conversations whose owner-authenticated messages reached this session. */
   observed_conversation_ids?: string[];
+  /**
+   * conversation_id → the group invocation awaiting this session's single
+   * reply. Relay completes an invocation on the first message that carries it,
+   * so exactly one outbound message may spend each entry. Absence means the
+   * conversation is direct and needs no id.
+   */
+  pending_invocations?: Record<string, string>;
 }
 
 export interface ChannelState extends ConsumerState, SessionRoutingState {}
@@ -334,6 +341,18 @@ export class StateStore {
         throw new Error("invalid routing state");
       }
       if (
+        parsed.pending_invocations !== undefined &&
+        (typeof parsed.pending_invocations !== "object" ||
+          parsed.pending_invocations === null ||
+          Array.isArray(parsed.pending_invocations) ||
+          Object.entries(parsed.pending_invocations).some(
+            ([conversationId, invocationId]) =>
+              !conversationId.startsWith("cnv_") || typeof invocationId !== "string",
+          ))
+      ) {
+        throw new Error("invalid pending invocations");
+      }
+      if (
         parsed.observed_conversation_ids !== undefined &&
         (!Array.isArray(parsed.observed_conversation_ids) ||
           parsed.observed_conversation_ids.some(
@@ -438,6 +457,35 @@ export class StateStore {
 
   hasObservedConversation(conversationId: string): boolean {
     return (this.routingState.observed_conversation_ids ?? []).includes(conversationId);
+  }
+
+  /**
+   * Remember the invocation a group message arrived under. A newer invocation
+   * replaces an older unanswered one: the reply this session is about to send
+   * answers the message Claude actually saw last.
+   */
+  recordInvocation(conversationId: string, invocationId: string): void {
+    this.routingState = {
+      ...this.routingState,
+      pending_invocations: {
+        ...(this.routingState.pending_invocations ?? {}),
+        [conversationId]: invocationId,
+      },
+    };
+    writeJsonAtomic(this.sessionStatePath, this.routingState);
+  }
+
+  invocationFor(conversationId: string): string | undefined {
+    return this.routingState.pending_invocations?.[conversationId];
+  }
+
+  /** Spend the invocation once its reply is committed by Relay. */
+  consumeInvocation(conversationId: string): void {
+    const pending = { ...(this.routingState.pending_invocations ?? {}) };
+    if (!(conversationId in pending)) return;
+    delete pending[conversationId];
+    this.routingState = { ...this.routingState, pending_invocations: pending };
+    writeJsonAtomic(this.sessionStatePath, this.routingState);
   }
 
   /**

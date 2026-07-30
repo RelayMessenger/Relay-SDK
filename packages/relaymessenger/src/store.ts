@@ -171,7 +171,18 @@ export interface BridgeState {
    */
   pending_replies?: Record<
     string,
-    { conversation_id: string; event_ids: string[]; text: string; created_at: string }
+    {
+      conversation_id: string;
+      event_ids: string[];
+      text: string;
+      created_at: string;
+      /**
+       * Group turns only: the invocation this reply answers. Persisted with the
+       * text because delivery may happen in a later process, after the queued
+       * events that carried it are gone.
+       */
+      invocation_id?: string;
+    }
   >;
   /**
    * The owner's conversation with this agent, persisted by the loop when the
@@ -278,6 +289,7 @@ function bridgeStateIsValid(raw: Partial<BridgeState>): boolean {
         typeof reply.conversation_id === "string" &&
         typeof reply.text === "string" &&
         typeof reply.created_at === "string" &&
+        (reply.invocation_id === undefined || typeof reply.invocation_id === "string") &&
         Array.isArray(reply.event_ids) &&
         reply.event_ids.every((id: unknown) => typeof id === "string"),
     ) &&

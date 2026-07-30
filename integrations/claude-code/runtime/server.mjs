@@ -24814,6 +24814,12 @@ function extractMessage(event) {
   if (typeof m.sender !== "object" || m.sender === null) return null;
   return m;
 }
+function extractInvocationId(event) {
+  const data = event.data;
+  if (typeof data !== "object" || data === null) return void 0;
+  const value = data.invocation_id;
+  return typeof value === "string" && value.length > 0 ? value : void 0;
+}
 function textOfMessage(message) {
   const texts = message.parts.filter((part) => part.type === "text" && typeof part.text === "string" && part.text.length > 0).map((part) => part.text);
   if (texts.length > 0) return texts.join("\n");
@@ -24858,12 +24864,18 @@ function classifyEvent(event, ownerUserId, isPendingRequest = () => false, canAc
     return { kind: "verdict", verdict: textVerdict };
   }
   if (text.length === 0) return { kind: "ignore", reason: "empty message body" };
+  const invocationId = extractInvocationId(event);
   return {
     kind: "message",
     content: text,
-    meta: { chat_id: message.conversation_id, sender: message.sender.id },
+    meta: {
+      chat_id: message.conversation_id,
+      sender: message.sender.id,
+      ...invocationId ? { invocation_id: invocationId } : {}
+    },
     conversationId: message.conversation_id,
-    sender: message.sender.id
+    sender: message.sender.id,
+    ...invocationId ? { invocationId } : {}
   };
 }
 var MAX_DESCRIPTION_CHARS = 500;
@@ -24954,8 +24966,12 @@ function buildPermissionCard(request, conversationId) {
     remoteAllowEnabled
   };
 }
-function buildReply(chatId, text) {
-  return { conversation_id: chatId, parts: [{ type: "text", text }] };
+function buildReply(chatId, text, invocationId) {
+  return {
+    conversation_id: chatId,
+    parts: [{ type: "text", text }],
+    ...invocationId ? { invocation_id: invocationId } : {}
+  };
 }
 
 // src/config.ts
@@ -25269,6 +25285,11 @@ var StateStore = class {
       if (parsed.last_conversation_id !== void 0 && typeof parsed.last_conversation_id !== "string") {
         throw new Error("invalid routing state");
       }
+      if (parsed.pending_invocations !== void 0 && (typeof parsed.pending_invocations !== "object" || parsed.pending_invocations === null || Array.isArray(parsed.pending_invocations) || Object.entries(parsed.pending_invocations).some(
+        ([conversationId, invocationId]) => !conversationId.startsWith("cnv_") || typeof invocationId !== "string"
+      ))) {
+        throw new Error("invalid pending invocations");
+      }
       if (parsed.observed_conversation_ids !== void 0 && (!Array.isArray(parsed.observed_conversation_ids) || parsed.observed_conversation_ids.some(
         (conversationId) => typeof conversationId !== "string" || !conversationId.startsWith("cnv_")
       ))) {
@@ -25350,6 +25371,32 @@ var StateStore = class {
   }
   hasObservedConversation(conversationId) {
     return (this.routingState.observed_conversation_ids ?? []).includes(conversationId);
+  }
+  /**
+   * Remember the invocation a group message arrived under. A newer invocation
+   * replaces an older unanswered one: the reply this session is about to send
+   * answers the message Claude actually saw last.
+   */
+  recordInvocation(conversationId, invocationId) {
+    this.routingState = {
+      ...this.routingState,
+      pending_invocations: {
+        ...this.routingState.pending_invocations ?? {},
+        [conversationId]: invocationId
+      }
+    };
+    writeJsonAtomic(this.sessionStatePath, this.routingState);
+  }
+  invocationFor(conversationId) {
+    return this.routingState.pending_invocations?.[conversationId];
+  }
+  /** Spend the invocation once its reply is committed by Relay. */
+  consumeInvocation(conversationId) {
+    const pending = { ...this.routingState.pending_invocations ?? {} };
+    if (!(conversationId in pending)) return;
+    delete pending[conversationId];
+    this.routingState = { ...this.routingState, pending_invocations: pending };
+    writeJsonAtomic(this.sessionStatePath, this.routingState);
   }
   /**
    * Bind a permission notification to its only safe active destination.
@@ -25814,7 +25861,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (typeof send_id !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(send_id)) {
     return toolError("send_id must be 1-128 letters, digits, dot, underscore, colon, or hyphen");
   }
-  const body = buildReply(chat_id, text);
+  const body = buildReply(chat_id, text, state.invocationFor(chat_id));
   const payloadHash = hashJson(body);
   const idempotencyKey = `claude-reply-${createHash2("sha256").update(`${scope.baseUrl}
 ${scope.agentId}
@@ -25827,6 +25874,7 @@ ${send_id}`).digest("hex")}`;
     }
     await client.sendMessage(body, registered.idempotency_key);
     state.confirmOutboundSend(send_id);
+    if (body.invocation_id) state.consumeInvocation(chat_id);
     return { content: [{ type: "text", text: "sent" }] };
   } catch (error51) {
     const detail = error51 instanceof RelayApiError ? `${error51.status} ${error51.code}: ${error51.message}` : String(error51);
@@ -25860,6 +25908,12 @@ mcp.setNotificationHandler(PermissionRequestSchema, async ({ params }) => {
   if (!conversationId) {
     log(
       `permission request ${params.request_id} not relayed: no unique active Relay conversation; review it at the local terminal`
+    );
+    return;
+  }
+  if (state.invocationFor(conversationId)) {
+    log(
+      `permission request ${params.request_id} not relayed: ${conversationId} is a group invocation that owes its single message to the reply; review it at the local terminal`
     );
     return;
   }
@@ -25946,6 +26000,9 @@ async function handleEvent(event) {
     }
     case "message": {
       state.recordConversation(action.conversationId);
+      if (action.invocationId) {
+        state.recordInvocation(action.conversationId, action.invocationId);
+      }
       const delivery = {
         event_id: event.event_id,
         content: action.content,

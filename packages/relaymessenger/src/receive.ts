@@ -15,7 +15,7 @@
 import { createHash } from "node:crypto";
 import type { RelayClient } from "./api.js";
 import type { BridgeState, RelayEvent, RelayMessage, StateStore } from "./store.js";
-import type { EngineAdapter } from "./engine/types.js";
+import type { EngineAdapter, PermissionAsk, PermissionDecision } from "./engine/types.js";
 import { PermissionBroker } from "./permissions.js";
 
 export interface ReceiveLoopOptions {
@@ -33,6 +33,28 @@ export function turnIdempotencyKey(conversationId: string, eventIds: string[]): 
     .update(JSON.stringify([conversationId, eventIds]))
     .digest("hex");
   return `relay-turn-${digest.slice(0, 40)}`;
+}
+
+/**
+ * Group events carry `data.invocation_id`; direct events do not. Its presence
+ * is how the bridge tells the two apart, and the id is required on every
+ * outbound call for that turn.
+ */
+export function invocationIdForEvent(event: RelayEvent | undefined): string | undefined {
+  const value = event?.data?.invocation_id;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * The batch a single turn may consume. Direct conversations coalesce a burst
+ * into one turn as before. A group invocation is single-use server-side (one
+ * message completes it), so a group turn is capped at the oldest invocation
+ * and later invocations stay queued for their own turns and their own replies.
+ */
+export function batchForTurn(queue: RelayEvent[]): RelayEvent[] {
+  const invocationId = invocationIdForEvent(queue[0]);
+  if (!invocationId) return [...queue];
+  return queue.filter((event) => invocationIdForEvent(event) === invocationId);
 }
 
 export function promptTextFromMessages(messages: RelayMessage[]): string {
@@ -110,8 +132,12 @@ export class ReceiveLoop {
       this.log(`ignoring message from non-owner sender ${message.sender.id}`);
       return undefined;
     }
-    // First owner message pins the default notify/MCP conversation.
-    this.state.current.owner_conversation_id ??= message.conversation_id;
+    // First owner message pins the default notify/MCP conversation. A group
+    // is never that conversation: sends there need an invocation this agent
+    // does not have, and approvals must reach the owner alone.
+    if (!invocationIdForEvent(event)) {
+      this.state.current.owner_conversation_id ??= message.conversation_id;
+    }
     if (this.broker.consumeReply(message)) return undefined;
     const queue = (this.state.current.pending_events[message.conversation_id] ??= []);
     queue.push(event);
@@ -169,10 +195,19 @@ export class ReceiveLoop {
     this.state.persist();
   }
 
-  private async postNotice(conversationId: string, text: string, key: string): Promise<void> {
+  private async postNotice(
+    conversationId: string,
+    text: string,
+    key: string,
+    invocationId?: string,
+  ): Promise<void> {
     try {
       await this.client.postMessage(
-        { conversation_id: conversationId, parts: [{ type: "text", text }] },
+        {
+          conversation_id: conversationId,
+          parts: [{ type: "text", text }],
+          ...(invocationId ? { invocation_id: invocationId } : {}),
+        },
         key,
       );
     } catch (error) {
@@ -197,7 +232,11 @@ export class ReceiveLoop {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         await this.client.postMessage(
-          { conversation_id: reply.conversation_id, parts: [{ type: "text", text: reply.text }] },
+          {
+            conversation_id: reply.conversation_id,
+            parts: [{ type: "text", text: reply.text }],
+            ...(reply.invocation_id ? { invocation_id: reply.invocation_id } : {}),
+          },
           turnKey,
         );
         return true;
@@ -247,20 +286,23 @@ export class ReceiveLoop {
       this.log(
         `turn ${attempted.turn_key} was interrupted — dropping its ${prefix.length}-event prefix, not re-executing`,
       );
+      const interruptedInvocation = invocationIdForEvent(prefix[prefix.length - 1]);
       this.clearBatch(conversationId, prefix, attempted.turn_key);
       await this.postNotice(
         conversationId,
         "The bridge restarted while working on your last message, so it was not retried " +
           "automatically (its tools may have partially run). Send it again to retry.",
         `${attempted.turn_key}-crashed`,
+        interruptedInvocation,
       );
       return;
     }
 
     // Snapshot: routeEvent keeps appending to the live queue while the turn
     // runs, and the post-turn filter must only remove what THIS turn consumed.
-    const events = [...(this.state.current.pending_events[conversationId] ?? [])];
+    const events = batchForTurn(this.state.current.pending_events[conversationId] ?? []);
     if (events.length === 0) return;
+    const invocationId = invocationIdForEvent(events[events.length - 1]);
     const messages = events
       .map((event) => event.data?.message)
       .filter((message): message is RelayMessage => message !== undefined);
@@ -284,7 +326,7 @@ export class ReceiveLoop {
     };
     this.state.persist();
 
-    const typing = this.startTyping(conversationId);
+    const typing = this.startTyping(conversationId, invocationId);
     try {
       let result;
       try {
@@ -293,7 +335,7 @@ export class ReceiveLoop {
           promptText,
           {
             onToolEvent: (event) => typing.setLabel(event.title ?? "Working…"),
-            onPermissionAsk: (ask) => this.broker.ask(conversationId, ask, this.engine.engine),
+            onPermissionAsk: (ask) => this.askPermission(conversationId, invocationId, ask),
           },
         );
       } catch (error) {
@@ -307,6 +349,7 @@ export class ReceiveLoop {
           `The ${this.engine.engine} turn failed: ${String(error instanceof Error ? error.message : error).slice(0, 300)}\n` +
             "Send your message again to retry.",
           `${turnKey}-failed`,
+          invocationId,
         );
         return;
       }
@@ -320,9 +363,13 @@ export class ReceiveLoop {
         event_ids: events.map((event) => event.event_id),
         text,
         created_at: new Date().toISOString(),
+        ...(invocationId ? { invocation_id: invocationId } : {}),
       };
       (this.state.current.pending_replies ??= {})[turnKey] = pendingReply;
       this.state.persist();
+      // Clearing typing needs the invocation still pending, and the reply is
+      // what completes it, so stop before delivering rather than in `finally`.
+      if (invocationId) await typing.stop();
       if (await this.deliverPendingReply(turnKey, pendingReply)) {
         this.clearBatch(conversationId, events, turnKey);
       } else {
@@ -335,12 +382,36 @@ export class ReceiveLoop {
     }
   }
 
-  private startTyping(conversationId: string) {
+  /**
+   * Route an approval card. A group invocation is spent by the single reply it
+   * owes, so a card posted into the group would consume it and leave the turn
+   * unable to answer. Group approvals therefore go to the owner's direct
+   * conversation with this agent, and deny when there is no such conversation
+   * to ask in.
+   */
+  private async askPermission(
+    conversationId: string,
+    invocationId: string | undefined,
+    ask: PermissionAsk,
+  ): Promise<PermissionDecision> {
+    if (!invocationId) return this.broker.ask(conversationId, ask, this.engine.engine);
+    const direct = this.state.current.owner_conversation_id;
+    if (!direct || direct === conversationId) {
+      this.log(
+        `group approval for ${ask.toolName ?? "a tool"} denied: no direct conversation with the owner to ask in`,
+      );
+      return this.broker.denyUnaskable(ask);
+    }
+    this.log(`group approval routed to the owner's direct conversation ${direct}`);
+    return this.broker.ask(direct, ask, this.engine.engine);
+  }
+
+  private startTyping(conversationId: string, invocationId?: string) {
     let label: string | undefined;
     let active = true;
     const push = () => {
       if (!active) return;
-      this.client.setTyping(conversationId, true, label).catch(() => {});
+      this.client.setTyping(conversationId, true, label, invocationId).catch(() => {});
     };
     push();
     const interval = setInterval(push, 20_000);
@@ -351,9 +422,10 @@ export class ReceiveLoop {
         push();
       },
       stop: async () => {
+        if (!active) return;
         active = false;
         clearInterval(interval);
-        await this.client.setTyping(conversationId, false).catch(() => {});
+        await this.client.setTyping(conversationId, false, undefined, invocationId).catch(() => {});
       },
     };
   }

@@ -54,6 +54,12 @@ function userMessageEvent(
 function fakeClient(options: { pages?: EventsPage[] } = {}) {
   const pages = [...(options.pages ?? [])];
   const posted: Array<{ body: any; key: string }> = [];
+  const typings: Array<{
+    conversationId: string;
+    started: boolean;
+    label?: string;
+    invocationId?: string;
+  }> = [];
   const client = {
     origin: "http://fake",
     async getEvents(cursor: number): Promise<EventsPage> {
@@ -77,12 +83,23 @@ function fakeClient(options: { pages?: EventsPage[] } = {}) {
         },
       };
     },
-    async setTyping() {},
+    async setTyping(
+      conversationId: string,
+      started: boolean,
+      label?: string,
+      invocationId?: string,
+    ) {
+      typings.push({ conversationId, started, label, invocationId });
+    },
     async listMessages() {
       return { messages: [] };
     },
   };
-  return { client: client as unknown as RelayClient & { pushPage(p: EventsPage): void }, posted };
+  return {
+    client: client as unknown as RelayClient & { pushPage(p: EventsPage): void },
+    posted,
+    typings,
+  };
 }
 
 function fakeEngine() {
@@ -113,7 +130,7 @@ function fakeEngine() {
 }
 
 function makeLoop(home: string, pages: EventsPage[], debounceMs = 25) {
-  const { client, posted } = fakeClient({ pages });
+  const { client, posted, typings } = fakeClient({ pages });
   const state = new StateStore(home);
   const approvals = new ApprovalStore(home);
   const fake = fakeEngine();
@@ -123,7 +140,19 @@ function makeLoop(home: string, pages: EventsPage[], debounceMs = 25) {
     debounceMs,
     cwd: "/tmp",
   });
-  return { loop, state, approvals, client, posted, broker, ...fake };
+  return { loop, state, approvals, client, posted, typings, broker, ...fake };
+}
+
+function groupMessageEvent(
+  eventId: string,
+  conversationId: string,
+  invocationId: string,
+  text: string,
+  sequence = 1,
+): RelayEvent {
+  const event = userMessageEvent(eventId, conversationId, text, sequence);
+  event.data!.invocation_id = invocationId;
+  return event;
 }
 
 function diskState(home: string): BridgeState {
@@ -719,4 +748,167 @@ test("idempotency key is stable for the exact event batch and prompt text falls 
     },
   ]);
   assert.equal(text, "[photo]");
+});
+
+test("group reply and typing both carry the invocation the turn is answering", async () => {
+  const home = tempHome();
+  const { loop, posted, typings } = makeLoop(home, [
+    {
+      events: [groupMessageEvent("evt_g1", "cnv_group", "inv_01", "@claude ship it")],
+      next_cursor: 3,
+    },
+  ]);
+  await loop.pollOnce();
+  await sleep(80);
+  await loop.settle();
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].body.conversation_id, "cnv_group");
+  assert.equal(posted[0].body.invocation_id, "inv_01");
+  assert.ok(typings.length >= 2);
+  assert.ok(typings.every((call) => call.invocationId === "inv_01"));
+  loop.stop();
+});
+
+test("a direct turn still sends no invocation_id", async () => {
+  const home = tempHome();
+  const { loop, posted, typings } = makeLoop(home, [
+    { events: [userMessageEvent("evt_d1", "cnv_direct", "hey")], next_cursor: 2 },
+  ]);
+  await loop.pollOnce();
+  await sleep(80);
+  await loop.settle();
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].body.invocation_id, undefined);
+  assert.ok(typings.every((call) => call.invocationId === undefined));
+  loop.stop();
+});
+
+test("two group invocations in one debounce window get one reply each, never sharing an id", async () => {
+  const home = tempHome();
+  const { loop, posted, turns } = makeLoop(home, [
+    {
+      events: [
+        groupMessageEvent("evt_g1", "cnv_group", "inv_01", "first", 1),
+        groupMessageEvent("evt_g2", "cnv_group", "inv_02", "second", 2),
+      ],
+      next_cursor: 5,
+    },
+  ]);
+  await loop.pollOnce();
+  await sleep(200);
+  await loop.settle();
+  // The server completes an invocation on its first message, so coalescing
+  // these into one turn would strand inv_02 with no reply.
+  assert.equal(turns.length, 2);
+  assert.deepEqual(turns.map((turn) => turn.prompt), ["first", "second"]);
+  assert.deepEqual(
+    posted.map((post) => post.body.invocation_id),
+    ["inv_01", "inv_02"],
+  );
+  assert.equal(Object.keys(diskState(home).pending_events).length, 0);
+  loop.stop();
+});
+
+test("a group approval is asked in the owner's direct conversation, not the group", async () => {
+  const home = tempHome();
+  const { loop, posted, setPermissionAsker, broker, client } = makeLoop(home, [
+    { events: [userMessageEvent("evt_d1", "cnv_direct", "hi")], next_cursor: 1 },
+  ]);
+  // Settle the direct turn first: it is only here to pin the owner's direct
+  // conversation, and must not be the turn that asks.
+  await loop.pollOnce();
+  await sleep(80);
+  await loop.settle();
+  let decision: unknown;
+  setPermissionAsker(async (callbacks) => {
+    const pending = callbacks.onPermissionAsk({
+      requestId: "ignored",
+      toolName: "Bash",
+      inputPreview: '{"command":"deploy"}',
+      options: [
+        { optionId: "opt_allow", label: "Allow", kind: "allow_once" },
+        { optionId: "opt_deny", label: "Deny", kind: "reject_once" },
+      ],
+    });
+    await sleep(30);
+    const card = posted.find((post) => post.key.startsWith("agent-perm-"));
+    assert.ok(card, "approval card was never posted");
+    assert.equal(card.body.conversation_id, "cnv_direct");
+    assert.equal(card.body.invocation_id, undefined);
+    const requestId = card.body.parts[1].data.request_id;
+    broker.consumeReply({
+      id: "msg_reply",
+      conversation_id: "cnv_direct",
+      sequence: 9,
+      sender: { kind: "user", id: OWNER },
+      parts: [{ type: "text", text: `yes ${requestId}` }],
+      fallback_text: `yes ${requestId}`,
+    });
+    decision = await pending;
+  });
+  client.pushPage({
+    events: [groupMessageEvent("evt_g1", "cnv_group", "inv_01", "@claude deploy")],
+    next_cursor: 2,
+  });
+  await loop.pollOnce();
+  await sleep(200);
+  await loop.settle();
+  assert.deepEqual(decision, { behavior: "selected", optionId: "opt_allow" });
+  const groupReply = posted.filter((post) => post.body.conversation_id === "cnv_group");
+  assert.equal(groupReply.length, 1);
+  assert.equal(groupReply[0].body.invocation_id, "inv_01");
+  loop.stop();
+});
+
+test("a group approval with no direct conversation to ask in denies instead of burning the invocation", async () => {
+  const home = tempHome();
+  const { loop, posted, setPermissionAsker } = makeLoop(home, [
+    {
+      events: [groupMessageEvent("evt_g1", "cnv_group", "inv_01", "@claude deploy")],
+      next_cursor: 2,
+    },
+  ]);
+  let decision: unknown;
+  setPermissionAsker(async (callbacks) => {
+    decision = await callbacks.onPermissionAsk({
+      requestId: "ignored",
+      toolName: "Bash",
+      inputPreview: '{"command":"deploy"}',
+      options: [
+        { optionId: "opt_allow", label: "Allow", kind: "allow_once" },
+        { optionId: "opt_deny", label: "Deny", kind: "reject_once" },
+      ],
+    });
+  });
+  await loop.pollOnce();
+  await sleep(200);
+  await loop.settle();
+  assert.deepEqual(decision, { behavior: "selected", optionId: "opt_deny" });
+  assert.equal(posted.filter((post) => post.key.startsWith("agent-perm-")).length, 0);
+  // The single message this invocation owes is still the reply.
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].body.invocation_id, "inv_01");
+  loop.stop();
+});
+
+test("a group turn clears typing before the reply completes the invocation", async () => {
+  const home = tempHome();
+  const { loop, posted, typings } = makeLoop(home, [
+    {
+      events: [groupMessageEvent("evt_g1", "cnv_group", "inv_01", "@claude status")],
+      next_cursor: 4,
+    },
+  ]);
+  await loop.pollOnce();
+  await sleep(80);
+  await loop.settle();
+  const stopped = typings.filter((call) => !call.started);
+  assert.equal(stopped.length, 1, "typing was stopped exactly once");
+  assert.equal(stopped[0].invocationId, "inv_01");
+  // Relay completes the invocation on the reply, so a typing-off sent after it
+  // would be rejected and the group would keep showing the indicator.
+  const stopIndex = typings.findIndex((call) => !call.started);
+  assert.equal(stopIndex, typings.length - 1);
+  assert.equal(posted.length, 1);
+  loop.stop();
 });

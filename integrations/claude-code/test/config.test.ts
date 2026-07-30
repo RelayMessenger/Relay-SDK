@@ -298,3 +298,45 @@ describe("exclusive consumer lock", () => {
     }
   });
 });
+
+describe("group invocation routing state", () => {
+  it("survives a restart and is spent exactly once", () => {
+    const dir = tempDir();
+    const store = new StateStore(dir, SCOPE);
+    store.recordConversation("cnv_group");
+    store.recordInvocation("cnv_group", "inv_01");
+    // A restart is the case that matters: the reply tool may run in a process
+    // that never saw the inbound event.
+    const reloaded = new StateStore(dir, SCOPE);
+    assert.equal(reloaded.invocationFor("cnv_group"), "inv_01");
+    reloaded.consumeInvocation("cnv_group");
+    assert.equal(reloaded.invocationFor("cnv_group"), undefined);
+    assert.equal(new StateStore(dir, SCOPE).invocationFor("cnv_group"), undefined);
+    // Consuming an already-spent conversation is a no-op, not a throw.
+    reloaded.consumeInvocation("cnv_group");
+  });
+
+  it("a newer invocation replaces an older unanswered one", () => {
+    const dir = tempDir();
+    const store = new StateStore(dir, SCOPE);
+    store.recordInvocation("cnv_group", "inv_01");
+    store.recordInvocation("cnv_group", "inv_02");
+    assert.equal(store.invocationFor("cnv_group"), "inv_02");
+  });
+
+  it("a direct conversation never gains one", () => {
+    const dir = tempDir();
+    const store = new StateStore(dir, SCOPE);
+    store.recordConversation("cnv_direct");
+    assert.equal(store.invocationFor("cnv_direct"), undefined);
+  });
+
+  it("corrupt invocation state is quarantined instead of trusted", () => {
+    const dir = tempDir();
+    const store = new StateStore(dir, SCOPE);
+    store.recordInvocation("cnv_group", "inv_01");
+    const statePath = join(sessionStateDir(dir, SCOPE), "routing.json");
+    writeFileSync(statePath, JSON.stringify({ pending_invocations: { cnv_group: 7 } }));
+    assert.equal(new StateStore(dir, SCOPE).invocationFor("cnv_group"), undefined);
+  });
+});

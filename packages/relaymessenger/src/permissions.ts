@@ -305,6 +305,26 @@ export class PermissionBroker {
     return true;
   }
 
+  /**
+   * Deny without posting a card, for asks that have nowhere safe to be asked.
+   * Nothing is persisted: an approval the owner never saw must leave no
+   * pending file behind for a later sweep to reason about.
+   */
+  denyUnaskable(askInput: PermissionAsk): PermissionDecision {
+    return denyDecision({
+      request_id: askInput.requestId,
+      conversation_id: "",
+      created_at: new Date().toISOString(),
+      deadline_at: new Date().toISOString(),
+      options: askInput.options.map((option) => ({
+        option_id: option.optionId,
+        label: option.label,
+        kind: option.kind,
+      })),
+      source: "acp",
+    });
+  }
+
   /** Post the card and block until tap or timeout→deny. */
   async ask(
     conversationId: string,
