@@ -77,6 +77,12 @@ export interface PostMessageBody {
   parts: Array<Record<string, unknown>>;
   suggestions?: Array<{ text: string }>;
   reply_to?: { message_id: string; part_index?: number };
+  /**
+   * Required in a group: the id Relay supplied on the invocation this message
+   * answers. The server rejects a group agent message without it, and consumes
+   * the invocation on commit, so exactly one message may carry a given id.
+   */
+  invocation_id?: string;
 }
 
 export class RelayClient {
@@ -171,9 +177,20 @@ export class RelayClient {
     return this.request("GET", `/v1/conversations/${conversationId}/messages?limit=${limit}`);
   }
 
-  setTyping(conversationId: string, started: boolean, label?: string): Promise<void> {
+  setTyping(
+    conversationId: string,
+    started: boolean,
+    label?: string,
+    invocationId?: string,
+  ): Promise<void> {
     return this.request("POST", `/v1/conversations/${conversationId}/typing`, {
-      body: { started, ...(label ? { label } : {}) },
+      // Group typing is gated on a still-pending invocation, so the id has to
+      // ride along until the reply consumes it.
+      body: {
+        started,
+        ...(label ? { label } : {}),
+        ...(invocationId ? { invocation_id: invocationId } : {}),
+      },
     });
   }
 

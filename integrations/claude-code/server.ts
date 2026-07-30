@@ -181,7 +181,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
     return toolError("send_id must be 1-128 letters, digits, dot, underscore, colon, or hyphen");
   }
 
-  const body = buildReply(chat_id, text);
+  // A group reply must carry the invocation Relay supplied, and a retry of the
+  // same send_id must hash identically, so the id is only spent once the send
+  // is confirmed.
+  const body = buildReply(chat_id, text, state.invocationFor(chat_id));
   const payloadHash = hashJson(body);
   const idempotencyKey = `claude-reply-${createHash("sha256")
     .update(`${scope.baseUrl}\n${scope.agentId}\n${scope.sessionId}\n${send_id}`)
@@ -193,6 +196,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     await client.sendMessage(body, registered.idempotency_key);
     state.confirmOutboundSend(send_id);
+    if (body.invocation_id) state.consumeInvocation(chat_id);
     return { content: [{ type: "text", text: "sent" }] };
   } catch (error) {
     const detail =
@@ -230,6 +234,15 @@ mcp.setNotificationHandler(PermissionRequestSchema, async ({ params }) => {
   if (!conversationId) {
     log(
       `permission request ${params.request_id} not relayed: no unique active Relay conversation; review it at the local terminal`,
+    );
+    return;
+  }
+  // A group invocation buys exactly one message, which the reply owes. Posting
+  // a card there would spend it and leave the turn unable to answer, so a group
+  // approval stays at the local terminal instead.
+  if (state.invocationFor(conversationId)) {
+    log(
+      `permission request ${params.request_id} not relayed: ${conversationId} is a group invocation that owes its single message to the reply; review it at the local terminal`,
     );
     return;
   }
@@ -331,6 +344,12 @@ async function handleEvent(event: RelayEvent): Promise<void> {
     }
     case "message": {
       state.recordConversation(action.conversationId);
+      // Durable before Claude is told about the message: the reply tool reads
+      // this back, possibly after a restart, and a group reply without it is
+      // rejected by Relay.
+      if (action.invocationId) {
+        state.recordInvocation(action.conversationId, action.invocationId);
+      }
       const delivery: PendingDelivery = {
         event_id: event.event_id,
         content: action.content,

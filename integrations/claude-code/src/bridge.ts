@@ -29,6 +29,8 @@ export type InboundAction =
       meta: Record<string, string>;
       conversationId: string;
       sender: string;
+      /** Present when the message is a group invocation; required on its reply. */
+      invocationId?: string;
     };
 
 /**
@@ -145,6 +147,17 @@ function extractMessage(event: RelayEvent): RelayMessage | null {
   return m;
 }
 
+/**
+ * Group deliveries carry `data.invocation_id`; direct ones do not. Presence is
+ * how this plugin tells a group message from a direct one.
+ */
+function extractInvocationId(event: RelayEvent): string | undefined {
+  const data = event.data;
+  if (typeof data !== "object" || data === null) return undefined;
+  const value = (data as Record<string, unknown>).invocation_id;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 function textOfMessage(message: RelayMessage): string {
   const texts = message.parts
     .filter((part) => part.type === "text" && typeof part.text === "string" && part.text.length > 0)
@@ -215,12 +228,18 @@ export function classifyEvent(
   }
 
   if (text.length === 0) return { kind: "ignore", reason: "empty message body" };
+  const invocationId = extractInvocationId(event);
   return {
     kind: "message",
     content: text,
-    meta: { chat_id: message.conversation_id, sender: message.sender.id },
+    meta: {
+      chat_id: message.conversation_id,
+      sender: message.sender.id,
+      ...(invocationId ? { invocation_id: invocationId } : {}),
+    },
     conversationId: message.conversation_id,
     sender: message.sender.id,
+    ...(invocationId ? { invocationId } : {}),
   };
 }
 
@@ -365,8 +384,16 @@ export function buildPermissionCard(
 }
 
 /** Builds the reply-tool send body. */
-export function buildReply(chatId: string, text: string): SendMessageBody {
-  return { conversation_id: chatId, parts: [{ type: "text", text }] };
+export function buildReply(
+  chatId: string,
+  text: string,
+  invocationId?: string,
+): SendMessageBody {
+  return {
+    conversation_id: chatId,
+    parts: [{ type: "text", text }],
+    ...(invocationId ? { invocation_id: invocationId } : {}),
+  };
 }
 
 export function firstTextPart(parts: RelayPart[]): string | undefined {

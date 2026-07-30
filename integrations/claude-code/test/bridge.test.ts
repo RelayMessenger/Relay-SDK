@@ -421,3 +421,49 @@ describe("reply body", () => {
     });
   });
 });
+
+describe("group invocations", () => {
+  function groupEvent(invocationId: string): RelayEvent {
+    const event = messageEvent({ conversation_id: "cnv_group" });
+    (event.data as Record<string, unknown>).invocation_id = invocationId;
+    return event;
+  }
+
+  it("surfaces the invocation id on the action and in the channel meta", () => {
+    const action = classifyEvent(groupEvent("inv_01"), OWNER);
+    assert(action.kind === "message");
+    assert.equal(action.invocationId, "inv_01");
+    assert.deepEqual(action.meta, {
+      chat_id: "cnv_group",
+      sender: OWNER,
+      invocation_id: "inv_01",
+    });
+  });
+
+  it("leaves a direct message with no invocation id", () => {
+    const action = classifyEvent(messageEvent({}), OWNER);
+    assert(action.kind === "message");
+    assert.equal(action.invocationId, undefined);
+    assert.equal(action.meta.invocation_id, undefined);
+  });
+
+  it("ignores a non-string invocation id rather than sending a malformed reply", () => {
+    const event = messageEvent({ conversation_id: "cnv_group" });
+    (event.data as Record<string, unknown>).invocation_id = 42;
+    const action = classifyEvent(event, OWNER);
+    assert(action.kind === "message");
+    assert.equal(action.invocationId, undefined);
+  });
+
+  it("puts the invocation id on the reply body, and omits it when absent", () => {
+    assert.deepEqual(buildReply("cnv_group", "on it", "inv_01"), {
+      conversation_id: "cnv_group",
+      parts: [{ type: "text", text: "on it" }],
+      invocation_id: "inv_01",
+    });
+    assert.deepEqual(buildReply("cnv_1", "on it"), {
+      conversation_id: "cnv_1",
+      parts: [{ type: "text", text: "on it" }],
+    });
+  });
+});

@@ -52,6 +52,8 @@ export interface SendMessageBody {
   conversation_id: string;
   parts: RelayPart[];
   suggestions?: { text: string }[];
+  /** Required in a group, and spent by the message that carries it. */
+  invocation_id?: string;
 }
 
 /** Fields of notifications/claude/channel/permission_request params. */
