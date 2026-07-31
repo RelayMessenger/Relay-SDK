@@ -74,7 +74,8 @@ jobs:
           node-version: 22.22.3
           cache: npm
       - run: npm ci
-      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --audit-level=low
+      - run: npm audit --omit=dev --audit-level=low
       - run: npm run test:release
       - run: npm run validate:claude-plugin
       - run: npm run gateway:harness

@@ -36,14 +36,17 @@
     "gateway:harness": "node scripts/gateway-harness.mjs",
     "prepack": "npm run build"
   },
+  "dependencies": {
+    "@openclaw/fs-safe": "0.5.0"
+  },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "openclaw": "2026.7.2-beta.2",
+    "openclaw": "2026.7.2-beta.5",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.7.2-beta.2"
+    "openclaw": ">=2026.7.2-beta.5"
   },
   "peerDependenciesMeta": {
     "openclaw": {
@@ -51,6 +54,9 @@
     }
   },
   "openclaw": {
+    "compat": {
+      "pluginApi": ">=2026.7.2-beta.5"
+    },
     "extensions": [
       "./index.ts"
     ],

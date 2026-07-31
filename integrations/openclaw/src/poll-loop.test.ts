@@ -25,7 +25,6 @@ function memoryCursorStore() {
     register: async (key, value) => {
       map.set(key, value);
     },
-    delete: async (key) => map.delete(key),
   };
   return createRelayCursorStore({ store, baseUrl: "https://api.relayapp.im", agentId: "agt_self" });
 }

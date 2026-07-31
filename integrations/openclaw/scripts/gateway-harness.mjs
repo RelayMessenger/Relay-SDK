@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -37,9 +38,20 @@ async function freePort() {
   });
 }
 
-function stop(child) {
-  if (!child || child.exitCode !== null) return;
+async function stop(child) {
+  const exited = () => child.exitCode !== null || child.signalCode !== null;
+  if (!child || exited()) return;
+  const gracefulExit = new Promise((resolveExit) => child.once("exit", resolveExit));
   child.kill("SIGTERM");
+  await Promise.race([
+    gracefulExit,
+    new Promise((resolveWait) => setTimeout(resolveWait, 2_000)),
+  ]);
+  if (!exited()) {
+    const forcedExit = new Promise((resolveExit) => child.once("exit", resolveExit));
+    child.kill("SIGKILL");
+    await forcedExit;
+  }
 }
 
 let mock;
@@ -54,11 +66,26 @@ try {
   const archives = readdirSync(packDir).filter((name) => name.endsWith(".tgz"));
   if (archives.length !== 1) throw new Error(`expected one plugin archive, found ${archives.length}`);
   const env = { ...process.env, HOME: home, USERPROFILE: home, NO_COLOR: "1" };
-  execFileSync(openclaw, ["plugins", "install", join(packDir, archives[0]), "--force"], {
+  execFileSync(openclaw, ["plugins", "install", `npm-pack:${join(packDir, archives[0])}`, "--force"], {
     cwd: temp,
     env,
     stdio: "pipe",
   });
+  const inspection = JSON.parse(
+    execFileSync(openclaw, ["plugins", "inspect", "relay", "--json"], {
+      cwd: temp,
+      env,
+      encoding: "utf8",
+    }),
+  );
+  if (inspection.install?.source !== "npm" || inspection.install?.artifactKind !== "npm-pack") {
+    throw new Error(`OpenClaw did not record the managed npm-pack install: ${JSON.stringify(inspection.install)}`);
+  }
+  const installedRequire = createRequire(join(inspection.install.installPath, "package.json"));
+  const fsSafeManifest = installedRequire("@openclaw/fs-safe/package.json");
+  if (fsSafeManifest.version !== "0.5.0") {
+    throw new Error(`installed plugin resolved @openclaw/fs-safe ${fsSafeManifest.version}`);
+  }
 
   const relayPort = await freePort();
   const gatewayPort = await freePort();
@@ -155,8 +182,6 @@ try {
   }
   process.stdout.write("OpenClaw installed-runtime gateway harness passed end to end.\n");
 } finally {
-  stop(gateway);
-  stop(mock);
-  await new Promise((resolveWait) => setTimeout(resolveWait, 250));
-  rmSync(temp, { recursive: true, force: true });
+  await Promise.all([stop(gateway), stop(mock)]);
+  rmSync(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

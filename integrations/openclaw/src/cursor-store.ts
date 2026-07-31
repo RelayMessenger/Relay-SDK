@@ -1,10 +1,14 @@
-// Persisted long-poll cursor, Telegram-offset style (monitor.ts:245-264):
+// Persisted long-poll cursor, Telegram-offset style:
 // monotonic writes only, bound to the agent identity so a token that now
 // resolves to a different agent discards the stale cursor instead of acking
 // another contact's event stream.
-import { createPluginStateSyncKeyedStore } from "openclaw/plugin-sdk/runtime-doctor";
+import { createHash } from "node:crypto";
+import {
+  assertRelayStateDocument,
+  emptyRelayStateDocument,
+  openRelayStateDocument,
+} from "./state-files.js";
 
-export const RELAY_CURSOR_NAMESPACE = "relay.cursors";
 export const RELAY_CURSOR_MAX_ENTRIES = 1_000;
 export const RELAY_CURSOR_OVERFLOW_POLICY = "reject-new" as const;
 
@@ -18,14 +22,12 @@ export type RelayCursorRecord = {
 };
 
 /**
- * Minimal slice of OpenClaw's PluginStateKeyedStore the cursor needs. The
- * channel runtime binds this to SQLite plugin state via
- * `runtime.state.openKeyedStore`; tests inject a memory map.
+ * Minimal state-store slice the cursor needs. The channel runtime binds this
+ * to Relay-owned files; tests can inject a memory map.
  */
 export type RelayCursorStateStore = {
   lookup(key: string): Promise<RelayCursorRecord | undefined>;
   register(key: string, value: RelayCursorRecord): Promise<void>;
-  delete(key: string): Promise<boolean>;
 };
 
 export type RelayCursorStore = {
@@ -42,32 +44,78 @@ export type RelayCursorStore = {
 };
 
 /**
- * Open the durable SQLite namespace with fail-closed capacity semantics. A
- * cursor is permanent safety state: evicting an old identity to admit a new
- * one could replay retained events when the old identity returns.
+ * Open Relay's private, lock-protected state file with fail-closed capacity
+ * semantics. A cursor is permanent safety state: evicting an old identity to
+ * admit a new one could replay retained events when the old identity returns.
  */
 export function openRelayCursorStateStore(
   warn: (line: string) => void,
   options: { env?: NodeJS.ProcessEnv; maxEntries?: number } = {},
 ): RelayCursorStateStore {
-  try {
-    const store = createPluginStateSyncKeyedStore<RelayCursorRecord>("relay", {
-      namespace: RELAY_CURSOR_NAMESPACE,
-      maxEntries: options.maxEntries ?? RELAY_CURSOR_MAX_ENTRIES,
-      overflowPolicy: RELAY_CURSOR_OVERFLOW_POLICY,
-      ...(options.env ? { env: options.env } : {}),
-    });
-    return {
-      lookup: async (key) => store.lookup(key),
-      register: async (key, value) => {
-        store.register(key, value);
-      },
-      delete: async (key) => store.delete(key),
-    };
-  } catch (error) {
-    warn(`[relay] plugin state unavailable; refusing unsafe cursor reset: ${String(error)}`);
-    throw error;
+  const maxEntries = options.maxEntries ?? RELAY_CURSOR_MAX_ENTRIES;
+  if (!Number.isSafeInteger(maxEntries) || maxEntries < 1) {
+    throw new Error("relay cursor maxEntries must be a positive safe integer");
   }
+  const store = openRelayStateDocument<RelayCursorRecord>({
+    fileName: "cursors.json",
+    ...(options.env ? { env: options.env } : {}),
+  });
+  const storageKey = (key: string) => createHash("sha256").update(key).digest("hex");
+  const validateEntry = (key: string, value: unknown): value is RelayCursorRecord => {
+    if (!/^[a-f0-9]{64}$/u.test(key) || !value || typeof value !== "object") return false;
+    const record = value as Partial<RelayCursorRecord>;
+    return (
+      record.version === RECORD_VERSION &&
+      isValidCursor(record.cursor) &&
+      typeof record.baseUrl === "string" &&
+      (() => {
+        try {
+          return new URL(record.baseUrl).origin === record.baseUrl;
+        } catch {
+          return false;
+        }
+      })() &&
+      typeof record.agentId === "string" &&
+      record.agentId.length > 0
+    );
+  };
+  const read = async () => {
+    try {
+      const current = await store.read();
+      if (current === undefined) return emptyRelayStateDocument<RelayCursorRecord>();
+      assertRelayStateDocument(current, "cursor", validateEntry);
+      return current;
+    } catch (error) {
+      warn(`[relay] cursor state unavailable; refusing unsafe cursor reset: ${String(error)}`);
+      throw error;
+    }
+  };
+  return {
+    lookup: async (key) => (await read()).entries[storageKey(key)],
+    register: async (key, value) => {
+      try {
+        await store.updateOr(emptyRelayStateDocument<RelayCursorRecord>(), (current) => {
+          assertRelayStateDocument(current, "cursor", validateEntry);
+          const hashedKey = storageKey(key);
+          if (
+            !Object.hasOwn(current.entries, hashedKey) &&
+            Object.keys(current.entries).length >= maxEntries
+          ) {
+            throw new Error(
+              `relay cursor state reached ${maxEntries} identities (${RELAY_CURSOR_OVERFLOW_POLICY})`,
+            );
+          }
+          return {
+            version: current.version,
+            entries: { ...current.entries, [hashedKey]: value },
+          };
+        });
+      } catch (error) {
+        warn(`[relay] cursor state unavailable; refusing unsafe cursor reset: ${String(error)}`);
+        throw error;
+      }
+    },
+  };
 }
 
 function isValidCursor(value: unknown): value is number {

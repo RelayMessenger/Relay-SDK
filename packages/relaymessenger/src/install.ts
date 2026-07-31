@@ -561,7 +561,7 @@ export function installClaude(
   out("Setup guide: https://docs.relayapp.im/guides/coding-agents");
 }
 
-/** Install and configure the OpenClaw plugin from relaymessenger's bundled archive. */
+/** Install and configure the OpenClaw plugin from relaymessenger's bundled npm pack. */
 export function installOpenClaw(
   out: (line: string) => void = console.log,
   options: InstallOpenClawOptions = {},
@@ -607,7 +607,16 @@ export function installOpenClaw(
     join(bundleDir, archives[0]!),
     options.installRoot ?? join(runtimeHomeForConfig(paired, dirname(config.path)), "installed-plugins", "openclaw"),
   );
-  runExternalCommand("OpenClaw", command, ["plugins", "install", archive, "--force"], "plugin installation", runner);
+  // npm-pack uses OpenClaw's managed per-plugin npm project, so the bundled
+  // plugin's declared runtime dependencies are installed and isolated without
+  // requiring a separately published Relay package.
+  runExternalCommand(
+    "OpenClaw",
+    command,
+    ["plugins", "install", `npm-pack:${archive}`, "--force"],
+    "plugin installation",
+    runner,
+  );
 
   // The official installer stamps root metadata and records install
   // provenance/update/uninstall state. Re-read after it returns; a merge
