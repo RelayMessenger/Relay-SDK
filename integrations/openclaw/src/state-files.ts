@@ -75,6 +75,26 @@ function localProcessIsLive(pid: number): boolean {
   }
 }
 
+/**
+ * Windows opens the sidecar lock with an openat-style
+ * `O_CREAT | O_EXCL` beneath a parent handle. While a just-released lock file
+ * is still delete-pending, that create returns `ACCESS_DENIED` instead of the
+ * `already exists` fs-safe retries on, so contention escapes the acquire loop
+ * as a hard `EACCES`. Retry those on Windows only, bounded by the caller's lock
+ * timeout: a genuine permission failure simply reproduces until the deadline
+ * and then surfaces unchanged.
+ */
+function isWindowsLockAcquisitionContention(error: unknown): boolean {
+  if (process.platform !== "win32") return false;
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === "EACCES" || code === "EPERM";
+}
+
+function lockRetryDelayMs(attempt: number, remainingMs: number): number {
+  const backoff = Math.min(25 * 2 ** attempt, 250);
+  return Math.max(1, Math.min(backoff * (0.5 + Math.random() / 2), remainingMs));
+}
+
 function canRecoverRelayStateLock(value: unknown): boolean {
   return (
     isRelayStateLockOwner(value) &&
@@ -125,32 +145,56 @@ export function openRelayStateDocument<T>(params: {
     dirMode: 0o700,
     mode: 0o600,
   });
-  const withMutationLock = async <R>(run: () => Promise<R>): Promise<R> =>
-    await withFileLock(
-      store.filePath,
-      {
-        managerKey: `relay-state:${store.filePath}`,
-        staleMs: RELAY_STATE_LOCK_TIMEOUT_MS,
-        timeoutMs: lockTimeoutMs,
-        staleRecovery: "remove-if-unchanged",
-        retry: {
-          retries: 300,
-          minTimeout: 25,
-          maxTimeout: 250,
-          randomize: true,
-        },
-        payload: (): RelayStateLockOwner => ({
-          version: RELAY_STATE_LOCK_VERSION,
-          kind: "relay-state",
-          pid: process.pid,
-          host: hostname(),
-          createdAt: new Date().toISOString(),
-        }),
-        shouldReclaim: ({ payload }) => canRecoverRelayStateLock(payload),
-        shouldRemoveStaleLock: ({ payload }) => canRecoverRelayStateLock(payload),
-      },
-      run,
-    );
+  const withMutationLock = async <R>(run: () => Promise<R>): Promise<R> => {
+    const deadline = Date.now() + lockTimeoutMs;
+    for (let attempt = 0; ; attempt += 1) {
+      // Only acquisition is retried. Once the mutation itself has started it has
+      // observed state under the lock, so replaying it could double-apply.
+      let mutationStarted = false;
+      try {
+        return await withFileLock(
+          store.filePath,
+          {
+            managerKey: `relay-state:${store.filePath}`,
+            staleMs: RELAY_STATE_LOCK_TIMEOUT_MS,
+            timeoutMs: Math.max(1, deadline - Date.now()),
+            staleRecovery: "remove-if-unchanged",
+            retry: {
+              retries: 300,
+              minTimeout: 25,
+              maxTimeout: 250,
+              randomize: true,
+            },
+            payload: (): RelayStateLockOwner => ({
+              version: RELAY_STATE_LOCK_VERSION,
+              kind: "relay-state",
+              pid: process.pid,
+              host: hostname(),
+              createdAt: new Date().toISOString(),
+            }),
+            shouldReclaim: ({ payload }) => canRecoverRelayStateLock(payload),
+            shouldRemoveStaleLock: ({ payload }) => canRecoverRelayStateLock(payload),
+          },
+          async () => {
+            mutationStarted = true;
+            return await run();
+          },
+        );
+      } catch (error) {
+        const remaining = deadline - Date.now();
+        if (
+          mutationStarted ||
+          remaining <= 0 ||
+          !isWindowsLockAcquisitionContention(error)
+        ) {
+          throw error;
+        }
+        await new Promise((resolve) =>
+          setTimeout(resolve, lockRetryDelayMs(attempt, remaining)),
+        );
+      }
+    }
+  };
 
   return {
     filePath: store.filePath,
