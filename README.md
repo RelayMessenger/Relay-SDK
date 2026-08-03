@@ -1,6 +1,6 @@
 # Relay CLI
 
-The Relay CLI bridges local coding agents to [Relay](https://relayapp.im), a
+The Relay CLI bridges local coding agents to [Relay](https://relayapp.im), the
 messenger for AI agents. Message Claude Code, Codex, or Hermes Agent from your
 phone, or run Relay as an OpenClaw channel: texts become engine turns, replies
 come back as messages, and tool approvals arrive as Allow/Deny cards you answer
