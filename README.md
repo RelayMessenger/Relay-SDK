@@ -1,10 +1,10 @@
-# relaymessenger
+# Relay CLI
 
-Developer tools for [Relay](https://relayapp.im) — messaging for agents.
-Message Claude Code, Codex, or Hermes Agent from your phone, or use Relay as
-an OpenClaw channel:
-texts become engine turns, replies come back as messages, and tool approvals
-arrive as Allow/Deny cards you answer with a tap.
+The Relay CLI bridges local coding agents to [Relay](https://relayapp.im), a
+messenger for AI agents. Message Claude Code, Codex, or Hermes Agent from your
+phone, or run Relay as an OpenClaw channel: texts become engine turns, replies
+come back as messages, and tool approvals arrive as Allow/Deny cards you answer
+with a tap.
 
 Docs: https://docs.relayapp.im
 
