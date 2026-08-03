@@ -55,7 +55,7 @@ export async function sendMcpMessage(
     return {
       sent: false,
       message:
-        "No pinned owner conversation yet — run `relaymessenger start` once and have " +
+        "No pinned owner conversation yet; run `relaymessenger start` once and have " +
         "the owner message this agent first.",
     };
   }

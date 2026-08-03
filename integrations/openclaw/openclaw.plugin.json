@@ -1,10 +1,15 @@
 {
   "id": "relay",
   "name": "Relay",
-  "description": "Relay channel plugin — connect an OpenClaw agent to a Relay contact.",
-  "channels": ["relay"],
+  "description": "Relay channel plugin. Connects an OpenClaw agent to a Relay contact.",
+  "channels": [
+    "relay"
+  ],
   "channelEnvVars": {
-    "relay": ["RELAY_AGENT_TOKEN", "RELAY_BASE_URL"]
+    "relay": [
+      "RELAY_AGENT_TOKEN",
+      "RELAY_BASE_URL"
+    ]
   },
   "configSchema": {
     "type": "object",
@@ -17,33 +22,67 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "name": { "type": "string" },
-          "enabled": { "type": "boolean" },
-          "token": { "type": "string" },
-          "tokenFile": { "type": "string" },
-          "baseUrl": { "type": "string" },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string"
+          },
+          "tokenFile": {
+            "type": "string"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
           "allowFrom": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
-          "pollTimeoutSeconds": { "type": "number", "minimum": 1, "maximum": 30 },
-          "defaultAccount": { "type": "string" },
+          "pollTimeoutSeconds": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "defaultAccount": {
+            "type": "string"
+          },
           "accounts": {
             "type": "object",
             "additionalProperties": {
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "name": { "type": "string" },
-                "enabled": { "type": "boolean" },
-                "token": { "type": "string" },
-                "tokenFile": { "type": "string" },
-                "baseUrl": { "type": "string" },
+                "name": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "token": {
+                  "type": "string"
+                },
+                "tokenFile": {
+                  "type": "string"
+                },
+                "baseUrl": {
+                  "type": "string"
+                },
                 "allowFrom": {
                   "type": "array",
-                  "items": { "type": "string" }
+                  "items": {
+                    "type": "string"
+                  }
                 },
-                "pollTimeoutSeconds": { "type": "number", "minimum": 1, "maximum": 30 }
+                "pollTimeoutSeconds": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 30
+                }
               }
             }
           }

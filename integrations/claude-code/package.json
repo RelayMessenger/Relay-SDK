@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Relay channel for Claude Code — bridges a Relay agent conversation into a Claude Code session over the experimental claude/channel MCP contract.",
+  "description": "Relay channel for Claude Code. Bridges a Relay agent conversation into a Claude Code session over the experimental claude/channel MCP contract.",
   "engines": {
     "node": ">=20.11"
   },

@@ -18,7 +18,7 @@ export async function doctor(out: (line: string) => void = console.log): Promise
   let healthy = true;
   const check = (ok: boolean, label: string, detail?: string) => {
     healthy = healthy && ok;
-    out(`${ok ? "ok " : "FAIL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+    out(`${ok ? "ok " : "FAIL"}  ${label}${detail ? `: ${detail}` : ""}`);
     return ok;
   };
 
@@ -40,13 +40,13 @@ export async function doctor(out: (line: string) => void = console.log): Promise
     check(
       Boolean(owner),
       "owner pinned (owner_user_id)",
-      owner ?? "missing — re-run `relaymessenger pair` or set RELAY_OWNER_USER_ID",
+      owner ?? "missing; re-run `relaymessenger pair` or set RELAY_OWNER_USER_ID",
     );
     let origin = loaded!.api_origin;
     try {
       origin = resolveApiOrigin(loaded!.api_origin);
       if (process.env.RELAY_API_ORIGIN) {
-        out(`info  RELAY_API_ORIGIN override active (${origin}) — development/testing only`);
+        out(`info  RELAY_API_ORIGIN override active (${origin}); development/testing only`);
       }
     } catch (error: any) {
       check(false, "RELAY_API_ORIGIN valid", String(error?.message ?? error));
@@ -113,7 +113,7 @@ export async function doctor(out: (line: string) => void = console.log): Promise
       windowsHide: true,
     });
     if (lookup.status !== 0) {
-      out(`info  ${engine}: not installed — ${spec.docsUrl}`);
+      out(`info  ${engine}: not installed; ${spec.docsUrl}`);
       continue;
     }
     const version = crossSpawn.sync(spec.command, spec.versionArgs, {
@@ -148,10 +148,10 @@ export async function doctor(out: (line: string) => void = console.log): Promise
   out(
     existsSync(codexConfig)
       ? `info  codex config present (${codexConfig}); run \`relaymessenger install-codex\` to wire notify + approvals`
-      : "info  no ~/.codex/config.toml — install Codex or skip install-codex",
+      : "info  no ~/.codex/config.toml; install Codex or skip install-codex",
   );
 
   out("");
-  out(healthy ? "All checks passed." : "Some checks failed — see above.");
+  out(healthy ? "All checks passed." : "Some checks failed. See above.");
   return healthy;
 }

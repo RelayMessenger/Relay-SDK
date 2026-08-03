@@ -54,7 +54,7 @@ export function claudeBypassWarning(
   const resolved = resolveClaudeDefaultMode(projectDir, home);
   if (resolved?.mode !== "bypassPermissions") return undefined;
   return (
-    `Claude permissions.defaultMode=bypassPermissions (${resolved.source}) — ` +
+    `Claude permissions.defaultMode=bypassPermissions (${resolved.source}). ` +
     "the engine never asks for approval, so Relay's phone Allow/Deny cards will not appear"
   );
 }

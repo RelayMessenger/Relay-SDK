@@ -284,7 +284,7 @@ export class ReceiveLoop {
         );
       }
       this.log(
-        `turn ${attempted.turn_key} was interrupted — dropping its ${prefix.length}-event prefix, not re-executing`,
+        `turn ${attempted.turn_key} was interrupted; dropping its ${prefix.length}-event prefix, not re-executing`,
       );
       const interruptedInvocation = invocationIdForEvent(prefix[prefix.length - 1]);
       this.clearBatch(conversationId, prefix, attempted.turn_key);
@@ -456,7 +456,7 @@ export class ReceiveLoop {
           throw error;
         }
         if (error?.status === 401) {
-          this.log("fatal: agent token rejected (401) — run `relaymessenger pair` again.");
+          this.log("fatal: agent token rejected (401); run `relaymessenger pair` again.");
           throw error;
         }
         failures += 1;

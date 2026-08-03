@@ -6,7 +6,7 @@ import { setRelayRuntime } from "./src/runtime.js";
 export default defineChannelPluginEntry({
   id: "relay",
   name: "Relay",
-  description: "Relay channel plugin — text your OpenClaw like a friend.",
+  description: "Relay channel plugin. Text your OpenClaw like a friend.",
   plugin: relayChannelPlugin,
   setRuntime: setRelayRuntime,
 });
