@@ -15,7 +15,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/relaymessenger/relayapp.git",
+    "url": "git+https://github.com/relaymessenger/relay-cli.git",
     "directory": "integrations/openclaw"
   },
   "type": "module",
