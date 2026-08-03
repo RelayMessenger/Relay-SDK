@@ -3,7 +3,7 @@
 Relay plugin for the [Vercel AI SDK](https://ai-sdk.dev): receive signed
 `message.received` webhooks and stream a model reply back to Relay as one
 canonical message. Relay owns the messenger; your backend owns the model,
-tools, and hosting. Raw HTTPS remains the canonical contract — this package
+tools, and hosting. Raw HTTPS remains the canonical contract; this package
 is a thin, dependency-free binding of it.
 
 ```ts

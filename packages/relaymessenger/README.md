@@ -6,7 +6,7 @@ machine. It also installs native Relay channels for Claude Code and OpenClaw.
 Texts become prompts, replies come back as messages, and tool approvals arrive
 as Allow/Deny cards you answer with a tap.
 
-Relay is messaging for agents — https://relayapp.im. API reference:
+Relay is the messenger for AI agents: https://relayapp.im. API reference:
 https://docs.relayapp.im.
 
 ## Quickstart
@@ -32,14 +32,14 @@ the engine works and posts one finalized reply per turn.
 | --- | --- |
 | `relaymessenger pair` | `POST /v1/pairings`, shows a terminal QR + code, long-polls until you claim it in the app, stores the Agent Token in `~/.relaymessenger/config.json` (chmod 600) and pins your user id as the bridge owner (from `GET /v1/agents/me`; override with `RELAY_OWNER_USER_ID`). If owner lookup is interrupted after the token is saved, running the command again resumes that saved token without creating another agent. The token never appears on the phone. |
 | `relaymessenger start` | Receive loop: long-polls `GET /v1/events`, drives the engine over ACP, replies via `POST /v1/messages` with an `Idempotency-Key`. Flags: `--engine claude\|codex\|hermes`, `--dir <path>`. Claude and Codex adapters are bundled; Hermes must already be installed and pass `hermes acp --check`. |
-| `relaymessenger install-codex` | Run from a project root to opt in that project only. Merges — never clobbers — `[mcp_servers.relay]` + `notify` into `~/.codex/config.toml` (comments preserved; a `.bak` of the original is kept) and a `PermissionRequest` hook into `~/.codex/hooks.json`. Other projects are suppressed until installed separately. Codex gates untrusted hook handlers: the first run may ask you to trust the relaymessenger handler. |
+| `relaymessenger install-codex` | Run from a project root to opt in that project only. Merges, never clobbers, `[mcp_servers.relay]` + `notify` into `~/.codex/config.toml` (comments preserved; a `.bak` of the original is kept) and a `PermissionRequest` hook into `~/.codex/hooks.json`. Other projects are suppressed until installed separately. Codex gates untrusted hook handlers: the first run may ask you to trust the relaymessenger handler. |
 | `relaymessenger install-claude` | After pairing, strictly validates the Claude plugin bundled in the installed npm package, persists its local marketplace under the paired account's private runtime directory, installs `relay@relaymessenger-bundled`, and writes the token/API origin/owner pin to `~/.claude/channels/relay/.env` with mode 600 without printing the token. It refuses to overwrite a different configured identity. |
 | `relaymessenger install-openclaw` | After pairing, persists the OpenClaw plugin archive bundled in the npm package and installs it through OpenClaw's managed `npm-pack:` path, adds only Relay's plugin/channel fields to `~/.openclaw/openclaw.json`, and writes the paired token to an owner-only file. Existing unrelated config is preserved and a different configured identity is refused. |
 | `relaymessenger doctor` | Checks Node, pairing, token file permissions, API reachability, installed adapter pins, and durable-state health. |
 
 ## How the wire works
 
-Everything rides Relay's public agent API — the same surface you can drive
+Everything rides Relay's public agent API, the same surface you can drive
 with curl:
 
 ```sh
@@ -111,7 +111,7 @@ curl -X POST https://api.relayapp.im/v1/messages \
 - `RELAY_API_ORIGIN` points `pair`, `start`, and `doctor` at a
   non-production Relay API origin, e.g. a local dev server:
   `RELAY_API_ORIGIN=http://127.0.0.1:8787 relaymessenger pair`. This is a
-  development/testing mechanism only — production
+  development/testing mechanism only, production
   (`https://api.relayapp.im`) stays the default, the value must be an
   origin with no path/query/credentials, and plain HTTP is accepted only
   for loopback hosts (same rule as every other origin the bridge uses).

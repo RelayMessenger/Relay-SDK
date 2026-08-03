@@ -97,7 +97,7 @@ export async function notifyCommand(
 
   const projectRoot = (dependencies.policy ?? new CodexNotifyPolicyStore()).matchProject(payload.cwd);
   if (!projectRoot) {
-    out("relaymessenger notify: suppressed — this project was not explicitly opted in.");
+    out("relaymessenger notify: suppressed; this project was not explicitly opted in.");
     return;
   }
   const config = dependencies.config ?? new ConfigStore();
@@ -109,7 +109,7 @@ export async function notifyCommand(
   const client = dependencies.client ?? new RelayClient(loaded.api_origin, loaded.agent_token);
   if (!conversationId) {
     out(
-      "relaymessenger notify: no pinned owner conversation yet — run `relaymessenger start` once and " +
+      "relaymessenger notify: no pinned owner conversation yet; run `relaymessenger start` once and " +
         "message the agent from the Relay app first.",
     );
     return;
@@ -190,7 +190,7 @@ export async function permissionRequestHook(
       inputPreview: input.tool_input !== undefined ? JSON.stringify(input.tool_input) : undefined,
     });
   } catch (error) {
-    process.stderr.write(`relaymessenger: refusing concealed approval input (${error}) — denying.\n`);
+    process.stderr.write(`relaymessenger: refusing concealed approval input (${error}); denying.\n`);
     write(decisionJson(false));
     return 0;
   }
@@ -205,7 +205,7 @@ export async function permissionRequestHook(
     posted = await client.postMessage(card.body, card.idempotencyKey);
   } catch (error) {
     approvals.consume(requestId);
-    process.stderr.write(`relaymessenger: approval card could not be delivered (${error}) — denying.\n`);
+    process.stderr.write(`relaymessenger: approval card could not be delivered (${error}); denying.\n`);
     write(decisionJson(false));
     return 0;
   }
@@ -247,7 +247,7 @@ export async function permissionRequestHook(
     }
   }
 
-  process.stderr.write("relaymessenger: no approval from Relay within the window — denying.\n");
+  process.stderr.write("relaymessenger: no approval from Relay within the window; denying.\n");
   return finish(false);
 }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * relaymessenger — bridge your local coding agent to Relay.
+ * relaymessenger: bridge your local coding agent to Relay.
  *
  *   relaymessenger pair [--engine <preset>] [--name <device-name>]
  *   relaymessenger start [--engine <preset>] [--dir <path>]

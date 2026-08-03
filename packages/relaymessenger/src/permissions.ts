@@ -284,7 +284,7 @@ export class PermissionBroker {
     if (approval.conversation_id !== message.conversation_id) {
       this.log(
         `verdict for ${verdict.request_id} from wrong conversation ` +
-          `${message.conversation_id} (expected ${approval.conversation_id}) — ignored`,
+          `${message.conversation_id} (expected ${approval.conversation_id}); ignored`,
       );
       return true;
     }
