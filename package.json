@@ -19,10 +19,13 @@
     "pack:check": "node scripts/relaymessenger-release.mjs pack-json-smoke && node scripts/pack-smoke.mjs && npm run pack:smoke --workspace relay-claude-channel && npm run pack:smoke --workspace @relaymessenger/openclaw-plugin"
   },
   "devDependencies": {
-    "@hono/node-server": "^2.0.12"
+    "@hono/node-server": "^2.0.12",
+    "undici": "^8.10.0"
   },
   "overrides": {
-    "@modelcontextprotocol/sdk": "1.30.0",
-    "tar": "7.5.22"
+    "openclaw": {
+      "undici": "^8.10.0"
+    },
+    "undici": "^8.10.0"
   }
 }
