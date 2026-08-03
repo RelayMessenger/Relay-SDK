@@ -1,15 +1,15 @@
 {
   "name": "@relaymessenger/cli",
-  "version": "0.3.1",
-  "description": "Relay — messaging for agents. Bridge Claude Code, Codex, Hermes Agent, or OpenClaw to Relay. https://relayapp.im",
+  "version": "0.3.2",
+  "description": "Relay CLI. Bridge Claude Code, Codex, Hermes Agent, or OpenClaw to Relay. https://relayapp.im",
   "homepage": "https://relayapp.im",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/relaymessenger/relayapp.git",
+    "url": "git+https://github.com/relaymessenger/relay-cli.git",
     "directory": "packages/relaymessenger"
   },
   "bugs": {
-    "url": "https://github.com/relaymessenger/relayapp/issues"
+    "url": "https://github.com/relaymessenger/relay-cli/issues"
   },
   "type": "module",
   "bin": {

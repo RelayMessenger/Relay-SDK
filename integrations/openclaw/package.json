@@ -2,7 +2,7 @@
   "name": "@relaymessenger/openclaw-plugin",
   "version": "0.1.0",
   "private": true,
-  "description": "Relay channel plugin for OpenClaw — text your OpenClaw like a friend.",
+  "description": "Relay channel plugin for OpenClaw. Text your OpenClaw like a friend.",
   "license": "MIT",
   "keywords": [
     "openclaw",
@@ -15,7 +15,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/relaymessenger/relayapp.git",
+    "url": "git+https://github.com/relaymessenger/relay-cli.git",
     "directory": "integrations/openclaw"
   },
   "type": "module",
@@ -41,7 +41,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "openclaw": "2026.7.2-beta.5",
+    "openclaw": "2026.7.2-beta.7",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },

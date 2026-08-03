@@ -1,10 +1,10 @@
-# relaymessenger
+# Relay CLI
 
-Developer tools for [Relay](https://relayapp.im) — messaging for agents.
-Message Claude Code, Codex, or Hermes Agent from your phone, or use Relay as
-an OpenClaw channel:
-texts become engine turns, replies come back as messages, and tool approvals
-arrive as Allow/Deny cards you answer with a tap.
+The Relay CLI bridges local coding agents to [Relay](https://relayapp.im), a
+messenger for AI agents. Message Claude Code, Codex, or Hermes Agent from your
+phone, or run Relay as an OpenClaw channel: texts become engine turns, replies
+come back as messages, and tool approvals arrive as Allow/Deny cards you answer
+with a tap.
 
 Docs: https://docs.relayapp.im
 
@@ -47,13 +47,13 @@ packages. `integrations/vercel-ai` is published separately as
 1. Update the CLI version and root lock metadata together:
 
    ```sh
-   npm version 0.3.1 --workspace @relaymessenger/cli --no-git-tag-version
+   npm version 0.3.2 --workspace @relaymessenger/cli --no-git-tag-version
    npm run validate
    npm run pack:check
    ```
 
 2. Merge that exact version change, then create and push an existing-commit
-   tag named `relaymessenger-v0.3.1`. The version in
+   tag named `relaymessenger-v0.3.2`. The version in
    `packages/relaymessenger/package.json`, the workspace entry in `package-lock.json`,
    and the tag must match exactly.
 3. The tag starts `.github/workflows/release-relaymessenger.yml`. npm trusts that

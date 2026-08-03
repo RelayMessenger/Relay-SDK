@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Do not open a public issue for a suspected vulnerability. Use
-[GitHub private vulnerability reporting](https://github.com/relaymessenger/relayapp/security/advisories/new)
+[GitHub private vulnerability reporting](https://github.com/relaymessenger/relay-cli/security/advisories/new)
 so the report, reproduction details, and any credentials remain private.
 
 Include the affected package and version, impact, reproduction steps, and the
