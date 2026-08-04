@@ -69,6 +69,24 @@ class DedupeWindow {
   }
 }
 
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  const withToJson = value as { toJSON?: () => unknown };
+  if (typeof withToJson.toJSON === "function") {
+    return canonicalJson(withToJson.toJSON());
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  return `{${entries.map(([key, entry]) =>
+    `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+}
+
 /**
  * Idempotency key for one reply: the event, its position in the handler, and a
  * digest of what is being sent. The content term is what keeps a redelivery
@@ -83,7 +101,7 @@ async function replyKey(
 ): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(JSON.stringify(content)),
+    new TextEncoder().encode(canonicalJson(content)),
   );
   const hex = Array.from(new Uint8Array(digest), (byte) =>
     byte.toString(16).padStart(2, "0"),

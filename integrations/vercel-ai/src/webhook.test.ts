@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createRelay } from "./index.js";
-import type { MessageReceivedEvent } from "./types.js";
+import type { MessageReceivedEvent, RelayOutgoingPart } from "./types.js";
 
 const SECRET_BYTES = Buffer.from("another-test-secret");
 const SECRET = `whsec_${SECRET_BYTES.toString("base64")}`;
@@ -124,6 +124,24 @@ describe("createWebhookHandler", () => {
     // A redelivery whose model wrote something else sends under a new key
     // instead of conflicting with the first request under the old one.
     expect(keys[2]).not.toBe(keys[0]);
+  });
+
+  it("keeps the reply key stable when equivalent part objects use another key order", async () => {
+    const parts: RelayOutgoingPart[] = [
+      { type: "data", data: { z: 2, a: 1 } },
+      { data: { a: 1, z: 2 }, type: "data" },
+    ];
+    const keys: string[] = [];
+    for (const part of parts) {
+      const { relay, fetchMock } = relayWithMockFetch();
+      const handler = relay.webhook(async ({ reply }) => {
+        await reply.parts([part]);
+      });
+      await handler(signedRequest(JSON.stringify(envelope())));
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      keys.push((init.headers as Record<string, string>)["Idempotency-Key"]);
+    }
+    expect(keys[0]).toBe(keys[1]);
   });
 
   it("threads invocation_id from group deliveries into replies", async () => {
