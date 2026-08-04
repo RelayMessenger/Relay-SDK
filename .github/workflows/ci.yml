@@ -42,8 +42,8 @@ jobs:
           - name: relaymessenger CLI
             node: 22.18.0
             directory: .
-            install: npm ci --workspace @relaymessenger/cli
-            verify: npm run check --workspace @relaymessenger/cli && npm run build --workspace @relaymessenger/cli && npm test --workspace @relaymessenger/cli
+            install: npm ci --workspace @relaymessenger/Relay-CLI
+            verify: npm run check --workspace @relaymessenger/Relay-CLI && npm run build --workspace @relaymessenger/Relay-CLI && npm test --workspace @relaymessenger/Relay-CLI
           - name: Claude channel
             node: 20.11.0
             directory: integrations/claude-code

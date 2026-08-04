@@ -68,7 +68,7 @@ jobs:
           set -euo pipefail
           rm -rf .release-tmp
           mkdir -p .release-tmp
-          npm pack --workspace @relaymessenger/cli --pack-destination .release-tmp
+          npm pack --workspace @relaymessenger/Relay-CLI --pack-destination .release-tmp
           mapfile -t tarballs < <(find .release-tmp -maxdepth 1 -type f -name '*.tgz' -print)
           test "${#tarballs[@]}" -eq 1
           tarball="${tarballs[0]}"

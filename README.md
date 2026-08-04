@@ -20,7 +20,7 @@ Docs: https://docs.relayapp.im
 ## Quickstart
 
 ```sh
-npm install -g @relaymessenger/cli
+npm install -g @relaymessenger/Relay-CLI
 relaymessenger pair            # QR + code → claim in the Relay app
 relaymessenger start --engine claude   # or codex | hermes
 
@@ -47,7 +47,7 @@ packages. `integrations/vercel-ai` is published separately as
 1. Update the CLI version and root lock metadata together:
 
    ```sh
-   npm version 0.3.2 --workspace @relaymessenger/cli --no-git-tag-version
+   npm version 0.3.2 --workspace @relaymessenger/Relay-CLI --no-git-tag-version
    npm run validate
    npm run pack:check
    ```
@@ -65,7 +65,7 @@ packages. `integrations/vercel-ai` is published separately as
    dispatch ref instead of the artifact's source tag. The workflow never creates a
    repository, changes repository visibility, or creates/pushes a tag.
 4. CI reruns the full validation and package smokes, publishes only
-   `@relaymessenger/cli`,
+   `@relaymessenger/Relay-CLI`,
    strictly validates the source Claude plugin and marketplace, and proves the
    packed OpenClaw plugin through a real isolated gateway turn. The release job
    accepts only tags on reviewed `main` history, uses a GitHub-hosted runner,

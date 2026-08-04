@@ -25,7 +25,7 @@ Install the published CLI, pair once, and install its bundled local
 marketplace:
 
 ```sh
-npm install -g @relaymessenger/cli
+npm install -g @relaymessenger/Relay-CLI
 relaymessenger pair
 relaymessenger install-claude
 ```

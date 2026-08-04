@@ -21,7 +21,7 @@ try {
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     const result = spawnSync(
       process.platform === "win32" ? "npm.cmd" : "npm",
-      ["install", "--no-audit", "--no-fund", "--prefer-online", `@relaymessenger/cli@${expected.version}`],
+      ["install", "--no-audit", "--no-fund", "--prefer-online", `@relaymessenger/Relay-CLI@${expected.version}`],
       { cwd: temp, encoding: "utf8" },
     );
     if (result.status === 0) {
@@ -65,7 +65,7 @@ try {
     );
     assert.equal(existsSync(path), true, `registry install missing ${adapter}`);
   }
-  process.stdout.write(`registry-installed @relaymessenger/cli@${expected.version} smoke passed\n`);
+  process.stdout.write(`registry-installed @relaymessenger/Relay-CLI@${expected.version} smoke passed\n`);
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

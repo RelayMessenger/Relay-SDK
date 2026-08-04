@@ -13,5 +13,5 @@ npm token, private conversation, or unrelated user data.
 ## Supported versions
 
 Security fixes are made against the latest published version of
-`@relaymessenger/cli` and `@relaymessenger/vercel-ai`. Older releases may be
+`@relaymessenger/Relay-CLI` and `@relaymessenger/vercel-ai`. Older releases may be
 superseded instead of patched in place.

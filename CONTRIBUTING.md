@@ -32,4 +32,4 @@ Pull requests must keep the supported Linux and Windows matrix green.
 Maintainers release from exact version tags through npm trusted publishing.
 Contributors should not create release tags, publish packages, or add registry
 tokens. The Claude Code and OpenClaw integrations are bundled in
-`@relaymessenger/cli`; `@relaymessenger/vercel-ai` has its own release workflow.
+`@relaymessenger/Relay-CLI`; `@relaymessenger/vercel-ai` has its own release workflow.

@@ -7,7 +7,7 @@ Configure Relay without asking the user to paste or echo a secret in chat.
 1. Use the paired relaymessenger flow. Ask the user to run these locally if needed:
 
    ```text
-   npm install -g @relaymessenger/cli
+   npm install -g @relaymessenger/Relay-CLI
    relaymessenger pair
    relaymessenger install-claude
    ```
