@@ -49,6 +49,12 @@ export class RelayApiError extends Error {
     readonly status: number,
     readonly code: string | undefined,
     message: string,
+    /**
+     * `error.details` from the Relay error body. The cursor faults carry the
+     * recovery target there (`highest_delivered_cursor`, `latest_sequence`),
+     * so it has to survive the throw.
+     */
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "RelayApiError";
@@ -70,6 +76,14 @@ export type PairingStatus =
 export interface EventsPage {
   events: RelayEvent[];
   next_cursor: number;
+}
+
+/** One row of GET /v1/conversations (AgentConversation in the OpenAPI contract). */
+export interface RelayConversation {
+  id: string;
+  kind?: "direct" | "group";
+  last_sequence?: number;
+  last_message_at?: string | null;
 }
 
 export interface PostMessageBody {
@@ -132,7 +146,13 @@ export class RelayClient {
     if (!okStatuses.includes(res.status)) {
       const code = json?.error?.code ?? json?.code;
       const message = json?.error?.message ?? json?.message ?? text.slice(0, 300) ?? res.statusText;
-      throw new RelayApiError(res.status, code, `${method} ${path} → ${res.status}: ${message}`);
+      const details = json?.error?.details;
+      throw new RelayApiError(
+        res.status,
+        code,
+        `${method} ${path} → ${res.status}: ${message}`,
+        details && typeof details === "object" && !Array.isArray(details) ? details : undefined,
+      );
     }
     return json as T;
   }
@@ -171,6 +191,15 @@ export class RelayClient {
       body,
       headers: { "idempotency-key": idempotencyKey },
     });
+  }
+
+  /**
+   * Conversations this agent still participates in, newest activity first.
+   * The canonical inventory used to reconcile after a cursor fault, when the
+   * event log can no longer say which conversations moved.
+   */
+  listConversations(limit = 50): Promise<{ conversations: RelayConversation[] }> {
+    return this.request("GET", `/v1/conversations?limit=${limit}`);
   }
 
   listMessages(conversationId: string, limit = 20): Promise<{ messages: RelayMessage[] }> {

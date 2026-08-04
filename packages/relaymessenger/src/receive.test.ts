@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { EventsPage, RelayClient } from "./api.js";
+import { RelayApiError, type EventsPage, type RelayClient } from "./api.js";
 import type { EngineAdapter, TurnCallbacks } from "./engine/types.js";
 import {
   MAX_PERMISSION_PREVIEW_CHARS,
@@ -12,7 +12,12 @@ import {
   parseVerdictDataPart,
   parseVerdictText,
 } from "./permissions.js";
-import { ReceiveLoop, promptTextFromMessages, turnIdempotencyKey } from "./receive.js";
+import {
+  ReceiveLoop,
+  promptTextFromMessages,
+  turnIdempotencyKey,
+  undeliveredCursorTarget,
+} from "./receive.js";
 import {
   ApprovalStore,
   StateStore,
@@ -911,4 +916,140 @@ test("a group turn clears typing before the reply completes the invocation", asy
   assert.equal(stopIndex, typings.length - 1);
   assert.equal(posted.length, 1);
   loop.stop();
+});
+
+function cursorFaultClient(options: {
+  failures: RelayApiError[];
+  onPoll?: (cursor: number) => void;
+}) {
+  const failures = [...options.failures];
+  const polls: number[] = [];
+  const historyReads: string[] = [];
+  let listings = 0;
+  const client = {
+    origin: "http://fake",
+    async getEvents(cursor: number): Promise<EventsPage> {
+      polls.push(cursor);
+      const failure = failures.shift();
+      if (failure) throw failure;
+      options.onPoll?.(cursor);
+      return { events: [], next_cursor: cursor };
+    },
+    async listConversations() {
+      listings += 1;
+      return { conversations: [{ id: "cnv_a", last_sequence: 12 }] };
+    },
+    async listMessages(conversationId: string) {
+      historyReads.push(conversationId);
+      return {
+        messages: [
+          {
+            id: "msg_head",
+            conversation_id: conversationId,
+            sequence: 12,
+            sender: { kind: "user" as const, id: OWNER },
+            parts: [{ type: "text", text: "still here" }],
+            fallback_text: "still here",
+            created_at: "2026-08-04T00:00:00.000Z",
+          },
+        ],
+      };
+    },
+    async setTyping() {},
+    async postMessage() {
+      throw new Error("a cursor fault must not post anything");
+    },
+  };
+  return {
+    client: client as unknown as RelayClient,
+    polls,
+    historyReads,
+    listings: () => listings,
+  };
+}
+
+function cursorFaultLoop(
+  home: string,
+  client: RelayClient,
+  lines: string[],
+  state = new StateStore(home),
+) {
+  return new ReceiveLoop(
+    client,
+    state,
+    fakeEngine().engine,
+    new PermissionBroker(client, new ApprovalStore(home), 60_000),
+    { ownerUserId: OWNER, debounceMs: 10, cwd: "/tmp", log: (line) => lines.push(line) },
+  );
+}
+
+test("an expired cursor reconciles history and stops instead of re-polling a dead cursor", async () => {
+  const home = tempHome();
+  const state = new StateStore(home);
+  state.current.cursor = 42;
+  state.current.owner_conversation_id = "cnv_owner";
+  state.persist();
+  const { client, polls, historyReads } = cursorFaultClient({
+    failures: [
+      new RelayApiError(410, "cursor_expired", "GET /v1/events → 410: cursor is older than the retained log"),
+    ],
+  });
+  const lines: string[] = [];
+  const loop = cursorFaultLoop(home, client, lines, state);
+
+  await assert.rejects(loop.run(), (error: any) => error.status === 410 && error.code === "cursor_expired");
+
+  assert.equal(polls.length, 1, "the expired cursor is polled once, never in a retry loop");
+  assert.ok(historyReads.includes("cnv_owner"), "the owner conversation is reconciled from history");
+  assert.ok(historyReads.includes("cnv_a"), "conversations only Relay knows about are reconciled too");
+  const gapLines = lines.filter((line) => line.includes("cursor_expired"));
+  assert.equal(gapLines.length, 1, "the gap is reported on exactly one line");
+  assert.match(gapLines[0]!, /cursor 42/);
+  assert.match(gapLines[0]!, /unanswered and is unrecoverable/);
+  assert.match(gapLines[0]!, /head msg_head seq 12/);
+  assert.equal(diskState(home).cursor, 42, "an expired cursor is never reset to zero");
+  loop.stop();
+});
+
+test("an undelivered cursor resumes from Relay's highest delivered cursor", async () => {
+  const home = tempHome();
+  const state = new StateStore(home);
+  state.current.cursor = 90;
+  state.persist();
+  let stop = () => {};
+  const { client, polls, historyReads } = cursorFaultClient({
+    failures: [
+      new RelayApiError(
+        422,
+        "invalid_request",
+        "GET /v1/events → 422: cursor 90 has not been delivered by Relay",
+        { field: "cursor", received: 90, highest_delivered_cursor: 12 },
+      ),
+    ],
+    onPoll: () => stop(),
+  });
+  const lines: string[] = [];
+  const loop = cursorFaultLoop(home, client, lines, state);
+  stop = () => loop.stop();
+
+  await loop.run();
+
+  assert.deepEqual(polls, [90, 12], "polling resumes from the ledger position Relay reported");
+  assert.equal(diskState(home).cursor, 12, "the recovered cursor is durable before the next poll");
+  assert.ok(historyReads.includes("cnv_a"), "history is reconciled before the cursor moves");
+  const recoveryLines = lines.filter((line) => line.includes("was never delivered by Relay"));
+  assert.equal(recoveryLines.length, 1);
+  assert.match(recoveryLines[0]!, /resumed from Relay's highest delivered cursor 12/);
+});
+
+test("a cursor fault never raises the cursor past what this bridge has read", async () => {
+  assert.equal(undeliveredCursorTarget({ status: 422, details: { highest_delivered_cursor: 12 } }, 90), 12);
+  assert.equal(undeliveredCursorTarget({ status: 422, details: { latest_sequence: 5 } }, 9), 5);
+  assert.equal(
+    undeliveredCursorTarget({ status: 422, details: { highest_delivered_cursor: 99 } }, 9),
+    undefined,
+    "a target above the current cursor would acknowledge unread events",
+  );
+  assert.equal(undeliveredCursorTarget({ status: 422, details: { field: "timeout" } }, 9), undefined);
+  assert.equal(undeliveredCursorTarget({ status: 410, details: {} }, 9), undefined);
 });

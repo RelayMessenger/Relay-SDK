@@ -11,9 +11,13 @@
  *  - Debounce: rapid messages in one conversation coalesce for ~800 ms into a
  *    single engine turn.
  *  - Supervisor: poll/turn failures restart with exponential backoff + jitter.
+ *  - Cursor faults: Relay rejects a cursor it never delivered (422) and one
+ *    that fell behind the seven-day event retention (410 cursor_expired).
+ *    Neither is retryable on the same cursor, so both reconcile from
+ *    conversation history first and then resume or stop, never re-poll blind.
  */
 import { createHash } from "node:crypto";
-import type { RelayClient } from "./api.js";
+import { RelayApiError, type RelayClient } from "./api.js";
 import type { BridgeState, RelayEvent, RelayMessage, StateStore } from "./store.js";
 import type { EngineAdapter, PermissionAsk, PermissionDecision } from "./engine/types.js";
 import { PermissionBroker } from "./permissions.js";
@@ -55,6 +59,33 @@ export function batchForTurn(queue: RelayEvent[]): RelayEvent[] {
   const invocationId = invocationIdForEvent(queue[0]);
   if (!invocationId) return [...queue];
   return queue.filter((event) => invocationIdForEvent(event) === invocationId);
+}
+
+/** Conversations read (and named in the recovery log line) after a cursor fault. */
+const CURSOR_RECOVERY_CONVERSATIONS = 25;
+
+/** What the supervisor does with a cursor fault after the recovery ran. */
+type CursorFaultOutcome = "resumed" | "terminal" | "unhandled";
+
+/**
+ * Relay's undelivered-cursor fault names its own recovery target in
+ * `error.details`: `highest_delivered_cursor` for a cursor the ledger never
+ * handed out, `latest_sequence` for one past the agent's newest event. A
+ * recovery only ever lowers the cursor. Raising it would acknowledge, and let
+ * the retention sweep delete, events this bridge has never read.
+ */
+export function undeliveredCursorTarget(
+  error: { status?: number; details?: Record<string, unknown> },
+  cursor: number,
+): number | undefined {
+  if (error.status !== 422) return undefined;
+  for (const key of ["highest_delivered_cursor", "latest_sequence"]) {
+    const value = error.details?.[key];
+    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value < cursor) {
+      return value;
+    }
+  }
+  return undefined;
 }
 
 export function promptTextFromMessages(messages: RelayMessage[]): string {
@@ -119,6 +150,84 @@ export class ReceiveLoop {
     this.state.persist();
     for (const conversationId of touched) this.scheduleFlush(conversationId);
     return accepted;
+  }
+
+  /**
+   * Read the canonical record after a cursor fault. Conversation history is
+   * Relay's documented recovery path: the event log can no longer say what
+   * moved, so the bridge names the head of every conversation it can still
+   * see. Nothing is replayed into the engine and nothing is invented for the
+   * events Relay deleted.
+   */
+  private async reconcileHistory(): Promise<string> {
+    const conversationIds = new Set<string>(Object.keys(this.state.current.pending_events));
+    const owner = this.state.current.owner_conversation_id;
+    if (owner) conversationIds.add(owner);
+    try {
+      const listed = await this.client.listConversations(CURSOR_RECOVERY_CONVERSATIONS);
+      for (const conversation of listed.conversations ?? []) {
+        if (conversation?.id) conversationIds.add(conversation.id);
+      }
+    } catch (error) {
+      this.log(`conversation listing failed during cursor recovery: ${error}`);
+    }
+    const heads: string[] = [];
+    const readable = [...conversationIds].slice(0, CURSOR_RECOVERY_CONVERSATIONS);
+    for (const conversationId of readable) {
+      try {
+        const { messages } = await this.client.listMessages(conversationId, 1);
+        const newest = messages?.[0];
+        heads.push(
+          newest
+            ? `${conversationId} head ${newest.id} seq ${newest.sequence}` +
+              `${newest.created_at ? ` at ${newest.created_at}` : ""}`
+            : `${conversationId} empty`,
+        );
+      } catch (error) {
+        heads.push(`${conversationId} unreadable (${error instanceof Error ? error.message : error})`);
+      }
+    }
+    if (conversationIds.size > readable.length) {
+      heads.push(`${conversationIds.size - readable.length} further conversations not read`);
+    }
+    return heads.length > 0 ? heads.join("; ") : "no conversations were visible to reconcile";
+  }
+
+  /**
+   * Apply Relay's cursor-fault contract. Both faults are permanent for the
+   * cursor that produced them, so neither may fall through to the generic
+   * retry: an undelivered cursor resumes from the ledger position Relay
+   * reports, and an expired cursor stops the loop with one line naming the
+   * gap it cannot recover.
+   */
+  private async recoverFromCursorFault(error: RelayApiError): Promise<CursorFaultOutcome> {
+    const cursor = this.state.current.cursor;
+    const target = undeliveredCursorTarget(error, cursor);
+    if (target !== undefined) {
+      const history = await this.reconcileHistory();
+      this.state.current.cursor = target;
+      this.state.persist();
+      this.log(
+        `poll cursor ${cursor} was never delivered by Relay (422 ${error.code ?? "invalid_request"}); ` +
+          `reconciled conversation history and resumed from Relay's highest delivered cursor ${target}. ` +
+          `Events after ${target} are redelivered and deduplicated by event_id, so nothing is skipped. ` +
+          `History head: ${history}`,
+      );
+      return "resumed";
+    }
+    if (error.status === 410 && error.code === "cursor_expired") {
+      const history = await this.reconcileHistory();
+      this.log(
+        `fatal: Relay expired this bridge's poll cursor ${cursor} (410 cursor_expired). Relay keeps the event ` +
+          `log for seven days, so events recorded after that cursor were deleted before this bridge read them. ` +
+          `They cannot be replayed, and any message they carried stays unanswered and is unrecoverable from the ` +
+          `event log; conversation history below is the only record of it. History head: ${history}. Polling ` +
+          `stops here: the consumer ledger is scoped to the agent, so restarting or re-pairing does not clear ` +
+          `it and Relay has to reset this agent's event consumer.`,
+      );
+      return "terminal";
+    }
+    return "unhandled";
   }
 
   /** Returns the conversation id when the event was enqueued for the engine. */
@@ -450,6 +559,14 @@ export class ReceiveLoop {
         await this.pollOnce();
         failures = 0;
       } catch (error: any) {
+        if (error instanceof RelayApiError && (error.status === 410 || error.status === 422)) {
+          const outcome = await this.recoverFromCursorFault(error);
+          if (outcome === "resumed") {
+            failures = 0;
+            continue;
+          }
+          if (outcome === "terminal") throw error;
+        }
         if (error?.status === 409) {
           // Another consumer (webhook or second long-poll) owns this token.
           this.log(`fatal: ${error.message}`);
