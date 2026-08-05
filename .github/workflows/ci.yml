@@ -25,7 +25,17 @@ jobs:
         node: [22.22.3, 24.15.0, 25.9.0]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      # Toolchain downloads for versions not yet in the runner manifest fail
+      # transiently; a second attempt costs seconds and keeps the aggregate
+      # gate meaningful instead of reporting a fake validate failure.
+      - id: node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        continue-on-error: true
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - if: steps.node.outcome == 'failure'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node }}
           cache: npm
