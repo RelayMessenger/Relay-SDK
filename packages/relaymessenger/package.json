@@ -34,7 +34,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.64.0",
-    "@agentclientprotocol/codex-acp": "1.1.7",
+    "@agentclientprotocol/codex-acp": "1.1.8",
     "@agentclientprotocol/sdk": "^1.2.1",
     "cross-spawn": "7.0.6",
     "qrcode-terminal": "^0.12.0",
