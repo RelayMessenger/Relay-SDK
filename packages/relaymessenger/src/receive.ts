@@ -197,8 +197,9 @@ export class ReceiveLoop {
    * Apply Relay's cursor-fault contract. Both faults are permanent for the
    * cursor that produced them, so neither may fall through to the generic
    * retry: an undelivered cursor resumes from the ledger position Relay
-   * reports, and an expired cursor stops the loop with one line naming the
-   * gap it cannot recover.
+   * reports. For an expired cursor, the bridge first reads canonical history,
+   * then explicitly confirms that reconciliation so Relay can advance only
+   * across the proven retention gap.
    */
   private async recoverFromCursorFault(error: RelayApiError): Promise<CursorFaultOutcome> {
     const cursor = this.state.current.cursor;
@@ -217,13 +218,45 @@ export class ReceiveLoop {
     }
     if (error.status === 410 && error.code === "cursor_expired") {
       const history = await this.reconcileHistory();
+      const highestDelivered = error.details?.highest_delivered_cursor;
+      const advertisedResume = error.details?.resume_cursor;
+      const reconciliationRequired = error.details?.reconciliation_required;
+      if (
+        reconciliationRequired === true
+        && typeof highestDelivered === "number"
+        && Number.isSafeInteger(highestDelivered)
+        && highestDelivered >= 0
+        && highestDelivered <= cursor
+      ) {
+        const reconciled = await this.client.reconcileEvents(highestDelivered);
+        if (
+          reconciled.reconciled !== true
+          || !Number.isSafeInteger(reconciled.resume_cursor)
+          || reconciled.resume_cursor < 0
+          || (
+            typeof advertisedResume === "number"
+            && reconciled.resume_cursor !== advertisedResume
+          )
+        ) {
+          throw new Error(
+            `Relay returned an invalid cursor reconciliation response for expired cursor ${cursor}`,
+          );
+        }
+        this.state.current.cursor = reconciled.resume_cursor;
+        this.state.persist();
+        this.log(
+          `Relay expired poll cursor ${cursor} (410 cursor_expired); reconciled canonical conversation ` +
+            `history, confirmed the retention gap, and resumed from ${reconciled.resume_cursor}. ` +
+            `Deleted events cannot be replayed, but polling is live again. History head: ${history}`,
+        );
+        return "resumed";
+      }
       this.log(
         `fatal: Relay expired this bridge's poll cursor ${cursor} (410 cursor_expired). Relay keeps the event ` +
           `log for seven days, so events recorded after that cursor were deleted before this bridge read them. ` +
           `They cannot be replayed, and any message they carried stays unanswered and is unrecoverable from the ` +
           `event log; conversation history below is the only record of it. History head: ${history}. Polling ` +
-          `stops here: the consumer ledger is scoped to the agent, so restarting or re-pairing does not clear ` +
-          `it and Relay has to reset this agent's event consumer.`,
+          `stops because this server did not advertise the explicit reconciliation contract.`,
       );
       return "terminal";
     }

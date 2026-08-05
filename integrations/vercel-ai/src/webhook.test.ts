@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createRelay } from "./index.js";
-import type { MessageReceivedEvent } from "./types.js";
+import type { MessageReceivedEvent, RelayOutgoingPart } from "./types.js";
 
 const SECRET_BYTES = Buffer.from("another-test-secret");
 const SECRET = `whsec_${SECRET_BYTES.toString("base64")}`;
@@ -85,7 +85,7 @@ describe("createWebhookHandler", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://api.example.test/v1/messages");
     const headers = init.headers as Record<string, string>;
-    expect(headers["Idempotency-Key"]).toBe("evt_01TEST:0");
+    expect(headers["Idempotency-Key"]).toMatch(/^evt_01TEST:0:[0-9a-f]{32}$/);
     expect(JSON.parse(init.body as string)).toMatchObject({
       conversation_id: "cnv_01TEST",
       parts: [{ type: "text", text: "hi back" }],
@@ -102,7 +102,46 @@ describe("createWebhookHandler", () => {
     const keys = fetchMock.mock.calls.map(
       ([, init]) => (init!.headers as Record<string, string>)["Idempotency-Key"],
     );
-    expect(keys).toEqual(["evt_01TEST:0", "evt_01TEST:1"]);
+    expect(keys[0]).toMatch(/^evt_01TEST:0:[0-9a-f]{32}$/);
+    expect(keys[1]).toMatch(/^evt_01TEST:1:[0-9a-f]{32}$/);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it("repeats the key for identical content and changes it when the reply changes", async () => {
+    const texts = ["first answer", "first answer", "second answer"];
+    const keys: string[] = [];
+    for (const text of texts) {
+      const { relay, fetchMock } = relayWithMockFetch();
+      const handler = relay.webhook(async ({ reply }) => {
+        await reply.text(text);
+      });
+      await handler(signedRequest(JSON.stringify(envelope())));
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      keys.push((init.headers as Record<string, string>)["Idempotency-Key"]);
+    }
+    // A redelivery that reproduces the reply replays the committed message.
+    expect(keys[0]).toBe(keys[1]);
+    // A redelivery whose model wrote something else sends under a new key
+    // instead of conflicting with the first request under the old one.
+    expect(keys[2]).not.toBe(keys[0]);
+  });
+
+  it("keeps the reply key stable when equivalent part objects use another key order", async () => {
+    const parts: RelayOutgoingPart[] = [
+      { type: "data", data: { z: 2, a: 1 } },
+      { data: { a: 1, z: 2 }, type: "data" },
+    ];
+    const keys: string[] = [];
+    for (const part of parts) {
+      const { relay, fetchMock } = relayWithMockFetch();
+      const handler = relay.webhook(async ({ reply }) => {
+        await reply.parts([part]);
+      });
+      await handler(signedRequest(JSON.stringify(envelope())));
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      keys.push((init.headers as Record<string, string>)["Idempotency-Key"]);
+    }
+    expect(keys[0]).toBe(keys[1]);
   });
 
   it("threads invocation_id from group deliveries into replies", async () => {
@@ -207,7 +246,7 @@ describe("createWebhookHandler", () => {
     expect(attempts).toBe(2);
   });
 
-  it("routes background waitUntil failures to onError without recording dedupe", async () => {
+  it("fails with 500 when waitUntil is provided so Relay still redelivers", async () => {
     const { relay } = relayWithMockFetch();
     const onError = vi.fn();
     let attempts = 0;
@@ -220,30 +259,26 @@ describe("createWebhookHandler", () => {
     const first = await handler(signedRequest(body, "whmsg_1"), {
       waitUntil: (p) => waited.push(p),
     });
-    expect(first.status).toBe(202);
-    await waited[0];
+    expect(first.status).toBe(500);
     expect(onError).toHaveBeenCalledTimes(1);
     const second = await handler(signedRequest(body, "whmsg_2"));
     expect(second.status).toBe(200);
     expect(attempts).toBe(2);
   });
 
-  it("returns 202 immediately when waitUntil is provided", async () => {
+  it("acknowledges only after the handler finishes, even with waitUntil", async () => {
     const { relay } = relayWithMockFetch();
-    let resolveHandler!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      resolveHandler = resolve;
-    });
+    let finished = false;
     const handler = relay.webhook(async () => {
-      await gate;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      finished = true;
     });
     const waited: Promise<unknown>[] = [];
     const response = await handler(signedRequest(JSON.stringify(envelope())), {
       waitUntil: (p) => waited.push(p),
     });
-    expect(response.status).toBe(202);
-    expect(waited).toHaveLength(1);
-    resolveHandler();
-    await waited[0];
+    expect(response.status).toBe(200);
+    expect(finished).toBe(true);
+    expect(waited).toHaveLength(0);
   });
 });

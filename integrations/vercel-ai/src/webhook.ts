@@ -18,8 +18,9 @@ export interface WebhookContext {
   client: RelayClient;
   /**
    * Reply helpers bound to the event's conversation and invocation. Each call
-   * derives a deterministic Idempotency-Key from the event id and call order,
-   * so a redelivered webhook replays instead of double-posting.
+   * derives a deterministic Idempotency-Key from the event id, the call order,
+   * and the content being sent, so a redelivered webhook that produces the
+   * same reply replays instead of double-posting.
    */
   reply: {
     text(text: string): Promise<SendResult>;
@@ -36,7 +37,7 @@ export interface WebhookOptions {
   client: RelayClient;
   /** message.received handler; other event types resolve 200 without dispatch. */
   onMessage: WebhookHandler;
-  /** Background (`waitUntil`) and awaited handler failures land here. */
+  /** Handler failures land here; the response is still 500 so Relay retries. */
   onError?: (error: unknown, event?: RelayEventEnvelope) => void;
   /** Clock tolerance for signature verification, seconds. */
   toleranceSeconds?: number;
@@ -66,6 +67,48 @@ class DedupeWindow {
       if (oldest !== undefined) this.seen.delete(oldest);
     }
   }
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  const withToJson = value as { toJSON?: () => unknown };
+  if (typeof withToJson.toJSON === "function") {
+    return canonicalJson(withToJson.toJSON());
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  return `{${entries.map(([key, entry]) =>
+    `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+}
+
+/**
+ * Idempotency key for one reply: the event, its position in the handler, and a
+ * digest of what is being sent. The content term is what keeps a redelivery
+ * safe. Keyed on position alone, a handler whose model wrote different words
+ * the second time reused the first key with a different body, which Relay
+ * answers with 409 idempotency_conflict, so the event could never complete.
+ */
+async function replyKey(
+  eventId: string,
+  ordinal: number,
+  content: unknown,
+): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonicalJson(content)),
+  );
+  const hex = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  )
+    .join("")
+    .slice(0, 32);
+  return `${eventId.slice(0, 180)}:${ordinal}:${hex}`;
 }
 
 function json(status: number, body: Record<string, unknown>): Response {
@@ -136,48 +179,50 @@ export function createWebhookHandler(options: WebhookOptions) {
     const invocationId = event.data.invocation_id;
     const conversationId = event.data.message.conversation_id;
     let sendSequence = 0;
-    const nextKey = () => `${event.event_id}:${sendSequence++}`;
     const webhookContext: WebhookContext = {
       event,
       message: event.data.message,
       invocationId,
       client: options.client,
       reply: {
-        text: (text) =>
+        text: async (text) =>
           options.client.sendText({
             conversationId,
             text,
             invocationId,
-            idempotencyKey: nextKey(),
+            idempotencyKey: await replyKey(event.event_id, sendSequence++, [
+              { type: "text", text },
+            ]),
           }),
-        parts: (parts) =>
+        parts: async (parts) =>
           options.client.send({
             conversationId,
             parts,
             invocationId,
-            idempotencyKey: nextKey(),
+            idempotencyKey: await replyKey(event.event_id, sendSequence++, parts),
           }),
+        // A stream has no content to digest before it is sent, so this key
+        // stays positional. Relay commits one message per stream, and a
+        // redelivered stream whose output diverges is the one case that still
+        // conflicts.
         stream: (source) =>
           options.client.stream({
             conversationId,
             stream: source,
             invocationId,
-            idempotencyKey: nextKey(),
+            idempotencyKey: `${event.event_id.slice(0, 180)}:${sendSequence++}:stream`,
           }),
       },
       typing: (started = true, label) =>
         options.client.typing({ conversationId, started, label, invocationId }),
     };
 
-    if (context?.waitUntil) {
-      context.waitUntil(
-        Promise.resolve(options.onMessage(webhookContext)).then(
-          () => dedupe.record(envelope.event_id),
-          (error) => options.onError?.(error, envelope),
-        ),
-      );
-      return json(202, { accepted: true });
-    }
+    // `context` is accepted for call-site compatibility with Cloudflare and
+    // Vercel runtimes, but the handler is never deferred past the response.
+    // Acknowledging first turned every handler failure into a lost event:
+    // Relay redelivers on 5xx only, so a throw after a 202 was reported to
+    // onError and then dropped, against this module's own contract.
+    void context;
 
     try {
       await options.onMessage(webhookContext);

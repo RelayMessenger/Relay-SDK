@@ -78,6 +78,11 @@ export interface EventsPage {
   next_cursor: number;
 }
 
+export interface EventCursorReconciliation {
+  reconciled: true;
+  resume_cursor: number;
+}
+
 /** One row of GET /v1/conversations (AgentConversation in the OpenAPI contract). */
 export interface RelayConversation {
   id: string;
@@ -181,6 +186,13 @@ export class RelayClient {
   getEvents(cursor: number, timeoutS = 25, limit = 100): Promise<EventsPage> {
     const qs = `cursor=${cursor}&timeout=${timeoutS}&limit=${limit}`;
     return this.request("GET", `/v1/events?${qs}`, { timeoutMs: (timeoutS + 15) * 1000 });
+  }
+
+  reconcileEvents(expiredCursor: number): Promise<EventCursorReconciliation> {
+    return this.request("POST", "/v1/events/reconcile", {
+      body: { expired_cursor: expiredCursor, history_reconciled: true },
+      headers: { "idempotency-key": `event-cursor-reconcile:${expiredCursor}` },
+    });
   }
 
   postMessage(

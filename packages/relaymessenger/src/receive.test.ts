@@ -921,10 +921,12 @@ test("a group turn clears typing before the reply completes the invocation", asy
 function cursorFaultClient(options: {
   failures: RelayApiError[];
   onPoll?: (cursor: number) => void;
+  reconciliation?: { reconciled: true; resume_cursor: number };
 }) {
   const failures = [...options.failures];
   const polls: number[] = [];
   const historyReads: string[] = [];
+  const reconciliations: number[] = [];
   let listings = 0;
   const client = {
     origin: "http://fake",
@@ -955,6 +957,10 @@ function cursorFaultClient(options: {
         ],
       };
     },
+    async reconcileEvents(expiredCursor: number) {
+      reconciliations.push(expiredCursor);
+      return options.reconciliation ?? { reconciled: true as const, resume_cursor: expiredCursor };
+    },
     async setTyping() {},
     async postMessage() {
       throw new Error("a cursor fault must not post anything");
@@ -964,6 +970,7 @@ function cursorFaultClient(options: {
     client: client as unknown as RelayClient,
     polls,
     historyReads,
+    reconciliations,
     listings: () => listings,
   };
 }
@@ -983,13 +990,55 @@ function cursorFaultLoop(
   );
 }
 
-test("an expired cursor reconciles history and stops instead of re-polling a dead cursor", async () => {
+test("an expired cursor reconciles history and resumes through Relay's explicit contract", async () => {
   const home = tempHome();
   const state = new StateStore(home);
   state.current.cursor = 42;
   state.current.owner_conversation_id = "cnv_owner";
   state.persist();
-  const { client, polls, historyReads } = cursorFaultClient({
+  let stop = () => {};
+  const { client, polls, historyReads, reconciliations } = cursorFaultClient({
+    failures: [
+      new RelayApiError(
+        410,
+        "cursor_expired",
+        "GET /v1/events → 410: cursor is older than the retained log",
+        {
+          highest_delivered_cursor: 42,
+          resume_cursor: 45,
+          reconciliation_required: true,
+          reconciliation_endpoint: "/v1/events/reconcile",
+        },
+      ),
+    ],
+    reconciliation: { reconciled: true, resume_cursor: 45 },
+    onPoll: () => stop(),
+  });
+  const lines: string[] = [];
+  const loop = cursorFaultLoop(home, client, lines, state);
+  stop = () => loop.stop();
+
+  await loop.run();
+
+  assert.deepEqual(polls, [42, 45], "the expired cursor resumes only after explicit reconciliation");
+  assert.deepEqual(reconciliations, [42], "the bridge confirms Relay's highest delivered cursor");
+  assert.ok(historyReads.includes("cnv_owner"), "the owner conversation is reconciled from history");
+  assert.ok(historyReads.includes("cnv_a"), "conversations only Relay knows about are reconciled too");
+  const gapLines = lines.filter((line) => line.includes("cursor_expired"));
+  assert.equal(gapLines.length, 1, "the gap is reported on exactly one line");
+  assert.match(gapLines[0]!, /cursor 42/);
+  assert.match(gapLines[0]!, /confirmed the retention gap/);
+  assert.match(gapLines[0]!, /head msg_head seq 12/);
+  assert.equal(diskState(home).cursor, 45, "the server-provided resume cursor is durable");
+  loop.stop();
+});
+
+test("an expired cursor without a reconciliation contract remains terminal", async () => {
+  const home = tempHome();
+  const state = new StateStore(home);
+  state.current.cursor = 42;
+  state.persist();
+  const { client, polls } = cursorFaultClient({
     failures: [
       new RelayApiError(410, "cursor_expired", "GET /v1/events → 410: cursor is older than the retained log"),
     ],
@@ -999,15 +1048,9 @@ test("an expired cursor reconciles history and stops instead of re-polling a dea
 
   await assert.rejects(loop.run(), (error: any) => error.status === 410 && error.code === "cursor_expired");
 
-  assert.equal(polls.length, 1, "the expired cursor is polled once, never in a retry loop");
-  assert.ok(historyReads.includes("cnv_owner"), "the owner conversation is reconciled from history");
-  assert.ok(historyReads.includes("cnv_a"), "conversations only Relay knows about are reconciled too");
-  const gapLines = lines.filter((line) => line.includes("cursor_expired"));
-  assert.equal(gapLines.length, 1, "the gap is reported on exactly one line");
-  assert.match(gapLines[0]!, /cursor 42/);
-  assert.match(gapLines[0]!, /unanswered and is unrecoverable/);
-  assert.match(gapLines[0]!, /head msg_head seq 12/);
-  assert.equal(diskState(home).cursor, 42, "an expired cursor is never reset to zero");
+  assert.deepEqual(polls, [42]);
+  assert.match(lines.find((line) => line.includes("cursor_expired")) ?? "", /did not advertise/);
+  assert.equal(diskState(home).cursor, 42);
   loop.stop();
 });
 
