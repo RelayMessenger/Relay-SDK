@@ -47,13 +47,13 @@ packages. `integrations/vercel-ai` is published separately as
 1. Update the CLI version and root lock metadata together:
 
    ```sh
-   npm version 0.3.2 --workspace @relaymessenger/cli --no-git-tag-version
+   npm version <version> --workspace @relaymessenger/cli --no-git-tag-version
    npm run validate
    npm run pack:check
    ```
 
 2. Merge that exact version change, then create and push an existing-commit
-   tag named `relaymessenger-v0.3.2`. The version in
+   tag named `relaymessenger-v<version>`. The version in
    `packages/relaymessenger/package.json`, the workspace entry in `package-lock.json`,
    and the tag must match exactly.
 3. The tag starts `.github/workflows/release-relaymessenger.yml`. npm trusts that
