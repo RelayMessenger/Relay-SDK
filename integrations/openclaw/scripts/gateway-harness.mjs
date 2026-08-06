@@ -83,8 +83,23 @@ try {
   }
   const installedRequire = createRequire(join(inspection.install.installPath, "package.json"));
   const fsSafeManifest = installedRequire("@openclaw/fs-safe/package.json");
-  if (fsSafeManifest.version !== "0.5.0") {
-    throw new Error(`installed plugin resolved @openclaw/fs-safe ${fsSafeManifest.version}`);
+  // Compare against what THIS package declares, never a literal. The check
+  // exists to prove the packed tarball resolves its own pinned dependency,
+  // and a hardcoded version turns every routine Dependabot bump into a red
+  // Required CI even though nothing is actually broken.
+  const declaredFsSafe = JSON.parse(
+    readFileSync(join(packageRoot, "package.json"), "utf8"),
+  ).dependencies?.["@openclaw/fs-safe"];
+  if (!declaredFsSafe) {
+    throw new Error("the plugin no longer declares @openclaw/fs-safe");
+  }
+  // The pin is exact today. If it is ever loosened to a range, the resolved
+  // version is whatever npm picked and there is nothing to assert.
+  const isExactPin = /^\d+\.\d+\.\d+/.test(declaredFsSafe);
+  if (isExactPin && fsSafeManifest.version !== declaredFsSafe) {
+    throw new Error(
+      `installed plugin resolved @openclaw/fs-safe ${fsSafeManifest.version}, expected the declared ${declaredFsSafe}`,
+    );
   }
 
   const relayPort = await freePort();
