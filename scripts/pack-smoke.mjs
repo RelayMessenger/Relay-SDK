@@ -235,11 +235,23 @@ try {
   const openclawPluginRequire = createRequire(
     join(openclawInspect.install.installPath, "package.json"),
   );
-  assert.equal(
-    openclawPluginRequire("@openclaw/fs-safe/package.json").version,
-    "0.5.0",
-    "managed OpenClaw install did not resolve Relay's declared state dependency",
-  );
+  // Compare against what the plugin declares, never a literal. The check exists
+  // to prove the packed tarball resolves its own pinned dependency, and a
+  // hardcoded version turns every routine Dependabot bump into a red Required
+  // CI even though nothing is actually broken.
+  const declaredFsSafe = JSON.parse(
+    readFileSync(join(repoRoot, "integrations", "openclaw", "package.json"), "utf8"),
+  ).dependencies?.["@openclaw/fs-safe"];
+  assert.ok(declaredFsSafe, "the plugin no longer declares @openclaw/fs-safe");
+  // The pin is exact today. If it is ever loosened to a range, the resolved
+  // version is whatever npm picked and there is nothing to assert.
+  if (/^\d+\.\d+\.\d+/.test(declaredFsSafe)) {
+    assert.equal(
+      openclawPluginRequire("@openclaw/fs-safe/package.json").version,
+      declaredFsSafe,
+      "managed OpenClaw install did not resolve Relay's declared state dependency",
+    );
+  }
   rmSync(join(installed, "openclaw-plugin"), { recursive: true, force: true });
   const afterSourceRemoval = cli("openclaw", ["plugins", "list", "--json"], {
     cwd: installDir,
