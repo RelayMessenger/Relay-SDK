@@ -1,0 +1,23 @@
+{
+  "name": "relay-plugins",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Native Relay plugins, runtime adapters, and runnable agent examples.",
+  "workspaces": ["packages/*", "plugins/*", "adapters/*", "examples/*"],
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "build": "npm run build --if-present --workspaces",
+    "check": "npm run check --if-present --workspaces",
+    "test": "npm run test --if-present --workspaces",
+    "validate": "npm run check && npm run build && npm test",
+    "pack:check": "node harnesses/packed-consumer.mjs",
+    "manifests:check": "node harnesses/validate-manifests.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "tsx": "^4.21.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "license": "MIT"
+}
