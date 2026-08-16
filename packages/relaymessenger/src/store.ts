@@ -138,12 +138,56 @@ export interface RelayEvent {
   data?: { message?: RelayMessage; [key: string]: unknown };
 }
 
+/**
+ * Inline mention of a conversation participant. Offsets are UTF-16 code
+ * units into the part's `text`, which holds the inserted display name with
+ * no "@". Ranges are sorted by `start` and never overlap.
+ */
+export interface RelayMentionRange {
+  start: number;
+  length: number;
+  participant_id: string;
+}
+
+export type RelayTextStyle = "bold" | "italic" | "underline" | "strikethrough" | "monospace";
+
+/**
+ * One formatting run over a text part, offsets in UTF-16 code units like
+ * mentions. An EMPTY `styles` array on the part is meaningful: it marks
+ * structured plain text as opposed to a legacy Markdown body.
+ */
+export interface RelayStyleRange {
+  start: number;
+  length: number;
+  styles: RelayTextStyle[];
+}
+
+/** Stored canonical part as delivered in events and history. */
+export interface RelayPart {
+  type: string;
+  part_index?: number;
+  text?: string;
+  /** Text parts only. */
+  mentions?: RelayMentionRange[];
+  styles?: RelayStyleRange[];
+  url?: string;
+  attachment_id?: string;
+  duration_ms?: number;
+  /** Media parts only: pixel dimensions (always paired) and a blurhash
+   * placeholder (base83) to draw before the bytes download. */
+  width?: number;
+  height?: number;
+  blur_hash?: string;
+  data?: unknown;
+  [key: string]: unknown;
+}
+
 export interface RelayMessage {
   id: string;
   conversation_id: string;
   sequence: number;
   sender: { kind: "user" | "agent"; id: string };
-  parts: Array<{ type: string; text?: string; [key: string]: unknown }>;
+  parts: RelayPart[];
   fallback_text: string;
   reply_to?: { message_id?: string; part_index?: number } | null;
   created_at?: string;

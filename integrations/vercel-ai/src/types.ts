@@ -18,10 +18,44 @@ export interface RelayMessageSender {
   display_name?: string;
 }
 
+/**
+ * Inline mention of a conversation participant. Offsets are UTF-16 code
+ * units into the part's `text`, which holds the inserted display name with
+ * no "@". Ranges are sorted by `start` and never overlap.
+ */
+export interface RelayMentionRange {
+  start: number;
+  length: number;
+  participant_id: string;
+}
+
+export type RelayTextStyle = "bold" | "italic" | "underline" | "strikethrough" | "monospace";
+
+/**
+ * One formatting run over a text part, offsets in UTF-16 code units like
+ * mentions. An EMPTY `styles` array on the part is meaningful: it marks
+ * structured plain text as opposed to a legacy Markdown body.
+ */
+export interface RelayStyleRange {
+  start: number;
+  length: number;
+  styles: RelayTextStyle[];
+}
+
 /** Outgoing part shapes accepted by `POST /v1/messages`. */
 export type RelayOutgoingPart =
-  | { type: "text"; text: string }
-  | { type: "media"; attachment_id?: string; url?: string }
+  | { type: "text"; text: string; mentions?: RelayMentionRange[]; styles?: RelayStyleRange[] }
+  | {
+      type: "media";
+      attachment_id?: string;
+      url?: string;
+      /** Optional pixel dimensions, always provided together. */
+      width?: number;
+      height?: number;
+      /** Optional blurhash placeholder (base83). Derived by the server for
+       * image attachments when omitted. */
+      blur_hash?: string;
+    }
   | { type: "voice_memo"; attachment_id?: string; url?: string; duration_ms?: number }
   | { type: "link_preview"; url: string }
   | { type: "data"; data: Record<string, unknown> };
@@ -31,9 +65,14 @@ export type RelayPart = {
   type: string;
   part_index?: number;
   text?: string;
+  mentions?: RelayMentionRange[];
+  styles?: RelayStyleRange[];
   url?: string;
   attachment_id?: string;
   duration_ms?: number;
+  width?: number;
+  height?: number;
+  blur_hash?: string;
   data?: Record<string, unknown>;
   [key: string]: unknown;
 };

@@ -21,7 +21,7 @@
  * to the engine as a prompt; abandoned files age out after deadline + grace.
  */
 import { randomInt } from "node:crypto";
-import type { RelayClient } from "./api.js";
+import type { RelayClient, RelayOutgoingPart } from "./api.js";
 import type { ApprovalStore, PendingApproval, RelayMessage } from "./store.js";
 import type { PermissionAsk, PermissionDecision } from "./engine/types.js";
 import { engineDisplayName } from "./engine/catalog.js";
@@ -177,7 +177,7 @@ export interface PermissionCardInput {
 export function buildPermissionCard(input: PermissionCardInput): {
   body: {
     conversation_id: string;
-    parts: Array<Record<string, unknown>>;
+    parts: RelayOutgoingPart[];
   };
   idempotencyKey: string;
 } {
