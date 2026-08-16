@@ -41,11 +41,11 @@
     "smol-toml": "^1.4.2"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "2.1.220",
+    "@anthropic-ai/claude-code": "2.1.226",
     "@types/cross-spawn": "6.0.6",
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.2.0",
     "@types/qrcode-terminal": "^0.12.2",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.11",
     "typescript": "^7.0.2"
   },
   "license": "MIT",
