@@ -7,6 +7,7 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "check": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
     "test": "node -e \"console.log('raw-webhook-agent: needs RELAY_WEBHOOK_SECRET + public URL')\""
   },
   "dependencies": {

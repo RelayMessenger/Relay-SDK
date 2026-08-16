@@ -1,7 +1,7 @@
-# Relay OpenClaw channel (Relay-Plugins home)
+# Relay OpenClaw channel (migration landing zone)
 
 Production OpenClaw channel code currently ships from
-[`relaymessenger/cli` → `integrations/openclaw`](https://github.com/relaymessenger/cli/tree/main/integrations/openclaw)
+[`integrations/openclaw`](../../../integrations/openclaw) in this repo
 and is bundled by `@relaymessenger/cli`.
 
 This package is the **migration landing zone**: it depends on

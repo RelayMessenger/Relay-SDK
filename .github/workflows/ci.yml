@@ -90,6 +90,10 @@ jobs:
       - run: npm run validate:claude-plugin
       - run: npm run gateway:harness
       - run: npm run pack:check
+      # Imported from Relay-Plugins: workspace-manifest invariants plus a
+      # fresh-path consumer import of the built @relaymessenger/core.
+      - run: npm run manifests:check
+      - run: npm run core:consumer-smoke
 
   required:
     name: Required CI

@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 function loadToken() {
   if (process.env.RELAY_AGENT_TOKEN?.trim()) return process.env.RELAY_AGENT_TOKEN.trim();

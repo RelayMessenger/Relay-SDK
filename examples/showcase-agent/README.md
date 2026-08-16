@@ -6,7 +6,7 @@ replies with an idempotent text message, and stops typing.
 ## Setup
 
 ```bash
-# from Relay-Plugins root
+# from the Relay-SDK repo root
 cp examples/showcase-agent/.env.example examples/showcase-agent/.env
 # put your Agent Token in .env or export RELAY_AGENT_TOKEN
 

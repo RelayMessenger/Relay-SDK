@@ -2,8 +2,12 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const root = new URL("..", import.meta.url).pathname;
-const requiredWorkspaces = ["packages/core", "plugins/hermes", "plugins/openclaw"];
+const root = new URL("../..", import.meta.url).pathname;
+const requiredWorkspaces = [
+  "packages/core",
+  "examples/plugins/hermes",
+  "examples/plugins/openclaw",
+];
 
 let failed = 0;
 
@@ -27,7 +31,7 @@ for (const workspace of requiredWorkspaces) {
   }
 }
 
-for (const dir of ["packages", "plugins", "examples"]) {
+for (const dir of ["packages", "examples", "examples/plugins"]) {
   const abs = join(root, dir);
   if (!statSync(abs, { throwIfNoEntry: false })?.isDirectory()) {
     console.error(`missing directory ${dir}/`);

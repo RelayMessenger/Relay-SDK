@@ -28,12 +28,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/relaymessenger/Relay-Plugins.git",
+    "url": "git+https://github.com/relaymessenger/Relay-SDK.git",
     "directory": "packages/core"
   },
   "homepage": "https://docs.relayapp.im",
   "bugs": {
-    "url": "https://github.com/relaymessenger/Relay-Plugins/issues"
+    "url": "https://github.com/relaymessenger/Relay-SDK/issues"
   },
   "keywords": [
     "relay",
