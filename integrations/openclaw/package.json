@@ -37,7 +37,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@openclaw/fs-safe": "0.5.2"
+    "@openclaw/fs-safe": "0.5.5"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
