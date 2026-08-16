@@ -3,7 +3,7 @@
  * Wire shapes follow Relay's public OpenAPI contract at
  * https://docs.relayapp.im/api-reference/openapi.yaml.
  */
-import type { RelayEvent, RelayMessage } from "./store.js";
+import type { RelayEvent, RelayMentionRange, RelayMessage, RelayStyleRange } from "./store.js";
 
 export const PRODUCTION_ORIGIN = "https://api.relayapp.im";
 
@@ -91,9 +91,27 @@ export interface RelayConversation {
   last_message_at?: string | null;
 }
 
+/** Outgoing part shapes accepted by `POST /v1/messages`. */
+export type RelayOutgoingPart =
+  | { type: "text"; text: string; mentions?: RelayMentionRange[]; styles?: RelayStyleRange[] }
+  | {
+      type: "media";
+      attachment_id?: string;
+      url?: string;
+      /** Optional pixel dimensions, always provided together. */
+      width?: number;
+      height?: number;
+      /** Optional blurhash placeholder (base83). Derived by the server for
+       * image attachments when omitted. */
+      blur_hash?: string;
+    }
+  | { type: "voice_memo"; attachment_id?: string; url?: string; duration_ms?: number }
+  | { type: "link_preview"; url: string }
+  | { type: "data"; data: Record<string, unknown> };
+
 export interface PostMessageBody {
   conversation_id: string;
-  parts: Array<Record<string, unknown>>;
+  parts: RelayOutgoingPart[];
   reply_to?: { message_id: string; part_index?: number };
   /**
    * Required in a group: the id Relay supplied on the invocation this message

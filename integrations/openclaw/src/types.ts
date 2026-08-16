@@ -7,10 +7,32 @@ export type RelaySender = {
   id: string;
 };
 
+// Inline mention of a conversation participant. Offsets are UTF-16 code
+// units into the part's text, which holds the inserted display name with
+// no "@". Ranges are sorted by start and never overlap.
+export type RelayMentionRange = {
+  start: number;
+  length: number;
+  participant_id: string;
+};
+
+export type RelayTextStyle = "bold" | "italic" | "underline" | "strikethrough" | "monospace";
+
+// One formatting run over a text part, offsets in UTF-16 code units like
+// mentions. An EMPTY styles array on the part is meaningful: it marks
+// structured plain text as opposed to a legacy Markdown body.
+export type RelayStyleRange = {
+  start: number;
+  length: number;
+  styles: RelayTextStyle[];
+};
+
 export type RelayTextPart = {
   part_index: number;
   type: "text";
   text: string;
+  mentions?: RelayMentionRange[];
+  styles?: RelayStyleRange[];
 };
 
 export type RelayMediaPart = {
@@ -18,6 +40,11 @@ export type RelayMediaPart = {
   type: "media";
   url: string;
   attachment_id?: string;
+  // Pixel dimensions (always paired) and a blurhash placeholder (base83)
+  // to draw before the bytes download.
+  width?: number;
+  height?: number;
+  blur_hash?: string;
 };
 
 export type RelayVoiceMemoPart = {
