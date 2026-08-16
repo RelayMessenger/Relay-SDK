@@ -9,7 +9,8 @@
     "build": "npm run build --if-present --workspaces",
     "check": "npm run check --if-present --workspaces",
     "test": "npm run test --if-present --workspaces",
-    "validate": "npm run check && npm run build && npm test",
+    "validate": "npm run build -w @relaymessenger/core && npm run check && npm run build && npm test",
+    "e2e": "node harnesses/e2e-production.mjs",
     "pack:check": "node harnesses/packed-consumer.mjs",
     "manifests:check": "node harnesses/validate-manifests.mjs"
   },
