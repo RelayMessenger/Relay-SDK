@@ -1,0 +1,20 @@
+{
+  "name": "@relaymessenger/showcase-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Forkable Relay agent: long-poll receive, responding, idempotent text reply.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "node -e \"console.log('showcase-agent: run npm start against a live Agent Token')\""
+  },
+  "dependencies": {
+    "@relaymessenger/core": "*"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "license": "MIT"
+}
