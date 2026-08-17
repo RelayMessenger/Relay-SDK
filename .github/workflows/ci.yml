@@ -99,7 +99,7 @@ jobs:
     name: Required CI
     if: ${{ always() }}
     needs: [validate, minimum-node, package-smoke]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Require every pull-request gate
         env:
