@@ -111,12 +111,20 @@ export interface StreamSendResult extends SendResult {
 }
 
 /**
- * Anything that can yield a Vercel AI SDK UI message stream: the SSE
- * `Response` from `toUIMessageStreamResponse()`, its `ReadableStream` body,
- * or a result object exposing `toUIMessageStreamResponse()` directly
- * (e.g. `streamText(...)`).
+ * Anything that can yield a Vercel AI SDK UI message stream:
+ *
+ * - a `ReadableStream` of UI message chunk OBJECTS, which is what the
+ *   standalone `toUIMessageStream({ stream: result.stream })` helper returns
+ *   on ai@7. The client SSE-encodes each chunk and appends the terminator,
+ *   matching what `createUIMessageStreamResponse` writes on the wire.
+ * - a `ReadableStream<Uint8Array>` already carrying SSE bytes, e.g. the body
+ *   of an SSE `Response`. Forwarded untouched.
+ * - an SSE `Response`.
+ * - a result object exposing the DEPRECATED `toUIMessageStreamResponse()`
+ *   (e.g. `streamText(...)` on ai@7). Kept so existing callers keep working.
  */
 export type UIMessageStreamSource =
   | Response
   | ReadableStream<Uint8Array>
+  | ReadableStream<unknown>
   | { toUIMessageStreamResponse(init?: unknown): Response };

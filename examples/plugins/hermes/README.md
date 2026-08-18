@@ -1,8 +1,9 @@
 # Relay channel for Hermes Agent
 
 Persistent Relay messaging for [Hermes Agent](https://hermes-agent.nousresearch.com),
-shaped like Hermes' Photon iMessage channel: no public webhook URL, durable
-long-poll, owner allowlist, idempotent replies.
+shaped like Hermes' Photon iMessage channel in that it needs no public URL;
+Relay reaches that with durable long polling instead of gRPC. Owner allowlist,
+idempotent replies.
 
 ## Quick start
 

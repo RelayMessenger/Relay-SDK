@@ -8,7 +8,7 @@ is a thin, dependency-free binding of it.
 
 ```ts
 import { createRelay } from "@relaymessenger/vercel-ai";
-import { streamText } from "ai";
+import { streamText, toUIMessageStream } from "ai";
 
 const relay = createRelay({
   token: process.env.RELAY_AGENT_TOKEN!,
@@ -22,9 +22,18 @@ export const POST = relay.webhook(async ({ message, typing, reply }) => {
     model: "anthropic/claude-sonnet-5",
     prompt: message.parts.find((p) => p.type === "text")?.text ?? "",
   });
-  await reply.stream(result.toUIMessageStreamResponse());
+  // sendReasoning defaults to true on the standalone helper. Relay commits
+  // one canonical message, so reasoning chunks only inflate the payload.
+  await reply.stream(
+    toUIMessageStream({ stream: result.stream, sendReasoning: false }),
+  );
 });
 ```
+
+Still on an older AI SDK? Passing `result` or
+`result.toUIMessageStreamResponse()` straight to `reply.stream` keeps working.
+`toUIMessageStreamResponse` is deprecated on ai@7 and goes away in the next
+major, so prefer the form above.
 
 What the plugin enforces for you, per the public contract
 (<https://docs.relayapp.im>):

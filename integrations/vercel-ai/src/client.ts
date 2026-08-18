@@ -22,7 +22,11 @@ export interface SendOptions {
 
 export interface StreamOptions {
   conversationId: string;
-  /** SSE stream in Vercel AI SDK UI message stream v1 format. */
+  /**
+   * A Vercel AI SDK UI message stream: chunk objects from
+   * `toUIMessageStream(...)`, already-encoded SSE bytes, an SSE `Response`,
+   * or a legacy `toUIMessageStreamResponse()` result.
+   */
   stream: UIMessageStreamSource;
   idempotencyKey: string;
   invocationId?: string;
@@ -49,8 +53,50 @@ export class RelayApiError extends Error {
 
 const DEFAULT_BASE_URL = "https://api.relayapp.im";
 
+/**
+ * SSE-encode a stream of UI message chunk objects, byte-for-byte what ai@7's
+ * `createUIMessageStreamResponse` writes: `data: <json>\n\n` per chunk and a
+ * final `data: [DONE]\n\n` (ai 7.0.66 dist/index.js:6459-6471, 6485-6503).
+ *
+ * The same stream type carries both already-encoded SSE bytes and chunk
+ * objects, so the mode is decided from the FIRST chunk and then fixed for the
+ * life of the stream: an `ArrayBuffer` view means bytes, anything else means
+ * objects. A byte stream is forwarded untouched and gets no terminator
+ * appended, because whoever encoded it already wrote one.
+ */
+function encodeUIMessageStream(
+  source: ReadableStream<unknown>,
+): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  const encoder = new TextEncoder();
+  let bytesMode: boolean | undefined;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        // Only the object path owns the terminator. An empty stream is
+        // ambiguous and stays untouched.
+        if (bytesMode === false) {
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        }
+        controller.close();
+        return;
+      }
+      bytesMode ??= ArrayBuffer.isView(value);
+      controller.enqueue(
+        bytesMode
+          ? (value as Uint8Array)
+          : encoder.encode(`data: ${JSON.stringify(value)}\n\n`),
+      );
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+}
+
 function streamBody(source: UIMessageStreamSource): ReadableStream<Uint8Array> {
-  if (source instanceof ReadableStream) return source;
+  if (source instanceof ReadableStream) return encodeUIMessageStream(source);
   const response =
     source instanceof Response ? source : source.toUIMessageStreamResponse();
   if (!response.body) {

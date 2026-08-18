@@ -1,6 +1,7 @@
 {
   "name": "@relaymessenger/hermes",
   "version": "0.1.0",
+  "private": true,
   "description": "Relay messaging channel for Hermes Agent: durable long-poll, owner allowlist, idempotent replies.",
   "type": "module",
   "main": "./dist/index.js",
