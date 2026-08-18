@@ -40,7 +40,7 @@ uses long polling so Hermes can run on a laptop or server without a tunnel.
 
 | Piece | State |
 | --- | --- |
-| Long-poll transport via `@relaymessenger/core` | Shipped in this package |
+| Long-poll transport via `@relaymessenger/sdk` | Shipped in this package |
 | Owner allowlist default | Shipped |
 | Idempotent text replies | Shipped |
 | First-party Hermes gateway wizard (`hermes relay setup`) | Next. Open an issue if you want it prioritized |

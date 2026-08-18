@@ -5,7 +5,7 @@ import {
   createRelayClient,
   MemoryDedupe,
   runPollLoop,
-} from "@relaymessenger/core";
+} from "@relaymessenger/sdk";
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();

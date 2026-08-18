@@ -27,7 +27,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@relaymessenger/core": "*"
+    "@relaymessenger/sdk": "*"
   },
   "engines": {
     "node": ">=22.18"

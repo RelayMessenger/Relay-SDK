@@ -2,11 +2,11 @@
 
 - This repo is Relay-SDK, the single repo for building on Relay: the
   `@relaymessenger/cli` npm tool (the package name never changes), the runtime
-  integrations it bundles, the `@relaymessenger/core` contract and transport
-  library in `packages/core`, and the forkable agents in `examples/`.
-- `@relaymessenger/core` is not published yet. Its types will become generated
-  from the Relay-Server schemas; do not hand-grow the contract surface or add
-  a release workflow for it without an owner ask.
+  integrations it bundles, the `@relaymessenger/sdk` contract and transport
+  library in `packages/sdk`, and the forkable agents in `examples/`.
+- `@relaymessenger/sdk` is not published yet. Its release workflow exists and
+  fires on `sdk-vX.Y.Z` tags. Its types will become generated from the
+  Relay-Server schemas; do not hand-grow the contract surface.
 - Supported integrations are exactly Claude Code, Codex, and Hermes over ACP,
   the OpenClaw channel plugin, and the Vercel AI SDK webhook plugin
   (`integrations/vercel-ai`, published as `@relaymessenger/vercel-ai`). Load `.agents/skills/acp-adapter-authoring/SKILL.md`

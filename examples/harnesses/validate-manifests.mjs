@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 const root = new URL("../..", import.meta.url).pathname;
 const requiredWorkspaces = [
-  "packages/core",
+  "packages/sdk",
   "examples/plugins/hermes",
   "examples/plugins/openclaw",
 ];

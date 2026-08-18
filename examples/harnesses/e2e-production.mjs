@@ -30,14 +30,14 @@ if (!token) {
   process.exit(1);
 }
 
-const build = spawnSync("npm", ["run", "build", "-w", "@relaymessenger/core"], {
+const build = spawnSync("npm", ["run", "build", "-w", "@relaymessenger/sdk"], {
   cwd: root,
   stdio: "inherit",
 });
 if (build.status !== 0) process.exit(build.status ?? 1);
 
 const { createRelayClient } = await import(
-  join(root, "packages/core/dist/index.js")
+  join(root, "packages/sdk/dist/index.js")
 );
 
 const client = createRelayClient({ token });

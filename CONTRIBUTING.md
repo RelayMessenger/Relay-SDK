@@ -33,6 +33,6 @@ Maintainers release from exact version tags through npm trusted publishing.
 Contributors should not create release tags, publish packages, or add registry
 tokens. The Claude Code and OpenClaw integrations are bundled in
 `@relaymessenger/cli`; `@relaymessenger/vercel-ai` has its own release workflow.
-`@relaymessenger/core` and everything under `examples/` are validated in CI but
-not published; core stays unpublished until its types are generated from the
-Relay-Server schemas.
+`@relaymessenger/sdk` has its own release workflow and is not published yet; it
+stays unpublished until its types are generated from the Relay-Server schemas.
+Everything under `examples/` is validated in CI but never published.
