@@ -14,7 +14,7 @@ jobs:
     name: Validate, publish, and verify @relaymessenger/vercel-ai
     # npm trusted publishing accepts GitHub-hosted runners, not third-party
     # runner labels. Keep ordinary CI on Blacksmith; releases use GitHub here.
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     env:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
