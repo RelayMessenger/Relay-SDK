@@ -5,7 +5,7 @@ import {
   replyIdempotencyKey,
   verifyWebhookSignature,
   type MessageReceivedEvent,
-} from "@relaymessenger/core";
+} from "@relaymessenger/sdk";
 
 const token = process.env.RELAY_AGENT_TOKEN;
 const secret = process.env.RELAY_WEBHOOK_SECRET;

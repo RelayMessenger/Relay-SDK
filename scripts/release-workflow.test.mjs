@@ -11,6 +11,10 @@ const releaseWorkflows = [
     path: ".github/workflows/release-vercel-ai.yml",
     tagPattern: '"vercel-ai-v*"',
   },
+  {
+    path: ".github/workflows/release-sdk.yml",
+    tagPattern: '"sdk-v*"',
+  },
 ];
 
 for (const { path, tagPattern } of releaseWorkflows) {
