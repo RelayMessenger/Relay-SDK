@@ -2,15 +2,12 @@
   "id": "relay",
   "name": "Relay",
   "description": "Relay channel plugin. Connects an OpenClaw agent to a Relay contact.",
+  "activation": {
+    "onStartup": false
+  },
   "channels": [
     "relay"
   ],
-  "channelEnvVars": {
-    "relay": [
-      "RELAY_AGENT_TOKEN",
-      "RELAY_BASE_URL"
-    ]
-  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -18,6 +15,8 @@
   },
   "channelConfigs": {
     "relay": {
+      "label": "Relay",
+      "description": "Back a Relay contact with this OpenClaw agent.",
       "schema": {
         "type": "object",
         "additionalProperties": false,

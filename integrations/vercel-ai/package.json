@@ -1,10 +1,10 @@
 {
   "name": "@relaymessenger/vercel-ai",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Relay plugin for the Vercel AI SDK. Receive signed Relay webhooks and stream replies as one canonical message.",
   "homepage": "https://docs.relayapp.im/guides/vercel-ai-sdk",
   "bugs": {
-    "url": "https://github.com/relaymessenger/cli/issues"
+    "url": "https://github.com/relaymessenger/Relay-SDK/issues"
   },
   "license": "MIT",
   "keywords": [
@@ -44,12 +44,13 @@
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "ai": "^7.0.66",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/relaymessenger/cli.git",
+    "url": "git+https://github.com/relaymessenger/Relay-SDK.git",
     "directory": "integrations/vercel-ai"
   }
 }

@@ -7,7 +7,7 @@ import {
   runPollLoop,
   type MessageHandlerContext,
   type RelayClient,
-} from "@relaymessenger/core";
+} from "@relaymessenger/sdk";
 
 export type HermesRelayOptions = {
   token: string;

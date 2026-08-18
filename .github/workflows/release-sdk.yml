@@ -1,9 +1,9 @@
-name: Release @relaymessenger/vercel-ai to npm
+name: Release @relaymessenger/sdk to npm
 
 on:
   push:
     tags:
-      - "vercel-ai-v*"
+      - "sdk-v*"
 
 permissions:
   contents: read
@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   publish:
-    name: Validate, publish, and verify @relaymessenger/vercel-ai
+    name: Validate, publish, and verify @relaymessenger/sdk
     # All jobs run on Blacksmith (9a24a58; ubuntu-latest caused zombie tag
     # runs). Every npm publish so far predates that move, so provenance from a
     # Blacksmith runner is unproven; the next tag release proves or refutes it.
@@ -30,7 +30,7 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - name: Refuse a mismatched version or tag
-        run: node scripts/vercel-ai-release.mjs check-tag "$RELEASE_TAG"
+        run: node scripts/sdk-release.mjs check-tag "$RELEASE_TAG"
       - name: Resolve and require a reviewed source commit
         id: source
         shell: bash
@@ -56,10 +56,10 @@ jobs:
           node --check "$helper"
           printf 'path=%s\n' "$helper" >> "$GITHUB_OUTPUT"
       - run: npm ci
-      - run: npm audit --workspace @relaymessenger/vercel-ai --omit=dev --audit-level=high
-      - run: npm run check --workspace @relaymessenger/vercel-ai
-      - run: npm test --workspace @relaymessenger/vercel-ai
-      - run: npm run build --workspace @relaymessenger/vercel-ai
+      - run: npm audit --workspace @relaymessenger/sdk --omit=dev --audit-level=high
+      - run: npm run check --workspace @relaymessenger/sdk
+      - run: npm test --workspace @relaymessenger/sdk
+      - run: npm run build --workspace @relaymessenger/sdk
       - name: Pack and retain the exact release artifact
         id: artifact
         shell: bash
@@ -67,7 +67,7 @@ jobs:
           set -euo pipefail
           rm -rf .release-tmp
           mkdir -p .release-tmp
-          npm pack --workspace @relaymessenger/vercel-ai --pack-destination .release-tmp
+          npm pack --workspace @relaymessenger/sdk --pack-destination .release-tmp
           mapfile -t tarballs < <(find .release-tmp -maxdepth 1 -type f -name '*.tgz' -print)
           test "${#tarballs[@]}" -eq 1
           tarball="${tarballs[0]}"
@@ -89,7 +89,7 @@ jobs:
           node <<'NODE'
           const { statSync, writeFileSync } = require("node:fs");
           const { basename } = require("node:path");
-          const pkg = require("./integrations/vercel-ai/package.json");
+          const pkg = require("./packages/sdk/package.json");
           const manifest = {
             schemaVersion: 1,
             repository: process.env.GITHUB_REPOSITORY,
@@ -118,7 +118,7 @@ jobs:
           printf 'retained artifact: %s\nsha256: %s\nintegrity: %s\n' "$tarball" "$sha256" "$integrity"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: vercel-ai-${{ steps.source.outputs.sha }}
+          name: sdk-${{ steps.source.outputs.sha }}
           path: |
             ${{ steps.artifact.outputs.tarball }}
             ${{ steps.artifact.outputs.manifest }}
@@ -126,7 +126,7 @@ jobs:
           retention-days: 90
       - name: Reconcile the version with npm before any publish retry
         id: registry
-        run: node scripts/vercel-ai-release.mjs registry-state
+        run: node scripts/sdk-release.mjs registry-state
       # npm 12 blocks unapproved dependency install scripts during `npm ci`.
       # Keep the setup-node npm for the locked install, then upgrade only for
       # OIDC trusted publishing after every artifact check passes.
@@ -140,7 +140,7 @@ jobs:
           EXPECTED_INTEGRITY: ${{ steps.artifact.outputs.integrity }}
         run: >-
           node "${{ steps.registry-verifier.outputs.path }}"
-          integrations/vercel-ai/package.json
+          packages/sdk/package.json
           "$EXPECTED_INTEGRITY"
       - name: Verify the registry-installed artifact
-        run: node scripts/vercel-ai-release.mjs verify-registry
+        run: node scripts/sdk-release.mjs verify-registry

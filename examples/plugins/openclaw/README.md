@@ -5,7 +5,7 @@ Production OpenClaw channel code currently ships from
 and is bundled by `@relaymessenger/cli`.
 
 This package is the **migration landing zone**: it depends on
-`@relaymessenger/core` and will absorb the full channel plugin once the core
+`@relaymessenger/sdk` and will absorb the full channel plugin once the SDK
 transport is stable and Advait signs off on moving the OpenClaw SDK adapters.
 
 Until then:

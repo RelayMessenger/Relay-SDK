@@ -11,6 +11,6 @@ export {
   runPollLoop,
   type MessageHandlerContext,
   type RelayClient,
-} from "@relaymessenger/core";
+} from "@relaymessenger/sdk";
 
 export const OPENCLAW_RELAY_CHANNEL_ID = "relay" as const;

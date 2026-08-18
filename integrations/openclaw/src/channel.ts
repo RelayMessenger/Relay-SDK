@@ -49,7 +49,7 @@ const relayMeta = {
   label: "Relay",
   selectionLabel: "Relay",
   detailLabel: "Relay",
-  docsPath: "/channels/relay",
+  docsPath: "https://docs.relayapp.im/integrations/openclaw",
   blurb: "Text your OpenClaw like a friend.",
   systemImage: "message",
   // Relay renders plain text plus typed parts; no markdown dialect, so core

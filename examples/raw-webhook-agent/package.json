@@ -11,7 +11,7 @@
     "test": "node -e \"console.log('raw-webhook-agent: needs RELAY_WEBHOOK_SECRET + public URL')\""
   },
   "dependencies": {
-    "@relaymessenger/core": "*"
+    "@relaymessenger/sdk": "*"
   },
   "engines": {
     "node": ">=22.18"

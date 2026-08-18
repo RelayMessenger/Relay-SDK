@@ -11,7 +11,7 @@
     "test": "node -e \"console.log('showcase-agent: run npm start against a live Agent Token')\""
   },
   "dependencies": {
-    "@relaymessenger/core": "*"
+    "@relaymessenger/sdk": "*"
   },
   "engines": {
     "node": ">=22.18"

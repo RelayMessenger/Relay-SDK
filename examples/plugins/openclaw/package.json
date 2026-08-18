@@ -1,7 +1,8 @@
 {
   "name": "@relaymessenger/openclaw-channel",
   "version": "0.1.0",
-  "description": "Relay OpenClaw channel built on @relaymessenger/core. Prefer the bundled installer in @relaymessenger/cli until this package is the published source of truth.",
+  "private": true,
+  "description": "Relay OpenClaw channel built on @relaymessenger/sdk. Prefer the bundled installer in @relaymessenger/cli until this package is the published source of truth.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,7 +18,7 @@
     "test": "node -e \"console.log('openclaw-channel: use cli/integrations/openclaw harness until migration completes')\""
   },
   "dependencies": {
-    "@relaymessenger/core": "*"
+    "@relaymessenger/sdk": "*"
   },
   "engines": {
     "node": ">=22.18"

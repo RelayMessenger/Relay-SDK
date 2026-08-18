@@ -1,4 +1,4 @@
-# `@relaymessenger/core`
+# `@relaymessenger/sdk`
 
 Shared Relay transport for native plugins and runnable examples.
 
@@ -8,7 +8,7 @@ Standard Webhooks verification, durable long-poll cursors, event dedupe, and
 idempotent `POST /v1/messages`.
 
 ```ts
-import { createRelayClient, runPollLoop, MemoryDedupe } from "@relaymessenger/core";
+import { createRelayClient, runPollLoop, MemoryDedupe } from "@relaymessenger/sdk";
 
 const client = createRelayClient({ token: process.env.RELAY_AGENT_TOKEN! });
 const me = await client.getMe();

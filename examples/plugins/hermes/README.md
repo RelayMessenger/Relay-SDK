@@ -1,8 +1,9 @@
 # Relay channel for Hermes Agent
 
 Persistent Relay messaging for [Hermes Agent](https://hermes-agent.nousresearch.com),
-shaped like Hermes' Photon iMessage channel: no public webhook URL, durable
-long-poll, owner allowlist, idempotent replies.
+shaped like Hermes' Photon iMessage channel in that it needs no public URL;
+Relay reaches that with durable long polling instead of gRPC. Owner allowlist,
+idempotent replies.
 
 ## Quick start
 
@@ -39,7 +40,7 @@ uses long polling so Hermes can run on a laptop or server without a tunnel.
 
 | Piece | State |
 | --- | --- |
-| Long-poll transport via `@relaymessenger/core` | Shipped in this package |
+| Long-poll transport via `@relaymessenger/sdk` | Shipped in this package |
 | Owner allowlist default | Shipped |
 | Idempotent text replies | Shipped |
 | First-party Hermes gateway wizard (`hermes relay setup`) | Next. Open an issue if you want it prioritized |
