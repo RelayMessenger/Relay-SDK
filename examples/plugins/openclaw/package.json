@@ -1,6 +1,7 @@
 {
   "name": "@relaymessenger/openclaw-channel",
   "version": "0.1.0",
+  "private": true,
   "description": "Relay OpenClaw channel built on @relaymessenger/core. Prefer the bundled installer in @relaymessenger/cli until this package is the published source of truth.",
   "type": "module",
   "main": "./dist/index.js",

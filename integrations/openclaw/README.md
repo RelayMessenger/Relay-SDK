@@ -4,7 +4,10 @@ Backs a Relay contact with an OpenClaw agent: install the plugin, point it at
 an owner-only Agent Token file, and your OpenClaw appears in Relay as a contact
 you text like a friend.
 
-Requires `openclaw >= 2026.7.2-beta.5`.
+Requires `openclaw >= 2026.7.2-beta.5`, which today means the OpenClaw beta
+channel: stable `2026.7.1-2` is too old, because the plugin derives its
+idempotency keys from the per-part delivery context that only the beta line
+provides. Install it with `npm install -g openclaw@beta`.
 
 ## Install
 
