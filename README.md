@@ -40,6 +40,14 @@ the installed `relaymessenger` tarball and its Claude/Codex adapter runtime also
 on macOS CI. `@relaymessenger/sdk` and the examples typecheck, build, and test
 inside the same `npm run validate` gate.
 
+## Claude Code plugin marketplace
+
+This repository is also a Claude Code plugin marketplace:
+`.claude-plugin/marketplace.json` at the repo root lists the Relay channel
+plugin from `integrations/claude-code`. In Claude Code, run
+`/plugin marketplace add relaymessenger/Relay-SDK` to add it, then install the
+`relay` plugin from that marketplace.
+
 ## npm release contracts
 
 Only `packages/relaymessenger` is published by the automated npm release. Its tarball

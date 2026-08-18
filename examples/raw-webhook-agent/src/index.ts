@@ -28,6 +28,7 @@ createServer(async (req, res) => {
   for await (const chunk of req) chunks.push(chunk as Buffer);
   const body = Buffer.concat(chunks).toString("utf8");
 
+  // Verify the Standard Webhooks signature over the exact raw body.
   try {
     await verifyWebhookSignature({
       secret,
@@ -43,14 +44,21 @@ createServer(async (req, res) => {
     return;
   }
 
-  res.writeHead(202).end();
-
   const event = JSON.parse(body) as MessageReceivedEvent;
-  if (event.event_type !== "message.received") return;
-  if (dedupe.has(event.event_id)) return;
+  if (event.event_type !== "message.received") {
+    res.writeHead(200).end();
+    return;
+  }
+  // Delivery is at least once: a replayed event_id was already answered.
+  if (dedupe.has(event.event_id)) {
+    res.writeHead(200).end();
+    return;
+  }
 
   const message = event.data.message;
   const invocationId = event.data.invocation_id;
+  // Reply before acknowledging. Relay retries only on 408/429/5xx, so a 2xx
+  // sent before the work is done would turn any crash into a lost event.
   try {
     await client.setResponding({
       conversationId: message.conversation_id,
@@ -62,17 +70,26 @@ createServer(async (req, res) => {
     await client.sendText({
       conversationId: message.conversation_id,
       text: `Webhook echo: ${text}`,
+      // Derived from event_id, so a redelivered event replays the same send
+      // instead of double-posting.
       idempotencyKey: replyIdempotencyKey(event.event_id),
       ...(invocationId ? { invocationId } : {}),
     });
-    dedupe.record(event.event_id);
-  } finally {
     await client.setTyping({
       conversationId: message.conversation_id,
       started: false,
       ...(invocationId ? { invocationId } : {}),
     });
+  } catch (error) {
+    console.error("[raw-webhook] handler failed", error);
+    // 5xx tells Relay to redeliver; the dedupe window was not recorded, so
+    // the retry is handled again.
+    res.writeHead(500).end();
+    return;
   }
+  // Record the event_id only after the reply succeeded, then acknowledge.
+  dedupe.record(event.event_id);
+  res.writeHead(200).end();
 }).listen(port, () => {
   console.log(`[raw-webhook] listening on :${port}`);
 });

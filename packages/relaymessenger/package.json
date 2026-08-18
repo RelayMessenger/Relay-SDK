@@ -5,11 +5,11 @@
   "homepage": "https://relayapp.im",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/relaymessenger/cli.git",
+    "url": "git+https://github.com/relaymessenger/Relay-SDK.git",
     "directory": "packages/relaymessenger"
   },
   "bugs": {
-    "url": "https://github.com/relaymessenger/cli/issues"
+    "url": "https://github.com/relaymessenger/Relay-SDK/issues"
   },
   "type": "module",
   "bin": {
