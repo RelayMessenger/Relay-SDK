@@ -74,20 +74,24 @@ function encodeUIMessageStream(
     async pull(controller) {
       const { done, value } = await reader.read();
       if (done) {
-        // Only the object path owns the terminator. An empty stream is
-        // ambiguous and stays untouched.
-        if (bytesMode === false) {
+        // The object path owns the terminator. An empty stream never chose a
+        // mode, so it terminates too: whoever produced zero chunks also wrote
+        // zero terminators, and the server must not wait on a bare body.
+        if (bytesMode !== true) {
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         }
         controller.close();
         return;
       }
       bytesMode ??= ArrayBuffer.isView(value);
-      controller.enqueue(
-        bytesMode
-          ? (value as Uint8Array)
-          : encoder.encode(`data: ${JSON.stringify(value)}\n\n`),
-      );
+      if (bytesMode) {
+        controller.enqueue(value as Uint8Array);
+        return;
+      }
+      // JSON.stringify returns undefined for undefined/functions/symbols,
+      // which would put invalid `data: undefined` frames on the wire.
+      const json = JSON.stringify(value) ?? "null";
+      controller.enqueue(encoder.encode(`data: ${json}\n\n`));
     },
     cancel(reason) {
       return reader.cancel(reason);

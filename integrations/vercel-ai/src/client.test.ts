@@ -101,6 +101,28 @@ describe("RelayClient.stream", () => {
     );
   });
 
+  it("terminates an empty object stream so the server never waits on a bare body", async () => {
+    const { client, fetchMock } = clientWithMock();
+    await client.stream({
+      conversationId: "cnv_1",
+      idempotencyKey: "evt_1:0",
+      stream: objectStream([]),
+    });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(await drain(init.body)).toBe("data: [DONE]\n\n");
+  });
+
+  it("never emits invalid JSON for chunks that stringify to undefined", async () => {
+    const { client, fetchMock } = clientWithMock();
+    await client.stream({
+      conversationId: "cnv_1",
+      idempotencyKey: "evt_1:0",
+      stream: objectStream([undefined]),
+    });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(await drain(init.body)).toBe("data: null\n\n" + "data: [DONE]\n\n");
+  });
+
   it("forwards an already-encoded SSE byte stream untouched", async () => {
     const { client, fetchMock } = clientWithMock();
     const encoded =
