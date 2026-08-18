@@ -18,6 +18,25 @@ function clientWithMock(status = 202, body: unknown = { message_id: "msg_out", m
   return { client, fetchMock };
 }
 
+function objectStream(chunks: unknown[]): ReadableStream<unknown> {
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
+}
+
+async function drain(body: unknown): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of body as ReadableStream<Uint8Array> & AsyncIterable<Uint8Array>) {
+    chunks.push(chunk);
+  }
+  return new TextDecoder().decode(
+    new Uint8Array(chunks.flatMap((chunk) => Array.from(chunk))),
+  );
+}
+
 function sse(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   return new ReadableStream({
@@ -53,6 +72,46 @@ describe("RelayClient.stream", () => {
     expect(headers["Idempotency-Key"]).toBe("evt_1:0");
     expect(init.duplex).toBe("half");
     expect(init.body).toBeInstanceOf(ReadableStream);
+  });
+
+  it("SSE-encodes a stream of UI message chunk objects", async () => {
+    const { client, fetchMock } = clientWithMock();
+    await client.stream({
+      conversationId: "cnv_1",
+      idempotencyKey: "evt_1:0",
+      stream: objectStream([
+        { type: "start" },
+        { type: "text-start", id: "0" },
+        { type: "text-delta", id: "0", delta: "hi" },
+        { type: "text-end", id: "0" },
+        { type: "finish" },
+      ]),
+    });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["x-vercel-ai-ui-message-stream"]).toBe("v1");
+    // Byte-for-byte what ai@7 createUIMessageStreamResponse writes.
+    expect(await drain(init.body)).toBe(
+      'data: {"type":"start"}\n\n' +
+        'data: {"type":"text-start","id":"0"}\n\n' +
+        'data: {"type":"text-delta","id":"0","delta":"hi"}\n\n' +
+        'data: {"type":"text-end","id":"0"}\n\n' +
+        'data: {"type":"finish"}\n\n' +
+        "data: [DONE]\n\n",
+    );
+  });
+
+  it("forwards an already-encoded SSE byte stream untouched", async () => {
+    const { client, fetchMock } = clientWithMock();
+    const encoded =
+      'data: {"type":"text-delta","id":"0","delta":"hi"}\n\n' + "data: [DONE]\n\n";
+    await client.stream({
+      conversationId: "cnv_1",
+      idempotencyKey: "evt_1:0",
+      stream: sse([encoded]),
+    });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(await drain(init.body)).toBe(encoded);
   });
 
   it("unwraps a toUIMessageStreamResponse() source", async () => {
