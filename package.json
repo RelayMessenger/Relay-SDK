@@ -8,7 +8,6 @@
     "integrations/openclaw",
     "integrations/vercel-ai",
     "examples/plugins/hermes",
-    "examples/plugins/openclaw",
     "examples/raw-webhook-agent",
     "examples/showcase-agent"
   ],

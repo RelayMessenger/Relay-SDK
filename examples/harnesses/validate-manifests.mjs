@@ -6,7 +6,6 @@ const root = new URL("../..", import.meta.url).pathname;
 const requiredWorkspaces = [
   "packages/sdk",
   "examples/plugins/hermes",
-  "examples/plugins/openclaw",
 ];
 
 let failed = 0;
