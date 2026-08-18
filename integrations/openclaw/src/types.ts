@@ -16,7 +16,7 @@ export type RelayMentionRange = {
   participant_id: string;
 };
 
-export type RelayTextStyle = "bold" | "italic" | "underline" | "strikethrough" | "monospace";
+export type RelayTextStyle = "bold" | "italic" | "underline" | "strikethrough" | "monospace" | "spoiler";
 
 // One formatting run over a text part, offsets in UTF-16 code units like
 // mentions. An EMPTY styles array on the part is meaningful: it marks
