@@ -33,8 +33,8 @@
     "prepack": "node scripts/build-claude-bundle.mjs && npm run clean && npm run build"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.66.0",
-    "@agentclientprotocol/codex-acp": "1.2.0",
+    "@agentclientprotocol/claude-agent-acp": "0.69.0",
+    "@agentclientprotocol/codex-acp": "1.4.0",
     "@agentclientprotocol/sdk": "^1.2.1",
     "cross-spawn": "7.0.6",
     "qrcode-terminal": "^0.12.0",
