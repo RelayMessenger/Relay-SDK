@@ -49,12 +49,17 @@ import {
   unkeyedIdempotencyKey,
 } from "./idempotency.js";
 import { toRelayReaction } from "./reactions.js";
-import { verifyWebhookSignature, WebhookVerificationError } from "./signature.js";
+import {
+  decodeWebhookSecret,
+  verifyWebhookSignature,
+  WebhookVerificationError,
+} from "./signature.js";
 import {
   decodeRelayThreadId,
   encodeRelayThreadId,
   relayChannelIdFromThreadId,
 } from "./threadId.js";
+import { activeTurn, runInTurn, type RelayTurn } from "./turn.js";
 import type {
   RelayEventEnvelope,
   RelayMessage,
@@ -63,6 +68,7 @@ import type {
   RelayOutgoingPart,
   RelayPart,
   RelayRawMessage,
+  RelayStyleRange,
   RelayThreadId,
 } from "./types.js";
 
@@ -89,21 +95,19 @@ export interface RelayAdapterOptions
 const DEFAULT_DEDUPE_WINDOW = 4096;
 const DEFAULT_HISTORY_LIMIT = 50;
 
+/** `GET /v1/conversations/{id}/messages` clamps `limit` to this server side. */
+const MAX_HISTORY_LIMIT = 100;
+
 /**
- * What the inbound event told us about the turn now in flight on one
- * conversation. `postMessage` never sees the event, so the invocation id a
- * group reply must echo, and the event id an idempotency key must be derived
- * from, are carried here.
- *
- * One entry per conversation is enough because the adapter declares
- * `lockScope: "thread"`, so the Chat SDK serializes handlers for a thread and
- * two turns never write the same entry at once.
+ * A group turn tried to commit a second message. Relay's invocation is single
+ * use, so there is nothing valid for the second message to cite and the server
+ * would answer 403.
  */
-interface TurnContext {
-  eventId: string;
-  invocationId?: string;
-  invocationUsed: boolean;
-  ordinal: number;
+export class RelayInvocationSpentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RelayInvocationSpentError";
+  }
 }
 
 function json(status: number, body: Record<string, unknown>): Response {
@@ -129,6 +133,45 @@ function mediaKindToAttachmentType(part: RelayPart): Attachment["type"] {
     default:
       return "file";
   }
+}
+
+/** Text parts joined into one string, with every style range rebased onto it. */
+const TEXT_PART_SEPARATOR = "\n\n";
+
+/**
+ * Flatten a message's text parts into the single string the Chat SDK reads,
+ * carrying each part's style ranges across at their new offsets.
+ *
+ * A message routinely holds several text parts: this adapter itself produces
+ * them whenever a reply is longer than Relay's 8 KB per-part ceiling. Reading
+ * only the first part's ranges would land a chunked reply back as one flat
+ * paragraph, and applying them to the joined string unshifted would put the
+ * emphasis on the wrong words.
+ */
+function joinTextParts(parts: RelayPart[]): {
+  text: string;
+  styles: RelayStyleRange[];
+} {
+  const pieces: string[] = [];
+  const styles: RelayStyleRange[] = [];
+  let offset = 0;
+  for (const part of parts) {
+    const text = part.text ?? "";
+    // An empty part contributes no text, so it must not contribute a separator
+    // either: that would shift every later range by two.
+    if (!text) continue;
+    if (pieces.length > 0) offset += TEXT_PART_SEPARATOR.length;
+    for (const run of part.styles ?? []) {
+      styles.push({
+        start: run.start + offset,
+        length: run.length,
+        styles: run.styles,
+      });
+    }
+    pieces.push(text);
+    offset += text.length;
+  }
+  return { text: pieces.join(TEXT_PART_SEPARATOR), styles };
 }
 
 /**
@@ -188,7 +231,6 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
   private readonly webhookSecret?: string;
   private readonly toleranceSeconds?: number;
   private readonly dedupe: DedupeWindow;
-  private readonly turns = new Map<string, TurnContext>();
   private chat?: ChatInstance;
 
   constructor(options: RelayAdapterOptions = {}) {
@@ -202,6 +244,11 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
       });
     this.webhookSecret =
       options.webhookSecret ?? process.env.RELAY_WEBHOOK_SECRET;
+    // Decode once, here. An unusable secret raised from inside verification is
+    // a 500 on every delivery, and Relay reads a 500 as transient and
+    // redelivers ten times; raised here it is a startup failure naming the
+    // option that is wrong.
+    if (this.webhookSecret) decodeWebhookSecret(this.webhookSecret);
     this.userName = options.userName ?? "Relay Agent";
     this.botUserId = options.agentId;
     this.toleranceSeconds = options.toleranceSeconds;
@@ -233,11 +280,11 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
     const threadId = this.encodeThreadId({ conversationId: message.conversation_id });
     const parts = message.parts ?? [];
     const textParts = parts.filter((part) => part.type === "text");
-    const value =
-      textParts.map((part) => part.text ?? "").join("\n\n") ||
-      message.fallback_text ||
-      "";
-    const styles = textParts.length === 1 ? textParts[0]?.styles : undefined;
+    const joined = joinTextParts(textParts);
+    const value = joined.text || message.fallback_text || "";
+    // Ranges index into the joined part text. When the parts carried no text
+    // and the fallback stands in, they would index into a different string.
+    const styles = joined.text ? joined.styles : undefined;
 
     const attachments: Attachment[] = parts
       .filter((part) => part.type === "media" || part.type === "voice_memo")
@@ -356,18 +403,28 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
    * Relay's typing indicator is ephemeral and carries an optional label of up
    * to 80 characters. The invocation is peeked rather than consumed: typing is
    * not the group reply the invocation is spent on.
+   *
+   * Failures are swallowed. Group typing without a live pending invocation is a
+   * 403 (`Relay-Server/server/src/domain/typing.ts:70-73`), which is exactly
+   * what typing after the first send of a group turn looks like. The Chat SDK
+   * treats this call as best effort and has no `stopTyping` to strand, so a
+   * hint that cannot be shown must never take the reply down with it.
    */
   async startTyping(threadId: string, status?: string): Promise<void> {
     const { conversationId } = this.decodeThreadId(threadId);
-    const turn = this.turns.get(conversationId);
-    await this.client.typing({
-      conversationId,
-      started: true,
-      ...(status ? { label: status.slice(0, 80) } : {}),
-      ...(turn?.invocationId && !turn.invocationUsed
-        ? { invocationId: turn.invocationId }
-        : {}),
-    });
+    const turn = activeTurn(conversationId);
+    try {
+      await this.client.typing({
+        conversationId,
+        started: true,
+        ...(status ? { label: status.slice(0, 80) } : {}),
+        ...(turn?.invocationId && !turn.invocationUsed
+          ? { invocationId: turn.invocationId }
+          : {}),
+      });
+    } catch {
+      // The indicator is decoration. The turn continues.
+    }
   }
 
   async markAsRead(threadId: string, messageId: string): Promise<void> {
@@ -413,7 +470,14 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
       );
     }
     const { conversationId } = this.decodeThreadId(threadId);
-    const limit = options?.limit ?? DEFAULT_HISTORY_LIMIT;
+    // The route clamps `limit` to 1..100 server side
+    // (`Relay-Server/server/src/routes/messages.ts:418`). Asking for 200 and
+    // then testing the 100 rows that come back against 200 would read as "the
+    // conversation ended here" and silently truncate the history.
+    const limit = Math.min(
+      Math.max(Math.trunc(options?.limit ?? DEFAULT_HISTORY_LIMIT), 1),
+      MAX_HISTORY_LIMIT,
+    );
     const beforeSequence = options?.cursor ? Number(options.cursor) : undefined;
     if (beforeSequence !== undefined && !Number.isFinite(beforeSequence)) {
       throw new Error(`not a Relay history cursor: ${options?.cursor}`);
@@ -540,12 +604,24 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
         error: { code: "invalid_request", message: "not an event envelope" },
       });
     }
-    if (this.dedupe.has(envelope.event_id)) {
+    // Claim before dispatching, not after. Two redeliveries of one event can
+    // be in flight at once, and a check that only records on the way out lets
+    // both of them past.
+    if (!this.dedupe.claim(envelope.event_id)) {
       return json(200, { deduplicated: true });
     }
 
-    await this.dispatch(envelope, options);
-    this.dedupe.record(envelope.event_id);
+    try {
+      await this.dispatch(envelope, options);
+    } catch (error) {
+      // Give the claim back. A thrown handler answers 5xx, which is Relay's
+      // signal to redeliver, and a retained claim would turn every redelivery
+      // into a 200 that did nothing: the message would be lost outright. The
+      // `Idempotency-Key` on each send is what keeps the retry from posting
+      // twice whatever the first attempt already committed.
+      this.dedupe.release(envelope.event_id);
+      throw error;
+    }
     return json(200, { handled: true });
   }
 
@@ -566,13 +642,18 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
         const threadId = this.encodeThreadId({
           conversationId: data.message.conversation_id,
         });
-        this.turns.set(data.message.conversation_id, {
+        const turn: RelayTurn = {
+          conversationId: data.message.conversation_id,
           eventId: envelope.event_id,
           invocationId: data.invocation_id,
           invocationUsed: false,
-          ordinal: 0,
-        });
-        await chat.processMessage(this, threadId, this.parseMessage(raw), options);
+          sent: 0,
+        };
+        // Bind the turn to this dispatch's async context, so a second event on
+        // the same conversation cannot take it over while this one waits.
+        await runInTurn(turn, () =>
+          chat.processMessage(this, threadId, this.parseMessage(raw), options),
+        );
         return;
       }
       case "message.edited": {
@@ -724,32 +805,50 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
 
   /**
    * Send the parts as one message when they fit, and as follow-up messages
-   * when they do not. A group turn cannot overflow: Relay's invocation is
-   * single use, so a second message has nothing valid to cite.
+   * when they do not. A group turn cannot overflow, and cannot send twice:
+   * Relay's invocation is single use, so anything after the first message has
+   * nothing valid to cite and the server answers 403
+   * (`Relay-Server/server/src/domain/commitMessage.ts:2049-2051`).
    */
   private async sendParts(
     conversationId: string,
     threadId: string,
     parts: RelayOutgoingPart[],
   ): Promise<RawMessage<RelayRawMessage>> {
-    const turn = this.turns.get(conversationId);
+    const turn = activeTurn(conversationId);
     const batches: RelayOutgoingPart[][] = [];
     for (let i = 0; i < parts.length; i += MAX_PARTS_PER_MESSAGE) {
       batches.push(parts.slice(i, i + MAX_PARTS_PER_MESSAGE));
     }
-    const invocationId =
-      turn?.invocationId && !turn.invocationUsed ? turn.invocationId : undefined;
+    // Relay carries an invocation only on a group event, so a turn holding one
+    // is a group turn for as long as it lives. Test that rather than testing
+    // whether an invocation is still available: once it is spent, the second
+    // send would otherwise go out bare and be refused by the server.
+    const groupTurn = turn?.invocationId !== undefined ? turn : undefined;
+    if (groupTurn?.invocationUsed) {
+      throw new RelayInvocationSpentError(
+        "this group turn already replied, and one Relay invocation permits one message",
+      );
+    }
+    const invocationId = groupTurn?.invocationId;
     if (batches.length > 1 && invocationId) {
-      throw new Error(
-        `this reply needs ${batches.length} Relay messages, and a group invocation authorizes exactly one`,
+      throw new RelayInvocationSpentError(
+        `this reply needs ${batches.length} Relay messages, and one Relay invocation permits one message`,
       );
     }
 
+    // The ordinal is the send's logical position in the turn, so a retry lands
+    // on the key the first attempt used and Relay replays it instead of
+    // posting a second message. The base counts what this turn has already
+    // committed and is read once, before the loop: it advances only on a
+    // successful send, so an attempt that threw does not push the next key
+    // along and a redelivery of the whole event starts from zero again.
+    const base = turn?.sent ?? 0;
+
     let first: RawMessage<RelayRawMessage> | undefined;
-    for (const batch of batches) {
-      const ordinal = turn ? turn.ordinal++ : 0;
+    for (const [index, batch] of batches.entries()) {
       const idempotencyKey = turn
-        ? await deriveIdempotencyKey(turn.eventId, ordinal, batch)
+        ? deriveIdempotencyKey(turn.eventId, base + index)
         : unkeyedIdempotencyKey(conversationId);
       const result = await this.client.send({
         conversationId,
@@ -757,7 +856,10 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
         idempotencyKey,
         ...(first === undefined && invocationId ? { invocationId } : {}),
       });
-      if (first === undefined && invocationId && turn) turn.invocationUsed = true;
+      if (turn) {
+        turn.sent += 1;
+        if (first === undefined && invocationId) turn.invocationUsed = true;
+      }
       first ??= {
         id: result.message_id,
         threadId,

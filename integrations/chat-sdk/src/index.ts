@@ -1,4 +1,9 @@
-export { createRelayAdapter, RelayAdapter, RELAY_ADAPTER_NAME } from "./adapter.js";
+export {
+  createRelayAdapter,
+  RelayAdapter,
+  RelayInvocationSpentError,
+  RELAY_ADAPTER_NAME,
+} from "./adapter.js";
 export type { RelayAdapterOptions } from "./adapter.js";
 export { RelayApiError, RelayClient } from "./client.js";
 export type {
@@ -22,14 +27,18 @@ export {
 } from "./format.js";
 export type { RenderedText } from "./format.js";
 export {
-  canonicalJson,
   DedupeWindow,
   deriveIdempotencyKey,
   unkeyedIdempotencyKey,
 } from "./idempotency.js";
 export { toRelayReaction } from "./reactions.js";
 export type { RelayReaction } from "./reactions.js";
-export { verifyWebhookSignature, WebhookVerificationError } from "./signature.js";
+export {
+  decodeWebhookSecret,
+  verifyWebhookSignature,
+  WebhookSecretError,
+  WebhookVerificationError,
+} from "./signature.js";
 export type { VerifyOptions } from "./signature.js";
 export {
   decodeRelayThreadId,
