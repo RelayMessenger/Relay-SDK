@@ -3,20 +3,13 @@ import type { EmojiValue } from "chat";
 import type { RelayReactionType } from "./types.js";
 
 /**
- * Relay renders six reactions as iMessage-style tapback balloons and anything
- * else as a plain emoji. The six are named on the wire, so a thumbs up must be
- * sent as `like` rather than as the character, or it lands as a generic emoji
- * reaction instead of the balloon a Relay user expects.
+ * A Relay reaction is an emoji character. Relay does render it as an
+ * iMessage-style balloon, but the balloon draws whatever string is stored, so
+ * the character is what has to be sent. Relay once also accepted six named
+ * types (love, like, dislike, laugh, emphasize, question) and stored the name
+ * itself in the emoji column, which put the word "like" inside the balloon.
+ * Those names are gone from the API and this adapter never produces one.
  */
-const TAPBACKS: Record<string, RelayReactionType> = {
-  heart: "love",
-  thumbs_up: "like",
-  thumbs_down: "dislike",
-  laugh: "laugh",
-  exclamation: "emphasize",
-  question: "question",
-};
-
 const PLACEHOLDER = /^\{\{emoji:([^}]+)\}\}$/;
 const SHORTCODE = /^:([a-z0-9_+-]+):$/i;
 /** Variation selector 16 and the five skin tone modifiers. */
@@ -99,9 +92,6 @@ export function toRelayReaction(input: EmojiValue | string): RelayReaction {
     }
   }
 
-  if (name && name in TAPBACKS) {
-    return { type: TAPBACKS[name] as RelayReactionType };
-  }
   if (literal) return { type: "emoji", emoji: literal };
   if (name) {
     const formats = DEFAULT_EMOJI_MAP[name];

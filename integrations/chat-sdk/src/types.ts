@@ -160,15 +160,11 @@ export interface RelayAttachment {
   size_bytes: number;
 }
 
-/** Tapback kinds Relay renders as balloons rather than a bare emoji. */
-export type RelayReactionType =
-  | "love"
-  | "like"
-  | "dislike"
-  | "laugh"
-  | "emphasize"
-  | "question"
-  | "emoji";
+/**
+ * Relay carries one reaction kind. The field survives because the wire still
+ * names it, not because there is a choice to make.
+ */
+export type RelayReactionType = "emoji";
 
 /**
  * The raw payload this adapter hands to the Chat SDK. It carries the group

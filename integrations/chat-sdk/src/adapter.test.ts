@@ -321,12 +321,12 @@ describe("postMessage", () => {
 });
 
 describe("reactions, typing, and receipts", () => {
-  it("sends a tapback by name on the reactions route", async () => {
+  it("sends an emoji character on the reactions route", async () => {
     const { adapter, calls } = harness();
     await adapter.addReaction("relay:cnv_1", "msg_1", "👍");
     const call = calls.at(-1) as RecordedCall;
     expect(call.url).toBe("https://api.relayapp.im/v1/messages/msg_1/reactions");
-    expect(call.body).toEqual({ operation: "add", type: "like" });
+    expect(call.body).toEqual({ operation: "add", type: "emoji", emoji: "👍" });
   });
 
   it("removes a reaction through the same route", async () => {
