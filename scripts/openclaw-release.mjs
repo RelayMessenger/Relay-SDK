@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { requireTaggedHead } from "./release-tag-contract.mjs";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const pkg = JSON.parse(
@@ -20,11 +21,7 @@ function checkVersionMetadata() {
 function checkTag(tag) {
   checkVersionMetadata();
   assert.equal(tag, expectedTag, `release tag must be exactly ${expectedTag}`);
-  const exact = execFileSync("git", ["describe", "--exact-match", "--tags", "HEAD"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  }).trim();
-  assert.equal(exact, tag, `checked-out commit is tagged ${exact}, not ${tag}`);
+  requireTaggedHead(repoRoot, tag);
   process.stdout.write(`release tag/version contract passed (${tag})\n`);
 }
 
