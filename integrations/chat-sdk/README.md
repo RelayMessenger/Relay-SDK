@@ -42,15 +42,30 @@ the environment it needs.
 ## What the adapter enforces
 
 - Standard Webhooks signature verification over the exact raw body, then
-  `event_id` deduplication, because Relay delivers at least once.
+  `event_id` deduplication, because Relay delivers at least once. The event id
+  is claimed before the handler runs, so two redeliveries racing each other
+  cannot both dispatch, and released again if the handler throws, so Relay's
+  retry of a failed turn is still handled. **This window is a bounded set in
+  memory, in one process.** A restart, or a second instance behind the same
+  webhook URL, has no claim to lose and will dispatch the event again. The
+  idempotency key below is what makes that second dispatch harmless.
 - A deterministic `Idempotency-Key` on every `POST /v1/messages`, derived from
-  the inbound event, the send's position in the turn, and a digest of the
-  content, so a redelivery replays instead of double-posting.
+  the inbound event id and the send's position in the turn, and from nothing
+  else. Relay hashes the request body server side and stores it beside the key,
+  so a retry carrying the same body replays the first response and a retry
+  carrying a different body is refused with 409 `idempotency_conflict`. Keeping
+  the content out of the key is what leaves both of those reachable: a key that
+  moved with the body would make every retry a new send, and a handler backed
+  by a model rarely writes the same words twice.
 - Group `invocation_id` threading. Relay delivers a group message to an agent
   only when that agent was invoked, and the reply is scoped to that single-use
-  invocation, so the first send of a turn carries it and a second cannot.
+  invocation, so the first send of a turn carries it and a second raises
+  `RelayInvocationSpentError` rather than going out bare and taking a 403.
 - Chunking rather than truncation. Relay caps a text part at 8 KB and a message
-  at 32 parts; a longer reply becomes more parts, and then more messages.
+  at 32 parts; a longer reply becomes more parts, and then more messages. Each
+  text part draws as its own balloon in the app, so a long reply arrives as a
+  stack of bubbles rather than one tall one. A split consumes the whitespace it
+  lands on, and nothing else.
 
 ## Formatting
 
