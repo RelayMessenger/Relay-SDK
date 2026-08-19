@@ -366,7 +366,18 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
         "editMessage",
       );
     }
-    const result = await this.client.edit(messageId, parts.slice(0, MAX_PARTS_PER_MESSAGE));
+    // Relay accepts exactly one text part per edit: an edit replaces one
+    // message's text, and one text part carries at most 8 KB. Text long
+    // enough to chunk cannot be an edit of one message, so refuse it here
+    // rather than sending a multi-part PATCH the server answers 422 to, or
+    // silently truncating the caller's content.
+    if (parts.length !== 1) {
+      throw new NotImplementedError(
+        "a Relay edit replaces one message with one text part of at most 8 KB; shorten the edit or post a new message",
+        "editMessage",
+      );
+    }
+    const result = await this.client.edit(messageId, parts);
     return {
       id: result.message.id,
       threadId,

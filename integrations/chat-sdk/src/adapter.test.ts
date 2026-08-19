@@ -446,6 +446,48 @@ describe("postMessage", () => {
     });
   });
 
+  it("edits with exactly one text part", async () => {
+    const { adapter, calls } = harness([
+      { body: { message: { id: "msg_1", conversation_id: "cnv_1" } } },
+    ]);
+    const edited = await adapter.editMessage("relay:cnv_1", "msg_1", "shorter");
+    const call = calls.at(-1) as RecordedCall;
+    expect(call.method).toBe("PATCH");
+    expect((call.body as { parts: unknown[] }).parts).toHaveLength(1);
+    expect(edited.id).toBe("msg_1");
+  });
+
+  it("refuses an edit whose text chunks past one part", async () => {
+    const { adapter, calls } = harness();
+    const oversize = "a".repeat(9000);
+    await expect(
+      adapter.editMessage("relay:cnv_1", "msg_1", oversize),
+    ).rejects.toThrow(/one text part/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("anchors a media reaction on its part when asked", async () => {
+    // The adapter's Chat SDK surface is message-level, so the part anchor is
+    // a client capability: only media messages carry addressable parts.
+    let body: unknown;
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      body = JSON.parse(init?.body as string);
+      return new Response(null, { status: 204 });
+    });
+    const client = new RelayClient({
+      token: "rly_live_test",
+      fetch: fetchMock as typeof fetch,
+    });
+    await client.react({
+      messageId: "msg_media",
+      operation: "add",
+      type: "emoji",
+      emoji: "❤️",
+      partIndex: 1,
+    });
+    expect(body).toMatchObject({ part_index: 1 });
+  });
+
   it("threads a group invocation into the first reply and refuses a second", async () => {
     let adapter!: RelayAdapter;
     let second: unknown;

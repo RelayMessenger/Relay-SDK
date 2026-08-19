@@ -214,8 +214,9 @@ export class RelayClient {
 
   /**
    * The server splits the accepted parts at ingest: each visible non-media
-   * part becomes its own message and contiguous media parts stay one media
-   * message, so the 202 carries one or more messages, in display order.
+   * part becomes its own message, contiguous media parts stay one media
+   * message, and a voice memo always commits alone, so the 202 carries one
+   * or more messages, in display order.
    */
   postMessage(
     body: PostMessageBody,

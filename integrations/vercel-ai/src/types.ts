@@ -99,9 +99,9 @@ export type MessageReceivedEvent = RelayEventEnvelope<MessageReceivedData>;
 
 /**
  * The 202 from `POST /v1/messages`. The server splits the accepted parts at
- * ingest: each visible non-media part becomes its own message and contiguous
- * media parts stay one media message, so one send commits one or more
- * messages, in display order.
+ * ingest: each visible non-media part becomes its own message, contiguous
+ * media parts stay one media message, and a voice memo always commits alone,
+ * so one send commits one or more messages, in display order.
  */
 export interface SendResult {
   messages: RelayMessage[];

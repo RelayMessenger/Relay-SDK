@@ -47,8 +47,8 @@ describe("classifyRelayEvent", () => {
 });
 
 describe("renderRelayPartsText", () => {
-  // A message carries one visible non-media part, or a run of contiguous
-  // media parts kept together as one media message.
+  // A message carries one visible non-media part, a run of contiguous media
+  // parts kept together as one media message, or a lone voice memo.
   it("renders a text part", () => {
     expect(renderRelayPartsText([{ type: "text", text: "check this" }])).toBe("check this");
   });
@@ -72,6 +72,17 @@ describe("renderRelayPartsText", () => {
         { part_index: 1, type: "media", url: "https://cdn/z.png" },
       ]),
     ).toBe("[attachment] https://cdn/x.png\n[attachment] https://cdn/z.png");
+  });
+
+  it("renders a group system message's text and mutation data together", () => {
+    // Group system messages are the one shape the split leaves untouched:
+    // one message carrying a text part plus a group.mutation data part.
+    expect(
+      renderRelayPartsText([
+        { type: "text", text: "Atlas added June to the group." },
+        { type: "data", data: { type: "group.mutation", op: "add" } },
+      ]),
+    ).toBe('Atlas added June to the group.\n```json\n{"type":"group.mutation","op":"add"}\n```');
   });
 
   it("labels a voice memo and includes rounded duration when present", () => {
