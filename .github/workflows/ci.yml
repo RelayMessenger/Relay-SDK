@@ -64,6 +64,16 @@ jobs:
             directory: integrations/openclaw
             install: npm ci
             verify: npm run check && npm run build && npm test
+          # The plugin declares support for the STABLE OpenClaw line, and the
+          # only thing that keeps that claim honest is compiling against it.
+          # The two contexts it reads a part index from carry no such field on
+          # stable, so a direct property read fails here and an unsafe default
+          # would silently truncate a chunked reply in production.
+          - name: OpenClaw plugin against stable core
+            node: 22.22.3
+            directory: integrations/openclaw
+            install: npm ci && npm install --no-save openclaw@latest
+            verify: npm run check && npm test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

@@ -4,10 +4,14 @@ Backs a Relay contact with an OpenClaw agent: install the plugin, point it at
 an owner-only Agent Token file, and your OpenClaw appears in Relay as a contact
 you text like a friend.
 
-Requires `openclaw >= 2026.7.2-beta.5`, which today means the OpenClaw beta
-channel: stable `2026.7.1-2` is too old, because the plugin derives its
-idempotency keys from the per-part delivery context that only the beta line
-provides. Install it with `npm install -g openclaw@beta`.
+Requires `openclaw >= 2026.7.1-2`, which the stable channel satisfies today.
+
+Cores from `2026.7.2-beta.5` onward tell the channel which part of a delivery
+each chunk is, and the plugin keys its idempotent sends on that. Older cores do
+not, so on those the plugin keys each chunk by a digest of the chunk's own
+text. Both keep a retry replaying the same message instead of posting a second
+one. The one thing an older core cannot do is separate two byte-identical
+chunks of a single reply, which arrive as one message.
 
 ## Install
 
