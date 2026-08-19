@@ -33,9 +33,7 @@ const messageEvent = {
       conversation_id: "cnv_harness_1",
       sequence: 1,
       sender: { kind: "user", id: "usr_harness" },
-      parts: [
-        { part_index: 0, type: "text", text: `hello from the harness (${BOOT})` },
-      ],
+      parts: [{ type: "text", text: `hello from the harness (${BOOT})` }],
       reply_to: null,
       fallback_text: `hello from the harness (${BOOT})`,
       status: "sent",
@@ -151,18 +149,19 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(202, { "content-type": "application/json" });
     res.end(
       JSON.stringify({
-        message_id: messageId,
-        message: {
-          id: messageId,
-          conversation_id: "cnv_harness_1",
-          sequence: 2,
-          sender: { kind: "agent", id: "agt_harness" },
-          parts: [{ part_index: 0, type: "text", text: JSON.parse(body).parts?.[0]?.text ?? "" }],
-          reply_to: null,
-          fallback_text: "",
-          status: "sent",
-          created_at: new Date().toISOString(),
-        },
+        messages: [
+          {
+            id: messageId,
+            conversation_id: "cnv_harness_1",
+            sequence: 2,
+            sender: { kind: "agent", id: "agt_harness" },
+            parts: [{ type: "text", text: JSON.parse(body).parts?.[0]?.text ?? "" }],
+            reply_to: null,
+            fallback_text: "",
+            status: "sent",
+            created_at: new Date().toISOString(),
+          },
+        ],
       }),
     );
     return;

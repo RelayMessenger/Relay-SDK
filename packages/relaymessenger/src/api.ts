@@ -112,7 +112,7 @@ export type RelayOutgoingPart =
 export interface PostMessageBody {
   conversation_id: string;
   parts: RelayOutgoingPart[];
-  reply_to?: { message_id: string; part_index?: number };
+  reply_to?: { message_id: string };
   /**
    * Required in a group: the id Relay supplied on the invocation this message
    * answers. The server rejects a group agent message without it, and consumes
@@ -212,10 +212,15 @@ export class RelayClient {
     });
   }
 
+  /**
+   * The server splits the accepted parts at ingest: each visible non-media
+   * part becomes its own message and contiguous media parts stay one media
+   * message, so the 202 carries one or more messages, in display order.
+   */
   postMessage(
     body: PostMessageBody,
     idempotencyKey: string,
-  ): Promise<{ message_id: string; message: RelayMessage }> {
+  ): Promise<{ messages: RelayMessage[] }> {
     return this.request("POST", "/v1/messages", {
       body,
       headers: { "idempotency-key": idempotencyKey },

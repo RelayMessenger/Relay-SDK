@@ -47,7 +47,7 @@ function relayWithMockFetch() {
     void url;
     void init;
     return new Response(
-      JSON.stringify({ message_id: "msg_out", message: { id: "msg_out" } }),
+      JSON.stringify({ messages: [{ id: "msg_out" }] }),
       { status: 202, headers: { "Content-Type": "application/json" } },
     );
   });

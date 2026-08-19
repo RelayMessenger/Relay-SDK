@@ -385,9 +385,11 @@ export class PermissionBroker {
     try {
       const posted = await this.client.postMessage(card.body, card.idempotencyKey);
       // The waiter may already have resolved (fast tap): only annotate while
-      // the approval file is still ours.
-      if (this.waiters.has(requestId)) {
-        approval.relay_message_id = posted.message_id;
+      // the approval file is still ours. The card's text and data parts land
+      // as separate messages; the last one is the data card the tap targets.
+      const cardMessage = posted.messages.at(-1);
+      if (this.waiters.has(requestId) && cardMessage) {
+        approval.relay_message_id = cardMessage.id;
         this.approvals.put(approval);
       }
     } catch (error) {

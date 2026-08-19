@@ -60,8 +60,7 @@ function harness(
     calls.push({ url: String(url), method: init?.method ?? "GET", headers, body });
     const next = responses[index++] ?? {
       body: {
-        message_id: "msg_out",
-        message: { id: "msg_out", conversation_id: "cnv_1" },
+        messages: [{ id: "msg_out", conversation_id: "cnv_1" }],
       },
     };
     const status = next.status ?? 200;

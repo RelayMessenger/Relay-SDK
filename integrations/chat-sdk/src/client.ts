@@ -21,7 +21,7 @@ export interface RelaySendOptions {
   parts: RelayOutgoingPart[];
   idempotencyKey: string;
   invocationId?: string;
-  replyTo?: { messageId: string; partIndex?: number };
+  replyTo?: { messageId: string };
 }
 
 export interface RelayReactionOptions {
@@ -29,7 +29,6 @@ export interface RelayReactionOptions {
   operation: "add" | "remove";
   type: RelayReactionType;
   emoji?: string;
-  partIndex?: number;
 }
 
 export interface RelayHistoryOptions {
@@ -119,14 +118,7 @@ export class RelayClient {
         parts: options.parts,
         ...(options.invocationId ? { invocation_id: options.invocationId } : {}),
         ...(options.replyTo
-          ? {
-              reply_to: {
-                message_id: options.replyTo.messageId,
-                ...(options.replyTo.partIndex !== undefined
-                  ? { part_index: options.replyTo.partIndex }
-                  : {}),
-              },
-            }
+          ? { reply_to: { message_id: options.replyTo.messageId } }
           : {}),
       }),
     });
@@ -169,9 +161,6 @@ export class RelayClient {
           operation: options.operation,
           type: options.type,
           ...(options.emoji ? { emoji: options.emoji } : {}),
-          ...(options.partIndex !== undefined
-            ? { part_index: options.partIndex }
-            : {}),
         }),
       },
     );

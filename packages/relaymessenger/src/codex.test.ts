@@ -56,7 +56,7 @@ test("Codex notify suppresses other repositories and sends only opted-in project
   const client = {
     async postMessage(body: any, key: string) {
       sent.push({ body, key });
-      return { message_id: "m1", message: { sequence: 1 } };
+      return { messages: [{ id: "m1", sequence: 1 }] };
     },
   } as unknown as RelayClient;
   const deps = { config, policy, client };

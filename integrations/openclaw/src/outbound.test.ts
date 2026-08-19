@@ -41,20 +41,21 @@ function fakeFetch(
   return { fetchImpl, requests };
 }
 
-function sentMessage(id = "msg_out"): { message_id: string; message: RelayMessage } {
+function sentMessage(id = "msg_out"): { messages: RelayMessage[] } {
   return {
-    message_id: id,
-    message: {
-      id,
-      conversation_id: "cnv_1",
-      sequence: 8,
-      sender: { kind: "agent", id: "agt_self" },
-      parts: [{ part_index: 0, type: "text", text: "hi" }],
-      reply_to: null,
-      fallback_text: "hi",
-      status: "sent",
-      created_at: "2026-07-17T00:00:02.000Z",
-    },
+    messages: [
+      {
+        id,
+        conversation_id: "cnv_1",
+        sequence: 8,
+        sender: { kind: "agent", id: "agt_self" },
+        parts: [{ type: "text", text: "hi" }],
+        reply_to: null,
+        fallback_text: "hi",
+        status: "sent",
+        created_at: "2026-07-17T00:00:02.000Z",
+      },
+    ],
   };
 }
 
@@ -196,8 +197,7 @@ describe("sendRelayText", () => {
         if (attempts === 1) {
           throw new RelayApiError("connection reset", { kind: "retryable" });
         }
-        const sent = sentMessage("msg_after_retry");
-        return { messageId: sent.message_id, message: sent.message };
+        return sentMessage("msg_after_retry");
       },
       setTyping: async () => {},
       markRead: async () => {},

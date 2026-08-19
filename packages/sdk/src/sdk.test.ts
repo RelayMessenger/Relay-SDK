@@ -193,7 +193,7 @@ describe("runPollLoop", () => {
       pollEvents: async () => ({ events: [event], nextCursor: 1 }),
       sendText: async (params: Record<string, unknown>) => {
         sends.push(params);
-        return { messageId: `m${sends.length}`, message: event.data.message };
+        return { messages: [event.data.message] };
       },
     } as unknown as RelayClient;
 
@@ -210,8 +210,7 @@ describe("runPollLoop", () => {
 
     expect(sends).toHaveLength(2);
     expect(sends[0]).not.toHaveProperty("replyTo");
-    expect(sends[1]).toMatchObject({
-      replyTo: { message_id: "msg_1", part_index: 0 },
-    });
+    // Replies target a message id only; the wire carries no part_index.
+    expect(sends[1]?.replyTo).toEqual({ message_id: "msg_1" });
   });
 });

@@ -136,8 +136,12 @@ const relayMessageAdapter = defineChannelMessageAdapter({
         return {
           status: "sent",
           messageId: verdict.messageId,
+          // The 202 is an array: name every message the send committed.
           receipt: createMessageReceiptFromOutboundResults({
-            results: [{ channel: RELAY_CHANNEL_ID, messageId: verdict.messageId }],
+            results: verdict.messages.map((message) => ({
+              channel: RELAY_CHANNEL_ID,
+              messageId: message.id,
+            })),
             kind: "text",
           }),
         };
@@ -170,8 +174,12 @@ const relayMessageAdapter = defineChannelMessageAdapter({
       });
       return {
         messageId: result.messageId,
+        // The 202 is an array: name every message the send committed.
         receipt: createMessageReceiptFromOutboundResults({
-          results: [{ channel: RELAY_CHANNEL_ID, messageId: result.messageId }],
+          results: result.messages.map((message) => ({
+            channel: RELAY_CHANNEL_ID,
+            messageId: message.id,
+          })),
           replyToId: ctx.replyToId ?? undefined,
           kind: "text",
         }),

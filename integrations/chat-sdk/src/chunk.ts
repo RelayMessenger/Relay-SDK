@@ -4,7 +4,12 @@ import type { RelayStyleRange } from "./types.js";
 /** Relay caps one text part at 8 KB of UTF-8. */
 export const MAX_TEXT_PART_BYTES = 8192;
 
-/** Relay caps one message at 32 ordered parts. */
+/**
+ * Relay caps one send call at 32 ordered parts. The server splits the call at
+ * ingest: each visible non-media part becomes its own message and contiguous
+ * media parts stay one media message. The name survives from when one call
+ * committed one message; it still bounds a single POST.
+ */
 export const MAX_PARTS_PER_MESSAGE = 32;
 
 const encoder = new TextEncoder();

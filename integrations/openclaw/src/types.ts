@@ -28,7 +28,7 @@ export type RelayStyleRange = {
 };
 
 export type RelayTextPart = {
-  part_index: number;
+  part_index?: number;
   type: "text";
   text: string;
   mentions?: RelayMentionRange[];
@@ -36,7 +36,7 @@ export type RelayTextPart = {
 };
 
 export type RelayMediaPart = {
-  part_index: number;
+  part_index?: number;
   type: "media";
   url: string;
   attachment_id?: string;
@@ -48,7 +48,7 @@ export type RelayMediaPart = {
 };
 
 export type RelayVoiceMemoPart = {
-  part_index: number;
+  part_index?: number;
   type: "voice_memo";
   url: string;
   attachment_id?: string;
@@ -56,13 +56,13 @@ export type RelayVoiceMemoPart = {
 };
 
 export type RelayLinkPreviewPart = {
-  part_index: number;
+  part_index?: number;
   type: "link_preview";
   url: string;
 };
 
 export type RelayDataPart = {
-  part_index: number;
+  part_index?: number;
   type: "data";
   data: unknown;
 };
@@ -76,7 +76,6 @@ export type RelayPart =
 
 export type RelayReplyRef = {
   message_id?: string;
-  part_index?: number;
 } | null;
 
 export type RelayMessage = {
@@ -126,9 +125,12 @@ export type RelayEventsPage = {
   nextCursor: number;
 };
 
+// The 202 from POST /v1/messages. The server splits the accepted parts at
+// ingest: each visible non-media part becomes its own message and contiguous
+// media parts stay one media message, so one send commits one or more
+// messages, in display order.
 export type RelaySendResult = {
-  messageId: string;
-  message: RelayMessage;
+  messages: RelayMessage[];
 };
 
 // ---------------------------------------------------------------------------

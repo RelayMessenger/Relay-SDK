@@ -26,7 +26,6 @@ export type RelayPart = {
 
 export type RelayReplyRef = {
   message_id: string;
-  part_index?: number;
 };
 
 export type RelayMessage = {
@@ -72,7 +71,12 @@ export type RelayEventsPage = {
   nextCursor: number;
 };
 
+/**
+ * The 202 from `POST /v1/messages`. The server splits the accepted parts at
+ * ingest: each visible non-media part becomes its own message and contiguous
+ * media parts stay one media message, so one send commits one or more
+ * messages, in display order.
+ */
 export type RelaySendResult = {
-  messageId: string;
-  message: RelayMessage;
+  messages: RelayMessage[];
 };

@@ -804,11 +804,12 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
   }
 
   /**
-   * Send the parts as one message when they fit, and as follow-up messages
-   * when they do not. A group turn cannot overflow, and cannot send twice:
-   * Relay's invocation is single use, so anything after the first message has
-   * nothing valid to cite and the server answers 403
-   * (`Relay-Server/server/src/domain/commitMessage.ts:2049-2051`).
+   * Send the parts in one call when they fit, and as follow-up calls when
+   * they do not. The server splits each call at ingest into one or more
+   * messages, and the one call that carries the invocation owns every message
+   * it commits. A group turn cannot overflow, and cannot POST twice: Relay's
+   * invocation is single use per call, so a second POST has nothing valid to
+   * cite and the server answers 403.
    */
   private async sendParts(
     conversationId: string,
@@ -833,7 +834,7 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
     const invocationId = groupTurn?.invocationId;
     if (batches.length > 1 && invocationId) {
       throw new RelayInvocationSpentError(
-        `this reply needs ${batches.length} Relay messages, and one Relay invocation permits one message`,
+        `this reply needs ${batches.length} Relay send calls, and one Relay invocation permits one call`,
       );
     }
 
@@ -860,11 +861,17 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
         turn.sent += 1;
         if (first === undefined && invocationId) turn.invocationUsed = true;
       }
-      first ??= {
-        id: result.message_id,
-        threadId,
-        raw: { message: result.message },
-      };
+      // One call commits one or more messages; the Chat SDK's post contract
+      // names a single raw message, so the first committed one stands for the
+      // whole send.
+      const [committed] = result.messages;
+      if (committed && first === undefined) {
+        first = {
+          id: committed.id,
+          threadId,
+          raw: { message: committed },
+        };
+      }
     }
     return first as RawMessage<RelayRawMessage>;
   }

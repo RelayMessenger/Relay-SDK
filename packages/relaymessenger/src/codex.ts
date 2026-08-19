@@ -209,7 +209,9 @@ export async function permissionRequestHook(
     write(decisionJson(false));
     return 0;
   }
-  const cardSequence = posted.message.sequence;
+  // The card's text and data parts land as separate messages; a verdict must
+  // come after every one of them, so the watermark is the last sequence.
+  const cardSequence = posted.messages.at(-1)?.sequence ?? 0;
 
   const finish = (allow: boolean): number => {
     approvals.consume(requestId);

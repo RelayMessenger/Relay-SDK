@@ -100,7 +100,7 @@ export interface RelayMessage {
   sender: RelaySender;
   is_from_me?: boolean;
   parts?: RelayPart[];
-  reply_to?: { message_id?: string; part_index?: number } | null;
+  reply_to?: { message_id?: string } | null;
   invoked_agents?: string[];
   reactions?: unknown[];
   fallback_text?: string;
@@ -123,9 +123,14 @@ export interface RelayMessageUnsentEventData {
   sequence: number;
 }
 
+/**
+ * The 202 from `POST /v1/messages`. The server splits the accepted parts at
+ * ingest: each visible non-media part becomes its own message and contiguous
+ * media parts stay one media message, so one send commits one or more
+ * messages, in display order.
+ */
 export interface RelaySendResult {
-  message_id: string;
-  message: RelayMessage;
+  messages: RelayMessage[];
 }
 
 export interface RelayConversation {

@@ -42,8 +42,14 @@ export function deriveRelayIdempotencyKey(params: {
 }
 
 export type RelayOutboundSendResult = {
+  /** Id of the first committed message; core's receipt APIs name one id. */
   messageId: string;
-  message: RelayMessage;
+  /**
+   * Every message the send committed, in display order. A single text part
+   * commits exactly one, but the 202 is always an array and the receipt
+   * should name everything the server stored.
+   */
+  messages: RelayMessage[];
 };
 
 export async function sendRelayText(params: {
@@ -64,7 +70,11 @@ export async function sendRelayText(params: {
         idempotencyKey: params.idempotencyKey,
         ...(params.signal ? { signal: params.signal } : {}),
       });
-      return { messageId: result.messageId, message: result.message };
+      const first = result.messages[0];
+      if (!first) {
+        throw new RelayApiError("relay: 202 carried no messages", { kind: "retryable" });
+      }
+      return { messageId: first.id, messages: result.messages };
     } catch (error) {
       lastError = error;
       if (!(error instanceof RelayApiError) || !error.retryable || params.signal?.aborted) {
@@ -76,15 +86,16 @@ export async function sendRelayText(params: {
 }
 
 export type RelayUnknownSendVerdict =
-  | { status: "sent"; messageId: string; message: RelayMessage }
+  | { status: "sent"; messageId: string; messages: RelayMessage[] }
   | { status: "not_sent" }
   | { status: "unresolved"; error?: string; retryable?: boolean };
 
 /**
- * Reconcile a send whose platform outcome is unknown: replay the POST with the same
- * idempotency key and body. By server contract the replay either performs the
- * send exactly once or returns the originally committed message — either way
- * the visible outcome is a single message.
+ * Reconcile a send whose platform outcome is unknown: replay the POST with the
+ * same idempotency key and body. By server contract the replay either performs
+ * the send exactly once or returns the originally committed messages — either
+ * way the visible outcome is the one set of messages the key names, never a
+ * duplicate.
  */
 export async function reconcileRelayUnknownSend(params: {
   client: RelayClient;
@@ -101,7 +112,7 @@ export async function reconcileRelayUnknownSend(params: {
       replyToId: params.replyToId ?? null,
       idempotencyKey: params.idempotencyKey,
     });
-    return { status: "sent", messageId: result.messageId, message: result.message };
+    return { status: "sent", messageId: result.messageId, messages: result.messages };
   } catch (error) {
     if (error instanceof RelayApiError) {
       if (error.kind === "conflict") {

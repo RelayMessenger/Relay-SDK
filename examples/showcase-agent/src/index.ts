@@ -62,7 +62,7 @@ await runPollLoop({
     try {
       await responding("Thinking…");
       const result = await reply.text(`Echo from @${me.handle}: ${text}`);
-      console.log(`[showcase] -> ${result.messageId}`);
+      console.log(`[showcase] -> ${result.messages.map((sent) => sent.id).join(", ")}`);
     } finally {
       await typing(false);
     }

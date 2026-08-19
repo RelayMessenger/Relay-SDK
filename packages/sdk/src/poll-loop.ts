@@ -103,7 +103,7 @@ function buildContext(
           idempotencyKey: key,
           ...(invocationId ? { invocationId } : {}),
           ...(options?.quote
-            ? { replyTo: { message_id: message.id, part_index: 0 } }
+            ? { replyTo: { message_id: message.id } }
             : {}),
         });
       },
@@ -115,7 +115,7 @@ function buildContext(
           idempotencyKey: key,
           ...(invocationId ? { invocationId } : {}),
           ...(options?.quote
-            ? { replyTo: { message_id: message.id, part_index: 0 } }
+            ? { replyTo: { message_id: message.id } }
             : {}),
         });
       },
