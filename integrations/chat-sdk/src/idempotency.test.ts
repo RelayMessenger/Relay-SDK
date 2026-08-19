@@ -1,47 +1,36 @@
 import { describe, expect, it } from "vitest";
 import {
   DedupeWindow,
-  canonicalJson,
   deriveIdempotencyKey,
   unkeyedIdempotencyKey,
 } from "./idempotency.js";
 
 describe("deriveIdempotencyKey", () => {
-  const parts = [{ type: "text", text: "hello" }];
-
-  it("is stable for the same event, ordinal, and content", async () => {
-    const first = await deriveIdempotencyKey("evt_1", 0, parts);
-    const second = await deriveIdempotencyKey("evt_1", 0, parts);
-    expect(first).toBe(second);
+  it("is stable for the same event and ordinal", () => {
+    expect(deriveIdempotencyKey("evt_1", 0)).toBe(deriveIdempotencyKey("evt_1", 0));
   });
 
-  it("ignores key order inside the content", async () => {
-    const a = await deriveIdempotencyKey("evt_1", 0, [{ type: "text", text: "hi" }]);
-    const b = await deriveIdempotencyKey("evt_1", 0, [{ text: "hi", type: "text" }]);
-    expect(a).toBe(b);
+  it("ignores the content, so Relay can replay a retry and refuse a diverging one", () => {
+    // Relay hashes the whole request server side and stores it beside the key
+    // (commitMessage.ts:1553-1561), then replays the stored response for a
+    // matching hash and answers 409 idempotency_conflict for a different one
+    // (:1885-1887). A key that moved with the content would make that conflict
+    // unreachable, so an LLM that wrote different words on the retry would post
+    // a genuine second message to the person.
+    expect(deriveIdempotencyKey("evt_1", 0)).toBe("relay:evt_1:0");
   });
 
-  it("changes when the content changes, so a diverging retry cannot 409", async () => {
-    const first = await deriveIdempotencyKey("evt_1", 0, parts);
-    const second = await deriveIdempotencyKey("evt_1", 0, [
-      { type: "text", text: "different" },
-    ]);
-    expect(first).not.toBe(second);
+  it("changes with the ordinal and with the event", () => {
+    expect(deriveIdempotencyKey("evt_1", 0)).not.toBe(deriveIdempotencyKey("evt_1", 1));
+    expect(deriveIdempotencyKey("evt_1", 0)).not.toBe(deriveIdempotencyKey("evt_2", 0));
   });
 
-  it("changes with the ordinal and with the event", async () => {
-    expect(await deriveIdempotencyKey("evt_1", 0, parts)).not.toBe(
-      await deriveIdempotencyKey("evt_1", 1, parts),
-    );
-    expect(await deriveIdempotencyKey("evt_1", 0, parts)).not.toBe(
-      await deriveIdempotencyKey("evt_2", 0, parts),
-    );
-  });
-
-  it("stays inside Relay's 8 to 255 character bound", async () => {
-    const key = await deriveIdempotencyKey("e".repeat(400), 3, parts);
-    expect(key.length).toBeGreaterThanOrEqual(8);
-    expect(key.length).toBeLessThanOrEqual(255);
+  it("stays inside Relay's 8 to 255 character bound", () => {
+    for (const eventId of ["", "e", "e".repeat(400)]) {
+      const key = deriveIdempotencyKey(eventId, 3);
+      expect(key.length).toBeGreaterThanOrEqual(8);
+      expect(key.length).toBeLessThanOrEqual(255);
+    }
   });
 });
 
@@ -51,27 +40,32 @@ describe("unkeyedIdempotencyKey", () => {
   });
 });
 
-describe("canonicalJson", () => {
-  it("drops undefined members and sorts keys", () => {
-    expect(canonicalJson({ b: 1, a: undefined, c: [2, { e: 3, d: 4 }] })).toBe(
-      '{"b":1,"c":[2,{"d":4,"e":3}]}',
-    );
-  });
-});
-
 describe("DedupeWindow", () => {
-  it("remembers what it recorded", () => {
+  it("remembers what it claimed", () => {
     const window = new DedupeWindow(4);
     expect(window.has("evt_1")).toBe(false);
-    window.record("evt_1");
+    expect(window.claim("evt_1")).toBe(true);
     expect(window.has("evt_1")).toBe(true);
+  });
+
+  it("refuses a second claim on one event id", () => {
+    const window = new DedupeWindow(4);
+    expect(window.claim("evt_1")).toBe(true);
+    expect(window.claim("evt_1")).toBe(false);
+  });
+
+  it("lets a released event id be claimed again", () => {
+    const window = new DedupeWindow(4);
+    window.claim("evt_1");
+    window.release("evt_1");
+    expect(window.claim("evt_1")).toBe(true);
   });
 
   it("evicts the oldest entry past capacity", () => {
     const window = new DedupeWindow(2);
-    window.record("a");
-    window.record("b");
-    window.record("c");
+    window.claim("a");
+    window.claim("b");
+    window.claim("c");
     expect(window.has("a")).toBe(false);
     expect(window.has("c")).toBe(true);
   });
