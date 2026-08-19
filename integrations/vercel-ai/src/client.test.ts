@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { RelayApiError, RelayClient } from "./client.js";
+import { RelayClient } from "./client.js";
 
 function clientWithMock(status = 202, body: unknown = { messages: [{ id: "msg_out" }] }) {
   const fetchMock = vi.fn(async () =>
@@ -202,6 +202,5 @@ describe("RelayClient.send", () => {
     expect(JSON.parse(init.body as string)).toMatchObject({
       reply_to: { message_id: "msg_9" },
     });
-    expect(RelayApiError.name).toBe("RelayApiError");
   });
 });

@@ -235,19 +235,34 @@ describe("handleWebhook", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+    let dispatched: (() => void) | undefined;
+    const entered = new Promise<void>((resolve) => {
+      dispatched = resolve;
+    });
+    let dispatches = 0;
     const { adapter, chat } = harness([], async () => {
+      dispatches += 1;
+      dispatched?.();
+      // A second dispatch is the defect under test. Let it through rather than
+      // deadlocking on the gate, so the failure lands on the assertion below
+      // instead of on the suite timeout.
+      if (dispatches > 1) release?.();
       await gate;
     });
     const body = JSON.stringify(messageEvent());
-    // Both are in flight before either can finish: the first dispatch is held
-    // open until the timer fires, which is what a redelivery racing its
-    // original looks like. A check that only records on the way out lets the
-    // second one past.
+    // The second delivery must arrive while the first is still inside its
+    // handler, which is what a redelivery racing its original looks like.
+    // Waiting on `entered` rather than on a timer pins that ordering: both
+    // requests await an async signature check first, and whichever resolves
+    // sooner takes the claim, so a bare `Promise.all` decides the winner by
+    // scheduler luck. A check that only records on the way out still fails
+    // here, because the first handler has not returned yet.
     const first = adapter.handleWebhook(signedRequest(body, "whmsg_1"));
-    const second = adapter.handleWebhook(signedRequest(body, "whmsg_2"));
-    setTimeout(() => release?.(), 20);
-    const [, secondResponse] = await Promise.all([first, second]);
-    expect(await secondResponse.json()).toEqual({ deduplicated: true });
+    await entered;
+    const second = await adapter.handleWebhook(signedRequest(body, "whmsg_2"));
+    release?.();
+    await first;
+    expect(await second.json()).toEqual({ deduplicated: true });
     expect(chat.messages).toHaveLength(1);
   });
 
