@@ -23,7 +23,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=22.22.3"
+    "node": ">=22.18"
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",

@@ -99,7 +99,11 @@ try {
 
   const pkg = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
   assert.equal(pkg.bin.relaymessenger, "dist/cli.js");
-  assert.equal(pkg.engines.node, ">=22.22.3");
+  // The PUBLISHED floor is what the artifact needs, measured in a clean box on
+  // 22.18.0, and doctor.ts asserts the same number at runtime. The stricter
+  // >=22.22.3 is a CONTRIBUTOR constraint (a transitive dev dependency's
+  // preinstall) and lives on the private root manifest, which npm never ships.
+  assert.equal(pkg.engines.node, ">=22.18");
   assert.equal(pkg.license, "MIT");
   // The packed adapter pins must stay exact and match the workspace manifest.
   // Comparing against the manifest instead of a literal keeps dependency bumps
