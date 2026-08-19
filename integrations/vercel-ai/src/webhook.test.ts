@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createRelay } from "./index.js";
-import type { MessageReceivedEvent, RelayOutgoingPart } from "./types.js";
+import type { MessageReceivedEvent } from "./types.js";
 
 const SECRET_BYTES = Buffer.from("another-test-secret");
 const SECRET = `whsec_${SECRET_BYTES.toString("base64")}`;
@@ -85,7 +85,7 @@ describe("createWebhookHandler", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://api.example.test/v1/messages");
     const headers = init.headers as Record<string, string>;
-    expect(headers["Idempotency-Key"]).toMatch(/^evt_01TEST:0:[0-9a-f]{32}$/);
+    expect(headers["Idempotency-Key"]).toBe("evt_01TEST:0");
     expect(JSON.parse(init.body as string)).toMatchObject({
       conversation_id: "cnv_01TEST",
       parts: [{ type: "text", text: "hi back" }],
@@ -102,12 +102,16 @@ describe("createWebhookHandler", () => {
     const keys = fetchMock.mock.calls.map(
       ([, init]) => (init!.headers as Record<string, string>)["Idempotency-Key"],
     );
-    expect(keys[0]).toMatch(/^evt_01TEST:0:[0-9a-f]{32}$/);
-    expect(keys[1]).toMatch(/^evt_01TEST:1:[0-9a-f]{32}$/);
-    expect(keys[0]).not.toBe(keys[1]);
+    expect(keys[0]).toBe("evt_01TEST:0");
+    expect(keys[1]).toBe("evt_01TEST:1");
   });
 
-  it("repeats the key for identical content and changes it when the reply changes", async () => {
+  it("keys a reply by event and position, whatever the model wrote", async () => {
+    // Relay hashes the request beside the key and answers 409 when one key
+    // returns with a different body, otherwise it replays the first response.
+    // So the key must NOT vary with the content: a redelivery whose model
+    // wrote something else has to collide, or it posts a second message to the
+    // person instead of being refused.
     const texts = ["first answer", "first answer", "second answer"];
     const keys: string[] = [];
     for (const text of texts) {
@@ -119,29 +123,8 @@ describe("createWebhookHandler", () => {
       const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       keys.push((init.headers as Record<string, string>)["Idempotency-Key"]);
     }
-    // A redelivery that reproduces the reply replays the committed message.
     expect(keys[0]).toBe(keys[1]);
-    // A redelivery whose model wrote something else sends under a new key
-    // instead of conflicting with the first request under the old one.
-    expect(keys[2]).not.toBe(keys[0]);
-  });
-
-  it("keeps the reply key stable when equivalent part objects use another key order", async () => {
-    const parts: RelayOutgoingPart[] = [
-      { type: "data", data: { z: 2, a: 1 } },
-      { data: { a: 1, z: 2 }, type: "data" },
-    ];
-    const keys: string[] = [];
-    for (const part of parts) {
-      const { relay, fetchMock } = relayWithMockFetch();
-      const handler = relay.webhook(async ({ reply }) => {
-        await reply.parts([part]);
-      });
-      await handler(signedRequest(JSON.stringify(envelope())));
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-      keys.push((init.headers as Record<string, string>)["Idempotency-Key"]);
-    }
-    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).toBe(keys[0]);
   });
 
   it("threads invocation_id from group deliveries into replies", async () => {

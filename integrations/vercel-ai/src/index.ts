@@ -8,7 +8,11 @@ export type {
   StreamOptions,
   TypingOptions,
 } from "./client.js";
-export { verifyWebhookSignature, WebhookVerificationError } from "./signature.js";
+export {
+  verifyWebhookSignature,
+  WebhookSecretError,
+  WebhookVerificationError,
+} from "./signature.js";
 export { createWebhookHandler } from "./webhook.js";
 export type { WebhookContext, WebhookHandler, WebhookOptions } from "./webhook.js";
 export type * from "./types.js";

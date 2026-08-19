@@ -4,6 +4,7 @@
   "workspaces": [
     "packages/relaymessenger",
     "packages/sdk",
+    "integrations/chat-sdk",
     "integrations/claude-code",
     "integrations/openclaw",
     "integrations/vercel-ai",
