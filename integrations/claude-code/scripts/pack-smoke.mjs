@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,7 +37,10 @@ try {
     throw new Error("installed archive is missing the bundled runtime or Claude plugin manifest");
   }
   const smoke = run(process.execPath, [runtime, "--version"], installDir);
-  if (smoke.stdout.trim() !== "0.2.0") {
+  const expectedVersion = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ).version;
+  if (smoke.stdout.trim() !== expectedVersion) {
     throw new Error(`unexpected installed runtime version: ${JSON.stringify(smoke.stdout.trim())}`);
   }
   process.stdout.write(`installed ${basename(archive)} and loaded bundled runtime ${smoke.stdout.trim()}\n`);

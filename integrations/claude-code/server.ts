@@ -22,8 +22,17 @@ import { startPoller } from "./src/poller.ts";
 import { RelayApiError, RelayClient } from "./src/relayClient.ts";
 import { RetryWindow } from "./src/retryWindow.ts";
 import type { PermissionRequest, RelayEvent, SendMessageBody } from "./src/types.ts";
+import { createRequire } from "node:module";
 
-const VERSION = "0.2.0";
+// Baked in at build time from package.json rather than restated here. Three
+// copies of this one fact drifted apart (package.json 0.2.1, plugin manifest
+// 0.2.0, this constant 0.2.0) and the pack smoke asserted the stale literal,
+// so nothing noticed. A relative read cannot serve both callers: `dev` runs
+// this file from the package root, the bundle runs from runtime/.
+declare const __RELAY_CHANNEL_VERSION__: string | undefined;
+const VERSION: string = typeof __RELAY_CHANNEL_VERSION__ === "string"
+  ? __RELAY_CHANNEL_VERSION__
+  : (createRequire(import.meta.url)("./package.json") as { version: string }).version;
 const RETRY_INTERVAL_MS = 5_000;
 const NOTIFICATION_RETRY_MS = 30_000;
 
