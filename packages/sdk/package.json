@@ -1,0 +1,48 @@
+{
+  "name": "@relaymessenger/sdk",
+  "version": "0.1.0",
+  "description": "Relay transport library: HTTPS client, Standard Webhooks verify, durable long-poll, idempotent sends.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/relaymessenger/Relay-SDK.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://docs.relayapp.im",
+  "bugs": {
+    "url": "https://github.com/relaymessenger/Relay-SDK/issues"
+  },
+  "keywords": [
+    "relay",
+    "relaymessenger",
+    "agents",
+    "webhooks",
+    "long-poll"
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "id": "relay",
+  "name": "Relay",
+  "description": "Relay channel plugin. Connects an OpenClaw agent to a Relay contact.",
+  "activation": {
+    "onStartup": false
+  },
+  "channels": [
+    "relay"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "channelConfigs": {
+    "relay": {
+      "label": "Relay",
+      "description": "Back a Relay contact with this OpenClaw agent.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string"
+          },
+          "tokenFile": {
+            "type": "string"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "allowFrom": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pollTimeoutSeconds": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "defaultAccount": {
+            "type": "string"
+          },
+          "accounts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "token": {
+                  "type": "string"
+                },
+                "tokenFile": {
+                  "type": "string"
+                },
+                "baseUrl": {
+                  "type": "string"
+                },
+                "allowFrom": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "pollTimeoutSeconds": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 30
+                }
+              }
+            }
+          }
+        }
+      },
+      "uiHints": {
+        "token": {
+          "label": "Agent Token",
+          "sensitive": true
+        },
+        "baseUrl": {
+          "label": "Relay API base URL"
+        }
+      }
+    }
+  }
+}

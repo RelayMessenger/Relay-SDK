@@ -1,0 +1,20 @@
+{
+  "name": "@relaymessenger/raw-webhook-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal webhook agent matching the Relay quickstart.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "node -e \"console.log('raw-webhook-agent: needs RELAY_WEBHOOK_SECRET + public URL')\""
+  },
+  "dependencies": {
+    "@relaymessenger/sdk": "*"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "license": "MIT"
+}

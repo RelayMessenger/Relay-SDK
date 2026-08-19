@@ -1,0 +1,4 @@
+interface:
+  display_name: "npm Package Authoring"
+  short_description: "Author and publish robust npm packages"
+  default_prompt: "Use $npm-package-authoring to audit, package, smoke-test, authenticate, and publish this npm package safely."

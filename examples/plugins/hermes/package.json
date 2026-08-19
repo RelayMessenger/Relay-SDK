@@ -1,0 +1,43 @@
+{
+  "name": "@relaymessenger/hermes",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Relay messaging channel for Hermes Agent: durable long-poll, owner allowlist, idempotent replies.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "relay-hermes": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "start": "tsx src/cli.ts",
+    "test": "vitest run --config vitest.config.ts",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@relaymessenger/sdk": "*"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "license": "MIT",
+  "keywords": [
+    "relay",
+    "hermes",
+    "hermes-agent",
+    "messaging",
+    "agents"
+  ]
+}

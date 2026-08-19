@@ -1,0 +1,95 @@
+{
+  "name": "@relaymessenger/openclaw-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Relay channel plugin for OpenClaw. Text your OpenClaw like a friend.",
+  "license": "MIT",
+  "keywords": [
+    "openclaw",
+    "relay",
+    "messaging",
+    "agent"
+  ],
+  "engines": {
+    "node": ">=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/relaymessenger/Relay-SDK.git",
+    "directory": "integrations/openclaw"
+  },
+  "type": "module",
+  "files": [
+    "README.md",
+    "index.ts",
+    "setup-entry.ts",
+    "openclaw.plugin.json",
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "dist/**/*.js"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "gateway:harness": "node scripts/gateway-harness.mjs",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@openclaw/fs-safe": "0.5.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "openclaw": "2026.7.2-beta.7",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.7.2-beta.5"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "openclaw": {
+    "compat": {
+      "pluginApi": ">=2026.7.2-beta.5"
+    },
+    "install": {
+      "localPath": ".",
+      "defaultChoice": "local",
+      "minHostVersion": ">=2026.7.2-beta.5"
+    },
+    "build": {
+      "openclawVersion": "2026.7.2-beta.7"
+    },
+    "extensions": [
+      "./index.ts"
+    ],
+    "runtimeExtensions": [
+      "./dist/index.js"
+    ],
+    "setupEntry": "./setup-entry.ts",
+    "runtimeSetupEntry": "./dist/setup-entry.js",
+    "channel": {
+      "id": "relay",
+      "configuredState": {
+        "env": {
+          "anyOf": [
+            "RELAY_AGENT_TOKEN"
+          ]
+        }
+      },
+      "label": "Relay",
+      "selectionLabel": "Relay",
+      "detailLabel": "Relay",
+      "docsPath": "https://docs.relayapp.im/integrations/openclaw",
+      "docsLabel": "documentation",
+      "blurb": "Text your OpenClaw like a friend.",
+      "systemImage": "message",
+      "markdownCapable": false
+    }
+  }
+}

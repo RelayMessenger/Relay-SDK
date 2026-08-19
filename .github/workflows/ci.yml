@@ -1,0 +1,149 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Node ${{ matrix.node }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [blacksmith-2vcpu-ubuntu-2404, blacksmith-2vcpu-windows-2025]
+        # Exercise every Node release line declared by the OpenClaw peer range.
+        node: [22.22.3, 24.15.0, 25.9.0]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Toolchain downloads for versions not yet in the runner manifest fail
+      # transiently; a second attempt costs seconds and keeps the aggregate
+      # gate meaningful instead of reporting a fake validate failure.
+      - id: node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        continue-on-error: true
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - if: steps.node.outcome == 'failure'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run validate
+
+  minimum-node:
+    name: ${{ matrix.name }} minimum Node ${{ matrix.node }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: relaymessenger CLI
+            node: 22.18.0
+            directory: .
+            install: npm ci --workspace @relaymessenger/cli
+            verify: npm run check --workspace @relaymessenger/cli && npm run build --workspace @relaymessenger/cli && npm test --workspace @relaymessenger/cli
+          - name: Claude channel
+            node: 20.11.0
+            directory: integrations/claude-code
+            install: npm ci
+            verify: npm run verify
+          - name: OpenClaw plugin
+            node: 22.22.3
+            directory: integrations/openclaw
+            install: npm ci
+            verify: npm run check && npm run build && npm test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+      - run: ${{ matrix.install }}
+        working-directory: ${{ matrix.directory }}
+      - run: ${{ matrix.verify }}
+        working-directory: ${{ matrix.directory }}
+
+  package-smoke:
+    name: Clean package and installed-tarball smokes
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=low
+      - run: npm audit --omit=dev --audit-level=low
+      - run: npm run test:release
+      - run: npm run validate:claude-plugin
+      - run: npm run gateway:harness
+      - run: npm run pack:check
+      # Imported from Relay-Plugins: workspace-manifest invariants plus a
+      # fresh-path consumer import of the built @relaymessenger/sdk.
+      - run: npm run manifests:check
+      - run: npm run sdk:consumer-smoke
+
+  required:
+    name: Required CI
+    if: ${{ always() }}
+    needs: [validate, minimum-node, package-smoke]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Require every pull-request gate
+        env:
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          MINIMUM_NODE_RESULT: ${{ needs.minimum-node.result }}
+          PACKAGE_SMOKE_RESULT: ${{ needs.package-smoke.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$VALIDATE_RESULT" = success
+          test "$MINIMUM_NODE_RESULT" = success
+          test "$PACKAGE_SMOKE_RESULT" = success
+
+  macos-relaymessenger-runtime:
+    name: macOS installed relaymessenger Claude/Codex runtime smoke
+    # macOS runner minutes stay the most expensive in the fleet. Every PR
+    # already gets the Linux validate/minimum-node/package-smoke jobs; this smoke
+    # runs on merge to main and the tag-driven release workflow re-proves it,
+    # so it does not need to re-run on every PR push too.
+    if: github.event_name != 'pull_request'
+    runs-on: blacksmith-6vcpu-macos-26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      # Packs, installs into a clean temp project, loads the CLI runtime and
+      # resolves both pinned ACP adapter entrypoints from the installed tree.
+      - run: node scripts/pack-smoke.mjs
+
+  windows-relaymessenger-runtime:
+    name: Windows installed relaymessenger integration smoke
+    # Same merge-only reasoning as the macOS smoke job above.
+    if: github.event_name != 'pull_request'
+    runs-on: blacksmith-2vcpu-windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      # Exercises installed-tarball Claude and OpenClaw installers through
+      # Windows npm .cmd shims, plus both pinned ACP adapter entrypoints.
+      - run: node scripts/pack-smoke.mjs
