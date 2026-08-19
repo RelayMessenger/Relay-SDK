@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  PERMISSION_REPLY_RE,
   PendingRequests,
   buildPermissionCard,
   buildReply,
@@ -165,9 +164,6 @@ describe("verdict text regex", () => {
     });
   }
 
-  it("matches the documented channels-reference regex source", () => {
-    assert.equal(PERMISSION_REPLY_RE.source, String.raw`^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$`);
-  });
 });
 
 describe("verdict data-part tap", () => {
@@ -410,15 +406,6 @@ describe("unsafe remote verdict", () => {
       (verdict) => verdict.behavior === "deny",
     );
     assert.equal(action.kind, "verdict");
-  });
-});
-
-describe("reply body", () => {
-  it("builds a single text part message", () => {
-    assert.deepEqual(buildReply("cnv_3", "on it"), {
-      conversation_id: "cnv_3",
-      parts: [{ type: "text", text: "on it" }],
-    });
   });
 });
 

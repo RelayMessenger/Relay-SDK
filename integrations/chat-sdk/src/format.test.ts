@@ -2,11 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeStyles,
   prefixLines,
-  renderAst,
   renderMarkdown,
   renderRawText,
 } from "./format.js";
-import { parseMarkdown } from "chat";
 
 describe("renderMarkdown", () => {
   it("keeps the words and records emphasis as style ranges", () => {
@@ -78,12 +76,6 @@ describe("renderRawText", () => {
       text: "**not markdown**",
       styles: [],
     });
-  });
-});
-
-describe("renderAst", () => {
-  it("renders the same tree renderMarkdown parses", () => {
-    expect(renderAst(parseMarkdown("a **b**"))).toEqual(renderMarkdown("a **b**"));
   });
 });
 

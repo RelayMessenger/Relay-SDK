@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const pkg = JSON.parse(
-  readFileSync(resolve(repoRoot, "integrations/vercel-ai/package.json"), "utf8"),
+  readFileSync(resolve(repoRoot, "integrations/openclaw/package.json"), "utf8"),
 );
-const expectedTag = `vercel-ai-v${pkg.version}`;
+const expectedTag = `openclaw-v${pkg.version}`;
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 
 function checkVersionMetadata() {
-  assert.equal(pkg.name, "@relaymessenger/vercel-ai", "this workflow publishes only the plugin");
+  assert.equal(pkg.name, "@relaymessenger/openclaw-plugin", "this workflow publishes only the plugin");
   assert.match(pkg.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u, "invalid package version");
 }
 
@@ -61,14 +61,19 @@ function registryState() {
   process.stdout.write(`${pkg.name}@${pkg.version} is not yet published\n`);
 }
 
-/** Install the exact published version clean and load its real entrypoints. */
+/**
+ * Install the exact published version clean and prove the plugin payload. The
+ * package is loaded by the OpenClaw host, which supplies the `openclaw` peer,
+ * so a standalone import of dist/index.js cannot run here; the smoke proves
+ * the shipped manifest parses and the runtime entrypoints exist and parse.
+ */
 async function verifyRegistry() {
   checkVersionMetadata();
-  const temp = mkdtempSync(join(tmpdir(), "vercel-ai-registry-smoke-"));
+  const temp = mkdtempSync(join(tmpdir(), "openclaw-registry-smoke-"));
   try {
     writeFileSync(
       join(temp, "package.json"),
-      `${JSON.stringify({ name: "vercel-ai-registry-smoke", private: true, type: "module" }, null, 2)}\n`,
+      `${JSON.stringify({ name: "openclaw-registry-smoke", private: true, type: "module" }, null, 2)}\n`,
     );
     let installed = false;
     let lastFailure = "";
@@ -87,25 +92,22 @@ async function verifyRegistry() {
     }
     assert.equal(installed, true, `registry install did not converge:\n${lastFailure}`);
 
-    const installedPkg = JSON.parse(
-      readFileSync(join(temp, "node_modules", "@relaymessenger", "vercel-ai", "package.json"), "utf8"),
-    );
+    const installedRoot = join(temp, "node_modules", "@relaymessenger", "openclaw-plugin");
+    const installedPkg = JSON.parse(readFileSync(join(installedRoot, "package.json"), "utf8"));
     assert.equal(installedPkg.version, pkg.version);
 
-    const probe = join(temp, "probe.mjs");
-    writeFileSync(
-      probe,
-      [
-        `import * as plugin from "${pkg.name}";`,
-        `const required = ["createRelay", "createWebhookHandler", "verifyWebhookSignature", "RelayClient"];`,
-        `for (const name of required) {`,
-        `  if (typeof plugin[name] !== "function") throw new Error("missing export: " + name);`,
-        `}`,
-        `process.stdout.write("registry-installed exports loaded\\n");`,
-      ].join("\n"),
-    );
-    const loaded = spawnSync(process.execPath, [probe], { cwd: temp, encoding: "utf8" });
-    assert.equal(loaded.status, 0, `installed package failed to load:\n${loaded.stderr}`);
+    const manifest = JSON.parse(readFileSync(join(installedRoot, "openclaw.plugin.json"), "utf8"));
+    assert.equal(typeof manifest, "object");
+    for (const entry of ["index.ts", "setup-entry.ts", "dist/index.js", "dist/setup-entry.js"]) {
+      assert.equal(existsSync(join(installedRoot, entry)), true, `missing shipped entry: ${entry}`);
+    }
+    for (const entry of ["dist/index.js", "dist/setup-entry.js"]) {
+      const checked = spawnSync(process.execPath, ["--check", join(installedRoot, entry)], {
+        cwd: temp,
+        encoding: "utf8",
+      });
+      assert.equal(checked.status, 0, `shipped entry failed to parse: ${entry}\n${checked.stderr}`);
+    }
     process.stdout.write(`registry-installed ${pkg.name}@${pkg.version} smoke passed\n`);
   } finally {
     rmSync(temp, { recursive: true, force: true });
@@ -117,5 +119,5 @@ if (command === "check-tag") checkTag(value ?? "");
 else if (command === "registry-state") registryState();
 else if (command === "verify-registry") await verifyRegistry();
 else throw new Error(
-  "usage: vercel-ai-release.mjs check-tag <vercel-ai-vX.Y.Z> | registry-state | verify-registry",
+  "usage: openclaw-release.mjs check-tag <openclaw-vX.Y.Z> | registry-state | verify-registry",
 );

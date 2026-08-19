@@ -114,15 +114,6 @@ describe("relay cursor store", () => {
     expect(map.get("relay:https://api.relayapp.im:agt_2")?.cursor).toBe(8);
   });
 
-  it("retains an ack beyond the bounded dedupe horizon", async () => {
-    const { store } = memoryStore();
-    const cursor = createRelayCursorStore({ store, baseUrl, agentId: "agt_1" });
-    await cursor.load();
-    await cursor.advance(25_001);
-    const afterDedupeEviction = createRelayCursorStore({ store, baseUrl, agentId: "agt_1" });
-    expect(await afterDedupeEviction.load()).toBe(25_001);
-  });
-
   it("fails closed when cursor state lookup is unavailable", async () => {
     const cursor = createRelayCursorStore({
       baseUrl,

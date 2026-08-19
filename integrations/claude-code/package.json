@@ -1,9 +1,17 @@
 {
   "name": "relay-claude-channel",
   "version": "0.2.1",
-  "private": true,
   "type": "module",
   "description": "Relay channel for Claude Code. Bridges a Relay agent conversation into a Claude Code session over the experimental claude/channel MCP contract.",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/relaymessenger/Relay-SDK.git",
+    "directory": "integrations/claude-code"
+  },
   "engines": {
     "node": ">=20.11"
   },
@@ -11,7 +19,8 @@
     ".claude-plugin/",
     "commands/",
     "runtime/",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -28,7 +37,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/node": "^26.2.0",
     "esbuild": "^0.28.2",
-    "tsx": "^4.23.11",
+    "tsx": "^4.23.12",
     "typescript": "^7.0.2",
     "zod": "4.4.3"
   }

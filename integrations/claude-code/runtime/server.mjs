@@ -25745,7 +25745,7 @@ var RetryWindow = class {
 };
 
 // server.ts
-var VERSION = "0.2.0";
+var VERSION = true ? "0.2.1" : createRequire(import.meta.url)("./package.json").version;
 var RETRY_INTERVAL_MS = 5e3;
 var NOTIFICATION_RETRY_MS = 3e4;
 var log = (message) => {

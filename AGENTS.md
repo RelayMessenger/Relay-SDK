@@ -4,12 +4,18 @@
   `@relaymessenger/cli` npm tool (the package name never changes), the runtime
   integrations it bundles, the `@relaymessenger/sdk` contract and transport
   library in `packages/sdk`, and the forkable agents in `examples/`.
-- `@relaymessenger/sdk` is not published yet. Its release workflow exists and
-  fires on `sdk-vX.Y.Z` tags. Its types will become generated from the
-  Relay-Server schemas; do not hand-grow the contract surface.
+- `@relaymessenger/sdk` publishes on `sdk-vX.Y.Z` tags. Its types will become
+  generated from the Relay-Server schemas; do not hand-grow the contract
+  surface.
+- Six packages publish from here, each on its own tag: `@relaymessenger/cli`,
+  `@relaymessenger/sdk`, `@relaymessenger/vercel-ai`,
+  `@relaymessenger/chat-sdk-adapter`, `@relaymessenger/openclaw-plugin`, and
+  `relay-claude-channel`. The CLI tarball still bundles the Claude Code
+  marketplace and the OpenClaw plugin archive.
 - Supported integrations are exactly Claude Code, Codex, and Hermes over ACP,
-  the OpenClaw channel plugin, and the Vercel AI SDK webhook plugin
-  (`integrations/vercel-ai`, published as `@relaymessenger/vercel-ai`). Load `.agents/skills/acp-adapter-authoring/SKILL.md`
+  the OpenClaw channel plugin, the Vercel AI SDK webhook plugin
+  (`integrations/vercel-ai`), and the Vercel Chat SDK adapter
+  (`integrations/chat-sdk`). Load `.agents/skills/acp-adapter-authoring/SKILL.md`
   before adding, changing, or auditing any coding-agent integration.
 - Load `.agents/skills/npm-package-authoring/SKILL.md` before changing package
   metadata, exports, packaging, or anything that ships in the npm tarball.

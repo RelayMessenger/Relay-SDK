@@ -7,13 +7,13 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const pkg = JSON.parse(
-  readFileSync(resolve(repoRoot, "integrations/vercel-ai/package.json"), "utf8"),
+  readFileSync(resolve(repoRoot, "integrations/chat-sdk/package.json"), "utf8"),
 );
-const expectedTag = `vercel-ai-v${pkg.version}`;
+const expectedTag = `chat-sdk-v${pkg.version}`;
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 
 function checkVersionMetadata() {
-  assert.equal(pkg.name, "@relaymessenger/vercel-ai", "this workflow publishes only the plugin");
+  assert.equal(pkg.name, "@relaymessenger/chat-sdk-adapter", "this workflow publishes only the adapter");
   assert.match(pkg.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u, "invalid package version");
 }
 
@@ -64,11 +64,11 @@ function registryState() {
 /** Install the exact published version clean and load its real entrypoints. */
 async function verifyRegistry() {
   checkVersionMetadata();
-  const temp = mkdtempSync(join(tmpdir(), "vercel-ai-registry-smoke-"));
+  const temp = mkdtempSync(join(tmpdir(), "chat-sdk-registry-smoke-"));
   try {
     writeFileSync(
       join(temp, "package.json"),
-      `${JSON.stringify({ name: "vercel-ai-registry-smoke", private: true, type: "module" }, null, 2)}\n`,
+      `${JSON.stringify({ name: "chat-sdk-registry-smoke", private: true, type: "module" }, null, 2)}\n`,
     );
     let installed = false;
     let lastFailure = "";
@@ -88,7 +88,7 @@ async function verifyRegistry() {
     assert.equal(installed, true, `registry install did not converge:\n${lastFailure}`);
 
     const installedPkg = JSON.parse(
-      readFileSync(join(temp, "node_modules", "@relaymessenger", "vercel-ai", "package.json"), "utf8"),
+      readFileSync(join(temp, "node_modules", "@relaymessenger", "chat-sdk-adapter", "package.json"), "utf8"),
     );
     assert.equal(installedPkg.version, pkg.version);
 
@@ -97,7 +97,7 @@ async function verifyRegistry() {
       probe,
       [
         `import * as plugin from "${pkg.name}";`,
-        `const required = ["createRelay", "createWebhookHandler", "verifyWebhookSignature", "RelayClient"];`,
+        `const required = ["createRelayAdapter", "RelayAdapter", "RelayClient", "RelayApiError"];`,
         `for (const name of required) {`,
         `  if (typeof plugin[name] !== "function") throw new Error("missing export: " + name);`,
         `}`,
@@ -117,5 +117,5 @@ if (command === "check-tag") checkTag(value ?? "");
 else if (command === "registry-state") registryState();
 else if (command === "verify-registry") await verifyRegistry();
 else throw new Error(
-  "usage: vercel-ai-release.mjs check-tag <vercel-ai-vX.Y.Z> | registry-state | verify-registry",
+  "usage: chat-sdk-release.mjs check-tag <chat-sdk-vX.Y.Z> | registry-state | verify-registry",
 );

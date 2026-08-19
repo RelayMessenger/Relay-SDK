@@ -20,11 +20,15 @@ function checkVersionMetadata() {
 function checkTag(tag) {
   checkVersionMetadata();
   assert.equal(tag, expectedTag, `release tag must be exactly ${expectedTag}`);
-  const exact = execFileSync("git", ["describe", "--exact-match", "--tags", "HEAD"], {
+  // Several packages can release from one commit, so the check is that OUR
+  // tag points at HEAD, not that it is the only tag here: `git describe
+  // --exact-match` picks a single winner among co-located tags and failed
+  // two of three releases cut from the same merge.
+  const pointing = execFileSync("git", ["tag", "--points-at", "HEAD"], {
     cwd: repoRoot,
     encoding: "utf8",
-  }).trim();
-  assert.equal(exact, tag, `checked-out commit is tagged ${exact}, not ${tag}`);
+  }).trim().split("\n").filter(Boolean);
+  assert.ok(pointing.includes(tag), `checked-out commit is tagged [${pointing.join(", ")}], not ${tag}`);
   process.stdout.write(`release tag/version contract passed (${tag})\n`);
 }
 

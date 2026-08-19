@@ -33,19 +33,19 @@
     "prepack": "node scripts/build-claude-bundle.mjs && npm run clean && npm run build"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.66.0",
-    "@agentclientprotocol/codex-acp": "1.2.0",
+    "@agentclientprotocol/claude-agent-acp": "0.69.0",
+    "@agentclientprotocol/codex-acp": "1.4.0",
     "@agentclientprotocol/sdk": "^1.2.1",
     "cross-spawn": "7.0.6",
     "qrcode-terminal": "^0.12.0",
     "smol-toml": "^1.8.0"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "2.1.226",
+    "@anthropic-ai/claude-code": "2.1.233",
     "@types/cross-spawn": "6.0.6",
     "@types/node": "^26.2.0",
     "@types/qrcode-terminal": "^0.12.2",
-    "tsx": "^4.23.11",
+    "tsx": "^4.23.12",
     "typescript": "^7.0.2"
   },
   "license": "MIT",

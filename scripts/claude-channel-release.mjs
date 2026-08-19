@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const pkg = JSON.parse(
-  readFileSync(resolve(repoRoot, "integrations/vercel-ai/package.json"), "utf8"),
+  readFileSync(resolve(repoRoot, "integrations/claude-code/package.json"), "utf8"),
 );
-const expectedTag = `vercel-ai-v${pkg.version}`;
+const expectedTag = `claude-channel-v${pkg.version}`;
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 
 function checkVersionMetadata() {
-  assert.equal(pkg.name, "@relaymessenger/vercel-ai", "this workflow publishes only the plugin");
+  assert.equal(pkg.name, "relay-claude-channel", "this workflow publishes only the channel");
   assert.match(pkg.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u, "invalid package version");
 }
 
@@ -61,14 +61,18 @@ function registryState() {
   process.stdout.write(`${pkg.name}@${pkg.version} is not yet published\n`);
 }
 
-/** Install the exact published version clean and load its real entrypoints. */
+/**
+ * Install the exact published version clean and prove the plugin payload. The
+ * package is a Claude Code plugin, not an importable library: the smoke proves
+ * the shipped plugin manifest parses and the runtime server exists and parses.
+ */
 async function verifyRegistry() {
   checkVersionMetadata();
-  const temp = mkdtempSync(join(tmpdir(), "vercel-ai-registry-smoke-"));
+  const temp = mkdtempSync(join(tmpdir(), "claude-channel-registry-smoke-"));
   try {
     writeFileSync(
       join(temp, "package.json"),
-      `${JSON.stringify({ name: "vercel-ai-registry-smoke", private: true, type: "module" }, null, 2)}\n`,
+      `${JSON.stringify({ name: "claude-channel-registry-smoke", private: true, type: "module" }, null, 2)}\n`,
     );
     let installed = false;
     let lastFailure = "";
@@ -87,25 +91,29 @@ async function verifyRegistry() {
     }
     assert.equal(installed, true, `registry install did not converge:\n${lastFailure}`);
 
-    const installedPkg = JSON.parse(
-      readFileSync(join(temp, "node_modules", "@relaymessenger", "vercel-ai", "package.json"), "utf8"),
-    );
+    const installedRoot = join(temp, "node_modules", "relay-claude-channel");
+    const installedPkg = JSON.parse(readFileSync(join(installedRoot, "package.json"), "utf8"));
     assert.equal(installedPkg.version, pkg.version);
 
-    const probe = join(temp, "probe.mjs");
-    writeFileSync(
-      probe,
-      [
-        `import * as plugin from "${pkg.name}";`,
-        `const required = ["createRelay", "createWebhookHandler", "verifyWebhookSignature", "RelayClient"];`,
-        `for (const name of required) {`,
-        `  if (typeof plugin[name] !== "function") throw new Error("missing export: " + name);`,
-        `}`,
-        `process.stdout.write("registry-installed exports loaded\\n");`,
-      ].join("\n"),
+    const manifest = JSON.parse(
+      readFileSync(join(installedRoot, ".claude-plugin", "plugin.json"), "utf8"),
     );
-    const loaded = spawnSync(process.execPath, [probe], { cwd: temp, encoding: "utf8" });
-    assert.equal(loaded.status, 0, `installed package failed to load:\n${loaded.stderr}`);
+    // Claude Code reads the plugin's version from the manifest, not from
+    // package.json, so the two are one identity and must ship equal. Asserting
+    // only that the manifest parsed let 0.2.1 publish carrying a 0.2.0
+    // manifest, and the same stale copy rode into @relaymessenger/cli, which
+    // bundles this directory.
+    assert.equal(
+      manifest.version,
+      pkg.version,
+      `plugin manifest version ${manifest.version} != package version ${pkg.version}`,
+    );
+    assert.equal(existsSync(join(installedRoot, "runtime", "server.mjs")), true, "missing runtime/server.mjs");
+    const checked = spawnSync(process.execPath, ["--check", join(installedRoot, "runtime", "server.mjs")], {
+      cwd: temp,
+      encoding: "utf8",
+    });
+    assert.equal(checked.status, 0, `runtime server failed to parse:\n${checked.stderr}`);
     process.stdout.write(`registry-installed ${pkg.name}@${pkg.version} smoke passed\n`);
   } finally {
     rmSync(temp, { recursive: true, force: true });
@@ -117,5 +125,5 @@ if (command === "check-tag") checkTag(value ?? "");
 else if (command === "registry-state") registryState();
 else if (command === "verify-registry") await verifyRegistry();
 else throw new Error(
-  "usage: vercel-ai-release.mjs check-tag <vercel-ai-vX.Y.Z> | registry-state | verify-registry",
+  "usage: claude-channel-release.mjs check-tag <claude-channel-vX.Y.Z> | registry-state | verify-registry",
 );
