@@ -22,9 +22,10 @@ export interface WebhookContext {
   client: RelayClient;
   /**
    * Reply helpers bound to the event's conversation and invocation. Each call
-   * derives a deterministic Idempotency-Key from the event id, the call order,
-   * and the content being sent, so a redelivered webhook that produces the
-   * same reply replays instead of double-posting.
+   * derives a deterministic Idempotency-Key from the event id and the call
+   * order, so a redelivered webhook replays the first reply instead of
+   * double-posting, and a redelivery whose content diverges is refused by
+   * Relay with 409 rather than posted twice.
    */
   reply: {
     text(text: string): Promise<SendResult>;
@@ -73,46 +74,23 @@ class DedupeWindow {
   }
 }
 
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value) ?? "null";
-  }
-  const withToJson = value as { toJSON?: () => unknown };
-  if (typeof withToJson.toJSON === "function") {
-    return canonicalJson(withToJson.toJSON());
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([, entry]) => entry !== undefined)
-    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
-  return `{${entries.map(([key, entry]) =>
-    `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
-}
 
 /**
- * Idempotency key for one reply: the event, its position in the handler, and a
- * digest of what is being sent. The content term is what keeps a redelivery
- * safe. Keyed on position alone, a handler whose model wrote different words
- * the second time reused the first key with a different body, which Relay
- * answers with 409 idempotency_conflict, so the event could never complete.
+ * Idempotency key for one reply: the event and the reply's position in the
+ * handler, and nothing else.
+ *
+ * This once carried a digest of the content too. That defeated the mechanism
+ * it was meant to serve. Relay hashes the whole request beside the key
+ * (Relay-Server/server/src/domain/commitMessage.ts:1553) and answers 409
+ * idempotency_conflict when one key returns with a different body, otherwise
+ * it replays the first response. Folding the content in made the key change
+ * whenever the body changed, so the conflict could never fire and a
+ * redelivered event whose model wrote different words the second time posted a
+ * genuine second message to the person. Naming only the position is what lets
+ * Relay replay a faithful retry and refuse a diverging one.
  */
-async function replyKey(
-  eventId: string,
-  ordinal: number,
-  content: unknown,
-): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(canonicalJson(content)),
-  );
-  const hex = Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  )
-    .join("")
-    .slice(0, 32);
-  return `${eventId.slice(0, 180)}:${ordinal}:${hex}`;
+function replyKey(eventId: string, ordinal: number): string {
+  return `${eventId.slice(0, 180)}:${ordinal}`;
 }
 
 function json(status: number, body: Record<string, unknown>): Response {
@@ -197,27 +175,21 @@ export function createWebhookHandler(options: WebhookOptions) {
             conversationId,
             text,
             invocationId,
-            idempotencyKey: await replyKey(event.event_id, sendSequence++, [
-              { type: "text", text },
-            ]),
+            idempotencyKey: replyKey(event.event_id, sendSequence++),
           }),
         parts: async (parts) =>
           options.client.send({
             conversationId,
             parts,
             invocationId,
-            idempotencyKey: await replyKey(event.event_id, sendSequence++, parts),
+            idempotencyKey: replyKey(event.event_id, sendSequence++),
           }),
-        // A stream has no content to digest before it is sent, so this key
-        // stays positional. Relay commits one message per stream, and a
-        // redelivered stream whose output diverges is the one case that still
-        // conflicts.
         stream: (source) =>
           options.client.stream({
             conversationId,
             stream: source,
             invocationId,
-            idempotencyKey: `${event.event_id.slice(0, 180)}:${sendSequence++}:stream`,
+            idempotencyKey: replyKey(event.event_id, sendSequence++),
           }),
       },
       typing: (started = true, label) =>
