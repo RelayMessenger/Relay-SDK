@@ -136,4 +136,4 @@ curl -X POST https://api.relayapp.im/v1/messages \
 ~/.relaymessenger/accounts/<hash>/installed-plugins/  stable bundled plugin sources
 ```
 
-Requires Node >= 22.18.
+Requires Node >= 22.22.3.
