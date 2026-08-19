@@ -92,11 +92,18 @@ export function toRelayReaction(input: EmojiValue | string): RelayReaction {
     }
   }
 
-  if (literal) return { type: "emoji", emoji: literal };
+  // One normalization, on both the add and the remove path, because Relay
+  // deletes a reaction by exact string match
+  // (`Relay-Server/server/src/routes/platform.ts:571-572`). Without it,
+  // `addReaction("👍🏽")` followed by `removeReaction("👍")` answers 200 and
+  // deletes nothing. A known character resolves to the map's canonical form,
+  // which keeps a variation selector where the canonical form has one; an
+  // unknown character keeps its own bare form.
   if (name) {
     const formats = DEFAULT_EMOJI_MAP[name];
     if (formats) return { type: "emoji", emoji: firstFormat(formats.gchat) };
   }
+  if (literal) return { type: "emoji", emoji: bare(literal) };
   throw new Error(
     "a Relay reaction needs an emoji character or a well-known emoji name",
   );

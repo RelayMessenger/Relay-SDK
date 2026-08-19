@@ -14,8 +14,16 @@ describe("toRelayReaction", () => {
     expect(toRelayReaction("❤️")).toEqual({ type: "emoji", emoji: "❤️" });
   });
 
-  it("keeps a skin tone modifier on the character it sends", () => {
-    expect(toRelayReaction("👍🏽")).toEqual({ type: "emoji", emoji: "👍🏽" });
+  it("normalizes a modified character, so an add and a remove match", () => {
+    // Relay deletes a reaction by exact emoji match, so a toned add and a bare
+    // remove would leave the reaction standing and still answer 200. Both
+    // paths run through this one function, so both send the same character.
+    expect(toRelayReaction("👍🏽")).toEqual(toRelayReaction("👍"));
+    expect(toRelayReaction("👍🏽")).toEqual({ type: "emoji", emoji: "👍" });
+  });
+
+  it("normalizes a character it does not know to its own bare form", () => {
+    expect(toRelayReaction("🫶🏽")).toEqual(toRelayReaction("🫶"));
   });
 
   it("accepts a shortcode and the EmojiValue placeholder form", () => {
