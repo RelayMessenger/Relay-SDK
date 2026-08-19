@@ -1,9 +1,11 @@
 {
   "name": "@relaymessenger/openclaw-plugin",
   "version": "0.2.0",
-  "private": true,
   "description": "Relay channel plugin for OpenClaw. Text your OpenClaw like a friend.",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "openclaw",
     "relay",

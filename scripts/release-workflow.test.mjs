@@ -15,6 +15,18 @@ const releaseWorkflows = [
     path: ".github/workflows/release-sdk.yml",
     tagPattern: '"sdk-v*"',
   },
+  {
+    path: ".github/workflows/release-chat-sdk.yml",
+    tagPattern: '"chat-sdk-v*"',
+  },
+  {
+    path: ".github/workflows/release-openclaw.yml",
+    tagPattern: '"openclaw-v*"',
+  },
+  {
+    path: ".github/workflows/release-claude-channel.yml",
+    tagPattern: '"claude-channel-v*"',
+  },
 ];
 
 for (const { path, tagPattern } of releaseWorkflows) {
