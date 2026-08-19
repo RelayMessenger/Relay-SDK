@@ -1,6 +1,11 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { verifyWebhookSignature, WebhookVerificationError } from "./signature.js";
+import {
+  decodeWebhookSecret,
+  verifyWebhookSignature,
+  WebhookSecretError,
+  WebhookVerificationError,
+} from "./signature.js";
 
 const SECRET_BYTES = Buffer.from("test-secret-key-material");
 const SECRET = `whsec_${SECRET_BYTES.toString("base64")}`;
@@ -123,5 +128,34 @@ describe("verifyWebhookSignature", () => {
         options: { nowSeconds: NOW },
       }),
     ).rejects.toBeInstanceOf(WebhookVerificationError);
+  });
+});
+
+describe("decodeWebhookSecret", () => {
+  it("decodes with or without the whsec_ prefix", () => {
+    expect(decodeWebhookSecret(SECRET)).toEqual(
+      decodeWebhookSecret(SECRET_BYTES.toString("base64")),
+    );
+  });
+
+  it("names a secret that is not base64 instead of throwing an InvalidCharacterError", () => {
+    // atob's DOMException escapes verification, the mount answers 500, and
+    // Relay reads that as transient and redelivers ten times.
+    expect(() => decodeWebhookSecret("whsec_!!not base64!!")).toThrow(WebhookSecretError);
+  });
+
+  it("keeps a malformed secret out of the invalid-signature path", async () => {
+    await expect(
+      verifyWebhookSignature({
+        secret: "whsec_!!not base64!!",
+        payload: "{}",
+        headers: {
+          "webhook-id": "msg_1",
+          "webhook-timestamp": String(NOW),
+          "webhook-signature": "v1,AAAA",
+        },
+        options: { nowSeconds: NOW },
+      }),
+    ).rejects.toBeInstanceOf(WebhookSecretError);
   });
 });

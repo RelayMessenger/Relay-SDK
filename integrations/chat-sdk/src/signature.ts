@@ -12,6 +12,18 @@ export class WebhookVerificationError extends Error {
   }
 }
 
+/**
+ * The configured signing secret is unusable. This is a deployment mistake, not
+ * a bad delivery, so it is a separate error: catch it where the secret is
+ * configured and fail there.
+ */
+export class WebhookSecretError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WebhookSecretError";
+  }
+}
+
 const DEFAULT_TOLERANCE_SECONDS = 5 * 60;
 
 function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
@@ -21,9 +33,24 @@ function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-function decodeSecret(secret: string): Uint8Array<ArrayBuffer> {
+/**
+ * Decode the signing secret Relay issued, with or without its `whsec_` prefix.
+ *
+ * `atob` answers a bare `InvalidCharacterError` on a secret that is not
+ * base64, which no caller recognizes: it escapes signature verification, the
+ * mount answers 500, and Relay reads that as a transient failure and redelivers
+ * ten times. Name it as a `WebhookSecretError` so it can be caught once, where
+ * the secret is configured, instead of on every delivery.
+ */
+export function decodeWebhookSecret(secret: string): Uint8Array<ArrayBuffer> {
   const raw = secret.startsWith("whsec_") ? secret.slice("whsec_".length) : secret;
-  return base64ToBytes(raw);
+  try {
+    return base64ToBytes(raw);
+  } catch {
+    throw new WebhookSecretError(
+      "the webhook signing secret is not base64: pass the whsec_ value Relay issued",
+    );
+  }
 }
 
 function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
@@ -38,8 +65,9 @@ function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
  * HMAC-SHA256 over `${webhook-id}.${webhook-timestamp}.${raw body}` with the
  * base64 secret, compared against every `v1,` candidate in
  * `webhook-signature` (rotation sends two). Throws `WebhookVerificationError`
- * on any failure. Uses only Web platform APIs (`crypto.subtle`, `atob`), so
- * it runs on Node 22+, Vercel Edge, and Cloudflare Workers unchanged.
+ * on any failure, and `WebhookSecretError` when the configured secret itself
+ * is unusable. Uses only Web platform APIs (`crypto.subtle`, `atob`), so it
+ * runs on Node 22+, Vercel Edge, and Cloudflare Workers unchanged.
  */
 export async function verifyWebhookSignature(input: {
   secret: string;
@@ -70,7 +98,7 @@ export async function verifyWebhookSignature(input: {
 
   const key = await crypto.subtle.importKey(
     "raw",
-    decodeSecret(input.secret),
+    decodeWebhookSecret(input.secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],

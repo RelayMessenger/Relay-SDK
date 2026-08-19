@@ -1,5 +1,9 @@
 import { RelayClient } from "./client.js";
-import { verifyWebhookSignature, WebhookVerificationError } from "./signature.js";
+import {
+  decodeWebhookSecret,
+  verifyWebhookSignature,
+  WebhookVerificationError,
+} from "./signature.js";
 import type {
   MessageReceivedEvent,
   RelayEventEnvelope,
@@ -129,6 +133,9 @@ function json(status: number, body: Record<string, unknown>): Response {
  * durably handled. A thrown handler error returns 500 so Relay redelivers.
  */
 export function createWebhookHandler(options: WebhookOptions) {
+  // Decode once, here, so an unusable secret is a startup failure naming the
+  // option rather than a 500 on every delivery that Relay then retries.
+  decodeWebhookSecret(options.webhookSecret);
   const dedupe = new DedupeWindow(options.dedupeWindow ?? DEFAULT_DEDUPE_WINDOW);
 
   return async function handleWebhook(
