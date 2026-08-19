@@ -6,6 +6,7 @@ import { build } from "esbuild";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outfile = resolve(root, "runtime/server.mjs");
+const { version } = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
 
 await mkdir(dirname(outfile), { recursive: true });
 await build({
@@ -18,6 +19,10 @@ await build({
   packages: "bundle",
   sourcemap: false,
   legalComments: "eof",
+  // One source of truth for the version: the manifest. The runtime cannot read
+  // package.json relatively, because dev runs from the package root and the
+  // bundle runs from runtime/.
+  define: { __RELAY_CHANNEL_VERSION__: JSON.stringify(version) },
 });
 
 // Some bundled dependencies contain whitespace-only lines inside generated

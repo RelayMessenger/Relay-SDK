@@ -98,7 +98,16 @@ async function verifyRegistry() {
     const manifest = JSON.parse(
       readFileSync(join(installedRoot, ".claude-plugin", "plugin.json"), "utf8"),
     );
-    assert.equal(typeof manifest, "object");
+    // Claude Code reads the plugin's version from the manifest, not from
+    // package.json, so the two are one identity and must ship equal. Asserting
+    // only that the manifest parsed let 0.2.1 publish carrying a 0.2.0
+    // manifest, and the same stale copy rode into @relaymessenger/cli, which
+    // bundles this directory.
+    assert.equal(
+      manifest.version,
+      pkg.version,
+      `plugin manifest version ${manifest.version} != package version ${pkg.version}`,
+    );
     assert.equal(existsSync(join(installedRoot, "runtime", "server.mjs")), true, "missing runtime/server.mjs");
     const checked = spawnSync(process.execPath, ["--check", join(installedRoot, "runtime", "server.mjs")], {
       cwd: temp,

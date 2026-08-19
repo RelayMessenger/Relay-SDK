@@ -45,6 +45,7 @@ const USAGE = `relaymessenger — bridge your local coding agent to Relay (https
   relaymessenger install-claude  point at the Claude Code channel plugin
   relaymessenger install-openclaw install and configure the bundled OpenClaw plugin
   relaymessenger doctor          health checks
+  relaymessenger version         print the installed version
 
 Docs: https://docs.relayapp.im/quickstart`;
 
@@ -151,6 +152,17 @@ async function main(): Promise<number> {
         return 1;
       }
       return await permissionRequestHook();
+    }
+    case "version":
+    case "--version":
+    case "-v": {
+      // A published CLI that cannot state its own version leaves a bug report
+      // with nothing to anchor on. Read the manifest rather than a constant, so
+      // it cannot drift from what npm actually installed.
+      const { createRequire } = await import("node:module");
+      const manifest = createRequire(import.meta.url)("../package.json") as { version: string };
+      console.log(manifest.version);
+      return 0;
     }
     case undefined:
     case "help":
