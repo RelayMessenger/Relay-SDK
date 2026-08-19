@@ -1,0 +1,59 @@
+{
+  "name": "@relaymessenger/chat-sdk-adapter",
+  "version": "0.1.0",
+  "description": "Relay adapter for the Vercel Chat SDK. Receive signed Relay webhooks and post replies as one canonical message.",
+  "homepage": "https://docs.relayapp.im/guides/chat-sdk",
+  "bugs": {
+    "url": "https://github.com/relaymessenger/Relay-SDK/issues"
+  },
+  "license": "MIT",
+  "keywords": [
+    "relay",
+    "chat-sdk",
+    "adapter",
+    "messaging",
+    "agent",
+    "webhook"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "dist/**/*.js",
+    "dist/**/*.d.ts"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "chat": "^4.38.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "chat": "^4.38.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/relaymessenger/Relay-SDK.git",
+    "directory": "integrations/chat-sdk"
+  }
+}
