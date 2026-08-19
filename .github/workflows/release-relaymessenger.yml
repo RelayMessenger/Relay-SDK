@@ -5,144 +5,27 @@ on:
     tags:
       - "relaymessenger-v*"
 
+# A re-pushed tag must never race a run that is already publishing, and a
+# publish in flight must never be cancelled: reconcile, then queue.
+concurrency:
+  group: release-relaymessenger-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   id-token: write
 
 jobs:
   publish:
-    name: Validate, publish, and verify relaymessenger
-    # All jobs run on Blacksmith (9a24a58; ubuntu-latest caused zombie tag
-    # runs). Every npm publish so far predates that move, so provenance from a
-    # Blacksmith runner is unproven; the next tag release proves or refutes it.
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    env:
-      RELEASE_TAG: ${{ github.ref_name }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.ref_name }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22.22.3
-          registry-url: https://registry.npmjs.org
-          package-manager-cache: false
-      - name: Refuse a mismatched version or tag
-        run: node scripts/relaymessenger-release.mjs check-tag "$RELEASE_TAG"
-      - name: Resolve and require a reviewed source commit
-        id: source
-        shell: bash
-        run: |
-          set -euo pipefail
-          source_sha="$(git rev-parse HEAD)"
-          tag_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
-          test "$tag_sha" = "$source_sha"
-          git merge-base --is-ancestor "$source_sha" origin/main
-          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
-          printf 'reviewed source: %s\n' "$source_sha"
-      - name: Resolve the registry verification helper
-        id: registry-verifier
-        shell: bash
-        run: |
-          set -euo pipefail
-          helper="scripts/verify-npm-registry-integrity.mjs"
-          if [[ ! -f "$helper" ]]; then
-            helper="$RUNNER_TEMP/verify-npm-registry-integrity.mjs"
-            git show origin/main:scripts/verify-npm-registry-integrity.mjs > "$helper"
-            printf 'using the reviewed-main verifier for a tag created before it existed\n'
-          fi
-          node --check "$helper"
-          printf 'path=%s\n' "$helper" >> "$GITHUB_OUTPUT"
-      - run: npm ci
-      - run: npm audit --audit-level=low
-      - run: npm audit --omit=dev --audit-level=low
-      - run: npm run validate
-      - run: npm run validate:claude-plugin
-      - run: npm run gateway:harness
-      - run: npm run pack:check
-      - name: Pack and retain the exact release artifact
-        id: artifact
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf .release-tmp
-          mkdir -p .release-tmp
-          npm pack --workspace @relaymessenger/cli --pack-destination .release-tmp
-          mapfile -t tarballs < <(find .release-tmp -maxdepth 1 -type f -name '*.tgz' -print)
-          test "${#tarballs[@]}" -eq 1
-          tarball="${tarballs[0]}"
-          integrity="$(
-            node -e "
-              const { createHash } = require('node:crypto');
-              const { readFileSync } = require('node:fs');
-              const digest = createHash('sha512')
-                .update(readFileSync(process.argv[1]))
-                .digest('base64');
-              process.stdout.write('sha512-' + digest);
-            " "$tarball"
-          )"
-          sha256="$(sha256sum "$tarball" | cut -d' ' -f1)"
-          SOURCE_SHA="${{ steps.source.outputs.sha }}" \
-          TARBALL="$tarball" \
-          SHA256="$sha256" \
-          INTEGRITY="$integrity" \
-          node <<'NODE'
-          const { statSync, writeFileSync } = require("node:fs");
-          const { basename } = require("node:path");
-          const pkg = require("./packages/relaymessenger/package.json");
-          const manifest = {
-            schemaVersion: 1,
-            repository: process.env.GITHUB_REPOSITORY,
-            sourceSha: process.env.SOURCE_SHA,
-            tag: process.env.RELEASE_TAG,
-            workflowRunId: process.env.GITHUB_RUN_ID,
-            workflowRunAttempt: process.env.GITHUB_RUN_ATTEMPT,
-            package: pkg.name,
-            version: pkg.version,
-            artifact: basename(process.env.TARBALL),
-            size: statSync(process.env.TARBALL).size,
-            sha256: process.env.SHA256,
-            integrity: process.env.INTEGRITY,
-          };
-          writeFileSync(
-            ".release-tmp/release-manifest.json",
-            `${JSON.stringify(manifest, null, 2)}\n`,
-          );
-          NODE
-          {
-            echo "tarball=$tarball"
-            echo "manifest=.release-tmp/release-manifest.json"
-            echo "integrity=$integrity"
-            echo "sha256=$sha256"
-          } >> "$GITHUB_OUTPUT"
-          printf 'retained artifact: %s\nsha256: %s\nintegrity: %s\n' "$tarball" "$sha256" "$integrity"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: relaymessenger-${{ steps.source.outputs.sha }}
-          path: |
-            ${{ steps.artifact.outputs.tarball }}
-            ${{ steps.artifact.outputs.manifest }}
-          if-no-files-found: error
-          retention-days: 90
-      - name: Reconcile the version with npm before any publish retry
-        id: registry
-        run: node scripts/relaymessenger-release.mjs registry-state
-      # npm 12 blocks unapproved dependency install scripts during `npm ci`.
-      # Keep the setup-node npm for the locked install/Claude native validator,
-      # then upgrade only for OIDC trusted publishing after all artifacts pass.
-      - name: Install an npm CLI with trusted publishing support
-        run: npm install --global npm@12.0.1
-      - name: Publish relaymessenger through npm trusted publishing
-        if: ${{ steps.registry.outputs.published != 'true' }}
-        run: npm publish "${{ steps.artifact.outputs.tarball }}" --access public
-      - name: Verify the published artifact integrity
-        env:
-          EXPECTED_INTEGRITY: ${{ steps.artifact.outputs.integrity }}
-        run: >-
-          node "${{ steps.registry-verifier.outputs.path }}"
-          packages/relaymessenger/package.json
-          "$EXPECTED_INTEGRITY"
-      - name: Verify the registry-installed artifact
-        run: node scripts/verify-relaymessenger-registry.mjs
+    uses: ./.github/workflows/release-npm-package.yml
+    with:
+      package_label: relaymessenger
+      workspace: "@relaymessenger/cli"
+      manifest_path: packages/relaymessenger/package.json
+      release_script: scripts/relaymessenger-release.mjs
+      artifact_prefix: relaymessenger
+      checks_profile: root
+      verify_registry_script: scripts/verify-relaymessenger-registry.mjs
+    permissions:
+      contents: read
+      id-token: write

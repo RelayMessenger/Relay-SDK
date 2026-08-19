@@ -1,0 +1,225 @@
+name: Release an npm package
+
+# One reusable body for every tag-driven npm release in this repo. The three
+# release-*.yml callers differ only in tag glob, package identity, release
+# script, and which validation profile the package carries; everything that
+# establishes release identity (reviewed source commit, retained artifact,
+# manifest, registry reconciliation, trusted publishing, both verifications)
+# lives here so it cannot drift between packages.
+on:
+  workflow_call:
+    inputs:
+      package_label:
+        description: Package name as it appears in the job title.
+        required: true
+        type: string
+      workspace:
+        description: npm workspace selector used for audit, checks, and pack.
+        required: true
+        type: string
+      manifest_path:
+        description: Path to the package.json that carries the released version.
+        required: true
+        type: string
+      release_script:
+        description: Release helper used for check-tag and registry-state.
+        required: true
+        type: string
+      artifact_prefix:
+        description: Prefix of the retained build artifact's name.
+        required: true
+        type: string
+      checks_profile:
+        description: >-
+          Validation profile. "workspace" runs the per-workspace audit, check,
+          test, and build scripts. "root" runs the CLI package's root-level
+          audit pair plus validate, validate:claude-plugin, gateway:harness,
+          and pack:check.
+        required: true
+        type: string
+      verify_registry_script:
+        description: Script that verifies the registry-installed artifact.
+        required: true
+        type: string
+      verify_registry_arg:
+        description: >-
+          Subcommand passed to verify_registry_script. Empty for a dedicated
+          verifier script that takes no arguments.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Validate, publish, and verify ${{ inputs.package_label }}
+    # All jobs run on Blacksmith (9a24a58; ubuntu-latest caused zombie tag
+    # runs). Every npm publish so far predates that move, so provenance from a
+    # Blacksmith runner is unproven; the next tag release proves or refutes it.
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.22.3
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Refuse a mismatched version or tag
+        env:
+          RELEASE_SCRIPT: ${{ inputs.release_script }}
+        run: node "$RELEASE_SCRIPT" check-tag "$RELEASE_TAG"
+      - name: Resolve and require a reviewed source commit
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          tag_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+          test "$tag_sha" = "$source_sha"
+          git merge-base --is-ancestor "$source_sha" origin/main
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+          printf 'reviewed source: %s\n' "$source_sha"
+      - name: Resolve the registry verification helper
+        id: registry-verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper="scripts/verify-npm-registry-integrity.mjs"
+          if [[ ! -f "$helper" ]]; then
+            helper="$RUNNER_TEMP/verify-npm-registry-integrity.mjs"
+            git show origin/main:scripts/verify-npm-registry-integrity.mjs > "$helper"
+            printf 'using the reviewed-main verifier for a tag created before it existed\n'
+          fi
+          node --check "$helper"
+          printf 'path=%s\n' "$helper" >> "$GITHUB_OUTPUT"
+      - run: npm ci
+      - name: Refuse an unknown validation profile
+        if: ${{ inputs.checks_profile != 'workspace' && inputs.checks_profile != 'root' }}
+        env:
+          CHECKS_PROFILE: ${{ inputs.checks_profile }}
+        run: |
+          printf 'unknown checks_profile: %s\n' "$CHECKS_PROFILE" >&2
+          exit 1
+      - if: ${{ inputs.checks_profile == 'workspace' }}
+        run: npm audit --workspace ${{ inputs.workspace }} --omit=dev --audit-level=high
+      - if: ${{ inputs.checks_profile == 'workspace' }}
+        run: npm run check --workspace ${{ inputs.workspace }}
+      - if: ${{ inputs.checks_profile == 'workspace' }}
+        run: npm test --workspace ${{ inputs.workspace }}
+      - if: ${{ inputs.checks_profile == 'workspace' }}
+        run: npm run build --workspace ${{ inputs.workspace }}
+      - if: ${{ inputs.checks_profile == 'root' }}
+        run: npm audit --audit-level=low
+      - if: ${{ inputs.checks_profile == 'root' }}
+        run: npm audit --omit=dev --audit-level=low
+      - if: ${{ inputs.checks_profile == 'root' }}
+        run: npm run validate
+      - if: ${{ inputs.checks_profile == 'root' }}
+        run: npm run validate:claude-plugin
+      - if: ${{ inputs.checks_profile == 'root' }}
+        run: npm run gateway:harness
+      - if: ${{ inputs.checks_profile == 'root' }}
+        run: npm run pack:check
+      - name: Pack and retain the exact release artifact
+        id: artifact
+        shell: bash
+        env:
+          PACK_WORKSPACE: ${{ inputs.workspace }}
+          MANIFEST_PATH: ${{ inputs.manifest_path }}
+        run: |
+          set -euo pipefail
+          rm -rf .release-tmp
+          mkdir -p .release-tmp
+          npm pack --workspace "$PACK_WORKSPACE" --pack-destination .release-tmp
+          mapfile -t tarballs < <(find .release-tmp -maxdepth 1 -type f -name '*.tgz' -print)
+          test "${#tarballs[@]}" -eq 1
+          tarball="${tarballs[0]}"
+          integrity="$(
+            node -e "
+              const { createHash } = require('node:crypto');
+              const { readFileSync } = require('node:fs');
+              const digest = createHash('sha512')
+                .update(readFileSync(process.argv[1]))
+                .digest('base64');
+              process.stdout.write('sha512-' + digest);
+            " "$tarball"
+          )"
+          sha256="$(sha256sum "$tarball" | cut -d' ' -f1)"
+          SOURCE_SHA="${{ steps.source.outputs.sha }}" \
+          TARBALL="$tarball" \
+          SHA256="$sha256" \
+          INTEGRITY="$integrity" \
+          node <<'NODE'
+          const { statSync, writeFileSync } = require("node:fs");
+          const { basename, resolve } = require("node:path");
+          const pkg = require(resolve(process.env.MANIFEST_PATH));
+          const manifest = {
+            schemaVersion: 1,
+            repository: process.env.GITHUB_REPOSITORY,
+            sourceSha: process.env.SOURCE_SHA,
+            tag: process.env.RELEASE_TAG,
+            workflowRunId: process.env.GITHUB_RUN_ID,
+            workflowRunAttempt: process.env.GITHUB_RUN_ATTEMPT,
+            package: pkg.name,
+            version: pkg.version,
+            artifact: basename(process.env.TARBALL),
+            size: statSync(process.env.TARBALL).size,
+            sha256: process.env.SHA256,
+            integrity: process.env.INTEGRITY,
+          };
+          writeFileSync(
+            ".release-tmp/release-manifest.json",
+            `${JSON.stringify(manifest, null, 2)}\n`,
+          );
+          NODE
+          {
+            echo "tarball=$tarball"
+            echo "manifest=.release-tmp/release-manifest.json"
+            echo "integrity=$integrity"
+            echo "sha256=$sha256"
+          } >> "$GITHUB_OUTPUT"
+          printf 'retained artifact: %s\nsha256: %s\nintegrity: %s\n' "$tarball" "$sha256" "$integrity"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact_prefix }}-${{ steps.source.outputs.sha }}
+          path: |
+            ${{ steps.artifact.outputs.tarball }}
+            ${{ steps.artifact.outputs.manifest }}
+          if-no-files-found: error
+          retention-days: 90
+      - name: Reconcile the version with npm before any publish retry
+        id: registry
+        env:
+          RELEASE_SCRIPT: ${{ inputs.release_script }}
+        run: node "$RELEASE_SCRIPT" registry-state
+      # npm 12 blocks unapproved dependency install scripts during `npm ci`.
+      # Keep the setup-node npm for the locked install (and, on the root
+      # profile, the Claude native validator), then upgrade only for OIDC
+      # trusted publishing after every artifact check passes.
+      - name: Install an npm CLI with trusted publishing support
+        run: npm install --global npm@12.0.1
+      - name: Publish ${{ inputs.package_label }} through npm trusted publishing
+        if: ${{ steps.registry.outputs.published != 'true' }}
+        run: npm publish "${{ steps.artifact.outputs.tarball }}" --access public
+      - name: Verify the published artifact integrity
+        env:
+          EXPECTED_INTEGRITY: ${{ steps.artifact.outputs.integrity }}
+          MANIFEST_PATH: ${{ inputs.manifest_path }}
+        run: >-
+          node "${{ steps.registry-verifier.outputs.path }}"
+          "$MANIFEST_PATH"
+          "$EXPECTED_INTEGRITY"
+      - name: Verify the registry-installed artifact
+        env:
+          VERIFY_SCRIPT: ${{ inputs.verify_registry_script }}
+          VERIFY_ARG: ${{ inputs.verify_registry_arg }}
+        run: node "$VERIFY_SCRIPT" ${VERIFY_ARG:+"$VERIFY_ARG"}
