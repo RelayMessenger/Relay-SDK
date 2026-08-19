@@ -35,7 +35,7 @@ import {
   MAX_TEXT_PART_BYTES,
   chunkRenderedText,
 } from "./chunk.js";
-import { RelayClient } from "./client.js";
+import { RelayApiError, RelayClient } from "./client.js";
 import type { RelayClientOptions } from "./client.js";
 import {
   renderAst,
@@ -874,9 +874,18 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
       }
       // One call commits one or more messages; the Chat SDK's post contract
       // names a single raw message, so the first committed one stands for the
-      // whole send.
+      // whole send. A 202 that carries none is a server contract violation:
+      // surface it as a 502 so a generic status-classing retry treats it as
+      // transient, instead of handing the caller undefined as a message.
       const [committed] = result.messages;
-      if (committed && first === undefined) {
+      if (!committed) {
+        throw new RelayApiError(
+          502,
+          "empty_send",
+          "relay: 202 carried no messages",
+        );
+      }
+      if (first === undefined) {
         first = {
           id: committed.id,
           threadId,
@@ -884,7 +893,10 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
         };
       }
     }
-    return first as RawMessage<RelayRawMessage>;
+    if (!first) {
+      throw new RelayApiError(502, "empty_send", "relay: send committed no messages");
+    }
+    return first;
   }
 }
 

@@ -446,6 +446,13 @@ describe("postMessage", () => {
     });
   });
 
+  it("throws on a 202 that carried no messages instead of returning undefined", async () => {
+    const { adapter } = harness([{ status: 202, body: { messages: [] } }]);
+    await expect(
+      adapter.postMessage("relay:cnv_1", "hello"),
+    ).rejects.toThrow(/carried no messages/);
+  });
+
   it("edits with exactly one text part", async () => {
     const { adapter, calls } = harness([
       { body: { message: { id: "msg_1", conversation_id: "cnv_1" } } },

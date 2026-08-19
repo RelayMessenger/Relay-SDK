@@ -210,8 +210,18 @@ export async function permissionRequestHook(
     return 0;
   }
   // The card's text and data parts land as separate messages; a verdict must
-  // come after every one of them, so the watermark is the last sequence.
-  const cardSequence = posted.messages.at(-1)?.sequence ?? 0;
+  // come after every one of them, so the watermark is the last sequence. A 202
+  // with no messages leaves no watermark to gate the verdict scan on, and a
+  // zero default would accept any earlier matching message, so refuse instead.
+  const cardSequence = posted.messages.at(-1)?.sequence;
+  if (cardSequence === undefined) {
+    approvals.consume(requestId);
+    process.stderr.write(
+      "relaymessenger: approval card send returned no committed messages; denying.\n",
+    );
+    write(decisionJson(false));
+    return 0;
+  }
 
   const finish = (allow: boolean): number => {
     approvals.consume(requestId);
