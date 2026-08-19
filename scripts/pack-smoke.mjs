@@ -99,7 +99,7 @@ try {
 
   const pkg = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
   assert.equal(pkg.bin.relaymessenger, "dist/cli.js");
-  assert.equal(pkg.engines.node, ">=22.18");
+  assert.equal(pkg.engines.node, ">=22.22.3");
   assert.equal(pkg.license, "MIT");
   // The packed adapter pins must stay exact and match the workspace manifest.
   // Comparing against the manifest instead of a literal keeps dependency bumps

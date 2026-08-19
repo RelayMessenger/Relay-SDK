@@ -23,7 +23,7 @@
     "prepack": "npm run build"
   },
   "engines": {
-    "node": ">=22.18"
+    "node": ">=22.22.3"
   },
   "license": "MIT",
   "publishConfig": {

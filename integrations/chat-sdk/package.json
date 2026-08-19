@@ -16,7 +16,7 @@
     "webhook"
   ],
   "engines": {
-    "node": ">=22.18"
+    "node": ">=22.22.3"
   },
   "publishConfig": {
     "access": "public"
