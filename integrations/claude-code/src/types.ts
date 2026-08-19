@@ -59,7 +59,7 @@ export interface RelayMessage {
   sequence: number;
   sender: RelaySender;
   parts: RelayPart[];
-  reply_to?: { message_id: string; part_index?: number } | null;
+  reply_to?: { message_id: string } | null;
   fallback_text?: string;
   status?: string;
   created_at: string;

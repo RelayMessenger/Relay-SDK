@@ -284,10 +284,9 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
         signal: params.signal,
       });
       const body = (await response.json()) as {
-        message_id: string;
-        message: RelaySendResult["message"];
+        messages: RelaySendResult["messages"];
       };
-      return { messageId: body.message_id, message: body.message };
+      return { messages: body.messages };
     },
 
     setTyping: async (params) => {

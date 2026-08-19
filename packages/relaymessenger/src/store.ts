@@ -189,7 +189,7 @@ export interface RelayMessage {
   sender: { kind: "user" | "agent"; id: string };
   parts: RelayPart[];
   fallback_text: string;
-  reply_to?: { message_id?: string; part_index?: number } | null;
+  reply_to?: { message_id?: string } | null;
   created_at?: string;
 }
 

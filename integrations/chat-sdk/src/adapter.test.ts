@@ -60,8 +60,7 @@ function harness(
     calls.push({ url: String(url), method: init?.method ?? "GET", headers, body });
     const next = responses[index++] ?? {
       body: {
-        message_id: "msg_out",
-        message: { id: "msg_out", conversation_id: "cnv_1" },
+        messages: [{ id: "msg_out", conversation_id: "cnv_1" }],
       },
     };
     const status = next.status ?? 200;
@@ -445,6 +444,55 @@ describe("postMessage", () => {
     expect((calls.at(-1) as RecordedCall).body).toMatchObject({
       parts: [{ type: "text", text: "**as typed**", styles: [] }],
     });
+  });
+
+  it("throws on a 202 that carried no messages instead of returning undefined", async () => {
+    const { adapter } = harness([{ status: 202, body: { messages: [] } }]);
+    await expect(
+      adapter.postMessage("relay:cnv_1", "hello"),
+    ).rejects.toThrow(/carried no messages/);
+  });
+
+  it("edits with exactly one text part", async () => {
+    const { adapter, calls } = harness([
+      { body: { message: { id: "msg_1", conversation_id: "cnv_1" } } },
+    ]);
+    const edited = await adapter.editMessage("relay:cnv_1", "msg_1", "shorter");
+    const call = calls.at(-1) as RecordedCall;
+    expect(call.method).toBe("PATCH");
+    expect((call.body as { parts: unknown[] }).parts).toHaveLength(1);
+    expect(edited.id).toBe("msg_1");
+  });
+
+  it("refuses an edit whose text chunks past one part", async () => {
+    const { adapter, calls } = harness();
+    const oversize = "a".repeat(9000);
+    await expect(
+      adapter.editMessage("relay:cnv_1", "msg_1", oversize),
+    ).rejects.toThrow(/one text part/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("anchors a media reaction on its part when asked", async () => {
+    // The adapter's Chat SDK surface is message-level, so the part anchor is
+    // a client capability: only media messages carry addressable parts.
+    let body: unknown;
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      body = JSON.parse(init?.body as string);
+      return new Response(null, { status: 204 });
+    });
+    const client = new RelayClient({
+      token: "rly_live_test",
+      fetch: fetchMock as typeof fetch,
+    });
+    await client.react({
+      messageId: "msg_media",
+      operation: "add",
+      type: "emoji",
+      emoji: "❤️",
+      partIndex: 1,
+    });
+    expect(body).toMatchObject({ part_index: 1 });
   });
 
   it("threads a group invocation into the first reply and refuses a second", async () => {

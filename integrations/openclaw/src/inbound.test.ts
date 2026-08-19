@@ -15,7 +15,7 @@ function message(overrides: Partial<RelayMessage> = {}): RelayMessage {
     conversation_id: "cnv_1",
     sequence: 7,
     sender: { kind: "user", id: "usr_1" },
-    parts: [{ part_index: 0, type: "text", text: "hello" }],
+    parts: [{ type: "text", text: "hello" }],
     reply_to: null,
     fallback_text: "hello",
     status: "sent",
@@ -47,35 +47,51 @@ describe("classifyRelayEvent", () => {
 });
 
 describe("renderRelayPartsText", () => {
-  it("joins text parts and inlines link URLs", () => {
-    expect(
-      renderRelayPartsText([
-        { part_index: 0, type: "text", text: "check this" },
-        { part_index: 1, type: "link_preview", url: "https://example.com/x" },
-        { part_index: 2, type: "text", text: "ok?" },
-      ]),
-    ).toBe("check this\nhttps://example.com/x\nok?");
+  // A message carries one visible non-media part, a run of contiguous media
+  // parts kept together as one media message, or a lone voice memo.
+  it("renders a text part", () => {
+    expect(renderRelayPartsText([{ type: "text", text: "check this" }])).toBe("check this");
+  });
+
+  it("inlines a link preview URL", () => {
+    expect(renderRelayPartsText([{ type: "link_preview", url: "https://example.com/x" }])).toBe(
+      "https://example.com/x",
+    );
   });
 
   it("renders data parts as a compact JSON fence", () => {
-    expect(renderRelayPartsText([{ part_index: 0, type: "data", data: { a: 1 } }])).toBe(
+    expect(renderRelayPartsText([{ type: "data", data: { a: 1 } }])).toBe(
       '```json\n{"a":1}\n```',
     );
   });
 
-  it("renders media and voice parts as labeled fetchable capability URLs", () => {
+  it("joins the media parts of one media message as labeled capability URLs", () => {
     expect(
       renderRelayPartsText([
         { part_index: 0, type: "media", url: "https://cdn/x.png" },
-        { part_index: 1, type: "voice_memo", url: "https://cdn/y.m4a" },
+        { part_index: 1, type: "media", url: "https://cdn/z.png" },
       ]),
-    ).toBe("[attachment] https://cdn/x.png\n[voice memo] https://cdn/y.m4a");
+    ).toBe("[attachment] https://cdn/x.png\n[attachment] https://cdn/z.png");
   });
 
-  it("includes rounded duration for voice memos when present", () => {
+  it("renders a group system message's text and mutation data together", () => {
+    // Group system messages are the one shape the split leaves untouched:
+    // one message carrying a text part plus a group.mutation data part.
     expect(
       renderRelayPartsText([
-        { part_index: 0, type: "voice_memo", url: "https://cdn/y.m4a", duration_ms: 18400 },
+        { type: "text", text: "Atlas added June to the group." },
+        { type: "data", data: { type: "group.mutation", op: "add" } },
+      ]),
+    ).toBe('Atlas added June to the group.\n```json\n{"type":"group.mutation","op":"add"}\n```');
+  });
+
+  it("labels a voice memo and includes rounded duration when present", () => {
+    expect(renderRelayPartsText([{ type: "voice_memo", url: "https://cdn/y.m4a" }])).toBe(
+      "[voice memo] https://cdn/y.m4a",
+    );
+    expect(
+      renderRelayPartsText([
+        { type: "voice_memo", url: "https://cdn/y.m4a", duration_ms: 18400 },
       ]),
     ).toBe("[voice memo, 18s] https://cdn/y.m4a");
   });
@@ -107,7 +123,7 @@ describe("buildRelayInboundFacts", () => {
 
   it("carries the reply target", () => {
     const facts = buildRelayInboundFacts(
-      event({ data: { message: message({ reply_to: { message_id: "msg_0", part_index: 0 } }) } }),
+      event({ data: { message: message({ reply_to: { message_id: "msg_0" } }) } }),
       { agentId: AGENT_ID },
     );
     expect(facts?.replyToId).toBe("msg_0");

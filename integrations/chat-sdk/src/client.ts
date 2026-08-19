@@ -21,7 +21,7 @@ export interface RelaySendOptions {
   parts: RelayOutgoingPart[];
   idempotencyKey: string;
   invocationId?: string;
-  replyTo?: { messageId: string; partIndex?: number };
+  replyTo?: { messageId: string };
 }
 
 export interface RelayReactionOptions {
@@ -29,6 +29,11 @@ export interface RelayReactionOptions {
   operation: "add" | "remove";
   type: RelayReactionType;
   emoji?: string;
+  /**
+   * Anchor the reaction on one part of a media message. Only media messages
+   * carry addressable parts (per-photo reaction pills); a text or card
+   * message takes whole-message reactions only, so leave this unset there.
+   */
   partIndex?: number;
 }
 
@@ -119,14 +124,7 @@ export class RelayClient {
         parts: options.parts,
         ...(options.invocationId ? { invocation_id: options.invocationId } : {}),
         ...(options.replyTo
-          ? {
-              reply_to: {
-                message_id: options.replyTo.messageId,
-                ...(options.replyTo.partIndex !== undefined
-                  ? { part_index: options.replyTo.partIndex }
-                  : {}),
-              },
-            }
+          ? { reply_to: { message_id: options.replyTo.messageId } }
           : {}),
       }),
     });
@@ -134,7 +132,8 @@ export class RelayClient {
 
   /**
    * `PATCH /v1/messages/{id}`. Relay allows edits for 15 minutes and at most
-   * five revisions, and rejects any part that is not text-bearing.
+   * five revisions, and accepts exactly one text part: an edit replaces one
+   * message's text, and anything else answers 422.
    */
   async edit(
     messageId: string,

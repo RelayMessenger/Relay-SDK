@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { RelayApiError, RelayClient } from "./client.js";
 
-function clientWithMock(status = 202, body: unknown = { message_id: "msg_out", message: { id: "msg_out" } }) {
+function clientWithMock(status = 202, body: unknown = { messages: [{ id: "msg_out" }] }) {
   const fetchMock = vi.fn(async () =>
     status === 204
       ? new Response(null, { status })
@@ -50,8 +50,7 @@ function sse(chunks: string[]): ReadableStream<Uint8Array> {
 describe("RelayClient.stream", () => {
   it("sends the exact one-shot stream contract", async () => {
     const { client, fetchMock } = clientWithMock(202, {
-      message_id: "msg_out",
-      message: { id: "msg_out" },
+      messages: [{ id: "msg_out" }],
       stream: { protocol: "vercel-ai-ui-message-stream-v1" },
     });
     await client.stream({
@@ -196,11 +195,12 @@ describe("RelayClient.send", () => {
       conversationId: "cnv_1",
       text: "hello",
       idempotencyKey: "evt_1:0",
-      replyTo: { messageId: "msg_9", partIndex: 1 },
+      replyTo: { messageId: "msg_9" },
     });
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    // Replies target a message id only; the wire carries no part_index.
     expect(JSON.parse(init.body as string)).toMatchObject({
-      reply_to: { message_id: "msg_9", part_index: 1 },
+      reply_to: { message_id: "msg_9" },
     });
     expect(RelayApiError.name).toBe("RelayApiError");
   });

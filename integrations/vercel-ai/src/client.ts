@@ -17,7 +17,7 @@ export interface SendOptions {
   parts: RelayOutgoingPart[];
   idempotencyKey: string;
   invocationId?: string;
-  replyTo?: { messageId: string; partIndex?: number };
+  replyTo?: { messageId: string };
 }
 
 export interface StreamOptions {
@@ -30,7 +30,7 @@ export interface StreamOptions {
   stream: UIMessageStreamSource;
   idempotencyKey: string;
   invocationId?: string;
-  replyTo?: { messageId: string; partIndex?: number };
+  replyTo?: { messageId: string };
 }
 
 export interface TypingOptions {
@@ -156,14 +156,7 @@ export class RelayClient {
         parts: options.parts,
         ...(options.invocationId ? { invocation_id: options.invocationId } : {}),
         ...(options.replyTo
-          ? {
-              reply_to: {
-                message_id: options.replyTo.messageId,
-                ...(options.replyTo.partIndex !== undefined
-                  ? { part_index: options.replyTo.partIndex }
-                  : {}),
-              },
-            }
+          ? { reply_to: { message_id: options.replyTo.messageId } }
           : {}),
       }),
     });
@@ -180,8 +173,8 @@ export class RelayClient {
 
   /**
    * Forward a Vercel AI SDK UI message stream to Relay in one request.
-   * Relay consumes the whole stream and commits exactly one canonical
-   * message; there are no draft bubbles to clean up.
+   * Relay consumes the whole stream and commits one or more finished
+   * messages, one per bubble; there are no draft bubbles to clean up.
    */
   async stream(options: StreamOptions): Promise<StreamSendResult> {
     const query = new URLSearchParams({
@@ -191,9 +184,6 @@ export class RelayClient {
     if (options.invocationId) query.set("invocation_id", options.invocationId);
     if (options.replyTo) {
       query.set("reply_to", options.replyTo.messageId);
-      if (options.replyTo.partIndex !== undefined) {
-        query.set("reply_to_part_index", String(options.replyTo.partIndex));
-      }
     }
     const response = await this.fetchImpl(
       `${this.baseUrl}/v1/messages?${query}`,

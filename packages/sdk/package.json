@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Relay transport library: HTTPS client, Standard Webhooks verify, durable long-poll, idempotent sends.",
   "type": "module",
   "main": "./dist/index.js",

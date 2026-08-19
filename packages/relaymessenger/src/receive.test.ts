@@ -76,16 +76,17 @@ function fakeClient(options: { pages?: EventsPage[] } = {}) {
     },
     async postMessage(body: any, key: string) {
       posted.push({ body, key });
+      // The server splits parts at ingest: one committed message per part
+      // in the 202, in display order.
       return {
-        message_id: `msg_out_${posted.length}`,
-        message: {
-          id: `msg_out_${posted.length}`,
+        messages: body.parts.map((part: unknown, index: number) => ({
+          id: `msg_out_${posted.length}_${index}`,
           conversation_id: body.conversation_id,
-          sequence: 100 + posted.length,
+          sequence: 100 + posted.length * 10 + index,
           sender: { kind: "agent" as const, id: "agt_1" },
-          parts: body.parts,
+          parts: [part],
           fallback_text: "",
-        },
+        })),
       };
     },
     async setTyping(
@@ -630,7 +631,7 @@ test("approval waiter is armed before posting, so an immediate phone reply wins"
       const requestId = body.parts[1].data.request_id as string;
       const tap = userMessageEvent("evt_fast", "cnv_a", `yes ${requestId}`, 2);
       assert.equal(broker.consumeReply(tap.data!.message!), true);
-      return { message_id: "msg_card", message: { sequence: 1 } };
+      return { messages: [{ id: "msg_card_text", sequence: 1 }, { id: "msg_card", sequence: 2 }] };
     },
   } as unknown as RelayClient;
   broker = new PermissionBroker(client, approvals, 60_000);
