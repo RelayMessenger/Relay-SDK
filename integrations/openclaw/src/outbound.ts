@@ -19,18 +19,41 @@ const IDEMPOTENCY_KEY_MAX = 255;
 
 /**
  * Idempotency key for one logical send. When core supplies a durable delivery
- * queue id, the key is a stable function of (queueId, partIndex) so internal
+ * queue id, the key is a stable function of (queueId, part) so internal
  * retries and reconciliation replay the exact same key. Without a queue id a
  * fresh key is minted: identical intentional sends must remain distinct.
+ *
+ * The part term names WHICH piece of one delivery this is. Core supplies
+ * `deliveryPartIndex` from 2026.7.2-beta.5 onward and that is authoritative.
+ * Older cores do not: they call `enqueueDelivery` once, mint ONE queue id, and
+ * then hand the channel each chunk of a long reply under it. Defaulting the
+ * missing index to 0 would key every chunk to `...:0`, so the server would
+ * replay the first chunk for each of the rest and the person would receive a
+ * long answer truncated to its opening chunk with no error anywhere.
+ *
+ * So when core cannot say which part this is, the part term is a digest of the
+ * part's own text. Sibling chunks differ, so each commits; a retry reproduces
+ * the same text, so it replays. This is not the content-in-the-key mistake
+ * that defeats conflict detection: the digest stands in FOR the position core
+ * did not give us, it does not replace it. Two byte-identical chunks in one
+ * delivery do collapse to one message, which is the residual cost of an
+ * unindexed core and is bounded to a repeat the reader would see twice.
  */
 export function deriveRelayIdempotencyKey(params: {
   deliveryQueueId?: string;
   deliveryPartIndex?: number;
+  /** Part text, used only when core supplies no `deliveryPartIndex`. */
+  partText?: string;
   random?: () => string;
 }): string {
   const queueId = params.deliveryQueueId?.trim();
+  const part = params.deliveryPartIndex ?? (
+    params.partText === undefined
+      ? 0
+      : `t${createHash("sha256").update(params.partText).digest("hex").slice(0, 16)}`
+  );
   const key = queueId
-    ? `relay-send:${queueId}:${params.deliveryPartIndex ?? 0}`
+    ? `relay-send:${queueId}:${part}`
     : `relay-send:${(params.random ?? (() => crypto.randomUUID()))()}`;
   // Server accepts 8-255 chars; the prefix guarantees the minimum.
   if (key.length <= IDEMPOTENCY_KEY_MAX) {

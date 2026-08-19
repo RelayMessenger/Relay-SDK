@@ -261,3 +261,36 @@ describe("text chunk ceiling", () => {
     expect(RELAY_TEXT_CHUNK_LIMIT * 4).toBeLessThanOrEqual(8 * 1024);
   });
 });
+
+describe("part keys on a core with no deliveryPartIndex", () => {
+  // Older cores enqueue one delivery, mint ONE queue id, and hand the channel
+  // each chunk of a long reply under it. Keying the missing index to 0 made
+  // every chunk share a key, so the server replayed the first chunk for all of
+  // them and the reader saw a long answer cut down to its opening chunk.
+  it("gives sibling chunks of one delivery distinct keys", () => {
+    const first = deriveRelayIdempotencyKey({ deliveryQueueId: "q1", partText: "opening chunk" });
+    const second = deriveRelayIdempotencyKey({ deliveryQueueId: "q1", partText: "second chunk" });
+    expect(first).not.toBe(second);
+  });
+
+  it("replays a retry of the same chunk", () => {
+    const once = deriveRelayIdempotencyKey({ deliveryQueueId: "q1", partText: "same chunk" });
+    const again = deriveRelayIdempotencyKey({ deliveryQueueId: "q1", partText: "same chunk" });
+    expect(once).toBe(again);
+  });
+
+  it("prefers core's index whenever core supplies one", () => {
+    const keyed = deriveRelayIdempotencyKey({
+      deliveryQueueId: "q1",
+      deliveryPartIndex: 2,
+      partText: "text that must not enter the key",
+    });
+    expect(keyed).toBe("relay-send:q1:2");
+  });
+
+  it("stays within the server's 255 character ceiling on a long chunk", () => {
+    const key = deriveRelayIdempotencyKey({ deliveryQueueId: "q1", partText: "x".repeat(50_000) });
+    expect(key.length).toBeLessThanOrEqual(255);
+    expect(key.length).toBeGreaterThanOrEqual(8);
+  });
+});

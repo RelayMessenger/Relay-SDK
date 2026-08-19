@@ -5,6 +5,18 @@
 import { createChatChannelPlugin } from "openclaw/plugin-sdk/channel-core";
 import type { ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk/channel-core";
 import type { ChannelGatewayContext } from "openclaw/plugin-sdk/channel-contract";
+
+/**
+ * Read core's part index without requiring it to exist. Cores before
+ * 2026.7.2-beta.5 have no `deliveryPartIndex` in their outbound context at all,
+ * so naming the field directly would not typecheck against them. Reading it
+ * through a widened shape keeps one source compiling on every supported core;
+ * `deriveRelayIdempotencyKey` handles the undefined case.
+ */
+function deliveryPartIndexOf(ctx: unknown): number | undefined {
+  const index = (ctx as { deliveryPartIndex?: unknown }).deliveryPartIndex;
+  return typeof index === "number" ? index : undefined;
+}
 import { resolveStableChannelMessageIngress } from "openclaw/plugin-sdk/channel-ingress-runtime";
 import {
   createMessageReceiptFromOutboundResults,
@@ -163,12 +175,13 @@ const relayMessageAdapter = defineChannelMessageAdapter({
         conversationId: ctx.to,
         text: ctx.text,
         replyToId: ctx.replyToId ?? null,
-        // Stable per (queueId, partIndex): internal retries replay the same
-        // key, so the server-side idempotent commit makes duplicates
-        // impossible by contract.
+        // Stable per (queueId, part): internal retries replay the same key,
+        // so the server-side idempotent commit makes duplicates impossible by
+        // contract. On a core with no part index the text names the part.
         idempotencyKey: deriveRelayIdempotencyKey({
           deliveryQueueId: ctx.deliveryQueueId,
-          deliveryPartIndex: ctx.deliveryPartIndex,
+          deliveryPartIndex: deliveryPartIndexOf(ctx),
+          partText: ctx.text,
         }),
         ...(ctx.signal ? { signal: ctx.signal } : {}),
       });
@@ -659,7 +672,8 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> = createCha
           // this invocation so two intentional identical sends remain two.
           idempotencyKey: deriveRelayIdempotencyKey({
             deliveryQueueId: ctx.deliveryQueueId,
-            deliveryPartIndex: ctx.deliveryPartIndex,
+            deliveryPartIndex: deliveryPartIndexOf(ctx),
+            partText: text,
           }),
         });
         return { messageId: result.messageId };
