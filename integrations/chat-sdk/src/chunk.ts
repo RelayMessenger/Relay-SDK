@@ -59,10 +59,23 @@ function sliceStyles(
   return out;
 }
 
+/** How much whitespace sits at `from`, which a cut there consumes. */
+function whitespaceRunLength(text: string, from: number): number {
+  const run = /^\s+/.exec(text.slice(from));
+  return run ? run[0].length : 0;
+}
+
 /**
  * Split rendered text into parts that each fit Relay's per-part ceiling.
  * Nothing is truncated: a long reply becomes more parts, and if it needs more
  * than one message the caller sends the overflow as follow-up messages.
+ *
+ * A cut consumes the whitespace run it lands on, and nothing else. Every part
+ * draws as its own balloon on iOS
+ * (`Relay-iOS/Relay/Views/Transcript/RelayCompositePartsModel.swift:6-7`), so a
+ * part must not open with a blank line or close with a trailing space; the
+ * whitespace at the seam is the only thing a split drops, and it is whitespace
+ * between two balloons, which nobody can see.
  */
 export function chunkRenderedText(
   rendered: RenderedText,
@@ -74,6 +87,14 @@ export function chunkRenderedText(
   const chunks: RenderedText[] = [];
   let cursor = 0;
   while (cursor < rendered.text.length) {
+    // A break separator shorter than the whitespace run it sits in leaves the
+    // rest of that run at the cursor. Step over it, or the next part opens
+    // with it: trimming only the tail cannot reach it.
+    const lead = whitespaceRunLength(rendered.text, cursor);
+    if (lead > 0) {
+      cursor += lead;
+      continue;
+    }
     const remainder = rendered.text.slice(cursor);
     const limit = byteLimitIndex(remainder, maxBytes);
     // A single code point wider than the ceiling cannot happen (Relay's

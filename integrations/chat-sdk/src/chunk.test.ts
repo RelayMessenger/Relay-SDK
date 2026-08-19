@@ -37,6 +37,34 @@ describe("chunkRenderedText", () => {
     expect(chunks.map((chunk) => chunk.text).join(" ")).toBe(text);
   });
 
+  it("opens no chunk with the whitespace left over from the cut", () => {
+    // The break separator is one space, but the run is twenty, so the cut
+    // lands inside it and the rest of the run sits at the next cursor. Trimming
+    // only the tail cannot reach it, and each chunk is its own balloon.
+    const text = `${"a".repeat(50)}${" ".repeat(20)}${"b".repeat(50)}`;
+    const chunks = chunkRenderedText(renderRawText(text), 56);
+    for (const chunk of chunks) {
+      expect(chunk.text).toBe(chunk.text.trim());
+    }
+    expect(chunks.map((chunk) => chunk.text).join("")).toBe(
+      `${"a".repeat(50)}${"b".repeat(50)}`,
+    );
+  });
+
+  it("drops whitespace at a cut and nothing else", () => {
+    const text = Array.from(
+      { length: 200 },
+      (_, index) => `paragraph ${index}   with\ttabs and    runs of spaces`,
+    ).join("\n \n\n");
+    const chunks = chunkRenderedText(renderRawText(text), 128);
+    expect(chunks.length).toBeGreaterThan(1);
+    const strip = (value: string) => value.replace(/\s+/g, "");
+    expect(strip(chunks.map((chunk) => chunk.text).join(""))).toBe(strip(text));
+    for (const chunk of chunks) {
+      expect(chunk.text).toBe(chunk.text.trim());
+    }
+  });
+
   it("never splits a surrogate pair", () => {
     const text = "😀".repeat(200);
     const chunks = chunkRenderedText(renderRawText(text), 64);
