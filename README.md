@@ -1,25 +1,33 @@
 # Relay SDK
 
 One repo for building on [Relay](https://relayapp.im), the messenger for AI
-agents. It ships the `relaymessenger` npm tool (published as
+agents. An agent on Relay is an AI that does things for you, and people message
+it the way they message a contact.
+
+This repo ships the `relaymessenger` npm tool (published as
 `@relaymessenger/cli`, name unchanged), the runtime integrations it bundles,
-the `@relaymessenger/sdk` contract and transport library, and forkable agent
-examples. Message Claude Code, Codex, or Hermes Agent from your phone, or run
-Relay as an OpenClaw channel: texts become engine turns, replies come back as
-messages, and tool approvals arrive as Allow/Deny cards you answer with a tap.
+the `@relaymessenger/sdk` contract and transport library, adapters for other
+agent frameworks, and forkable agent examples. Message Claude Code, Codex, or
+Hermes Agent from your phone, or run Relay as an OpenClaw channel: texts become
+engine turns, replies come back as messages, and tool approvals arrive as
+Allow/Deny cards you answer with a tap.
 
 Docs: https://docs.relayapp.im
+
+The Relay app itself is invite-only and on TestFlight. Join the waitlist at
+[relayapp.im](https://relayapp.im).
 
 ## What's here
 
 | Path | What it is |
 | --- | --- |
 | [`packages/relaymessenger`](packages/relaymessenger) | The `relaymessenger` CLI (npm, `@relaymessenger/cli`): `pair` a machine with the Relay app via QR/code, drive Claude Code, Codex, or Hermes Agent over ACP, and install the bundled Codex, Claude Code, or OpenClaw integration. |
-| [`packages/sdk`](packages/sdk) | `@relaymessenger/sdk`: Relay contract types and transport (HTTPS client, Standard Webhooks verify, durable long-poll, idempotent sends). Not yet published to npm; its types will become generated from the Relay-Server schemas so the wire contract has one source of truth. |
-| [`integrations/claude-code`](integrations/claude-code) | Claude Code **channel plugin** (official Channels contract): push Relay messages into a running session, reply tool, phone permission relay. The npm CLI bundles and installs this plugin from a local marketplace; no GitHub checkout is required. |
-| [`integrations/openclaw`](integrations/openclaw) | OpenClaw channel plugin: an OpenClaw agent as a Relay contact (long-poll receive, durable chunked replies). The npm CLI bundles its installable archive. |
+| [`packages/sdk`](packages/sdk) | `@relaymessenger/sdk`: Relay contract types and transport (HTTPS client, Standard Webhooks verify, durable long-poll, idempotent sends). Its types will become generated from the Relay-Server schemas so the wire contract has one source of truth. |
+| [`integrations/claude-code`](integrations/claude-code) | Claude Code **channel plugin** (`relay-claude-channel`, official Channels contract): push Relay messages into a running session, reply tool, phone permission relay. The npm CLI bundles and installs this plugin from a local marketplace; no GitHub checkout is required. |
+| [`integrations/openclaw`](integrations/openclaw) | OpenClaw channel plugin (`@relaymessenger/openclaw-plugin`): an OpenClaw agent as a Relay contact (long-poll receive, durable chunked replies). The npm CLI bundles its installable archive. |
 | [`integrations/vercel-ai`](integrations/vercel-ai) | Vercel AI SDK webhook plugin (`@relaymessenger/vercel-ai`): verify signed Relay webhooks, then stream `streamText(...)` back as one canonical message. |
-| [`examples`](examples) | Forkable agents built on `@relaymessenger/sdk` ([`raw-webhook-agent`](examples/raw-webhook-agent), [`showcase-agent`](examples/showcase-agent)), plugin landing zones ([`examples/plugins`](examples/plugins)), and smoke harnesses ([`examples/harnesses`](examples/harnesses)). |
+| [`integrations/chat-sdk`](integrations/chat-sdk) | Vercel Chat SDK adapter (`@relaymessenger/chat-sdk-adapter`): a Relay conversation becomes a Chat SDK thread, so anything built on the Chat SDK reaches Relay users. |
+| [`examples`](examples) | Forkable agents built on `@relaymessenger/sdk` ([`raw-webhook-agent`](examples/raw-webhook-agent), [`showcase-agent`](examples/showcase-agent)), an [eve channel template](examples/eve), plugin landing zones ([`examples/plugins`](examples/plugins)), and smoke harnesses ([`examples/harnesses`](examples/harnesses)). |
 
 ## Quickstart
 
@@ -33,10 +41,10 @@ relaymessenger install-claude
 relaymessenger install-openclaw
 ```
 
-Full guide: https://docs.relayapp.im/guides/coding-agents
+Full guide: https://docs.relayapp.im/integrations
 
-All four integration surfaces are release-gated together on Linux and Windows;
-the installed `relaymessenger` tarball and its Claude/Codex adapter runtime also run
+Every integration surface is release-gated together on Linux and Windows; the
+installed `relaymessenger` tarball and its Claude/Codex adapter runtime also run
 on macOS CI. `@relaymessenger/sdk` and the examples typecheck, build, and test
 inside the same `npm run validate` gate.
 
@@ -50,12 +58,27 @@ plugin from `integrations/claude-code`. In Claude Code, run
 
 ## npm release contracts
 
-Only `packages/relaymessenger` is published by the automated npm release. Its tarball
-contains a strictly validated Claude Code marketplace and an installable
-OpenClaw plugin archive generated from the matching integration sources. The
-Claude Code and OpenClaw workspaces are bundled artifacts, not independent npm
-packages. `integrations/vercel-ai` is published separately as
-`@relaymessenger/vercel-ai`.
+Six packages publish from this repository, each through its own tag-triggered
+workflow. Every one uses npm OIDC trusted publishing; no long-lived write token
+is allowed anywhere.
+
+| Package | Source | Tag |
+| --- | --- | --- |
+| `@relaymessenger/cli` | `packages/relaymessenger` | `relaymessenger-vX.Y.Z` |
+| `@relaymessenger/sdk` | `packages/sdk` | `sdk-vX.Y.Z` |
+| `@relaymessenger/vercel-ai` | `integrations/vercel-ai` | `vercel-ai-vX.Y.Z` |
+| `@relaymessenger/chat-sdk-adapter` | `integrations/chat-sdk` | `chat-sdk-vX.Y.Z` |
+| `@relaymessenger/openclaw-plugin` | `integrations/openclaw` | `openclaw-vX.Y.Z` |
+| `relay-claude-channel` | `integrations/claude-code` | `claude-channel-vX.Y.Z` |
+
+The `@relaymessenger/cli` tarball still carries a strictly validated Claude Code
+marketplace and an installable OpenClaw plugin archive generated from those
+integration sources, so `relaymessenger install-claude` and
+`relaymessenger install-openclaw` need no registry install of their own. Those
+two packages now also stand on their own for anyone consuming them directly.
+
+The steps below describe the `@relaymessenger/cli` release. The other five
+follow the same contract through their own workflow and tag.
 
 1. Update the CLI version and root lock metadata together:
 
@@ -92,11 +115,6 @@ packages. `integrations/vercel-ai` is published separately as
    into a clean directory, loads the CLI, resolves both pinned ACP adapter
    runtimes, and verifies that both bundled native-integration artifacts are
    present.
-
-`@relaymessenger/vercel-ai` follows the same contract through
-`.github/workflows/release-vercel-ai.yml` and tags named `vercel-ai-vX.Y.Z`.
-`@relaymessenger/sdk` follows it through
-`.github/workflows/release-sdk.yml` and tags named `sdk-vX.Y.Z`.
 
 The repository is available under the MIT License; each integration documents
 its own trust, delivery, and crash-recovery boundary.
