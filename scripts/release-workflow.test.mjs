@@ -60,6 +60,19 @@ for (const { path, tagPattern } of releaseWorkflows) {
     assert.match(workflow, /^\s*test -n "\$\{ACTIONS_ID_TOKEN_REQUEST_URL:-\}"\s*$/mu);
   });
 
+  test(`${path} names a missing trusted-publisher record instead of leaving ENEEDAUTH`, () => {
+    const workflow = readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+
+    assert.match(workflow, /oidc\/token\/exchange\/package/u);
+    // Only a definitive "not configured" answer may block a release; an
+    // unreachable registry must fall through to npm publish rather than
+    // inventing a new way for releases to fail.
+    assert.match(workflow, /^\s*if \[\[ "\$status" == "404" \]\]; then$/mu);
+    assert.match(workflow, /leaving the verdict to npm publish/u);
+    // A successful exchange returns a live publish token.
+    assert.match(workflow, /^\s*rm -f "\$body"$/mu);
+  });
+
   test(`${path} never publishes with a long-lived token`, () => {
     const workflow = readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
