@@ -60,6 +60,20 @@ export type RelayClient = {
     invocationId?: string;
     signal?: AbortSignal;
   }) => Promise<void>;
+  /**
+   * Advance the delivered watermark to `messageId`, and every earlier message
+   * from other participants with it.
+   *
+   * Send this when the message reaches the agent, before anything that implies
+   * a read. The server advances the delivered watermark whenever it records a
+   * read, so a delivered receipt that arrives after a read for the same
+   * message is silently dropped and the sender never leaves "Sent".
+   */
+  markDelivered: (params: {
+    conversationId: string;
+    messageId: string;
+    signal?: AbortSignal;
+  }) => Promise<void>;
   markRead: (params: {
     conversationId: string;
     messageId: string;
@@ -239,6 +253,15 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
           ...(params.label ? { label: params.label } : {}),
           ...(params.invocationId ? { invocation_id: params.invocationId } : {}),
         },
+        ...(params.signal ? { signal: params.signal } : {}),
+      });
+    },
+
+    markDelivered: async (params) => {
+      await request({
+        method: "POST",
+        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/delivered`,
+        body: { message_id: params.messageId },
         ...(params.signal ? { signal: params.signal } : {}),
       });
     },
