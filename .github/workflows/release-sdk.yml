@@ -131,6 +131,23 @@ jobs:
       # OIDC trusted publishing after every artifact check passes.
       - name: Install an npm CLI with trusted publishing support
         run: npm install --global npm@12.0.1
+      - name: Clear the placeholder auth line that suppresses the OIDC exchange
+        if: ${{ steps.registry.outputs.published != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          test -f "$npmrc"
+          # setup-node's registry-url always writes `_authToken=${NODE_AUTH_TOKEN}`.
+          # Releases here carry no token, so npm reads that empty value as
+          # configured credentials, never requests an OIDC token, and PUTs
+          # anonymously - which the registry answers with a bare E404.
+          grep -v ':_authToken=' "$npmrc" > "$npmrc.oidc" || true
+          mv "$npmrc.oidc" "$npmrc"
+          ! grep -q ':_authToken=' "$npmrc"
+          # Fail loudly here when the OIDC permission is missing, rather than as
+          # an anonymous publish rejected several steps later.
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
       - name: Publish through npm trusted publishing
         if: ${{ steps.registry.outputs.published != 'true' }}
         run: npm publish "${{ steps.artifact.outputs.tarball }}" --access public

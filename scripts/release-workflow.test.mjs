@@ -47,4 +47,23 @@ for (const { path, tagPattern } of releaseWorkflows) {
     assert.doesNotMatch(workflow, /^\s*runs-on: blacksmith-/mu);
     assert.match(workflow, /^\s*id-token: write\s*$/mu);
   });
+
+  test(`${path} lets npm reach the OIDC exchange instead of publishing anonymously`, () => {
+    const workflow = readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+
+    // setup-node's registry-url writes `_authToken=${NODE_AUTH_TOKEN}` into the
+    // job npmrc. Left in place with no token set, npm treats the empty value as
+    // configured credentials, skips trusted publishing, and publishes
+    // anonymously; the registry rejects that as an unrelated-looking E404.
+    assert.match(workflow, /^\s*grep -v ':_authToken=' "\$npmrc"/mu);
+    assert.match(workflow, /^\s*! grep -q ':_authToken=' "\$npmrc"/mu);
+    assert.match(workflow, /^\s*test -n "\$\{ACTIONS_ID_TOKEN_REQUEST_URL:-\}"\s*$/mu);
+  });
+
+  test(`${path} never publishes with a long-lived token`, () => {
+    const workflow = readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+
+    assert.doesNotMatch(workflow, /secrets\.NPM_TOKEN/u);
+    assert.doesNotMatch(workflow, /^\s*NODE_AUTH_TOKEN:/mu);
+  });
 }
