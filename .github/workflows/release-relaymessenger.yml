@@ -150,6 +150,50 @@ jobs:
           # Fail loudly here when the OIDC permission is missing, rather than as
           # an anonymous publish rejected several steps later.
           test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+      - name: Name the missing trusted-publisher record before npm obscures it
+        if: ${{ steps.registry.outputs.published != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg="$(node -p "require('./.release-tmp/release-manifest.json').package")"
+          # npm answers an unconfigured package with ENEEDAUTH, which reads as a
+          # missing token rather than a missing trust record. Ask the exchange
+          # directly so the failure names what to configure and where.
+          if ! id_token="$(
+            curl --silent --fail --show-error \
+              --header "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" \
+            | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>process.stdout.write(JSON.parse(d).value))"
+          )"; then
+            printf 'could not mint an OIDC token to probe with; leaving the verdict to npm publish\n'
+            exit 0
+          fi
+          body="$RUNNER_TEMP/oidc-exchange.json"
+          if ! status="$(
+            curl --silent --output "$body" --write-out '%{http_code}' \
+              --request POST \
+              --header "Authorization: Bearer $id_token" \
+              --header "Content-Type: application/json" \
+              "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${pkg//\//%2f}"
+          )"; then
+            printf 'trusted-publisher probe could not reach the registry; leaving the verdict to npm publish\n'
+            exit 0
+          fi
+          # A 200 body carries a live publish token; never log or keep it.
+          rm -f "$body"
+          if [[ "$status" == "404" ]]; then
+            workflow_ref="${GITHUB_WORKFLOW_REF%%@*}"
+            {
+              printf 'npm has no trusted-publisher record matching this workflow for %s.\n' "$pkg"
+              printf 'Publishing would fail with ENEEDAUTH, which names credentials rather than trust.\n'
+              printf 'Configure it at npmjs.com -> %s -> Settings -> Trusted publishing:\n' "$pkg"
+              printf '  organization or user: %s\n' "${GITHUB_REPOSITORY%%/*}"
+              printf '  repository:           %s\n' "${GITHUB_REPOSITORY##*/}"
+              printf '  workflow filename:    %s\n' "${workflow_ref##*/}"
+            } >&2
+            exit 1
+          fi
+          printf 'trusted-publisher probe returned HTTP %s; continuing to publish\n' "$status"
       - name: Publish relaymessenger through npm trusted publishing
         if: ${{ steps.registry.outputs.published != 'true' }}
         run: npm publish "${{ steps.artifact.outputs.tarball }}" --access public
