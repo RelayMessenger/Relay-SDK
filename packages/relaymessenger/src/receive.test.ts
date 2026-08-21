@@ -207,6 +207,18 @@ function pendingApproval(overrides: Partial<PendingApproval> = {}): PendingAppro
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function waitFor(
+  condition: () => boolean,
+  message: string,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) assert.fail(message);
+    await sleep(10);
+  }
+}
+
 test("cursor advances only with the durably persisted queue (single atomic write)", async () => {
   const home = tempHome();
   const { loop } = makeLoop(home, [
@@ -936,7 +948,10 @@ test("two group invocations in one debounce window get one reply each, never sha
     },
   ]);
   await loop.pollOnce();
-  await sleep(200);
+  await waitFor(
+    () => turns.length === 2 && posted.length === 2,
+    "both group invocations did not complete",
+  );
   await loop.settle();
   // The server completes an invocation on its first message, so coalescing
   // these into one turn would strand inv_02 with no reply.
