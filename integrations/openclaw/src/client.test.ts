@@ -94,3 +94,33 @@ describe("Relay API operation deadlines", () => {
     expect(keys).toEqual(["relay-send:stable:0", "relay-send:stable:0"]);
   });
 });
+
+describe("Relay responding", () => {
+  it("posts the inbound watermark before a turn", async () => {
+    const requests: Array<{ url: string; body: unknown }> = [];
+    const client = createRelayClient({
+      baseUrl: "https://api.test",
+      token: "tok",
+      fetchImpl: async (input, init) => {
+        requests.push({
+          url: input,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        return new Response(null, { status: 204 });
+      },
+    });
+
+    await client.setResponding({
+      conversationId: "cnv/a",
+      messageId: "msg_2",
+      label: "OpenClaw",
+    });
+
+    expect(requests).toEqual([
+      {
+        url: "https://api.test/v1/conversations/cnv%2Fa/responding",
+        body: { message_id: "msg_2", label: "OpenClaw" },
+      },
+    ]);
+  });
+});

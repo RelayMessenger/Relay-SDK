@@ -78,6 +78,7 @@ function scriptedClient(turns: PollTurn[], abort: AbortController): RelayClient 
       throw new Error("not used");
     },
     setTyping: async () => {},
+    setResponding: async () => {},
     markRead: async () => {},
   };
 }

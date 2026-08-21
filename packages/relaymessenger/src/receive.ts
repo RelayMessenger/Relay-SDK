@@ -20,6 +20,7 @@ import { createHash } from "node:crypto";
 import { RelayApiError, type RelayClient } from "./api.js";
 import type { BridgeState, RelayEvent, RelayMessage, StateStore } from "./store.js";
 import type { EngineAdapter, PermissionAsk, PermissionDecision } from "./engine/types.js";
+import { engineDisplayName } from "./engine/catalog.js";
 import { PermissionBroker } from "./permissions.js";
 
 export interface ReceiveLoopOptions {
@@ -456,20 +457,37 @@ export class ReceiveLoop {
       return;
     }
 
-    // Crash semantics: engine/tool side effects are at-most-once per batch.
-    // The exact event-id batch is persisted BEFORE the engine starts. A later
-    // message cannot change or overwrite which prefix was already attempted.
-    const eventIds = events.map((event) => event.event_id);
-    const turnKey = turnIdempotencyKey(conversationId, eventIds);
-    (this.state.current.attempted_turns ??= {})[conversationId] = {
-      turn_key: turnKey,
-      event_ids: eventIds,
-      started_at: new Date().toISOString(),
-    };
-    this.state.persist();
+    const lastMessage = messages[messages.length - 1]!;
+    const respondingLabel = engineDisplayName(this.engine.engine);
+    // Mark the complete debounced watermark before engine execution. A
+    // rejected /responding call propagates visibly and leaves the batch
+    // unattempted, so no tool turn can run behind a stale Delivered receipt.
+    await this.client.setResponding(
+      conversationId,
+      lastMessage.id,
+      respondingLabel,
+      invocationId,
+    );
 
-    const typing = this.startTyping(conversationId, invocationId);
+    const typing = this.startTyping(
+      conversationId,
+      invocationId,
+      respondingLabel,
+    );
     try {
+      // Crash semantics: engine/tool side effects are at-most-once per batch.
+      // The exact event-id batch is persisted AFTER replay-safe lifecycle
+      // preflight and BEFORE the engine starts. A later message cannot change
+      // or overwrite which prefix was already attempted.
+      const eventIds = events.map((event) => event.event_id);
+      const turnKey = turnIdempotencyKey(conversationId, eventIds);
+      (this.state.current.attempted_turns ??= {})[conversationId] = {
+        turn_key: turnKey,
+        event_ids: eventIds,
+        started_at: new Date().toISOString(),
+      };
+      this.state.persist();
+
       let result;
       try {
         result = await this.engine.startTurn(
@@ -548,26 +566,50 @@ export class ReceiveLoop {
     return this.broker.ask(direct, ask, this.engine.engine);
   }
 
-  private startTyping(conversationId: string, invocationId?: string) {
-    let label: string | undefined;
+  private startTyping(
+    conversationId: string,
+    invocationId: string | undefined,
+    initialLabel: string,
+  ) {
+    let label: string | undefined = initialLabel;
     let active = true;
-    const push = () => {
+    const push = async (reason: "start" | "label" | "keepalive") => {
       if (!active) return;
-      this.client.setTyping(conversationId, true, label, invocationId).catch(() => {});
+      try {
+        await this.client.setTyping(
+          conversationId,
+          true,
+          label,
+          invocationId,
+        );
+      } catch (error) {
+        this.log(`typing ${reason} failed for ${conversationId}: ${error}`);
+      }
     };
-    push();
-    const interval = setInterval(push, 20_000);
+    void push("start");
+    const interval = setInterval(() => {
+      void push("keepalive");
+    }, 20_000);
     interval.unref?.();
     return {
       setLabel: (next: string) => {
         label = next.slice(0, 80);
-        push();
+        void push("label");
       },
       stop: async () => {
         if (!active) return;
         active = false;
         clearInterval(interval);
-        await this.client.setTyping(conversationId, false, undefined, invocationId).catch(() => {});
+        try {
+          await this.client.setTyping(
+            conversationId,
+            false,
+            undefined,
+            invocationId,
+          );
+        } catch (error) {
+          this.log(`typing stop failed for ${conversationId}: ${error}`);
+        }
       },
     };
   }

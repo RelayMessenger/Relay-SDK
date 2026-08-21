@@ -192,8 +192,21 @@ try {
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
-  for (const proof of ["GET /v1/agents/me", "GET /v1/events", "completion request", "POST /v1/messages"]) {
+  for (const proof of [
+    "GET /v1/agents/me",
+    "GET /v1/events",
+    "POST /v1/conversations/cnv_harness_1/responding",
+    "completion request",
+    "POST /v1/messages",
+  ]) {
     if (!mockOutput.includes(proof)) throw new Error(`missing gateway proof: ${proof}\n${mockOutput}`);
+  }
+  const respondingIndex = mockOutput.indexOf(
+    "POST /v1/conversations/cnv_harness_1/responding",
+  );
+  const completionIndex = mockOutput.indexOf("completion request");
+  if (respondingIndex < 0 || completionIndex < 0 || respondingIndex > completionIndex) {
+    throw new Error(`responding did not precede engine execution\n${mockOutput}`);
   }
   process.stdout.write("OpenClaw installed-runtime gateway harness passed end to end.\n");
 } finally {
