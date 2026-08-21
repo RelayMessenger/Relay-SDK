@@ -162,12 +162,19 @@ async function withStateFileMutex<R>(
   // waiter.
   const tail = previous ? previous.then(() => ours) : ours;
   mutexes.set(filePath, tail);
+  let tookTurn = false;
   try {
     if (previous) await awaitTurn(previous, deadline, filePath);
+    tookTurn = true;
     return await run();
   } finally {
     release();
-    if (mutexes.get(filePath) === tail) mutexes.delete(filePath);
+    // Forgetting the queue is only safe once it has drained. A waiter that gave
+    // up is still queued behind a holder that is running, so dropping the entry
+    // there would let the next caller past the holder and back onto the lock
+    // file the queue exists to keep it off. Leaving it costs one settled promise
+    // until the next caller drains it.
+    if (tookTurn && mutexes.get(filePath) === tail) mutexes.delete(filePath);
   }
 }
 
