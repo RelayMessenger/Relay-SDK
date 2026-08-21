@@ -45,7 +45,16 @@ describe("Relay-owned state files", () => {
     }
   });
 
-  it("serializes concurrent updates from separate store handles", async () => {
+  // 40 serialized locked updates are 40 real atomic replacements: read, private
+  // temp write, fsync, rename, plus a sidecar lock create and unlink each. That
+  // costs ~730ms on an idle M-series Mac (~18ms per update) and the Windows CI
+  // runners measure ~2.2x that per filesystem operation, so a runner sharing a
+  // host with release workflows legitimately needs 2-4s. Vitest's 5s default left
+  // under 1.4x headroom and failed intermittently on Windows; this budget is
+  // sized for the measured cost rather than to outrun a lock defect. Contention
+  // itself is bounded by the in-process queue in state-files.ts, whose fail-closed
+  // deadline the next test covers.
+  it("serializes concurrent updates from separate store handles", { timeout: 20_000 }, async () => {
     const stateDir = mkdtempSync(join(tmpdir(), "relay-state-concurrency-"));
     const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
     const first = openRelayStateDocument<number>({ fileName: "counter.json", env });
@@ -64,6 +73,48 @@ describe("Relay-owned state files", () => {
         }),
       );
       expect((await first.readRequired()).entries.count).toBe(40);
+    } finally {
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("times out a queued same-process update instead of waiting forever", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "relay-state-queue-"));
+    const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
+    const holder = openRelayStateDocument<number>({
+      fileName: "queued.json",
+      env,
+      lockTimeoutMs: 5_000,
+    });
+    const waiter = openRelayStateDocument<number>({
+      fileName: "queued.json",
+      env,
+      lockTimeoutMs: 50,
+    });
+    try {
+      let releaseHolder!: () => void;
+      const holderReleased = new Promise<void>((resolve) => {
+        releaseHolder = resolve;
+      });
+      const holding = holder.updateOr(emptyRelayStateDocument<number>(), async (current) => {
+        await holderReleased;
+        return { version: current.version, entries: { held: 1 } };
+      });
+      // The queue must bound its wait on the caller's lock timeout: without that,
+      // a same-process waiter would block on the holder forever rather than
+      // surfacing the timeout the cross-process lock already fails closed with.
+      await expect(
+        waiter.updateOr(emptyRelayStateDocument<number>(), async (current) => current),
+      ).rejects.toThrow(/file lock timeout/u);
+      releaseHolder();
+      await expect(holding).resolves.toEqual({ version: 1, entries: { held: 1 } });
+      expect((await holder.readRequired()).entries.held).toBe(1);
+      // Giving up a turn must not wedge the queue for everyone behind it.
+      await waiter.updateOr(emptyRelayStateDocument<number>(), async (current) => ({
+        version: current.version,
+        entries: { ...current.entries, after: 1 },
+      }));
+      expect((await holder.readRequired()).entries.after).toBe(1);
     } finally {
       rmSync(stateDir, { recursive: true, force: true });
     }
