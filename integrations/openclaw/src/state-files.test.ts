@@ -47,14 +47,13 @@ describe("Relay-owned state files", () => {
 
   // 40 serialized locked updates are 40 real atomic replacements: read, private
   // temp write, fsync, rename, plus a sidecar lock create and unlink each. That
-  // costs ~730ms on an idle M-series Mac (~18ms per update) and the Windows CI
-  // runners measure ~2.2x that per filesystem operation, so a runner sharing a
-  // host with release workflows legitimately needs 2-4s. Vitest's 5s default left
-  // under 1.4x headroom and failed intermittently on Windows; this budget is
-  // sized for the measured cost rather than to outrun a lock defect. Contention
-  // itself is bounded by the in-process queue in state-files.ts, whose fail-closed
-  // deadline the next test covers.
-  it("serializes concurrent updates from separate store handles", { timeout: 20_000 }, async () => {
+  // is ~700ms on an idle M-series Mac, and Windows CI measured 1009-1490ms on the
+  // runs where this passed. It has no business taking longer, so it keeps vitest's
+  // 5s default: the Windows timeouts that prompted the in-process queue in
+  // state-files.ts were bimodal, ~1.2s normally against >5s when contention tipped
+  // into delete-pending denials, and a roomier budget would hide that regime
+  // returning rather than fail on it.
+  it("serializes concurrent updates from separate store handles", async () => {
     const stateDir = mkdtempSync(join(tmpdir(), "relay-state-concurrency-"));
     const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
     const first = openRelayStateDocument<number>({ fileName: "counter.json", env });
