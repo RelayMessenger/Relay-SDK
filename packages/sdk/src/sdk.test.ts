@@ -163,6 +163,39 @@ describe("RelayClient responding", () => {
   });
 });
 
+describe("RelayClient receipts", () => {
+  it("sends delivered and read to their own routes", async () => {
+    const requests: Array<{ url: string; body: unknown }> = [];
+    const client = createRelayClient({
+      token: "rly_test",
+      fetchImpl: async (input, init) => {
+        requests.push({
+          url: input,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        return new Response(null, { status: 204 });
+      },
+    });
+
+    // Delivered before read is the order the server requires: recording a read
+    // also advances the delivered watermark, so the reverse order drops the
+    // delivered receipt and the sender is stuck on "Sent".
+    await client.markDelivered({ conversationId: "cnv/a", messageId: "msg_2" });
+    await client.markRead({ conversationId: "cnv/a", messageId: "msg_2" });
+
+    expect(requests).toEqual([
+      {
+        url: "https://api.relayapp.im/v1/conversations/cnv%2Fa/delivered",
+        body: { message_id: "msg_2" },
+      },
+      {
+        url: "https://api.relayapp.im/v1/conversations/cnv%2Fa/read",
+        body: { message_id: "msg_2" },
+      },
+    ]);
+  });
+});
+
 describe("runPollLoop", () => {
   const baseParams = {
     getCursor: () => 0,
