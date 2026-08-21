@@ -149,8 +149,30 @@ export class ReceiveLoop {
       this.state.current.cursor = page.next_cursor;
     }
     this.state.persist();
-    for (const conversationId of touched) this.scheduleFlush(conversationId);
+    for (const conversationId of touched) {
+      this.scheduleFlush(conversationId);
+      this.ackQueuedBehindTurn(conversationId);
+    }
     return accepted;
+  }
+
+  /**
+   * A turn snapshots its batch at start, so a message that lands while the
+   * turn runs cannot advance that turn's /responding watermark and would sit
+   * at "Delivered" until its own turn — after the reply, plus another
+   * debounce. Mark the queue head read now instead. /read is the receipt
+   * without /responding's typing side effect, so the running turn's tool
+   * label survives. Best-effort: the next turn's /responding still covers
+   * the same watermark durably, so a failure here only delays the receipt.
+   */
+  private ackQueuedBehindTurn(conversationId: string): void {
+    if (!this.turnChains.has(conversationId)) return;
+    const queue = this.state.current.pending_events[conversationId] ?? [];
+    const newest = queue[queue.length - 1]?.data?.message;
+    if (!newest) return;
+    void this.client
+      .markRead(conversationId, newest.id)
+      .catch((error) => this.log(`mid-turn read receipt failed for ${conversationId}: ${error}`));
   }
 
   /**
@@ -451,9 +473,18 @@ export class ReceiveLoop {
       .filter((message): message is RelayMessage => message !== undefined);
     const promptText = promptTextFromMessages(messages);
     if (promptText.length === 0) {
-      // Nothing promptable; drop the batch durably.
-      delete this.state.current.pending_events[conversationId];
-      this.state.persist();
+      // Nothing promptable; drop only THIS batch durably — later events must
+      // survive for their own turns — and still mark it read, or a
+      // media-only message with no fallback text pins at Delivered forever.
+      this.clearBatch(conversationId, events);
+      const newestUnpromptable = messages[messages.length - 1];
+      if (newestUnpromptable) {
+        try {
+          await this.client.markRead(conversationId, newestUnpromptable.id);
+        } catch (error) {
+          this.log(`read receipt for unpromptable batch failed for ${conversationId}: ${error}`);
+        }
+      }
       return;
     }
 

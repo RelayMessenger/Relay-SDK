@@ -71,6 +71,7 @@ function fakeClient(options: { pages?: EventsPage[] } = {}) {
     label?: string;
     invocationId?: string;
   }> = [];
+  const reads: Array<{ conversationId: string; messageId: string }> = [];
   const client = {
     origin: "http://fake",
     async getEvents(cursor: number): Promise<EventsPage> {
@@ -111,6 +112,9 @@ function fakeClient(options: { pages?: EventsPage[] } = {}) {
     ) {
       respondings.push({ conversationId, messageId, label, invocationId });
     },
+    async markRead(conversationId: string, messageId: string) {
+      reads.push({ conversationId, messageId });
+    },
     async listMessages() {
       return { messages: [] };
     },
@@ -120,6 +124,7 @@ function fakeClient(options: { pages?: EventsPage[] } = {}) {
     posted,
     typings,
     respondings,
+    reads,
   };
 }
 
@@ -151,7 +156,7 @@ function fakeEngine() {
 }
 
 function makeLoop(home: string, pages: EventsPage[], debounceMs = 25) {
-  const { client, posted, typings, respondings } = fakeClient({ pages });
+  const { client, posted, typings, respondings, reads } = fakeClient({ pages });
   const state = new StateStore(home);
   const approvals = new ApprovalStore(home);
   const fake = fakeEngine();
@@ -169,6 +174,7 @@ function makeLoop(home: string, pages: EventsPage[], debounceMs = 25) {
     posted,
     typings,
     respondings,
+    reads,
     broker,
     ...fake,
   };
@@ -471,6 +477,75 @@ test("H1 regression: a message arriving mid-turn is kept and triggers a follow-u
   assert.equal(turns.length, 2, "mid-turn message must start a follow-up turn");
   assert.equal(turns[1]!.prompt, "second");
   assert.equal(Object.keys(diskState(home).pending_events).length, 0);
+  loop.stop();
+});
+
+test("a message arriving mid-turn is marked read before the reply is delivered", async () => {
+  const home = tempHome();
+  const { loop, turns, client, posted, reads, respondings, setTurnGate } = makeLoop(
+    home,
+    [{ events: [userMessageEvent("evt_1", "cnv_a", "first", 1)], next_cursor: 1 }],
+    20,
+  );
+  let releaseFirstTurn!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseFirstTurn = resolve;
+  });
+  setTurnGate(gate);
+
+  await loop.pollOnce();
+  await sleep(60); // debounce fires; first turn is now blocked on the gate
+  assert.equal(turns.length, 1);
+  assert.deepEqual(reads, [], "no catch-up receipt while the queue is empty");
+
+  // Second message lands while the first turn is still running: its receipt
+  // must not wait for the first turn's reply.
+  client.pushPage({ events: [userMessageEvent("evt_2", "cnv_a", "second", 2)], next_cursor: 2 });
+  await loop.pollOnce();
+  assert.deepEqual(reads, [{ conversationId: "cnv_a", messageId: "msg_evt_2" }]);
+  assert.equal(posted.length, 0, "the receipt precedes any reply delivery");
+
+  releaseFirstTurn();
+  await sleep(80);
+  await loop.settle();
+  await sleep(80); // follow-up debounce window
+  await loop.settle();
+
+  // The durable watermark still lands at the follow-up turn's /responding.
+  assert.deepEqual(
+    respondings.map((r) => r.messageId),
+    ["msg_evt_1", "msg_evt_2"],
+  );
+  assert.equal(reads.length, 1, "the catch-up receipt fires once per arrival, not per turn");
+  loop.stop();
+});
+
+test("an unpromptable batch clears only itself and is still marked read", async () => {
+  const home = tempHome();
+  const { loop, turns, reads, respondings, state } = makeLoop(home, []);
+  // A media-only message: no text part, empty fallback text. The later group
+  // invocation stays queued for its own turn (batchForTurn caps at inv_1).
+  const unpromptable = groupMessageEvent("evt_media", "cnv_a", "inv_1", "", 1);
+  unpromptable.data!.message!.parts = [
+    { type: "link_preview", url: "https://example.com" },
+  ];
+  unpromptable.data!.message!.fallback_text = "";
+  state.current.pending_events.cnv_a = [
+    unpromptable,
+    groupMessageEvent("evt_next", "cnv_a", "inv_2", "still here", 2),
+  ];
+  state.persist();
+
+  await loop.runTurn("cnv_a");
+
+  assert.equal(turns.length, 0, "an unpromptable batch never reaches the engine");
+  assert.deepEqual(respondings, [], "no responding lifecycle without an engine turn");
+  assert.deepEqual(reads, [{ conversationId: "cnv_a", messageId: "msg_evt_media" }]);
+  assert.deepEqual(
+    diskState(home).pending_events.cnv_a?.map((event) => event.event_id),
+    ["evt_next"],
+    "later invocations survive the drop",
+  );
   loop.stop();
 });
 
