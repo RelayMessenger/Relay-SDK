@@ -12,10 +12,9 @@ permissions:
 jobs:
   publish:
     name: Validate, publish, and verify @relaymessenger/vercel-ai
-    # All jobs run on Blacksmith (9a24a58; ubuntu-latest caused zombie tag
-    # runs). Every npm publish so far predates that move, so provenance from a
-    # Blacksmith runner is unproven; the next tag release proves or refutes it.
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # npm OIDC trusted publishing accepts GitHub-hosted runners only.
+    # Validation stays on Blacksmith in CI; publication must run here.
+    runs-on: ubuntu-24.04
     env:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:

@@ -39,4 +39,12 @@ for (const { path, tagPattern } of releaseWorkflows) {
     assert.match(workflow, /^\s*RELEASE_TAG: \$\{\{ github\.ref_name \}\}\s*$/mu);
     assert.match(workflow, /^\s*ref: \$\{\{ github\.ref_name \}\}\s*$/mu);
   });
+
+  test(`${path} publishes OIDC releases from a supported GitHub runner`, () => {
+    const workflow = readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+
+    assert.match(workflow, /^\s*runs-on: ubuntu-24\.04\s*$/mu);
+    assert.doesNotMatch(workflow, /^\s*runs-on: blacksmith-/mu);
+    assert.match(workflow, /^\s*id-token: write\s*$/mu);
+  });
 }
