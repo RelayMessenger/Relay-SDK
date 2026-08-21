@@ -30,7 +30,7 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test \"src/**/*.test.ts\"",
-    "prepack": "node scripts/build-claude-bundle.mjs && npm run clean && npm run build"
+    "prepack": "npm run build --workspace @relaymessenger/sdk && node scripts/build-claude-bundle.mjs && npm run clean && npm run build"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.69.0",
