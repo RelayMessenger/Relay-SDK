@@ -19,6 +19,9 @@ const releaseWorkflows = [
   {
     path: ".github/workflows/release-cli.yml",
     packageName: "@relaymessenger/cli",
+    // The only package whose registry smoke is its own file rather than a
+    // `verify-registry` subcommand of its release script.
+    verifyScript: "scripts/verify-cli-registry.mjs",
     tagPattern: '"relaymessenger-v*"',
   },
   {
@@ -57,7 +60,7 @@ test("every release workflow on disk is covered by this file", () => {
   assert.deepEqual(present, covered);
 });
 
-for (const { path, packageName, tagPattern } of releaseWorkflows) {
+for (const { path, packageName, tagPattern, verifyScript } of releaseWorkflows) {
   const slug = /release-(?<slug>.+)\.yml$/u.exec(path).groups.slug;
 
   test(`${path} names the package it publishes`, () => {
@@ -76,11 +79,22 @@ for (const { path, packageName, tagPattern } of releaseWorkflows) {
       workflow,
       new RegExp(`^\\s*name: ${slug}-\\$\\{\\{ steps\\.source\\.outputs\\.sha \\}\\}$`, "mu"),
     );
-    assert.match(workflow, new RegExp(`scripts/${slug}-release\\.mjs`, "u"));
-    assert.ok(
-      existsSync(new URL(`../scripts/${slug}-release.mjs`, import.meta.url)),
-      `${path} references scripts/${slug}-release.mjs, which does not exist`,
+    // Every release-script reference, not merely one of them: a rename that
+    // updates the first mention and leaves a second behind still resolves to a
+    // real file, so matching once would let a half-applied rename through.
+    const scripts = new Set(
+      workflow.match(/scripts\/[a-z0-9-]+-(?:release|registry)\.mjs/gu) ?? [],
     );
+    assert.deepEqual(
+      [...scripts].sort(),
+      [`scripts/${slug}-release.mjs`, ...(verifyScript ? [verifyScript] : [])].sort(),
+    );
+    for (const script of scripts) {
+      assert.ok(
+        existsSync(new URL(`../${script}`, import.meta.url)),
+        `${path} references ${script}, which does not exist`,
+      );
+    }
   });
 
   test(`${path} publishes only from its tag event`, () => {
