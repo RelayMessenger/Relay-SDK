@@ -50,6 +50,7 @@ import {
   sendRelayText,
 } from "./outbound.js";
 import { runRelayPollLoop } from "./poll-loop.js";
+import { markRespondingBeforeAttempt } from "./responding.js";
 import { getRelayRuntime } from "./runtime.js";
 import { relaySenderIsAllowed, resolveRelayAllowedSenderIds } from "./security.js";
 import type { RelayCoreConfig, ResolvedRelayAccount } from "./types.js";
@@ -286,7 +287,13 @@ async function dispatchRelayInbound(params: {
   // Admission, runtime resolution, route/session lookup, envelope building,
   // and context finalization above are replay-safe. The durable attempt starts
   // immediately before OpenClaw can invoke the agent or its tools.
-  await params.markAttempt();
+  await markRespondingBeforeAttempt({
+    client: params.client,
+    conversationId: facts.conversationId,
+    messageId: facts.messageId,
+    label: "OpenClaw",
+    markAttempt: params.markAttempt,
+  });
   await runtime.channel.inbound.dispatchReply({
     cfg: params.cfg,
     channel: RELAY_CHANNEL_ID,
@@ -492,11 +499,6 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
           allowedSenderIds,
           markAttempt,
         });
-        // Read watermark after the turn is handled: read implies delivered;
-        // best effort — a failed receipt must not replay the event.
-        await client
-          .markRead({ conversationId: facts.conversationId, messageId: facts.messageId })
-          .catch((error) => log(`[relay] markRead failed: ${String(error)}`));
       },
     });
   } catch (error) {

@@ -53,7 +53,7 @@ jobs:
             node: 22.18.0
             directory: .
             install: npm ci --workspace @relaymessenger/cli
-            verify: npm run check --workspace @relaymessenger/cli && npm run build --workspace @relaymessenger/cli && npm test --workspace @relaymessenger/cli
+            verify: npm run build --workspace @relaymessenger/sdk && npm run check --workspace @relaymessenger/cli && npm run build --workspace @relaymessenger/cli && npm test --workspace @relaymessenger/cli
           - name: Claude channel
             node: 20.11.0
             directory: integrations/claude-code

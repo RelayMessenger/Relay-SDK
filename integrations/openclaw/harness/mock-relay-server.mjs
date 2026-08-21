@@ -1,6 +1,6 @@
 // Minimal mock Relay API for the plugin harness proof: agent identity,
 // long-poll events (one message.received, then empty), idempotent sends,
-// typing, read. Logs every hit to stdout.
+// typing, responding, read. Logs every hit to stdout.
 import http from "node:http";
 
 const PORT = Number(process.env.MOCK_RELAY_PORT ?? 8790);
@@ -166,11 +166,23 @@ const server = http.createServer(async (req, res) => {
     );
     return;
   }
-  if (req.method === "POST" && /^\/v1\/conversations\/[^/]+\/(typing|read)$/.test(url.pathname)) {
-    res.writeHead(url.pathname.endsWith("/typing") ? 204 : 200, {
+  if (
+    req.method === "POST" &&
+    /^\/v1\/conversations\/[^/]+\/(typing|responding|read)$/.test(url.pathname)
+  ) {
+    let body = "";
+    for await (const chunk of req) {
+      body += chunk;
+    }
+    if (url.pathname.endsWith("/responding")) {
+      console.log(`[mock-relay] responding body=${body}`);
+    }
+    const noContent =
+      url.pathname.endsWith("/typing") || url.pathname.endsWith("/responding");
+    res.writeHead(noContent ? 204 : 200, {
       "content-type": "application/json",
     });
-    res.end(url.pathname.endsWith("/typing") ? undefined : JSON.stringify({ ok: true }));
+    res.end(noContent ? undefined : JSON.stringify({ ok: true }));
     return;
   }
   res.writeHead(404, { "content-type": "application/json" });

@@ -1,7 +1,6 @@
-// Thin Relay REST client for the OpenClaw channel plugin. Bespoke fetch until
-// the Relay SDK ships. Owns the abort-aware long poll, idempotent
-// sends, typing, and read watermarks. No SDK imports so unit tests run
-// without an OpenClaw runtime.
+// Thin Relay REST client boundary for the standalone OpenClaw channel plugin.
+// Owns the abort-aware long poll, idempotent sends, typing, responding, and
+// read watermarks without loading an OpenClaw runtime in unit tests.
 import { isIP } from "node:net";
 import type {
   RelayAgentProfile,
@@ -143,6 +142,12 @@ export type RelayClient = {
   setTyping: (params: {
     conversationId: string;
     started: boolean;
+    label?: string;
+    signal?: AbortSignal;
+  }) => Promise<void>;
+  setResponding: (params: {
+    conversationId: string;
+    messageId: string;
     label?: string;
     signal?: AbortSignal;
   }) => Promise<void>;
@@ -295,6 +300,18 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
         path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/typing`,
         body: {
           started: params.started,
+          ...(params.label ? { label: params.label } : {}),
+        },
+        signal: params.signal,
+      });
+    },
+
+    setResponding: async (params) => {
+      await request({
+        method: "POST",
+        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/responding`,
+        body: {
+          message_id: params.messageId,
           ...(params.label ? { label: params.label } : {}),
         },
         signal: params.signal,

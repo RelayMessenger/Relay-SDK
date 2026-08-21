@@ -7,9 +7,9 @@ test("API origins require HTTPS except explicit loopback development", () => {
   assert.equal(normalizeApiOrigin("http://127.0.0.1:8787"), "http://127.0.0.1:8787");
   assert.equal(normalizeApiOrigin("http://localhost:3000/"), "http://localhost:3000");
   assert.throws(() => normalizeApiOrigin("http://api.relayapp.im"), /must use HTTPS/);
-  assert.throws(() => normalizeApiOrigin("https://user:secret@example.com"), /scheme and host/);
-  assert.throws(() => normalizeApiOrigin("https://example.com/relay"), /scheme and host/);
-  assert.throws(() => normalizeApiOrigin("file:///tmp/relay"), /scheme and host|must use HTTPS/);
+  assert.throws(() => normalizeApiOrigin("https://user:secret@example.com"), /credentials/);
+  assert.throws(() => normalizeApiOrigin("https://example.com/relay"), /without a path/);
+  assert.throws(() => normalizeApiOrigin("file:///tmp/relay"), /without a path|must use HTTPS/);
 });
 
 test("RELAY_API_ORIGIN overrides the origin only through normalizeApiOrigin", () => {
@@ -28,7 +28,7 @@ test("RELAY_API_ORIGIN overrides the origin only through normalizeApiOrigin", ()
     process.env.RELAY_API_ORIGIN = "http://staging.example";
     assert.throws(() => resolveApiOrigin(), /must use HTTPS/);
     process.env.RELAY_API_ORIGIN = "not a url";
-    assert.throws(() => resolveApiOrigin(), /Invalid Relay API origin/);
+    assert.throws(() => resolveApiOrigin(), /invalid baseUrl/);
 
     process.env.RELAY_API_ORIGIN = "   ";
     assert.equal(resolveApiOrigin(), PRODUCTION_ORIGIN);

@@ -11,6 +11,7 @@ import { runPollLoop } from "./poll-loop.js";
 import { verifyWebhookSignature } from "./signature.js";
 import type { MessageReceivedEvent } from "./types.js";
 import { normalizeRelayBaseUrl } from "./url.js";
+import { createRelayClient } from "./client.js";
 
 describe("normalizeRelayBaseUrl", () => {
   it("defaults to production", () => {
@@ -119,6 +120,46 @@ describe("RelayApiError", () => {
     });
     expect(error.terminal).toBe(true);
     expect(error.retryable).toBe(false);
+  });
+});
+
+describe("RelayClient responding", () => {
+  it("still requires an Agent Token for authenticated clients", () => {
+    expect(() => createRelayClient({ token: " " })).toThrow(
+      /Agent Token is required/,
+    );
+  });
+
+  it("posts the consumed watermark, label, and invocation", async () => {
+    const requests: Array<{ url: string; body: unknown }> = [];
+    const client = createRelayClient({
+      token: "rly_test",
+      fetchImpl: async (input, init) => {
+        requests.push({
+          url: input,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        return new Response(null, { status: 204 });
+      },
+    });
+
+    await client.setResponding({
+      conversationId: "cnv/a",
+      messageId: "msg_2",
+      label: "Claude Code",
+      invocationId: "inv_1",
+    });
+
+    expect(requests).toEqual([
+      {
+        url: "https://api.relayapp.im/v1/conversations/cnv%2Fa/responding",
+        body: {
+          message_id: "msg_2",
+          label: "Claude Code",
+          invocation_id: "inv_1",
+        },
+      },
+    ]);
   });
 });
 

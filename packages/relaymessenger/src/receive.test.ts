@@ -65,6 +65,12 @@ function fakeClient(options: { pages?: EventsPage[] } = {}) {
     label?: string;
     invocationId?: string;
   }> = [];
+  const respondings: Array<{
+    conversationId: string;
+    messageId: string;
+    label?: string;
+    invocationId?: string;
+  }> = [];
   const client = {
     origin: "http://fake",
     async getEvents(cursor: number): Promise<EventsPage> {
@@ -97,6 +103,14 @@ function fakeClient(options: { pages?: EventsPage[] } = {}) {
     ) {
       typings.push({ conversationId, started, label, invocationId });
     },
+    async setResponding(
+      conversationId: string,
+      messageId: string,
+      label?: string,
+      invocationId?: string,
+    ) {
+      respondings.push({ conversationId, messageId, label, invocationId });
+    },
     async listMessages() {
       return { messages: [] };
     },
@@ -105,6 +119,7 @@ function fakeClient(options: { pages?: EventsPage[] } = {}) {
     client: client as unknown as RelayClient & { pushPage(p: EventsPage): void },
     posted,
     typings,
+    respondings,
   };
 }
 
@@ -136,7 +151,7 @@ function fakeEngine() {
 }
 
 function makeLoop(home: string, pages: EventsPage[], debounceMs = 25) {
-  const { client, posted, typings } = fakeClient({ pages });
+  const { client, posted, typings, respondings } = fakeClient({ pages });
   const state = new StateStore(home);
   const approvals = new ApprovalStore(home);
   const fake = fakeEngine();
@@ -146,7 +161,17 @@ function makeLoop(home: string, pages: EventsPage[], debounceMs = 25) {
     debounceMs,
     cwd: "/tmp",
   });
-  return { loop, state, approvals, client, posted, typings, broker, ...fake };
+  return {
+    loop,
+    state,
+    approvals,
+    client,
+    posted,
+    typings,
+    respondings,
+    broker,
+    ...fake,
+  };
 }
 
 function groupMessageEvent(
@@ -181,6 +206,18 @@ function pendingApproval(overrides: Partial<PendingApproval> = {}): PendingAppro
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitFor(
+  condition: () => boolean,
+  message: string,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) assert.fail(message);
+    await sleep(10);
+  }
+}
 
 test("cursor advances only with the durably persisted queue (single atomic write)", async () => {
   const home = tempHome();
@@ -289,6 +326,117 @@ test("debounce coalesces rapid messages into one turn; separate conversations st
   // Queue drained durably.
   assert.equal(Object.keys(diskState(home).pending_events).length, 0);
   loop.stop();
+});
+
+test("responding uses the last message in a debounced batch before engine execution", async () => {
+  const home = tempHome();
+  const calls: string[] = [];
+  const { client, respondings } = fakeClient();
+  client.setResponding = async (
+    conversationId: string,
+    messageId: string,
+    label?: string,
+    invocationId?: string,
+  ) => {
+    calls.push(`responding:${messageId}`);
+    respondings.push({ conversationId, messageId, label, invocationId });
+  };
+  const state = new StateStore(home);
+  state.current.pending_events.cnv_a = [
+    userMessageEvent("evt_1", "cnv_a", "first", 1),
+    userMessageEvent("evt_2", "cnv_a", "second", 2),
+  ];
+  state.persist();
+  const engine: EngineAdapter = {
+    engine: "claude",
+    async startTurn() {
+      calls.push("engine");
+      return { text: "done", stopReason: "end_turn" };
+    },
+    async abort() {},
+    async dispose() {},
+  };
+  const loop = new ReceiveLoop(
+    client,
+    state,
+    engine,
+    new PermissionBroker(client, new ApprovalStore(home), 60_000),
+    { ownerUserId: OWNER, cwd: "/tmp" },
+  );
+
+  await loop.runTurn("cnv_a");
+
+  assert.deepEqual(calls, ["responding:msg_evt_2", "engine"]);
+  assert.deepEqual(respondings, [
+    {
+      conversationId: "cnv_a",
+      messageId: "msg_evt_2",
+      label: "Claude Code",
+      invocationId: undefined,
+    },
+  ]);
+});
+
+test("responding failure is propagated before any engine attempt", async () => {
+  const home = tempHome();
+  const { client } = fakeClient();
+  client.setResponding = async () => {
+    throw new Error("responding unavailable");
+  };
+  const state = new StateStore(home);
+  state.current.pending_events.cnv_a = [
+    userMessageEvent("evt_1", "cnv_a", "hello"),
+  ];
+  state.persist();
+  let engineStarts = 0;
+  const engine: EngineAdapter = {
+    engine: "codex",
+    async startTurn() {
+      engineStarts += 1;
+      return { text: "must not run", stopReason: "end_turn" };
+    },
+    async abort() {},
+    async dispose() {},
+  };
+  const loop = new ReceiveLoop(
+    client,
+    state,
+    engine,
+    new PermissionBroker(client, new ApprovalStore(home), 60_000),
+    { ownerUserId: OWNER, cwd: "/tmp" },
+  );
+
+  await assert.rejects(loop.runTurn("cnv_a"), /responding unavailable/);
+  assert.equal(engineStarts, 0);
+  assert.equal(state.current.attempted_turns?.cnv_a, undefined);
+  assert.equal(state.current.pending_events.cnv_a?.length, 1);
+});
+
+test("typing lifecycle failures are logged instead of swallowed", async () => {
+  const home = tempHome();
+  const { client } = fakeClient();
+  client.setTyping = async () => {
+    throw new Error("typing unavailable");
+  };
+  const state = new StateStore(home);
+  state.current.pending_events.cnv_a = [
+    userMessageEvent("evt_1", "cnv_a", "hello"),
+  ];
+  state.persist();
+  const logs: string[] = [];
+  const engine = fakeEngine().engine;
+  const loop = new ReceiveLoop(
+    client,
+    state,
+    engine,
+    new PermissionBroker(client, new ApprovalStore(home), 60_000),
+    { ownerUserId: OWNER, cwd: "/tmp", log: (line) => logs.push(line) },
+  );
+
+  await loop.runTurn("cnv_a");
+
+  assert.ok(logs.some((line) => line.includes("typing start failed")));
+  assert.ok(logs.some((line) => line.includes("typing stop failed")));
 });
 
 test("H1 regression: a message arriving mid-turn is kept and triggers a follow-up turn", async () => {
@@ -752,9 +900,9 @@ test("idempotency key is stable for the exact event batch and prompt text falls 
   assert.equal(text, "[photo]");
 });
 
-test("group reply and typing both carry the invocation the turn is answering", async () => {
+test("group responding, reply, and typing carry the invocation the turn is answering", async () => {
   const home = tempHome();
-  const { loop, posted, typings } = makeLoop(home, [
+  const { loop, posted, typings, respondings } = makeLoop(home, [
     {
       events: [groupMessageEvent("evt_g1", "cnv_group", "inv_01", "@claude ship it")],
       next_cursor: 3,
@@ -766,6 +914,9 @@ test("group reply and typing both carry the invocation the turn is answering", a
   assert.equal(posted.length, 1);
   assert.equal(posted[0].body.conversation_id, "cnv_group");
   assert.equal(posted[0].body.invocation_id, "inv_01");
+  assert.equal(respondings.length, 1);
+  assert.equal(respondings[0].messageId, "msg_evt_g1");
+  assert.equal(respondings[0].invocationId, "inv_01");
   assert.ok(typings.length >= 2);
   assert.ok(typings.every((call) => call.invocationId === "inv_01"));
   loop.stop();
@@ -797,7 +948,10 @@ test("two group invocations in one debounce window get one reply each, never sha
     },
   ]);
   await loop.pollOnce();
-  await sleep(200);
+  await waitFor(
+    () => turns.length === 2 && posted.length === 2,
+    "both group invocations did not complete",
+  );
   await loop.settle();
   // The server completes an invocation on its first message, so coalescing
   // these into one turn would strand inv_02 with no reply.
@@ -997,14 +1151,17 @@ test("an expired cursor reconciles history and resumes through Relay's explicit 
   const { client, polls, historyReads, reconciliations } = cursorFaultClient({
     failures: [
       new RelayApiError(
-        410,
-        "cursor_expired",
         "GET /v1/events → 410: cursor is older than the retained log",
         {
-          highest_delivered_cursor: 42,
-          resume_cursor: 45,
-          reconciliation_required: true,
-          reconciliation_endpoint: "/v1/events/reconcile",
+          status: 410,
+          kind: "rejected",
+          code: "cursor_expired",
+          details: {
+            highest_delivered_cursor: 42,
+            resume_cursor: 45,
+            reconciliation_required: true,
+            reconciliation_endpoint: "/v1/events/reconcile",
+          },
         },
       ),
     ],
@@ -1037,7 +1194,10 @@ test("an expired cursor without a reconciliation contract remains terminal", asy
   state.persist();
   const { client, polls } = cursorFaultClient({
     failures: [
-      new RelayApiError(410, "cursor_expired", "GET /v1/events → 410: cursor is older than the retained log"),
+      new RelayApiError(
+        "GET /v1/events → 410: cursor is older than the retained log",
+        { status: 410, kind: "rejected", code: "cursor_expired" },
+      ),
     ],
   });
   const lines: string[] = [];
@@ -1060,10 +1220,17 @@ test("an undelivered cursor resumes from Relay's highest delivered cursor", asyn
   const { client, polls, historyReads } = cursorFaultClient({
     failures: [
       new RelayApiError(
-        422,
-        "invalid_request",
         "GET /v1/events → 422: cursor 90 has not been delivered by Relay",
-        { field: "cursor", received: 90, highest_delivered_cursor: 12 },
+        {
+          status: 422,
+          kind: "rejected",
+          code: "invalid_request",
+          details: {
+            field: "cursor",
+            received: 90,
+            highest_delivered_cursor: 12,
+          },
+        },
       ),
     ],
     onPoll: () => stop(),
