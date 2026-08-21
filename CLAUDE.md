@@ -15,7 +15,7 @@
   metadata, exports, packaging, or anything that ships in the npm tarball.
 - Load `.agents/skills/oss-release-engineering/SKILL.md` before touching release
   workflows, tags, CI, or branch topology.
-- The engine catalog in `packages/relaymessenger/src/engine/catalog.ts` is the single
+- The engine catalog in `packages/cli/src/engine/catalog.ts` is the single
   source of truth for supported engines; docs, CLI help, and tests must match it.
 - Releases are tag-driven (`relaymessenger-vX.Y.Z`) and publish through npm OIDC trusted
   publishing; the release workflow's registry-state step makes retries idempotent.

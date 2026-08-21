@@ -1,4 +1,4 @@
-name: Release relaymessenger to npm
+name: Release @relaymessenger/cli to npm
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   publish:
-    name: Validate, publish, and verify relaymessenger
+    name: Validate, publish, and verify @relaymessenger/cli
     # npm OIDC trusted publishing accepts GitHub-hosted runners only.
     # Validation stays on Blacksmith in CI; publication must run here.
     runs-on: ubuntu-24.04
@@ -29,7 +29,7 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - name: Refuse a mismatched version or tag
-        run: node scripts/relaymessenger-release.mjs check-tag "$RELEASE_TAG"
+        run: node scripts/cli-release.mjs check-tag "$RELEASE_TAG"
       - name: Resolve and require a reviewed source commit
         id: source
         shell: bash
@@ -90,7 +90,7 @@ jobs:
           node <<'NODE'
           const { statSync, writeFileSync } = require("node:fs");
           const { basename } = require("node:path");
-          const pkg = require("./packages/relaymessenger/package.json");
+          const pkg = require("./packages/cli/package.json");
           const manifest = {
             schemaVersion: 1,
             repository: process.env.GITHUB_REPOSITORY,
@@ -119,7 +119,7 @@ jobs:
           printf 'retained artifact: %s\nsha256: %s\nintegrity: %s\n' "$tarball" "$sha256" "$integrity"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: relaymessenger-${{ steps.source.outputs.sha }}
+          name: cli-${{ steps.source.outputs.sha }}
           path: |
             ${{ steps.artifact.outputs.tarball }}
             ${{ steps.artifact.outputs.manifest }}
@@ -127,7 +127,7 @@ jobs:
           retention-days: 90
       - name: Reconcile the version with npm before any publish retry
         id: registry
-        run: node scripts/relaymessenger-release.mjs registry-state
+        run: node scripts/cli-release.mjs registry-state
       # npm 12 blocks unapproved dependency install scripts during `npm ci`.
       # Keep the setup-node npm for the locked install/Claude native validator,
       # then upgrade only for OIDC trusted publishing after all artifacts pass.
@@ -194,7 +194,7 @@ jobs:
             exit 1
           fi
           printf 'trusted-publisher probe returned HTTP %s; continuing to publish\n' "$status"
-      - name: Publish relaymessenger through npm trusted publishing
+      - name: Publish through npm trusted publishing
         if: ${{ steps.registry.outputs.published != 'true' }}
         run: npm publish "${{ steps.artifact.outputs.tarball }}" --access public
       - name: Verify the published artifact integrity
@@ -202,7 +202,7 @@ jobs:
           EXPECTED_INTEGRITY: ${{ steps.artifact.outputs.integrity }}
         run: >-
           node "${{ steps.registry-verifier.outputs.path }}"
-          packages/relaymessenger/package.json
+          packages/cli/package.json
           "$EXPECTED_INTEGRITY"
       - name: Verify the registry-installed artifact
-        run: node scripts/verify-relaymessenger-registry.mjs
+        run: node scripts/verify-cli-registry.mjs
