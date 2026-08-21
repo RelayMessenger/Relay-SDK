@@ -109,7 +109,7 @@ try {
   // Comparing against the manifest instead of a literal keeps dependency bumps
   // from failing this smoke for no reason.
   const sourcePkg = JSON.parse(
-    readFileSync(join(repoRoot, "packages", "relaymessenger", "package.json"), "utf8"),
+    readFileSync(join(repoRoot, "packages", "cli", "package.json"), "utf8"),
   );
   for (const adapter of ["@agentclientprotocol/claude-agent-acp", "@agentclientprotocol/codex-acp"]) {
     const pinned = sourcePkg.dependencies[adapter];

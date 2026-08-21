@@ -21,7 +21,7 @@ The Relay app itself is invite-only and on TestFlight. Join the waitlist at
 
 | Path | What it is |
 | --- | --- |
-| [`packages/relaymessenger`](packages/relaymessenger) | The `relaymessenger` CLI (npm, `@relaymessenger/cli`): `pair` a machine with the Relay app via QR/code, drive Claude Code, Codex, or Hermes Agent over ACP, and install the bundled Codex, Claude Code, or OpenClaw integration. |
+| [`packages/cli`](packages/cli) | The `relaymessenger` CLI (npm, `@relaymessenger/cli`): `pair` a machine with the Relay app via QR/code, drive Claude Code, Codex, or Hermes Agent over ACP, and install the bundled Codex, Claude Code, or OpenClaw integration. |
 | [`packages/sdk`](packages/sdk) | `@relaymessenger/sdk`: Relay contract types and transport (HTTPS client, Standard Webhooks verify, durable long-poll, idempotent sends). Its types will become generated from the Relay-Server schemas so the wire contract has one source of truth. |
 | [`integrations/claude-code`](integrations/claude-code) | Claude Code **channel plugin** (`relay-claude-channel`, official Channels contract): push Relay messages into a running session, reply tool, phone permission relay. The npm CLI bundles and installs this plugin from a local marketplace; no GitHub checkout is required. |
 | [`integrations/openclaw`](integrations/openclaw) | OpenClaw channel plugin (`@relaymessenger/openclaw-plugin`): an OpenClaw agent as a Relay contact (long-poll receive, durable chunked replies). The npm CLI bundles its installable archive. |
@@ -62,14 +62,23 @@ Six packages publish from this repository, each through its own tag-triggered
 workflow. Every one uses npm OIDC trusted publishing; no long-lived write token
 is allowed anywhere.
 
-| Package | Source | Tag |
-| --- | --- | --- |
-| `@relaymessenger/cli` | `packages/relaymessenger` | `relaymessenger-vX.Y.Z` |
-| `@relaymessenger/sdk` | `packages/sdk` | `sdk-vX.Y.Z` |
-| `@relaymessenger/vercel-ai` | `integrations/vercel-ai` | `vercel-ai-vX.Y.Z` |
-| `@relaymessenger/chat-sdk-adapter` | `integrations/chat-sdk` | `chat-sdk-vX.Y.Z` |
-| `@relaymessenger/openclaw-plugin` | `integrations/openclaw` | `openclaw-vX.Y.Z` |
-| `relay-claude-channel` | `integrations/claude-code` | `claude-channel-vX.Y.Z` |
+| Package | Source | Tag | Workflow |
+| --- | --- | --- | --- |
+| `@relaymessenger/cli` | `packages/cli` | `relaymessenger-vX.Y.Z` | `release-cli.yml` |
+| `@relaymessenger/sdk` | `packages/sdk` | `sdk-vX.Y.Z` | `release-sdk.yml` |
+| `@relaymessenger/vercel-ai` | `integrations/vercel-ai` | `vercel-ai-vX.Y.Z` | `release-vercel-ai.yml` |
+| `@relaymessenger/chat-sdk-adapter` | `integrations/chat-sdk` | `chat-sdk-vX.Y.Z` | `release-chat-sdk.yml` |
+| `@relaymessenger/openclaw-plugin` | `integrations/openclaw` | `openclaw-vX.Y.Z` | `release-openclaw.yml` |
+| `relay-claude-channel` | `integrations/claude-code` | `claude-channel-vX.Y.Z` | `release-claude-channel.yml` |
+
+The workflow filename is part of each package's release identity, not a label.
+npm's trusted-publisher record names that exact file, so renaming one is a
+coordinated change with npmjs.com. `scripts/release-workflow.test.mjs` holds the
+filename, the release script, and the retained artifact name on one slug, so the
+trust record's filename leads to every part of the release it authorizes. Tag
+prefixes are the release series each package has always used and deliberately do
+not track the filename: `@relaymessenger/cli` keeps `relaymessenger-v*`, which is
+also the name of the binary it installs.
 
 The `@relaymessenger/cli` tarball still carries a strictly validated Claude Code
 marketplace and an installable OpenClaw plugin archive generated from those
@@ -90,14 +99,18 @@ follow the same contract through their own workflow and tag.
 
 2. Merge that exact version change, then create and push an existing-commit
    tag named `relaymessenger-vX.Y.Z`. The version in
-   `packages/relaymessenger/package.json`, the workspace entry in `package-lock.json`,
+   `packages/cli/package.json`, the workspace entry in `package-lock.json`,
    and the tag must match exactly.
-3. The tag starts `.github/workflows/release-relaymessenger.yml`. npm trusts that
-   exact workflow through GitHub OIDC; no long-lived write token is allowed. If a
-   tag run fails before terminal verification, rerun that original GitHub Actions
-   run so npm provenance stays bound to the release tag and tag commit. The
-   workflow deliberately has no manual-dispatch path: checking out an old tag from
-   a default-branch dispatch would make GitHub's automatic provenance name the
+3. The tag starts `.github/workflows/release-cli.yml`. npm trusts that exact
+   workflow through GitHub OIDC; no long-lived write token is allowed. A tag push
+   runs the workflow file as it exists in the tagged commit, so a tag whose commit
+   predates a workflow rename still presents the old filename to npm and fails the
+   trust match; after renaming a release workflow, release from a new tag on a
+   commit that contains the rename rather than replaying an older one. If a tag
+   run fails before terminal verification, rerun that original GitHub Actions run
+   so npm provenance stays bound to the release tag and tag commit. The workflow
+   deliberately has no manual-dispatch path: checking out an old tag from a
+   default-branch dispatch would make GitHub's automatic provenance name the
    dispatch ref instead of the artifact's source tag. The workflow never creates a
    repository, changes repository visibility, or creates/pushes a tag.
 4. CI reruns the full validation and package smokes, publishes only
@@ -111,7 +124,7 @@ follow the same contract through their own workflow and tag.
 5. Before any retry, the workflow reconciles npm state. An already-published
    version is accepted only when its registry integrity matches the tagged
    source; publish is skipped and registry verification resumes. Finally,
-   `scripts/verify-relaymessenger-registry.mjs` installs the exact registry version
+   `scripts/verify-cli-registry.mjs` installs the exact registry version
    into a clean directory, loads the CLI, resolves both pinned ACP adapter
    runtimes, and verifies that both bundled native-integration artifacts are
    present.

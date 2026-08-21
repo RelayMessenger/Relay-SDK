@@ -7,14 +7,14 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const expected = JSON.parse(
-  readFileSync(resolve(repoRoot, "packages/relaymessenger/package.json"), "utf8"),
+  readFileSync(resolve(repoRoot, "packages/cli/package.json"), "utf8"),
 );
-const temp = mkdtempSync(join(tmpdir(), "relaymessenger-registry-smoke-"));
+const temp = mkdtempSync(join(tmpdir(), "cli-registry-smoke-"));
 
 try {
   writeFileSync(
     join(temp, "package.json"),
-    `${JSON.stringify({ name: "relaymessenger-registry-smoke", private: true }, null, 2)}\n`,
+    `${JSON.stringify({ name: "cli-registry-smoke", private: true }, null, 2)}\n`,
   );
   let installed = false;
   let lastFailure = "";

@@ -10,7 +10,7 @@ description: >-
 
 1. Locate the developer repository root. Treat paths below as repository-relative.
 2. Run `git status --short`, `git branch --show-current`, and `git rev-parse --short HEAD`. Preserve unrelated changes.
-3. Read `packages/relaymessenger/README.md`, the target runtime's catalog/adapter code, its tests, its package manifest, and `package-lock.json` before editing.
+3. Read `packages/cli/README.md`, the target runtime's catalog/adapter code, its tests, its package manifest, and `package-lock.json` before editing.
 4. Inspect the installed runtime directly with `<binary> --version` and its non-interactive readiness check. Inspect the latest upstream release separately. Record both; do not silently make them equal.
 5. Decide whether the integration is an **engine** or a **channel** before writing code.
 
@@ -18,15 +18,15 @@ Use this ownership map:
 
 | Concern | Owning source |
 | --- | --- |
-| Engine names and external runtime specs | `packages/relaymessenger/src/engine/catalog.ts` |
-| ACP process, handshake, sessions, turns, permissions | `packages/relaymessenger/src/engine/acp.ts` |
-| Engine process-tree shutdown | `packages/relaymessenger/src/engine/process.ts` |
-| Engine boundary types | `packages/relaymessenger/src/engine/types.ts` |
-| Engine selection and lifecycle | `packages/relaymessenger/src/flags.ts`, `packages/relaymessenger/src/cli.ts` |
-| External runtime preflight | `packages/relaymessenger/src/doctor.ts` |
-| Durable conversation/session binding | `packages/relaymessenger/src/store.ts` (`SessionStore`) |
-| Relay receive/turn/reply loop | `packages/relaymessenger/src/receive.ts` |
-| Permission card, parser, timeout, durable approval | `packages/relaymessenger/src/permissions.ts` |
+| Engine names and external runtime specs | `packages/cli/src/engine/catalog.ts` |
+| ACP process, handshake, sessions, turns, permissions | `packages/cli/src/engine/acp.ts` |
+| Engine process-tree shutdown | `packages/cli/src/engine/process.ts` |
+| Engine boundary types | `packages/cli/src/engine/types.ts` |
+| Engine selection and lifecycle | `packages/cli/src/flags.ts`, `packages/cli/src/cli.ts` |
+| External runtime preflight | `packages/cli/src/doctor.ts` |
+| Durable conversation/session binding | `packages/cli/src/store.ts` (`SessionStore`) |
+| Relay receive/turn/reply loop | `packages/cli/src/receive.ts` |
+| Permission card, parser, timeout, durable approval | `packages/cli/src/permissions.ts` |
 | Claude Code channel | `integrations/claude-code/server.ts`, `integrations/claude-code/src/bridge.ts`, `integrations/claude-code/src/poller.ts` |
 | OpenClaw channel | `integrations/openclaw/src/channel.ts`, `integrations/openclaw/openclaw.plugin.json` |
 | Release and installed-artifact proofs | `.github/workflows/ci.yml`, `scripts/`, integration `scripts/` |
@@ -47,7 +47,7 @@ Ask: “Who owns the session and turn loop?” If `relaymessenger` owns it, use 
 
 ## Extend the engine catalog without runtime mutation
 
-Keep `packages/relaymessenger/src/engine/catalog.ts` as the closed catalog owner. Update `ENGINE_NAMES`, `EngineName`, display labels, CLI help, flags tests, doctor output, README, and runtime tests together.
+Keep `packages/cli/src/engine/catalog.ts` as the closed catalog owner. Update `ENGINE_NAMES`, `EngineName`, display labels, CLI help, flags tests, doctor output, README, and runtime tests together.
 
 Choose one installation tier:
 
@@ -55,13 +55,13 @@ Choose one installation tier:
 
 Use this for Relay-shipped Claude/Codex-style wrappers:
 
-1. Add the adapter as an **exact** dependency in `packages/relaymessenger/package.json`; update `package-lock.json` with the package manager, never by hand.
+1. Add the adapter as an **exact** dependency in `packages/cli/package.json`; update `package-lock.json` with the package manager, never by hand.
 2. Add its package name to `ADAPTER_PACKAGES` in `engine/acp.ts`. Do not add a version literal: `ADAPTER_VERSIONS` is derived from the manifest at load time and throws if the pin is not exact.
 3. Resolve the installed executable module with `createRequire(import.meta.url).resolve(...)`.
 4. Launch it with `process.execPath` and one resolved entrypoint argument.
 5. Prove the dependency value, lockfile, resolved file, packed tarball, and installed tarball agree.
 
-`packages/relaymessenger/package.json` is the single source of the adapter versions. Read it for the current pins rather than trusting a version quoted anywhere else, and change a pin only as an explicit, tested dependency update.
+`packages/cli/package.json` is the single source of the adapter versions. Read it for the current pins rather than trusting a version quoted anywhere else, and change a pin only as an explicit, tested dependency update.
 
 ### Use an external runtime
 
@@ -171,11 +171,11 @@ Treat a permission request as a security protocol, not UI copy.
 
 Do not retry rejected credentials forever:
 
-- In `packages/relaymessenger/src/receive.ts`, treat Relay `401` as terminal, tell the user to pair again, throw, and dispose the engine tree.
+- In `packages/cli/src/receive.ts`, treat Relay `401` as terminal, tell the user to pair again, throw, and dispose the engine tree.
 - In `integrations/claude-code/src/poller.ts`, abort the poller on `401`; do not enter exponential backoff for an authentication error.
 - Reconcile an ambiguous write with its stable idempotency key before retrying. Rate-limit notification retries; never generate a fresh key for the same logical card or reply.
 
-Keep the engine broker and Claude channel parser behavior aligned. When changing the card or verdict grammar, update both `packages/relaymessenger/src/permissions.ts` and `integrations/claude-code/src/bridge.ts`, plus both test suites.
+Keep the engine broker and Claude channel parser behavior aligned. When changing the card or verdict grammar, update both `packages/cli/src/permissions.ts` and `integrations/claude-code/src/bridge.ts`, plus both test suites.
 
 ## Author channels as channels
 

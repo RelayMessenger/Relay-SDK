@@ -1,7 +1,7 @@
 node_modules/
 dist/
-packages/relaymessenger/claude-plugin/
-packages/relaymessenger/openclaw-plugin/
+packages/cli/claude-plugin/
+packages/cli/openclaw-plugin/
 .release-tmp/
 *.log
 .DS_Store
