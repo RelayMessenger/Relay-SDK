@@ -67,7 +67,9 @@ export type RelayClient = {
    * Send this when the message reaches the agent, before anything that implies
    * a read. The server advances the delivered watermark whenever it records a
    * read, so a delivered receipt that arrives after a read for the same
-   * message is silently dropped and the sender never leaves "Sent".
+   * message is silently dropped: the sender goes straight from "Sent" to
+   * "Read" and never sees "Delivered". Skipping this call costs the middle
+   * rung of the ladder, not the top one.
    */
   markDelivered: (params: {
     conversationId: string;
