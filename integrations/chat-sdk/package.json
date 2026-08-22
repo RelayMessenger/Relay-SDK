@@ -2,7 +2,7 @@
   "name": "@relaymessenger/chat-sdk-adapter",
   "version": "0.2.0",
   "description": "Relay adapter for the Vercel Chat SDK. Receive signed Relay webhooks and post replies as one canonical message.",
-  "homepage": "https://docs.relayapp.im/guides/chat-sdk",
+  "homepage": "https://docs.relayapp.im/integrations/chat-sdk",
   "bugs": {
     "url": "https://github.com/relaymessenger/Relay-SDK/issues"
   },
