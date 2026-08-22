@@ -179,7 +179,8 @@ describe("RelayClient receipts", () => {
 
     // Delivered before read is the order the server requires: recording a read
     // also advances the delivered watermark, so the reverse order drops the
-    // delivered receipt and the sender is stuck on "Sent".
+    // delivered receipt and the sender goes straight from "Sent" to "Read"
+    // without ever seeing "Delivered".
     await client.markDelivered({ conversationId: "cnv/a", messageId: "msg_2" });
     await client.markRead({ conversationId: "cnv/a", messageId: "msg_2" });
 

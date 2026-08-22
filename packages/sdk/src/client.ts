@@ -64,12 +64,23 @@ export type RelayClient = {
    * Advance the delivered watermark to `messageId`, and every earlier message
    * from other participants with it.
    *
-   * Send this when the message reaches the agent, before anything that implies
-   * a read. The server advances the delivered watermark whenever it records a
-   * read, so a delivered receipt that arrives after a read for the same
-   * message is silently dropped: the sender goes straight from "Sent" to
-   * "Read" and never sees "Delivered". Skipping this call costs the middle
-   * rung of the ladder, not the top one.
+   * Most agents never call this. Delivered means the agent's endpoint has the
+   * message, so Relay records it from the transport itself: a webhook gets it
+   * when the endpoint answers `2xx`, and a `GET /v1/events` consumer gets it
+   * when the cursor moves past the event. Neither needs a line of code, and
+   * neither can suppress it.
+   *
+   * The exception is a transcript poller — a client that reads
+   * `GET /v1/conversations/:id/messages` on a timer. Reading history records
+   * no receipt, so nothing on the server ever learns the message arrived.
+   * That client, and only that client, has to say so itself.
+   *
+   * Send it on ingest, before anything that implies a read. The server
+   * advances the delivered watermark whenever it records a read, so a
+   * delivered receipt that arrives after a read for the same message is
+   * silently dropped: the sender goes straight from "Sent" to "Read" and never
+   * sees "Delivered". Skipping this call costs the middle rung of the ladder,
+   * not the top one.
    */
   markDelivered: (params: {
     conversationId: string;
