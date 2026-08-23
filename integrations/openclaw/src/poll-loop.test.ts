@@ -59,6 +59,7 @@ type PollTurn = RelayEventsPage | Error;
 function scriptedClient(turns: PollTurn[], abort: AbortController): RelayClient {
   let index = 0;
   return {
+    baseUrl: "https://api.relayapp.im",
     getMe: async () => {
       throw new Error("not used");
     },
@@ -77,8 +78,12 @@ function scriptedClient(turns: PollTurn[], abort: AbortController): RelayClient 
     sendMessage: async () => {
       throw new Error("not used");
     },
+    sendText: async () => {
+      throw new Error("not used");
+    },
     setTyping: async () => {},
     setResponding: async () => {},
+    markDelivered: async () => {},
     markRead: async () => {},
   };
 }
@@ -229,6 +234,90 @@ describe("runRelayPollLoop", () => {
       expect(cursorStore.current()).toBe(1);
     },
   );
+
+  // REL-167: the cursor is ONE watermark for the whole channel, so an event
+  // the server refuses permanently must not hold it. Before this, a single
+  // group mention the server rejected replayed forever and every later
+  // message, direct ones included, waited behind it.
+  it("does not let a permanently rejected event hold the cursor", async () => {
+    const abort = new AbortController();
+    const cursorStore = memoryCursorStore();
+    await cursorStore.load();
+    const handled: string[] = [];
+    const logs: string[] = [];
+
+    await runRelayPollLoop({
+      client: scriptedClient(
+        [{ events: [makeEvent("evt_poison"), makeEvent("evt_later")], nextCursor: 2 }],
+        abort,
+      ),
+      cursorStore,
+      deduper: createRelayInboundDeduper({
+        guard: memoryGuard(),
+        baseUrl: "https://api.relayapp.im",
+        agentId: "agt_self",
+      }),
+      abortSignal: abort.signal,
+      handleEvent: async (event, markAttempt) => {
+        if (event.event_id === "evt_poison") {
+          throw new RelayApiError(
+            "relay: POST /v1/conversations/cnv_g/responding failed with 403: group typing requires invocation_id",
+            { status: 403, kind: "rejected" },
+          );
+        }
+        await markAttempt();
+        handled.push(event.event_id);
+      },
+      log: (line) => logs.push(line),
+      sleep: instantSleep,
+    });
+
+    // The message behind the poison event is answered, and the watermark moved.
+    expect(handled).toEqual(["evt_later"]);
+    expect(cursorStore.current()).toBe(2);
+    expect(logs.some((line) => line.includes("evt_poison") && line.includes("permanently rejected")))
+      .toBe(true);
+  });
+
+  it("still holds the cursor when a preflight failure is retryable", async () => {
+    const abort = new AbortController();
+    const cursorStore = memoryCursorStore();
+    await cursorStore.load();
+    const handled: string[] = [];
+    let calls = 0;
+
+    await runRelayPollLoop({
+      client: scriptedClient(
+        [
+          { events: [makeEvent("evt_flaky")], nextCursor: 1 },
+          { events: [makeEvent("evt_flaky")], nextCursor: 1 },
+        ],
+        abort,
+      ),
+      cursorStore,
+      deduper: createRelayInboundDeduper({
+        guard: memoryGuard(),
+        baseUrl: "https://api.relayapp.im",
+        agentId: "agt_self",
+      }),
+      abortSignal: abort.signal,
+      handleEvent: async (event, markAttempt) => {
+        calls += 1;
+        if (calls === 1) {
+          throw new RelayApiError("relay: 503", { status: 503, kind: "retryable" });
+        }
+        await markAttempt();
+        handled.push(event.event_id);
+      },
+      sleep: instantSleep,
+    });
+
+    // Replayed rather than skipped: a retryable failure is not the server's
+    // final answer, so the event is worth another attempt.
+    expect(calls).toBe(2);
+    expect(handled).toEqual(["evt_flaky"]);
+    expect(cursorStore.current()).toBe(1);
+  });
 
   it("acks bookkeeping events without burning dedupe claims", async () => {
     const abort = new AbortController();

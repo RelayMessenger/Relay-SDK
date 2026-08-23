@@ -170,6 +170,66 @@ describe("sendRelayText", () => {
     });
   });
 
+  // A group reply that does not name its invocation is refused with
+  // `403 group agent replies require invocation_id`, after the model and its
+  // tools have already run (REL-167).
+  it("names the invocation when replying into a group", async () => {
+    const { fetchImpl, requests } = fakeFetch(() => ({ status: 202, body: sentMessage() }));
+    const client = createRelayClient({ baseUrl: "https://api.test", token: "tok", fetchImpl });
+
+    await sendRelayText({
+      client,
+      conversationId: "cnv_group",
+      text: "four",
+      invocationId: "inv_1",
+      idempotencyKey: "relay-send:q1:0",
+    });
+
+    expect(requests[0]!.body).toMatchObject({
+      conversation_id: "cnv_group",
+      invocation_id: "inv_1",
+    });
+  });
+
+  it("sends no invocation_id at all in a direct message", async () => {
+    const { fetchImpl, requests } = fakeFetch(() => ({ status: 202, body: sentMessage() }));
+    const client = createRelayClient({ baseUrl: "https://api.test", token: "tok", fetchImpl });
+
+    await sendRelayText({
+      client,
+      conversationId: "cnv_dm",
+      text: "hi",
+      idempotencyKey: "relay-send:q1:0",
+    });
+
+    expect(Object.keys(requests[0]!.body as Record<string, unknown>))
+      .not.toContain("invocation_id");
+  });
+
+  it("replays the invocation on a retried send so the group reply still lands", async () => {
+    let attempt = 0;
+    const { fetchImpl, requests } = fakeFetch(() => {
+      attempt += 1;
+      return attempt === 1
+        ? { status: 503, body: { error: { message: "unavailable" } } }
+        : { status: 202, body: sentMessage() };
+    });
+    const client = createRelayClient({ baseUrl: "https://api.test", token: "tok", fetchImpl });
+
+    await sendRelayText({
+      client,
+      conversationId: "cnv_group",
+      text: "four",
+      invocationId: "inv_1",
+      idempotencyKey: "relay-send:q1:0",
+    });
+
+    expect(requests).toHaveLength(2);
+    for (const request of requests) {
+      expect(request.body).toMatchObject({ invocation_id: "inv_1" });
+    }
+  });
+
   it("reuses the same key on caller retry so the server dedupes the send", async () => {
     const { fetchImpl, requests } = fakeFetch(() => ({ status: 202, body: sentMessage() }));
     const client = createRelayClient({ baseUrl: "https://api.test", token: "tok", fetchImpl });

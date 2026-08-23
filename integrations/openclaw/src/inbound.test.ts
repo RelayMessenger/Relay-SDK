@@ -173,4 +173,28 @@ describe("buildRelayInboundFacts", () => {
   it("returns null when the message is missing", () => {
     expect(buildRelayInboundFacts(event({ data: {} }), { agentId: AGENT_ID })).toBeNull();
   });
+
+  // REL-167: every server call about a group message has to name the
+  // invocation that delivered it, so the id has to survive this mapping.
+  it("carries the group invocation id", () => {
+    const facts = buildRelayInboundFacts(
+      event({ data: { message: message(), invocation_id: "inv_01abc" } }),
+      { agentId: AGENT_ID },
+    );
+    expect(facts?.invocationId).toBe("inv_01abc");
+  });
+
+  it("leaves the invocation id unset for a direct message", () => {
+    const facts = buildRelayInboundFacts(event(), { agentId: AGENT_ID });
+    expect(facts?.invocationId).toBeUndefined();
+    expect(Object.keys(facts!)).not.toContain("invocationId");
+  });
+
+  it("ignores an empty invocation id rather than sending a blank one", () => {
+    const facts = buildRelayInboundFacts(
+      event({ data: { message: message(), invocation_id: "   " } }),
+      { agentId: AGENT_ID },
+    );
+    expect(facts?.invocationId).toBeUndefined();
+  });
 });
