@@ -1,6 +1,8 @@
-# Alarms when the published CLI bundles an OpenClaw plugin that is not the one
-# npm serves as latest. See scripts/check-bundled-plugin-currency.mjs for why
-# this is a registry read rather than a repository check.
+# Alarms when the published CLI bundles a copy of a plugin that is not the one
+# npm serves as latest. It covers every package the CLI tarball carries, not
+# only the OpenClaw plugin that made the trap visible. See
+# scripts/check-bundled-plugin-currency.mjs for why this is a registry read
+# rather than a repository check.
 #
 # It is deliberately NOT a pull-request gate. The state it measures is release
 # debt, not a property of any branch: it becomes true the moment a plugin
@@ -27,7 +29,7 @@ concurrency:
 
 jobs:
   currency:
-    name: Published CLI bundles the published plugin
+    name: Published CLI bundles the published plugins
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
