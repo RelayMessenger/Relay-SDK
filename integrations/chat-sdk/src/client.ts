@@ -92,7 +92,12 @@ export class RelayClient {
     if (!options.token) throw new Error("Relay Agent Token is required");
     this.token = options.token;
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
-    this.fetchImpl = options.fetch ?? fetch;
+    // Bound to the global object because the call sites invoke this through a
+    // property, which would otherwise pass the client as `this`. undici accepts
+    // that; workerd rejects it with `Illegal invocation`, so an unbound fetch
+    // fails every request on Cloudflare Workers. Binding a caller-supplied
+    // fetch is safe: an already-bound function ignores a later `bind`.
+    this.fetchImpl = (options.fetch ?? globalThis.fetch).bind(globalThis);
   }
 
   private authHeaders(extra?: Record<string, string>): Record<string, string> {
