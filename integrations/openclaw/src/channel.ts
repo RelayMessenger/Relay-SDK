@@ -42,6 +42,7 @@ import { createRelayCursorStore, openRelayCursorStateStore } from "./cursor-stor
 import { createRelayInboundDedupeGuard, createRelayInboundDeduper } from "./inbound-dedupe.js";
 import { buildRelayInboundFacts } from "./inbound.js";
 import type { RelayInboundFacts } from "./inbound.js";
+import { relayInvocationFor, rememberRelayInvocation } from "./invocations.js";
 import { createRelayAccountLifecycleRegistry } from "./lifecycle.js";
 import {
   deriveRelayIdempotencyKey,
@@ -138,11 +139,16 @@ const relayMessageAdapter = defineChannelMessageAdapter({
       if (text === null) {
         return null;
       }
+      const invocationId = relayInvocationFor({
+        accountId: account.accountId,
+        conversationId: ctx.to,
+      });
       const verdict = await reconcileRelayUnknownSend({
         client: relayClientForAccount(account),
         conversationId: ctx.to,
         text,
         replyToId: ctx.effectiveReplyToId ?? ctx.replyToId ?? null,
+        ...(invocationId ? { invocationId } : {}),
         idempotencyKey: deriveRelayIdempotencyKey({ deliveryQueueId: ctx.queueId }),
       });
       if (verdict.status === "sent") {
@@ -171,11 +177,19 @@ const relayMessageAdapter = defineChannelMessageAdapter({
       if (!account.configured) {
         throw new Error(`relay: account "${account.accountId}" has no Agent Token configured`);
       }
+      // A group reply must name the invocation it answers. Core's send context
+      // has no field for it, so the turn parks it in the invocation registry
+      // under (accountId, conversationId) and it is read back here.
+      const invocationId = relayInvocationFor({
+        accountId: account.accountId,
+        conversationId: ctx.to,
+      });
       const result = await sendRelayText({
         client: relayClientForAccount(account),
         conversationId: ctx.to,
         text: ctx.text,
         replyToId: ctx.replyToId ?? null,
+        ...(invocationId ? { invocationId } : {}),
         // Stable per (queueId, part): internal retries replay the same key,
         // so the server-side idempotent commit makes duplicates impossible by
         // contract. On a core with no part index the text names the part.
@@ -218,6 +232,7 @@ async function dispatchRelayInbound(params: {
   client: RelayClient;
   allowedSenderIds: readonly string[];
   markAttempt: () => Promise<void>;
+  warn?: (line: string) => void;
 }): Promise<void> {
   const { account, facts } = params;
   // Public Relay agents are discoverable, so contact membership is not an
@@ -284,82 +299,97 @@ async function dispatchRelayInbound(params: {
   const recordDeliveryError = (error: unknown) => {
     deliveryError ??= error;
   };
-  // Admission, runtime resolution, route/session lookup, envelope building,
-  // and context finalization above are replay-safe. The durable attempt starts
-  // immediately before OpenClaw can invoke the agent or its tools.
-  await markRespondingBeforeAttempt({
-    client: params.client,
-    conversationId: facts.conversationId,
-    messageId: facts.messageId,
-    label: "OpenClaw",
-    markAttempt: params.markAttempt,
-  });
-  await runtime.channel.inbound.dispatchReply({
-    cfg: params.cfg,
-    channel: RELAY_CHANNEL_ID,
-    accountId: account.accountId,
-    agentId: route.agentId,
-    routeSessionKey: route.sessionKey,
-    storePath,
-    ctxPayload,
-    recordInboundSession: runtime.channel.session.recordInboundSession,
-    dispatchReplyWithBufferedBlockDispatcher:
-      runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher,
-    delivery: {
-      // Final replies go through the durable message adapter: core renders
-      // and chunks them (chunker + textChunkLimit) and tracks the send as a
-      // durable queue intent. Requiring reconcileUnknownSend forces
-      // `durability: "required"`, so single-payload finals carry a stable
-      // deliveryQueueId into send.text (stable idempotency key + exact
-      // replay), and multi-chunk finals get core's queue-level crash
-      // recovery. Replies land as plain messages, not quotes
-      // (`replyToId: null`).
-      durable: {
-        to: facts.conversationId,
-        replyToId: null,
-        requiredCapabilities: { reconcileUnknownSend: true },
-      },
-      // Fallback for payloads the durable path does not carry (non-final
-      // visible blocks). The event id + block/chunk ordinals identify each
-      // logical send: retries reuse it while identical intentional blocks and
-      // chunks remain distinct.
-      deliver: async (payload) => {
-        const text =
-          payload && typeof payload === "object" && "text" in payload
-            ? ((payload as { text?: string }).text ?? "")
-            : "";
-        if (!text.trim()) {
-          return;
-        }
-        const logicalBlockId = `${facts.eventId}:block:${fallbackDeliveryIndex}`;
-        fallbackDeliveryIndex += 1;
-        try {
-          let chunkIndex = 0;
-          for (const chunk of chunkText(text, RELAY_TEXT_CHUNK_LIMIT)) {
-            await sendRelayText({
-              client: params.client,
-              conversationId: facts.conversationId,
-              text: chunk,
-              idempotencyKey: deriveRelayIdempotencyKey({
-                deliveryQueueId: logicalBlockId,
-                deliveryPartIndex: chunkIndex,
-              }),
-            });
-            chunkIndex += 1;
+  // Park the group invocation for the life of the turn. Core's durable send
+  // adapter is a separate entry point with no inbound context, so this is how
+  // the reply learns which invocation it answers.
+  const releaseInvocation = facts.invocationId
+    ? rememberRelayInvocation({
+      accountId: account.accountId,
+      conversationId: facts.conversationId,
+      invocationId: facts.invocationId,
+    })
+    : () => {};
+  try {
+    // Admission, runtime resolution, route/session lookup, envelope building,
+    // and context finalization above are replay-safe. The durable attempt starts
+    // immediately before OpenClaw can invoke the agent or its tools.
+    await markRespondingBeforeAttempt({
+      client: params.client,
+      facts,
+      label: "OpenClaw",
+      markAttempt: params.markAttempt,
+      ...(params.warn ? { onReceiptFailure: params.warn } : {}),
+    });
+    await runtime.channel.inbound.dispatchReply({
+      cfg: params.cfg,
+      channel: RELAY_CHANNEL_ID,
+      accountId: account.accountId,
+      agentId: route.agentId,
+      routeSessionKey: route.sessionKey,
+      storePath,
+      ctxPayload,
+      recordInboundSession: runtime.channel.session.recordInboundSession,
+      dispatchReplyWithBufferedBlockDispatcher:
+        runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher,
+      delivery: {
+        // Final replies go through the durable message adapter: core renders
+        // and chunks them (chunker + textChunkLimit) and tracks the send as a
+        // durable queue intent. Requiring reconcileUnknownSend forces
+        // `durability: "required"`, so single-payload finals carry a stable
+        // deliveryQueueId into send.text (stable idempotency key + exact
+        // replay), and multi-chunk finals get core's queue-level crash
+        // recovery. Replies land as plain messages, not quotes
+        // (`replyToId: null`).
+        durable: {
+          to: facts.conversationId,
+          replyToId: null,
+          requiredCapabilities: { reconcileUnknownSend: true },
+        },
+        // Fallback for payloads the durable path does not carry (non-final
+        // visible blocks). The event id + block/chunk ordinals identify each
+        // logical send: retries reuse it while identical intentional blocks and
+        // chunks remain distinct.
+        deliver: async (payload) => {
+          const text =
+            payload && typeof payload === "object" && "text" in payload
+              ? ((payload as { text?: string }).text ?? "")
+              : "";
+          if (!text.trim()) {
+            return;
           }
-        } catch (error) {
-          recordDeliveryError(error);
-          throw error;
-        }
+          const logicalBlockId = `${facts.eventId}:block:${fallbackDeliveryIndex}`;
+          fallbackDeliveryIndex += 1;
+          try {
+            let chunkIndex = 0;
+            for (const chunk of chunkText(text, RELAY_TEXT_CHUNK_LIMIT)) {
+              await sendRelayText({
+                client: params.client,
+                conversationId: facts.conversationId,
+                text: chunk,
+                ...(facts.invocationId ? { invocationId: facts.invocationId } : {}),
+                idempotencyKey: deriveRelayIdempotencyKey({
+                  deliveryQueueId: logicalBlockId,
+                  deliveryPartIndex: chunkIndex,
+                }),
+              });
+              chunkIndex += 1;
+            }
+          } catch (error) {
+            recordDeliveryError(error);
+            throw error;
+          }
+        },
+        onError: recordDeliveryError,
       },
-      onError: recordDeliveryError,
-    },
-    replyPipeline: {},
-  });
-  if (deliveryError) {
-    throw deliveryError instanceof Error
-      ? deliveryError
-      : new Error(`relay reply delivery failed: ${String(deliveryError)}`);
+      replyPipeline: {},
+    });
+    if (deliveryError) {
+      throw deliveryError instanceof Error
+        ? deliveryError
+        : new Error(`relay reply delivery failed: ${String(deliveryError)}`);
+    }
+  } finally {
+    releaseInvocation();
   }
 }
 
@@ -498,6 +528,7 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
           client,
           allowedSenderIds,
           markAttempt,
+          warn,
         });
       },
     });
@@ -505,7 +536,11 @@ async function startRelayAccount(ctx: ChannelGatewayContext<ResolvedRelayAccount
     if (abortSignal.aborted || isAbortError(error)) {
       return;
     }
-    if (error instanceof RelayApiError && error.terminal) {
+    // Named as `kind === "auth"`, not `error.terminal`. The SDK client counts
+    // every non-retryable kind as terminal, which would swallow the 409 cases
+    // below — including `terminated_by_other_consumer`, whose whole point is
+    // to fall through to the supervisor's restart arbitration.
+    if (error instanceof RelayApiError && error.kind === "auth") {
       markTerminalDisconnect(error);
     } else if (isRelayWebhookConflict(error)) {
       // Webhook XOR: long polling stays 409 until the operator

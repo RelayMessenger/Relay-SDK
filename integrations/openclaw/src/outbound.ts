@@ -4,8 +4,7 @@
 // (server contract: commitMessage.ts idempotent replay).
 import { createHash } from "node:crypto";
 import { RelayApiError } from "./client.js";
-import type { RelayClient } from "./client.js";
-import type { RelayMessage } from "./types.js";
+import type { RelayClient, RelaySentMessage } from "./client.js";
 
 /**
  * Per-part text ceiling declared to core's renderer so long agent replies are
@@ -72,7 +71,7 @@ export type RelayOutboundSendResult = {
    * commits exactly one, but the 202 is always an array and the receipt
    * should name everything the server stored.
    */
-  messages: RelayMessage[];
+  messages: RelaySentMessage[];
 };
 
 export async function sendRelayText(params: {
@@ -80,6 +79,11 @@ export async function sendRelayText(params: {
   conversationId: string;
   text: string;
   replyToId?: string | null;
+  /**
+   * Required when replying into a group: the server refuses an agent's group
+   * message that does not name the invocation it is answering.
+   */
+  invocationId?: string;
   idempotencyKey: string;
   signal?: AbortSignal;
 }): Promise<RelayOutboundSendResult> {
@@ -90,6 +94,7 @@ export async function sendRelayText(params: {
         conversationId: params.conversationId,
         parts: [{ type: "text", text: params.text }],
         ...(params.replyToId ? { replyTo: { message_id: params.replyToId } } : {}),
+        ...(params.invocationId ? { invocationId: params.invocationId } : {}),
         idempotencyKey: params.idempotencyKey,
         ...(params.signal ? { signal: params.signal } : {}),
       });
@@ -109,7 +114,7 @@ export async function sendRelayText(params: {
 }
 
 export type RelayUnknownSendVerdict =
-  | { status: "sent"; messageId: string; messages: RelayMessage[] }
+  | { status: "sent"; messageId: string; messages: RelaySentMessage[] }
   | { status: "not_sent" }
   | { status: "unresolved"; error?: string; retryable?: boolean };
 
@@ -125,6 +130,7 @@ export async function reconcileRelayUnknownSend(params: {
   conversationId: string;
   text: string;
   replyToId?: string | null;
+  invocationId?: string;
   idempotencyKey: string;
 }): Promise<RelayUnknownSendVerdict> {
   try {
@@ -133,6 +139,7 @@ export async function reconcileRelayUnknownSend(params: {
       conversationId: params.conversationId,
       text: params.text,
       replyToId: params.replyToId ?? null,
+      ...(params.invocationId ? { invocationId: params.invocationId } : {}),
       idempotencyKey: params.idempotencyKey,
     });
     return { status: "sent", messageId: result.messageId, messages: result.messages };

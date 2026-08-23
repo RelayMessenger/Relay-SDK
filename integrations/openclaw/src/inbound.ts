@@ -86,6 +86,12 @@ export type RelayInboundFacts = {
   replyToId?: string;
   text: string;
   timestamp?: number;
+  /**
+   * The group invocation this message belongs to, when it is group work.
+   * Every subsequent server call about this message must carry it back, and
+   * because only a group mints one, its presence is also the group signal.
+   */
+  invocationId?: string;
 };
 
 /**
@@ -115,6 +121,10 @@ export function buildRelayInboundFacts(
     return null;
   }
   const createdAtMs = Date.parse(message.created_at);
+  const invocationId = typeof event.data.invocation_id === "string"
+    && event.data.invocation_id.trim()
+    ? event.data.invocation_id
+    : undefined;
   return {
     eventId: event.event_id,
     messageId: message.id,
@@ -124,5 +134,6 @@ export function buildRelayInboundFacts(
     ...(message.reply_to?.message_id ? { replyToId: message.reply_to.message_id } : {}),
     text,
     ...(Number.isFinite(createdAtMs) ? { timestamp: createdAtMs } : {}),
+    ...(invocationId ? { invocationId } : {}),
   };
 }

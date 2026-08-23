@@ -3,7 +3,10 @@
 // { events, next_cursor }, cursor N acknowledges everything <= N.
 
 export type RelaySender = {
-  kind: "user" | "agent";
+  // `system` is real on the wire: a group's own notices are authored by it
+  // (creating a group commits "<name> created <title>"). Only `user` messages
+  // start a turn, and `buildRelayInboundFacts` drops everything else.
+  kind: "user" | "agent" | "system";
   id: string;
 };
 
@@ -105,6 +108,17 @@ export type RelayEvent = {
   created_at: string;
   data: {
     message?: RelayMessage;
+    /**
+     * Present only when this event belongs to a group invocation: a human
+     * mentioned the agent, replied to it, or picked it. In a group the server
+     * delivers nothing to an agent that was not invoked, and every call the
+     * agent then makes about the message must carry this id back
+     * (`/typing`, `/responding`, and the reply itself all refuse without it).
+     * A direct message never carries one — the server rejects
+     * `invoked_agent_ids` outside a group — so its presence is also how the
+     * plugin knows it is in a group.
+     */
+    invocation_id?: string;
     [key: string]: unknown;
   };
 };

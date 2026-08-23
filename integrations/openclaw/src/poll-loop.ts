@@ -130,6 +130,18 @@ export async function runRelayPollLoop(params: RelayPollLoopParams): Promise<voi
         } catch (error) {
           if (!attempted) {
             params.deduper.releaseEvent(event.event_id);
+            // A rejection is the server's final answer: replaying the identical
+            // request produces the identical refusal. Holding the cursor for it
+            // is a livelock, and the cursor is ONE watermark for the whole
+            // channel — so a single permanently-refused event would starve every
+            // later message, direct ones included (REL-167). Losing one event is
+            // strictly better than losing the channel, so log it loudly and let
+            // the page cursor move past it.
+            if (error instanceof RelayApiError && error.kind === "rejected") {
+              log(`[relay] event ${event.event_id} was permanently rejected by the server, ` +
+                `skipping it so later messages are not starved: ${String(error)}`);
+              continue;
+            }
             log(`[relay] event ${event.event_id} safe preflight failed, will replay: ${String(error)}`);
             batchFailed = true;
             break;
