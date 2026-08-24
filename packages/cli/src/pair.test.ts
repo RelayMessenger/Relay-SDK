@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { RelayClient } from "./api.js";
-import { ownerUserIdFromMe, pair } from "./pair.js";
+import { ownerUserIdFromMe, pair, profileCaptionForVisibility, profileUrlForHandle } from "./pair.js";
 import {
   ApprovalStore,
   ConfigStore,
@@ -34,6 +34,10 @@ interface MockOptions {
   failMeWith500?: number;
   /** Reject a specifically stale saved token while accepting the new claim. */
   staleToken401?: boolean;
+  /** Omit handle from both the claim response and /v1/agents/me. */
+  omitHandle?: boolean;
+  /** contactAccessPolicies.visibility as GET /v1/agents/me reports it. */
+  visibility?: string;
 }
 
 function mockServer(options: MockOptions = {}) {
@@ -67,7 +71,9 @@ function mockServer(options: MockOptions = {}) {
       return json(200, {
         status: "claimed",
         agent_token: "rly_agent_token_abc",
-        agent: { handle: "laptop", display_name: "Laptop" },
+        agent: options.omitHandle
+          ? { display_name: "Laptop" }
+          : { handle: "laptop", display_name: "Laptop" },
       });
     }
     if (req.method === "GET" && req.url === "/v1/agents/me") {
@@ -82,8 +88,9 @@ function mockServer(options: MockOptions = {}) {
       return json(200, {
         agent: {
           id: "agt_1",
-          handle: "laptop",
+          ...(options.omitHandle ? {} : { handle: "laptop" }),
           ...(options.omitOwner ? {} : { owner_user_id: "usr_owner_1" }),
+          ...(options.visibility ? { visibility: options.visibility } : {}),
         },
       });
     }
@@ -117,9 +124,17 @@ test("pair: QR + code, long-poll until claimed, token + pinned owner stored priv
   try {
     const { origin, config, lines, qrPayloads } = await runPair(port, home);
 
-    // QR encodes the claim url; the short code is shown beside it.
-    assert.deepEqual(qrPayloads, ["https://relayapp.im/pair/KITE-MANGO-47"]);
+    // QR encodes the claim url; the short code is shown beside it. Once the
+    // owner is pinned, the SAME renderQr is reused for the agent's own
+    // profile — REL-301: there is no in-app QR surface, so this terminal
+    // print is the only place a profile QR exists.
+    assert.deepEqual(qrPayloads, [
+      "https://relayapp.im/pair/KITE-MANGO-47",
+      "https://relayapp.im/@laptop",
+    ]);
     assert.ok(lines.some((line) => line.includes("KITE-MANGO-47")));
+    assert.ok(lines.some((line) => line.includes("https://relayapp.im/@laptop")));
+    assert.ok(lines.some((line) => line.includes("@laptop")));
 
     // Poll long-polled with the poll_token bearer, not an agent token.
     const poll = requests.find((entry) => entry.url.startsWith("/v1/pairings/pair_123"));
@@ -139,6 +154,100 @@ test("pair: QR + code, long-poll until claimed, token + pinned owner stored priv
     if (process.platform !== "win32") {
       assert.equal(statSync(config.path).mode & 0o777, 0o600);
     }
+  } finally {
+    server.close();
+  }
+});
+
+test("REL-301: profileUrlForHandle matches Relay-iOS's Contact.profileShareURL exactly", () => {
+  assert.equal(profileUrlForHandle("laptop"), "https://relayapp.im/@laptop");
+  assert.equal(profileUrlForHandle("code_agent_2"), "https://relayapp.im/@code_agent_2");
+});
+
+test("REL-301: profileCaptionForVisibility matches measured server behavior, not the enum's implication", () => {
+  // "public" discloses nothing the link doesn't already say by working for anyone
+  // who has it — no caption, same as a field the server never sent. The caption
+  // exists only to name a RESTRICTION the reader can't see from the link itself.
+  assert.equal(profileCaptionForVisibility("public"), undefined);
+  // "unlisted" still 200s from the anonymous GET /v1/contacts/:handle/profile
+  // (Relay-Server server/src/routes/contacts.ts:1383-1455, no session check) —
+  // anyone holding the link opens it — but it stays out of Store browse/search
+  // (server/src/domain/agentCreation.ts:188-191), which isn't visible from the
+  // link, so it's the one fact worth telling the owner.
+  assert.equal(
+    profileCaptionForVisibility("unlisted"),
+    "Unlisted — anyone with the link can open this profile, but it won't turn up in search.",
+  );
+  // "private" 404s from that same anonymous route (contacts.ts:1441-1442) and the
+  // signed-in counterpart at GET /v1/contacts/:handle only admits the owner
+  // (contacts.ts:319-336: `or(ne(visibility, "private"), eq(ownerUserId, user.id))`).
+  assert.equal(
+    profileCaptionForVisibility("private"),
+    "Private — only you can open this; the link won't work for anyone else.",
+  );
+  // Unknown/missing visibility asserts nothing rather than guessing.
+  assert.equal(profileCaptionForVisibility(undefined), undefined);
+  assert.equal(profileCaptionForVisibility("some-future-enum-value"), undefined);
+});
+
+test("REL-301: the profile QR always prints regardless of visibility — caption present only for a real restriction, absent for public or a missing field", async () => {
+  for (const [visibility, expectedCaption] of [
+    // caption-present: a restriction the link's bare existence doesn't disclose.
+    ["unlisted", "Unlisted — anyone with the link can open this profile, but it won't turn up in search."],
+    ["private", "Private — only you can open this; the link won't work for anyone else."],
+    // caption-absent: nothing to disclose ("public" behaves exactly as the link implies).
+    ["public", undefined],
+    // caption-absent: the field itself is missing from the /v1/agents/me response —
+    // the caption asserts nothing about a state it never measured, exactly like the
+    // missing-handle guard skips the whole block rather than printing "@undefined".
+    [undefined, undefined],
+  ] as const) {
+    const { server } = mockServer({ pendingPolls: 0, visibility });
+    const port = await listen(server);
+    const label = visibility ?? "field-absent";
+    const home = mkdtempSync(join(tmpdir(), `relaymessenger-pair-vis-${label}-`));
+    try {
+      const { lines, qrPayloads } = await runPair(port, home);
+      // The print itself is never gated on visibility — same QR, same link, at
+      // every level (team-lead ruling: the owner's own phone scanning it is
+      // the primary use, which works regardless).
+      assert.ok(qrPayloads.includes("https://relayapp.im/@laptop"), `${label}: QR still printed`);
+      if (expectedCaption) {
+        assert.ok(
+          lines.some((line) => line.trim() === expectedCaption),
+          `${label}: expected caption line present`,
+        );
+      } else {
+        // Caption-absent: neither the "Public" caption text nor the em dash
+        // caption format appears anywhere in the output for this run.
+        assert.ok(
+          !lines.some((line) => line.trim().startsWith("Public —") || line.trim().startsWith("Unlisted —") || line.trim().startsWith("Private —")),
+          `${label}: no caption line printed`,
+        );
+      }
+    } finally {
+      server.close();
+    }
+  }
+});
+
+test("REL-301: a server that omits handle finishes pairing without printing a profile block", async () => {
+  const { server } = mockServer({ pendingPolls: 0, omitHandle: true });
+  const port = await listen(server);
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-nohandle-"));
+  try {
+    const { config, lines, qrPayloads } = await runPair(port, home);
+
+    // Pairing still succeeds and the token is stored — a missing handle must
+    // not be treated as a pairing failure.
+    assert.equal(config.load()?.agent_token, "rly_agent_token_abc");
+    assert.equal(config.load()?.owner_user_id, "usr_owner_1");
+
+    // No profile block: only the pairing QR was rendered, and no line
+    // mentions a bare "@" handle.
+    assert.deepEqual(qrPayloads, ["https://relayapp.im/pair/KITE-MANGO-47"]);
+    assert.ok(!lines.some((line) => line.startsWith("  @")));
+    assert.ok(lines.some((line) => line.includes("Next: relaymessenger start")));
   } finally {
     server.close();
   }

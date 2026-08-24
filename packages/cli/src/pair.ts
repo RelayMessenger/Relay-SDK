@@ -44,11 +44,53 @@ function agentProfileFromMe(me: Record<string, unknown>): Record<string, unknown
     : undefined;
 }
 
+/**
+ * Matches Relay-iOS's `Contact.profileShareURL` exactly: relayapp.im is the
+ * only host `RelayAgentShareLink` accepts on the phone, regardless of
+ * whatever RELAY_API_ORIGIN this CLI was paired against.
+ */
+export function profileUrlForHandle(handle: string): string {
+  return `https://relayapp.im/@${handle}`;
+}
+
+/**
+ * The print is never gated on visibility (the owner's own phone scanning it
+ * is the primary use, which works at every level). The caption exists only
+ * to explain a RESTRICTION the reader wouldn't otherwise know about — so
+ * "public" gets none, same as a field the server didn't send at all: there
+ * is nothing non-obvious to disclose about a link that already works for
+ * anyone. Relay-Console has no copy for this concept: its "Unlisted" badge
+ * is AgentStatus (Store listing status), a different enum from this one
+ * (contactAccessPolicies.visibility), so reusing that word would be two
+ * concepts sharing one label. Measured against Relay-Server:
+ *   - "public" and "unlisted" both resolve at GET /v1/contacts/:handle/profile
+ *     (server/src/routes/contacts.ts:1383-1455) with no session required —
+ *     anyone holding the link can open it. "unlisted" additionally stays out
+ *     of Store browse/search (server/src/domain/agentCreation.ts:188-191,
+ *     the default for every pairing-created agent) — that's the one fact
+ *     worth telling the owner, since it isn't visible from the link itself.
+ *   - "private" 404s from that same route, indistinguishable from a
+ *     handle that does not exist (contacts.ts:1441-1442); the signed-in
+ *     counterpart at GET /v1/contacts/:handle (contacts.ts:319-336) only
+ *     admits the owner (`or(ne(visibility, "private"), eq(ownerUserId, user.id))`).
+ *     So "only you" is literal, not assumed.
+ */
+export function profileCaptionForVisibility(visibility: unknown): string | undefined {
+  if (visibility === "unlisted") {
+    return "Unlisted — anyone with the link can open this profile, but it won't turn up in search.";
+  }
+  if (visibility === "private") {
+    return "Private — only you can open this; the link won't work for anyone else.";
+  }
+  return undefined;
+}
+
 async function finalizeSavedPairing(
   saved: RelayConfig,
   config: ConfigStore,
   agentClientFor: PairOptions["agentClientFor"],
   out: (line: string) => void,
+  renderQr: (url: string) => void,
 ): Promise<void> {
   const agentClient =
     agentClientFor?.(saved.agent_token) ??
@@ -82,6 +124,25 @@ async function finalizeSavedPairing(
   } as RelayConfig["agent"];
   config.save({ ...saved, agent, owner_user_id: ownerUserId });
   out(`Owner pinned: ${ownerUserId}. Only this user can drive the bridge.`);
+
+  // The agent's own profile — printed here because this is the first point
+  // the CLI has a live, owner-pinned handle; there is no separate create or
+  // deploy step to hook (agents are created at console.relayapp.im, not by
+  // this CLI). Reuses the same renderQr the pairing QR above used.
+  const handle = agent?.handle;
+  if (handle) {
+    const profileUrl = profileUrlForHandle(handle);
+    out("");
+    out("Your agent's profile — scan to open it in Relay, or share the link:");
+    out("");
+    renderQr(profileUrl);
+    out("");
+    out(`  ${profileUrl}`);
+    out(`  @${handle}`);
+    const caption = profileCaptionForVisibility(agent?.visibility);
+    if (caption) out(`  ${caption}`);
+  }
+
   out("Next: relaymessenger start --engine claude   (run `relaymessenger help` for every ACP preset)");
 }
 
@@ -90,6 +151,8 @@ export async function pair(options: PairOptions): Promise<void> {
   const config = options.config ?? new ConfigStore();
   const client = options.client ?? new RelayClient(options.origin);
   const deviceName = options.deviceName ?? hostname();
+  const renderQr =
+    options.renderQr ?? ((url: string) => qrcode.generate(url, { small: true }));
 
   const existing = config.load();
   if (
@@ -99,7 +162,7 @@ export async function pair(options: PairOptions): Promise<void> {
   ) {
     out("Resuming owner pinning for the Agent Token already stored on this machine.");
     try {
-      await finalizeSavedPairing(existing, config, options.agentClientFor, out);
+      await finalizeSavedPairing(existing, config, options.agentClientFor, out, renderQr);
       return;
     } catch (error) {
       if (!(error instanceof RelayApiError) || error.status !== 401) throw error;
@@ -108,8 +171,6 @@ export async function pair(options: PairOptions): Promise<void> {
   }
 
   const pairing = await client.createPairing(deviceName, options.engine);
-  const renderQr =
-    options.renderQr ?? ((url: string) => qrcode.generate(url, { small: true }));
 
   out("");
   out("Scan with the Relay app, or open the link on your phone:");
@@ -160,5 +221,5 @@ export async function pair(options: PairOptions): Promise<void> {
   out("");
   out(`Paired. Agent token stored in ${config.path} (mode 600).`);
 
-  await finalizeSavedPairing(saved, config, options.agentClientFor, out);
+  await finalizeSavedPairing(saved, config, options.agentClientFor, out, renderQr);
 }

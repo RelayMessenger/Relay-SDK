@@ -59,7 +59,13 @@ export interface RelayConfig {
    * bridge does — prompts, approvals, notify targets — is gated on it.
    */
   owner_user_id?: string;
-  agent?: { id?: string; handle?: string; display_name?: string };
+  agent?: {
+    id?: string;
+    handle?: string;
+    display_name?: string;
+    /** From GET /v1/agents/me: who can open the profile link at this handle. */
+    visibility?: string;
+  };
   paired_at?: string;
 }
 
