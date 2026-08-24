@@ -165,14 +165,15 @@ test("REL-301: profileUrlForHandle matches Relay-iOS's Contact.profileShareURL e
 });
 
 test("REL-301: profileCaptionForVisibility matches measured server behavior, not the enum's implication", () => {
-  // "public"/"unlisted" both 200 from the anonymous GET /v1/contacts/:handle/profile
-  // (Relay-Server server/src/routes/contacts.ts:1383-1455, no session check) — anyone
-  // holding the link can open it either way. Only "unlisted" additionally stays out of
-  // Store browse/search (server/src/domain/agentCreation.ts:188-191).
-  assert.equal(
-    profileCaptionForVisibility("public"),
-    "Public — anyone with the link can open this profile. Share away.",
-  );
+  // "public" discloses nothing the link doesn't already say by working for anyone
+  // who has it — no caption, same as a field the server never sent. The caption
+  // exists only to name a RESTRICTION the reader can't see from the link itself.
+  assert.equal(profileCaptionForVisibility("public"), undefined);
+  // "unlisted" still 200s from the anonymous GET /v1/contacts/:handle/profile
+  // (Relay-Server server/src/routes/contacts.ts:1383-1455, no session check) —
+  // anyone holding the link opens it — but it stays out of Store browse/search
+  // (server/src/domain/agentCreation.ts:188-191), which isn't visible from the
+  // link, so it's the one fact worth telling the owner.
   assert.equal(
     profileCaptionForVisibility("unlisted"),
     "Unlisted — anyone with the link can open this profile, but it won't turn up in search.",
@@ -189,25 +190,41 @@ test("REL-301: profileCaptionForVisibility matches measured server behavior, not
   assert.equal(profileCaptionForVisibility("some-future-enum-value"), undefined);
 });
 
-test("REL-301: the profile QR always prints regardless of visibility, with a visibility-matched caption", async () => {
+test("REL-301: the profile QR always prints regardless of visibility — caption present only for a real restriction, absent for public or a missing field", async () => {
   for (const [visibility, expectedCaption] of [
-    ["public", "Public — anyone with the link can open this profile. Share away."],
+    // caption-present: a restriction the link's bare existence doesn't disclose.
     ["unlisted", "Unlisted — anyone with the link can open this profile, but it won't turn up in search."],
     ["private", "Private — only you can open this; the link won't work for anyone else."],
+    // caption-absent: nothing to disclose ("public" behaves exactly as the link implies).
+    ["public", undefined],
+    // caption-absent: the field itself is missing from the /v1/agents/me response —
+    // the caption asserts nothing about a state it never measured, exactly like the
+    // missing-handle guard skips the whole block rather than printing "@undefined".
+    [undefined, undefined],
   ] as const) {
     const { server } = mockServer({ pendingPolls: 0, visibility });
     const port = await listen(server);
-    const home = mkdtempSync(join(tmpdir(), `relaymessenger-pair-vis-${visibility}-`));
+    const label = visibility ?? "field-absent";
+    const home = mkdtempSync(join(tmpdir(), `relaymessenger-pair-vis-${label}-`));
     try {
       const { lines, qrPayloads } = await runPair(port, home);
       // The print itself is never gated on visibility — same QR, same link, at
       // every level (team-lead ruling: the owner's own phone scanning it is
       // the primary use, which works regardless).
-      assert.ok(qrPayloads.includes("https://relayapp.im/@laptop"), `${visibility}: QR still printed`);
-      assert.ok(
-        lines.some((line) => line.trim() === expectedCaption),
-        `${visibility}: expected caption line present`,
-      );
+      assert.ok(qrPayloads.includes("https://relayapp.im/@laptop"), `${label}: QR still printed`);
+      if (expectedCaption) {
+        assert.ok(
+          lines.some((line) => line.trim() === expectedCaption),
+          `${label}: expected caption line present`,
+        );
+      } else {
+        // Caption-absent: neither the "Public" caption text nor the em dash
+        // caption format appears anywhere in the output for this run.
+        assert.ok(
+          !lines.some((line) => line.trim().startsWith("Public —") || line.trim().startsWith("Unlisted —") || line.trim().startsWith("Private —")),
+          `${label}: no caption line printed`,
+        );
+      }
     } finally {
       server.close();
     }

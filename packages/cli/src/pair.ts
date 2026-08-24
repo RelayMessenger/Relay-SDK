@@ -55,9 +55,11 @@ export function profileUrlForHandle(handle: string): string {
 
 /**
  * The print is never gated on visibility (the owner's own phone scanning it
- * is the primary use, which works at every level), but the caption is —
- * matched to what the server actually does, not to what the enum name
- * implies. Relay-Console has no copy for this concept: its "Unlisted" badge
+ * is the primary use, which works at every level). The caption exists only
+ * to explain a RESTRICTION the reader wouldn't otherwise know about — so
+ * "public" gets none, same as a field the server didn't send at all: there
+ * is nothing non-obvious to disclose about a link that already works for
+ * anyone. Relay-Console has no copy for this concept: its "Unlisted" badge
  * is AgentStatus (Store listing status), a different enum from this one
  * (contactAccessPolicies.visibility), so reusing that word would be two
  * concepts sharing one label. Measured against Relay-Server:
@@ -65,7 +67,8 @@ export function profileUrlForHandle(handle: string): string {
  *     (server/src/routes/contacts.ts:1383-1455) with no session required —
  *     anyone holding the link can open it. "unlisted" additionally stays out
  *     of Store browse/search (server/src/domain/agentCreation.ts:188-191,
- *     the default for every pairing-created agent).
+ *     the default for every pairing-created agent) — that's the one fact
+ *     worth telling the owner, since it isn't visible from the link itself.
  *   - "private" 404s from that same route, indistinguishable from a
  *     handle that does not exist (contacts.ts:1441-1442); the signed-in
  *     counterpart at GET /v1/contacts/:handle (contacts.ts:319-336) only
@@ -73,9 +76,6 @@ export function profileUrlForHandle(handle: string): string {
  *     So "only you" is literal, not assumed.
  */
 export function profileCaptionForVisibility(visibility: unknown): string | undefined {
-  if (visibility === "public") {
-    return "Public — anyone with the link can open this profile. Share away.";
-  }
   if (visibility === "unlisted") {
     return "Unlisted — anyone with the link can open this profile, but it won't turn up in search.";
   }
