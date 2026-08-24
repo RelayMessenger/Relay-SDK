@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { RelayClient } from "./api.js";
-import { ownerUserIdFromMe, pair, profileUrlForHandle } from "./pair.js";
+import { ownerUserIdFromMe, pair, profileCaptionForVisibility, profileUrlForHandle } from "./pair.js";
 import {
   ApprovalStore,
   ConfigStore,
@@ -36,6 +36,8 @@ interface MockOptions {
   staleToken401?: boolean;
   /** Omit handle from both the claim response and /v1/agents/me. */
   omitHandle?: boolean;
+  /** contactAccessPolicies.visibility as GET /v1/agents/me reports it. */
+  visibility?: string;
 }
 
 function mockServer(options: MockOptions = {}) {
@@ -88,6 +90,7 @@ function mockServer(options: MockOptions = {}) {
           id: "agt_1",
           ...(options.omitHandle ? {} : { handle: "laptop" }),
           ...(options.omitOwner ? {} : { owner_user_id: "usr_owner_1" }),
+          ...(options.visibility ? { visibility: options.visibility } : {}),
         },
       });
     }
@@ -159,6 +162,56 @@ test("pair: QR + code, long-poll until claimed, token + pinned owner stored priv
 test("REL-301: profileUrlForHandle matches Relay-iOS's Contact.profileShareURL exactly", () => {
   assert.equal(profileUrlForHandle("laptop"), "https://relayapp.im/@laptop");
   assert.equal(profileUrlForHandle("code_agent_2"), "https://relayapp.im/@code_agent_2");
+});
+
+test("REL-301: profileCaptionForVisibility matches measured server behavior, not the enum's implication", () => {
+  // "public"/"unlisted" both 200 from the anonymous GET /v1/contacts/:handle/profile
+  // (Relay-Server server/src/routes/contacts.ts:1383-1455, no session check) — anyone
+  // holding the link can open it either way. Only "unlisted" additionally stays out of
+  // Store browse/search (server/src/domain/agentCreation.ts:188-191).
+  assert.equal(
+    profileCaptionForVisibility("public"),
+    "Public — anyone with the link can open this profile. Share away.",
+  );
+  assert.equal(
+    profileCaptionForVisibility("unlisted"),
+    "Unlisted — anyone with the link can open this profile, but it won't turn up in search.",
+  );
+  // "private" 404s from that same anonymous route (contacts.ts:1441-1442) and the
+  // signed-in counterpart at GET /v1/contacts/:handle only admits the owner
+  // (contacts.ts:319-336: `or(ne(visibility, "private"), eq(ownerUserId, user.id))`).
+  assert.equal(
+    profileCaptionForVisibility("private"),
+    "Private — only you can open this; the link won't work for anyone else.",
+  );
+  // Unknown/missing visibility asserts nothing rather than guessing.
+  assert.equal(profileCaptionForVisibility(undefined), undefined);
+  assert.equal(profileCaptionForVisibility("some-future-enum-value"), undefined);
+});
+
+test("REL-301: the profile QR always prints regardless of visibility, with a visibility-matched caption", async () => {
+  for (const [visibility, expectedCaption] of [
+    ["public", "Public — anyone with the link can open this profile. Share away."],
+    ["unlisted", "Unlisted — anyone with the link can open this profile, but it won't turn up in search."],
+    ["private", "Private — only you can open this; the link won't work for anyone else."],
+  ] as const) {
+    const { server } = mockServer({ pendingPolls: 0, visibility });
+    const port = await listen(server);
+    const home = mkdtempSync(join(tmpdir(), `relaymessenger-pair-vis-${visibility}-`));
+    try {
+      const { lines, qrPayloads } = await runPair(port, home);
+      // The print itself is never gated on visibility — same QR, same link, at
+      // every level (team-lead ruling: the owner's own phone scanning it is
+      // the primary use, which works regardless).
+      assert.ok(qrPayloads.includes("https://relayapp.im/@laptop"), `${visibility}: QR still printed`);
+      assert.ok(
+        lines.some((line) => line.trim() === expectedCaption),
+        `${visibility}: expected caption line present`,
+      );
+    } finally {
+      server.close();
+    }
+  }
 });
 
 test("REL-301: a server that omits handle finishes pairing without printing a profile block", async () => {

@@ -53,6 +53,38 @@ export function profileUrlForHandle(handle: string): string {
   return `https://relayapp.im/@${handle}`;
 }
 
+/**
+ * The print is never gated on visibility (the owner's own phone scanning it
+ * is the primary use, which works at every level), but the caption is —
+ * matched to what the server actually does, not to what the enum name
+ * implies. Relay-Console has no copy for this concept: its "Unlisted" badge
+ * is AgentStatus (Store listing status), a different enum from this one
+ * (contactAccessPolicies.visibility), so reusing that word would be two
+ * concepts sharing one label. Measured against Relay-Server:
+ *   - "public" and "unlisted" both resolve at GET /v1/contacts/:handle/profile
+ *     (server/src/routes/contacts.ts:1383-1455) with no session required —
+ *     anyone holding the link can open it. "unlisted" additionally stays out
+ *     of Store browse/search (server/src/domain/agentCreation.ts:188-191,
+ *     the default for every pairing-created agent).
+ *   - "private" 404s from that same route, indistinguishable from a
+ *     handle that does not exist (contacts.ts:1441-1442); the signed-in
+ *     counterpart at GET /v1/contacts/:handle (contacts.ts:319-336) only
+ *     admits the owner (`or(ne(visibility, "private"), eq(ownerUserId, user.id))`).
+ *     So "only you" is literal, not assumed.
+ */
+export function profileCaptionForVisibility(visibility: unknown): string | undefined {
+  if (visibility === "public") {
+    return "Public — anyone with the link can open this profile. Share away.";
+  }
+  if (visibility === "unlisted") {
+    return "Unlisted — anyone with the link can open this profile, but it won't turn up in search.";
+  }
+  if (visibility === "private") {
+    return "Private — only you can open this; the link won't work for anyone else.";
+  }
+  return undefined;
+}
+
 async function finalizeSavedPairing(
   saved: RelayConfig,
   config: ConfigStore,
@@ -107,6 +139,8 @@ async function finalizeSavedPairing(
     out("");
     out(`  ${profileUrl}`);
     out(`  @${handle}`);
+    const caption = profileCaptionForVisibility(agent?.visibility);
+    if (caption) out(`  ${caption}`);
   }
 
   out("Next: relaymessenger start --engine claude   (run `relaymessenger help` for every ACP preset)");
