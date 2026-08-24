@@ -44,11 +44,21 @@ function agentProfileFromMe(me: Record<string, unknown>): Record<string, unknown
     : undefined;
 }
 
+/**
+ * Matches Relay-iOS's `Contact.profileShareURL` exactly: relayapp.im is the
+ * only host `RelayAgentShareLink` accepts on the phone, regardless of
+ * whatever RELAY_API_ORIGIN this CLI was paired against.
+ */
+export function profileUrlForHandle(handle: string): string {
+  return `https://relayapp.im/@${handle}`;
+}
+
 async function finalizeSavedPairing(
   saved: RelayConfig,
   config: ConfigStore,
   agentClientFor: PairOptions["agentClientFor"],
   out: (line: string) => void,
+  renderQr: (url: string) => void,
 ): Promise<void> {
   const agentClient =
     agentClientFor?.(saved.agent_token) ??
@@ -82,6 +92,23 @@ async function finalizeSavedPairing(
   } as RelayConfig["agent"];
   config.save({ ...saved, agent, owner_user_id: ownerUserId });
   out(`Owner pinned: ${ownerUserId}. Only this user can drive the bridge.`);
+
+  // The agent's own profile — printed here because this is the first point
+  // the CLI has a live, owner-pinned handle; there is no separate create or
+  // deploy step to hook (agents are created at console.relayapp.im, not by
+  // this CLI). Reuses the same renderQr the pairing QR above used.
+  const handle = agent?.handle;
+  if (handle) {
+    const profileUrl = profileUrlForHandle(handle);
+    out("");
+    out("Your agent's profile — scan to open it in Relay, or share the link:");
+    out("");
+    renderQr(profileUrl);
+    out("");
+    out(`  ${profileUrl}`);
+    out(`  @${handle}`);
+  }
+
   out("Next: relaymessenger start --engine claude   (run `relaymessenger help` for every ACP preset)");
 }
 
@@ -90,6 +117,8 @@ export async function pair(options: PairOptions): Promise<void> {
   const config = options.config ?? new ConfigStore();
   const client = options.client ?? new RelayClient(options.origin);
   const deviceName = options.deviceName ?? hostname();
+  const renderQr =
+    options.renderQr ?? ((url: string) => qrcode.generate(url, { small: true }));
 
   const existing = config.load();
   if (
@@ -99,7 +128,7 @@ export async function pair(options: PairOptions): Promise<void> {
   ) {
     out("Resuming owner pinning for the Agent Token already stored on this machine.");
     try {
-      await finalizeSavedPairing(existing, config, options.agentClientFor, out);
+      await finalizeSavedPairing(existing, config, options.agentClientFor, out, renderQr);
       return;
     } catch (error) {
       if (!(error instanceof RelayApiError) || error.status !== 401) throw error;
@@ -108,8 +137,6 @@ export async function pair(options: PairOptions): Promise<void> {
   }
 
   const pairing = await client.createPairing(deviceName, options.engine);
-  const renderQr =
-    options.renderQr ?? ((url: string) => qrcode.generate(url, { small: true }));
 
   out("");
   out("Scan with the Relay app, or open the link on your phone:");
@@ -160,5 +187,5 @@ export async function pair(options: PairOptions): Promise<void> {
   out("");
   out(`Paired. Agent token stored in ${config.path} (mode 600).`);
 
-  await finalizeSavedPairing(saved, config, options.agentClientFor, out);
+  await finalizeSavedPairing(saved, config, options.agentClientFor, out, renderQr);
 }

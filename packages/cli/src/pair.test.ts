@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { RelayClient } from "./api.js";
-import { ownerUserIdFromMe, pair } from "./pair.js";
+import { ownerUserIdFromMe, pair, profileUrlForHandle } from "./pair.js";
 import {
   ApprovalStore,
   ConfigStore,
@@ -34,6 +34,8 @@ interface MockOptions {
   failMeWith500?: number;
   /** Reject a specifically stale saved token while accepting the new claim. */
   staleToken401?: boolean;
+  /** Omit handle from both the claim response and /v1/agents/me. */
+  omitHandle?: boolean;
 }
 
 function mockServer(options: MockOptions = {}) {
@@ -67,7 +69,9 @@ function mockServer(options: MockOptions = {}) {
       return json(200, {
         status: "claimed",
         agent_token: "rly_agent_token_abc",
-        agent: { handle: "laptop", display_name: "Laptop" },
+        agent: options.omitHandle
+          ? { display_name: "Laptop" }
+          : { handle: "laptop", display_name: "Laptop" },
       });
     }
     if (req.method === "GET" && req.url === "/v1/agents/me") {
@@ -82,7 +86,7 @@ function mockServer(options: MockOptions = {}) {
       return json(200, {
         agent: {
           id: "agt_1",
-          handle: "laptop",
+          ...(options.omitHandle ? {} : { handle: "laptop" }),
           ...(options.omitOwner ? {} : { owner_user_id: "usr_owner_1" }),
         },
       });
@@ -117,9 +121,17 @@ test("pair: QR + code, long-poll until claimed, token + pinned owner stored priv
   try {
     const { origin, config, lines, qrPayloads } = await runPair(port, home);
 
-    // QR encodes the claim url; the short code is shown beside it.
-    assert.deepEqual(qrPayloads, ["https://relayapp.im/pair/KITE-MANGO-47"]);
+    // QR encodes the claim url; the short code is shown beside it. Once the
+    // owner is pinned, the SAME renderQr is reused for the agent's own
+    // profile — REL-301: there is no in-app QR surface, so this terminal
+    // print is the only place a profile QR exists.
+    assert.deepEqual(qrPayloads, [
+      "https://relayapp.im/pair/KITE-MANGO-47",
+      "https://relayapp.im/@laptop",
+    ]);
     assert.ok(lines.some((line) => line.includes("KITE-MANGO-47")));
+    assert.ok(lines.some((line) => line.includes("https://relayapp.im/@laptop")));
+    assert.ok(lines.some((line) => line.includes("@laptop")));
 
     // Poll long-polled with the poll_token bearer, not an agent token.
     const poll = requests.find((entry) => entry.url.startsWith("/v1/pairings/pair_123"));
@@ -139,6 +151,33 @@ test("pair: QR + code, long-poll until claimed, token + pinned owner stored priv
     if (process.platform !== "win32") {
       assert.equal(statSync(config.path).mode & 0o777, 0o600);
     }
+  } finally {
+    server.close();
+  }
+});
+
+test("REL-301: profileUrlForHandle matches Relay-iOS's Contact.profileShareURL exactly", () => {
+  assert.equal(profileUrlForHandle("laptop"), "https://relayapp.im/@laptop");
+  assert.equal(profileUrlForHandle("code_agent_2"), "https://relayapp.im/@code_agent_2");
+});
+
+test("REL-301: a server that omits handle finishes pairing without printing a profile block", async () => {
+  const { server } = mockServer({ pendingPolls: 0, omitHandle: true });
+  const port = await listen(server);
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-nohandle-"));
+  try {
+    const { config, lines, qrPayloads } = await runPair(port, home);
+
+    // Pairing still succeeds and the token is stored — a missing handle must
+    // not be treated as a pairing failure.
+    assert.equal(config.load()?.agent_token, "rly_agent_token_abc");
+    assert.equal(config.load()?.owner_user_id, "usr_owner_1");
+
+    // No profile block: only the pairing QR was rendered, and no line
+    // mentions a bare "@" handle.
+    assert.deepEqual(qrPayloads, ["https://relayapp.im/pair/KITE-MANGO-47"]);
+    assert.ok(!lines.some((line) => line.startsWith("  @")));
+    assert.ok(lines.some((line) => line.includes("Next: relaymessenger start")));
   } finally {
     server.close();
   }
