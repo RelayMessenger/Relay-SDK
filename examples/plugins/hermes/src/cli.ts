@@ -1,3 +1,4 @@
+import { isVisibleMessage } from "@relaymessenger/sdk";
 import { startHermesRelayChannel } from "./index.js";
 
 function requireEnv(name: string): string {
@@ -20,6 +21,9 @@ await startHermesRelayChannel({
   ...(process.env.RELAY_API_URL ? { baseUrl: process.env.RELAY_API_URL } : {}),
   abortSignal: abort.signal,
   handleTurn: async ({ message }) => {
+    // A replayed event can carry a tombstone for a message that has since been
+    // unsent, and a tombstone has no parts and no fallback text.
+    if (!isVisibleMessage(message)) return null;
     const text =
       message.parts.find((part) => part.type === "text")?.text?.trim() ||
       message.fallback_text ||

@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import {
   createRelayClient,
+  isVisibleMessage,
   MemoryDedupe,
   replyIdempotencyKey,
   verifyWebhookSignature,
@@ -94,6 +95,9 @@ function accept(event: MessageReceivedEvent): void {
 
 async function respond(event: MessageReceivedEvent): Promise<void> {
   const message = event.data.message;
+  // A replayed event can carry a tombstone for a message that has since been
+  // unsent, and a tombstone has no parts to echo.
+  if (!isVisibleMessage(message)) return;
   const invocationId = event.data.invocation_id;
   try {
     // Read is the rung you control, and it is a different claim from

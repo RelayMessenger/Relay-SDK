@@ -259,7 +259,14 @@ describe("runPollLoop", () => {
           conversation_id: "cnv_1",
           sequence: 1,
           sender: { kind: "user", id: "usr_1" },
-          parts: [{ type: "text", part_index: 0, text: "hi" }],
+          is_from_me: false,
+          parts: [
+            { part_id: "prt_1", part_index: 0, position: 0, type: "text", text: "hi" },
+          ],
+          reply_to: null,
+          fallback_text: "hi",
+          status: "sent",
+          version: 1,
           created_at: "2026-08-16T00:00:00.000Z",
         },
       },
@@ -285,7 +292,8 @@ describe("runPollLoop", () => {
 
     expect(sends).toHaveLength(2);
     expect(sends[0]).not.toHaveProperty("replyTo");
-    // Replies target a message id only; the wire carries no part_index.
-    expect(sends[1]?.replyTo).toEqual({ message_id: "msg_1" });
+    // A quote targets the part by its stable id, never by its slot: the wire
+    // carries no part_index for a message that has part identities.
+    expect(sends[1]?.replyTo).toEqual({ message_id: "msg_1", part_id: "prt_1" });
   });
 });

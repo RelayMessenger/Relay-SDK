@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   createFileCursorStore,
   createRelayClient,
+  isVisibleMessage,
   MemoryDedupe,
   runPollLoop,
 } from "@relaymessenger/sdk";
@@ -54,6 +55,12 @@ await runPollLoop({
     return senderId === me.owner_user_id;
   },
   onMessage: async ({ message, reply, responding, typing }) => {
+    // A replayed event can carry a tombstone for a message that has since been
+    // unsent, and a tombstone has no parts and no fallback text.
+    if (!isVisibleMessage(message)) {
+      console.log(`[showcase] <- ${message.id}: (unsent)`);
+      return;
+    }
     const text =
       message.parts.find((part) => part.type === "text")?.text?.trim() ||
       message.fallback_text ||

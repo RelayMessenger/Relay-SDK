@@ -2,16 +2,35 @@ import type { RelayClient } from "./client.js";
 import { RelayApiError, isAbortError } from "./errors.js";
 import { replyIdempotencyKey } from "./idempotency.js";
 import type { EventDedupe } from "./memory-dedupe.js";
+import { isVisibleMessage } from "./types.js";
 import type {
   MessageReceivedData,
   MessageReceivedEvent,
   RelayEventEnvelope,
+  RelayMessage,
   RelayOutgoingPart,
+  RelayReplyTarget,
   RelaySendResult,
 } from "./types.js";
 
 const TRANSIENT_BASE_DELAY_MS = 500;
 const TRANSIENT_MAX_DELAY_MS = 30_000;
+
+/**
+ * What a quoting reply should point at.
+ *
+ * Prefer the target's first part's stable `part_id`: it keeps naming that part
+ * after an edit reorders or removes it, where `part_index: 0` would follow the
+ * slot and silently come to mean a different part. The index is the fallback
+ * for a payload stored before part identities existed, which `/v1/events`
+ * still replays verbatim.
+ */
+function quoteTarget(message: RelayMessage): RelayReplyTarget {
+  const partId = isVisibleMessage(message) ? message.parts[0]?.part_id : undefined;
+  return partId
+    ? { message_id: message.id, part_id: partId }
+    : { message_id: message.id, part_index: 0 };
+}
 
 export type ReplyOptions = {
   /**
@@ -102,9 +121,7 @@ function buildContext(
           text,
           idempotencyKey: key,
           ...(invocationId ? { invocationId } : {}),
-          ...(options?.quote
-            ? { replyTo: { message_id: message.id } }
-            : {}),
+          ...(options?.quote ? { replyTo: quoteTarget(message) } : {}),
         });
       },
       parts: async (parts, options) => {
@@ -114,9 +131,7 @@ function buildContext(
           parts,
           idempotencyKey: key,
           ...(invocationId ? { invocationId } : {}),
-          ...(options?.quote
-            ? { replyTo: { message_id: message.id } }
-            : {}),
+          ...(options?.quote ? { replyTo: quoteTarget(message) } : {}),
         });
       },
     },
