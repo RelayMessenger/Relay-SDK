@@ -37,9 +37,9 @@ export interface ReceiveLoopOptions {
  * identity — what `attempted_turns` and `pending_replies` are keyed on — not
  * anything the wire sees: a send's retry key is its `msg_` id.
  */
-export function turnLedgerKey(conversationId: string, eventIds: string[]): string {
+export function turnLedgerKey(chatId: string, eventIds: string[]): string {
   const digest = createHash("sha256")
-    .update(JSON.stringify([conversationId, eventIds]))
+    .update(JSON.stringify([chatId, eventIds]))
     .digest("hex");
   return `relay-turn-${digest.slice(0, 40)}`;
 }
@@ -52,7 +52,7 @@ export function promptTextFromMessages(messages: RelayMessage[]): string {
       .map((part) => part.text as string)
       .join("\n")
       .trim();
-    chunks.push(text.length > 0 ? text : message.fallback_text);
+    chunks.push(text.length > 0 ? text : message.text);
   }
   return chunks.filter((chunk) => chunk && chunk.length > 0).join("\n\n");
 }
@@ -104,9 +104,9 @@ export class ReceiveLoop {
       this.state.current.cursor = page.next_cursor;
     }
     this.state.persist();
-    for (const conversationId of touched) {
-      this.scheduleFlush(conversationId);
-      this.ackQueuedBehindTurn(conversationId);
+    for (const chatId of touched) {
+      this.scheduleFlush(chatId);
+      this.ackQueuedBehindTurn(chatId);
     }
     return accepted;
   }
@@ -118,58 +118,58 @@ export class ReceiveLoop {
    * Best-effort: the next turn's own read receipt covers the same watermark,
    * so a failure here only delays it.
    */
-  private ackQueuedBehindTurn(conversationId: string): void {
-    if (!this.turnChains.has(conversationId)) return;
-    const queue = this.state.current.pending_events[conversationId] ?? [];
+  private ackQueuedBehindTurn(chatId: string): void {
+    if (!this.turnChains.has(chatId)) return;
+    const queue = this.state.current.pending_events[chatId] ?? [];
     const newest = queue[queue.length - 1]?.data?.message;
     if (!newest) return;
     void this.client
-      .markRead(conversationId, newest.id)
-      .catch((error) => this.log(`mid-turn read receipt failed for ${conversationId}: ${error}`));
+      .markRead(chatId, newest.id)
+      .catch((error) => this.log(`mid-turn read receipt failed for ${chatId}: ${error}`));
   }
 
   /** Returns the conversation id when the event was enqueued for the engine. */
   private routeEvent(event: RelayEvent): string | undefined {
     if (event.event_type !== "message.received") return undefined;
     const message = event.data?.message;
-    if (!message || message.sender?.kind !== "user") return undefined;
+    if (!message || message.sender_handle?.kind !== "user") return undefined;
     // Owner gate before any content is interpreted: non-owner senders can
     // neither prompt the engine nor answer a permission card.
-    if (message.sender.id !== this.ownerUserId) {
-      this.log(`ignoring message from non-owner sender ${message.sender.id}`);
+    if (message.sender_handle.id !== this.ownerUserId) {
+      this.log(`ignoring message from non-owner sender ${message.sender_handle.id}`);
       return undefined;
     }
     // First owner message pins the default notify/MCP conversation, and with
     // it the only conversation an approval card may be shown in.
-    this.state.current.owner_conversation_id ??= message.conversation_id;
+    this.state.current.owner_conversation_id ??= message.chat_id;
     if (this.broker.consumeReply(message)) return undefined;
-    const queue = (this.state.current.pending_events[message.conversation_id] ??= []);
+    const queue = (this.state.current.pending_events[message.chat_id] ??= []);
     queue.push(event);
-    return message.conversation_id;
+    return message.chat_id;
   }
 
-  private scheduleFlush(conversationId: string): void {
+  private scheduleFlush(chatId: string): void {
     if (this.stopped) return;
-    const existing = this.debounceTimers.get(conversationId);
+    const existing = this.debounceTimers.get(chatId);
     if (existing) clearTimeout(existing);
     const timer = this.setTimeoutImpl(() => {
-      this.debounceTimers.delete(conversationId);
-      this.chainTurn(conversationId);
+      this.debounceTimers.delete(chatId);
+      this.chainTurn(chatId);
     }, this.debounceMs);
     (timer as NodeJS.Timeout).unref?.();
-    this.debounceTimers.set(conversationId, timer as NodeJS.Timeout);
+    this.debounceTimers.set(chatId, timer as NodeJS.Timeout);
   }
 
-  private chainTurn(conversationId: string): void {
-    const previous = this.turnChains.get(conversationId) ?? Promise.resolve();
+  private chainTurn(chatId: string): void {
+    const previous = this.turnChains.get(chatId) ?? Promise.resolve();
     const next = previous
-      .then(() => this.runTurn(conversationId))
+      .then(() => this.runTurn(chatId))
       .catch((error) => {
-        this.log(`turn failed for ${conversationId}: ${error}`);
+        this.log(`turn failed for ${chatId}: ${error}`);
       });
-    this.turnChains.set(conversationId, next);
+    this.turnChains.set(chatId, next);
     void next.finally(() => {
-      if (this.turnChains.get(conversationId) === next) this.turnChains.delete(conversationId);
+      if (this.turnChains.get(chatId) === next) this.turnChains.delete(chatId);
     });
   }
 
@@ -179,21 +179,21 @@ export class ReceiveLoop {
   }
 
   /** Removes THIS turn's consumed events (and its attempt marker) durably. */
-  private clearBatch(conversationId: string, events: RelayEvent[], turnKey?: string): void {
-    const queue = this.state.current.pending_events[conversationId] ?? [];
+  private clearBatch(chatId: string, events: RelayEvent[], turnKey?: string): void {
+    const queue = this.state.current.pending_events[chatId] ?? [];
     const remaining = queue.filter(
       (event) => !events.some((consumed) => consumed.event_id === event.event_id),
     );
     if (remaining.length === 0) {
-      delete this.state.current.pending_events[conversationId];
+      delete this.state.current.pending_events[chatId];
     } else {
-      this.state.current.pending_events[conversationId] = remaining;
+      this.state.current.pending_events[chatId] = remaining;
       // New messages arrived mid-turn; run again.
-      this.scheduleFlush(conversationId);
+      this.scheduleFlush(chatId);
     }
-    const attempted = (this.state.current.attempted_turns ??= {})[conversationId];
+    const attempted = (this.state.current.attempted_turns ??= {})[chatId];
     if (attempted && (!turnKey || attempted.turn_key === turnKey)) {
-      delete this.state.current.attempted_turns![conversationId];
+      delete this.state.current.attempted_turns![chatId];
     }
     if (turnKey) delete (this.state.current.pending_replies ??= {})[turnKey];
     this.state.persist();
@@ -204,22 +204,22 @@ export class ReceiveLoop {
    * describes is already cleared — so its id is minted inline rather than
    * persisted.
    */
-  private async postNotice(conversationId: string, text: string): Promise<void> {
+  private async postNotice(chatId: string, text: string): Promise<void> {
     try {
       await this.client.postMessage({
-        conversation_id: conversationId,
+        chat_id: chatId,
         parts: [{ type: "text", text }],
       });
     } catch (error) {
-      this.log(`notice post failed for ${conversationId}: ${error}`);
+      this.log(`notice post failed for ${chatId}: ${error}`);
     }
   }
 
-  private pendingReplyForConversation(conversationId: string):
+  private pendingReplyForConversation(chatId: string):
     | [string, NonNullable<BridgeState["pending_replies"]>[string]]
     | undefined {
     return Object.entries(this.state.current.pending_replies ?? {}).find(
-      ([, reply]) => reply.conversation_id === conversationId,
+      ([, reply]) => reply.chat_id === chatId,
     );
   }
 
@@ -243,7 +243,7 @@ export class ReceiveLoop {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         await this.client.postMessage({
-          conversation_id: reply.conversation_id,
+          chat_id: reply.chat_id,
           message_id: reply.message_id,
           parts: [{ type: "text", text: reply.text }],
         });
@@ -255,23 +255,23 @@ export class ReceiveLoop {
         }
       }
     }
-    this.log(`final reply post failed for ${reply.conversation_id}: ${lastError}`);
+    this.log(`final reply post failed for ${reply.chat_id}: ${lastError}`);
     return false;
   }
 
-  async runTurn(conversationId: string): Promise<void> {
+  async runTurn(chatId: string): Promise<void> {
     // Delivery is its own durable phase. Finish an older reply before looking
     // at newer queued prompts, otherwise appending a message after an unknown
     // POST outcome could cause the older tool turn to execute again.
-    const queuedReply = this.pendingReplyForConversation(conversationId);
+    const queuedReply = this.pendingReplyForConversation(chatId);
     if (queuedReply) {
       const [turnKey, reply] = queuedReply;
-      const queuedEvents = this.state.current.pending_events[conversationId] ?? [];
+      const queuedEvents = this.state.current.pending_events[chatId] ?? [];
       const consumed = queuedEvents.filter((event) => reply.event_ids.includes(event.event_id));
       if (await this.deliverPendingReply(turnKey, reply)) {
-        this.clearBatch(conversationId, consumed, turnKey);
+        this.clearBatch(chatId, consumed, turnKey);
       } else {
-        this.scheduleFlush(conversationId);
+        this.scheduleFlush(chatId);
       }
       return;
     }
@@ -279,24 +279,24 @@ export class ReceiveLoop {
     // Recover the exact prefix a previous run durably claimed before it
     // disappeared. Later events may already be queued; they must survive and
     // run separately, while the attempted prefix is never re-executed.
-    const attempted = (this.state.current.attempted_turns ??= {})[conversationId];
+    const attempted = (this.state.current.attempted_turns ??= {})[chatId];
     if (attempted) {
-      const queue = this.state.current.pending_events[conversationId] ?? [];
+      const queue = this.state.current.pending_events[chatId] ?? [];
       const prefix = queue.slice(0, attempted.event_ids.length);
       if (
         prefix.length !== attempted.event_ids.length ||
         prefix.some((event, index) => event.event_id !== attempted.event_ids[index])
       ) {
         throw new Error(
-          `attempt ledger mismatch for ${conversationId}; refusing to execute queued events`,
+          `attempt ledger mismatch for ${chatId}; refusing to execute queued events`,
         );
       }
       this.log(
         `turn ${attempted.turn_key} was interrupted; dropping its ${prefix.length}-event prefix, not re-executing`,
       );
-      this.clearBatch(conversationId, prefix, attempted.turn_key);
+      this.clearBatch(chatId, prefix, attempted.turn_key);
       await this.postNotice(
-        conversationId,
+        chatId,
         "The bridge restarted while working on your last message, so it was not retried " +
           "automatically (its tools may have partially run). Send it again to retry.",
       );
@@ -305,7 +305,7 @@ export class ReceiveLoop {
 
     // Snapshot: routeEvent keeps appending to the live queue while the turn
     // runs, and the post-turn filter must only remove what THIS turn consumed.
-    const events = [...(this.state.current.pending_events[conversationId] ?? [])];
+    const events = [...(this.state.current.pending_events[chatId] ?? [])];
     if (events.length === 0) return;
     const messages = events
       .map((event) => event.data?.message)
@@ -315,13 +315,13 @@ export class ReceiveLoop {
       // Nothing promptable; drop only THIS batch durably — later events must
       // survive for their own turns — and still mark it read, or a
       // media-only message with no fallback text pins at Delivered forever.
-      this.clearBatch(conversationId, events);
+      this.clearBatch(chatId, events);
       const newestUnpromptable = messages[messages.length - 1];
       if (newestUnpromptable) {
         try {
-          await this.client.markRead(conversationId, newestUnpromptable.id);
+          await this.client.markRead(chatId, newestUnpromptable.id);
         } catch (error) {
-          this.log(`read receipt for unpromptable batch failed for ${conversationId}: ${error}`);
+          this.log(`read receipt for unpromptable batch failed for ${chatId}: ${error}`);
         }
       }
       return;
@@ -331,17 +331,17 @@ export class ReceiveLoop {
     // Advance the read watermark over the complete debounced batch before the
     // engine runs. A rejected receipt propagates visibly and leaves the batch
     // unattempted, so no tool turn can run behind a stale Delivered stamp.
-    await this.client.markRead(conversationId, lastMessage.id);
+    await this.client.markRead(chatId, lastMessage.id);
 
-    const typing = this.startTyping(conversationId);
+    const typing = this.startTyping(chatId);
     try {
       // Crash semantics: engine/tool side effects are at-most-once per batch.
       // The exact event-id batch is persisted AFTER replay-safe lifecycle
       // preflight and BEFORE the engine starts. A later message cannot change
       // or overwrite which prefix was already attempted.
       const eventIds = events.map((event) => event.event_id);
-      const turnKey = turnLedgerKey(conversationId, eventIds);
-      (this.state.current.attempted_turns ??= {})[conversationId] = {
+      const turnKey = turnLedgerKey(chatId, eventIds);
+      (this.state.current.attempted_turns ??= {})[chatId] = {
         turn_key: turnKey,
         event_ids: eventIds,
         started_at: new Date().toISOString(),
@@ -351,21 +351,21 @@ export class ReceiveLoop {
       let result;
       try {
         result = await this.engine.startTurn(
-          { conversationId, cwd: this.cwd },
+          { chatId, cwd: this.cwd },
           promptText,
           {
             onToolEvent: (event) => typing.note(event.title ?? "Working…"),
-            onPermissionAsk: (ask) => this.askPermission(conversationId, ask),
+            onPermissionAsk: (ask) => this.askPermission(chatId, ask),
           },
         );
       } catch (error) {
         // A failed engine turn is not silently retried (its side effects may
         // have partially run) and must not strand the queue: tell the owner
         // and clear the batch so the conversation stays usable.
-        this.log(`engine turn failed for ${conversationId}: ${error}`);
-        this.clearBatch(conversationId, events, turnKey);
+        this.log(`engine turn failed for ${chatId}: ${error}`);
+        this.clearBatch(chatId, events, turnKey);
         await this.postNotice(
-          conversationId,
+          chatId,
           `The ${this.engine.engine} turn failed: ${String(error instanceof Error ? error.message : error).slice(0, 300)}\n` +
             "Send your message again to retry.",
         );
@@ -377,7 +377,7 @@ export class ReceiveLoop {
       // Persist the completed output BEFORE delivery. Any crash from here on
       // can retry this idempotent POST without rerunning the engine or tools.
       const pendingReply = {
-        conversation_id: conversationId,
+        chat_id: chatId,
         event_ids: events.map((event) => event.event_id),
         text,
         created_at: new Date().toISOString(),
@@ -388,11 +388,11 @@ export class ReceiveLoop {
       (this.state.current.pending_replies ??= {})[turnKey] = pendingReply;
       this.state.persist();
       if (await this.deliverPendingReply(turnKey, pendingReply)) {
-        this.clearBatch(conversationId, events, turnKey);
+        this.clearBatch(chatId, events, turnKey);
       } else {
         // Keep the queue, attempt marker and completed reply. The scheduled
         // retry enters the delivery-only path above.
-        this.scheduleFlush(conversationId);
+        this.scheduleFlush(chatId);
       }
     } finally {
       await typing.stop();
@@ -407,11 +407,11 @@ export class ReceiveLoop {
    * conversation exists yet.
    */
   private async askPermission(
-    conversationId: string,
+    chatId: string,
     ask: PermissionAsk,
   ): Promise<PermissionDecision> {
     const owner = this.state.current.owner_conversation_id;
-    if (owner === conversationId) return this.broker.ask(conversationId, ask, this.engine.engine);
+    if (owner === chatId) return this.broker.ask(chatId, ask, this.engine.engine);
     if (!owner) {
       this.log(
         `approval for ${ask.toolName ?? "a tool"} denied: no owner conversation to ask in`,
@@ -426,14 +426,14 @@ export class ReceiveLoop {
    * Ephemeral typing: fire and forget, no lease and no label, so the phone
    * hides the indicator on its own if this process dies mid-turn.
    */
-  private startTyping(conversationId: string) {
+  private startTyping(chatId: string) {
     let active = true;
     const push = async (reason: "start" | "tool" | "keepalive") => {
       if (!active) return;
       try {
-        await this.client.setTyping(conversationId, true);
+        await this.client.setTyping(chatId, true);
       } catch (error) {
-        this.log(`typing ${reason} failed for ${conversationId}: ${error}`);
+        this.log(`typing ${reason} failed for ${chatId}: ${error}`);
       }
     };
     void push("start");
@@ -444,7 +444,7 @@ export class ReceiveLoop {
     return {
       /** A tool started. Relay carries no label, so it only reaches the log. */
       note: (title: string) => {
-        this.log(`${conversationId}: ${title.slice(0, 80)}`);
+        this.log(`${chatId}: ${title.slice(0, 80)}`);
         void push("tool");
       },
       stop: async () => {
@@ -452,9 +452,9 @@ export class ReceiveLoop {
         active = false;
         clearInterval(interval);
         try {
-          await this.client.setTyping(conversationId, false);
+          await this.client.setTyping(chatId, false);
         } catch (error) {
-          this.log(`typing stop failed for ${conversationId}: ${error}`);
+          this.log(`typing stop failed for ${chatId}: ${error}`);
         }
       },
     };
@@ -471,8 +471,8 @@ export class ReceiveLoop {
     let failures = 0;
     // Replay anything a previous process left behind.
     this.broker.sweep();
-    for (const conversationId of Object.keys(this.state.current.pending_events)) {
-      this.scheduleFlush(conversationId);
+    for (const chatId of Object.keys(this.state.current.pending_events)) {
+      this.scheduleFlush(chatId);
     }
     while (!this.stopped) {
       try {

@@ -143,8 +143,8 @@ describe("RelayClient receipts", () => {
     // also advances the delivered watermark, so the reverse order drops the
     // delivered receipt and the sender goes straight from "Sent" to "Read"
     // without ever seeing "Delivered".
-    await client.markDelivered({ conversationId: "cnv/a", messageId: "msg_2" });
-    await client.markRead({ conversationId: "cnv/a", messageId: "msg_2" });
+    await client.markDelivered({ chatId: "cnv/a", messageId: "msg_2" });
+    await client.markRead({ chatId: "cnv/a", messageId: "msg_2" });
 
     expect(requests).toEqual([
       {
@@ -192,21 +192,21 @@ describe("runPollLoop", () => {
       sequence: 1,
       event_type: "message.received",
       agent_id: "agt_1",
-      conversation_id: "cnv_1",
+      chat_id: "cnv_1",
       created_at: "2026-08-16T00:00:00.000Z",
       data: {
         message: {
           id: "msg_1",
-          conversation_id: "cnv_1",
+          chat_id: "cnv_1",
           sequence: 1,
-          kind: "message",
-          sender: { kind: "user", id: "usr_1" },
+          item_type: 0,
+          sender_handle: { kind: "user", id: "usr_1" },
           is_from_me: false,
           parts: [
             { part_id: "prt_1", part_index: 0, type: "text", text: "hi" },
           ],
           reply_to: null,
-          fallback_text: "hi",
+          text: "hi",
           status: "sent",
           created_at: "2026-08-16T00:00:00.000Z",
         },

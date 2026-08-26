@@ -109,7 +109,7 @@ export function verdictFromMessage(message: RelayMessage): PermissionVerdict | n
     .filter((part) => part.type === "text" && typeof part.text === "string" && part.text.length > 0)
     .map((part) => part.text as string)
     .join("\n");
-  return parseVerdictText(text.length > 0 ? text : message.fallback_text ?? "");
+  return parseVerdictText(text.length > 0 ? text : message.text ?? "");
 }
 
 const MAX_DESCRIPTION_CHARS = 500;
@@ -167,7 +167,7 @@ export function sanitizePermissionPreview(value: string): string {
 
 export interface PermissionCardInput {
   requestId: string;
-  conversationId: string;
+  chatId: string;
   /** Human name for the asking engine. */
   engineLabel: string;
   toolName?: string;
@@ -182,7 +182,7 @@ export interface PermissionCardInput {
  */
 export function buildPermissionCard(input: PermissionCardInput): {
   body: {
-    conversation_id: string;
+    chat_id: string;
     message_id: string;
     parts: RelayOutgoingPart[];
   };
@@ -200,7 +200,7 @@ export function buildPermissionCard(input: PermissionCardInput): {
 
   return {
     body: {
-      conversation_id: input.conversationId,
+      chat_id: input.chatId,
       message_id: relayId("msg"),
       parts: [
         { type: "text", text: lines.join("\n") },
@@ -284,10 +284,10 @@ export class PermissionBroker {
       return true;
     }
     // A verdict only counts from the conversation that was asked.
-    if (approval.conversation_id !== message.conversation_id) {
+    if (approval.chat_id !== message.chat_id) {
       this.log(
         `verdict for ${verdict.request_id} from wrong conversation ` +
-          `${message.conversation_id} (expected ${approval.conversation_id}); ignored`,
+          `${message.chat_id} (expected ${approval.chat_id}); ignored`,
       );
       return true;
     }
@@ -316,7 +316,7 @@ export class PermissionBroker {
   denyUnaskable(askInput: PermissionAsk): PermissionDecision {
     return denyDecision({
       request_id: askInput.requestId,
-      conversation_id: "",
+      chat_id: "",
       created_at: new Date().toISOString(),
       deadline_at: new Date().toISOString(),
       options: askInput.options.map((option) => ({
@@ -330,14 +330,14 @@ export class PermissionBroker {
 
   /** Post the card and block until tap or timeout→deny. */
   async ask(
-    conversationId: string,
+    chatId: string,
     askInput: PermissionAsk,
     engine: string,
   ): Promise<PermissionDecision> {
     const requestId = newRequestId();
     const approval: PendingApproval = {
       request_id: requestId,
-      conversation_id: conversationId,
+      chat_id: chatId,
       engine,
       tool_name: askInput.toolName,
       created_at: new Date().toISOString(),
@@ -357,7 +357,7 @@ export class PermissionBroker {
     try {
       card = buildPermissionCard({
         requestId,
-        conversationId,
+        chatId,
         engineLabel: engineDisplayName(engine),
         toolName: askInput.toolName,
         description: askInput.title,

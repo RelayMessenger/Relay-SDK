@@ -38,7 +38,7 @@ import {
 export function requireClient(config = new ConfigStore()): {
   client: RelayClient;
   ownerUserId?: string;
-  conversationId?: string;
+  chatId?: string;
   projectRoot: string;
   runtimeHome: string;
   apiOrigin: string;
@@ -66,7 +66,7 @@ export function requireClient(config = new ConfigStore()): {
     ownerUserId,
     // The owner's conversation, pinned by the loop at the first owner
     // message — never the most recent writer.
-    conversationId: readStateSnapshot(runtimeHomeForConfig(loaded, dirname(config.path))).owner_conversation_id,
+    chatId: readStateSnapshot(runtimeHomeForConfig(loaded, dirname(config.path))).owner_conversation_id,
     projectRoot,
     runtimeHome: runtimeHomeForConfig(loaded, dirname(config.path)),
     apiOrigin: loaded.api_origin,
@@ -103,11 +103,11 @@ export async function notifyCommand(
   const config = dependencies.config ?? new ConfigStore();
   const loaded = config.load();
   if (!loaded?.agent_token) throw new Error("Not paired. Run `relaymessenger pair` first.");
-  const conversationId = readStateSnapshot(
+  const chatId = readStateSnapshot(
     runtimeHomeForConfig(loaded, dirname(config.path)),
   ).owner_conversation_id;
   const client = dependencies.client ?? new RelayClient(loaded.api_origin, loaded.agent_token);
-  if (!conversationId) {
+  if (!chatId) {
     out(
       "relaymessenger notify: no pinned owner conversation yet; run `relaymessenger start` once and " +
         "message the agent from the Relay app first.",
@@ -119,7 +119,7 @@ export async function notifyCommand(
     ? last.trim()
     : "Codex finished a turn.";
   await client.postMessage({
-    conversation_id: conversationId,
+    chat_id: chatId,
     parts: [{ type: "text", text: `Codex (${basename(projectRoot)}): ${summary}`.slice(0, 7900) }],
   });
 }
@@ -145,7 +145,7 @@ export async function permissionRequestHook(
   const config = new ConfigStore().load();
   const projectRoot = new CodexNotifyPolicyStore().matchProject(input.cwd);
   if (!projectRoot) return 0;
-  const conversationId = config?.agent_token
+  const chatId = config?.agent_token
     ? readStateSnapshot(runtimeHomeForConfig(config)).owner_conversation_id
     : undefined;
   let ownerUserId: string | undefined;
@@ -154,7 +154,7 @@ export async function permissionRequestHook(
   } catch {
     ownerUserId = undefined;
   }
-  if (!config?.agent_token || !conversationId || !ownerUserId) {
+  if (!config?.agent_token || !chatId || !ownerUserId) {
     // Not paired / no pinned owner or conversation → we cannot verify who
     // would answer, so fall through to Codex's local approval flow.
     return 0;
@@ -165,7 +165,7 @@ export async function permissionRequestHook(
   const requestId = newRequestId();
   const approval: PendingApproval = {
     request_id: requestId,
-    conversation_id: conversationId,
+    chat_id: chatId,
     engine: "codex",
     tool_name: input.tool_name,
     created_at: new Date().toISOString(),
@@ -180,7 +180,7 @@ export async function permissionRequestHook(
   try {
     card = buildPermissionCard({
       requestId,
-      conversationId,
+      chatId,
       engineLabel: "Codex",
       toolName: input.tool_name,
       inputPreview: input.tool_input !== undefined ? JSON.stringify(input.tool_input) : undefined,
@@ -238,13 +238,13 @@ export async function permissionRequestHook(
     }
     // Path 2: poll the conversation directly (works without `relaymessenger start`).
     try {
-      const { messages } = await client.listMessages(conversationId, 10);
+      const { messages } = await client.listMessages(chatId, 10);
       const verdict = messages
         .filter(
           (message) =>
-            message.sender.kind === "user" &&
-            message.sender.id === ownerUserId &&
-            message.conversation_id === conversationId &&
+            message.sender_handle.kind === "user" &&
+            message.sender_handle.id === ownerUserId &&
+            message.chat_id === chatId &&
             message.sequence > cardSequence,
         )
         .sort((a, b) => a.sequence - b.sequence)

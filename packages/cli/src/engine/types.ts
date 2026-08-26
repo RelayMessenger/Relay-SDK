@@ -2,11 +2,11 @@
  * Narrow engine-adapter boundary. The receive loop only knows this interface;
  * AcpEngine drives every supported coding runtime over ACP stdio without the
  * loop knowing which. `SessionRef` is opaque per engine — adapters own their
- * own binding from conversation_id to whatever session identity they need.
+ * own binding from chat_id to whatever session identity they need.
  */
 
 export interface SessionRef {
-  conversationId: string;
+  chatId: string;
   /** Working directory the engine session should operate in. */
   cwd: string;
 }

@@ -138,7 +138,7 @@ test("a send carries the caller's message id, or mints one, and never an Idempot
   const client = new RelayClient("https://api.relayapp.im", "rly_live_x", stub.impl);
 
   const minted = await client.postMessage({
-    conversation_id: "cnv_a",
+    chat_id: "cnv_a",
     parts: [{ type: "text", text: "hi" }],
   });
   assert.match(minted.message_id, /^msg_[0-9a-hjkmnp-tv-z]{26}$/);
@@ -150,10 +150,10 @@ test("a send carries the caller's message id, or mints one, and never an Idempot
     (stub.calls[0]!.init.headers as Record<string, string>)["idempotency-key"],
     undefined,
   );
-  assert.equal(new URL(stub.calls[0]!.url).pathname, "/v2/conversations/cnv_a/messages");
+  assert.equal(new URL(stub.calls[0]!.url).pathname, "/v2/chats/cnv_a/messages");
 
   const reused = await client.postMessage({
-    conversation_id: "cnv_a",
+    chat_id: "cnv_a",
     message_id: "msg_01k1m9x2ph4vb7k0d3wzr8ftqe",
     parts: [{ type: "text", text: "hi" }],
   });

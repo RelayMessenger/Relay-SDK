@@ -51,7 +51,7 @@ export async function sendMcpMessage(
   }
 
   const context = (dependencies.requireContext ?? requireClient)();
-  if (!context.conversationId) {
+  if (!context.chatId) {
     return {
       sent: false,
       message:
@@ -64,9 +64,9 @@ export async function sendMcpMessage(
     context.apiOrigin,
     context.accountIdentity,
   );
-  const logicalSend = ledger.register(sendId, context.conversationId, text);
+  const logicalSend = ledger.register(sendId, context.chatId, text);
   await context.client.postMessage({
-    conversation_id: context.conversationId,
+    chat_id: context.chatId,
     // The ledger's durable message id, so a retry after a lost response is a
     // replay rather than a second message to the owner.
     message_id: logicalSend.message_id,

@@ -44,16 +44,17 @@ export type RelaySender = RelayActor;
 // ---------------------------------------------------------------------------
 
 /**
- * A mention is the handle it names. A sender confirms handles from the
- * client's suggestion list, and the server checks each one is really written
- * as `@handle` in the part's `text`. There are no offsets: a range could mark
- * any word as a mention of anyone, a handle can only ever mark itself.
+ * A mention rides on a text part as `mention` (the target's handle, no
+ * leading `@`) plus `mention_range` ([start, end) UTF-16 offsets over the
+ * part's `text`): one mention per text part. The server checks the handle
+ * names someone real; the ranged text is display text.
  */
 export type RelayMention = string;
+export type RelayMentionRange = [number, number];
 
 export type RelayTextStyle = "bold" | "italic" | "underline" | "strikethrough";
 
-/** Formatting run over a text part, in the same UTF-16 offsets mentions use. */
+/** Formatting run over a text part, in the same UTF-16 offsets mention_range uses. */
 export type RelayStyleRange = {
   start: number;
   length: number;
@@ -66,8 +67,7 @@ export type RelayMediaKind = "image" | "video" | "audio" | "file";
 export const KNOWN_PART_KINDS = [
   "text",
   "media",
-  "voice_memo",
-  "link_preview",
+  "link",
   "data",
 ] as const;
 
@@ -88,18 +88,19 @@ export type RelayPart = {
   part_index: number;
   type: string;
   text?: string;
-  mentions?: RelayMention[];
+  mention?: RelayMention;
+  mention_range?: RelayMentionRange;
   styles?: RelayStyleRange[];
   url?: string;
   /**
-   * `link_preview` parts: the metadata the sender resolved. Stored with the
+   * `link` parts: the metadata the sender resolved. Stored with the
    * part and echoed on history reads; absent from send responses and event
    * payloads, so a client that needs it reads the message back.
    */
   title?: string;
   description?: string;
   attachment_id?: RelayId;
-  content_type?: string;
+  mime_type?: string;
   media_kind?: RelayMediaKind;
   filename?: string;
   size_bytes?: number;
@@ -120,21 +121,21 @@ export function isKnownPartKind(
 
 /** A part as a client submits it. The server mints the identity. */
 export type RelayOutgoingPart =
-  | { type: "text"; text: string; mentions?: RelayMention[]; styles?: RelayStyleRange[] }
+  | { type: "text"; text: string; mention?: RelayMention; mention_range?: RelayMentionRange; styles?: RelayStyleRange[] }
   | {
     type: "media";
     attachment_id?: RelayId;
     url?: string;
-    content_type?: string;
+    mime_type?: string;
     media_kind?: RelayMediaKind;
     filename?: string;
     size_bytes?: number;
+    duration_ms?: number;
     width?: number;
     height?: number;
     blur_hash?: string;
   }
-  | { type: "voice_memo"; attachment_id?: RelayId; url?: string; duration_ms?: number }
-  | { type: "link_preview"; url: string; title?: string; description?: string }
+  | { type: "link"; url: string; title?: string; description?: string }
   | { type: "data"; data: Record<string, unknown> };
 
 // ---------------------------------------------------------------------------
@@ -167,13 +168,23 @@ export type RelayReplyTarget = {
 // ---------------------------------------------------------------------------
 
 /**
+ * Apple's six tapback verbs (chat.db associated_message_type 2000–2005,
+ * spelled the way Linq spells them) plus `custom`, the only type carrying an
+ * emoji of its own.
+ */
+export type RelayReactionType =
+  | "love" | "like" | "dislike" | "laugh" | "emphasize" | "question" | "custom";
+
+/**
  * A reaction as projected onto a message. One per (message, target slot,
- * actor): adding a second emoji to the same slot replaces the first.
+ * actor): a new reaction in the same slot replaces the previous one.
  */
 export type RelayReaction = {
   /** The part this reaction targets; null for a whole-message reaction. */
   target_part_id: RelayId | null;
-  emoji: string;
+  type: RelayReactionType;
+  /** Present exactly when `type` is `custom`. */
+  custom_emoji?: string;
   actor_kind: "user" | "agent";
   actor_id: RelayId;
   created_at: string;
@@ -184,8 +195,8 @@ export type RelayReaction = {
 export type RelayReactionResult = {
   message_id: RelayId;
   target_part_id: RelayId | null;
-  type: "emoji";
-  emoji: string;
+  type: RelayReactionType;
+  custom_emoji?: string;
   actor: RelayActor;
   operation: "add" | "remove";
   /** False on a no-op. Relay emits no event when this is false. */
@@ -203,8 +214,13 @@ export type RelayReactionResult = {
  */
 export type RelayMessageStatus = "sent" | "delivered" | "read";
 
-/** `notice` is a group notice ("Alice added Bob"), sent by the person who did it. */
-export type RelayMessageKind = "message" | "notice";
+/**
+ * chat.db's item_type, with Apple's values: 0 an ordinary message, 1 a
+ * participant change (`group_action_type` 0 = added, 1 = removed/left;
+ * `other_handle` = who), 2 a rename (`group_title`), 3 a group-photo change.
+ * The sender of an item_type ≠ 0 row is the person who did the thing.
+ */
+export type RelayItemType = number;
 
 /**
  * One stored message as one viewer sees it.
@@ -214,16 +230,22 @@ export type RelayMessageKind = "message" | "notice";
  */
 export type RelayMessage = {
   id: RelayId;
-  conversation_id: RelayId;
+  chat_id: RelayId;
   sequence: number;
-  kind: RelayMessageKind;
-  sender: RelaySender;
+  item_type: RelayItemType;
+  group_action_type?: number;
+  other_handle?: RelayId;
+  group_title?: string;
+  sender_handle: RelaySender;
   is_from_me: boolean;
+  /** chat.db's is_audio_message: this message is a voice memo. */
+  is_audio_message?: boolean;
   parts: RelayPart[];
   reply_to: RelayReplyRef | null;
   /** Resolved on reads. Send responses and event payloads omit it. */
   reactions?: RelayReaction[];
-  fallback_text: string;
+  /** Plain-text body beside the structured parts — chat.db's `text`. */
+  text: string;
   status: RelayMessageStatus;
   delivered_at?: string;
   read_at?: string;
@@ -239,10 +261,11 @@ export type RelayEventType =
   | "message.received"
   | "message.delivered"
   | "message.read"
-  | "conversation.added"
-  | "conversation.updated"
-  | "conversation.removed"
-  | "conversation.left"
+  | "chat.created"
+  | "chat.group_name_updated"
+  | "chat.group_icon_updated"
+  | "participant.added"
+  | "participant.removed"
   | "reaction.added"
   | "reaction.removed";
 
@@ -258,7 +281,7 @@ export type RelayEventEnvelope<TData = Record<string, unknown>> = {
   sequence: number;
   event_type: string;
   agent_id: RelayId;
-  conversation_id: RelayId | null;
+  chat_id: RelayId | null;
   created_at: string;
   /** The envelope shape this delivery was rendered as, as a date. */
   schema_version?: string;
@@ -266,11 +289,8 @@ export type RelayEventEnvelope<TData = Record<string, unknown>> = {
   [key: string]: unknown;
 };
 
-export type MessageReceivedData = {
-  message: RelayMessage;
-};
-
-export type MessageReceivedEvent = RelayEventEnvelope<MessageReceivedData>;
+/** `message.received` carries the message itself as `data`. */
+export type MessageReceivedEvent = RelayEventEnvelope<RelayMessage>;
 
 /**
  * One page of `GET /v1/events?after=N`.
@@ -316,7 +336,7 @@ export type RelaySendResult = {
 export type RelayAttachment = {
   id: RelayId;
   url: string;
-  content_type: string;
+  mime_type: string;
   size_bytes: number;
   [key: string]: unknown;
 };
@@ -328,7 +348,7 @@ export type RelayHistoryPage = {
 /** The watermark a read/delivered receipt advanced to. */
 export type RelayReceipt = {
   message_id: RelayId;
-  conversation_id: RelayId;
+  chat_id: RelayId;
   through_sequence: number;
   recipient: RelayActor;
   status: "delivered" | "read";

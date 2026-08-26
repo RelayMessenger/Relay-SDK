@@ -293,7 +293,7 @@ export class AcpEngine implements EngineAdapter {
   private loadSessionSupported = false;
   /** Live turn state keyed by ACP session id. */
   private readonly turns = new Map<string, TurnState>();
-  /** conversation_id → ACP session + repository for the live process. */
+  /** chat_id → ACP session + repository for the live process. */
   private readonly liveSessions = new Map<string, { sessionId: string; cwd: string }>();
   private permissionSeq = 0;
 
@@ -434,11 +434,11 @@ export class AcpEngine implements EngineAdapter {
   }
 
   private async openSession(ctx: ClientContext, ref: SessionRef): Promise<string> {
-    const live = this.liveSessions.get(ref.conversationId);
+    const live = this.liveSessions.get(ref.chatId);
     if (live?.cwd === ref.cwd) return live.sessionId;
-    if (live) this.liveSessions.delete(ref.conversationId);
+    if (live) this.liveSessions.delete(ref.chatId);
 
-    const stored = this.sessions.get(ref.conversationId);
+    const stored = this.sessions.get(ref.chatId);
     // Reuse only bindings from the same engine AND the same working
     // directory: reloading another repository's session would leak its
     // history/instructions into this tree and act against the wrong files.
@@ -449,17 +449,17 @@ export class AcpEngine implements EngineAdapter {
           cwd: ref.cwd,
           mcpServers: [],
         });
-        this.liveSessions.set(ref.conversationId, { sessionId: stored.session_id, cwd: ref.cwd });
+        this.liveSessions.set(ref.chatId, { sessionId: stored.session_id, cwd: ref.cwd });
         return stored.session_id;
       } catch (error) {
-        this.log(`session/load failed for ${ref.conversationId}, creating fresh: ${error}`);
-        this.sessions.delete(ref.conversationId);
+        this.log(`session/load failed for ${ref.chatId}, creating fresh: ${error}`);
+        this.sessions.delete(ref.chatId);
       }
     }
 
     const created = await ctx.request("session/new", { cwd: ref.cwd, mcpServers: [] });
-    this.liveSessions.set(ref.conversationId, { sessionId: created.sessionId, cwd: ref.cwd });
-    this.sessions.set(ref.conversationId, {
+    this.liveSessions.set(ref.chatId, { sessionId: created.sessionId, cwd: ref.cwd });
+    this.sessions.set(ref.chatId, {
       engine: this.engine,
       session_id: created.sessionId,
       cwd: ref.cwd,
@@ -487,7 +487,7 @@ export class AcpEngine implements EngineAdapter {
   }
 
   async abort(ref: SessionRef): Promise<void> {
-    const live = this.liveSessions.get(ref.conversationId);
+    const live = this.liveSessions.get(ref.chatId);
     if (!live || live.cwd !== ref.cwd || !this.ctx) return;
     await this.ctx.notify("session/cancel", { sessionId: live.sessionId });
   }

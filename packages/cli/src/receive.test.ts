@@ -37,7 +37,7 @@ function page(events: RelayEvent[], nextCursor: number): EventsPage {
 
 function userMessageEvent(
   eventId: string,
-  conversationId: string,
+  chatId: string,
   text: string,
   sequence = 1,
   senderId = OWNER,
@@ -49,12 +49,12 @@ function userMessageEvent(
     data: {
       message: {
         id: `msg_${eventId}`,
-        conversation_id: conversationId,
+        chat_id: chatId,
         sequence,
         kind: "message",
-        sender: { kind: "user", id: senderId },
+        sender_handle: { kind: "user", id: senderId },
         parts: [{ part_id: `prt_${eventId}`, part_index: 0, type: "text", text }],
-        fallback_text: text,
+        text: text,
         reply_to: null,
       },
     },
@@ -64,8 +64,8 @@ function userMessageEvent(
 function fakeClient(options: { pages?: EventsPage[] } = {}) {
   const pages = [...(options.pages ?? [])];
   const posted: Array<{ body: PostMessageBody }> = [];
-  const typings: Array<{ conversationId: string; started: boolean }> = [];
-  const reads: Array<{ conversationId: string; messageId: string }> = [];
+  const typings: Array<{ chatId: string; started: boolean }> = [];
+  const reads: Array<{ chatId: string; messageId: string }> = [];
   const client = {
     origin: "http://fake",
     async getEvents(after: number): Promise<EventsPage> {
@@ -83,25 +83,25 @@ function fakeClient(options: { pages?: EventsPage[] } = {}) {
         message_id: messageId,
         message: {
           id: messageId,
-          conversation_id: body.conversation_id,
+          chat_id: body.chat_id,
           sequence: 100 + posted.length,
           kind: "message" as const,
-          sender: { kind: "agent" as const, id: "agt_1" },
+          sender_handle: { kind: "agent" as const, id: "agt_1" },
           parts: body.parts.map((part, index) => ({
             part_id: `prt_out_${posted.length}_${index}`,
             part_index: index,
             ...part,
           })),
-          fallback_text: "",
+          text: "",
           reply_to: null,
         },
       };
     },
-    async setTyping(conversationId: string, started: boolean) {
-      typings.push({ conversationId, started });
+    async setTyping(chatId: string, started: boolean) {
+      typings.push({ chatId, started });
     },
-    async markRead(conversationId: string, messageId: string) {
-      reads.push({ conversationId, messageId });
+    async markRead(chatId: string, messageId: string) {
+      reads.push({ chatId, messageId });
     },
     async listMessages() {
       return { messages: [] };
@@ -116,13 +116,13 @@ function fakeClient(options: { pages?: EventsPage[] } = {}) {
 }
 
 function fakeEngine() {
-  const turns: Array<{ conversationId: string; prompt: string }> = [];
+  const turns: Array<{ chatId: string; prompt: string }> = [];
   let permissionAsker: ((cb: TurnCallbacks) => Promise<void>) | undefined;
   let gate: Promise<void> | undefined;
   const engine: EngineAdapter = {
     engine: "claude",
     async startTurn(ref, promptText, callbacks) {
-      turns.push({ conversationId: ref.conversationId, prompt: promptText });
+      turns.push({ chatId: ref.chatId, prompt: promptText });
       if (permissionAsker) await permissionAsker(callbacks);
       if (gate) await gate;
       return { text: `echo: ${promptText}`, stopReason: "end_turn" };
@@ -163,7 +163,7 @@ function diskState(home: string): BridgeState {
 function pendingApproval(overrides: Partial<PendingApproval> = {}): PendingApproval {
   return {
     request_id: "abcde",
-    conversation_id: "cnv_a",
+    chat_id: "cnv_a",
     created_at: new Date().toISOString(),
     deadline_at: new Date(Date.now() + 60_000).toISOString(),
     options: [
@@ -293,7 +293,7 @@ test("debounce coalesces rapid messages into one turn; separate conversations st
   await sleep(150);
   await loop.settle();
   assert.equal(turns.length, 2);
-  const byConversation = Object.fromEntries(turns.map((turn) => [turn.conversationId, turn.prompt]));
+  const byConversation = Object.fromEntries(turns.map((turn) => [turn.chatId, turn.prompt]));
   assert.equal(byConversation.cnv_a, "part one\n\npart two");
   assert.equal(byConversation.cnv_b, "other convo");
   // Quiet finalization: one message per turn, under an id this bridge minted.
@@ -310,9 +310,9 @@ test("the read watermark covers the whole debounced batch before the engine runs
   const calls: string[] = [];
   const { client, reads } = fakeClient();
   const originalMarkRead = client.markRead.bind(client);
-  client.markRead = async (conversationId: string, messageId: string) => {
+  client.markRead = async (chatId: string, messageId: string) => {
     calls.push(`read:${messageId}`);
-    await originalMarkRead(conversationId, messageId);
+    await originalMarkRead(chatId, messageId);
   };
   const state = new StateStore(home);
   state.current.pending_events.cnv_a = [
@@ -340,7 +340,7 @@ test("the read watermark covers the whole debounced batch before the engine runs
   await loop.runTurn("cnv_a");
 
   assert.deepEqual(calls, ["read:msg_evt_2", "engine"]);
-  assert.deepEqual(reads, [{ conversationId: "cnv_a", messageId: "msg_evt_2" }]);
+  assert.deepEqual(reads, [{ chatId: "cnv_a", messageId: "msg_evt_2" }]);
 });
 
 test("a rejected read receipt is propagated before any engine attempt", async () => {
@@ -410,7 +410,7 @@ test("typing is fire and forget: started, kept alive, then stopped, with no labe
   await loop.pollOnce();
   await sleep(80);
   await loop.settle();
-  assert.deepEqual(typings[0], { conversationId: "cnv_a", started: true });
+  assert.deepEqual(typings[0], { chatId: "cnv_a", started: true });
   const stopped = typings.filter((call) => !call.started);
   assert.equal(stopped.length, 1, "typing was stopped exactly once");
   assert.equal(typings.at(-1)!.started, false);
@@ -469,7 +469,7 @@ test("a message arriving mid-turn is marked read before the reply is delivered",
   await sleep(60); // debounce fires; first turn is now blocked on the gate
   assert.equal(turns.length, 1);
   // Only the turn's own watermark so far; nothing is queued behind it.
-  assert.deepEqual(reads, [{ conversationId: "cnv_a", messageId: "msg_evt_1" }]);
+  assert.deepEqual(reads, [{ chatId: "cnv_a", messageId: "msg_evt_1" }]);
 
   // Second message lands while the first turn is still running: its receipt
   // must not wait for the first turn's reply.
@@ -502,16 +502,16 @@ test("an unpromptable batch is dropped and still marked read", async () => {
   // become a prompt, but it must not pin at Delivered forever either.
   const unpromptable = userMessageEvent("evt_media", "cnv_a", "", 1);
   unpromptable.data!.message!.parts = [
-    { part_id: "prt_media", part_index: 0, type: "link_preview", url: "https://example.com" },
+    { part_id: "prt_media", part_index: 0, type: "link", url: "https://example.com" },
   ];
-  unpromptable.data!.message!.fallback_text = "";
+  unpromptable.data!.message!.text = "";
   state.current.pending_events.cnv_a = [unpromptable];
   state.persist();
 
   await loop.runTurn("cnv_a");
 
   assert.equal(turns.length, 0, "an unpromptable batch never reaches the engine");
-  assert.deepEqual(reads, [{ conversationId: "cnv_a", messageId: "msg_evt_media" }]);
+  assert.deepEqual(reads, [{ chatId: "cnv_a", messageId: "msg_evt_media" }]);
   assert.equal(diskState(home).pending_events.cnv_a, undefined);
   loop.stop();
 });
@@ -646,7 +646,7 @@ test("completed reply outbox redelivers under its persisted id, not a second mes
     started_at: new Date().toISOString(),
   };
   (state.current.pending_replies ??= {})[key] = {
-    conversation_id: "cnv_a",
+    chat_id: "cnv_a",
     event_ids: [event.event_id],
     text: "finished before the crash",
     created_at: new Date().toISOString(),
@@ -693,7 +693,7 @@ test("a queued reply written before ids were the retry key adopts one, durably, 
   const key = turnLedgerKey("cnv_a", [event.event_id]);
   state.current.pending_events.cnv_a = [event];
   (state.current.pending_replies ??= {})[key] = {
-    conversation_id: "cnv_a",
+    chat_id: "cnv_a",
     event_ids: [event.event_id],
     text: "written by an older bridge",
     created_at: new Date().toISOString(),
@@ -778,7 +778,7 @@ test("M1 regression: a verdict from the wrong conversation does not resolve the 
   const home = tempHome();
   const { client } = fakeClient();
   const approvals = new ApprovalStore(home);
-  approvals.create(pendingApproval({ request_id: "abcde", conversation_id: "cnv_a" }));
+  approvals.create(pendingApproval({ request_id: "abcde", chat_id: "cnv_a" }));
   const broker = new PermissionBroker(client, approvals, 60_000);
 
   const wrongConversation = userMessageEvent("evt_w", "cnv_other", "yes abcde", 5);
@@ -897,7 +897,7 @@ test("security-sensitive approval input is complete or the ask fails closed", as
   const full = `printf start\n${"x".repeat(2_000)}\nprintf dangerous-suffix`;
   const card = buildPermissionCard({
     requestId: "abcde",
-    conversationId: "cnv_a",
+    chatId: "cnv_a",
     engineLabel: "Codex",
     toolName: "shell",
     inputPreview: full,
@@ -909,7 +909,7 @@ test("security-sensitive approval input is complete or the ask fails closed", as
     () =>
       buildPermissionCard({
         requestId: "abcde",
-        conversationId: "cnv_a",
+        chatId: "cnv_a",
         engineLabel: "Codex",
         inputPreview: "x".repeat(MAX_PERMISSION_PREVIEW_CHARS + 1),
       }),
@@ -981,12 +981,12 @@ test("the turn ledger key is stable for the exact event batch, and prompt text f
   const text = promptTextFromMessages([
     {
       id: "m1",
-      conversation_id: "cnv_a",
+      chat_id: "cnv_a",
       sequence: 1,
       kind: "message",
-      sender: { kind: "user", id: "u" },
+      sender_handle: { kind: "user", id: "u" },
       parts: [{ part_id: "prt_1", part_index: 0, type: "media", url: "https://x" }],
-      fallback_text: "[photo]",
+      text: "[photo]",
       reply_to: null,
     },
   ]);
@@ -1019,16 +1019,16 @@ test("an approval raised outside the owner's conversation is asked there, never 
     // owner alone reads it.
     const card = posted.find((entry) => cardRequestId(entry) !== undefined);
     assert.ok(card, "approval card was never posted");
-    assert.equal(card.body.conversation_id, "cnv_direct");
+    assert.equal(card.body.chat_id, "cnv_direct");
     const requestId = cardRequestId(card)!;
     broker.consumeReply({
       id: "msg_reply",
-      conversation_id: "cnv_direct",
+      chat_id: "cnv_direct",
       sequence: 9,
       kind: "message",
-      sender: { kind: "user", id: OWNER },
+      sender_handle: { kind: "user", id: OWNER },
       parts: [{ part_id: "prt_reply", part_index: 0, type: "text", text: `yes ${requestId}` }],
-      fallback_text: `yes ${requestId}`,
+      text: `yes ${requestId}`,
       reply_to: null,
     });
     decision = await pending;
@@ -1038,7 +1038,7 @@ test("an approval raised outside the owner's conversation is asked there, never 
   await sleep(200);
   await loop.settle();
   assert.deepEqual(decision, { behavior: "selected", optionId: "opt_allow" });
-  const groupReply = posted.filter((entry) => entry.body.conversation_id === "cnv_group");
+  const groupReply = posted.filter((entry) => entry.body.chat_id === "cnv_group");
   assert.equal(groupReply.length, 1, "the answer still goes back to where it was asked");
   loop.stop();
 });

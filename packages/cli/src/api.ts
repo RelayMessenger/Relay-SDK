@@ -79,7 +79,7 @@ export interface CreatedAgent {
     [key: string]: unknown;
   };
   token: string;
-  conversation_id?: string;
+  chat_id?: string;
 }
 
 export interface NewAgentBody {
@@ -130,11 +130,11 @@ export type RelayOutgoingPart =
       url?: string;
       duration_ms?: number;
     }
-  | { type: "link_preview"; url: string }
+  | { type: "link"; url: string }
   | { type: "data"; data: Record<string, unknown> };
 
 export interface PostMessageBody {
-  conversation_id: string;
+  chat_id: string;
   /**
    * The `msg_` id this send commits under. It is the message's identity AND
    * the send's only retry key: the same id is a replay, a fresh one on retry
@@ -350,7 +350,7 @@ export class RelayClient {
   async postMessage(body: PostMessageBody): Promise<PostedMessage> {
     const messageId = body.message_id ?? relayId("msg");
     const result = await this.authenticatedClient().sendMessage({
-      conversationId: body.conversation_id,
+      chatId: body.chat_id,
       messageId,
       parts: body.parts as SdkRelayOutgoingPart[],
       ...(body.reply_to ? { replyTo: body.reply_to } : {}),
@@ -366,19 +366,19 @@ export class RelayClient {
   }
 
   async listMessages(
-    conversationId: string,
+    chatId: string,
     limit = 20,
   ): Promise<{ messages: RelayMessage[] }> {
-    const page = await this.authenticatedClient().getHistory({ conversationId, limit });
+    const page = await this.authenticatedClient().getHistory({ chatId, limit });
     return { messages: page.messages as RelayMessage[] };
   }
 
   /** Fire and forget: nothing is stored, no lease is taken. */
-  setTyping(conversationId: string, started: boolean): Promise<void> {
-    return this.authenticatedClient().setTyping({ conversationId, started });
+  setTyping(chatId: string, started: boolean): Promise<void> {
+    return this.authenticatedClient().setTyping({ chatId, started });
   }
 
-  async markRead(conversationId: string, messageId: string): Promise<void> {
-    await this.authenticatedClient().markRead({ conversationId, messageId });
+  async markRead(chatId: string, messageId: string): Promise<void> {
+    await this.authenticatedClient().markRead({ chatId, messageId });
   }
 }

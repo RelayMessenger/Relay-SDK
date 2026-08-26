@@ -127,7 +127,7 @@ function mockServer(options: MockOptions = {}) {
             ...(options.visibility ? { visibility: options.visibility } : {}),
           },
           token: "rly_live_abc",
-          conversation_id: "cnv_owner",
+          chat_id: "cnv_owner",
         });
       }
       if (req.method === "GET" && req.url === "/v1/agents/me") {
@@ -588,7 +588,7 @@ test("a new agent isolates cursor, queued work, approvals, destinations, and eng
   });
   new ApprovalStore(oldRuntime).create({
     request_id: "oldreq",
-    conversation_id: "cnv_old",
+    chat_id: "cnv_old",
     created_at: new Date().toISOString(),
     deadline_at: new Date(Date.now() + 60_000).toISOString(),
     options: [{ option_id: "allow", label: "Allow" }],

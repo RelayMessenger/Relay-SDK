@@ -68,14 +68,14 @@ describe("ulid", () => {
 
 const committed: RelayMessage = {
   id: "msg_01k1m9x2ph4vb7k0d3wzr8ftqe",
-  conversation_id: "cnv_01k1m4q9vn2r7t9b4c6qdh8xwy",
+  chat_id: "cnv_01k1m4q9vn2r7t9b4c6qdh8xwy",
   sequence: 8,
-  kind: "message",
-  sender: { kind: "agent", id: "agt_01k1m7v9wr4t2b8n5c3qjd6hzx" },
+  item_type: 0,
+  sender_handle: { kind: "agent", id: "agt_01k1m7v9wr4t2b8n5c3qjd6hzx" },
   is_from_me: true,
   parts: [{ part_id: "prt_01k1ma0m5r9xd4t7c2vqj6nzbh", part_index: 0, type: "text", text: "first" }],
   reply_to: null,
-  fallback_text: "first",
+  text: "first",
   status: "sent",
   created_at: "2026-08-24T20:00:00.000Z",
 };
@@ -103,7 +103,7 @@ describe("send response parsing", () => {
   it("mints a msg_ id and sends it as the body's message_id", async () => {
     const { client, requests } = clientAnswering({ message: committed });
     const result = await client.sendMessage({
-      conversationId: committed.conversation_id,
+      chatId: committed.chat_id,
       parts: [{ type: "text", text: "one message" }],
     });
     expect(result.messageId).toMatch(/^msg_[0-9a-hjkmnp-tv-z]{26}$/);
@@ -116,7 +116,7 @@ describe("send response parsing", () => {
   it("carries no Idempotency-Key: the message id is the whole retry story", async () => {
     const { client, requests } = clientAnswering({ message: committed });
     await client.sendMessage({
-      conversationId: committed.conversation_id,
+      chatId: committed.chat_id,
       parts: [{ type: "text", text: "one message" }],
     });
     const headers = requests[0]!.init?.headers as Record<string, string>;
@@ -129,7 +129,7 @@ describe("send response parsing", () => {
     const messageId = committed.id;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await client.sendMessage({
-        conversationId: committed.conversation_id,
+        chatId: committed.chat_id,
         messageId,
         parts: [{ type: "text", text: "one message" }],
       });
@@ -142,7 +142,7 @@ describe("send response parsing", () => {
   it("raises rather than resolving with an undefined message", async () => {
     const { client } = clientAnswering({});
     await expect(client.sendMessage({
-      conversationId: committed.conversation_id,
+      chatId: committed.chat_id,
       parts: [{ type: "text", text: "first" }],
     })).rejects.toBeInstanceOf(RelayApiError);
   });
@@ -152,7 +152,7 @@ describe("send response parsing", () => {
     // read one, not because anything is ever split into several.
     const { client, requests } = clientAnswering({ messages: [committed] });
     const result = await client.sendMessageV1({
-      conversationId: committed.conversation_id,
+      chatId: committed.chat_id,
       messageId: committed.id,
       parts: [{ type: "text", text: "first" }],
     });
@@ -164,7 +164,7 @@ describe("send response parsing", () => {
   it("raises when /v1 answers with an empty array", async () => {
     const { client } = clientAnswering({ messages: [] });
     await expect(client.sendMessageV1({
-      conversationId: committed.conversation_id,
+      chatId: committed.chat_id,
       parts: [{ type: "text", text: "first" }],
     })).rejects.toBeInstanceOf(RelayApiError);
   });
@@ -196,8 +196,8 @@ describe("reactions", () => {
   const reaction = {
     message_id: committed.id,
     target_part_id: null,
-    type: "emoji" as const,
-    emoji: "🔥",
+    type: "custom" as const,
+    custom_customEmoji: "🔥",
     actor: { kind: "agent" as const, id: "agt_01k1m7v9wr4t2b8n5c3qjd6hzx" },
     operation: "add" as const,
     changed: true,
@@ -208,11 +208,11 @@ describe("reactions", () => {
     const result = await client.react({
       messageId: committed.id,
       operation: "add",
-      emoji: "🔥",
+      customEmoji: "🔥",
     });
     expect(result.target_part_id).toBeNull();
     const body = JSON.parse(String(requests[0]!.init?.body)) as Record<string, unknown>;
-    expect(body).toEqual({ operation: "add", type: "emoji", emoji: "🔥" });
+    expect(body).toEqual({ operation: "add", type: "custom", emoji: "🔥" });
   });
 
   it("names one exact part by its permanent id, never by a slot index", async () => {
@@ -224,7 +224,7 @@ describe("reactions", () => {
     await client.react({
       messageId: committed.id,
       operation: "add",
-      emoji: "🔥",
+      customEmoji: "🔥",
       targetPartId: partId,
     });
     const body = JSON.parse(String(requests[0]!.init?.body)) as Record<string, unknown>;
@@ -246,7 +246,7 @@ describe("typing", () => {
         return new Response(null, { status: 204 });
       },
     });
-    await client.setTyping({ conversationId: "cnv/a", started: true });
+    await client.setTyping({ chatId: "cnv/a", started: true });
     expect(requests[0]!.url).toBe("http://127.0.0.1:8788/v1/conversations/cnv%2Fa/typing");
     expect(JSON.parse(String(requests[0]!.init?.body))).toEqual({ started: true });
   });
@@ -261,9 +261,9 @@ describe("quoting replies", () => {
       sequence: 1,
       event_type: "message.received",
       agent_id: "agt_01k1m7v9wr4t2b8n5c3qjd6hzx",
-      conversation_id: committed.conversation_id,
+      chat_id: committed.chat_id,
       created_at: committed.created_at,
-      data: { message: { ...committed, is_from_me: false, sender: { kind: "user", id: "usr_01k1m8t3zq7v2r9c4b6ndh5xwj" }, parts } },
+      data: { message: { ...committed, is_from_me: false, sender_handle: { kind: "user", id: "usr_01k1m8t3zq7v2r9c4b6ndh5xwj" }, parts } },
     } as MessageReceivedEvent;
     const client = {
       pollEvents: async () => ({ events: [event], nextCursor: 1, latest: 1, hasMore: false }),
@@ -317,7 +317,7 @@ describe("tolerating what this version does not know", () => {
   });
 
   it("knows the part kinds it publishes a shape for, polls included", () => {
-    for (const type of ["text", "media", "voice_memo", "link_preview", "data"]) {
+    for (const type of ["text", "media", "link", "data"]) {
       const part = { part_id: "prt_01k1ma0m5r9xd4t7c2vqj6nzbh", part_index: 0, type } satisfies RelayPart;
       expect(isKnownPartKind(part)).toBe(true);
     }

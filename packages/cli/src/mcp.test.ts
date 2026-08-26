@@ -11,7 +11,7 @@ import { McpSendLedger } from "./store.js";
 function context(home: string, postMessage: RelayClient["postMessage"]) {
   return () => ({
     client: { postMessage } as RelayClient,
-    conversationId: "cnv_owner",
+    chatId: "cnv_owner",
     ownerUserId: "usr_owner",
     projectRoot: "/repo",
     runtimeHome: home,

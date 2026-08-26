@@ -12,7 +12,7 @@
  *                    by whoever arms it, resolution written by the loop,
  *                    consumed+unlinked by the waiter). No read-modify-write
  *                    of shared snapshots across processes.
- *   accounts/<hash>/sessions.json — conversation_id → engine session binding
+ *   accounts/<hash>/sessions.json — chat_id → engine session binding
  *
  * Writes are atomic: content is fsync'd to a tmp file, then renamed into
  * place, so a crash can never leave a half-written file. Cursor + pending
@@ -130,7 +130,7 @@ export function resolveOwnerUserId(config: RelayConfig | undefined): string {
 
 export interface PendingApproval {
   request_id: string;
-  conversation_id: string;
+  chat_id: string;
   engine?: string;
   tool_name?: string;
   created_at: string;
@@ -196,13 +196,13 @@ export interface RelayPart {
 
 export interface RelayMessage {
   id: string;
-  conversation_id: string;
+  chat_id: string;
   sequence: number;
   /** `notice` is a group notice, sent by the person who caused it. */
   kind?: "message" | "notice";
-  sender: { kind: "user" | "agent"; id: string };
+  sender_handle: { kind: "user" | "agent"; id: string };
   parts: RelayPart[];
-  fallback_text: string;
+  text: string;
   /** A pointer, never a copy: Relay stores no quote snapshot. */
   reply_to?: { message_id: string; part_id?: string } | null;
   created_at?: string;
@@ -213,7 +213,7 @@ export interface BridgeState {
   seen_event_ids: string[];
   pending_events: Record<string, RelayEvent[]>;
   /**
-   * conversation_id → turn ledger key persisted immediately BEFORE the
+   * chat_id → turn ledger key persisted immediately BEFORE the
    * engine turn starts and cleared on success. A marker found at startup means
    * a previous process crashed mid-turn: that batch is dropped with a notice
    * instead of re-executed, so engine/tool side effects (deploys, deletions,
@@ -231,7 +231,7 @@ export interface BridgeState {
   pending_replies?: Record<
     string,
     {
-      conversation_id: string;
+      chat_id: string;
       event_ids: string[];
       text: string;
       created_at: string;
@@ -346,7 +346,7 @@ function bridgeStateIsValid(raw: Partial<BridgeState>): boolean {
       raw.pending_replies,
       (reply) =>
         !!reply &&
-        typeof reply.conversation_id === "string" &&
+        typeof reply.chat_id === "string" &&
         typeof reply.text === "string" &&
         typeof reply.created_at === "string" &&
         (reply.message_id === undefined || typeof reply.message_id === "string") &&
@@ -553,7 +553,7 @@ export interface McpOutboundSend {
   send_id: string;
   api_origin: string;
   account_identity: string;
-  conversation_id: string;
+  chat_id: string;
   payload_hash: string;
   /** The `msg_` id this logical send commits under, and its only retry key. */
   message_id: string;
@@ -583,16 +583,16 @@ export class McpSendLedger {
     return join(this.dir, `${createHash("sha256").update(sendId).digest("hex")}.json`);
   }
 
-  register(sendId: string, conversationId: string, text: string): McpOutboundSend {
+  register(sendId: string, chatId: string, text: string): McpOutboundSend {
     const path = this.pathFor(sendId);
     const payloadHash = createHash("sha256")
-      .update(JSON.stringify({ conversation_id: conversationId, text }))
+      .update(JSON.stringify({ chat_id: chatId, text }))
       .digest("hex");
     const expected = {
       send_id: sendId,
       api_origin: canonicalOrigin(this.apiOrigin),
       account_identity: this.accountIdentity,
-      conversation_id: conversationId,
+      chat_id: chatId,
       payload_hash: payloadHash,
     };
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
@@ -636,7 +636,7 @@ export class McpSendLedger {
       }
       return created;
     } catch (error: any) {
-      if (error?.code === "EEXIST") return this.register(sendId, conversationId, text);
+      if (error?.code === "EEXIST") return this.register(sendId, chatId, text);
       throw error;
     }
   }
@@ -659,17 +659,17 @@ export class SessionStore {
     return join(this.home, "sessions.json");
   }
 
-  get(conversationId: string): SessionBinding | undefined {
-    return this.sessions[conversationId];
+  get(chatId: string): SessionBinding | undefined {
+    return this.sessions[chatId];
   }
 
-  set(conversationId: string, binding: SessionBinding): void {
-    this.sessions[conversationId] = binding;
+  set(chatId: string, binding: SessionBinding): void {
+    this.sessions[chatId] = binding;
     atomicWriteJson(this.path, this.sessions, 0o600);
   }
 
-  delete(conversationId: string): void {
-    delete this.sessions[conversationId];
+  delete(chatId: string): void {
+    delete this.sessions[chatId];
     atomicWriteJson(this.path, this.sessions, 0o600);
   }
 

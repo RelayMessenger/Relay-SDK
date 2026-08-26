@@ -2,7 +2,6 @@ import type { RelayClient } from "./client.js";
 import { RelayApiError, isAbortError } from "./errors.js";
 import type { EventDedupe } from "./memory-dedupe.js";
 import type {
-  MessageReceivedData,
   MessageReceivedEvent,
   RelayEventEnvelope,
   RelayMessage,
@@ -36,7 +35,7 @@ export type ReplyOptions = {
 
 export type MessageHandlerContext = {
   event: MessageReceivedEvent;
-  message: MessageReceivedData["message"];
+  message: RelayMessage;
   client: RelayClient;
   reply: {
     text: (text: string, options?: ReplyOptions) => Promise<RelaySendResult>;
@@ -88,8 +87,8 @@ function isMessageReceived(event: RelayEventEnvelope): event is MessageReceivedE
     event.event_type === "message.received" &&
     typeof event.data === "object" &&
     event.data !== null &&
-    "message" in event.data &&
-    typeof (event.data as MessageReceivedData).message === "object"
+    "id" in event.data &&
+    "parts" in event.data
   );
 }
 
@@ -97,7 +96,7 @@ function buildContext(
   client: RelayClient,
   event: MessageReceivedEvent,
 ): MessageHandlerContext {
-  const message = event.data.message;
+  const message = event.data;
 
   return {
     event,
@@ -105,18 +104,18 @@ function buildContext(
     client,
     reply: {
       text: async (text, options) => client.sendText({
-        conversationId: message.conversation_id,
+        chatId: message.chat_id,
         text,
         ...(options?.quote ? { replyTo: replyTarget(message) } : {}),
       }),
       parts: async (parts, options) => client.sendMessage({
-        conversationId: message.conversation_id,
+        chatId: message.chat_id,
         parts,
         ...(options?.quote ? { replyTo: replyTarget(message) } : {}),
       }),
     },
     typing: async (started = true) => {
-      await client.setTyping({ conversationId: message.conversation_id, started });
+      await client.setTyping({ chatId: message.chat_id, started });
     },
   };
 }
@@ -173,7 +172,7 @@ export async function runPollLoop(params: PollLoopParams): Promise<void> {
       if (!isMessageReceived(event)) continue;
       if (params.dedupe.has(event.event_id)) continue;
 
-      const sender = event.data.message.sender;
+      const sender = event.data.sender_handle;
       if (sender.kind === "agent") continue;
       if (params.allowSender && !params.allowSender(sender.id)) {
         params.dedupe.record(event.event_id);

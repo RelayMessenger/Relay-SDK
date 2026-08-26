@@ -24,7 +24,6 @@ export {
 } from "./signature.js";
 export { isKnownPartKind, KNOWN_PART_KINDS } from "./types.js";
 export type {
-  MessageReceivedData,
   MessageReceivedEvent,
   RelayActor,
   RelayAgentProfile,
@@ -38,7 +37,9 @@ export type {
   RelayMediaKind,
   RelayMention,
   RelayMessage,
-  RelayMessageKind,
+  RelayItemType,
+  RelayReactionType,
+  RelayMentionRange,
   RelayMessageStatus,
   RelayOutgoingPart,
   RelayPart,

@@ -12,6 +12,7 @@ import type {
   RelayMessage,
   RelayOutgoingPart,
   RelayReactionResult,
+  RelayReactionType,
   RelayReceipt,
   RelayReplyTarget,
   RelaySendResult,
@@ -53,7 +54,7 @@ export type RelayClient = {
    * it — new code should use `sendMessage`.
    */
   sendMessageV1: (params: {
-    conversationId: string;
+    chatId: string;
     messageId?: RelayId;
     parts: RelayOutgoingPart[];
     replyTo?: RelayReplyTarget;
@@ -69,7 +70,7 @@ export type RelayClient = {
    * fresh one on retry is how you send the same message twice.
    */
   sendMessage: (params: {
-    conversationId: string;
+    chatId: string;
     messageId?: RelayId;
     parts: RelayOutgoingPart[];
     replyTo?: RelayReplyTarget;
@@ -77,7 +78,7 @@ export type RelayClient = {
     signal?: AbortSignal;
   }) => Promise<RelaySendResult>;
   sendText: (params: {
-    conversationId: string;
+    chatId: string;
     messageId?: RelayId;
     text: string;
     replyTo?: RelayReplyTarget;
@@ -91,21 +92,23 @@ export type RelayClient = {
     signal?: AbortSignal;
   }) => Promise<RelayAttachment>;
   /**
-   * Add, change or remove a reaction. Pass `targetPartId` to react to one
-   * exact part; omit it for the whole message. Changing an emoji is an `add`
-   * on the slot the previous one occupied, and repeating a request changes
+   * Add, change or remove a reaction. `type` is one of Apple's six tapback
+   * verbs, or `custom` with `customEmoji`. Pass `targetPartId` to react to
+   * one exact part; omit it for the whole message. A new reaction in an
+   * occupied slot replaces the previous one, and repeating a request changes
    * nothing the second time — there is no operation id.
    */
   react: (params: {
     messageId: RelayId;
     operation: "add" | "remove";
-    emoji: string;
+    type: RelayReactionType;
+    customEmoji?: string;
     targetPartId?: RelayId;
     signal?: AbortSignal;
   }) => Promise<RelayReactionResult>;
   /** A page of conversation history, newest first. */
   getHistory: (params: {
-    conversationId: string;
+    chatId: string;
     limit?: number;
     beforeSequence?: number;
     signal?: AbortSignal;
@@ -120,17 +123,17 @@ export type RelayClient = {
    * when Relay hands the page over. Neither needs a line of code.
    *
    * The exception is a transcript poller — a client that reads
-   * `GET /v1/conversations/:id/messages` on a timer. Reading history records
+   * `GET /v1/chats/:id/messages` on a timer. Reading history records
    * no receipt, so nothing on the server ever learns the message arrived.
    * That client, and only that client, has to say so itself.
    */
   markDelivered: (params: {
-    conversationId: string;
+    chatId: string;
     messageId: RelayId;
     signal?: AbortSignal;
   }) => Promise<RelayReceipt>;
   markRead: (params: {
-    conversationId: string;
+    chatId: string;
     messageId: RelayId;
     signal?: AbortSignal;
   }) => Promise<RelayReceipt>;
@@ -140,7 +143,7 @@ export type RelayClient = {
    * seconds. Send the start again while still composing to keep it alive.
    */
   setTyping: (params: {
-    conversationId: string;
+    chatId: string;
     started: boolean;
     signal?: AbortSignal;
   }) => Promise<void>;
@@ -246,16 +249,16 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     message_id: params.messageId,
     parts: params.parts,
     ...(params.replyTo ? { reply_to: params.replyTo } : {}),
-    ...(params.fallbackText === undefined ? {} : { fallback_text: params.fallbackText }),
+    ...(params.fallbackText === undefined ? {} : { text: params.fallbackText }),
   });
 
   const receipt = async (
     kind: "read" | "delivered",
-    params: { conversationId: string; messageId: RelayId; signal?: AbortSignal },
+    params: { chatId: string; messageId: RelayId; signal?: AbortSignal },
   ): Promise<RelayReceipt> => {
     const response = await request({
       method: "POST",
-      path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/${kind}`,
+      path: `/v1/chats/${encodeURIComponent(params.chatId)}/${kind}`,
       body: { message_id: params.messageId },
       ...(params.signal ? { signal: params.signal } : {}),
     });
@@ -318,7 +321,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       const messageId = params.messageId ?? relayId("msg");
       const response = await request({
         method: "POST",
-        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/messages`,
+        path: `/v1/chats/${encodeURIComponent(params.chatId)}/messages`,
         body: sendBody({ ...params, messageId }),
         ...(params.signal ? { signal: params.signal } : {}),
       });
@@ -339,7 +342,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       const messageId = params.messageId ?? relayId("msg");
       const response = await request({
         method: "POST",
-        path: `/v2/conversations/${encodeURIComponent(params.conversationId)}/messages`,
+        path: `/v2/chats/${encodeURIComponent(params.chatId)}/messages`,
         body: sendBody({ ...params, messageId }),
         ...(params.signal ? { signal: params.signal } : {}),
       });
@@ -389,8 +392,8 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
         path: `/v1/messages/${encodeURIComponent(params.messageId)}/reactions`,
         body: {
           operation: params.operation,
-          type: "emoji",
-          emoji: params.emoji,
+          type: params.type,
+          ...(params.customEmoji !== undefined ? { custom_emoji: params.customEmoji } : {}),
           ...(params.targetPartId ? { target_part_id: params.targetPartId } : {}),
         },
         ...(params.signal ? { signal: params.signal } : {}),
@@ -408,7 +411,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     getHistory: async (params) => {
       const response = await request({
         method: "GET",
-        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/messages`,
+        path: `/v1/chats/${encodeURIComponent(params.chatId)}/messages`,
         query: {
           ...(params.limit === undefined ? {} : { limit: params.limit }),
           ...(params.beforeSequence === undefined
@@ -427,7 +430,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     setTyping: async (params) => {
       await request({
         method: "POST",
-        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/typing`,
+        path: `/v1/chats/${encodeURIComponent(params.chatId)}/typing`,
         body: { started: params.started },
         ...(params.signal ? { signal: params.signal } : {}),
       });

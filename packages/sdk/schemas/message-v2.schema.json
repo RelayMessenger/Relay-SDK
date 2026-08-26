@@ -2,9 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://api.relayapp.im/schemas/message-v2.schema.json",
   "title": "Relay message model v2",
-  "description": "The canonical wire contract for Relay's message model: one send is one message, message content is immutable, every stored part carries a permanent identity, a reply is a pointer rather than a copied quote, and a reaction is one emoji per actor per slot. Relay-Server owns this file. Every shape here is generated from and validated against real server responses by server/scripts/contract-fixtures-test.ts; nothing may be added to it that the server does not emit.",
+  "description": "The canonical wire contract for Relay's message model: one send is one message, message content is immutable, every stored part carries a permanent identity, a reply is a pointer rather than a copied quote, and a reaction is one tapback per actor per slot (Apple's six verbs plus a custom emoji). Relay-Server owns this file. Every shape here is generated from and validated against real server responses by server/scripts/contract-fixtures-test.ts; nothing may be added to it that the server does not emit.",
   "$comment": "Clients MUST tolerate part types they do not know. The Part union is deliberately open: an unrecognised `type` matches $defs/UnknownPart, which requires only the identity fields (part_id, part_index) and permits any other member. Render such a part with the message's fallback_text and leave it otherwise untouched — do not drop it, and do not fail the message. Clients MUST also tolerate additive members on known shapes: Relay adds optional fields without a version bump.",
-
   "$defs": {
     "messageId": {
       "type": "string",
@@ -16,48 +15,65 @@
       "pattern": "^prt_[0-9a-hjkmnp-tv-z]{26}$",
       "description": "A permanent part identity, assigned at commit. A reply or a reaction that targets one exact part names it by this."
     },
-    "conversationId": { "type": "string", "pattern": "^cnv_[0-9a-hjkmnp-tv-z]{26}$" },
-    "attachmentId": { "type": "string", "pattern": "^att_[0-9a-hjkmnp-tv-z]{26}$" },
-    "participantId": { "type": "string", "pattern": "^(usr|agt)_[0-9a-hjkmnp-tv-z]{26}$" },
-
+    "attachmentId": {
+      "type": "string",
+      "pattern": "^att_[0-9a-hjkmnp-tv-z]{26}$"
+    },
     "Actor": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "id"],
+      "required": [
+        "kind",
+        "id"
+      ],
       "description": "Anyone who can act in a conversation. Humans are `user`, agents are `agent`; storage and wire spell it the same way, and there is no `system` actor — a group notice is sent by the person who caused it.",
       "properties": {
-        "kind": { "type": "string", "enum": ["user", "agent"] },
-        "id": { "$ref": "#/$defs/participantId" }
+        "kind": {
+          "type": "string",
+          "enum": [
+            "user",
+            "agent"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/handleId"
+        }
       }
     },
-
     "mentionHandle": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]{2,31}$",
       "description": "The handle of a mentioned user or agent, without the leading '@'."
     },
-    "mentions": {
-      "type": "array",
-      "maxItems": 16,
-      "uniqueItems": true,
-      "description": "The handles this message mentions, each of which must be written as '@handle' in the part's `text` — at its start or after a space, newline, bracket or quote. A handle typed but never confirmed against the sender's suggestion list is absent here and stays plain text. There are no offsets: a mention can only ever be the handle itself.",
-      "items": { "$ref": "#/$defs/mentionHandle" }
-    },
-
     "StyleRange": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["start", "length", "styles"],
+      "required": [
+        "start",
+        "length",
+        "styles"
+      ],
       "description": "One formatting run over a text part, in the same UTF-16 offsets mentions use. Presentation only: the text stays canonical and fallback text ignores styling.",
       "properties": {
-        "start": { "type": "integer", "minimum": 0 },
-        "length": { "type": "integer", "minimum": 1 },
+        "start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1
+        },
         "styles": {
           "type": "array",
           "minItems": 1,
           "items": {
             "type": "string",
-            "enum": ["bold", "italic", "underline", "strikethrough"]
+            "enum": [
+              "bold",
+              "italic",
+              "underline",
+              "strikethrough"
+            ]
           }
         }
       }
@@ -66,9 +82,10 @@
       "type": "array",
       "maxItems": 200,
       "description": "An empty array is meaningful: it marks structured plain text, distinguishing it from a legacy Markdown body. Absent means legacy.",
-      "items": { "$ref": "#/$defs/StyleRange" }
+      "items": {
+        "$ref": "#/$defs/StyleRange"
+      }
     },
-
     "blurHash": {
       "type": "string",
       "minLength": 6,
@@ -76,383 +93,818 @@
       "pattern": "^[0-9A-Za-z#$%*+,\\-.:;=?@\\[\\]^_{|}~]{6,96}$",
       "description": "Compact placeholder a client decodes into a soft preview before the bytes download."
     },
-
     "TextPart": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["part_id", "part_index", "type", "text"],
+      "required": [
+        "part_id",
+        "part_index",
+        "type",
+        "text"
+      ],
       "properties": {
-        "part_id": { "$ref": "#/$defs/partId" },
-        "part_index": { "type": "integer", "minimum": 0 },
-        "type": { "const": "text" },
-        "text": { "type": "string" },
-        "mentions": { "$ref": "#/$defs/mentions" },
-        "styles": { "$ref": "#/$defs/styles" }
-      }
-    },
-
-    "MediaPart": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["part_id", "part_index", "type"],
-      "description": "A photo, video, audio file or document. Attachment-backed media carries `attachment_id` and a capability `url`; remote media carries `url` alone.",
-      "properties": {
-        "part_id": { "$ref": "#/$defs/partId" },
-        "part_index": { "type": "integer", "minimum": 0 },
-        "type": { "const": "media" },
-        "attachment_id": { "$ref": "#/$defs/attachmentId" },
-        "url": { "type": "string", "format": "uri" },
-        "content_type": { "type": "string" },
-        "media_kind": { "type": "string", "enum": ["image", "video", "audio", "file"] },
-        "filename": { "type": "string", "minLength": 1, "maxLength": 180 },
-        "size_bytes": { "type": "integer", "minimum": 0, "maximum": 104857600 },
-        "width": { "type": "integer", "minimum": 1, "maximum": 100000 },
-        "height": { "type": "integer", "minimum": 1, "maximum": 100000 },
-        "blur_hash": { "$ref": "#/$defs/blurHash" }
-      }
-    },
-
-    "VoiceMemoPart": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["part_id", "part_index", "type"],
-      "properties": {
-        "part_id": { "$ref": "#/$defs/partId" },
-        "part_index": { "type": "integer", "minimum": 0 },
-        "type": { "const": "voice_memo" },
-        "attachment_id": { "$ref": "#/$defs/attachmentId" },
-        "url": { "type": "string", "format": "uri" },
-        "duration_ms": { "type": "integer", "minimum": 0 }
-      }
-    },
-
-    "LinkPreviewPart": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["part_id", "part_index", "type", "url"],
-      "description": "Metadata the SENDER resolved, carried with the message, so a recipient never opens a connection to a URL somebody else chose. `title` and `description` are stored with the part and echoed on history reads; they are absent from the send response and from event payloads, so a client that needs them reads them back.",
-      "properties": {
-        "part_id": { "$ref": "#/$defs/partId" },
-        "part_index": { "type": "integer", "minimum": 0 },
-        "type": { "const": "link_preview" },
-        "url": { "type": "string", "format": "uri" },
-        "title": { "type": "string", "maxLength": 512 },
-        "description": { "type": "string", "maxLength": 512 }
-      }
-    },
-
-    "DataPart": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["part_id", "part_index", "type", "data"],
-      "description": "A structured component. `data.type` names the component. A group notice carries its GroupMutationData here; see group-lifecycle-event.schema.json.",
-      "properties": {
-        "part_id": { "$ref": "#/$defs/partId" },
-        "part_index": { "type": "integer", "minimum": 0 },
-        "type": { "const": "data" },
-        "data": true
-      }
-    },
-
-    "UnknownPart": {
-      "type": "object",
-      "additionalProperties": true,
-      "required": ["part_id", "part_index", "type"],
-      "description": "The catch-all that keeps the Part union open. A client that meets a part type it does not know MUST render the message's fallback_text for it rather than dropping the part or rejecting the message.",
-      "properties": {
-        "part_id": { "$ref": "#/$defs/partId" },
-        "part_index": { "type": "integer", "minimum": 0 },
+        "part_id": {
+          "$ref": "#/$defs/partId"
+        },
+        "part_index": {
+          "type": "integer",
+          "minimum": 0
+        },
         "type": {
-          "type": "string",
-          "not": { "enum": ["text", "media", "voice_memo", "link_preview", "data"] }
+          "const": "text"
+        },
+        "text": {
+          "type": "string"
+        },
+        "styles": {
+          "$ref": "#/$defs/styles"
+        },
+        "mention": {
+          "$ref": "#/$defs/mentionHandle"
+        },
+        "mention_range": {
+          "$ref": "#/$defs/mentionRange"
         }
       }
     },
-
+    "MediaPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "part_id",
+        "part_index",
+        "type"
+      ],
+      "description": "A photo, video, audio file or document. Attachment-backed media carries `attachment_id` and a capability `url`; remote media carries `url` alone.",
+      "properties": {
+        "part_id": {
+          "$ref": "#/$defs/partId"
+        },
+        "part_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "media"
+        },
+        "attachment_id": {
+          "$ref": "#/$defs/attachmentId"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "media_kind": {
+          "type": "string",
+          "enum": [
+            "image",
+            "video",
+            "audio",
+            "file"
+          ]
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 104857600
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "blur_hash": {
+          "$ref": "#/$defs/blurHash"
+        },
+        "mime_type": {
+          "type": "string"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "DataPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "part_id",
+        "part_index",
+        "type",
+        "data"
+      ],
+      "description": "A structured component. `data.type` names the component. A group notice carries its GroupMutationData here; see group-lifecycle-event.schema.json.",
+      "properties": {
+        "part_id": {
+          "$ref": "#/$defs/partId"
+        },
+        "part_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "data"
+        },
+        "data": true
+      }
+    },
+    "UnknownPart": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "part_id",
+        "part_index",
+        "type"
+      ],
+      "description": "The catch-all that keeps the Part union open. A client that meets a part type it does not know MUST render the message's fallback_text for it rather than dropping the part or rejecting the message.",
+      "properties": {
+        "part_id": {
+          "$ref": "#/$defs/partId"
+        },
+        "part_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "type": "string",
+          "not": {
+            "enum": [
+              "text",
+              "media",
+              "link",
+              "data"
+            ]
+          }
+        }
+      }
+    },
     "Part": {
       "description": "One part of a message, discriminated on `type`. The union is open by design; see UnknownPart.",
       "oneOf": [
-        { "$ref": "#/$defs/TextPart" },
-        { "$ref": "#/$defs/MediaPart" },
-        { "$ref": "#/$defs/VoiceMemoPart" },
-        { "$ref": "#/$defs/LinkPreviewPart" },
-        { "$ref": "#/$defs/DataPart" },
-        { "$ref": "#/$defs/UnknownPart" }
+        {
+          "$ref": "#/$defs/TextPart"
+        },
+        {
+          "$ref": "#/$defs/MediaPart"
+        },
+        {
+          "$ref": "#/$defs/LinkPart"
+        },
+        {
+          "$ref": "#/$defs/DataPart"
+        },
+        {
+          "$ref": "#/$defs/UnknownPart"
+        }
       ]
     },
-
     "ReplyRef": {
       "oneOf": [
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["message_id"],
+          "required": [
+            "message_id"
+          ],
           "description": "A pointer, never a copy. The client draws the quote from the target message it already has; Relay stores no snapshot, so there is no quote to go stale and no quote state to interpret. A target the reader cannot see is a pointer that resolves to nothing — render the reply without a quote.",
           "properties": {
-            "message_id": { "$ref": "#/$defs/messageId" },
+            "message_id": {
+              "$ref": "#/$defs/messageId"
+            },
             "part_id": {
               "$ref": "#/$defs/partId",
               "description": "Present when the reply targeted one specific part."
             }
           }
         },
-        { "type": "null" }
+        {
+          "type": "null"
+        }
       ]
     },
-
     "Reaction": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["target_part_id", "emoji", "actor_kind", "actor_id", "created_at"],
+      "required": [
+        "target_part_id",
+        "type",
+        "actor_kind",
+        "actor_id",
+        "created_at"
+      ],
       "description": "One reaction as projected onto a message. One per (message, target slot, actor): adding a second emoji to the same slot replaces the first, and removing one that is not there is a no-op.",
       "properties": {
         "target_part_id": {
-          "oneOf": [{ "$ref": "#/$defs/partId" }, { "type": "null" }],
+          "oneOf": [
+            {
+              "$ref": "#/$defs/partId"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "The part this reaction targets; null for a whole-message reaction."
         },
-        "emoji": { "type": "string", "minLength": 1, "maxLength": 32 },
-        "actor_kind": { "type": "string", "enum": ["user", "agent"] },
-        "actor_id": { "$ref": "#/$defs/participantId" },
-        "created_at": { "type": "string", "format": "date-time" }
+        "actor_kind": {
+          "type": "string",
+          "enum": [
+            "user",
+            "agent"
+          ]
+        },
+        "actor_id": {
+          "$ref": "#/$defs/handleId"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "love",
+            "like",
+            "dislike",
+            "laugh",
+            "emphasize",
+            "question",
+            "custom"
+          ],
+          "description": "Apple's six tapback verbs (chat.db associated_message_type 2000–2005, Linq's spellings) plus custom."
+        },
+        "custom_emoji": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Present exactly when `type` is `custom`."
+        }
       }
     },
-
     "Message": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "id",
-        "conversation_id",
+        "chat_id",
         "sequence",
-        "kind",
-        "sender",
+        "item_type",
+        "sender_handle",
         "is_from_me",
         "parts",
         "reply_to",
-        "fallback_text",
+        "text",
         "status",
         "created_at"
       ],
       "description": "One stored message as one viewer sees it. Content is immutable — there is no edit, no unsend, no version and no tombstone — so this is the row plus its parts, its reactions on a read, and (in a direct conversation) its receipt stamps.",
       "properties": {
-        "id": { "$ref": "#/$defs/messageId" },
-        "conversation_id": { "$ref": "#/$defs/conversationId" },
-        "sequence": { "type": "integer", "minimum": 1 },
-        "kind": {
-          "type": "string",
-          "enum": ["message", "notice"],
-          "description": "`notice` is a group notice (\"Alice added Bob\"), sent by the person who did it rather than by a system participant. Its part 0 is the human-readable line and part 1 is a `data` part carrying the structured mutation."
+        "id": {
+          "$ref": "#/$defs/messageId"
         },
-        "sender": { "$ref": "#/$defs/Actor" },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
         "is_from_me": {
           "type": "boolean",
           "description": "True when the authenticated account this payload was projected for is the sender. Relay resolves direction so a client never compares sender.id against its own identity — a comparison that is wrong for every other human in a group."
         },
-        "parts": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/Part" } },
-        "reply_to": { "$ref": "#/$defs/ReplyRef" },
+        "parts": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/Part"
+          },
+          "description": "An item_type 0 message has at least one part; an item_type != 0 notice carries none — its human line is `text`."
+        },
+        "reply_to": {
+          "$ref": "#/$defs/ReplyRef"
+        },
         "reactions": {
           "type": "array",
-          "items": { "$ref": "#/$defs/Reaction" },
+          "items": {
+            "$ref": "#/$defs/Reaction"
+          },
           "description": "Resolved on reads. A send response and an event payload carry the committed message alone and omit this."
-        },
-        "fallback_text": {
-          "type": "string",
-          "description": "A plain-text rendering of the whole message, for notifications, previews and any client that cannot render a part it was handed."
         },
         "status": {
           "type": "string",
-          "enum": ["sent", "delivered", "read"],
+          "enum": [
+            "sent",
+            "delivered",
+            "read"
+          ],
           "description": "Direct conversations carry one stamp per message; a group message is always `sent`, the way iMessage behaves in groups."
         },
-        "delivered_at": { "type": "string", "format": "date-time" },
-        "read_at": { "type": "string", "format": "date-time" },
-        "created_at": { "type": "string", "format": "date-time" }
-      }
+        "delivered_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "read_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "chat_id": {
+          "$ref": "#/$defs/chatId"
+        },
+        "item_type": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "description": "chat.db's item_type: 0 an ordinary message, 1 a participant change (group_action_type 0 = added, 1 = removed/left; other_handle = who), 2 a rename (group_title), 3 a group-photo change. The sender of a non-zero row is the person who did the thing."
+        },
+        "group_action_type": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "other_handle": {
+          "$ref": "#/$defs/handleId"
+        },
+        "group_title": {
+          "type": "string"
+        },
+        "is_audio_message": {
+          "type": "boolean",
+          "description": "chat.db's is_audio_message: this message is a voice memo."
+        },
+        "sender_handle": {
+          "$ref": "#/$defs/Actor"
+        },
+        "text": {
+          "type": "string",
+          "description": "A plain-text rendering of the whole message, for notifications, previews and any client that cannot render a part it was handed."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "item_type": {
+                "const": 0
+              }
+            },
+            "required": [
+              "item_type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parts": {
+                "type": "array",
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
     },
-
     "VisibleMessage": {
       "$ref": "#/$defs/Message",
       "description": "Retained name for the one message shape. Unsend is gone, so there is nothing invisible to distinguish it from."
     },
-
     "IncomingPart": {
       "type": "object",
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "description": "A part as a client submits it. The server mints the identity; a client never supplies part_id or part_index.",
       "properties": {
-        "type": { "type": "string", "enum": ["text", "media", "voice_memo", "link_preview", "data"] },
-        "text": { "type": "string" },
-        "mentions": { "$ref": "#/$defs/mentions" },
-        "styles": { "$ref": "#/$defs/styles" },
-        "url": { "type": "string", "format": "uri" },
-        "title": { "type": "string", "maxLength": 512 },
-        "description": { "type": "string", "maxLength": 512 },
-        "attachment_id": { "$ref": "#/$defs/attachmentId" },
-        "content_type": { "type": "string" },
-        "media_kind": { "type": "string", "enum": ["image", "video", "audio", "file"] },
-        "filename": { "type": "string", "minLength": 1, "maxLength": 180 },
-        "size_bytes": { "type": "integer", "minimum": 0, "maximum": 104857600 },
-        "duration_ms": { "type": "integer", "minimum": 0 },
-        "width": { "type": "integer", "minimum": 1, "maximum": 100000 },
-        "height": { "type": "integer", "minimum": 1, "maximum": 100000 },
-        "blur_hash": { "$ref": "#/$defs/blurHash" },
+        "type": {
+          "type": "string",
+          "enum": [
+            "text",
+            "media",
+            "link",
+            "data"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "styles": {
+          "$ref": "#/$defs/styles"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "attachment_id": {
+          "$ref": "#/$defs/attachmentId"
+        },
+        "media_kind": {
+          "type": "string",
+          "enum": [
+            "image",
+            "video",
+            "audio",
+            "file"
+          ]
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 104857600
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "blur_hash": {
+          "$ref": "#/$defs/blurHash"
+        },
         "data": true,
         "part_id": false,
-        "part_index": false
+        "part_index": false,
+        "mime_type": {
+          "type": "string"
+        },
+        "mention": {
+          "$ref": "#/$defs/mentionHandle"
+        },
+        "mention_range": {
+          "$ref": "#/$defs/mentionRange"
+        }
       }
     },
-
     "SendRequestV2": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["message_id", "parts"],
+      "required": [
+        "message_id",
+        "parts"
+      ],
       "description": "POST /v2/conversations/{conversation_id}/messages. One send is one message: mixed media and text stay together instead of being split into a run of messages. `message_id` is the whole idempotency story — retrying the same id replays the original 201, and no Idempotency-Key header is involved.",
       "properties": {
-        "message_id": { "$ref": "#/$defs/messageId" },
-        "parts": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/IncomingPart" } },
+        "message_id": {
+          "$ref": "#/$defs/messageId"
+        },
+        "parts": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/IncomingPart"
+          },
+          "description": "An item_type 0 message has at least one part; an item_type != 0 notice carries none — its human line is `text`."
+        },
         "reply_to": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["message_id"],
+          "required": [
+            "message_id"
+          ],
           "description": "A pointer to a message of this conversation, optionally to one exact part of it.",
           "properties": {
-            "message_id": { "$ref": "#/$defs/messageId" },
-            "part_id": { "$ref": "#/$defs/partId" }
+            "message_id": {
+              "$ref": "#/$defs/messageId"
+            },
+            "part_id": {
+              "$ref": "#/$defs/partId"
+            }
           }
         },
-        "fallback_text": { "type": "string" },
         "invoked_agent_ids": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^agt_[0-9a-hjkmnp-tv-z]{26}$" },
+          "items": {
+            "type": "string",
+            "pattern": "^agt_[0-9a-hjkmnp-tv-z]{26}$"
+          },
           "description": "DEPRECATED and ignored. An agent is a normal group member now; shipped SDKs still send this, so the field is accepted rather than rejected. New clients must omit it."
         },
         "invocation_id": {
           "type": "string",
           "description": "DEPRECATED and ignored, for the same reason as invoked_agent_ids."
+        },
+        "text": {
+          "type": "string"
+        },
+        "is_audio_message": {
+          "type": "boolean"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "item_type": {
+                "const": 0
+              }
+            },
+            "required": [
+              "item_type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parts": {
+                "type": "array",
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
     },
-
     "SendResponseV2": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["message"],
-      "properties": { "message": { "$ref": "#/$defs/Message" } },
+      "required": [
+        "message"
+      ],
+      "properties": {
+        "message": {
+          "$ref": "#/$defs/Message"
+        }
+      },
       "$comment": "201. A retry with the same message_id replays this exact body."
     },
-
     "SendResponseV1": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["messages"],
+      "required": [
+        "messages"
+      ],
       "description": "201 from POST /v1/conversations/{conversation_id}/messages. The array always has exactly one element: Relay no longer splits a send. Shipped clients read an array, which is the only reason it is still one.",
       "properties": {
-        "messages": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "$ref": "#/$defs/Message" } }
+        "messages": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        }
       }
     },
-
     "AgentSendResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["message_id", "message"],
+      "required": [
+        "message_id",
+        "message"
+      ],
       "description": "202 from POST /v1/messages, the agent send.",
       "properties": {
-        "message_id": { "$ref": "#/$defs/messageId" },
-        "message": { "$ref": "#/$defs/Message" }
+        "message_id": {
+          "$ref": "#/$defs/messageId"
+        },
+        "message": {
+          "$ref": "#/$defs/Message"
+        }
       }
     },
-
     "ReactionRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["operation", "emoji"],
+      "required": [
+        "operation",
+        "type"
+      ],
       "description": "POST /v1/messages/{message_id}/reactions. Omit target_part_id to react to the whole message. Repeating a request changes nothing the second time, so there is no operation id.",
       "properties": {
-        "operation": { "type": "string", "enum": ["add", "remove"] },
-        "type": { "const": "emoji" },
-        "emoji": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "add",
+            "remove"
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "love",
+            "like",
+            "dislike",
+            "laugh",
+            "emphasize",
+            "question",
+            "custom"
+          ],
+          "description": "Apple's six tapback verbs (chat.db associated_message_type 2000–2005, Linq's spellings) plus custom."
+        },
         "target_part_id": {
-          "oneOf": [{ "$ref": "#/$defs/partId" }, { "type": "null" }],
+          "oneOf": [
+            {
+              "$ref": "#/$defs/partId"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "One exact part of the target message. Null or absent means the whole message."
+        },
+        "custom_emoji": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Present exactly when `type` is `custom`."
         }
       }
     },
-
     "ReactionResult": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["message_id", "target_part_id", "type", "emoji", "actor", "operation", "changed"],
+      "required": [
+        "message_id",
+        "target_part_id",
+        "type",
+        "actor",
+        "operation",
+        "changed"
+      ],
       "description": "Both the 200 body and the reaction.changed / reaction.added / reaction.removed event payload.",
       "properties": {
-        "message_id": { "$ref": "#/$defs/messageId" },
-        "target_part_id": { "oneOf": [{ "$ref": "#/$defs/partId" }, { "type": "null" }] },
-        "type": { "const": "emoji" },
-        "emoji": { "type": "string" },
-        "actor": { "$ref": "#/$defs/Actor" },
-        "operation": { "type": "string", "enum": ["add", "remove"] },
+        "message_id": {
+          "$ref": "#/$defs/messageId"
+        },
+        "target_part_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/partId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "love",
+            "like",
+            "dislike",
+            "laugh",
+            "emphasize",
+            "question",
+            "custom"
+          ],
+          "description": "Apple's six tapback verbs (chat.db associated_message_type 2000–2005, Linq's spellings) plus custom."
+        },
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "add",
+            "remove"
+          ]
+        },
         "changed": {
           "type": "boolean",
           "description": "False when the request was a no-op — removing a reaction that was not there, or re-adding the one already in the slot. Events are emitted only when this is true."
+        },
+        "custom_emoji": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Present exactly when `type` is `custom`."
         }
       }
     },
-
     "ReactionResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["reaction"],
-      "properties": { "reaction": { "$ref": "#/$defs/ReactionResult" } }
+      "required": [
+        "reaction"
+      ],
+      "properties": {
+        "reaction": {
+          "$ref": "#/$defs/ReactionResult"
+        }
+      }
     },
-
     "Receipt": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["message_id", "conversation_id", "through_sequence", "recipient", "status", "at"],
+      "required": [
+        "message_id",
+        "chat_id",
+        "through_sequence",
+        "recipient",
+        "status",
+        "at"
+      ],
       "description": "The 200 body of POST /v1/conversations/{id}/read and /delivered: the watermark this actor advanced to. `read` implies delivered; an older or repeated target changes nothing.",
       "properties": {
-        "message_id": { "$ref": "#/$defs/messageId" },
-        "conversation_id": { "$ref": "#/$defs/conversationId" },
-        "through_sequence": { "type": "integer", "minimum": 0 },
-        "recipient": { "$ref": "#/$defs/Actor" },
-        "status": { "type": "string", "enum": ["delivered", "read"] },
-        "at": { "type": "string", "format": "date-time" }
+        "message_id": {
+          "$ref": "#/$defs/messageId"
+        },
+        "through_sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recipient": {
+          "$ref": "#/$defs/Actor"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "delivered",
+            "read"
+          ]
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "chat_id": {
+          "$ref": "#/$defs/chatId"
+        }
       }
     },
-
     "ReceiptResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["receipt", "advanced"],
+      "required": [
+        "receipt",
+        "advanced"
+      ],
       "properties": {
-        "receipt": { "$ref": "#/$defs/Receipt" },
+        "receipt": {
+          "$ref": "#/$defs/Receipt"
+        },
         "advanced": {
           "type": "boolean",
           "description": "False when the watermark was already at or past the named message."
         }
       }
     },
-
     "HistoryPage": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["messages"],
+      "required": [
+        "messages"
+      ],
       "description": "GET /v1/conversations/{id}/messages, newest first, inside the caller's membership window.",
       "properties": {
-        "messages": { "type": "array", "items": { "$ref": "#/$defs/Message" } }
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        }
       }
     },
-
     "ErrorBody": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["error"],
+      "required": [
+        "error"
+      ],
       "description": "Every Relay error.",
       "properties": {
         "error": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["code", "message"],
+          "required": [
+            "code",
+            "message"
+          ],
           "properties": {
             "code": {
               "type": "string",
@@ -466,9 +918,72 @@
                 "temporarily_unavailable"
               ]
             },
-            "message": { "type": "string" },
-            "details": { "type": "object" }
+            "message": {
+              "type": "string"
+            },
+            "details": {
+              "type": "object"
+            }
           }
+        }
+      }
+    },
+    "chatId": {
+      "type": "string",
+      "pattern": "^cnv_[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "handleId": {
+      "type": "string",
+      "pattern": "^(usr|agt)_[0-9a-hjkmnp-tv-z]{26}$"
+    },
+    "mentionRange": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        }
+      ],
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "[start, end) UTF-16 code-unit offsets over the part's `text`."
+    },
+    "LinkPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "part_id",
+        "part_index",
+        "type",
+        "url"
+      ],
+      "description": "Metadata the SENDER resolved, carried with the message, so a recipient never opens a connection to a URL somebody else chose. `title` and `description` are stored with the part and echoed on history reads; they are absent from the send response and from event payloads, so a client that needs them reads them back.",
+      "properties": {
+        "part_id": {
+          "$ref": "#/$defs/partId"
+        },
+        "part_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "link"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 512
         }
       }
     }
