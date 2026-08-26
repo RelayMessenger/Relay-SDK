@@ -13,7 +13,7 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
  * Canonicalize and validate the credential destination. Bearer tokens are
  * only sent to HTTPS origins; plain HTTP is allowed solely for a loopback
  * development server. Paths, query strings, fragments, and embedded
- * credentials are rejected so two spellings cannot identify one consumer.
+ * credentials are rejected so two spellings cannot name one origin.
  */
 export function normalizeRelayBaseUrl(value: string): string {
   let url: URL;
@@ -81,19 +81,23 @@ export class RelayClient {
   }
 
   /**
-   * Long-polls GET /v1/events. Resolves with an empty batch on server-side
-   * timeout. The fetch itself is aborted at timeoutSeconds + 15s so a hung
-   * connection cannot wedge the loop.
+   * Long-polls GET /v1/events for everything after `after`. Resolves with an
+   * empty batch on server-side timeout. The fetch itself is aborted at
+   * timeoutSeconds + 15s so a hung connection cannot wedge the loop.
+   *
+   * A plain pull: no exclusive consumer, no acknowledgement handshake, and it
+   * coexists with a webhook. Delivery is at least once, so an event seen
+   * before is ignored rather than reconciled.
    */
   async pollEvents(params: {
-    cursor: number;
+    after: number;
     timeoutSeconds?: number;
     limit?: number;
     signal?: AbortSignal;
   }): Promise<PollEventsResponse> {
     const timeoutSeconds = params.timeoutSeconds ?? 25;
     const url = new URL(`${this.baseUrl}/v1/events`);
-    url.searchParams.set("cursor", String(params.cursor));
+    url.searchParams.set("after", String(params.after));
     url.searchParams.set("timeout", String(timeoutSeconds));
     url.searchParams.set("limit", String(params.limit ?? 100));
 
@@ -105,20 +109,25 @@ export class RelayClient {
     });
     if (!response.ok) throw await this.parseError(response);
     const body = (await response.json()) as Partial<PollEventsResponse>;
+    const nextCursor =
+      typeof body.next_cursor === "number" ? body.next_cursor : params.after;
     return {
       events: Array.isArray(body.events) ? body.events : [],
-      next_cursor: typeof body.next_cursor === "number" ? body.next_cursor : params.cursor,
+      next_cursor: nextCursor,
+      latest: typeof body.latest === "number" ? body.latest : nextCursor,
+      has_more: body.has_more === true,
     };
   }
 
-  /** POST /v1/messages with the mandatory Idempotency-Key header. */
-  async sendMessage(body: SendMessageBody, idempotencyKey: string): Promise<unknown> {
+  /**
+   * POST /v1/messages. The body's `message_id` is the whole idempotency
+   * mechanism: replaying it returns the message it already committed, so
+   * there is no key header to send.
+   */
+  async sendMessage(body: SendMessageBody): Promise<unknown> {
     const response = await this.fetchImpl(`${this.baseUrl}/v1/messages`, {
       method: "POST",
-      headers: this.headers({
-        "Content-Type": "application/json",
-        "Idempotency-Key": idempotencyKey,
-      }),
+      headers: this.headers({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(30_000),
     });

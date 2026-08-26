@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { RelayApiError, type EventsPage, type RelayClient } from "./api.js";
+import type { EventsPage, PostMessageBody, RelayClient } from "./api.js";
 import type { EngineAdapter, TurnCallbacks } from "./engine/types.js";
 import {
   MAX_PERMISSION_PREVIEW_CHARS,
@@ -12,12 +12,7 @@ import {
   parseVerdictDataPart,
   parseVerdictText,
 } from "./permissions.js";
-import {
-  ReceiveLoop,
-  promptTextFromMessages,
-  turnIdempotencyKey,
-  undeliveredCursorTarget,
-} from "./receive.js";
+import { ReceiveLoop, promptTextFromMessages, turnLedgerKey } from "./receive.js";
 import {
   ApprovalStore,
   StateStore,
@@ -28,8 +23,16 @@ import {
 
 const OWNER = "usr_owner";
 
+/** A client-minted message id, as the server's grammar spells it. */
+const MESSAGE_ID = /^msg_[0-9a-hjkmnp-tv-z]{26}$/;
+
 function tempHome(): string {
   return mkdtempSync(join(tmpdir(), "relaymessenger-test-"));
+}
+
+/** One page of the agent's event log, caught up to `nextCursor`. */
+function page(events: RelayEvent[], nextCursor: number): EventsPage {
+  return { events, next_cursor: nextCursor, latest: nextCursor, has_more: false };
 }
 
 function userMessageEvent(
@@ -48,9 +51,11 @@ function userMessageEvent(
         id: `msg_${eventId}`,
         conversation_id: conversationId,
         sequence,
+        kind: "message",
         sender: { kind: "user", id: senderId },
-        parts: [{ type: "text", text }],
+        parts: [{ part_id: `prt_${eventId}`, part_index: 0, type: "text", text }],
         fallback_text: text,
+        reply_to: null,
       },
     },
   };
@@ -58,59 +63,42 @@ function userMessageEvent(
 
 function fakeClient(options: { pages?: EventsPage[] } = {}) {
   const pages = [...(options.pages ?? [])];
-  const posted: Array<{ body: any; key: string }> = [];
-  const typings: Array<{
-    conversationId: string;
-    started: boolean;
-    label?: string;
-    invocationId?: string;
-  }> = [];
-  const respondings: Array<{
-    conversationId: string;
-    messageId: string;
-    label?: string;
-    invocationId?: string;
-  }> = [];
+  const posted: Array<{ body: PostMessageBody }> = [];
+  const typings: Array<{ conversationId: string; started: boolean }> = [];
   const reads: Array<{ conversationId: string; messageId: string }> = [];
   const client = {
     origin: "http://fake",
-    async getEvents(cursor: number): Promise<EventsPage> {
-      const page = pages.shift();
-      return page ?? { events: [], next_cursor: cursor };
+    async getEvents(after: number): Promise<EventsPage> {
+      return pages.shift() ?? page([], after);
     },
-    pushPage(page: EventsPage) {
-      pages.push(page);
+    pushPage(next: EventsPage) {
+      pages.push(next);
     },
-    async postMessage(body: any, key: string) {
-      posted.push({ body, key });
-      // The server splits parts at ingest: one committed message per part
-      // in the 202, in display order.
+    // One send is one message: the id the caller minted is the message's
+    // identity, and reposting it would be a replay rather than a second send.
+    async postMessage(body: PostMessageBody) {
+      posted.push({ body });
+      const messageId = body.message_id ?? `msg_out_${posted.length}`;
       return {
-        messages: body.parts.map((part: unknown, index: number) => ({
-          id: `msg_out_${posted.length}_${index}`,
+        message_id: messageId,
+        message: {
+          id: messageId,
           conversation_id: body.conversation_id,
-          sequence: 100 + posted.length * 10 + index,
+          sequence: 100 + posted.length,
+          kind: "message" as const,
           sender: { kind: "agent" as const, id: "agt_1" },
-          parts: [part],
+          parts: body.parts.map((part, index) => ({
+            part_id: `prt_out_${posted.length}_${index}`,
+            part_index: index,
+            ...part,
+          })),
           fallback_text: "",
-        })),
+          reply_to: null,
+        },
       };
     },
-    async setTyping(
-      conversationId: string,
-      started: boolean,
-      label?: string,
-      invocationId?: string,
-    ) {
-      typings.push({ conversationId, started, label, invocationId });
-    },
-    async setResponding(
-      conversationId: string,
-      messageId: string,
-      label?: string,
-      invocationId?: string,
-    ) {
-      respondings.push({ conversationId, messageId, label, invocationId });
+    async setTyping(conversationId: string, started: boolean) {
+      typings.push({ conversationId, started });
     },
     async markRead(conversationId: string, messageId: string) {
       reads.push({ conversationId, messageId });
@@ -123,7 +111,6 @@ function fakeClient(options: { pages?: EventsPage[] } = {}) {
     client: client as unknown as RelayClient & { pushPage(p: EventsPage): void },
     posted,
     typings,
-    respondings,
     reads,
   };
 }
@@ -156,7 +143,7 @@ function fakeEngine() {
 }
 
 function makeLoop(home: string, pages: EventsPage[], debounceMs = 25) {
-  const { client, posted, typings, respondings, reads } = fakeClient({ pages });
+  const { client, posted, typings, reads } = fakeClient({ pages });
   const state = new StateStore(home);
   const approvals = new ApprovalStore(home);
   const fake = fakeEngine();
@@ -166,30 +153,7 @@ function makeLoop(home: string, pages: EventsPage[], debounceMs = 25) {
     debounceMs,
     cwd: "/tmp",
   });
-  return {
-    loop,
-    state,
-    approvals,
-    client,
-    posted,
-    typings,
-    respondings,
-    reads,
-    broker,
-    ...fake,
-  };
-}
-
-function groupMessageEvent(
-  eventId: string,
-  conversationId: string,
-  invocationId: string,
-  text: string,
-  sequence = 1,
-): RelayEvent {
-  const event = userMessageEvent(eventId, conversationId, text, sequence);
-  event.data!.invocation_id = invocationId;
-  return event;
+  return { loop, state, approvals, client, posted, typings, reads, broker, ...fake };
 }
 
 function diskState(home: string): BridgeState {
@@ -211,6 +175,14 @@ function pendingApproval(overrides: Partial<PendingApproval> = {}): PendingAppro
   };
 }
 
+/** The request id the card in `posted` was armed with. */
+function cardRequestId(entry: { body: PostMessageBody } | undefined): string | undefined {
+  const data = entry?.body.parts[1];
+  return data && data.type === "data"
+    ? (data.data as { request_id?: string }).request_id
+    : undefined;
+}
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function waitFor(
@@ -227,9 +199,7 @@ async function waitFor(
 
 test("cursor advances only with the durably persisted queue (single atomic write)", async () => {
   const home = tempHome();
-  const { loop } = makeLoop(home, [
-    { events: [userMessageEvent("evt_1", "cnv_a", "hello")], next_cursor: 7 },
-  ]);
+  const { loop } = makeLoop(home, [page([userMessageEvent("evt_1", "cnv_a", "hello")], 7)]);
   await loop.pollOnce();
   const persisted = diskState(home);
   assert.equal(persisted.cursor, 7);
@@ -241,7 +211,7 @@ test("cursor advances only with the durably persisted queue (single atomic write
 test("cursor is not acked when persistence fails", async () => {
   const home = tempHome();
   const { client } = fakeClient({
-    pages: [{ events: [userMessageEvent("evt_1", "cnv_a", "hello")], next_cursor: 9 }],
+    pages: [page([userMessageEvent("evt_1", "cnv_a", "hello")], 9)],
   });
   const state = new StateStore(home);
   state.persist(); // seed disk with cursor 0
@@ -270,13 +240,13 @@ test("cursor is not acked when persistence fails", async () => {
 test("events are processed in order within a conversation", async () => {
   const home = tempHome();
   const { loop, turns } = makeLoop(home, [
-    {
-      events: [
+    page(
+      [
         userMessageEvent("evt_1", "cnv_a", "first", 1),
         userMessageEvent("evt_2", "cnv_a", "second", 2),
       ],
-      next_cursor: 2,
-    },
+      2,
+    ),
   ]);
   await loop.pollOnce();
   await sleep(80);
@@ -290,8 +260,8 @@ test("event_id dedupe: repeated delivery is enqueued once", async () => {
   const home = tempHome();
   const duplicated = userMessageEvent("evt_dup", "cnv_a", "hello");
   const { loop, turns, state } = makeLoop(home, [
-    { events: [duplicated, duplicated], next_cursor: 1 },
-    { events: [duplicated], next_cursor: 1 },
+    page([duplicated, duplicated], 1),
+    page([duplicated], 1),
   ]);
   await loop.pollOnce();
   await loop.pollOnce();
@@ -307,14 +277,14 @@ test("debounce coalesces rapid messages into one turn; separate conversations st
   const { loop, turns, posted } = makeLoop(
     home,
     [
-      { events: [userMessageEvent("evt_1", "cnv_a", "part one")], next_cursor: 1 },
-      {
-        events: [
+      page([userMessageEvent("evt_1", "cnv_a", "part one")], 1),
+      page(
+        [
           userMessageEvent("evt_2", "cnv_a", "part two", 2),
           userMessageEvent("evt_3", "cnv_b", "other convo"),
         ],
-        next_cursor: 3,
-      },
+        3,
+      ),
     ],
     40,
   );
@@ -326,26 +296,23 @@ test("debounce coalesces rapid messages into one turn; separate conversations st
   const byConversation = Object.fromEntries(turns.map((turn) => [turn.conversationId, turn.prompt]));
   assert.equal(byConversation.cnv_a, "part one\n\npart two");
   assert.equal(byConversation.cnv_b, "other convo");
-  // Quiet finalization: one POST per turn, keyed on the turn.
+  // Quiet finalization: one message per turn, under an id this bridge minted.
   assert.equal(posted.length, 2);
-  assert.match(posted[0]!.key, /^relay-turn-[0-9a-f]{40}$/);
+  assert.match(posted[0]!.body.message_id!, MESSAGE_ID);
+  assert.notEqual(posted[0]!.body.message_id, posted[1]!.body.message_id);
   // Queue drained durably.
   assert.equal(Object.keys(diskState(home).pending_events).length, 0);
   loop.stop();
 });
 
-test("responding uses the last message in a debounced batch before engine execution", async () => {
+test("the read watermark covers the whole debounced batch before the engine runs", async () => {
   const home = tempHome();
   const calls: string[] = [];
-  const { client, respondings } = fakeClient();
-  client.setResponding = async (
-    conversationId: string,
-    messageId: string,
-    label?: string,
-    invocationId?: string,
-  ) => {
-    calls.push(`responding:${messageId}`);
-    respondings.push({ conversationId, messageId, label, invocationId });
+  const { client, reads } = fakeClient();
+  const originalMarkRead = client.markRead.bind(client);
+  client.markRead = async (conversationId: string, messageId: string) => {
+    calls.push(`read:${messageId}`);
+    await originalMarkRead(conversationId, messageId);
   };
   const state = new StateStore(home);
   state.current.pending_events.cnv_a = [
@@ -372,27 +339,18 @@ test("responding uses the last message in a debounced batch before engine execut
 
   await loop.runTurn("cnv_a");
 
-  assert.deepEqual(calls, ["responding:msg_evt_2", "engine"]);
-  assert.deepEqual(respondings, [
-    {
-      conversationId: "cnv_a",
-      messageId: "msg_evt_2",
-      label: "Claude Code",
-      invocationId: undefined,
-    },
-  ]);
+  assert.deepEqual(calls, ["read:msg_evt_2", "engine"]);
+  assert.deepEqual(reads, [{ conversationId: "cnv_a", messageId: "msg_evt_2" }]);
 });
 
-test("responding failure is propagated before any engine attempt", async () => {
+test("a rejected read receipt is propagated before any engine attempt", async () => {
   const home = tempHome();
   const { client } = fakeClient();
-  client.setResponding = async () => {
-    throw new Error("responding unavailable");
+  client.markRead = async () => {
+    throw new Error("receipts unavailable");
   };
   const state = new StateStore(home);
-  state.current.pending_events.cnv_a = [
-    userMessageEvent("evt_1", "cnv_a", "hello"),
-  ];
+  state.current.pending_events.cnv_a = [userMessageEvent("evt_1", "cnv_a", "hello")];
   state.persist();
   let engineStarts = 0;
   const engine: EngineAdapter = {
@@ -412,7 +370,8 @@ test("responding failure is propagated before any engine attempt", async () => {
     { ownerUserId: OWNER, cwd: "/tmp" },
   );
 
-  await assert.rejects(loop.runTurn("cnv_a"), /responding unavailable/);
+  // No tool turn may run behind a stale Delivered stamp.
+  await assert.rejects(loop.runTurn("cnv_a"), /receipts unavailable/);
   assert.equal(engineStarts, 0);
   assert.equal(state.current.attempted_turns?.cnv_a, undefined);
   assert.equal(state.current.pending_events.cnv_a?.length, 1);
@@ -425,9 +384,7 @@ test("typing lifecycle failures are logged instead of swallowed", async () => {
     throw new Error("typing unavailable");
   };
   const state = new StateStore(home);
-  state.current.pending_events.cnv_a = [
-    userMessageEvent("evt_1", "cnv_a", "hello"),
-  ];
+  state.current.pending_events.cnv_a = [userMessageEvent("evt_1", "cnv_a", "hello")];
   state.persist();
   const logs: string[] = [];
   const engine = fakeEngine().engine;
@@ -445,11 +402,26 @@ test("typing lifecycle failures are logged instead of swallowed", async () => {
   assert.ok(logs.some((line) => line.includes("typing stop failed")));
 });
 
+test("typing is fire and forget: started, kept alive, then stopped, with no label", async () => {
+  const home = tempHome();
+  const { loop, typings } = makeLoop(home, [
+    page([userMessageEvent("evt_1", "cnv_a", "hi")], 1),
+  ]);
+  await loop.pollOnce();
+  await sleep(80);
+  await loop.settle();
+  assert.deepEqual(typings[0], { conversationId: "cnv_a", started: true });
+  const stopped = typings.filter((call) => !call.started);
+  assert.equal(stopped.length, 1, "typing was stopped exactly once");
+  assert.equal(typings.at(-1)!.started, false);
+  loop.stop();
+});
+
 test("H1 regression: a message arriving mid-turn is kept and triggers a follow-up turn", async () => {
   const home = tempHome();
   const { loop, turns, client, setTurnGate } = makeLoop(
     home,
-    [{ events: [userMessageEvent("evt_1", "cnv_a", "first", 1)], next_cursor: 1 }],
+    [page([userMessageEvent("evt_1", "cnv_a", "first", 1)], 1)],
     20,
   );
   let releaseFirstTurn!: () => void;
@@ -463,7 +435,7 @@ test("H1 regression: a message arriving mid-turn is kept and triggers a follow-u
   assert.equal(turns.length, 1);
 
   // Second message lands while the first turn is still running.
-  client.pushPage({ events: [userMessageEvent("evt_2", "cnv_a", "second", 2)], next_cursor: 2 });
+  client.pushPage(page([userMessageEvent("evt_2", "cnv_a", "second", 2)], 2));
   await loop.pollOnce();
   // It must be durably queued, not clobbered by the in-flight turn.
   assert.equal(diskState(home).pending_events.cnv_a?.length, 2);
@@ -482,9 +454,9 @@ test("H1 regression: a message arriving mid-turn is kept and triggers a follow-u
 
 test("a message arriving mid-turn is marked read before the reply is delivered", async () => {
   const home = tempHome();
-  const { loop, turns, client, posted, reads, respondings, setTurnGate } = makeLoop(
+  const { loop, turns, client, posted, reads, setTurnGate } = makeLoop(
     home,
-    [{ events: [userMessageEvent("evt_1", "cnv_a", "first", 1)], next_cursor: 1 }],
+    [page([userMessageEvent("evt_1", "cnv_a", "first", 1)], 1)],
     20,
   );
   let releaseFirstTurn!: () => void;
@@ -496,13 +468,17 @@ test("a message arriving mid-turn is marked read before the reply is delivered",
   await loop.pollOnce();
   await sleep(60); // debounce fires; first turn is now blocked on the gate
   assert.equal(turns.length, 1);
-  assert.deepEqual(reads, [], "no catch-up receipt while the queue is empty");
+  // Only the turn's own watermark so far; nothing is queued behind it.
+  assert.deepEqual(reads, [{ conversationId: "cnv_a", messageId: "msg_evt_1" }]);
 
   // Second message lands while the first turn is still running: its receipt
   // must not wait for the first turn's reply.
-  client.pushPage({ events: [userMessageEvent("evt_2", "cnv_a", "second", 2)], next_cursor: 2 });
+  client.pushPage(page([userMessageEvent("evt_2", "cnv_a", "second", 2)], 2));
   await loop.pollOnce();
-  assert.deepEqual(reads, [{ conversationId: "cnv_a", messageId: "msg_evt_2" }]);
+  await waitFor(
+    () => reads.some((entry) => entry.messageId === "msg_evt_2"),
+    "the mid-turn arrival was never acknowledged",
+  );
   assert.equal(posted.length, 0, "the receipt precedes any reply delivery");
 
   releaseFirstTurn();
@@ -511,54 +487,45 @@ test("a message arriving mid-turn is marked read before the reply is delivered",
   await sleep(80); // follow-up debounce window
   await loop.settle();
 
-  // The durable watermark still lands at the follow-up turn's /responding.
+  // The follow-up turn re-asserts the same watermark durably before running.
   assert.deepEqual(
-    respondings.map((r) => r.messageId),
-    ["msg_evt_1", "msg_evt_2"],
+    reads.map((entry) => entry.messageId),
+    ["msg_evt_1", "msg_evt_2", "msg_evt_2"],
   );
-  assert.equal(reads.length, 1, "the catch-up receipt fires once per arrival, not per turn");
   loop.stop();
 });
 
-test("an unpromptable batch clears only itself and is still marked read", async () => {
+test("an unpromptable batch is dropped and still marked read", async () => {
   const home = tempHome();
-  const { loop, turns, reads, respondings, state } = makeLoop(home, []);
-  // A media-only message: no text part, empty fallback text. The later group
-  // invocation stays queued for its own turn (batchForTurn caps at inv_1).
-  const unpromptable = groupMessageEvent("evt_media", "cnv_a", "inv_1", "", 1);
+  const { loop, turns, reads, state } = makeLoop(home, []);
+  // A media-only message: no text part, empty fallback text. Nothing here can
+  // become a prompt, but it must not pin at Delivered forever either.
+  const unpromptable = userMessageEvent("evt_media", "cnv_a", "", 1);
   unpromptable.data!.message!.parts = [
-    { type: "link_preview", url: "https://example.com" },
+    { part_id: "prt_media", part_index: 0, type: "link_preview", url: "https://example.com" },
   ];
   unpromptable.data!.message!.fallback_text = "";
-  state.current.pending_events.cnv_a = [
-    unpromptable,
-    groupMessageEvent("evt_next", "cnv_a", "inv_2", "still here", 2),
-  ];
+  state.current.pending_events.cnv_a = [unpromptable];
   state.persist();
 
   await loop.runTurn("cnv_a");
 
   assert.equal(turns.length, 0, "an unpromptable batch never reaches the engine");
-  assert.deepEqual(respondings, [], "no responding lifecycle without an engine turn");
   assert.deepEqual(reads, [{ conversationId: "cnv_a", messageId: "msg_evt_media" }]);
-  assert.deepEqual(
-    diskState(home).pending_events.cnv_a?.map((event) => event.event_id),
-    ["evt_next"],
-    "later invocations survive the drop",
-  );
+  assert.equal(diskState(home).pending_events.cnv_a, undefined);
   loop.stop();
 });
 
 test("owner gate: non-owner messages are ignored; first owner message pins the conversation", async () => {
   const home = tempHome();
   const { loop, turns, state } = makeLoop(home, [
-    {
-      events: [
+    page(
+      [
         userMessageEvent("evt_intruder", "cnv_x", "ignore me", 1, "usr_intruder"),
         userMessageEvent("evt_owner", "cnv_a", "hello", 1, OWNER),
       ],
-      next_cursor: 2,
-    },
+      2,
+    ),
   ]);
   await loop.pollOnce();
   assert.equal(state.current.pending_events.cnv_x, undefined);
@@ -574,7 +541,7 @@ test("owner gate: non-owner messages are ignored; first owner message pins the c
 test("turn failure is surfaced and not replayed because tools may have partially run", async () => {
   const home = tempHome();
   const { client, posted } = fakeClient({
-    pages: [{ events: [userMessageEvent("evt_1", "cnv_a", "hello")], next_cursor: 1 }],
+    pages: [page([userMessageEvent("evt_1", "cnv_a", "hello")], 1)],
   });
   const state = new StateStore(home);
   const engine: EngineAdapter = {
@@ -596,7 +563,7 @@ test("turn failure is surfaced and not replayed because tools may have partially
   assert.equal(diskState(home).pending_events.cnv_a, undefined);
   assert.equal(diskState(home).attempted_turns?.cnv_a, undefined);
   assert.equal(posted.length, 1);
-  assert.match(posted[0]!.body.parts[0].text, /turn failed/i);
+  assert.match((posted[0]!.body.parts[0] as { text: string }).text, /turn failed/i);
   loop.stop();
 });
 
@@ -605,7 +572,7 @@ test("crash marker drops an interrupted tool turn instead of executing it twice"
   const { client, posted } = fakeClient();
   const state = new StateStore(home);
   const event = userMessageEvent("evt_crash", "cnv_a", "deploy it");
-  const key = turnIdempotencyKey("cnv_a", [event.event_id]);
+  const key = turnLedgerKey("cnv_a", [event.event_id]);
   state.current.pending_events.cnv_a = [event];
   (state.current.attempted_turns ??= {}).cnv_a = {
     turn_key: key,
@@ -625,7 +592,7 @@ test("crash marker drops an interrupted tool turn instead of executing it twice"
   assert.equal(fake.turns.length, 0, "interrupted engine turn must not run again");
   assert.equal(diskState(home).pending_events.cnv_a, undefined);
   assert.equal(posted.length, 1);
-  assert.match(posted[0]!.body.parts[0].text, /not retried automatically/);
+  assert.match((posted[0]!.body.parts[0] as { text: string }).text, /not retried automatically/);
   loop.stop();
 });
 
@@ -635,7 +602,7 @@ test("crash recovery drops only the attempted prefix when a new message arrived"
   const state = new StateStore(home);
   const attemptedEvent = userMessageEvent("evt_attempted", "cnv_a", "deploy it", 1);
   const laterEvent = userMessageEvent("evt_later", "cnv_a", "check status", 2);
-  const key = turnIdempotencyKey("cnv_a", [attemptedEvent.event_id]);
+  const key = turnLedgerKey("cnv_a", [attemptedEvent.event_id]);
   state.current.pending_events.cnv_a = [attemptedEvent, laterEvent];
   (state.current.attempted_turns ??= {}).cnv_a = {
     turn_key: key,
@@ -660,16 +627,18 @@ test("crash recovery drops only the attempted prefix when a new message arrived"
   );
   await loop.runTurn("cnv_a");
   assert.deepEqual(fake.turns.map((turn) => turn.prompt), ["check status"]);
-  assert.equal(posted.filter((entry) => entry.key.endsWith("-crashed")).length, 1);
+  const notices = posted.filter((entry) =>
+    /not retried automatically/.test((entry.body.parts[0] as { text: string }).text));
+  assert.equal(notices.length, 1);
   loop.stop();
 });
 
-test("completed reply outbox redelivers after restart without rerunning the engine", async () => {
+test("completed reply outbox redelivers under its persisted id, not a second message", async () => {
   const home = tempHome();
   const { client, posted } = fakeClient();
   const state = new StateStore(home);
   const event = userMessageEvent("evt_done", "cnv_a", "send it");
-  const key = turnIdempotencyKey("cnv_a", [event.event_id]);
+  const key = turnLedgerKey("cnv_a", [event.event_id]);
   state.current.pending_events.cnv_a = [event];
   (state.current.attempted_turns ??= {}).cnv_a = {
     turn_key: key,
@@ -681,6 +650,7 @@ test("completed reply outbox redelivers after restart without rerunning the engi
     event_ids: [event.event_id],
     text: "finished before the crash",
     created_at: new Date().toISOString(),
+    message_id: "msg_01k1m9x2ph4vb7k0d3wzr8ftqe",
   };
   state.persist();
   const fake = fakeEngine();
@@ -694,18 +664,61 @@ test("completed reply outbox redelivers after restart without rerunning the engi
   await loop.runTurn("cnv_a");
   assert.equal(fake.turns.length, 0);
   assert.equal(posted.length, 1);
-  assert.equal(posted[0]!.key, key);
-  assert.equal(posted[0]!.body.parts[0].text, "finished before the crash");
+  // Same id as before the crash, which is what makes this a replay.
+  assert.equal(posted[0]!.body.message_id, "msg_01k1m9x2ph4vb7k0d3wzr8ftqe");
+  assert.equal((posted[0]!.body.parts[0] as { text: string }).text, "finished before the crash");
   const persisted = diskState(home);
   assert.equal(persisted.pending_events.cnv_a, undefined);
   assert.equal(persisted.pending_replies?.[key], undefined);
   loop.stop();
 });
 
+test("a queued reply written before ids were the retry key adopts one, durably, before the first attempt", async () => {
+  const home = tempHome();
+  const { client, posted } = fakeClient();
+  let attempts = 0;
+  const originalPost = client.postMessage.bind(client);
+  client.postMessage = async (body: PostMessageBody) => {
+    attempts += 1;
+    // The first attempt's response is lost, so the retry must reuse the id
+    // the first one committed under.
+    if (attempts === 1) {
+      posted.push({ body });
+      throw new Error("response lost after commit");
+    }
+    return originalPost(body);
+  };
+  const state = new StateStore(home);
+  const event = userMessageEvent("evt_legacy", "cnv_a", "send it");
+  const key = turnLedgerKey("cnv_a", [event.event_id]);
+  state.current.pending_events.cnv_a = [event];
+  (state.current.pending_replies ??= {})[key] = {
+    conversation_id: "cnv_a",
+    event_ids: [event.event_id],
+    text: "written by an older bridge",
+    created_at: new Date().toISOString(),
+  };
+  state.persist();
+  const loop = new ReceiveLoop(
+    client,
+    new StateStore(home),
+    fakeEngine().engine,
+    new PermissionBroker(client, new ApprovalStore(home), 60_000),
+    { ownerUserId: OWNER, debounceMs: 10, cwd: "/tmp", setTimeoutImpl: ((fn: any) => setTimeout(fn, 1)) as any },
+  );
+
+  await loop.runTurn("cnv_a");
+
+  assert.equal(posted.length, 2);
+  assert.match(posted[0]!.body.message_id!, MESSAGE_ID);
+  assert.equal(posted[1]!.body.message_id, posted[0]!.body.message_id);
+  loop.stop();
+});
+
 test("permission card reply is consumed by the broker, not forwarded to the engine", async () => {
   const home = tempHome();
   const { loop, turns, posted, broker, approvals, setPermissionAsker } = makeLoop(home, [
-    { events: [userMessageEvent("evt_1", "cnv_a", "do the thing")], next_cursor: 1 },
+    page([userMessageEvent("evt_1", "cnv_a", "do the thing")], 1),
   ]);
   let decision: unknown;
   setPermissionAsker(async (callbacks) => {
@@ -726,12 +739,17 @@ test("permission card reply is consumed by the broker, not forwarded to the engi
   assert.equal(pending.length, 1);
   const requestId = pending[0]!.request_id;
   assert.match(requestId, /^[a-km-z]{5}$/);
-  const card = posted.find((entry) => entry.key === `agent-perm-${requestId}`);
+  const card = posted.find((entry) => cardRequestId(entry) === requestId);
   assert.ok(card, "permission card was posted");
-  // Channel-plugin wire shape: text part with the yes/no fallback + data part.
-  assert.equal(card!.body.parts[0].type, "text");
-  assert.match(card!.body.parts[0].text, new RegExp(`yes ${requestId}`));
-  const data = card!.body.parts[1];
+  // The id the card commits under is durable before the POST, so a repost
+  // cannot stack a second card on the phone.
+  assert.equal(pending[0]!.relay_message_id, card!.body.message_id);
+  // Channel-plugin wire shape: one message, text part with the yes/no
+  // fallback plus a data part.
+  const text = card!.body.parts[0] as { type: string; text: string };
+  assert.equal(text.type, "text");
+  assert.match(text.text, new RegExp(`yes ${requestId}`));
+  const data = card!.body.parts[1] as { type: string; data: any };
   assert.equal(data.type, "data");
   assert.equal(data.data.kind, "agent_permission_request");
   assert.equal(data.data.request_id, requestId);
@@ -850,11 +868,11 @@ test("approval waiter is armed before posting, so an immediate phone reply wins"
   let broker!: PermissionBroker;
   const client = {
     origin: "https://api.relayapp.im",
-    async postMessage(body: any) {
-      const requestId = body.parts[1].data.request_id as string;
+    async postMessage(body: PostMessageBody) {
+      const requestId = (body.parts[1] as { data: any }).data.request_id as string;
       const tap = userMessageEvent("evt_fast", "cnv_a", `yes ${requestId}`, 2);
       assert.equal(broker.consumeReply(tap.data!.message!), true);
-      return { messages: [{ id: "msg_card_text", sequence: 1 }, { id: "msg_card", sequence: 2 }] };
+      return { message_id: body.message_id!, message: { id: body.message_id!, sequence: 2 } };
     },
   } as unknown as RelayClient;
   broker = new PermissionBroker(client, approvals, 60_000);
@@ -884,8 +902,9 @@ test("security-sensitive approval input is complete or the ask fails closed", as
     toolName: "shell",
     inputPreview: full,
   });
-  assert.equal(card.body.parts[1]!.data.input_preview, full);
-  assert.match(card.body.parts[0]!.text as string, /dangerous-suffix$/m);
+  assert.match(card.body.message_id, MESSAGE_ID);
+  assert.equal((card.body.parts[1] as { data: any })!.data.input_preview, full);
+  assert.match((card.body.parts[0] as { text: string })!.text, /dangerous-suffix$/m);
   assert.throws(
     () =>
       buildPermissionCard({
@@ -955,98 +974,32 @@ test("verdict parsing matches the channel plugin: data-part tap and text fallbac
   assert.equal(parseVerdictDataPart({ request_id: "toolong", option: "allow" }), null);
 });
 
-test("idempotency key is stable for the exact event batch and prompt text falls back", () => {
-  assert.equal(turnIdempotencyKey("cnv_a", ["evt_9"]), turnIdempotencyKey("cnv_a", ["evt_9"]));
-  assert.notEqual(turnIdempotencyKey("cnv_a", ["evt_9"]), turnIdempotencyKey("cnv_a", ["evt_8"]));
-  assert.notEqual(
-    turnIdempotencyKey("cnv_a", ["evt_9"]),
-    turnIdempotencyKey("cnv_a", ["evt_9", "evt_10"]),
-  );
+test("the turn ledger key is stable for the exact event batch, and prompt text falls back", () => {
+  assert.equal(turnLedgerKey("cnv_a", ["evt_9"]), turnLedgerKey("cnv_a", ["evt_9"]));
+  assert.notEqual(turnLedgerKey("cnv_a", ["evt_9"]), turnLedgerKey("cnv_a", ["evt_8"]));
+  assert.notEqual(turnLedgerKey("cnv_a", ["evt_9"]), turnLedgerKey("cnv_a", ["evt_9", "evt_10"]));
   const text = promptTextFromMessages([
     {
       id: "m1",
       conversation_id: "cnv_a",
       sequence: 1,
+      kind: "message",
       sender: { kind: "user", id: "u" },
-      parts: [{ type: "media", url: "https://x" }],
+      parts: [{ part_id: "prt_1", part_index: 0, type: "media", url: "https://x" }],
       fallback_text: "[photo]",
+      reply_to: null,
     },
   ]);
   assert.equal(text, "[photo]");
 });
 
-test("group responding, reply, and typing carry the invocation the turn is answering", async () => {
-  const home = tempHome();
-  const { loop, posted, typings, respondings } = makeLoop(home, [
-    {
-      events: [groupMessageEvent("evt_g1", "cnv_group", "inv_01", "@claude ship it")],
-      next_cursor: 3,
-    },
-  ]);
-  await loop.pollOnce();
-  await sleep(80);
-  await loop.settle();
-  assert.equal(posted.length, 1);
-  assert.equal(posted[0].body.conversation_id, "cnv_group");
-  assert.equal(posted[0].body.invocation_id, "inv_01");
-  assert.equal(respondings.length, 1);
-  assert.equal(respondings[0].messageId, "msg_evt_g1");
-  assert.equal(respondings[0].invocationId, "inv_01");
-  assert.ok(typings.length >= 2);
-  assert.ok(typings.every((call) => call.invocationId === "inv_01"));
-  loop.stop();
-});
-
-test("a direct turn still sends no invocation_id", async () => {
-  const home = tempHome();
-  const { loop, posted, typings } = makeLoop(home, [
-    { events: [userMessageEvent("evt_d1", "cnv_direct", "hey")], next_cursor: 2 },
-  ]);
-  await loop.pollOnce();
-  await sleep(80);
-  await loop.settle();
-  assert.equal(posted.length, 1);
-  assert.equal(posted[0].body.invocation_id, undefined);
-  assert.ok(typings.every((call) => call.invocationId === undefined));
-  loop.stop();
-});
-
-test("two group invocations in one debounce window get one reply each, never sharing an id", async () => {
-  const home = tempHome();
-  const { loop, posted, turns } = makeLoop(home, [
-    {
-      events: [
-        groupMessageEvent("evt_g1", "cnv_group", "inv_01", "first", 1),
-        groupMessageEvent("evt_g2", "cnv_group", "inv_02", "second", 2),
-      ],
-      next_cursor: 5,
-    },
-  ]);
-  await loop.pollOnce();
-  await waitFor(
-    () => turns.length === 2 && posted.length === 2,
-    "both group invocations did not complete",
-  );
-  await loop.settle();
-  // The server completes an invocation on its first message, so coalescing
-  // these into one turn would strand inv_02 with no reply.
-  assert.equal(turns.length, 2);
-  assert.deepEqual(turns.map((turn) => turn.prompt), ["first", "second"]);
-  assert.deepEqual(
-    posted.map((post) => post.body.invocation_id),
-    ["inv_01", "inv_02"],
-  );
-  assert.equal(Object.keys(diskState(home).pending_events).length, 0);
-  loop.stop();
-});
-
-test("a group approval is asked in the owner's direct conversation, not the group", async () => {
+test("an approval raised outside the owner's conversation is asked there, never in the other one", async () => {
   const home = tempHome();
   const { loop, posted, setPermissionAsker, broker, client } = makeLoop(home, [
-    { events: [userMessageEvent("evt_d1", "cnv_direct", "hi")], next_cursor: 1 },
+    page([userMessageEvent("evt_d1", "cnv_direct", "hi")], 1),
   ]);
-  // Settle the direct turn first: it is only here to pin the owner's direct
-  // conversation, and must not be the turn that asks.
+  // Settle the first turn: it is only here to pin the owner's conversation,
+  // and must not be the turn that asks.
   await loop.pollOnce();
   await sleep(80);
   await loop.settle();
@@ -1062,43 +1015,43 @@ test("a group approval is asked in the owner's direct conversation, not the grou
       ],
     });
     await sleep(30);
-    const card = posted.find((post) => post.key.startsWith("agent-perm-"));
+    // The card carries the raw command, so it may only appear where the
+    // owner alone reads it.
+    const card = posted.find((entry) => cardRequestId(entry) !== undefined);
     assert.ok(card, "approval card was never posted");
     assert.equal(card.body.conversation_id, "cnv_direct");
-    assert.equal(card.body.invocation_id, undefined);
-    const requestId = card.body.parts[1].data.request_id;
+    const requestId = cardRequestId(card)!;
     broker.consumeReply({
       id: "msg_reply",
       conversation_id: "cnv_direct",
       sequence: 9,
+      kind: "message",
       sender: { kind: "user", id: OWNER },
-      parts: [{ type: "text", text: `yes ${requestId}` }],
+      parts: [{ part_id: "prt_reply", part_index: 0, type: "text", text: `yes ${requestId}` }],
       fallback_text: `yes ${requestId}`,
+      reply_to: null,
     });
     decision = await pending;
   });
-  client.pushPage({
-    events: [groupMessageEvent("evt_g1", "cnv_group", "inv_01", "@claude deploy")],
-    next_cursor: 2,
-  });
+  client.pushPage(page([userMessageEvent("evt_g1", "cnv_group", "@claude deploy")], 2));
   await loop.pollOnce();
   await sleep(200);
   await loop.settle();
   assert.deepEqual(decision, { behavior: "selected", optionId: "opt_allow" });
-  const groupReply = posted.filter((post) => post.body.conversation_id === "cnv_group");
-  assert.equal(groupReply.length, 1);
-  assert.equal(groupReply[0].body.invocation_id, "inv_01");
+  const groupReply = posted.filter((entry) => entry.body.conversation_id === "cnv_group");
+  assert.equal(groupReply.length, 1, "the answer still goes back to where it was asked");
   loop.stop();
 });
 
-test("a group approval with no direct conversation to ask in denies instead of burning the invocation", async () => {
+test("an approval with no owner conversation to ask in denies instead of leaking the tool input", async () => {
   const home = tempHome();
-  const { loop, posted, setPermissionAsker } = makeLoop(home, [
-    {
-      events: [groupMessageEvent("evt_g1", "cnv_group", "inv_01", "@claude deploy")],
-      next_cursor: 2,
-    },
-  ]);
+  const { loop, posted, state, setPermissionAsker } = makeLoop(home, []);
+  // A queue restored without a pinned owner conversation: there is nowhere
+  // the card is known to be private, so it is never posted.
+  state.current.pending_events.cnv_group = [
+    userMessageEvent("evt_g1", "cnv_group", "@claude deploy"),
+  ];
+  state.persist();
   let decision: unknown;
   setPermissionAsker(async (callbacks) => {
     decision = await callbacks.onPermissionAsk({
@@ -1111,227 +1064,31 @@ test("a group approval with no direct conversation to ask in denies instead of b
       ],
     });
   });
-  await loop.pollOnce();
-  await sleep(200);
-  await loop.settle();
+
+  await loop.runTurn("cnv_group");
+
   assert.deepEqual(decision, { behavior: "selected", optionId: "opt_deny" });
-  assert.equal(posted.filter((post) => post.key.startsWith("agent-perm-")).length, 0);
-  // The single message this invocation owes is still the reply.
+  assert.equal(posted.filter((entry) => cardRequestId(entry) !== undefined).length, 0);
+  // The turn still answers.
   assert.equal(posted.length, 1);
-  assert.equal(posted[0].body.invocation_id, "inv_01");
   loop.stop();
 });
 
-test("a group turn clears typing before the reply completes the invocation", async () => {
+test("a 401 stops the loop with re-pair guidance instead of retrying forever", async () => {
   const home = tempHome();
-  const { loop, posted, typings } = makeLoop(home, [
-    {
-      events: [groupMessageEvent("evt_g1", "cnv_group", "inv_01", "@claude status")],
-      next_cursor: 4,
-    },
-  ]);
-  await loop.pollOnce();
-  await sleep(80);
-  await loop.settle();
-  const stopped = typings.filter((call) => !call.started);
-  assert.equal(stopped.length, 1, "typing was stopped exactly once");
-  assert.equal(stopped[0].invocationId, "inv_01");
-  // Relay completes the invocation on the reply, so a typing-off sent after it
-  // would be rejected and the group would keep showing the indicator.
-  const stopIndex = typings.findIndex((call) => !call.started);
-  assert.equal(stopIndex, typings.length - 1);
-  assert.equal(posted.length, 1);
-  loop.stop();
-});
-
-function cursorFaultClient(options: {
-  failures: RelayApiError[];
-  onPoll?: (cursor: number) => void;
-  reconciliation?: { reconciled: true; resume_cursor: number };
-}) {
-  const failures = [...options.failures];
-  const polls: number[] = [];
-  const historyReads: string[] = [];
-  const reconciliations: number[] = [];
-  let listings = 0;
-  const client = {
-    origin: "http://fake",
-    async getEvents(cursor: number): Promise<EventsPage> {
-      polls.push(cursor);
-      const failure = failures.shift();
-      if (failure) throw failure;
-      options.onPoll?.(cursor);
-      return { events: [], next_cursor: cursor };
-    },
-    async listConversations() {
-      listings += 1;
-      return { conversations: [{ id: "cnv_a", last_sequence: 12 }] };
-    },
-    async listMessages(conversationId: string) {
-      historyReads.push(conversationId);
-      return {
-        messages: [
-          {
-            id: "msg_head",
-            conversation_id: conversationId,
-            sequence: 12,
-            sender: { kind: "user" as const, id: OWNER },
-            parts: [{ type: "text", text: "still here" }],
-            fallback_text: "still here",
-            created_at: "2026-08-04T00:00:00.000Z",
-          },
-        ],
-      };
-    },
-    async reconcileEvents(expiredCursor: number) {
-      reconciliations.push(expiredCursor);
-      return options.reconciliation ?? { reconciled: true as const, resume_cursor: expiredCursor };
-    },
-    async setTyping() {},
-    async postMessage() {
-      throw new Error("a cursor fault must not post anything");
-    },
+  const { client } = fakeClient();
+  client.getEvents = async () => {
+    throw Object.assign(new Error("GET /v1/events → 401: agent key revoked"), { status: 401 });
   };
-  return {
-    client: client as unknown as RelayClient,
-    polls,
-    historyReads,
-    reconciliations,
-    listings: () => listings,
-  };
-}
-
-function cursorFaultLoop(
-  home: string,
-  client: RelayClient,
-  lines: string[],
-  state = new StateStore(home),
-) {
-  return new ReceiveLoop(
+  const lines: string[] = [];
+  const loop = new ReceiveLoop(
     client,
-    state,
+    new StateStore(home),
     fakeEngine().engine,
     new PermissionBroker(client, new ApprovalStore(home), 60_000),
     { ownerUserId: OWNER, debounceMs: 10, cwd: "/tmp", log: (line) => lines.push(line) },
   );
-}
-
-test("an expired cursor reconciles history and resumes through Relay's explicit contract", async () => {
-  const home = tempHome();
-  const state = new StateStore(home);
-  state.current.cursor = 42;
-  state.current.owner_conversation_id = "cnv_owner";
-  state.persist();
-  let stop = () => {};
-  const { client, polls, historyReads, reconciliations } = cursorFaultClient({
-    failures: [
-      new RelayApiError(
-        "GET /v1/events → 410: cursor is older than the retained log",
-        {
-          status: 410,
-          kind: "rejected",
-          code: "cursor_expired",
-          details: {
-            highest_delivered_cursor: 42,
-            resume_cursor: 45,
-            reconciliation_required: true,
-            reconciliation_endpoint: "/v1/events/reconcile",
-          },
-        },
-      ),
-    ],
-    reconciliation: { reconciled: true, resume_cursor: 45 },
-    onPoll: () => stop(),
-  });
-  const lines: string[] = [];
-  const loop = cursorFaultLoop(home, client, lines, state);
-  stop = () => loop.stop();
-
-  await loop.run();
-
-  assert.deepEqual(polls, [42, 45], "the expired cursor resumes only after explicit reconciliation");
-  assert.deepEqual(reconciliations, [42], "the bridge confirms Relay's highest delivered cursor");
-  assert.ok(historyReads.includes("cnv_owner"), "the owner conversation is reconciled from history");
-  assert.ok(historyReads.includes("cnv_a"), "conversations only Relay knows about are reconciled too");
-  const gapLines = lines.filter((line) => line.includes("cursor_expired"));
-  assert.equal(gapLines.length, 1, "the gap is reported on exactly one line");
-  assert.match(gapLines[0]!, /cursor 42/);
-  assert.match(gapLines[0]!, /confirmed the retention gap/);
-  assert.match(gapLines[0]!, /head msg_head seq 12/);
-  assert.equal(diskState(home).cursor, 45, "the server-provided resume cursor is durable");
+  await assert.rejects(loop.run(), (error: any) => error.status === 401);
+  assert.match(lines.join("\n"), /relaymessenger pair/);
   loop.stop();
-});
-
-test("an expired cursor without a reconciliation contract remains terminal", async () => {
-  const home = tempHome();
-  const state = new StateStore(home);
-  state.current.cursor = 42;
-  state.persist();
-  const { client, polls } = cursorFaultClient({
-    failures: [
-      new RelayApiError(
-        "GET /v1/events → 410: cursor is older than the retained log",
-        { status: 410, kind: "rejected", code: "cursor_expired" },
-      ),
-    ],
-  });
-  const lines: string[] = [];
-  const loop = cursorFaultLoop(home, client, lines, state);
-
-  await assert.rejects(loop.run(), (error: any) => error.status === 410 && error.code === "cursor_expired");
-
-  assert.deepEqual(polls, [42]);
-  assert.match(lines.find((line) => line.includes("cursor_expired")) ?? "", /did not advertise/);
-  assert.equal(diskState(home).cursor, 42);
-  loop.stop();
-});
-
-test("an undelivered cursor resumes from Relay's highest delivered cursor", async () => {
-  const home = tempHome();
-  const state = new StateStore(home);
-  state.current.cursor = 90;
-  state.persist();
-  let stop = () => {};
-  const { client, polls, historyReads } = cursorFaultClient({
-    failures: [
-      new RelayApiError(
-        "GET /v1/events → 422: cursor 90 has not been delivered by Relay",
-        {
-          status: 422,
-          kind: "rejected",
-          code: "invalid_request",
-          details: {
-            field: "cursor",
-            received: 90,
-            highest_delivered_cursor: 12,
-          },
-        },
-      ),
-    ],
-    onPoll: () => stop(),
-  });
-  const lines: string[] = [];
-  const loop = cursorFaultLoop(home, client, lines, state);
-  stop = () => loop.stop();
-
-  await loop.run();
-
-  assert.deepEqual(polls, [90, 12], "polling resumes from the ledger position Relay reported");
-  assert.equal(diskState(home).cursor, 12, "the recovered cursor is durable before the next poll");
-  assert.ok(historyReads.includes("cnv_a"), "history is reconciled before the cursor moves");
-  const recoveryLines = lines.filter((line) => line.includes("was never delivered by Relay"));
-  assert.equal(recoveryLines.length, 1);
-  assert.match(recoveryLines[0]!, /resumed from Relay's highest delivered cursor 12/);
-});
-
-test("a cursor fault never raises the cursor past what this bridge has read", async () => {
-  assert.equal(undeliveredCursorTarget({ status: 422, details: { highest_delivered_cursor: 12 } }, 90), 12);
-  assert.equal(undeliveredCursorTarget({ status: 422, details: { latest_sequence: 5 } }, 9), 5);
-  assert.equal(
-    undeliveredCursorTarget({ status: 422, details: { highest_delivered_cursor: 99 } }, 9),
-    undefined,
-    "a target above the current cursor would acknowledge unread events",
-  );
-  assert.equal(undeliveredCursorTarget({ status: 422, details: { field: "timeout" } }, 9), undefined);
-  assert.equal(undeliveredCursorTarget({ status: 410, details: {} }, 9), undefined);
 });

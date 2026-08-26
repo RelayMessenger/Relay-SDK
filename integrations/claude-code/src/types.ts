@@ -4,20 +4,23 @@
  * installed runtime is standalone under ${CLAUDE_PLUGIN_ROOT}.
  */
 
-export type RelayPartType = "text" | "media" | "voice_memo" | "link_preview" | "data";
+export type RelayPartType =
+  | "text"
+  | "media"
+  | "voice_memo"
+  | "link_preview"
+  | "data"
+  | "poll";
 
 /**
- * Inline mention of a conversation participant. Offsets are UTF-16 code
- * units into the part's `text`, which holds the inserted display name with
- * no "@". Ranges are sorted by `start` and never overlap.
+ * A mention is the handle it names. A sender confirms handles from the
+ * client's suggestion list, and the server checks each one is really written
+ * as `@handle` in the part's `text`. There are no offsets: a range could mark
+ * any word as a mention of anyone, a handle can only ever mark itself.
  */
-export interface RelayMentionRange {
-  start: number;
-  length: number;
-  participant_id: string;
-}
+export type RelayMention = string;
 
-export type RelayTextStyle = "bold" | "italic" | "underline" | "strikethrough" | "monospace" | "spoiler";
+export type RelayTextStyle = "bold" | "italic" | "underline" | "strikethrough";
 
 /**
  * One formatting run over a text part, offsets in UTF-16 code units like
@@ -31,11 +34,13 @@ export interface RelayStyleRange {
 }
 
 export interface RelayPart {
+  /** Permanent part identity, assigned at commit. Absent on a send. */
+  part_id?: string;
   part_index?: number;
   type: RelayPartType;
   text?: string;
   /** Text parts only. */
-  mentions?: RelayMentionRange[];
+  mentions?: RelayMention[];
   styles?: RelayStyleRange[];
   url?: string;
   attachment_id?: string;
@@ -48,18 +53,28 @@ export interface RelayPart {
   data?: unknown;
 }
 
+/**
+ * An actor is a person or an agent. A group notice ("Alice added Bob") is a
+ * real message from the person who did it, not a message from the system.
+ */
 export interface RelaySender {
-  kind: "user" | "agent" | "system";
+  kind: "user" | "agent";
   id: string;
 }
+
+/** `notice` is a group notice; only `message` is addressed to anybody. */
+export type RelayMessageKind = "message" | "notice";
 
 export interface RelayMessage {
   id: string;
   conversation_id: string;
   sequence: number;
+  kind?: RelayMessageKind;
   sender: RelaySender;
+  is_from_me?: boolean;
   parts: RelayPart[];
-  reply_to?: { message_id: string } | null;
+  /** A pointer to the target, never a stored quote. */
+  reply_to?: { message_id: string; part_id?: string } | null;
   fallback_text?: string;
   status?: string;
   created_at: string;
@@ -68,6 +83,8 @@ export interface RelayMessage {
 /** Developer-facing event envelope from GET /v1/events (AgentEventEnvelope). */
 export interface RelayEvent {
   event_id: string;
+  /** This agent's position in its own log; the value to send back as `after`. */
+  sequence?: number;
   event_type: string;
   agent_id: string;
   created_at: string;
@@ -77,14 +94,21 @@ export interface RelayEvent {
 export interface PollEventsResponse {
   events: RelayEvent[];
   next_cursor: number;
+  /** Highest sequence Relay has issued this agent, and whether the page
+   * stopped short of it. `has_more` means poll again without waiting. */
+  latest: number;
+  has_more: boolean;
 }
 
 /** Body for POST /v1/messages (agent bearer auth). */
 export interface SendMessageBody {
   conversation_id: string;
+  /**
+   * The `msg_` id this client minted. It is the message's identity AND the
+   * send's only retry key: same id replays, a new id is a new message.
+   */
+  message_id: string;
   parts: RelayPart[];
-  /** Required in a group, and spent by the message that carries it. */
-  invocation_id?: string;
 }
 
 /** Fields of notifications/claude/channel/permission_request params. */

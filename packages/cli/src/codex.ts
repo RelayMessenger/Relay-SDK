@@ -21,7 +21,6 @@
  * owner conversation via readStateSnapshot() and coordinate approvals only
  * through per-request files in the active account runtime's approvals/.
  */
-import { randomBytes } from "node:crypto";
 import { basename, dirname } from "node:path";
 import { RelayClient } from "./api.js";
 import { buildPermissionCard, newRequestId, verdictFromMessage } from "./permissions.js";
@@ -55,6 +54,7 @@ export function requireClient(config = new ConfigStore()): {
   if (!loaded?.agent_token) {
     throw new Error("Not paired. Run `relaymessenger pair` first.");
   }
+
   let ownerUserId: string | undefined;
   try {
     ownerUserId = resolveOwnerUserId(loaded);
@@ -118,14 +118,10 @@ export async function notifyCommand(
   const summary = typeof last === "string" && last.trim().length > 0
     ? last.trim()
     : "Codex finished a turn.";
-  const turnId = payload["turn-id"] ?? randomBytes(6).toString("hex");
-  await client.postMessage(
-    {
-      conversation_id: conversationId,
-      parts: [{ type: "text", text: `Codex (${basename(projectRoot)}): ${summary}`.slice(0, 7900) }],
-    },
-    `relay-notify-${turnId}`,
-  );
+  await client.postMessage({
+    conversation_id: conversationId,
+    parts: [{ type: "text", text: `Codex (${basename(projectRoot)}): ${summary}`.slice(0, 7900) }],
+  });
 }
 
 async function readStdin(): Promise<string> {
@@ -195,29 +191,30 @@ export async function permissionRequestHook(
     return 0;
   }
 
-  // Durable (create-once) before the card goes out. A running `relaymessenger
-  // start` loop sees the tap on the event stream and writes the resolution
-  // into this file; this process is the waiter that consumes it.
+  // Durable (create-once) before the card goes out, carrying the id the card
+  // commits under so a repost cannot stack a second card. A running
+  // `relaymessenger start` loop sees the tap on the event stream and writes
+  // the resolution into this file; this process is the waiter that consumes it.
+  approval.relay_message_id = card.body.message_id;
   approvals.create(approval);
 
   let posted;
   try {
-    posted = await client.postMessage(card.body, card.idempotencyKey);
+    posted = await client.postMessage(card.body);
   } catch (error) {
     approvals.consume(requestId);
     process.stderr.write(`relaymessenger: approval card could not be delivered (${error}); denying.\n`);
     write(decisionJson(false));
     return 0;
   }
-  // The card's text and data parts land as separate messages; a verdict must
-  // come after every one of them, so the watermark is the last sequence. A 202
-  // with no messages leaves no watermark to gate the verdict scan on, and a
-  // zero default would accept any earlier matching message, so refuse instead.
-  const cardSequence = posted.messages.at(-1)?.sequence;
+  // A verdict must come after the card, so the card's own sequence is the
+  // watermark the scan is gated on. A response without one would leave a zero
+  // default that accepts any earlier matching message, so refuse instead.
+  const cardSequence = posted.message?.sequence;
   if (cardSequence === undefined) {
     approvals.consume(requestId);
     process.stderr.write(
-      "relaymessenger: approval card send returned no committed messages; denying.\n",
+      "relaymessenger: approval card send returned no committed message; denying.\n",
     );
     write(decisionJson(false));
     return 0;

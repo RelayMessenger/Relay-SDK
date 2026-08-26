@@ -21,7 +21,6 @@ export interface PollerOptions {
 
 const BASE_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 60_000;
-const CONFLICT_BACKOFF_MS = 30_000;
 
 function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
@@ -45,7 +44,7 @@ export function startPoller(options: PollerOptions): { stop: () => void; done: P
     while (!controller.signal.aborted) {
       try {
         const batch = await options.client.pollEvents({
-          cursor: options.getCursor(),
+          after: options.getCursor(),
           timeoutSeconds: options.timeoutSeconds ?? 25,
           signal: controller.signal,
         });
@@ -77,11 +76,7 @@ export function startPoller(options: PollerOptions): { stop: () => void; done: P
         if (controller.signal.aborted) return;
         let waitMs = backoffMs;
         if (error instanceof RelayApiError) {
-          if (error.status === 409) {
-            // Webhook XOR or another long-poll consumer holds the stream.
-            options.log(`long-poll conflict (${error.code}): ${error.message}; retrying in ${CONFLICT_BACKOFF_MS / 1000}s`);
-            waitMs = CONFLICT_BACKOFF_MS;
-          } else if (error.status === 401) {
+          if (error.status === 401) {
             // Authentication cannot recover through polling. Stop cleanly so
             // a supervisor/user sees a terminal failure instead of an
             // endless unauthorized request loop.

@@ -22,44 +22,33 @@ breaking change and gets a major version. Webhook envelopes carry the same
 promise under their own dated `schema_version`; see the deprecation policy in
 Relay's [webhook guide](https://docs.relayapp.im/guides/webhooks).
 
-## Deprecated, still supported
+## Removed in the server cleanup
 
-| Deprecated | Replacement | Supported until |
-| --- | --- | --- |
-| `RelaySendResult.messageId` | `RelaySendResult.messages` | The next major version |
-| `RelayReplyTarget.part_index` | `RelayReplyTarget.part_id` | As long as Relay's `/v1` routes accept it |
-| `client.sendMessage` (`/v1`) | `client.sendMessageV2` | At least 90 days after `/v2` reaches general availability |
+These were removed from Relay itself, not merely deprecated here. There is no
+replacement and no compatibility window: the behaviour no longer exists.
 
-`messageId` was never the whole answer on `/v1`: one send can commit several
-messages, so a single id names only the first of them. On `/v2` it is the id you
-minted, which you already had.
+| Removed | Why |
+| --- | --- |
+| `client.editMessage`, `client.unsendMessage`, `buildEditRequest`, `MAX_OPERATIONS_PER_EDIT`, `RelayPartOperation`, `RelayEditRequest`, `RelayEditCapabilities`, `RelayRevision`, `RelayTombstone`, `isVisibleMessage` | Message content is immutable. There is no edit, no unsend, no version, and no tombstone, so a message you hold has parts and never changes underneath you |
+| `RelaySendResult.messages`, the `/v1` split | One send is one message. `/v1` still answers with an array because shipped clients read one, but it always holds exactly one element |
+| `client.setResponding`, `invocationId`, `invoked_agent_ids`, `MessageHandlerContext.responding` | An agent is an ordinary group member. Nothing invokes it, so nothing scopes a reply to an invocation |
+| `client.reconcileEvents`, `classifyCursorGap`, `CursorGap`, `RelayReconcileResult`, `isRelayWebhookConflict` | `GET /v1/events` is a plain poll: no exclusive consumer, no acknowledgement handshake, no expiry to reconcile, and it coexists with webhooks |
+| `deriveIdempotencyKey`, `replyIdempotencyKey`, every `Idempotency-Key` header | The `msg_` id you mint IS the idempotency mechanism |
+| `RelayReplyQuote`, `RelayQuoteState`, `RelayReplyTarget.part_index` | A reply is a pointer `{ message_id, part_id? }`. Nothing is copied, so nothing goes stale |
+| `RelayReaction.part_index`, `RelayReaction.target_scope`, reaction `operation_id` | A reaction names its slot by `target_part_id`, or `null` for the whole message, and repeating a request changes nothing |
+| `RelayReceiptSummary` | Receipts are per-message stamps in a direct conversation; groups carry none |
+| `monospace` and `spoiler` text styles, the `system` sender kind | Gone from the wire. A group notice is a `kind: "notice"` message sent by the person who caused it |
 
-`part_index` is a position, and a position is not an identity. Relay translates
-a `/v1` `part_index` to that part's `part_id` at the boundary and never stores
-the index, which is what lets an edit reorder parts without breaking anything
-that pointed at them.
+## Renamed
 
-## The v1 to v2 window
+| Before | After |
+| --- | --- |
+| `client.sendMessageV2` | `client.sendMessage` |
+| `client.sendMessage` (`/v1`) | `client.sendMessageV1` |
+| `client.pollEvents({ cursor })` | `client.pollEvents({ after })` |
+| `RelaySendResult` = `{ messageId, message, messages }` | `{ messageId, message }` |
 
-Relay's `/v1` message and reaction routes are supported for **at least 90 days
-after `/v2` reaches general availability**. Deprecation is announced before the
-window opens. The window is a promise about notice, not about the change never
-arriving.
-
-Both wires read and write the same rows, so a message sent on one is a message
-the other serves, and you can migrate one call site at a time.
-
-| Behaviour | `/v1` | `/v2` |
-| --- | --- | --- |
-| One send | Split into content runs, so mixed parts commit as several messages | One message, holding every part |
-| Retry key | `Idempotency-Key` header | `message_id` in the body, minted by you |
-| Reply target | `part_id`, or a legacy `part_index` | `part_id` only |
-| Edit | One text part replaces the message body | Part operations against `expected_version` |
-
-`/v1` keeps splitting sends into content runs. Shipped clients render one bubble
-per message and would show a mixed send as one unreadable balloon if the split
-changed under them, so it is a property of the `/v1` wire rather than a bug to
-be fixed there.
+`RelayEventsPage` gained `latest` and `hasMore` beside `nextCursor`.
 
 ## Migrating a send
 
@@ -73,7 +62,7 @@ const { messages } = await client.sendMessage({
 
 // After: one send, one message, an id you minted as the retry key.
 const messageId = relayId("msg");
-const { message } = await client.sendMessageV2({
+const { message } = await client.sendMessage({
   conversationId,
   messageId,
   parts: [{ type: "text", text: "Here it is:" }, { type: "media", attachment_id }],

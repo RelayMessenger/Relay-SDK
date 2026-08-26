@@ -1,9 +1,9 @@
 #!/bin/bash
-# Keeps a live pairing QR on screen; starts the Claude engine once claimed.
+# Keeps a live device code on screen; starts the Claude engine once approved.
 cd "$(dirname "$0")/.."
 while true; do
   clear
-  echo "SCAN THIS FROM RELAY  (New Message -> Scan QR Code)"
+  echo "ENTER THIS CODE IN RELAY  (Settings -> Link a device)"
   echo
   if npx -y @relaymessenger/cli pair; then
     exec npx -y @relaymessenger/cli start --engine claude

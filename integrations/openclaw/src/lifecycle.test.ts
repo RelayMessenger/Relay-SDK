@@ -11,12 +11,12 @@ describe("Relay account lifecycle", () => {
     lease.release();
   });
 
-  it("does not allow a replacement consumer until teardown releases ownership", () => {
+  it("does not allow a replacement loop until teardown releases ownership", () => {
     const registry = createRelayAccountLifecycleRegistry();
     const lease = registry.acquire("default", new AbortController().signal);
     registry.stop("default");
     expect(() => registry.acquire("default", new AbortController().signal)).toThrow(
-      /already has an active consumer/,
+      /already has an active receive loop/,
     );
     lease.release();
     expect(() => registry.acquire("default", new AbortController().signal)).not.toThrow();

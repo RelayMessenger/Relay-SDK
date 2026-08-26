@@ -58,11 +58,14 @@ describe("Relay API operation deadlines", () => {
     });
   });
 
-  it("reuses the caller's idempotency key after an ambiguous timeout", async () => {
-    const keys: string[] = [];
+  // The message id is the whole idempotency mechanism now: a timeout leaves
+  // the send's outcome unknown, and only replaying the same id can settle it
+  // without risking a second visible message.
+  it("reuses the caller's message id after an ambiguous timeout", async () => {
+    const ids: unknown[] = [];
     let attempt = 0;
     const fetchImpl = async (_input: string, init?: RequestInit): Promise<Response> => {
-      keys.push(new Headers(init?.headers).get("idempotency-key") ?? "");
+      ids.push(JSON.parse(String(init?.body)).message_id);
       attempt += 1;
       if (attempt === 1) {
         return await new Promise<Response>((_resolve, reject) => {
@@ -73,8 +76,8 @@ describe("Relay API operation deadlines", () => {
           );
         });
       }
-      return new Response(JSON.stringify({ message_id: "msg_1", message: {} }), {
-        status: 200,
+      return new Response(JSON.stringify({ message: { id: "msg_stable" } }), {
+        status: 201,
         headers: { "content-type": "application/json" },
       });
     };
@@ -86,17 +89,17 @@ describe("Relay API operation deadlines", () => {
     });
     const params = {
       conversationId: "cnv_1",
+      messageId: "msg_stable",
       parts: [{ type: "text" as const, text: "hello" }],
-      idempotencyKey: "relay-send:stable:0",
     };
     await expect(client.sendMessage(params)).rejects.toThrow(/timed out/);
     await client.sendMessage(params);
-    expect(keys).toEqual(["relay-send:stable:0", "relay-send:stable:0"]);
+    expect(ids).toEqual(["msg_stable", "msg_stable"]);
   });
 });
 
-describe("Relay responding", () => {
-  it("posts the inbound watermark before a turn", async () => {
+describe("typing", () => {
+  it("posts nothing but the flag", async () => {
     const requests: Array<{ url: string; body: unknown }> = [];
     const client = createRelayClient({
       baseUrl: "https://api.test",
@@ -110,91 +113,13 @@ describe("Relay responding", () => {
       },
     });
 
-    await client.setResponding({
-      conversationId: "cnv/a",
-      messageId: "msg_2",
-      label: "OpenClaw",
-    });
+    await client.setTyping({ conversationId: "cnv/a", started: true });
 
     expect(requests).toEqual([
       {
-        url: "https://api.test/v1/conversations/cnv%2Fa/responding",
-        body: { message_id: "msg_2", label: "OpenClaw" },
+        url: "https://api.test/v1/conversations/cnv%2Fa/typing",
+        body: { started: true },
       },
     ]);
-  });
-});
-
-// The plugin used to run a second, hand-rolled client with no invocationId
-// anywhere. An agent's first group mention therefore hit
-// `403 group typing requires invocation_id` and wedged the whole event
-// stream (REL-167). These pin that the adopted client puts the id on the wire
-// for each of the three calls a group turn makes.
-describe("group invocation on the wire", () => {
-  function recordingClient(requests: Array<{ url: string; body: unknown }>) {
-    return createRelayClient({
-      baseUrl: "https://api.test",
-      token: "tok",
-      fetchImpl: async (input, init) => {
-        requests.push({
-          url: input,
-          body: init?.body ? JSON.parse(String(init.body)) : undefined,
-        });
-        return new Response(JSON.stringify({ messages: [{ id: "msg_out" }] }), {
-          status: 202,
-          headers: { "content-type": "application/json" },
-        });
-      },
-    });
-  }
-
-  it("sends invocation_id on the responding receipt", async () => {
-    const requests: Array<{ url: string; body: unknown }> = [];
-    await recordingClient(requests).setResponding({
-      conversationId: "cnv_g",
-      messageId: "msg_2",
-      label: "OpenClaw",
-      invocationId: "inv_1",
-    });
-    expect(requests[0]?.body).toEqual({
-      message_id: "msg_2",
-      label: "OpenClaw",
-      invocation_id: "inv_1",
-    });
-  });
-
-  it("sends invocation_id on the typing indicator", async () => {
-    const requests: Array<{ url: string; body: unknown }> = [];
-    await recordingClient(requests).setTyping({
-      conversationId: "cnv_g",
-      started: true,
-      invocationId: "inv_1",
-    });
-    expect(requests[0]?.body).toEqual({ started: true, invocation_id: "inv_1" });
-  });
-
-  it("sends invocation_id on the reply itself", async () => {
-    const requests: Array<{ url: string; body: unknown }> = [];
-    await recordingClient(requests).sendMessage({
-      conversationId: "cnv_g",
-      parts: [{ type: "text", text: "hi" }],
-      invocationId: "inv_1",
-      idempotencyKey: "relay-send:k:0",
-    });
-    expect(requests[0]?.body).toMatchObject({
-      conversation_id: "cnv_g",
-      invocation_id: "inv_1",
-    });
-  });
-
-  it("omits invocation_id when there is none, so a DM body is unchanged", async () => {
-    const requests: Array<{ url: string; body: unknown }> = [];
-    await recordingClient(requests).sendMessage({
-      conversationId: "cnv_dm",
-      parts: [{ type: "text", text: "hi" }],
-      idempotencyKey: "relay-send:k:0",
-    });
-    expect(Object.keys(requests[0]?.body as Record<string, unknown>))
-      .not.toContain("invocation_id");
   });
 });

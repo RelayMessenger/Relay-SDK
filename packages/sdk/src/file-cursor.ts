@@ -8,7 +8,8 @@ export type FileCursorStore = {
 };
 
 /**
- * Simple durable cursor file for long-poll consumers.
+ * Simple durable cursor file for `GET /v1/events` pollers: it holds the last
+ * sequence handled, to send back as `after`.
  * Advances are monotonic; a corrupt file refuses to reset to zero silently.
  */
 export function createFileCursorStore(path: string): FileCursorStore {

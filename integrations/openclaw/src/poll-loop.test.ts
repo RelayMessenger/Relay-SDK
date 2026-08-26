@@ -66,7 +66,7 @@ function scriptedClient(turns: PollTurn[], abort: AbortController): RelayClient 
     pollEvents: async () => {
       if (index >= turns.length) {
         abort.abort();
-        return { events: [], nextCursor: 0 };
+        return { events: [], nextCursor: 0, latest: 0, hasMore: false };
       }
       const turn = turns[index]!;
       index += 1;
@@ -78,13 +78,37 @@ function scriptedClient(turns: PollTurn[], abort: AbortController): RelayClient 
     sendMessage: async () => {
       throw new Error("not used");
     },
+    sendMessageV1: async () => {
+      throw new Error("not used");
+    },
     sendText: async () => {
       throw new Error("not used");
     },
+    uploadAttachment: async () => {
+      throw new Error("not used");
+    },
+    react: async () => {
+      throw new Error("not used");
+    },
+    getHistory: async () => {
+      throw new Error("not used");
+    },
+    getPoll: async () => {
+      throw new Error("not used");
+    },
+    votePoll: async () => {
+      throw new Error("not used");
+    },
+    closePoll: async () => {
+      throw new Error("not used");
+    },
     setTyping: async () => {},
-    setResponding: async () => {},
-    markDelivered: async () => {},
-    markRead: async () => {},
+    markDelivered: async () => {
+      throw new Error("not used");
+    },
+    markRead: async () => {
+      throw new Error("not used");
+    },
   };
 }
 
@@ -100,7 +124,7 @@ describe("runRelayPollLoop", () => {
 
     await runRelayPollLoop({
       client: scriptedClient(
-        [{ events: [makeEvent("evt_1"), makeEvent("evt_2")], nextCursor: 2 }],
+        [{ events: [makeEvent("evt_1"), makeEvent("evt_2")], nextCursor: 2, latest: 2, hasMore: false }],
         abort,
       ),
       cursorStore,
@@ -132,9 +156,9 @@ describe("runRelayPollLoop", () => {
     await runRelayPollLoop({
       client: scriptedClient(
         [
-          { events: [makeEvent("evt_1"), makeEvent("evt_2")], nextCursor: 2 },
+          { events: [makeEvent("evt_1"), makeEvent("evt_2")], nextCursor: 2, latest: 2, hasMore: false },
           // Replay of the same batch after the mid-batch failure.
-          { events: [makeEvent("evt_1"), makeEvent("evt_2")], nextCursor: 2 },
+          { events: [makeEvent("evt_1"), makeEvent("evt_2")], nextCursor: 2, latest: 2, hasMore: false },
         ],
         abort,
       ),
@@ -179,8 +203,8 @@ describe("runRelayPollLoop", () => {
     await runRelayPollLoop({
       client: scriptedClient(
         [
-          { events: [makeEvent("evt_1"), makeEvent("evt_2")], nextCursor: 2 },
-          { events: [makeEvent("evt_1"), makeEvent("evt_2")], nextCursor: 2 },
+          { events: [makeEvent("evt_1"), makeEvent("evt_2")], nextCursor: 2, latest: 2, hasMore: false },
+          { events: [makeEvent("evt_1"), makeEvent("evt_2")], nextCursor: 2, latest: 2, hasMore: false },
         ],
         abort,
       ),
@@ -209,8 +233,8 @@ describe("runRelayPollLoop", () => {
       await runRelayPollLoop({
         client: scriptedClient(
           [
-            { events: [makeEvent("evt_preflight")], nextCursor: 1 },
-            { events: [makeEvent("evt_preflight")], nextCursor: 1 },
+            { events: [makeEvent("evt_preflight")], nextCursor: 1, latest: 1, hasMore: false },
+            { events: [makeEvent("evt_preflight")], nextCursor: 1, latest: 1, hasMore: false },
           ],
           abort,
         ),
@@ -237,8 +261,8 @@ describe("runRelayPollLoop", () => {
 
   // REL-167: the cursor is ONE watermark for the whole channel, so an event
   // the server refuses permanently must not hold it. Before this, a single
-  // group mention the server rejected replayed forever and every later
-  // message, direct ones included, waited behind it.
+  // rejected message replayed forever and every later message waited behind
+  // it.
   it("does not let a permanently rejected event hold the cursor", async () => {
     const abort = new AbortController();
     const cursorStore = memoryCursorStore();
@@ -248,7 +272,7 @@ describe("runRelayPollLoop", () => {
 
     await runRelayPollLoop({
       client: scriptedClient(
-        [{ events: [makeEvent("evt_poison"), makeEvent("evt_later")], nextCursor: 2 }],
+        [{ events: [makeEvent("evt_poison"), makeEvent("evt_later")], nextCursor: 2, latest: 2, hasMore: false }],
         abort,
       ),
       cursorStore,
@@ -261,7 +285,7 @@ describe("runRelayPollLoop", () => {
       handleEvent: async (event, markAttempt) => {
         if (event.event_id === "evt_poison") {
           throw new RelayApiError(
-            "relay: POST /v1/conversations/cnv_g/responding failed with 403: group typing requires invocation_id",
+            "relay: POST /v2/conversations/cnv_g/messages failed with 403: not a participant",
             { status: 403, kind: "rejected" },
           );
         }
@@ -289,8 +313,8 @@ describe("runRelayPollLoop", () => {
     await runRelayPollLoop({
       client: scriptedClient(
         [
-          { events: [makeEvent("evt_flaky")], nextCursor: 1 },
-          { events: [makeEvent("evt_flaky")], nextCursor: 1 },
+          { events: [makeEvent("evt_flaky")], nextCursor: 1, latest: 1, hasMore: false },
+          { events: [makeEvent("evt_flaky")], nextCursor: 1, latest: 1, hasMore: false },
         ],
         abort,
       ),
@@ -335,7 +359,7 @@ describe("runRelayPollLoop", () => {
     const receipt: RelayEvent = { ...makeEvent("evt_read"), event_type: "message.read" };
     await runRelayPollLoop({
       client: scriptedClient(
-        [{ events: [receipt, makeEvent("evt_msg")], nextCursor: 2 }],
+        [{ events: [receipt, makeEvent("evt_msg")], nextCursor: 2, latest: 2, hasMore: false }],
         abort,
       ),
       cursorStore,
@@ -365,8 +389,8 @@ describe("runRelayPollLoop", () => {
     await runRelayPollLoop({
       client: scriptedClient(
         [
-          { events: [makeEvent("evt_1")], nextCursor: 1 },
-          { events: [makeEvent("evt_1")], nextCursor: 1 },
+          { events: [makeEvent("evt_1")], nextCursor: 1, latest: 1, hasMore: false },
+          { events: [makeEvent("evt_1")], nextCursor: 1, latest: 1, hasMore: false },
         ],
         abort,
       ),
@@ -403,26 +427,6 @@ describe("runRelayPollLoop", () => {
     ).rejects.toMatchObject({ kind: "auth" });
   });
 
-  it("settles on 409 consumer conflict", async () => {
-    const abort = new AbortController();
-    const cursorStore = memoryCursorStore();
-    await cursorStore.load();
-
-    await expect(
-      runRelayPollLoop({
-        client: scriptedClient(
-          [new RelayApiError("terminated_by_other_consumer", { status: 409, kind: "conflict" })],
-          abort,
-        ),
-        cursorStore,
-        deduper: createRelayInboundDeduper({ guard: memoryGuard(), baseUrl: "https://api.relayapp.im", agentId: "agt_self" }),
-        abortSignal: abort.signal,
-        handleEvent: async () => {},
-        sleep: instantSleep,
-      }),
-    ).rejects.toMatchObject({ kind: "conflict" });
-  });
-
   it("keeps looping through transient errors", async () => {
     const abort = new AbortController();
     const cursorStore = memoryCursorStore();
@@ -434,7 +438,7 @@ describe("runRelayPollLoop", () => {
         [
           new RelayApiError("rate limited", { status: 429, kind: "retryable" }),
           new RelayApiError("bad gateway", { status: 502, kind: "retryable" }),
-          { events: [makeEvent("evt_1")], nextCursor: 1 },
+          { events: [makeEvent("evt_1")], nextCursor: 1, latest: 1, hasMore: false },
         ],
         abort,
       ),
@@ -487,7 +491,7 @@ describe("runRelayPollLoop", () => {
 
     await runRelayPollLoop({
       client: scriptedClient(
-        [{ events: [makeEvent("evt_1"), makeEvent("evt_tail")], nextCursor: 2 }],
+        [{ events: [makeEvent("evt_1"), makeEvent("evt_tail")], nextCursor: 2, latest: 2, hasMore: false }],
         abort,
       ),
       cursorStore,

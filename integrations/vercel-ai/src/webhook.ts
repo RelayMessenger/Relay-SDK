@@ -9,30 +9,23 @@ import type {
   RelayEventEnvelope,
   RelayOutgoingPart,
   SendResult,
-  StreamSendResult,
-  UIMessageStreamSource,
 } from "./types.js";
 
 export interface WebhookContext {
   event: MessageReceivedEvent;
   /** Convenience accessor for `event.data.message`. */
   message: MessageReceivedEvent["data"]["message"];
-  /** Present only for group deliveries; already threaded into every reply helper. */
-  invocationId?: string;
   client: RelayClient;
   /**
-   * Reply helpers bound to the event's conversation and invocation. Each call
-   * derives a deterministic Idempotency-Key from the event id and the call
-   * order, so a redelivered webhook replays the first reply instead of
-   * double-posting, and a redelivery whose content diverges is refused by
-   * Relay with 409 rather than posted twice.
+   * Reply helpers bound to the event's conversation. Each call is an ordinary
+   * send: one send is one message, and the `msg_` id the client mints for it
+   * is that message's identity and its only retry key.
    */
   reply: {
     text(text: string): Promise<SendResult>;
     parts(parts: RelayOutgoingPart[]): Promise<SendResult>;
-    stream(source: UIMessageStreamSource): Promise<StreamSendResult>;
   };
-  typing(started?: boolean, label?: string): Promise<void>;
+  typing(started?: boolean): Promise<void>;
 }
 
 export type WebhookHandler = (context: WebhookContext) => Promise<void> | void;
@@ -63,7 +56,8 @@ class DedupeWindow {
   /**
    * Record an id only after its event was durably handled. A failed handler
    * never records, so Relay's 5xx redelivery is dispatched again instead of
-   * being swallowed by this window.
+   * being swallowed by this window. The `msg_` id on each reply is what keeps
+   * that second dispatch from posting the same message twice.
    */
   record(id: string): void {
     this.seen.add(id);
@@ -74,24 +68,6 @@ class DedupeWindow {
   }
 }
 
-
-/**
- * Idempotency key for one reply: the event and the reply's position in the
- * handler, and nothing else.
- *
- * This once carried a digest of the content too. That defeated the mechanism
- * it was meant to serve. Relay hashes the whole request beside the key
- * (Relay-Server/server/src/domain/commitMessage.ts:1553) and answers 409
- * idempotency_conflict when one key returns with a different body, otherwise
- * it replays the first response. Folding the content in made the key change
- * whenever the body changed, so the conflict could never fire and a
- * redelivered event whose model wrote different words the second time posted a
- * genuine second message to the person. Naming only the position is what lets
- * Relay replay a faithful retry and refuse a diverging one.
- */
-function replyKey(eventId: string, ordinal: number): string {
-  return `${eventId.slice(0, 180)}:${ordinal}`;
-}
 
 function json(status: number, body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), {
@@ -161,39 +137,16 @@ export function createWebhookHandler(options: WebhookOptions) {
     }
 
     const event = envelope as MessageReceivedEvent;
-    const invocationId = event.data.invocation_id;
     const conversationId = event.data.message.conversation_id;
-    let sendSequence = 0;
     const webhookContext: WebhookContext = {
       event,
       message: event.data.message,
-      invocationId,
       client: options.client,
       reply: {
-        text: async (text) =>
-          options.client.sendText({
-            conversationId,
-            text,
-            invocationId,
-            idempotencyKey: replyKey(event.event_id, sendSequence++),
-          }),
-        parts: async (parts) =>
-          options.client.send({
-            conversationId,
-            parts,
-            invocationId,
-            idempotencyKey: replyKey(event.event_id, sendSequence++),
-          }),
-        stream: (source) =>
-          options.client.stream({
-            conversationId,
-            stream: source,
-            invocationId,
-            idempotencyKey: replyKey(event.event_id, sendSequence++),
-          }),
+        text: async (text) => options.client.sendText({ conversationId, text }),
+        parts: async (parts) => options.client.send({ conversationId, parts }),
       },
-      typing: (started = true, label) =>
-        options.client.typing({ conversationId, started, label, invocationId }),
+      typing: (started = true) => options.client.typing({ conversationId, started }),
     };
 
     // `context` is accepted for call-site compatibility with Cloudflare and

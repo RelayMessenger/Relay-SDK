@@ -11,10 +11,8 @@ import type {
   RelayId,
   RelayMessage,
   RelayOutgoingPart,
-  RelayPartOperation,
   RelayReactionResult,
-  RelayEditRequest,
-  RelayReconcileResult,
+  RelayReceipt,
   RelayReplyTarget,
   RelaySendResult,
 } from "./types.js";
@@ -33,48 +31,56 @@ export type RelayClientOptions = {
 export type RelayClient = {
   readonly baseUrl: string;
   getMe: (params?: { signal?: AbortSignal }) => Promise<RelayAgentProfile>;
+  /**
+   * One page of this agent's durable event log.
+   *
+   * `after` is the last sequence you have seen and the page is everything
+   * newer, oldest first. There is no exclusive consumer, no acknowledgement
+   * handshake and no reconcile step: persist `nextCursor` once you have
+   * durably handled the page, and ignore an event you have already seen —
+   * delivery is at least once. `timeoutSeconds` from 1 to 30 holds the
+   * request open until something arrives.
+   */
   pollEvents: (params: {
-    cursor: number;
+    after: number;
     timeoutSeconds?: number;
     limit?: number;
     signal?: AbortSignal;
   }) => Promise<RelayEventsPage>;
   /**
-   * `/v1` send. Relay splits the parts at ingest, so this can commit several
-   * messages; read `messages`. Kept for clients already shipped against it.
+   * `/v1` send. One send is one message; the array in the response body
+   * always has exactly one element. Kept for clients already shipped against
+   * it — new code should use `sendMessage`.
    */
-  sendMessage: (params: {
-    conversationId: string;
-    parts: RelayOutgoingPart[];
-    replyTo?: RelayReplyTarget;
-    invocationId?: string;
-    idempotencyKey: string;
-    signal?: AbortSignal;
-  }) => Promise<RelaySendResult>;
-  /**
-   * `/v2` send: one send is one message. Mints a `msg_` ULID when
-   * `messageId` is absent, and that id is both the message's identity and the
-   * retry key, so no `Idempotency-Key` is involved.
-   *
-   * Mint the id once per logical send and reuse it across retries. Minting a
-   * fresh one on retry is how you send the same message twice.
-   */
-  sendMessageV2: (params: {
+  sendMessageV1: (params: {
     conversationId: string;
     messageId?: RelayId;
     parts: RelayOutgoingPart[];
     replyTo?: RelayReplyTarget;
-    invokedAgentIds?: RelayId[];
     fallbackText?: string;
-    invocationId?: string;
     signal?: AbortSignal;
-  }) => Promise<{ messageId: RelayId; message: RelayMessage }>;
+  }) => Promise<RelaySendResult>;
+  /**
+   * `/v2` send: one send is one message. Mints a `msg_` ULID when
+   * `messageId` is absent, and that id is the message's identity AND the only
+   * retry key — no `Idempotency-Key` header is involved.
+   *
+   * Mint the id once per logical send and reuse it across retries. Minting a
+   * fresh one on retry is how you send the same message twice.
+   */
+  sendMessage: (params: {
+    conversationId: string;
+    messageId?: RelayId;
+    parts: RelayOutgoingPart[];
+    replyTo?: RelayReplyTarget;
+    fallbackText?: string;
+    signal?: AbortSignal;
+  }) => Promise<RelaySendResult>;
   sendText: (params: {
     conversationId: string;
+    messageId?: RelayId;
     text: string;
     replyTo?: RelayReplyTarget;
-    invocationId?: string;
-    idempotencyKey: string;
     signal?: AbortSignal;
   }) => Promise<RelaySendResult>;
   /** Upload bytes and get an `att_` id to reference from a media part. */
@@ -85,34 +91,16 @@ export type RelayClient = {
     signal?: AbortSignal;
   }) => Promise<RelayAttachment>;
   /**
-   * Apply part operations to a message. `expectedVersion` is the `version`
-   * you last read: a stale value is refused rather than overwriting somebody
-   * else's edit.
-   */
-  editMessage: (params: {
-    messageId: RelayId;
-    operationId?: RelayId;
-    expectedVersion: number;
-    operations: RelayPartOperation[];
-    signal?: AbortSignal;
-  }) => Promise<{ operationId: RelayId; message: RelayMessage }>;
-  /** Unsend a message. Idempotent: a second call returns the same tombstone. */
-  unsendMessage: (params: {
-    messageId: RelayId;
-    operationId?: RelayId;
-    signal?: AbortSignal;
-  }) => Promise<{ operationId: RelayId; message: RelayMessage }>;
-  /**
    * Add, change or remove a reaction. Pass `targetPartId` to react to one
    * exact part; omit it for the whole message. Changing an emoji is an `add`
-   * on the slot the previous one occupied.
+   * on the slot the previous one occupied, and repeating a request changes
+   * nothing the second time — there is no operation id.
    */
   react: (params: {
     messageId: RelayId;
     operation: "add" | "remove";
     emoji: string;
     targetPartId?: RelayId;
-    operationId?: RelayId;
     signal?: AbortSignal;
   }) => Promise<RelayReactionResult>;
   /** A page of conversation history, newest first. */
@@ -129,53 +117,31 @@ export type RelayClient = {
    * Most agents never call this. Delivered means the agent's endpoint has the
    * message, so Relay records it from the transport itself: a webhook gets it
    * when the endpoint answers `2xx`, and a `GET /v1/events` consumer gets it
-   * when the cursor moves past the event. Neither needs a line of code, and
-   * neither can suppress it.
+   * when Relay hands the page over. Neither needs a line of code.
    *
    * The exception is a transcript poller — a client that reads
    * `GET /v1/conversations/:id/messages` on a timer. Reading history records
    * no receipt, so nothing on the server ever learns the message arrived.
    * That client, and only that client, has to say so itself.
-   *
-   * Send it on ingest, before anything that implies a read. The server
-   * advances the delivered watermark whenever it records a read, so a
-   * delivered receipt that arrives after a read for the same message is
-   * silently dropped: the sender goes straight from "Sent" to "Read" and never
-   * sees "Delivered". Skipping this call costs the middle rung of the ladder,
-   * not the top one.
    */
   markDelivered: (params: {
     conversationId: string;
     messageId: RelayId;
     signal?: AbortSignal;
-  }) => Promise<void>;
-  /**
-   * Recover from a `410 cursor_expired`. Read canonical history first: this
-   * call asserts you did, and returns the cursor to resume from.
-   */
-  reconcileEvents: (params: {
-    expiredCursor: number;
-    historyReconciled: true;
-    idempotencyKey?: string;
+  }) => Promise<RelayReceipt>;
+  markRead: (params: {
+    conversationId: string;
+    messageId: RelayId;
     signal?: AbortSignal;
-  }) => Promise<RelayReconcileResult>;
+  }) => Promise<RelayReceipt>;
+  /**
+   * Ephemeral typing. Fire and forget: nothing is stored, no lease is taken,
+   * and the recipient's client hides the indicator on its own after 90
+   * seconds. Send the start again while still composing to keep it alive.
+   */
   setTyping: (params: {
     conversationId: string;
     started: boolean;
-    label?: string;
-    invocationId?: string;
-    signal?: AbortSignal;
-  }) => Promise<void>;
-  setResponding: (params: {
-    conversationId: string;
-    messageId: string;
-    label?: string;
-    invocationId?: string;
-    signal?: AbortSignal;
-  }) => Promise<void>;
-  markRead: (params: {
-    conversationId: string;
-    messageId: string;
     signal?: AbortSignal;
   }) => Promise<void>;
 };
@@ -200,93 +166,9 @@ async function readErrorDetail(response: Response): Promise<{
   }
 }
 
-/**
- * Build the body of a `PATCH /v2/messages/{id}`.
- *
- * Exported because it is the part of an edit worth testing without a server:
- * the operations are the caller's, and everything else is the retry and
- * concurrency contract. `operationId` defaults to a fresh `mut_` id, which is
- * correct for a first attempt and wrong for a retry, so a caller that retries
- * must pass the id it used the first time.
- */
-export function buildEditRequest(params: {
-  operationId?: RelayId;
-  expectedVersion: number;
-  operations: RelayPartOperation[];
-}): RelayEditRequest {
-  if (!Number.isInteger(params.expectedVersion) || params.expectedVersion < 1) {
-    throw new Error("relay: expectedVersion must be the version you last read");
-  }
-  if (params.operations.length === 0) {
-    throw new Error("relay: an edit needs at least one operation");
-  }
-  if (params.operations.length > MAX_OPERATIONS_PER_EDIT) {
-    throw new Error(
-      `relay: an edit takes at most ${MAX_OPERATIONS_PER_EDIT} operations`,
-    );
-  }
-  return {
-    operation_id: params.operationId ?? relayId("mut"),
-    expected_version: params.expectedVersion,
-    operations: params.operations,
-  };
-}
-
-/** Relay refuses an edit with more operations than this. */
-export const MAX_OPERATIONS_PER_EDIT = 64;
-
-/**
- * What a poll should do about the gap between the cursor it holds and the
- * page it just read.
- *
- * A long poll returns `next_cursor` and the events between. A cursor that is
- * behind Relay's retention is `410 cursor_expired` and needs a history read
- * before it can resume; a cursor ahead of what Relay ever delivered is a
- * `422` and means this consumer's stored cursor is not Relay's. Both are
- * terminal to the loop and neither is repaired by retrying, so name them
- * rather than letting a caller retry into them forever.
- */
-export type CursorGap =
-  | { kind: "none"; resumeCursor: number }
-  | { kind: "expired"; resumeFrom: number }
-  | { kind: "ahead"; highestDeliveredCursor: number };
-
-/**
- * Classify the error a poll failed with, or the page it succeeded with.
- *
- * ```ts
- * const gap = classifyCursorGap({ cursor, error });
- * if (gap.kind === "expired") {
- *   await readHistoryFrom(gap.resumeFrom);
- *   const { resumeCursor } = await client.reconcileEvents({
- *     expiredCursor: gap.resumeFrom,
- *     historyReconciled: true,
- *   });
- *   setCursor(resumeCursor);
- * }
- * ```
- */
-export function classifyCursorGap(input: {
-  cursor: number;
-  error?: unknown;
-  page?: RelayEventsPage;
-}): CursorGap {
-  const error = input.error;
-  if (error instanceof RelayApiError) {
-    if (error.status === 410 || error.code === "cursor_expired") {
-      return { kind: "expired", resumeFrom: input.cursor };
-    }
-    const highest = error.details?.["highest_delivered_cursor"];
-    if (typeof highest === "number") {
-      return { kind: "ahead", highestDeliveredCursor: highest };
-    }
-  }
-  return { kind: "none", resumeCursor: input.page?.nextCursor ?? input.cursor };
-}
-
 export function createRelayClient(options: RelayClientOptions): RelayClient {
   if (!options.token.trim()) {
-    throw new Error("relay: Agent Token is required");
+    throw new Error("relay: API key is required");
   }
   const baseUrl = normalizeRelayBaseUrl(options.baseUrl);
   const fetchImpl: FetchLike =
@@ -355,6 +237,39 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     return response;
   };
 
+  const sendBody = (params: {
+    messageId: RelayId;
+    parts: RelayOutgoingPart[];
+    replyTo?: RelayReplyTarget;
+    fallbackText?: string;
+  }) => ({
+    message_id: params.messageId,
+    parts: params.parts,
+    ...(params.replyTo ? { reply_to: params.replyTo } : {}),
+    ...(params.fallbackText === undefined ? {} : { fallback_text: params.fallbackText }),
+  });
+
+  const receipt = async (
+    kind: "read" | "delivered",
+    params: { conversationId: string; messageId: RelayId; signal?: AbortSignal },
+  ): Promise<RelayReceipt> => {
+    const response = await request({
+      method: "POST",
+      path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/${kind}`,
+      body: { message_id: params.messageId },
+      ...(params.signal ? { signal: params.signal } : {}),
+    });
+    const body = (await response.json()) as { receipt?: RelayReceipt };
+    if (!body.receipt) {
+      throw new RelayApiError(`relay: ${kind} receipt returned no watermark`, {
+        status: response.status,
+        kind: "retryable",
+      });
+    }
+    return body.receipt;
+  };
+
+
   const client: RelayClient = {
     baseUrl,
 
@@ -369,12 +284,12 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     },
 
     pollEvents: async (params) => {
-      const timeoutSeconds = Math.min(Math.max(params.timeoutSeconds ?? 30, 1), 30);
+      const timeoutSeconds = Math.min(Math.max(params.timeoutSeconds ?? 30, 0), 30);
       const response = await request({
         method: "GET",
         path: "/v1/events",
         query: {
-          cursor: params.cursor,
+          after: params.after,
           timeout: timeoutSeconds,
           ...(params.limit === undefined ? {} : { limit: params.limit }),
         },
@@ -384,73 +299,63 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       const body = (await response.json()) as {
         events?: RelayEventsPage["events"];
         next_cursor?: number;
+        latest?: number;
+        has_more?: boolean;
       };
       const events = Array.isArray(body.events) ? body.events : [];
       const nextCursor =
         typeof body.next_cursor === "number" && Number.isSafeInteger(body.next_cursor)
           ? body.next_cursor
-          : params.cursor;
-      return { events, nextCursor };
+          : params.after;
+      const latest =
+        typeof body.latest === "number" && Number.isSafeInteger(body.latest)
+          ? body.latest
+          : nextCursor;
+      return { events, nextCursor, latest, hasMore: body.has_more === true };
     },
 
-    sendMessage: async (params) => {
+    sendMessageV1: async (params) => {
+      const messageId = params.messageId ?? relayId("msg");
       const response = await request({
         method: "POST",
-        path: "/v1/messages",
-        headers: { "idempotency-key": params.idempotencyKey },
-        body: {
-          conversation_id: params.conversationId,
-          parts: params.parts,
-          ...(params.invocationId ? { invocation_id: params.invocationId } : {}),
-          ...(params.replyTo ? { reply_to: params.replyTo } : {}),
-        },
+        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/messages`,
+        body: sendBody({ ...params, messageId }),
         ...(params.signal ? { signal: params.signal } : {}),
       });
-      // The server answers `{ message_id, messages }`. Reading `body.message`
-      // here resolved every send with `message: undefined` while TypeScript
-      // believed otherwise, and the fault surfaced later at the consumer.
-      const body = (await response.json()) as {
-        message_id?: string;
-        messages?: RelayMessage[];
-      };
-      const messages = Array.isArray(body.messages) ? body.messages : [];
-      const first = messages[0];
-      if (!first) {
-        throw new RelayApiError("relay: send returned no committed messages", {
+      // `/v1` answers `{ messages: [one] }`. One send is one message now, so
+      // the array is a shape shipped clients still read, not a split.
+      const body = (await response.json()) as { messages?: RelayMessage[] };
+      const message = Array.isArray(body.messages) ? body.messages[0] : undefined;
+      if (!message) {
+        throw new RelayApiError("relay: send returned no committed message", {
           status: response.status,
           kind: "retryable",
         });
       }
-      return {
-        messageId: typeof body.message_id === "string" ? body.message_id : first.id,
-        message: first,
-        messages,
-      };
+      return { messageId, message };
     },
 
-    sendMessageV2: async (params) => {
+    sendMessage: async (params) => {
       const messageId = params.messageId ?? relayId("msg");
       const response = await request({
         method: "POST",
         path: `/v2/conversations/${encodeURIComponent(params.conversationId)}/messages`,
-        body: {
-          message_id: messageId,
-          parts: params.parts,
-          ...(params.replyTo ? { reply_to: params.replyTo } : {}),
-          ...(params.invokedAgentIds ? { invoked_agent_ids: params.invokedAgentIds } : {}),
-          ...(params.fallbackText === undefined ? {} : { fallback_text: params.fallbackText }),
-          ...(params.invocationId ? { invocation_id: params.invocationId } : {}),
-        },
+        body: sendBody({ ...params, messageId }),
         ...(params.signal ? { signal: params.signal } : {}),
       });
       const body = (await response.json()) as { message?: RelayMessage };
       if (!body.message) {
-        throw new RelayApiError("relay: v2 send returned no message", {
+        throw new RelayApiError("relay: send returned no message", {
           status: response.status,
           kind: "retryable",
         });
       }
       return { messageId, message: body.message };
+    },
+
+    sendText: async (params) => {
+      const { text, ...rest } = params;
+      return client.sendMessage({ ...rest, parts: [{ type: "text", text }] });
     },
 
     uploadAttachment: async (params) => {
@@ -478,46 +383,6 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       return body.attachment;
     },
 
-    editMessage: async (params) => {
-      const operationId = params.operationId ?? relayId("mut");
-      const response = await request({
-        method: "PATCH",
-        path: `/v2/messages/${encodeURIComponent(params.messageId)}`,
-        body: buildEditRequest({
-          operationId,
-          expectedVersion: params.expectedVersion,
-          operations: params.operations,
-        }),
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
-      const body = (await response.json()) as { message?: RelayMessage };
-      if (!body.message) {
-        throw new RelayApiError("relay: edit returned no message", {
-          status: response.status,
-          kind: "retryable",
-        });
-      }
-      return { operationId, message: body.message };
-    },
-
-    unsendMessage: async (params) => {
-      const operationId = params.operationId ?? relayId("mut");
-      const response = await request({
-        method: "DELETE",
-        path: `/v2/messages/${encodeURIComponent(params.messageId)}`,
-        body: { operation_id: operationId },
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
-      const body = (await response.json()) as { message?: RelayMessage };
-      if (!body.message) {
-        throw new RelayApiError("relay: unsend returned no tombstone", {
-          status: response.status,
-          kind: "retryable",
-        });
-      }
-      return { operationId, message: body.message };
-    },
-
     react: async (params) => {
       const response = await request({
         method: "POST",
@@ -526,10 +391,7 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
           operation: params.operation,
           type: "emoji",
           emoji: params.emoji,
-          ...(params.targetPartId
-            ? { target_scope: "part", target_part_id: params.targetPartId }
-            : {}),
-          operation_id: params.operationId ?? relayId("mut"),
+          ...(params.targetPartId ? { target_part_id: params.targetPartId } : {}),
         },
         ...(params.signal ? { signal: params.signal } : {}),
       });
@@ -559,80 +421,14 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       return { messages: Array.isArray(body.messages) ? body.messages : [] };
     },
 
-    markDelivered: async (params) => {
-      await request({
-        method: "POST",
-        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/delivered`,
-        body: { message_id: params.messageId },
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
-    },
-
-    reconcileEvents: async (params) => {
-      const response = await request({
-        method: "POST",
-        path: "/v1/events/reconcile",
-        headers: {
-          "idempotency-key": params.idempotencyKey ?? `reconcile-${relayId("req")}`,
-        },
-        body: {
-          expired_cursor: params.expiredCursor,
-          history_reconciled: params.historyReconciled,
-        },
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
-      const body = (await response.json()) as {
-        reconciled?: boolean;
-        resume_cursor?: number;
-      };
-      if (body.reconciled !== true || typeof body.resume_cursor !== "number") {
-        throw new RelayApiError("relay: reconcile returned no resume cursor", {
-          status: response.status,
-          kind: "retryable",
-        });
-      }
-      return { reconciled: true, resumeCursor: body.resume_cursor };
-    },
-
-    sendText: async (params) => {
-      const { text, ...rest } = params;
-      return client.sendMessage({
-        ...rest,
-        parts: [{ type: "text", text }],
-      });
-    },
+    markDelivered: async (params) => receipt("delivered", params),
+    markRead: async (params) => receipt("read", params),
 
     setTyping: async (params) => {
       await request({
         method: "POST",
         path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/typing`,
-        body: {
-          started: params.started,
-          ...(params.label ? { label: params.label } : {}),
-          ...(params.invocationId ? { invocation_id: params.invocationId } : {}),
-        },
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
-    },
-
-    setResponding: async (params) => {
-      await request({
-        method: "POST",
-        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/responding`,
-        body: {
-          message_id: params.messageId,
-          ...(params.label ? { label: params.label } : {}),
-          ...(params.invocationId ? { invocation_id: params.invocationId } : {}),
-        },
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
-    },
-
-    markRead: async (params) => {
-      await request({
-        method: "POST",
-        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/read`,
-        body: { message_id: params.messageId },
+        body: { started: params.started },
         ...(params.signal ? { signal: params.signal } : {}),
       });
     },

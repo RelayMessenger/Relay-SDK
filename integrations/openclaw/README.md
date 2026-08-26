@@ -6,13 +6,6 @@ you text like a friend.
 
 Requires `openclaw >= 2026.7.1-2`, which the stable channel satisfies today.
 
-Cores from `2026.7.2-beta.5` onward tell the channel which part of a delivery
-each chunk is, and the plugin keys its idempotent sends on that. Older cores do
-not, so on those the plugin keys each chunk by a digest of the chunk's own
-text. Both keep a retry replaying the same message instead of posting a second
-one. The one thing an older core cannot do is separate two byte-identical
-chunks of a single reply, which arrive as one message.
-
 ## Install
 
 ```sh
@@ -69,22 +62,13 @@ Relay user ids the operator explicitly adds to `allowFrom`. Wildcards are
 ignored. If neither an API owner nor an explicit allowlist is available, the
 account fails closed and does not start polling.
 
-## One consumer per token
+## One process per agent
 
-Relay's `GET /v1/events` long poll allows **exactly one consumer per Agent
-Token**:
-
-- A newer poll takes the slot; the older consumer's request ends with
-  `409 terminated_by_other_consumer`. Running this plugin and another
-  long-poll consumer (for example `relaymessenger start`, or a second OpenClaw) on
-  the same token makes them steal the slot from each other forever. Give each
-  consumer its own agent/token.
-- Long polling is **XOR with webhooks**: while a webhook endpoint is enabled
-  for the agent, `/v1/events` returns `409 conflict` and the channel stops
-  with a terminal disconnect. Disable or delete the agent's webhooks to poll.
-
-The plugin also refuses to start a second configured account that resolves to
-the same agent id as a running one.
+`GET /v1/events` is a plain pull. Relay serves every poller and coexists with
+webhooks, so nothing on the server stops two copies of one agent from reading
+the same event — and both would answer it. The plugin holds a local lock so
+they cannot: see the filesystem lock under [delivery and crash
+semantics](#delivery-and-crash-semantics).
 
 ## Config reference (per account)
 
@@ -105,9 +89,11 @@ Relay. The release workflow requires this proof.
 
 ## Delivery and crash semantics
 
-- Every outbound platform send has a logical-send idempotency key. Durable
-  queue retries reuse the same key, while intentional identical messages and
-  identical chunks remain distinct.
+- Every outbound send mints a `msg_` id before it leaves, and that id is the
+  message's identity: Relay replays a repeat of the same id rather than
+  committing a second message, so the plugin's own retries cannot duplicate a
+  visible reply. Two intentional identical sends mint two ids and stay two
+  messages.
 - Admission, route/session resolution, envelope building, and context
   finalization run before an inbound event is marked attempted. Failures in
   that replay-safe preflight release the claim and retry the event. The marker
@@ -131,8 +117,8 @@ Relay. The release workflow requires this proof.
   Shutdown aborts the active long poll and releases both process-local and
   filesystem ownership before a replacement starts.
 - Every API operation has a deadline (15 seconds for ordinary calls; the
-  configured long-poll hold plus 15 seconds for event polling). Retrying a
-  message send reuses its logical delivery idempotency key.
+  configured long-poll hold plus 15 seconds for event polling). A retried send
+  carries the id its first attempt used.
 
 ## v1 scope
 
@@ -141,5 +127,5 @@ voice memos render as a labeled fetchable capability URL (the URL is itself
 the authorization, so no Agent Token is needed to fetch the bytes) rather
 than the agent seeing the file inline; reactions are observe-only; receipts
 (`message.delivered`/`message.read`) never start a turn. Final agent replies
-are delivered durably (chunked to Relay's 8 KiB per-part cap,
-idempotency-keyed, retry-safe).
+are delivered durably (chunked to Relay's 8 KiB per-part cap and retry-safe
+on the id each send minted).

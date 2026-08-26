@@ -1,11 +1,7 @@
 import { createHmac } from "node:crypto";
 import type { ChatInstance, Message } from "chat";
 import { describe, expect, it, vi } from "vitest";
-import {
-  RelayAdapter,
-  RelayInvocationSpentError,
-  createRelayAdapter,
-} from "./adapter.js";
+import { RelayAdapter, createRelayAdapter } from "./adapter.js";
 import { RelayClient } from "./client.js";
 import { WebhookSecretError } from "./signature.js";
 import type { RelayEventEnvelope, RelayPart, RelayRawMessage } from "./types.js";
@@ -21,9 +17,8 @@ interface RecordedCall {
 }
 
 /**
- * The turn an inbound event opens lives on the async context of its dispatch,
- * so a test that needs one has to reply from inside `processMessage` the way a
- * real handler does. `onMessage` is that handler.
+ * A handler that replies from inside `processMessage`, the way a real one
+ * does. Several assertions below only hold for a reply made during a dispatch.
  */
 type OnMessage = (
   threadId: string,
@@ -36,7 +31,7 @@ function harness(
 ): {
   adapter: RelayAdapter;
   calls: RecordedCall[];
-  chat: { messages: Array<Message<RelayRawMessage>>; deleted: string[]; updated: string[] };
+  chat: { messages: Array<Message<RelayRawMessage>> };
 } {
   const calls: RecordedCall[] = [];
   let index = 0;
@@ -60,7 +55,8 @@ function harness(
     calls.push({ url: String(url), method: init?.method ?? "GET", headers, body });
     const next = responses[index++] ?? {
       body: {
-        messages: [{ id: "msg_out", conversation_id: "cnv_1" }],
+        message_id: "msg_out",
+        message: { id: "msg_out", conversation_id: "cnv_1" },
       },
     };
     const status = next.status ?? 200;
@@ -78,11 +74,7 @@ function harness(
     userName: "Test Agent",
   });
 
-  const seen = {
-    messages: [] as Array<Message<RelayRawMessage>>,
-    deleted: [] as string[],
-    updated: [] as string[],
-  };
+  const seen = { messages: [] as Array<Message<RelayRawMessage>> };
   const chat = {
     async processMessage(
       _adapter: unknown,
@@ -93,12 +85,6 @@ function harness(
       seen.messages.push(resolved);
       if (onMessage) await onMessage(threadId, resolved);
     },
-    async processMessageUpdated(event: { message: unknown }) {
-      seen.updated.push((event.message as Message).id);
-    },
-    async processMessageDeleted(event: { messageId: string }) {
-      seen.deleted.push(event.messageId);
-    },
   };
   void adapter.initialize(chat as unknown as ChatInstance);
   return { adapter, calls, chat: seen };
@@ -106,7 +92,6 @@ function harness(
 
 function messageEvent(
   overrides: Partial<RelayEventEnvelope> = {},
-  invocationId?: string,
 ): RelayEventEnvelope {
   return {
     event_id: "evt_01TEST",
@@ -118,13 +103,15 @@ function messageEvent(
         id: "msg_01IN",
         conversation_id: "cnv_1",
         sequence: 7,
+        kind: "message",
         sender: { kind: "user", id: "usr_01TEST" },
         is_from_me: false,
         status: "sent",
-        parts: [{ part_index: 0, type: "text", text: "hello there" }],
+        parts: [
+          { part_id: "prt_01IN", part_index: 0, type: "text", text: "hello there" },
+        ],
         created_at: "2026-08-19T00:00:00.000Z",
       },
-      ...(invocationId ? { invocation_id: invocationId } : {}),
     },
     ...overrides,
   };
@@ -288,22 +275,6 @@ describe("handleWebhook", () => {
     ).toThrow(WebhookSecretError);
   });
 
-  it("dispatches an edit and an unsend to their own Chat SDK hooks", async () => {
-    const { adapter, chat } = harness();
-    const edited = messageEvent({ event_id: "evt_edit", event_type: "message.edited" });
-    await adapter.handleWebhook(signedRequest(JSON.stringify(edited)));
-    const unsent: RelayEventEnvelope = {
-      event_id: "evt_unsent",
-      event_type: "message.unsent",
-      agent_id: "agt_01TEST",
-      created_at: "2026-08-19T00:00:00.000Z",
-      data: { message_id: "msg_01IN", conversation_id: "cnv_1", sequence: 7 },
-    };
-    await adapter.handleWebhook(signedRequest(JSON.stringify(unsent)));
-    expect(chat.updated).toEqual(["msg_01IN"]);
-    expect(chat.deleted).toEqual(["msg_01IN"]);
-  });
-
   it("acknowledges an event type it does not map without dispatching", async () => {
     const { adapter, chat } = harness();
     const receipt: RelayEventEnvelope = {
@@ -349,6 +320,7 @@ describe("parseMessage", () => {
         id: "msg_1",
         conversation_id: "cnv_1",
         sequence: 1,
+        kind: "message",
         sender: { kind: "user", id: "usr_1" },
         status: "sent",
         parts,
@@ -364,12 +336,14 @@ describe("parseMessage", () => {
     const message = adapter.parseMessage(
       inbound([
         {
+          part_id: "prt_0",
           part_index: 0,
           type: "text",
           text: "alpha bravo",
           styles: [{ start: 6, length: 5, styles: ["bold"] }],
         },
         {
+          part_id: "prt_1",
           part_index: 1,
           type: "text",
           text: "charlie delta",
@@ -385,8 +359,9 @@ describe("parseMessage", () => {
   it("skips an empty part rather than shifting the ranges after it", () => {
     const message = adapter.parseMessage(
       inbound([
-        { part_index: 0, type: "text", text: "" },
+        { part_id: "prt_0", part_index: 0, type: "text", text: "" },
         {
+          part_id: "prt_1",
           part_index: 1,
           type: "text",
           text: "alpha bravo",
@@ -403,6 +378,7 @@ describe("parseMessage", () => {
       inbound(
         [
           {
+            part_id: "prt_0",
             part_index: 0,
             type: "text",
             text: "",
@@ -418,7 +394,7 @@ describe("parseMessage", () => {
 });
 
 describe("postMessage", () => {
-  it("posts the OpenAPI payload shape with a keyed idempotent send", async () => {
+  it("posts the OpenAPI payload shape with a client-minted message id", async () => {
     let sent: unknown;
     let adapter!: RelayAdapter;
     const built = harness([], async (threadId) => {
@@ -433,10 +409,11 @@ describe("postMessage", () => {
     expect(post.url).toBe("https://api.relayapp.im/v1/messages");
     expect(post.headers.authorization).toBe("Bearer rly_live_test");
     expect(post.headers["content-type"]).toBe("application/json");
-    // The key names the event and the position, and nothing else: that is what
-    // lets Relay replay a redelivery and refuse a diverging one.
-    expect(post.headers["idempotency-key"]).toBe("relay:evt_01TEST:0");
-    expect(post.body).toEqual({
+    // The minted id is the only retry key; there is no idempotency header.
+    expect(post.headers["idempotency-key"]).toBeUndefined();
+    const body = post.body as { message_id: string };
+    expect(body.message_id).toMatch(/^msg_[0-9a-hjkmnp-tv-z]{26}$/);
+    expect(post.body).toMatchObject({
       conversation_id: "cnv_1",
       parts: [
         {
@@ -461,30 +438,21 @@ describe("postMessage", () => {
     });
   });
 
-  it("throws on a 202 that carried no messages instead of returning undefined", async () => {
-    const { adapter } = harness([{ status: 202, body: { messages: [] } }]);
+  it("throws on a 202 that carried no message instead of returning undefined", async () => {
+    const { adapter } = harness([{ status: 202, body: {} }]);
     await expect(
       adapter.postMessage("relay:cnv_1", "hello"),
-    ).rejects.toThrow(/carried no messages/);
+    ).rejects.toThrow(/carried no committed message/);
   });
 
-  it("edits with exactly one text part", async () => {
-    const { adapter, calls } = harness([
-      { body: { message: { id: "msg_1", conversation_id: "cnv_1" } } },
-    ]);
-    const edited = await adapter.editMessage("relay:cnv_1", "msg_1", "shorter");
-    const call = calls.at(-1) as RecordedCall;
-    expect(call.method).toBe("PATCH");
-    expect((call.body as { parts: unknown[] }).parts).toHaveLength(1);
-    expect(edited.id).toBe("msg_1");
-  });
-
-  it("refuses an edit whose text chunks past one part", async () => {
+  it("says plainly that Relay messages cannot be edited or unsent", async () => {
     const { adapter, calls } = harness();
-    const oversize = "a".repeat(9000);
     await expect(
-      adapter.editMessage("relay:cnv_1", "msg_1", oversize),
-    ).rejects.toThrow(/one text part/);
+      adapter.editMessage("relay:cnv_1", "msg_1", "shorter"),
+    ).rejects.toThrow(/immutable/);
+    await expect(adapter.deleteMessage("relay:cnv_1", "msg_1")).rejects.toThrow(
+      /immutable/,
+    );
     expect(calls).toHaveLength(0);
   });
 
@@ -505,35 +473,12 @@ describe("postMessage", () => {
       operation: "add",
       type: "emoji",
       emoji: "❤️",
-      partIndex: 1,
+      targetPartId: "prt_1",
     });
-    expect(body).toMatchObject({ part_index: 1 });
+    expect(body).toMatchObject({ target_part_id: "prt_1" });
   });
 
-  it("threads a group invocation into the first reply and refuses a second", async () => {
-    let adapter!: RelayAdapter;
-    let second: unknown;
-    const built = harness([], async (threadId) => {
-      await adapter.postMessage(threadId, "first");
-      second = await adapter
-        .postMessage(threadId, "second")
-        .then(() => undefined)
-        .catch((error: unknown) => error);
-    });
-    adapter = built.adapter;
-    await adapter.handleWebhook(
-      signedRequest(JSON.stringify(messageEvent({}, "ivk_01k1m4q9vn2r7t9b4c6qdh8xwy"))),
-    );
-    expect((built.calls[0] as RecordedCall).body).toMatchObject({
-      invocation_id: "ivk_01k1m4q9vn2r7t9b4c6qdh8xwy",
-    });
-    // A bare second send is a 403 from Relay: group agent replies require an
-    // invocation and this turn spent its only one.
-    expect(second).toBeInstanceOf(RelayInvocationSpentError);
-    expect(built.calls).toHaveLength(1);
-  });
-
-  it("allows a second reply in a direct conversation, where no invocation is in play", async () => {
+  it("posts a second reply in one turn, because nothing scopes a group reply now", async () => {
     let adapter!: RelayAdapter;
     const built = harness([], async (threadId) => {
       await adapter.postMessage(threadId, "first");
@@ -542,77 +487,40 @@ describe("postMessage", () => {
     adapter = built.adapter;
     await adapter.handleWebhook(signedRequest(JSON.stringify(messageEvent())));
     expect(built.calls).toHaveLength(2);
+    const ids = built.calls.map(
+      (call) => (call.body as { message_id: string }).message_id,
+    );
+    // Two logical sends, two identities: neither send can replay the other.
+    expect(new Set(ids).size).toBe(2);
     for (const call of built.calls) {
-      expect(call.body).not.toHaveProperty("invocation_id");
+      expect(call.headers["idempotency-key"]).toBeUndefined();
     }
-    // Two logical sends in one turn, so two positions.
-    expect(built.calls.map((call) => call.headers["idempotency-key"])).toEqual([
-      "relay:evt_01TEST:0",
-      "relay:evt_01TEST:1",
-    ]);
   });
 
-  it("keeps the ordinal where it was when a send failed, so the retry reuses the key", async () => {
+  it("mints a fresh id per send, so a failed send's id is never reused", async () => {
+    // The id is the retry key, and this adapter mints one per call rather than
+    // holding it across a failure, so a caller that re-posts after an error is
+    // posting again on purpose rather than silently replaying.
     let adapter!: RelayAdapter;
-    let retried: string | undefined;
     const built = harness(
       [{ status: 500, body: { error: { code: "internal", message: "boom" } } }],
       async (threadId) => {
         await expect(adapter.postMessage(threadId, "hello")).rejects.toThrow();
         await adapter.postMessage(threadId, "hello");
-        retried = (built.calls.at(-1) as RecordedCall).headers["idempotency-key"];
       },
     );
     adapter = built.adapter;
     await adapter.handleWebhook(signedRequest(JSON.stringify(messageEvent())));
     expect(built.calls).toHaveLength(2);
-    expect(built.calls[0]?.headers["idempotency-key"]).toBe("relay:evt_01TEST:0");
-    expect(retried).toBe("relay:evt_01TEST:0");
+    const ids = built.calls.map(
+      (call) => (call.body as { message_id: string }).message_id,
+    );
+    expect(new Set(ids).size).toBe(2);
   });
 
-  it("gives each concurrent turn on one conversation its own event and invocation", async () => {
-    let adapter!: RelayAdapter;
-    let releaseFirst: (() => void) | undefined;
-    const gate = new Promise<void>((resolve) => {
-      releaseFirst = resolve;
-    });
-    const built = harness([], async (threadId, message) => {
-      if (message.raw.event_id === "evt_A") await gate;
-      await adapter.postMessage(threadId, message.raw.event_id ?? "");
-    });
-    adapter = built.adapter;
-
-    const first = adapter.handleWebhook(
-      signedRequest(JSON.stringify(messageEvent({ event_id: "evt_A" })), "whmsg_a"),
-    );
-    // The Chat SDK takes its per-thread lock inside processMessage, so a second
-    // event lands here while the first is still waiting. Turn state kept in a
-    // map keyed by conversation would be overwritten at this point.
-    await adapter.handleWebhook(
-      signedRequest(JSON.stringify(messageEvent({ event_id: "evt_B" })), "whmsg_b"),
-    );
-    releaseFirst?.();
-    await first;
-
-    const keyed = new Map(
-      built.calls.map((call) => [
-        (call.body as { parts: Array<{ text: string }> }).parts[0]?.text,
-        call.headers["idempotency-key"],
-      ]),
-    );
-    expect(keyed.get("evt_A")).toBe("relay:evt_A:0");
-    expect(keyed.get("evt_B")).toBe("relay:evt_B:0");
-  });
-
-  it("derives a fresh key when no inbound event caused the send", async () => {
-    const { adapter, calls } = harness();
-    await adapter.postMessage("relay:cnv_9", "proactive");
-    expect((calls.at(-1) as RecordedCall).headers["idempotency-key"]).toMatch(
-      /^relay:cnv_9:[0-9a-f-]{36}$/,
-    );
-  });
-
-  it("splits a reply that needs more parts than one message holds", async () => {
+  it("delivers a reply past the 32-part ceiling as several messages", async () => {
+    // Relay caps one message at 32 parts and never splits a send itself, so
+    // the follow-up messages are this adapter's own choice.
     const { adapter, calls } = harness();
     const long = Array.from({ length: 40 }, (_, index) =>
       `${"word ".repeat(1700)}block ${index}`,
@@ -646,21 +554,18 @@ describe("reactions, typing, and receipts", () => {
     });
   });
 
-  it("posts an ephemeral typing label bounded to 80 characters", async () => {
-    const { adapter, calls } = harness([{ status: 204, body: {} }]);
-    await adapter.startTyping("relay:cnv_1", "x".repeat(120));
-    const call = calls.at(-1) as RecordedCall;
-    expect(call.url).toBe("https://api.relayapp.im/v1/conversations/cnv_1/typing");
-    expect((call.body as { label: string }).label).toHaveLength(80);
-  });
-
-  it("swallows a typing failure rather than taking the reply down with it", async () => {
-    // Group typing with no live pending invocation is a 403, which is exactly
-    // what typing after the first send of a group turn looks like.
-    const { adapter } = harness([
-      { status: 403, body: { error: { code: "forbidden", message: "invocation is not pending" } } },
+  it("starts and stops the ephemeral typing indicator", async () => {
+    const { adapter, calls } = harness([
+      { status: 204, body: {} },
+      { status: 204, body: {} },
     ]);
-    await expect(adapter.startTyping("relay:cnv_1", "thinking")).resolves.toBeUndefined();
+    await adapter.startTyping("relay:cnv_1", "a label Relay has nowhere to put");
+    await adapter.stopTyping("relay:cnv_1");
+    const [start, stop] = calls as [RecordedCall, RecordedCall];
+    expect(start.url).toBe("https://api.relayapp.im/v1/conversations/cnv_1/typing");
+    // Fire and forget: a bare started flag, no label, no lease, no invocation.
+    expect(start.body).toEqual({ started: true });
+    expect(stop.body).toEqual({ started: false });
   });
 
   it("advances the read watermark without starting a response", async () => {
@@ -682,18 +587,20 @@ describe("history and threads", () => {
               id: "msg_b",
               conversation_id: "cnv_1",
               sequence: 9,
+              kind: "message",
               sender: { kind: "user", id: "usr_1" },
               status: "sent",
-              parts: [{ part_index: 0, type: "text", text: "second" }],
+              parts: [{ part_id: "prt_b", part_index: 0, type: "text", text: "second" }],
               created_at: "2026-08-19T00:00:01.000Z",
             },
             {
               id: "msg_a",
               conversation_id: "cnv_1",
               sequence: 8,
+              kind: "message",
               sender: { kind: "user", id: "usr_1" },
               status: "sent",
-              parts: [{ part_index: 0, type: "text", text: "first" }],
+              parts: [{ part_id: "prt_a", part_index: 0, type: "text", text: "first" }],
               created_at: "2026-08-19T00:00:00.000Z",
             },
           ],
@@ -727,9 +634,10 @@ describe("history and threads", () => {
       id: `msg_${index}`,
       conversation_id: "cnv_1",
       sequence: 100 + index,
+      kind: "message",
       sender: { kind: "user", id: "usr_1" },
       status: "sent",
-      parts: [{ part_index: 0, type: "text", text: `line ${index}` }],
+      parts: [{ part_id: `prt_${index}`, part_index: 0, type: "text", text: `line ${index}` }],
       created_at: "2026-08-19T00:00:00.000Z",
     }));
     const { adapter } = harness([{ body: { messages } }]);

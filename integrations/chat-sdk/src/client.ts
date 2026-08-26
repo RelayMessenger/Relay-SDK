@@ -7,6 +7,7 @@ import type {
   RelaySendResult,
   RelayUserProfile,
 } from "./types.js";
+import { relayId } from "./ulid.js";
 
 export interface RelayClientOptions {
   /** Agent Token (`rly_live_...`). */
@@ -19,9 +20,15 @@ export interface RelayClientOptions {
 export interface RelaySendOptions {
   conversationId: string;
   parts: RelayOutgoingPart[];
-  idempotencyKey: string;
-  invocationId?: string;
-  replyTo?: { messageId: string };
+  /**
+   * The message's identity, minted client side. Omit and the client mints one.
+   * Reuse the same id across retries of one logical send: that is the whole
+   * idempotency mechanism, so minting a fresh one on a retry is how you send
+   * the same message twice.
+   */
+  messageId?: string;
+  replyTo?: { messageId: string; partId?: string };
+  fallbackText?: string;
 }
 
 export interface RelayReactionOptions {
@@ -31,10 +38,10 @@ export interface RelayReactionOptions {
   emoji?: string;
   /**
    * Anchor the reaction on one part of a media message. Only media messages
-   * carry addressable parts (per-photo reaction pills); a text or card
-   * message takes whole-message reactions only, so leave this unset there.
+   * carry addressable parts (per-photo reaction pills); a text or card message
+   * takes whole-message reactions only, so leave this unset there.
    */
-  partIndex?: number;
+  targetPartId?: string;
 }
 
 export interface RelayHistoryOptions {
@@ -116,50 +123,47 @@ export class RelayClient {
     return (await response.json()) as T;
   }
 
-  /** `POST /v1/messages`. The idempotency key is mandatory on this route. */
-  async send(options: RelaySendOptions): Promise<RelaySendResult> {
-    return this.json<RelaySendResult>("/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Idempotency-Key": options.idempotencyKey,
-      },
-      body: JSON.stringify({
-        conversation_id: options.conversationId,
-        parts: options.parts,
-        ...(options.invocationId ? { invocation_id: options.invocationId } : {}),
-        ...(options.replyTo
-          ? { reply_to: { message_id: options.replyTo.messageId } }
-          : {}),
-      }),
-    });
-  }
-
   /**
-   * `PATCH /v1/messages/{id}`. Relay allows edits for 15 minutes and at most
-   * five revisions, and accepts exactly one text part: an edit replaces one
-   * message's text, and anything else answers 422.
+   * `POST /v1/messages`. One send is one message, keyed by the `msg_` id the
+   * client minted: Relay replays that id rather than committing it twice, and
+   * refuses another sender's claim on it with 409. There is no idempotency
+   * header.
    */
-  async edit(
-    messageId: string,
-    parts: RelayOutgoingPart[],
-  ): Promise<{ message: RelayMessage }> {
-    return this.json<{ message: RelayMessage }>(
-      `/v1/messages/${encodeURIComponent(messageId)}`,
+  async send(options: RelaySendOptions): Promise<RelaySendResult> {
+    const messageId = options.messageId ?? relayId("msg");
+    const result = await this.json<{ message_id?: string; message: RelayMessage }>(
+      "/v1/messages",
       {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parts }),
+        body: JSON.stringify({
+          conversation_id: options.conversationId,
+          message_id: messageId,
+          parts: options.parts,
+          ...(options.replyTo
+            ? {
+                reply_to: {
+                  message_id: options.replyTo.messageId,
+                  ...(options.replyTo.partId
+                    ? { part_id: options.replyTo.partId }
+                    : {}),
+                },
+              }
+            : {}),
+          ...(options.fallbackText === undefined
+            ? {}
+            : { fallback_text: options.fallbackText }),
+        }),
       },
     );
-  }
-
-  /** `DELETE /v1/messages/{id}`. Relay allows unsend for two minutes. */
-  async unsend(messageId: string): Promise<{ message: RelayMessage }> {
-    return this.json<{ message: RelayMessage }>(
-      `/v1/messages/${encodeURIComponent(messageId)}`,
-      { method: "DELETE" },
-    );
+    if (!result.message) {
+      throw new RelayApiError(
+        502,
+        "empty_send",
+        "relay: 202 carried no committed message",
+      );
+    }
+    return { message_id: result.message_id ?? messageId, message: result.message };
   }
 
   /** `POST /v1/messages/{id}/reactions`. One route adds and removes. */
@@ -173,8 +177,8 @@ export class RelayClient {
           operation: options.operation,
           type: options.type,
           ...(options.emoji ? { emoji: options.emoji } : {}),
-          ...(options.partIndex !== undefined
-            ? { part_index: options.partIndex }
+          ...(options.targetPartId
+            ? { target_part_id: options.targetPartId }
             : {}),
         }),
       },
@@ -183,29 +187,21 @@ export class RelayClient {
   }
 
   /**
-   * `POST /v1/conversations/{id}/typing`. Ephemeral: pushed to live devices,
-   * never entering the event log. Relay also exposes `/responding`, which
-   * commits a Read receipt before it starts typing; this adapter keeps the two
-   * apart so `markAsRead` stays the only call that moves a watermark.
+   * `POST /v1/conversations/{id}/typing`. Ephemeral and fire and forget:
+   * nothing is stored, no lease is taken, and the recipient's client hides the
+   * indicator on its own. Send the start again while still composing to keep
+   * it alive.
    */
   async typing(options: {
     conversationId: string;
-    started?: boolean;
-    label?: string;
-    invocationId?: string;
+    started: boolean;
   }): Promise<void> {
     const response = await this.fetchImpl(
       `${this.baseUrl}/v1/conversations/${encodeURIComponent(options.conversationId)}/typing`,
       {
         method: "POST",
         headers: this.authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          started: options.started ?? true,
-          ...(options.label ? { label: options.label } : {}),
-          ...(options.invocationId
-            ? { invocation_id: options.invocationId }
-            : {}),
-        }),
+        body: JSON.stringify({ started: options.started }),
       },
     );
     await raiseForStatus(response);

@@ -6,12 +6,12 @@ import { describe, expect, it } from "vitest";
 import { RelayAccountLock } from "./account-lock.js";
 
 describe("cross-process Relay account lock", () => {
-  it("fails a second consumer closed until the first releases", () => {
+  it("fails a second holder closed until the first releases", () => {
     const home = mkdtempSync(join(tmpdir(), "relay-openclaw-lock-"));
     const first = new RelayAccountLock("https://api.relayapp.im", "agt_1", "one", home);
     const second = new RelayAccountLock("https://api.relayapp.im", "agt_1", "two", home);
     first.acquire();
-    expect(() => second.acquire()).toThrow(/already has an active consumer/);
+    expect(() => second.acquire()).toThrow(/already being run by/);
     first.release();
     expect(() => second.acquire()).not.toThrow();
     second.release();

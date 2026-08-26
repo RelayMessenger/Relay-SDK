@@ -12,6 +12,11 @@ Configure Relay without asking the user to paste or echo a secret in chat.
    relaymessenger install-claude
    ```
 
+   `pair` runs the OAuth device-authorization flow: it shows a short user code
+   and a verification link, the user approves the device in the Relay app, and
+   the CLI collects the agent's API key on approval. Nothing is typed into the
+   terminal, and an unapproved code expires by itself.
+
    `install-claude` installs the bundled local marketplace as
    `relay@relaymessenger-bundled`, then copies the paired token, API origin, and
    pinned owner into the channel `.env` with current-user-only permissions. It
@@ -61,8 +66,9 @@ Configure Relay without asking the user to paste or echo a secret in chat.
    claude --dangerously-load-development-channels plugin:relay@relaymessenger-bundled
    ```
 
-   Use `server:relay` for a bare MCP registration. The agent must not have a
-   webhook enabled, and only one live Claude session can consume that agent.
+   Use `server:relay` for a bare MCP registration. Every reader of an agent's
+   event stream receives every event, so two Claude sessions on one agent both
+   answer each message — give each session its own agent.
 
 7. Ask the user to message the agent from Relay. Explain that messages are
    delivered at least once until Claude acknowledges them. Permission cards

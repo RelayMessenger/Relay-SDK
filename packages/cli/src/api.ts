@@ -1,10 +1,11 @@
 /**
  * Compatibility facade over the canonical @relaymessenger/sdk client.
  *
- * The running bridge uses the SDK for identity, polling, messages, typing,
- * responding, and read receipts. This facade keeps the CLI's established
- * positional signatures and implements only pairing and cursor-recovery
- * endpoints that the current published SDK does not expose.
+ * The running bridge uses the SDK for identity, polling, messages, typing and
+ * read receipts. This facade keeps the CLI's established positional
+ * signatures and implements only the endpoints the SDK does not expose: the
+ * Better Auth device-authorization flow that `relaymessenger pair` runs, agent
+ * creation, and the conversation/history inventory.
  */
 import {
   classifyRelayHttpStatus,
@@ -12,12 +13,13 @@ import {
   DEFAULT_RELAY_BASE_URL,
   normalizeRelayBaseUrl,
   RelayApiError,
+  relayId,
   type RelayClient as SdkRelayClient,
   type RelayOutgoingPart as SdkRelayOutgoingPart,
 } from "@relaymessenger/sdk";
 import type {
   RelayEvent,
-  RelayMentionRange,
+  RelayMention,
   RelayMessage,
   RelayStyleRange,
 } from "./store.js";
@@ -36,30 +38,68 @@ export function resolveApiOrigin(fallback: string = PRODUCTION_ORIGIN): string {
   return normalizeRelayBaseUrl(override || fallback);
 }
 
-export interface PairingCreated {
-  pairing_id: string;
-  code: string;
-  url: string;
-  poll_token: string;
+/** `POST /api/auth/device/code`. `expires_in` and `interval` are seconds. */
+export interface DeviceCodeGrant {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  verification_uri_complete?: string;
   expires_in: number;
+  interval: number;
 }
 
-export type PairingStatus =
-  | { status: "pending" }
+/**
+ * One `POST /api/auth/device/token` outcome.
+ *
+ * Two error vocabularies reach this endpoint and neither is a superset of the
+ * other: RFC 8628 states arrive as `{ error, error_description }`, while a
+ * request Better Auth refuses before it reaches the grant arrives in Better
+ * Auth's own `{ message, code }`. Which key is present is the discriminator.
+ */
+export type DeviceTokenResult =
   | {
-      status: "claimed";
-      agent_token: string;
-      agent?: Record<string, unknown>;
-    };
+      kind: "token";
+      access_token: string;
+      token_type: string;
+      expires_in?: number;
+      scope?: string;
+    }
+  | { kind: "oauth_error"; error: string; error_description?: string }
+  | { kind: "request_error"; message: string; code?: string }
+  /** A network blip or a 5xx: the grant is untouched, so keep polling. */
+  | { kind: "transient"; message: string };
 
+/** `POST /v1/me/agents` — the agent and the `rly_live_` key that drives it. */
+export interface CreatedAgent {
+  agent: {
+    id?: string;
+    handle?: string;
+    displayName?: string;
+    visibility?: string;
+    [key: string]: unknown;
+  };
+  token: string;
+  conversation_id?: string;
+}
+
+export interface NewAgentBody {
+  handle: string;
+  displayName: string;
+  tagline?: string;
+}
+
+/**
+ * One page of `GET /v1/events?after=N`. A plain pull: no exclusive consumer,
+ * no acknowledgement handshake, nothing to reconcile.
+ */
 export interface EventsPage {
   events: RelayEvent[];
+  /** Pass as `after` on the next poll. */
   next_cursor: number;
-}
-
-export interface EventCursorReconciliation {
-  reconciled: true;
-  resume_cursor: number;
+  /** The highest sequence Relay has issued to this agent. */
+  latest: number;
+  /** True when `next_cursor` is behind `latest` — poll again immediately. */
+  has_more: boolean;
 }
 
 export interface RelayConversation {
@@ -73,7 +113,7 @@ export type RelayOutgoingPart =
   | {
       type: "text";
       text: string;
-      mentions?: RelayMentionRange[];
+      mentions?: RelayMention[];
       styles?: RelayStyleRange[];
     }
   | {
@@ -95,13 +135,21 @@ export type RelayOutgoingPart =
 
 export interface PostMessageBody {
   conversation_id: string;
-  parts: RelayOutgoingPart[];
-  reply_to?: { message_id: string };
   /**
-   * Required in a group: Relay supplies this on the inbound invocation and
-   * consumes it when the reply commits.
+   * The `msg_` id this send commits under. It is the message's identity AND
+   * the send's only retry key: the same id is a replay, a fresh one on retry
+   * sends the message twice. Minted here when the caller has no durable id of
+   * its own to reuse.
    */
-  invocation_id?: string;
+  message_id?: string;
+  parts: RelayOutgoingPart[];
+  reply_to?: { message_id: string; part_id?: string };
+}
+
+/** One send is one message. */
+export interface PostedMessage {
+  message_id: string;
+  message: RelayMessage;
 }
 
 export class RelayClient {
@@ -125,7 +173,7 @@ export class RelayClient {
   }
 
   /**
-   * Pairing, event reconciliation, and history inventory are not yet in the
+   * The device flow, agent creation, and history inventory are not in the
    * published SDK. Keep their transport narrow until generated SDK methods
    * replace this compatibility path.
    */
@@ -139,27 +187,7 @@ export class RelayClient {
       timeoutMs?: number;
     } = {},
   ): Promise<T> {
-    const headers: Record<string, string> = { ...options.headers };
-    const bearer = options.bearer ?? this.token;
-    if (bearer) headers.authorization = `Bearer ${bearer}`;
-    let body: string | undefined;
-    if (options.body !== undefined) {
-      headers["content-type"] = "application/json";
-      body = JSON.stringify(options.body);
-    }
-    const response = await this.fetchImpl(`${this.origin}${path}`, {
-      method,
-      headers,
-      body,
-      signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
-    });
-    const text = await response.text();
-    let json: unknown;
-    try {
-      json = text ? JSON.parse(text) : undefined;
-    } catch {
-      json = undefined;
-    }
+    const { response, json, text } = await this.rawRequest(method, path, options);
     if (!response.ok) {
       const envelope = json as {
         error?: {
@@ -190,69 +218,144 @@ export class RelayClient {
     return json as T;
   }
 
+  private async rawRequest(
+    method: string,
+    path: string,
+    options: {
+      body?: unknown;
+      headers?: Record<string, string>;
+      bearer?: string;
+      timeoutMs?: number;
+    } = {},
+  ): Promise<{ response: Response; json: unknown; text: string }> {
+    const headers: Record<string, string> = { ...options.headers };
+    const bearer = options.bearer ?? this.token;
+    if (bearer) headers.authorization = `Bearer ${bearer}`;
+    let body: string | undefined;
+    if (options.body !== undefined) {
+      headers["content-type"] = "application/json";
+      body = JSON.stringify(options.body);
+    }
+    const response = await this.fetchImpl(`${this.origin}${path}`, {
+      method,
+      headers,
+      body,
+      signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
+    });
+    const text = await response.text();
+    let json: unknown;
+    try {
+      json = text ? JSON.parse(text) : undefined;
+    } catch {
+      json = undefined;
+    }
+    return { response, json, text };
+  }
+
   private authenticatedClient(): SdkRelayClient {
     if (!this.sdk) {
-      throw new Error("relay: Agent Token is required");
+      throw new Error("relay: Agent API key is required");
     }
     return this.sdk;
   }
 
-  createPairing(deviceName: string, engine?: string): Promise<PairingCreated> {
-    return this.compatibilityRequest("POST", "/v1/pairings", {
-      body: {
-        device_name: deviceName,
-        ...(engine ? { engine } : {}),
-      },
+  /** RFC 8628 step 1: ask for a code the person can approve in the app. */
+  requestDeviceCode(clientId: string, scope?: string): Promise<DeviceCodeGrant> {
+    return this.compatibilityRequest("POST", "/api/auth/device/code", {
+      body: { client_id: clientId, ...(scope ? { scope } : {}) },
     });
   }
 
-  waitPairing(pairingId: string, pollToken: string): Promise<PairingStatus> {
-    return this.compatibilityRequest(
-      "GET",
-      `/v1/pairings/${encodeURIComponent(pairingId)}?wait=true`,
-      { bearer: pollToken, timeoutMs: 45_000 },
+  /**
+   * RFC 8628 step 3. JSON only — the endpoint refuses a form-encoded body
+   * with 415 — and every documented outcome is a value, not a throw: pending
+   * is the expected steady state, so it must not travel as an exception.
+   */
+  async pollDeviceToken(deviceCode: string, clientId: string): Promise<DeviceTokenResult> {
+    const { response, json, text } = await this.rawRequest(
+      "POST",
+      "/api/auth/device/token",
+      {
+        body: {
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+          device_code: deviceCode,
+          client_id: clientId,
+        },
+      },
     );
+    const body = (json ?? {}) as Record<string, unknown>;
+    if (classifyRelayHttpStatus(response.status) === "retryable" && !response.ok) {
+      return {
+        kind: "transient",
+        message: `device token request failed with ${response.status}`,
+      };
+    }
+    if (response.ok && typeof body.access_token === "string") {
+      return {
+        kind: "token",
+        access_token: body.access_token,
+        token_type: typeof body.token_type === "string" ? body.token_type : "Bearer",
+        ...(typeof body.expires_in === "number" ? { expires_in: body.expires_in } : {}),
+        ...(typeof body.scope === "string" ? { scope: body.scope } : {}),
+      };
+    }
+    if (typeof body.error === "string") {
+      return {
+        kind: "oauth_error",
+        error: body.error,
+        ...(typeof body.error_description === "string"
+          ? { error_description: body.error_description }
+          : {}),
+      };
+    }
+    return {
+      kind: "request_error",
+      message: typeof body.message === "string"
+        ? body.message
+        : text.slice(0, 300) || `device token request failed with ${response.status}`,
+      ...(typeof body.code === "string" ? { code: body.code } : {}),
+    };
+  }
+
+  /**
+   * Create this machine's agent with the session the device flow returned.
+   * The response carries the agent's `rly_live_` key, which is the only
+   * credential the bridge keeps.
+   */
+  createAgent(sessionToken: string, body: NewAgentBody): Promise<CreatedAgent> {
+    return this.compatibilityRequest("POST", "/v1/me/agents", {
+      bearer: sessionToken,
+      body,
+    });
   }
 
   async getMe(): Promise<Record<string, unknown>> {
     return { agent: await this.authenticatedClient().getMe() };
   }
 
-  async getEvents(cursor: number, timeoutS = 25, limit = 100): Promise<EventsPage> {
+  async getEvents(after: number, timeoutS = 25, limit = 100): Promise<EventsPage> {
     const page = await this.authenticatedClient().pollEvents({
-      cursor,
+      after,
       timeoutSeconds: timeoutS,
       limit,
     });
     return {
       events: page.events as RelayEvent[],
       next_cursor: page.nextCursor,
+      latest: page.latest,
+      has_more: page.hasMore,
     };
   }
 
-  reconcileEvents(expiredCursor: number): Promise<EventCursorReconciliation> {
-    return this.compatibilityRequest("POST", "/v1/events/reconcile", {
-      body: {
-        expired_cursor: expiredCursor,
-        history_reconciled: true,
-      },
-      headers: {
-        "idempotency-key": `event-cursor-reconcile:${expiredCursor}`,
-      },
-    });
-  }
-
-  postMessage(
-    body: PostMessageBody,
-    idempotencyKey: string,
-  ): Promise<{ messages: RelayMessage[] }> {
-    return this.authenticatedClient().sendMessage({
+  async postMessage(body: PostMessageBody): Promise<PostedMessage> {
+    const messageId = body.message_id ?? relayId("msg");
+    const result = await this.authenticatedClient().sendMessage({
       conversationId: body.conversation_id,
+      messageId,
       parts: body.parts as SdkRelayOutgoingPart[],
-      idempotencyKey,
       ...(body.reply_to ? { replyTo: body.reply_to } : {}),
-      ...(body.invocation_id ? { invocationId: body.invocation_id } : {}),
-    }) as Promise<{ messages: RelayMessage[] }>;
+    });
+    return { message_id: result.messageId, message: result.message as RelayMessage };
   }
 
   listConversations(limit = 50): Promise<{ conversations: RelayConversation[] }> {
@@ -262,45 +365,20 @@ export class RelayClient {
     );
   }
 
-  listMessages(
+  async listMessages(
     conversationId: string,
     limit = 20,
   ): Promise<{ messages: RelayMessage[] }> {
-    return this.compatibilityRequest(
-      "GET",
-      `/v1/conversations/${encodeURIComponent(conversationId)}/messages?limit=${encodeURIComponent(limit)}`,
-    );
+    const page = await this.authenticatedClient().getHistory({ conversationId, limit });
+    return { messages: page.messages as RelayMessage[] };
   }
 
-  setTyping(
-    conversationId: string,
-    started: boolean,
-    label?: string,
-    invocationId?: string,
-  ): Promise<void> {
-    return this.authenticatedClient().setTyping({
-      conversationId,
-      started,
-      ...(label ? { label } : {}),
-      ...(invocationId ? { invocationId } : {}),
-    });
+  /** Fire and forget: nothing is stored, no lease is taken. */
+  setTyping(conversationId: string, started: boolean): Promise<void> {
+    return this.authenticatedClient().setTyping({ conversationId, started });
   }
 
-  setResponding(
-    conversationId: string,
-    messageId: string,
-    label?: string,
-    invocationId?: string,
-  ): Promise<void> {
-    return this.authenticatedClient().setResponding({
-      conversationId,
-      messageId,
-      ...(label ? { label } : {}),
-      ...(invocationId ? { invocationId } : {}),
-    });
-  }
-
-  markRead(conversationId: string, messageId: string): Promise<void> {
-    return this.authenticatedClient().markRead({ conversationId, messageId });
+  async markRead(conversationId: string, messageId: string): Promise<void> {
+    await this.authenticatedClient().markRead({ conversationId, messageId });
   }
 }

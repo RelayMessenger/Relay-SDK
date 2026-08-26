@@ -26,31 +26,32 @@
 /** `<prefix>_<26-char lowercase Crockford ULID>`. Well-formed proves nothing else. */
 export type RelayId = string;
 
-export type RelaySender = {
-  kind: "user" | "agent" | "system";
+/**
+ * Anyone who can act in a conversation. There is no `system` actor: a group
+ * notice is sent by the person who caused it.
+ */
+export type RelayActor = {
+  kind: "user" | "agent";
   id: RelayId;
-  display_name?: string;
   [key: string]: unknown;
 };
+
+/** The `sender` of a message is an actor. */
+export type RelaySender = RelayActor;
 
 // ---------------------------------------------------------------------------
 // Parts
 // ---------------------------------------------------------------------------
 
-/** Inline mention over a text part. Offsets are UTF-16 code units over `text`. */
-export type RelayMentionRange = {
-  start: number;
-  length: number;
-  participant_id: RelayId;
-};
+/**
+ * A mention is the handle it names. A sender confirms handles from the
+ * client's suggestion list, and the server checks each one is really written
+ * as `@handle` in the part's `text`. There are no offsets: a range could mark
+ * any word as a mention of anyone, a handle can only ever mark itself.
+ */
+export type RelayMention = string;
 
-export type RelayTextStyle =
-  | "bold"
-  | "italic"
-  | "underline"
-  | "strikethrough"
-  | "monospace"
-  | "spoiler";
+export type RelayTextStyle = "bold" | "italic" | "underline" | "strikethrough";
 
 /** Formatting run over a text part, in the same UTF-16 offsets mentions use. */
 export type RelayStyleRange = {
@@ -81,17 +82,20 @@ export type RelayKnownPartKind = (typeof KNOWN_PART_KINDS)[number];
  * back to the message's `fallback_text` for anything else.
  */
 export type RelayPart = {
-  /** Permanent part identity. Survives edits, moves and removal. */
+  /** Permanent part identity, assigned at commit. */
   part_id: RelayId;
-  /** Retained for clients that predate part ids. Always equal to `position`. */
+  /** Position of this part in the message, from 0. */
   part_index: number;
-  /** Dense presentation position in the current version, from 0. */
-  position: number;
   type: string;
   text?: string;
-  mentions?: RelayMentionRange[];
+  mentions?: RelayMention[];
   styles?: RelayStyleRange[];
   url?: string;
+  /**
+   * `link_preview` parts: the metadata the sender resolved. Stored with the
+   * part and echoed on history reads; absent from send responses and event
+   * payloads, so a client that needs it reads the message back.
+   */
   title?: string;
   description?: string;
   attachment_id?: RelayId;
@@ -116,7 +120,7 @@ export function isKnownPartKind(
 
 /** A part as a client submits it. The server mints the identity. */
 export type RelayOutgoingPart =
-  | { type: "text"; text: string; mentions?: RelayMentionRange[]; styles?: RelayStyleRange[] }
+  | { type: "text"; text: string; mentions?: RelayMention[]; styles?: RelayStyleRange[] }
   | {
     type: "media";
     attachment_id?: RelayId;
@@ -137,81 +141,52 @@ export type RelayOutgoingPart =
 // Replies
 // ---------------------------------------------------------------------------
 
-export type RelayQuoteState =
-  | "active"
-  | "unsent"
-  | "part_removed"
-  | "moderated"
-  | "redacted"
-  | "unavailable";
-
-/** A snapshot of a reply's target, frozen when the reply committed. */
-export type RelayReplyQuote = {
-  sender: RelaySender;
-  target_kind: string;
-  text_preview?: string;
-  media?: {
-    attachment_id?: RelayId;
-    content_type?: string;
-    width?: number;
-    height?: number;
-    blur_hash?: string;
-  };
-  target_part_id?: RelayId;
-  target_version_id: RelayId;
-  [key: string]: unknown;
-};
-
 /**
- * The reply edge as this reader sees it.
+ * The reply edge: a pointer, never a copy.
  *
- * `message_id` and `part_id` are permanent and never repoint. `quote_state`
- * and `quote` are what changed since: losing the target redacts the quote
- * rather than moving the edge to whatever now sits in that slot.
+ * Relay stores no quote snapshot, so there is nothing to go stale and no
+ * quote state to interpret. Draw the quote from the target message you
+ * already hold; a target this reader cannot see resolves to nothing, and the
+ * reply renders without a quote.
  */
 export type RelayReplyRef = {
   message_id: RelayId;
+  /** Present when the reply targeted one specific part. */
   part_id?: RelayId;
-  quote_state: RelayQuoteState;
-  quote?: RelayReplyQuote;
   [key: string]: unknown;
 };
 
-/** A reply target on a send. `/v2` accepts `part_id` only. */
+/** A reply target on a send. */
 export type RelayReplyTarget = {
   message_id: RelayId;
   part_id?: RelayId;
-  /** @deprecated Legacy index form, accepted on `/v1` only. Use `part_id`. */
-  part_index?: number;
 };
 
 // ---------------------------------------------------------------------------
 // Reactions
 // ---------------------------------------------------------------------------
 
-/** A reaction as projected onto a message. */
+/**
+ * A reaction as projected onto a message. One per (message, target slot,
+ * actor): adding a second emoji to the same slot replaces the first.
+ */
 export type RelayReaction = {
-  /** The target part's current position, or null on a whole-message reaction. */
-  part_index: number | null;
-  target_scope: "message" | "part";
-  /** Null exactly when `target_scope` is `message`. This is the identity. */
+  /** The part this reaction targets; null for a whole-message reaction. */
   target_part_id: RelayId | null;
   emoji: string;
   actor_kind: "user" | "agent";
   actor_id: RelayId;
-  created_at?: string;
+  created_at: string;
   [key: string]: unknown;
 };
 
 /** The reaction endpoint's result, and the `reaction.*` event payload. */
 export type RelayReactionResult = {
   message_id: RelayId;
-  part_index: number | null;
-  target_scope: "message" | "part";
   target_part_id: RelayId | null;
   type: "emoji";
   emoji: string;
-  actor: RelaySender;
+  actor: RelayActor;
   operation: "add" | "remove";
   /** False on a no-op. Relay emits no event when this is false. */
   changed: boolean;
@@ -222,127 +197,68 @@ export type RelayReactionResult = {
 // Messages
 // ---------------------------------------------------------------------------
 
-export type RelayReceiptSummary = {
-  eligible: number;
-  delivered: number;
-  read: number;
-  delivered_state: "none" | "partial" | "complete";
-  read_state: "none" | "partial" | "complete";
-  first_delivered_at?: string;
-  first_read_at?: string;
-  complete_delivered_at?: string;
-  complete_read_at?: string;
-  [key: string]: unknown;
-};
+/**
+ * Direct conversations carry one stamp per message; a group message is always
+ * `sent`, the way iMessage behaves in groups.
+ */
+export type RelayMessageStatus = "sent" | "delivered" | "read";
 
-/** A prior version of a message. The current version is never in this list. */
-export type RelayRevision = {
-  version?: number;
-  parts: RelayPart[];
-  fallback_text: string;
-  created_at?: string;
-  replaced_at: string;
-  [key: string]: unknown;
-};
+/** `notice` is a group notice ("Alice added Bob"), sent by the person who did it. */
+export type RelayMessageKind = "message" | "notice";
 
-export type RelayPartEditAction = "update" | "remove" | "move" | "replace";
-
-/** What the server says this reader may do to this message right now. */
-export type RelayEditCapabilities = {
-  can_edit: boolean;
-  version: number;
-  /** Keyed by `part_id`. Empty when `can_edit` is false. */
-  editable_parts: Record<string, RelayPartEditAction[]>;
-  [key: string]: unknown;
-};
-
-export type RelayMessageStatus =
-  | "sent"
-  | "delivered"
-  | "read"
-  | "completed"
-  | "failed";
-
-/** A message that still has content. */
-export type RelayVisibleMessage = {
+/**
+ * One stored message as one viewer sees it.
+ *
+ * Content is immutable: there is no edit, no unsend, no version and no
+ * tombstone. A message that exists has parts.
+ */
+export type RelayMessage = {
   id: RelayId;
   conversation_id: RelayId;
   sequence: number;
+  kind: RelayMessageKind;
   sender: RelaySender;
   is_from_me: boolean;
-  invoked_agents?: RelayId[];
   parts: RelayPart[];
   reply_to: RelayReplyRef | null;
+  /** Resolved on reads. Send responses and event payloads omit it. */
   reactions?: RelayReaction[];
   fallback_text: string;
   status: RelayMessageStatus;
   delivered_at?: string;
   read_at?: string;
-  receipt_summary?: RelayReceiptSummary;
-  edited_at?: string;
-  revisions?: RelayRevision[];
-  /** 1 for a never-edited message; 6 is the ceiling. */
-  version: number;
-  edit_capabilities?: RelayEditCapabilities;
-  created_at: string;
-  status_deleted?: never;
-  [key: string]: unknown;
-};
-
-/** What is left after an unsend: the identity, and nothing else. */
-export type RelayTombstone = {
-  id: RelayId;
-  conversation_id: RelayId;
-  sequence: number;
-  sender: RelaySender;
-  is_from_me?: boolean;
-  status: "deleted";
-  /** Present iff the sender unsent it; absent for moderation. */
-  unsent_at?: string;
   created_at: string;
   [key: string]: unknown;
-};
-
-export type RelayMessage = RelayVisibleMessage | RelayTombstone;
-
-/** True when the message still has content. Narrow before reading `parts`. */
-export function isVisibleMessage(
-  message: RelayMessage,
-): message is RelayVisibleMessage {
-  return message.status !== "deleted";
-}
-
-// ---------------------------------------------------------------------------
-// Edits
-// ---------------------------------------------------------------------------
-
-export type RelayPartOperation =
-  | {
-    action: "update";
-    part_id: RelayId;
-    text?: string;
-    mentions?: RelayMentionRange[];
-    styles?: RelayStyleRange[];
-  }
-  | { action: "add"; position?: number; part: RelayOutgoingPart }
-  | { action: "remove"; part_id: RelayId }
-  | { action: "move"; part_id: RelayId; position: number }
-  | { action: "replace"; part_id: RelayId; part: RelayOutgoingPart };
-
-export type RelayEditRequest = {
-  operation_id: RelayId;
-  expected_version: number;
-  operations: RelayPartOperation[];
 };
 
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
 
+export type RelayEventType =
+  | "message.received"
+  | "message.delivered"
+  | "message.read"
+  | "conversation.added"
+  | "conversation.updated"
+  | "conversation.removed"
+  | "conversation.left"
+  | "reaction.added"
+  | "reaction.removed";
+
+/**
+ * One envelope from `GET /v1/events`, identical to what a webhook delivers.
+ *
+ * `event_type` is `string` rather than the union above for the same reason
+ * part types are: Relay adds event types without a version bump.
+ */
 export type RelayEventEnvelope<TData = Record<string, unknown>> = {
   event_id: string;
+  /** This agent's position in its own log; the value to send back as `after`. */
+  sequence: number;
   event_type: string;
   agent_id: RelayId;
+  conversation_id: RelayId | null;
   created_at: string;
   /** The envelope shape this delivery was rendered as, as a date. */
   schema_version?: string;
@@ -352,10 +268,26 @@ export type RelayEventEnvelope<TData = Record<string, unknown>> = {
 
 export type MessageReceivedData = {
   message: RelayMessage;
-  invocation_id?: string;
 };
 
 export type MessageReceivedEvent = RelayEventEnvelope<MessageReceivedData>;
+
+/**
+ * One page of `GET /v1/events?after=N`.
+ *
+ * A plain pull, not a consumer session: there is no exclusive consumer, no
+ * acknowledgement handshake and no reconcile step. Delivery is at least once,
+ * so ignore an event you have already seen.
+ */
+export type RelayEventsPage = {
+  events: RelayEventEnvelope[];
+  /** Pass as `after` on the next poll. */
+  nextCursor: number;
+  /** The highest sequence Relay has issued to this agent. */
+  latest: number;
+  /** True when `nextCursor` is behind `latest` — poll again immediately. */
+  hasMore: boolean;
+};
 
 export type RelayAgentProfile = {
   id: RelayId;
@@ -368,31 +300,17 @@ export type RelayAgentProfile = {
   created_at?: string;
 };
 
-export type RelayEventsPage = {
-  events: RelayEventEnvelope[];
-  nextCursor: number;
-};
-
 // ---------------------------------------------------------------------------
 // Results
 // ---------------------------------------------------------------------------
 
 /**
- * The 202 from `POST /v1/messages`. The server splits the accepted parts at
- * ingest: each visible non-media part becomes its own message, contiguous
- * media parts stay one media message, and a voice memo always commits alone,
- * so one send commits one or more messages, in display order.
+ * The result of a send. One send is one message: the `msg_` id you minted is
+ * the message's identity and the send's only retry key.
  */
 export type RelaySendResult = {
-  /**
-   * @deprecated The first committed message's id. A `/v1` send can commit
-   * several messages; read `messages`. On `/v2` it is the id you minted.
-   */
   messageId: RelayId;
-  /** The first committed message, for callers written before the split. */
   message: RelayMessage;
-  /** Every message this send committed, in display order. */
-  messages: RelayMessage[];
 };
 
 export type RelayAttachment = {
@@ -407,7 +325,13 @@ export type RelayHistoryPage = {
   messages: RelayMessage[];
 };
 
-export type RelayReconcileResult = {
-  reconciled: true;
-  resumeCursor: number;
+/** The watermark a read/delivered receipt advanced to. */
+export type RelayReceipt = {
+  message_id: RelayId;
+  conversation_id: RelayId;
+  through_sequence: number;
+  recipient: RelayActor;
+  status: "delivered" | "read";
+  at: string;
+  [key: string]: unknown;
 };

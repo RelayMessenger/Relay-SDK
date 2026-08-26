@@ -1,27 +1,47 @@
 /**
- * `relaymessenger pair` — device-code pairing.
- * POST /v1/pairings → terminal QR of the claim url + short code → long-poll
- * GET /v1/pairings/:id?wait=true until the phone claims it → store the
- * agent_token in ~/.relaymessenger/config.json (chmod 600), then pin the owner from
- * GET /v1/agents/me. Claimed status may recoverably re-return the token until
- * the first successful Agent API use (or the server's claim grace expires),
- * but the locally saved token is authoritative for interrupted finalization.
+ * `relaymessenger pair` — Better Auth device authorization (RFC 8628).
+ * POST /api/auth/device/code → terminal QR of the verification url + the short
+ * user code → poll POST /api/auth/device/token until the person approves it in
+ * the Relay app → use the returned session to POST /v1/me/agents, which creates
+ * this machine's agent and issues its rly_live_ API key. The key is stored in
+ * ~/.relaymessenger/config.json (chmod 600) before the first Agent API call,
+ * then the owner is pinned from GET /v1/agents/me. The locally saved key is
+ * authoritative for interrupted finalization: re-running the command resumes
+ * owner pinning instead of creating a second agent.
  */
 import { hostname } from "node:os";
 import qrcode from "qrcode-terminal";
-import { RelayApiError, RelayClient, type PairingStatus } from "./api.js";
+import {
+  RelayApiError,
+  RelayClient,
+  type DeviceCodeGrant,
+  type NewAgentBody,
+} from "./api.js";
 import { ConfigStore, type RelayConfig } from "./store.js";
+
+/**
+ * Identifies the CLI to the device-authorization endpoint. Relay does not
+ * gate on registered clients, so this is a label in the approval screen and
+ * the audit trail rather than a credential.
+ */
+export const DEVICE_CLIENT_ID = "relaymessenger-cli";
 
 export interface PairOptions {
   origin: string;
-  engine?: string;
+  /** Display name for the created agent. Defaults to this machine's hostname. */
   deviceName?: string;
+  /** Overrides the handle derived from the device name. */
+  handle?: string;
   config?: ConfigStore;
   client?: RelayClient;
-  /** Injected for tests: builds the agent-authenticated client after claim. */
+  /** Injected for tests: builds the agent-authenticated client after creation. */
   agentClientFor?: (agentToken: string) => RelayClient;
   out?: (line: string) => void;
   renderQr?: (url: string) => void;
+  /** Injected for tests: the poll clock, delay, and jitter source. */
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  random?: () => number;
 }
 
 /**
@@ -64,15 +84,15 @@ export function profileUrlForHandle(handle: string): string {
  * (contactAccessPolicies.visibility), so reusing that word would be two
  * concepts sharing one label. Measured against Relay-Server:
  *   - "public" and "unlisted" both resolve at GET /v1/contacts/:handle/profile
- *     (server/src/routes/contacts.ts:1383-1455) with no session required —
- *     anyone holding the link can open it. "unlisted" additionally stays out
- *     of Store browse/search (server/src/domain/agentCreation.ts:188-191,
- *     the default for every pairing-created agent) — that's the one fact
- *     worth telling the owner, since it isn't visible from the link itself.
+ *     (server/src/routes/contacts.ts) with no session required — anyone
+ *     holding the link can open it. "unlisted" additionally stays out of
+ *     Store browse/search (server/src/domain/agentCreation.ts, the default
+ *     for every agent this command creates) — that's the one fact worth
+ *     telling the owner, since it isn't visible from the link itself.
  *   - "private" 404s from that same route, indistinguishable from a
- *     handle that does not exist (contacts.ts:1441-1442); the signed-in
- *     counterpart at GET /v1/contacts/:handle (contacts.ts:319-336) only
- *     admits the owner (`or(ne(visibility, "private"), eq(ownerUserId, user.id))`).
+ *     handle that does not exist; the signed-in counterpart at
+ *     GET /v1/contacts/:handle only admits the owner
+ *     (`or(ne(visibility, "private"), eq(ownerUserId, user.id))`).
  *     So "only you" is literal, not assumed.
  */
 export function profileCaptionForVisibility(visibility: unknown): string | undefined {
@@ -85,7 +105,36 @@ export function profileCaptionForVisibility(visibility: unknown): string | undef
   return undefined;
 }
 
-async function finalizeSavedPairing(
+/**
+ * Relay's handle grammar, enforced here so a machine name that cannot become
+ * one is reported before the device flow spends the person's time:
+ * 3–32 characters, first a lowercase letter, then lowercase letters, digits
+ * or single underscores, never trailing.
+ */
+export const HANDLE_RULES =
+  "a handle must be 3–32 characters, start with a lowercase letter, use only lowercase " +
+  "letters, numbers, or underscores, and cannot end with or repeat underscores";
+
+export function isValidAgentHandle(value: string): boolean {
+  return /^[a-z][a-z0-9_]{2,31}$/.test(value)
+    && !value.endsWith("_")
+    && !value.includes("__");
+}
+
+/** Best-effort handle for a machine name; undefined when nothing valid survives. */
+export function handleFromDeviceName(deviceName: string): string | undefined {
+  const candidate = deviceName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^[^a-z]+/, "")
+    .replace(/_+$/, "")
+    .slice(0, 32)
+    .replace(/_+$/, "");
+  return isValidAgentHandle(candidate) ? candidate : undefined;
+}
+
+async function finalizeSavedAgent(
   saved: RelayConfig,
   config: ConfigStore,
   agentClientFor: PairOptions["agentClientFor"],
@@ -105,17 +154,17 @@ async function finalizeSavedPairing(
     if (error instanceof RelayApiError && error.status === 401) throw error;
     if (!ownerUserId) {
       throw new Error(
-        `Agent Token is safely stored, but owner lookup failed (${error instanceof Error ? error.message : error}). ` +
-          "Run `relaymessenger pair` again to resume owner pinning with this saved token; " +
+        `Agent API key is safely stored, but owner lookup failed (${error instanceof Error ? error.message : error}). ` +
+          "Run `relaymessenger pair` again to resume owner pinning with this saved key; " +
           "it will not create or overwrite an agent.",
       );
     }
   }
   if (!ownerUserId) {
     throw new Error(
-      "Agent Token is safely stored, but the server did not report owner_user_id and " +
+      "Agent API key is safely stored, but the server did not report owner_user_id and " +
         "RELAY_OWNER_USER_ID is not set. The bridge fails closed without a pinned owner. " +
-        "Set RELAY_OWNER_USER_ID, then run `relaymessenger pair` again to finalize this saved token.",
+        "Set RELAY_OWNER_USER_ID, then run `relaymessenger pair` again to finalize this saved key.",
     );
   }
   const agent = {
@@ -126,9 +175,8 @@ async function finalizeSavedPairing(
   out(`Owner pinned: ${ownerUserId}. Only this user can drive the bridge.`);
 
   // The agent's own profile — printed here because this is the first point
-  // the CLI has a live, owner-pinned handle; there is no separate create or
-  // deploy step to hook (agents are created at console.relayapp.im, not by
-  // this CLI). Reuses the same renderQr the pairing QR above used.
+  // the CLI has a live, owner-pinned handle. Reuses the same renderQr the
+  // approval QR above used.
   const handle = agent?.handle;
   if (handle) {
     const profileUrl = profileUrlForHandle(handle);
@@ -146,6 +194,79 @@ async function finalizeSavedPairing(
   out("Next: relaymessenger start --engine claude   (run `relaymessenger help` for every ACP preset)");
 }
 
+/**
+ * RFC 8628 §3.4-3.5. Every terminal state gets its own message, because the
+ * five of them ask the operator for five different things.
+ */
+async function awaitDeviceApproval(
+  client: RelayClient,
+  grant: DeviceCodeGrant,
+  out: (line: string) => void,
+  clock: { now: () => number; sleep: (ms: number) => Promise<void>; random: () => number },
+): Promise<string> {
+  const deadline = clock.now() + grant.expires_in * 1_000;
+  let intervalMs = Math.max(1, grant.interval) * 1_000;
+  const expired = () =>
+    new Error(
+      "The code expired before it was approved in the Relay app. Run `relaymessenger pair` again.",
+    );
+
+  for (;;) {
+    // Jitter on top of the interval, not inside it: the server measures every
+    // poll against `lastPolledAt`, rejected ones included, so arriving at
+    // exactly `interval` intermittently reads as too fast and trips slow_down.
+    await clock.sleep(intervalMs + Math.floor(clock.random() * 1_000));
+    if (clock.now() >= deadline) throw expired();
+
+    let result;
+    try {
+      result = await client.pollDeviceToken(grant.device_code, DEVICE_CLIENT_ID);
+    } catch (error) {
+      // Network blip: the grant is untouched, so keep waiting until expiry.
+      out(`(retrying: ${error instanceof Error ? error.message : error})`);
+      continue;
+    }
+
+    switch (result.kind) {
+      case "token":
+        return result.access_token;
+      case "transient":
+        out(`(retrying: ${result.message})`);
+        continue;
+      case "request_error":
+        throw new Error(
+          `Relay rejected the approval request: ${result.message}` +
+            `${result.code ? ` (${result.code})` : ""}.`,
+        );
+      case "oauth_error":
+        switch (result.error) {
+          case "authorization_pending":
+            continue;
+          case "slow_down":
+            // RFC 8628 §3.5: widen by five seconds and keep the same code.
+            intervalMs += 5_000;
+            continue;
+          case "access_denied":
+            throw new Error(
+              "The request was declined in the Relay app. Run `relaymessenger pair` again to ask for a new code.",
+            );
+          case "expired_token":
+            throw expired();
+          case "invalid_grant":
+            throw new Error(
+              "Relay no longer recognises this code — it was already used, or it belongs to another " +
+                "device. Run `relaymessenger pair` again for a fresh one.",
+            );
+          default:
+            throw new Error(
+              `Relay refused the approval (${result.error})` +
+                `${result.error_description ? `: ${result.error_description}` : ""}.`,
+            );
+        }
+    }
+  }
+}
+
 export async function pair(options: PairOptions): Promise<void> {
   const out = options.out ?? console.log;
   const config = options.config ?? new ConfigStore();
@@ -153,6 +274,11 @@ export async function pair(options: PairOptions): Promise<void> {
   const deviceName = options.deviceName ?? hostname();
   const renderQr =
     options.renderQr ?? ((url: string) => qrcode.generate(url, { small: true }));
+  const clock = {
+    now: options.now ?? Date.now,
+    sleep: options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
+    random: options.random ?? Math.random,
+  };
 
   const existing = config.load();
   if (
@@ -160,66 +286,77 @@ export async function pair(options: PairOptions): Promise<void> {
     !existing.owner_user_id &&
     existing.api_origin === client.origin
   ) {
-    out("Resuming owner pinning for the Agent Token already stored on this machine.");
+    out("Resuming owner pinning for the Agent API key already stored on this machine.");
     try {
-      await finalizeSavedPairing(existing, config, options.agentClientFor, out, renderQr);
+      await finalizeSavedAgent(existing, config, options.agentClientFor, out, renderQr);
       return;
     } catch (error) {
       if (!(error instanceof RelayApiError) || error.status !== 401) throw error;
-      out("Saved Agent Token was rejected (401); starting a fresh pairing for this origin.");
+      out("Saved Agent API key was rejected (401); starting a fresh approval for this origin.");
     }
   }
 
-  const pairing = await client.createPairing(deviceName, options.engine);
+  // Refuse before the person is asked to approve anything: the handle is only
+  // needed at the very end, and finding out then wastes the whole approval.
+  const handle = options.handle ?? handleFromDeviceName(deviceName);
+  if (!handle) {
+    throw new Error(
+      `Cannot derive an agent handle from "${deviceName}" — ${HANDLE_RULES}. ` +
+        "Pass one with `relaymessenger pair --handle <handle>`.",
+    );
+  }
+  if (!isValidAgentHandle(handle)) {
+    throw new Error(`"${handle}" is not a valid handle — ${HANDLE_RULES}.`);
+  }
+
+  const grant = await client.requestDeviceCode(DEVICE_CLIENT_ID);
+  const approvalUrl = grant.verification_uri_complete || grant.verification_uri;
 
   out("");
   out("Scan with the Relay app, or open the link on your phone:");
   out("");
-  renderQr(pairing.url);
+  renderQr(approvalUrl);
   out("");
-  out(`  ${pairing.url}`);
-  out(`  Pairing code: ${pairing.code}`);
+  out(`  ${approvalUrl}`);
+  out(`  Enter this code: ${grant.user_code}`);
   out("");
-  out(`Waiting for the phone to claim (expires in ${Math.round(pairing.expires_in / 60)} min)…`);
+  out(`Waiting for approval (expires in ${Math.round(grant.expires_in / 60)} min)…`);
 
-  const deadline = Date.now() + pairing.expires_in * 1000;
-  let status: PairingStatus | undefined;
-  while (Date.now() < deadline) {
-    try {
-      status = await client.waitPairing(pairing.pairing_id, pairing.poll_token);
-    } catch (error) {
-      if (error instanceof RelayApiError && error.status === 404) {
-        throw new Error("Pairing expired before it was claimed. Run `relaymessenger pair` again.");
-      }
-      if (error instanceof RelayApiError && error.status === 410) {
-        throw new Error(
-          "This pairing claim can no longer return its token. If config.json contains an Agent " +
-            "Token, re-run `relaymessenger pair` to finalize that saved token; otherwise start a new pairing.",
-        );
-      }
-      // Transient (network blip, 5xx, timeout): keep waiting until expiry.
-      out(`(retrying: ${error instanceof Error ? error.message : error})`);
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      continue;
+  const sessionToken = await awaitDeviceApproval(client, grant, out, clock);
+
+  let created;
+  try {
+    created = await client.createAgent(sessionToken, {
+      handle,
+      displayName: deviceName,
+    } satisfies NewAgentBody);
+  } catch (error) {
+    if (error instanceof RelayApiError && error.status === 409) {
+      const why = error.code === "handle_reserved" ? "is reserved by Relay" : "is already taken";
+      throw new Error(
+        `@${handle} ${why}. Run \`relaymessenger pair --handle <handle>\` to choose another.`,
+      );
     }
-    if (status.status === "claimed") break;
-  }
-  if (!status || status.status !== "claimed") {
-    throw new Error("Pairing expired before it was claimed. Run `relaymessenger pair` again.");
+    throw error;
   }
 
-  // Store the token before the first Agent API call. The server may re-return
-  // it during its short claim-recovery window, while this durable local copy
-  // lets a later `relaymessenger pair` resume without creating another agent.
+  // Store the key before the first Agent API call, so an interrupted owner
+  // pin can be resumed from this durable local copy instead of creating a
+  // second agent.
   const saved: RelayConfig = {
     api_origin: client.origin,
-    agent_token: status.agent_token,
-    agent: status.agent as any,
+    agent_token: created.token,
+    agent: {
+      ...(created.agent.id ? { id: created.agent.id } : {}),
+      ...(created.agent.handle ? { handle: created.agent.handle } : {}),
+      ...(created.agent.displayName ? { display_name: created.agent.displayName } : {}),
+      ...(created.agent.visibility ? { visibility: created.agent.visibility } : {}),
+    },
     paired_at: new Date().toISOString(),
   };
   config.save(saved);
   out("");
-  out(`Paired. Agent token stored in ${config.path} (mode 600).`);
+  out(`Approved. Agent API key stored in ${config.path} (mode 600).`);
 
-  await finalizeSavedPairing(saved, config, options.agentClientFor, out, renderQr);
+  await finalizeSavedAgent(saved, config, options.agentClientFor, out, renderQr);
 }

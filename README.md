@@ -21,10 +21,10 @@ The Relay app itself is invite-only and on TestFlight. Join the waitlist at
 
 | Path | What it is |
 | --- | --- |
-| [`packages/cli`](packages/cli) | The `relaymessenger` CLI (npm, `@relaymessenger/cli`): `pair` a machine with the Relay app via QR/code, drive Claude Code, Codex, or Hermes Agent over ACP, and install the bundled Codex, Claude Code, or OpenClaw integration. |
-| [`packages/sdk`](packages/sdk) | `@relaymessenger/sdk`: Relay contract types and transport (HTTPS client, Standard Webhooks verify, durable long-poll, idempotent sends). Its types will become generated from the Relay-Server schemas so the wire contract has one source of truth. |
+| [`packages/cli`](packages/cli) | The `relaymessenger` CLI (npm, `@relaymessenger/cli`): `pair` a machine with the Relay app via a device code you approve in the app, drive Claude Code, Codex, or Hermes Agent over ACP, and install the bundled Codex, Claude Code, or OpenClaw integration. |
+| [`packages/sdk`](packages/sdk) | `@relaymessenger/sdk`: Relay contract types and transport (HTTPS client, Standard Webhooks verify, durable event cursors, sends keyed by a client-minted `msg_` id). Its types follow `schemas/message-v2.schema.json`, which Relay-Server owns, so the wire contract has one source of truth. |
 | [`integrations/claude-code`](integrations/claude-code) | Claude Code **channel plugin** (`relay-claude-channel`, official Channels contract): push Relay messages into a running session, reply tool, phone permission relay. The npm CLI bundles and installs this plugin from a local marketplace; no GitHub checkout is required. |
-| [`integrations/openclaw`](integrations/openclaw) | OpenClaw channel plugin (`@relaymessenger/openclaw-plugin`): an OpenClaw agent as a Relay contact (long-poll receive, durable chunked replies). The npm CLI bundles its installable archive. |
+| [`integrations/openclaw`](integrations/openclaw) | OpenClaw channel plugin (`@relaymessenger/openclaw-plugin`): an OpenClaw agent as a Relay agent (event-poll receive, durable replies). The npm CLI bundles its installable archive. |
 | [`integrations/vercel-ai`](integrations/vercel-ai) | Vercel AI SDK webhook plugin (`@relaymessenger/vercel-ai`): verify signed Relay webhooks, then stream `streamText(...)` back as one canonical message. |
 | [`integrations/chat-sdk`](integrations/chat-sdk) | Vercel Chat SDK adapter (`@relaymessenger/chat-sdk-adapter`): a Relay conversation becomes a Chat SDK thread, so anything built on the Chat SDK reaches Relay users. |
 | [`examples`](examples) | Forkable agents built on `@relaymessenger/sdk` ([`raw-webhook-agent`](examples/raw-webhook-agent), [`showcase-agent`](examples/showcase-agent)), an [eve channel template](examples/eve), plugin landing zones ([`examples/plugins`](examples/plugins)), and smoke harnesses ([`examples/harnesses`](examples/harnesses)). |
@@ -33,10 +33,10 @@ The Relay app itself is invite-only and on TestFlight. Join the waitlist at
 
 ```sh
 npm install -g @relaymessenger/cli
-relaymessenger pair            # QR + code → claim in the Relay app
+relaymessenger pair            # shows a code → approve it in the Relay app
 relaymessenger start --engine claude   # or codex | hermes
 
-# Or install a native channel after pairing:
+# Or install a native channel once the device is linked:
 relaymessenger install-claude
 relaymessenger install-openclaw
 ```

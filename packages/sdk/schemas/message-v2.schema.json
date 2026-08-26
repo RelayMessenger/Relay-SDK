@@ -2,55 +2,46 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://api.relayapp.im/schemas/message-v2.schema.json",
   "title": "Relay message model v2",
-  "description": "The canonical wire contract for Relay's message model: one send is one message, every stored part carries a permanent identity, replies target parts, reactions are scoped, and edits are versioned part operations. Relay-Server owns this file. Every shape here is generated from and validated against real server responses by server/scripts/contract-fixtures-test.ts; nothing may be added to it that the server does not emit.",
-  "$comment": "Clients MUST tolerate part types they do not know. The Part union is deliberately open: an unrecognised `type` matches $defs/UnknownPart, which requires only the identity fields (part_id, part_index, position) and permits any other member. Render such a part with the message's fallback_text and leave it otherwise untouched — do not drop it, and do not fail the message. Clients MUST also tolerate additive members on known shapes: Relay adds optional fields without a version bump.",
+  "description": "The canonical wire contract for Relay's message model: one send is one message, message content is immutable, every stored part carries a permanent identity, a reply is a pointer rather than a copied quote, and a reaction is one emoji per actor per slot. Relay-Server owns this file. Every shape here is generated from and validated against real server responses by server/scripts/contract-fixtures-test.ts; nothing may be added to it that the server does not emit.",
+  "$comment": "Clients MUST tolerate part types they do not know. The Part union is deliberately open: an unrecognised `type` matches $defs/UnknownPart, which requires only the identity fields (part_id, part_index) and permits any other member. Render such a part with the message's fallback_text and leave it otherwise untouched — do not drop it, and do not fail the message. Clients MUST also tolerate additive members on known shapes: Relay adds optional fields without a version bump.",
 
   "$defs": {
     "messageId": {
       "type": "string",
       "pattern": "^msg_[0-9a-hjkmnp-tv-z]{26}$",
-      "description": "A client-generated message identity. Lowercase Crockford base32 ULID; the client mints it before queueing the send and it is both the canonical id and the send's idempotency key."
+      "description": "A client-generated message identity. Lowercase Crockford base32 ULID; the client mints it before queueing the send and it is both the canonical id and the send's only idempotency mechanism. A retry with the same id replays the stored message; another sender's use of the id is a 409."
     },
     "partId": {
       "type": "string",
       "pattern": "^prt_[0-9a-hjkmnp-tv-z]{26}$",
-      "description": "A permanent part identity. Survives edits, reordering and removal; a removed part keeps its id as a tombstone so a reply that targeted it still resolves to the right thing."
+      "description": "A permanent part identity, assigned at commit. A reply or a reaction that targets one exact part names it by this."
     },
     "conversationId": { "type": "string", "pattern": "^cnv_[0-9a-hjkmnp-tv-z]{26}$" },
     "attachmentId": { "type": "string", "pattern": "^att_[0-9a-hjkmnp-tv-z]{26}$" },
-    "operationId": {
-      "type": "string",
-      "pattern": "^mut_[0-9a-hjkmnp-tv-z]{26}$",
-      "description": "A client-generated mutation identity: one per logical edit, unsend or reaction change. Retrying with the same id and the same request replays the original result; the same id with a different request is a 409 idempotency_conflict."
-    },
-    "versionId": { "type": "string", "pattern": "^mvr_[0-9a-hjkmnp-tv-z]{26}$" },
     "participantId": { "type": "string", "pattern": "^(usr|agt)_[0-9a-hjkmnp-tv-z]{26}$" },
 
-    "Sender": {
+    "Actor": {
       "type": "object",
       "additionalProperties": false,
       "required": ["kind", "id"],
+      "description": "Anyone who can act in a conversation. Humans are `user`, agents are `agent`; storage and wire spell it the same way, and there is no `system` actor — a group notice is sent by the person who caused it.",
       "properties": {
-        "kind": { "type": "string", "enum": ["user", "agent", "system"] },
-        "id": { "type": "string", "pattern": "^(usr|agt|sys)_[0-9a-hjkmnp-tv-z]{26}$" }
+        "kind": { "type": "string", "enum": ["user", "agent"] },
+        "id": { "$ref": "#/$defs/participantId" }
       }
     },
 
-    "MentionRange": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["start", "length", "participant_id"],
-      "description": "One inline mention over a text part. `start` and `length` are UTF-16 code-unit offsets into that part's `text`, which contains the display name the sender inserted and never an '@'.",
-      "properties": {
-        "start": { "type": "integer", "minimum": 0 },
-        "length": { "type": "integer", "minimum": 1 },
-        "participant_id": { "$ref": "#/$defs/participantId" }
-      }
+    "mentionHandle": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,31}$",
+      "description": "The handle of a mentioned user or agent, without the leading '@'."
     },
     "mentions": {
       "type": "array",
       "maxItems": 16,
-      "items": { "$ref": "#/$defs/MentionRange" }
+      "uniqueItems": true,
+      "description": "The handles this message mentions, each of which must be written as '@handle' in the part's `text` — at its start or after a space, newline, bracket or quote. A handle typed but never confirmed against the sender's suggestion list is absent here and stays plain text. There are no offsets: a mention can only ever be the handle itself.",
+      "items": { "$ref": "#/$defs/mentionHandle" }
     },
 
     "StyleRange": {
@@ -66,7 +57,7 @@
           "minItems": 1,
           "items": {
             "type": "string",
-            "enum": ["bold", "italic", "underline", "strikethrough", "monospace", "spoiler"]
+            "enum": ["bold", "italic", "underline", "strikethrough"]
           }
         }
       }
@@ -89,11 +80,10 @@
     "TextPart": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["part_id", "part_index", "position", "type", "text"],
+      "required": ["part_id", "part_index", "type", "text"],
       "properties": {
         "part_id": { "$ref": "#/$defs/partId" },
         "part_index": { "type": "integer", "minimum": 0 },
-        "position": { "type": "integer", "minimum": 0 },
         "type": { "const": "text" },
         "text": { "type": "string" },
         "mentions": { "$ref": "#/$defs/mentions" },
@@ -104,12 +94,11 @@
     "MediaPart": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["part_id", "part_index", "position", "type"],
+      "required": ["part_id", "part_index", "type"],
       "description": "A photo, video, audio file or document. Attachment-backed media carries `attachment_id` and a capability `url`; remote media carries `url` alone.",
       "properties": {
         "part_id": { "$ref": "#/$defs/partId" },
         "part_index": { "type": "integer", "minimum": 0 },
-        "position": { "type": "integer", "minimum": 0 },
         "type": { "const": "media" },
         "attachment_id": { "$ref": "#/$defs/attachmentId" },
         "url": { "type": "string", "format": "uri" },
@@ -126,11 +115,10 @@
     "VoiceMemoPart": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["part_id", "part_index", "position", "type"],
+      "required": ["part_id", "part_index", "type"],
       "properties": {
         "part_id": { "$ref": "#/$defs/partId" },
         "part_index": { "type": "integer", "minimum": 0 },
-        "position": { "type": "integer", "minimum": 0 },
         "type": { "const": "voice_memo" },
         "attachment_id": { "$ref": "#/$defs/attachmentId" },
         "url": { "type": "string", "format": "uri" },
@@ -141,12 +129,11 @@
     "LinkPreviewPart": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["part_id", "part_index", "position", "type", "url"],
-      "description": "Metadata the SENDER resolved, carried with the message, so a recipient never opens a connection to a URL somebody else chose. `title` and `description` may be absent while the sender-side unfurl is still resolving.",
+      "required": ["part_id", "part_index", "type", "url"],
+      "description": "Metadata the SENDER resolved, carried with the message, so a recipient never opens a connection to a URL somebody else chose. `title` and `description` are stored with the part and echoed on history reads; they are absent from the send response and from event payloads, so a client that needs them reads them back.",
       "properties": {
         "part_id": { "$ref": "#/$defs/partId" },
         "part_index": { "type": "integer", "minimum": 0 },
-        "position": { "type": "integer", "minimum": 0 },
         "type": { "const": "link_preview" },
         "url": { "type": "string", "format": "uri" },
         "title": { "type": "string", "maxLength": 512 },
@@ -157,12 +144,11 @@
     "DataPart": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["part_id", "part_index", "position", "type", "data"],
-      "description": "A structured component. `data.type` names the component; see schemas/parts/ for the published component shapes.",
+      "required": ["part_id", "part_index", "type", "data"],
+      "description": "A structured component. `data.type` names the component. A group notice carries its GroupMutationData here; see group-lifecycle-event.schema.json.",
       "properties": {
         "part_id": { "$ref": "#/$defs/partId" },
         "part_index": { "type": "integer", "minimum": 0 },
-        "position": { "type": "integer", "minimum": 0 },
         "type": { "const": "data" },
         "data": true
       }
@@ -171,12 +157,11 @@
     "UnknownPart": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["part_id", "part_index", "position", "type"],
-      "description": "The catch-all that keeps the Part union open. A client that meets a part type it does not know MUST render the message's fallback_text for it rather than dropping the part or rejecting the message. `poll` parts land here for clients written before the poll surface shipped.",
+      "required": ["part_id", "part_index", "type"],
+      "description": "The catch-all that keeps the Part union open. A client that meets a part type it does not know MUST render the message's fallback_text for it rather than dropping the part or rejecting the message.",
       "properties": {
         "part_id": { "$ref": "#/$defs/partId" },
         "part_index": { "type": "integer", "minimum": 0 },
-        "position": { "type": "integer", "minimum": 0 },
         "type": {
           "type": "string",
           "not": { "enum": ["text", "media", "voice_memo", "link_preview", "data"] }
@@ -196,56 +181,18 @@
       ]
     },
 
-    "ReplyQuote": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["sender", "target_kind", "target_version_id"],
-      "description": "A snapshot of the target taken when the reply was committed, frozen thereafter. It is never re-resolved: editing the target does not rewrite the quote, and losing the target redacts it rather than repointing it.",
-      "properties": {
-        "sender": { "$ref": "#/$defs/Sender" },
-        "target_kind": {
-          "type": "string",
-          "enum": ["text", "media", "voice_memo", "link_preview", "data", "contact_card", "card", "poll"],
-          "description": "The stored kind of the quoted part, which is finer-grained than the wire `type`: a contact card and a group-invite card both project as a `data` part but quote as their own kind."
-        },
-        "text_preview": { "type": "string", "maxLength": 200 },
-        "media": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "attachment_id": { "$ref": "#/$defs/attachmentId" },
-            "content_type": { "type": "string" },
-            "width": { "type": "integer", "minimum": 1 },
-            "height": { "type": "integer", "minimum": 1 },
-            "blur_hash": { "$ref": "#/$defs/blurHash" }
-          }
-        },
-        "target_part_id": { "$ref": "#/$defs/partId" },
-        "target_version_id": { "type": "string" }
-      }
-    },
-
     "ReplyRef": {
       "oneOf": [
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["message_id", "quote_state"],
-          "description": "The reply edge as one viewer sees it. `message_id` and `part_id` are permanent; `quote_state` and `quote` are what changed since.",
+          "required": ["message_id"],
+          "description": "A pointer, never a copy. The client draws the quote from the target message it already has; Relay stores no snapshot, so there is no quote to go stale and no quote state to interpret. A target the reader cannot see is a pointer that resolves to nothing — render the reply without a quote.",
           "properties": {
             "message_id": { "$ref": "#/$defs/messageId" },
             "part_id": {
               "$ref": "#/$defs/partId",
-              "description": "Present when the reply targeted one specific part. It keeps pointing at that part's identity even after the part is removed, so a reply to the middle photo never silently becomes a reply to a different photo."
-            },
-            "quote_state": {
-              "type": "string",
-              "enum": ["active", "unsent", "part_removed", "moderated", "redacted", "unavailable"],
-              "description": "active: the quote below is live. unsent: the sender unsent the target. part_removed: an edit removed the quoted part. moderated / redacted: Relay removed the content. unavailable: this viewer's membership window does not include the target, so the edge is visible but its content is not."
-            },
-            "quote": {
-              "$ref": "#/$defs/ReplyQuote",
-              "description": "Present only when quote_state is `active`."
+              "description": "Present when the reply targeted one specific part."
             }
           }
         },
@@ -256,179 +203,82 @@
     "Reaction": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["part_index", "target_scope", "target_part_id", "emoji", "actor_kind", "actor_id"],
-      "description": "One reaction as projected onto a message. One per (message, target slot, actor): adding a second emoji to the same slot replaces the first.",
+      "required": ["target_part_id", "emoji", "actor_kind", "actor_id", "created_at"],
+      "description": "One reaction as projected onto a message. One per (message, target slot, actor): adding a second emoji to the same slot replaces the first, and removing one that is not there is a no-op.",
       "properties": {
-        "part_index": {
-          "type": ["integer", "null"],
-          "minimum": 0,
-          "description": "The target part's CURRENT position, derived at read time from the live parts; null for a message-scoped reaction. Retained for clients that key reaction slots by index, and never authority — target_part_id is."
-        },
-        "target_scope": { "type": "string", "enum": ["message", "part"] },
         "target_part_id": {
           "oneOf": [{ "$ref": "#/$defs/partId" }, { "type": "null" }],
-          "description": "Null exactly when target_scope is `message`."
+          "description": "The part this reaction targets; null for a whole-message reaction."
         },
         "emoji": { "type": "string", "minLength": 1, "maxLength": 32 },
-        "actor_kind": {
-          "type": "string",
-          "enum": ["user", "agent"],
-          "description": "The published actor kind. Storage spells an agent `contact`; the wire never does."
-        },
+        "actor_kind": { "type": "string", "enum": ["user", "agent"] },
         "actor_id": { "$ref": "#/$defs/participantId" },
         "created_at": { "type": "string", "format": "date-time" }
       }
     },
 
-    "ReceiptSummary": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["eligible", "delivered", "read", "delivered_state", "read_state"],
-      "description": "How many eligible recipients reached each state, so `read` is never mistaken for 'everyone read'.",
-      "properties": {
-        "eligible": { "type": "integer", "minimum": 0 },
-        "delivered": { "type": "integer", "minimum": 0 },
-        "read": { "type": "integer", "minimum": 0 },
-        "delivered_state": { "type": "string", "enum": ["none", "partial", "complete"] },
-        "read_state": { "type": "string", "enum": ["none", "partial", "complete"] },
-        "first_delivered_at": { "type": "string", "format": "date-time" },
-        "first_read_at": { "type": "string", "format": "date-time" },
-        "complete_delivered_at": { "type": "string", "format": "date-time" },
-        "complete_read_at": { "type": "string", "format": "date-time" }
-      }
-    },
-
-    "Revision": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["parts", "fallback_text", "replaced_at"],
-      "description": "A prior version of a message, oldest first. The current version is never in this list. An unsent message's revisions are redacted along with everything else.",
-      "properties": {
-        "version": { "type": "integer", "minimum": 1 },
-        "parts": { "type": "array", "items": { "$ref": "#/$defs/Part" } },
-        "fallback_text": { "type": "string" },
-        "created_at": {
-          "type": "string",
-          "format": "date-time",
-          "description": "When this version began."
-        },
-        "replaced_at": {
-          "type": "string",
-          "format": "date-time",
-          "description": "When the next version replaced it."
-        }
-      }
-    },
-
-    "EditCapabilities": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["can_edit", "version", "editable_parts"],
-      "description": "The server's answer to 'what can this viewer do to this message right now'. Clients hide controls this says are unavailable rather than deriving the policy themselves. `editable_parts` is empty when can_edit is false.",
-      "properties": {
-        "can_edit": { "type": "boolean" },
-        "version": { "type": "integer", "minimum": 1 },
-        "editable_parts": {
-          "type": "object",
-          "propertyNames": { "$ref": "#/$defs/partId" },
-          "additionalProperties": {
-            "type": "array",
-            "items": { "type": "string", "enum": ["update", "remove", "move", "replace"] }
-          }
-        }
-      }
-    },
-
-    "VisibleMessage": {
+    "Message": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "id",
         "conversation_id",
         "sequence",
+        "kind",
         "sender",
         "is_from_me",
         "parts",
         "reply_to",
         "fallback_text",
         "status",
-        "version",
         "created_at"
       ],
-      "description": "A message that still has content. `reactions`, `revisions`, `receipt_summary` and `edit_capabilities` are resolved on reads and on the edit response; a send response carries the committed message alone.",
+      "description": "One stored message as one viewer sees it. Content is immutable — there is no edit, no unsend, no version and no tombstone — so this is the row plus its parts, its reactions on a read, and (in a direct conversation) its receipt stamps.",
       "properties": {
         "id": { "$ref": "#/$defs/messageId" },
         "conversation_id": { "$ref": "#/$defs/conversationId" },
         "sequence": { "type": "integer", "minimum": 1 },
-        "sender": { "$ref": "#/$defs/Sender" },
+        "kind": {
+          "type": "string",
+          "enum": ["message", "notice"],
+          "description": "`notice` is a group notice (\"Alice added Bob\"), sent by the person who did it rather than by a system participant. Its part 0 is the human-readable line and part 1 is a `data` part carrying the structured mutation."
+        },
+        "sender": { "$ref": "#/$defs/Actor" },
         "is_from_me": {
           "type": "boolean",
           "description": "True when the authenticated account this payload was projected for is the sender. Relay resolves direction so a client never compares sender.id against its own identity — a comparison that is wrong for every other human in a group."
         },
-        "invoked_agents": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^agt_[0-9a-hjkmnp-tv-z]{26}$" }
-        },
         "parts": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/Part" } },
         "reply_to": { "$ref": "#/$defs/ReplyRef" },
-        "reactions": { "type": "array", "items": { "$ref": "#/$defs/Reaction" } },
+        "reactions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Reaction" },
+          "description": "Resolved on reads. A send response and an event payload carry the committed message alone and omit this."
+        },
         "fallback_text": {
           "type": "string",
           "description": "A plain-text rendering of the whole message, for notifications, previews and any client that cannot render a part it was handed."
         },
-        "status": { "type": "string", "enum": ["sent", "delivered", "read", "completed", "failed"] },
+        "status": {
+          "type": "string",
+          "enum": ["sent", "delivered", "read"],
+          "description": "Direct conversations carry one stamp per message; a group message is always `sent`, the way iMessage behaves in groups."
+        },
         "delivered_at": { "type": "string", "format": "date-time" },
         "read_at": { "type": "string", "format": "date-time" },
-        "receipt_summary": { "$ref": "#/$defs/ReceiptSummary" },
-        "edited_at": { "type": "string", "format": "date-time" },
-        "revisions": { "type": "array", "maxItems": 5, "items": { "$ref": "#/$defs/Revision" } },
-        "version": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 6,
-          "description": "The current version number. 1 for a never-edited message; five successful edits is the ceiling, so 6 is the highest value."
-        },
-        "edit_capabilities": { "$ref": "#/$defs/EditCapabilities" },
         "created_at": { "type": "string", "format": "date-time" }
       }
     },
 
-    "Tombstone": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "conversation_id", "sequence", "sender", "status", "created_at"],
-      "description": "What is left after an unsend: the identity, the place in the conversation, and who sent it. No parts, no fallback text, no reactions, no revisions — a tombstone that exposed parts would defeat the unsend.",
-      "properties": {
-        "id": { "$ref": "#/$defs/messageId" },
-        "conversation_id": { "$ref": "#/$defs/conversationId" },
-        "sequence": { "type": "integer", "minimum": 1 },
-        "sender": { "$ref": "#/$defs/Sender" },
-        "is_from_me": {
-          "type": "boolean",
-          "description": "Kept on the tombstone because it is all that is left to say whether the client renders \"You unsent a message\" or names the other participant."
-        },
-        "status": { "const": "deleted" },
-        "unsent_at": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Present iff the sender unsent the message; absent for moderation or other deletion."
-        },
-        "created_at": { "type": "string", "format": "date-time" }
-      }
-    },
-
-    "Message": {
-      "oneOf": [
-        { "$ref": "#/$defs/VisibleMessage" },
-        { "$ref": "#/$defs/Tombstone" }
-      ]
+    "VisibleMessage": {
+      "$ref": "#/$defs/Message",
+      "description": "Retained name for the one message shape. Unsend is gone, so there is nothing invisible to distinguish it from."
     },
 
     "IncomingPart": {
       "type": "object",
       "required": ["type"],
-      "description": "A part as a client submits it. The server mints the identity; a client never supplies part_id, part_index or position.",
+      "description": "A part as a client submits it. The server mints the identity; a client never supplies part_id or part_index.",
       "properties": {
         "type": { "type": "string", "enum": ["text", "media", "voice_memo", "link_preview", "data"] },
         "text": { "type": "string" },
@@ -448,78 +298,15 @@
         "blur_hash": { "$ref": "#/$defs/blurHash" },
         "data": true,
         "part_id": false,
-        "part_index": false,
-        "position": false
+        "part_index": false
       }
-    },
-
-    "PartOperation": {
-      "description": "One step of an edit. Operations apply in array order against the version named by expected_version. Which actions a part accepts is per kind and is published on the message as edit_capabilities: text updates in place; media and voice memos are removed, moved or replaced (never rewritten, because the bytes are a different identity); link previews and data components move or go.",
-      "oneOf": [
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["action", "part_id"],
-          "properties": {
-            "action": { "const": "update" },
-            "part_id": { "$ref": "#/$defs/partId" },
-            "text": { "type": "string" },
-            "mentions": { "$ref": "#/$defs/mentions" },
-            "styles": { "$ref": "#/$defs/styles" }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["action", "part"],
-          "properties": {
-            "action": { "const": "add" },
-            "position": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "Where the new part lands. Appended when omitted."
-            },
-            "part": { "$ref": "#/$defs/IncomingPart" }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["action", "part_id"],
-          "properties": {
-            "action": { "const": "remove" },
-            "part_id": { "$ref": "#/$defs/partId" }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["action", "part_id", "position"],
-          "properties": {
-            "action": { "const": "move" },
-            "part_id": { "$ref": "#/$defs/partId" },
-            "position": { "type": "integer", "minimum": 0 }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["action", "part_id", "part"],
-          "description": "Replace tombstones the old identity and mints a new one; reactions on the replaced part go with it.",
-          "properties": {
-            "action": { "const": "replace" },
-            "part_id": { "$ref": "#/$defs/partId" },
-            "part": { "$ref": "#/$defs/IncomingPart" }
-          }
-        }
-      ]
     },
 
     "SendRequestV2": {
       "type": "object",
       "additionalProperties": false,
       "required": ["message_id", "parts"],
-      "description": "POST /v2/conversations/{conversation_id}/messages. One send is one message: mixed media and text stay together instead of being split into a run of messages. `message_id` is the idempotency key — retrying the same id with the same request replays the original 201.",
+      "description": "POST /v2/conversations/{conversation_id}/messages. One send is one message: mixed media and text stay together instead of being split into a run of messages. `message_id` is the whole idempotency story — retrying the same id replays the original 201, and no Idempotency-Key header is involved.",
       "properties": {
         "message_id": { "$ref": "#/$defs/messageId" },
         "parts": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/IncomingPart" } },
@@ -527,22 +314,22 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["message_id"],
-          "description": "v2 accepts a stable part id only. The legacy `part_index` form is rejected with a 422.",
+          "description": "A pointer to a message of this conversation, optionally to one exact part of it.",
           "properties": {
             "message_id": { "$ref": "#/$defs/messageId" },
             "part_id": { "$ref": "#/$defs/partId" }
           }
         },
+        "fallback_text": { "type": "string" },
         "invoked_agent_ids": {
           "type": "array",
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^agt_[0-9a-hjkmnp-tv-z]{26}$" },
-          "description": "User senders only."
+          "description": "DEPRECATED and ignored. An agent is a normal group member now; shipped SDKs still send this, so the field is accepted rather than rejected. New clients must omit it."
         },
-        "fallback_text": { "type": "string" },
         "invocation_id": {
           "type": "string",
-          "description": "Agent senders only: the invocation this message answers."
+          "description": "DEPRECATED and ignored, for the same reason as invoked_agent_ids."
         }
       }
     },
@@ -552,107 +339,57 @@
       "additionalProperties": false,
       "required": ["message"],
       "properties": { "message": { "$ref": "#/$defs/Message" } },
-      "$comment": "201. A replayed send whose message has since been unsent answers with the tombstone, never the content, which is why this is Message and not VisibleMessage."
+      "$comment": "201. A retry with the same message_id replays this exact body."
     },
 
-    "EditRequestV2": {
+    "SendResponseV1": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["operation_id", "expected_version", "operations"],
-      "description": "PATCH /v2/messages/{message_id}. `expected_version` is optimistic concurrency: two devices editing version 2 produce exactly one version 3 and the loser gets a 409.",
+      "required": ["messages"],
+      "description": "201 from POST /v1/conversations/{conversation_id}/messages. The array always has exactly one element: Relay no longer splits a send. Shipped clients read an array, which is the only reason it is still one.",
       "properties": {
-        "operation_id": { "$ref": "#/$defs/operationId" },
-        "expected_version": { "type": "integer", "minimum": 1, "maximum": 6 },
-        "operations": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 64,
-          "items": { "$ref": "#/$defs/PartOperation" }
-        }
+        "messages": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "$ref": "#/$defs/Message" } }
       }
     },
 
-    "EditResponseV2": {
+    "AgentSendResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["message"],
+      "required": ["message_id", "message"],
+      "description": "202 from POST /v1/messages, the agent send.",
       "properties": {
-        "message": {
-          "allOf": [
-            { "$ref": "#/$defs/VisibleMessage" },
-            {
-              "type": "object",
-              "required": ["edited_at", "revisions", "edit_capabilities"],
-              "properties": {
-                "edited_at": { "type": "string", "format": "date-time" },
-                "revisions": { "type": "array", "minItems": 1, "maxItems": 5 },
-                "edit_capabilities": { "$ref": "#/$defs/EditCapabilities" }
-              }
-            }
-          ]
-        }
+        "message_id": { "$ref": "#/$defs/messageId" },
+        "message": { "$ref": "#/$defs/Message" }
       }
-    },
-
-    "UnsendRequestV2": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["operation_id"],
-      "description": "DELETE /v2/messages/{message_id}. The operation id may also travel as an Idempotency-Key header when it is itself a mut_ id.",
-      "properties": { "operation_id": { "$ref": "#/$defs/operationId" } }
-    },
-
-    "UnsendResponseV2": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["message"],
-      "properties": { "message": { "$ref": "#/$defs/Tombstone" } }
     },
 
     "ReactionRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["operation", "type", "emoji"],
-      "description": "POST /v1/messages/{message_id}/reactions. Omit both target fields to react to the whole message.",
+      "required": ["operation", "emoji"],
+      "description": "POST /v1/messages/{message_id}/reactions. Omit target_part_id to react to the whole message. Repeating a request changes nothing the second time, so there is no operation id.",
       "properties": {
         "operation": { "type": "string", "enum": ["add", "remove"] },
         "type": { "const": "emoji" },
         "emoji": { "type": "string", "minLength": 1, "maxLength": 32 },
-        "target_scope": { "type": "string", "enum": ["message", "part"] },
         "target_part_id": {
           "oneOf": [{ "$ref": "#/$defs/partId" }, { "type": "null" }],
-          "description": "Required when target_scope is `part`; supplying it alone implies part scope. Targets any part kind."
-        },
-        "part_index": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "DEPRECATED legacy input. Translated to the target's live part id at the boundary and never stored. It keeps its original media-only rule: an index naming a non-media part is a 422. Use target_part_id."
-        },
-        "operation_id": { "$ref": "#/$defs/operationId" }
+          "description": "One exact part of the target message. Null or absent means the whole message."
+        }
       }
     },
 
     "ReactionResult": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["message_id", "part_index", "target_scope", "target_part_id", "type", "emoji", "actor", "operation", "changed"],
-      "description": "Both the 200 body and the reaction.added / reaction.removed event payload, which is why it carries the published actor shape rather than the projected one.",
+      "required": ["message_id", "target_part_id", "type", "emoji", "actor", "operation", "changed"],
+      "description": "Both the 200 body and the reaction.changed / reaction.added / reaction.removed event payload.",
       "properties": {
         "message_id": { "$ref": "#/$defs/messageId" },
-        "part_index": { "type": ["integer", "null"], "minimum": 0 },
-        "target_scope": { "type": "string", "enum": ["message", "part"] },
         "target_part_id": { "oneOf": [{ "$ref": "#/$defs/partId" }, { "type": "null" }] },
         "type": { "const": "emoji" },
         "emoji": { "type": "string" },
-        "actor": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["kind", "id"],
-          "properties": {
-            "kind": { "type": "string", "enum": ["user", "agent", "system"] },
-            "id": { "type": "string", "pattern": "^(usr|agt|sys)_[0-9a-hjkmnp-tv-z]{26}$" }
-          }
-        },
+        "actor": { "$ref": "#/$defs/Actor" },
         "operation": { "type": "string", "enum": ["add", "remove"] },
         "changed": {
           "type": "boolean",
@@ -668,10 +405,39 @@
       "properties": { "reaction": { "$ref": "#/$defs/ReactionResult" } }
     },
 
+    "Receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message_id", "conversation_id", "through_sequence", "recipient", "status", "at"],
+      "description": "The 200 body of POST /v1/conversations/{id}/read and /delivered: the watermark this actor advanced to. `read` implies delivered; an older or repeated target changes nothing.",
+      "properties": {
+        "message_id": { "$ref": "#/$defs/messageId" },
+        "conversation_id": { "$ref": "#/$defs/conversationId" },
+        "through_sequence": { "type": "integer", "minimum": 0 },
+        "recipient": { "$ref": "#/$defs/Actor" },
+        "status": { "type": "string", "enum": ["delivered", "read"] },
+        "at": { "type": "string", "format": "date-time" }
+      }
+    },
+
+    "ReceiptResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receipt", "advanced"],
+      "properties": {
+        "receipt": { "$ref": "#/$defs/Receipt" },
+        "advanced": {
+          "type": "boolean",
+          "description": "False when the watermark was already at or past the named message."
+        }
+      }
+    },
+
     "HistoryPage": {
       "type": "object",
       "additionalProperties": false,
       "required": ["messages"],
+      "description": "GET /v1/conversations/{id}/messages, newest first, inside the caller's membership window.",
       "properties": {
         "messages": { "type": "array", "items": { "$ref": "#/$defs/Message" } }
       }
@@ -681,7 +447,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["error"],
-      "description": "Every Relay error. `idempotency_conflict` is a 409 and means the operation id was reused with a different request, or the original is still in flight — in which case a Retry-After header names the wait.",
+      "description": "Every Relay error.",
       "properties": {
         "error": {
           "type": "object",
@@ -696,7 +462,6 @@
                 "forbidden",
                 "not_found",
                 "conflict",
-                "idempotency_conflict",
                 "rate_limited",
                 "temporarily_unavailable"
               ]

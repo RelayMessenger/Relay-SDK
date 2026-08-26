@@ -5,11 +5,19 @@ import {
 } from "./errors.js";
 import type {
   RelayAgentProfile,
+  RelayAttachment,
   RelayEventsPage,
+  RelayHistoryPage,
+  RelayId,
+  RelayMessage,
   RelayOutgoingPart,
-  RelayReplyRef,
+  RelayPoll,
+  RelayReactionResult,
+  RelayReceipt,
+  RelayReplyTarget,
   RelaySendResult,
 } from "./types.js";
+import { relayId } from "./ulid.js";
 import { normalizeRelayBaseUrl } from "./url.js";
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -24,42 +32,98 @@ export type RelayClientOptions = {
 export type RelayClient = {
   readonly baseUrl: string;
   getMe: (params?: { signal?: AbortSignal }) => Promise<RelayAgentProfile>;
+  /**
+   * One page of this agent's durable event log.
+   *
+   * `after` is the last sequence you have seen and the page is everything
+   * newer, oldest first. There is no exclusive consumer, no acknowledgement
+   * handshake and no reconcile step: persist `nextCursor` once you have
+   * durably handled the page, and ignore an event you have already seen —
+   * delivery is at least once. `timeoutSeconds` from 1 to 30 holds the
+   * request open until something arrives.
+   */
   pollEvents: (params: {
-    cursor: number;
+    after: number;
     timeoutSeconds?: number;
     limit?: number;
     signal?: AbortSignal;
   }) => Promise<RelayEventsPage>;
+  /**
+   * `/v1` send. One send is one message; the array in the response body
+   * always has exactly one element. Kept for clients already shipped against
+   * it — new code should use `sendMessage`.
+   */
+  sendMessageV1: (params: {
+    conversationId: string;
+    messageId?: RelayId;
+    parts: RelayOutgoingPart[];
+    replyTo?: RelayReplyTarget;
+    fallbackText?: string;
+    signal?: AbortSignal;
+  }) => Promise<RelaySendResult>;
+  /**
+   * `/v2` send: one send is one message. Mints a `msg_` ULID when
+   * `messageId` is absent, and that id is the message's identity AND the only
+   * retry key — no `Idempotency-Key` header is involved.
+   *
+   * Mint the id once per logical send and reuse it across retries. Minting a
+   * fresh one on retry is how you send the same message twice.
+   */
   sendMessage: (params: {
     conversationId: string;
+    messageId?: RelayId;
     parts: RelayOutgoingPart[];
-    replyTo?: RelayReplyRef;
-    invocationId?: string;
-    idempotencyKey: string;
+    replyTo?: RelayReplyTarget;
+    fallbackText?: string;
     signal?: AbortSignal;
   }) => Promise<RelaySendResult>;
   sendText: (params: {
     conversationId: string;
+    messageId?: RelayId;
     text: string;
-    replyTo?: RelayReplyRef;
-    invocationId?: string;
-    idempotencyKey: string;
+    replyTo?: RelayReplyTarget;
     signal?: AbortSignal;
   }) => Promise<RelaySendResult>;
-  setTyping: (params: {
-    conversationId: string;
-    started: boolean;
-    label?: string;
-    invocationId?: string;
+  /** Upload bytes and get an `att_` id to reference from a media part. */
+  uploadAttachment: (params: {
+    body: Uint8Array | ArrayBuffer;
+    contentType: string;
+    filename?: string;
     signal?: AbortSignal;
-  }) => Promise<void>;
-  setResponding: (params: {
-    conversationId: string;
-    messageId: string;
-    label?: string;
-    invocationId?: string;
+  }) => Promise<RelayAttachment>;
+  /**
+   * Add, change or remove a reaction. Pass `targetPartId` to react to one
+   * exact part; omit it for the whole message. Changing an emoji is an `add`
+   * on the slot the previous one occupied, and repeating a request changes
+   * nothing the second time — there is no operation id.
+   */
+  react: (params: {
+    messageId: RelayId;
+    operation: "add" | "remove";
+    emoji: string;
+    targetPartId?: RelayId;
     signal?: AbortSignal;
-  }) => Promise<void>;
+  }) => Promise<RelayReactionResult>;
+  /** A page of conversation history, newest first. */
+  getHistory: (params: {
+    conversationId: string;
+    limit?: number;
+    beforeSequence?: number;
+    signal?: AbortSignal;
+  }) => Promise<RelayHistoryPage>;
+  /** One poll, projected for this caller. */
+  getPoll: (params: { pollId: RelayId; signal?: AbortSignal }) => Promise<RelayPoll>;
+  /**
+   * Set this agent's whole selection on a poll. A diff, so re-sending the same
+   * selection changes nothing; an empty array removes the vote.
+   */
+  votePoll: (params: {
+    pollId: RelayId;
+    optionIds: RelayId[];
+    signal?: AbortSignal;
+  }) => Promise<RelayPoll>;
+  /** Close a poll. Creator only; idempotent. */
+  closePoll: (params: { pollId: RelayId; signal?: AbortSignal }) => Promise<RelayPoll>;
   /**
    * Advance the delivered watermark to `messageId`, and every earlier message
    * from other participants with it.
@@ -67,29 +131,31 @@ export type RelayClient = {
    * Most agents never call this. Delivered means the agent's endpoint has the
    * message, so Relay records it from the transport itself: a webhook gets it
    * when the endpoint answers `2xx`, and a `GET /v1/events` consumer gets it
-   * when the cursor moves past the event. Neither needs a line of code, and
-   * neither can suppress it.
+   * when Relay hands the page over. Neither needs a line of code.
    *
    * The exception is a transcript poller — a client that reads
    * `GET /v1/conversations/:id/messages` on a timer. Reading history records
    * no receipt, so nothing on the server ever learns the message arrived.
    * That client, and only that client, has to say so itself.
-   *
-   * Send it on ingest, before anything that implies a read. The server
-   * advances the delivered watermark whenever it records a read, so a
-   * delivered receipt that arrives after a read for the same message is
-   * silently dropped: the sender goes straight from "Sent" to "Read" and never
-   * sees "Delivered". Skipping this call costs the middle rung of the ladder,
-   * not the top one.
    */
   markDelivered: (params: {
     conversationId: string;
-    messageId: string;
+    messageId: RelayId;
     signal?: AbortSignal;
-  }) => Promise<void>;
+  }) => Promise<RelayReceipt>;
   markRead: (params: {
     conversationId: string;
-    messageId: string;
+    messageId: RelayId;
+    signal?: AbortSignal;
+  }) => Promise<RelayReceipt>;
+  /**
+   * Ephemeral typing. Fire and forget: nothing is stored, no lease is taken,
+   * and the recipient's client hides the indicator on its own after 90
+   * seconds. Send the start again while still composing to keep it alive.
+   */
+  setTyping: (params: {
+    conversationId: string;
+    started: boolean;
     signal?: AbortSignal;
   }) => Promise<void>;
 };
@@ -116,7 +182,7 @@ async function readErrorDetail(response: Response): Promise<{
 
 export function createRelayClient(options: RelayClientOptions): RelayClient {
   if (!options.token.trim()) {
-    throw new Error("relay: Agent Token is required");
+    throw new Error("relay: API key is required");
   }
   const baseUrl = normalizeRelayBaseUrl(options.baseUrl);
   const fetchImpl: FetchLike =
@@ -128,6 +194,8 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     path: string;
     query?: Record<string, string | number | boolean | undefined>;
     body?: unknown;
+    /** Pre-encoded bytes, for the routes that take an octet-stream. */
+    rawBody?: Uint8Array;
     headers?: Record<string, string>;
     signal?: AbortSignal;
     timeoutMs?: number;
@@ -149,7 +217,11 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
           ...(params.body === undefined ? {} : { "content-type": "application/json" }),
           ...params.headers,
         },
-        ...(params.body === undefined ? {} : { body: JSON.stringify(params.body) }),
+        ...(params.rawBody === undefined
+          ? params.body === undefined
+            ? {}
+            : { body: JSON.stringify(params.body) }
+          : { body: params.rawBody as unknown as BodyInit }),
         signal,
       });
     } catch (error) {
@@ -179,6 +251,57 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     return response;
   };
 
+  const sendBody = (params: {
+    messageId: RelayId;
+    parts: RelayOutgoingPart[];
+    replyTo?: RelayReplyTarget;
+    fallbackText?: string;
+  }) => ({
+    message_id: params.messageId,
+    parts: params.parts,
+    ...(params.replyTo ? { reply_to: params.replyTo } : {}),
+    ...(params.fallbackText === undefined ? {} : { fallback_text: params.fallbackText }),
+  });
+
+  const receipt = async (
+    kind: "read" | "delivered",
+    params: { conversationId: string; messageId: RelayId; signal?: AbortSignal },
+  ): Promise<RelayReceipt> => {
+    const response = await request({
+      method: "POST",
+      path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/${kind}`,
+      body: { message_id: params.messageId },
+      ...(params.signal ? { signal: params.signal } : {}),
+    });
+    const body = (await response.json()) as { receipt?: RelayReceipt };
+    if (!body.receipt) {
+      throw new RelayApiError(`relay: ${kind} receipt returned no watermark`, {
+        status: response.status,
+        kind: "retryable",
+      });
+    }
+    return body.receipt;
+  };
+
+  const poll = async (
+    params: { method: string; path: string; body?: unknown; signal?: AbortSignal },
+  ): Promise<RelayPoll> => {
+    const response = await request({
+      method: params.method,
+      path: params.path,
+      ...(params.body === undefined ? {} : { body: params.body }),
+      ...(params.signal ? { signal: params.signal } : {}),
+    });
+    const body = (await response.json()) as { poll?: RelayPoll };
+    if (!body.poll) {
+      throw new RelayApiError("relay: poll request returned no poll", {
+        status: response.status,
+        kind: "retryable",
+      });
+    }
+    return body.poll;
+  };
+
   const client: RelayClient = {
     baseUrl,
 
@@ -193,12 +316,12 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
     },
 
     pollEvents: async (params) => {
-      const timeoutSeconds = Math.min(Math.max(params.timeoutSeconds ?? 30, 1), 30);
+      const timeoutSeconds = Math.min(Math.max(params.timeoutSeconds ?? 30, 0), 30);
       const response = await request({
         method: "GET",
         path: "/v1/events",
         query: {
-          cursor: params.cursor,
+          after: params.after,
           timeout: timeoutSeconds,
           ...(params.limit === undefined ? {} : { limit: params.limit }),
         },
@@ -208,82 +331,162 @@ export function createRelayClient(options: RelayClientOptions): RelayClient {
       const body = (await response.json()) as {
         events?: RelayEventsPage["events"];
         next_cursor?: number;
+        latest?: number;
+        has_more?: boolean;
       };
       const events = Array.isArray(body.events) ? body.events : [];
       const nextCursor =
         typeof body.next_cursor === "number" && Number.isSafeInteger(body.next_cursor)
           ? body.next_cursor
-          : params.cursor;
-      return { events, nextCursor };
+          : params.after;
+      const latest =
+        typeof body.latest === "number" && Number.isSafeInteger(body.latest)
+          ? body.latest
+          : nextCursor;
+      return { events, nextCursor, latest, hasMore: body.has_more === true };
+    },
+
+    sendMessageV1: async (params) => {
+      const messageId = params.messageId ?? relayId("msg");
+      const response = await request({
+        method: "POST",
+        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/messages`,
+        body: sendBody({ ...params, messageId }),
+        ...(params.signal ? { signal: params.signal } : {}),
+      });
+      // `/v1` answers `{ messages: [one] }`. One send is one message now, so
+      // the array is a shape shipped clients still read, not a split.
+      const body = (await response.json()) as { messages?: RelayMessage[] };
+      const message = Array.isArray(body.messages) ? body.messages[0] : undefined;
+      if (!message) {
+        throw new RelayApiError("relay: send returned no committed message", {
+          status: response.status,
+          kind: "retryable",
+        });
+      }
+      return { messageId, message };
     },
 
     sendMessage: async (params) => {
+      const messageId = params.messageId ?? relayId("msg");
       const response = await request({
         method: "POST",
-        path: "/v1/messages",
-        headers: { "idempotency-key": params.idempotencyKey },
-        body: {
-          conversation_id: params.conversationId,
-          parts: params.parts,
-          ...(params.invocationId ? { invocation_id: params.invocationId } : {}),
-          ...(params.replyTo ? { reply_to: params.replyTo } : {}),
-        },
+        path: `/v2/conversations/${encodeURIComponent(params.conversationId)}/messages`,
+        body: sendBody({ ...params, messageId }),
         ...(params.signal ? { signal: params.signal } : {}),
       });
-      const body = (await response.json()) as {
-        messages: RelaySendResult["messages"];
-      };
-      return { messages: body.messages };
+      const body = (await response.json()) as { message?: RelayMessage };
+      if (!body.message) {
+        throw new RelayApiError("relay: send returned no message", {
+          status: response.status,
+          kind: "retryable",
+        });
+      }
+      return { messageId, message: body.message };
     },
 
     sendText: async (params) => {
       const { text, ...rest } = params;
-      return client.sendMessage({
-        ...rest,
-        parts: [{ type: "text", text }],
-      });
+      return client.sendMessage({ ...rest, parts: [{ type: "text", text }] });
     },
+
+    uploadAttachment: async (params) => {
+      const bytes = params.body instanceof Uint8Array
+        ? params.body
+        : new Uint8Array(params.body);
+      const response = await request({
+        method: "POST",
+        path: "/v1/attachments",
+        rawBody: bytes,
+        headers: {
+          "content-type": params.contentType,
+          "content-length": String(bytes.byteLength),
+          ...(params.filename ? { "x-relay-filename": params.filename } : {}),
+        },
+        ...(params.signal ? { signal: params.signal } : {}),
+      });
+      const body = (await response.json()) as { attachment?: RelayAttachment };
+      if (!body.attachment) {
+        throw new RelayApiError("relay: upload returned no attachment", {
+          status: response.status,
+          kind: "retryable",
+        });
+      }
+      return body.attachment;
+    },
+
+    react: async (params) => {
+      const response = await request({
+        method: "POST",
+        path: `/v1/messages/${encodeURIComponent(params.messageId)}/reactions`,
+        body: {
+          operation: params.operation,
+          type: "emoji",
+          emoji: params.emoji,
+          ...(params.targetPartId ? { target_part_id: params.targetPartId } : {}),
+        },
+        ...(params.signal ? { signal: params.signal } : {}),
+      });
+      const body = (await response.json()) as { reaction?: RelayReactionResult };
+      if (!body.reaction) {
+        throw new RelayApiError("relay: reaction returned no result", {
+          status: response.status,
+          kind: "retryable",
+        });
+      }
+      return body.reaction;
+    },
+
+    getHistory: async (params) => {
+      const response = await request({
+        method: "GET",
+        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/messages`,
+        query: {
+          ...(params.limit === undefined ? {} : { limit: params.limit }),
+          ...(params.beforeSequence === undefined
+            ? {}
+            : { before_sequence: params.beforeSequence }),
+        },
+        ...(params.signal ? { signal: params.signal } : {}),
+      });
+      const body = (await response.json()) as { messages?: RelayMessage[] };
+      return { messages: Array.isArray(body.messages) ? body.messages : [] };
+    },
+
+    getPoll: async (params) => poll({
+      method: "GET",
+      path: `/v2/polls/${encodeURIComponent(params.pollId)}`,
+      ...(params.signal ? { signal: params.signal } : {}),
+    }),
+
+    votePoll: async (params) => params.optionIds.length === 0
+      ? poll({
+        method: "DELETE",
+        path: `/v2/polls/${encodeURIComponent(params.pollId)}/votes`,
+        ...(params.signal ? { signal: params.signal } : {}),
+      })
+      : poll({
+        method: "POST",
+        path: `/v2/polls/${encodeURIComponent(params.pollId)}/votes`,
+        body: { option_ids: params.optionIds },
+        ...(params.signal ? { signal: params.signal } : {}),
+      }),
+
+    closePoll: async (params) => poll({
+      method: "POST",
+      path: `/v2/polls/${encodeURIComponent(params.pollId)}/close`,
+      body: {},
+      ...(params.signal ? { signal: params.signal } : {}),
+    }),
+
+    markDelivered: async (params) => receipt("delivered", params),
+    markRead: async (params) => receipt("read", params),
 
     setTyping: async (params) => {
       await request({
         method: "POST",
         path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/typing`,
-        body: {
-          started: params.started,
-          ...(params.label ? { label: params.label } : {}),
-          ...(params.invocationId ? { invocation_id: params.invocationId } : {}),
-        },
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
-    },
-
-    setResponding: async (params) => {
-      await request({
-        method: "POST",
-        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/responding`,
-        body: {
-          message_id: params.messageId,
-          ...(params.label ? { label: params.label } : {}),
-          ...(params.invocationId ? { invocation_id: params.invocationId } : {}),
-        },
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
-    },
-
-    markDelivered: async (params) => {
-      await request({
-        method: "POST",
-        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/delivered`,
-        body: { message_id: params.messageId },
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
-    },
-
-    markRead: async (params) => {
-      await request({
-        method: "POST",
-        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/read`,
-        body: { message_id: params.messageId },
+        body: { started: params.started },
         ...(params.signal ? { signal: params.signal } : {}),
       });
     },

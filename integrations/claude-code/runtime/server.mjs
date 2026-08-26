@@ -24835,12 +24835,6 @@ function extractMessage(event) {
   if (typeof m.sender !== "object" || m.sender === null) return null;
   return m;
 }
-function extractInvocationId(event) {
-  const data = event.data;
-  if (typeof data !== "object" || data === null) return void 0;
-  const value = data.invocation_id;
-  return typeof value === "string" && value.length > 0 ? value : void 0;
-}
 function textOfMessage(message) {
   const texts = message.parts.filter((part) => part.type === "text" && typeof part.text === "string" && part.text.length > 0).map((part) => part.text);
   if (texts.length > 0) return texts.join("\n");
@@ -24852,6 +24846,9 @@ function classifyEvent(event, ownerUserId, isPendingRequest = () => false, canAc
   }
   const message = extractMessage(event);
   if (!message) return { kind: "ignore", reason: "malformed message.received payload" };
+  if (message.kind === "notice") {
+    return { kind: "ignore", reason: "group notice" };
+  }
   if (message.sender.kind !== "user") {
     return { kind: "ignore", reason: `non-user sender kind ${message.sender.kind}` };
   }
@@ -24885,18 +24882,15 @@ function classifyEvent(event, ownerUserId, isPendingRequest = () => false, canAc
     return { kind: "verdict", verdict: textVerdict };
   }
   if (text.length === 0) return { kind: "ignore", reason: "empty message body" };
-  const invocationId = extractInvocationId(event);
   return {
     kind: "message",
     content: text,
     meta: {
       chat_id: message.conversation_id,
-      sender: message.sender.id,
-      ...invocationId ? { invocation_id: invocationId } : {}
+      sender: message.sender.id
     },
     conversationId: message.conversation_id,
-    sender: message.sender.id,
-    ...invocationId ? { invocationId } : {}
+    sender: message.sender.id
   };
 }
 var MAX_DESCRIPTION_CHARS = 500;
@@ -24921,7 +24915,7 @@ function hasCompletePermissionInput(value) {
     return false;
   }
 }
-function buildPermissionCard(request, conversationId) {
+function buildPermissionCard(request, conversationId, messageId) {
   const toolName = sanitizeRelayedText(request.tool_name, 100) || "a tool";
   const description = sanitizeRelayedText(request.description, MAX_DESCRIPTION_CHARS);
   const inputPreview = renderPermissionInput(request.input_preview);
@@ -24964,6 +24958,7 @@ function buildPermissionCard(request, conversationId) {
   return {
     body: {
       conversation_id: conversationId,
+      message_id: messageId,
       parts: [
         { type: "text", text: lines.join("\n") },
         {
@@ -24981,17 +24976,14 @@ function buildPermissionCard(request, conversationId) {
         }
       ]
     },
-    // Deterministic per request id: a retried relay of the same prompt can
-    // never post the card twice. (Server requires 8..255 chars.)
-    idempotencyKey: `agent-perm-${id}`,
     remoteAllowEnabled
   };
 }
-function buildReply(chatId, text, invocationId) {
+function buildReply(chatId, text, messageId) {
   return {
     conversation_id: chatId,
-    parts: [{ type: "text", text }],
-    ...invocationId ? { invocation_id: invocationId } : {}
+    message_id: messageId,
+    parts: [{ type: "text", text }]
   };
 }
 
@@ -25006,11 +24998,30 @@ import {
   openSync,
   readFileSync,
   renameSync,
-  unlinkSync,
   writeFileSync
 } from "node:fs";
-import { homedir, hostname as hostname3 } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+
+// src/ids.ts
+import { randomBytes } from "node:crypto";
+var ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
+var TIME_LENGTH = 10;
+var RANDOM_LENGTH = 16;
+function encodeTime(time3) {
+  let remaining = time3;
+  let encoded = "";
+  for (let index = 0; index < TIME_LENGTH; index += 1) {
+    const digit = remaining % ALPHABET.length;
+    encoded = `${ALPHABET[digit]}${encoded}`;
+    remaining = (remaining - digit) / ALPHABET.length;
+  }
+  return encoded;
+}
+function relayMessageId(now = Date.now()) {
+  const random = Array.from(randomBytes(RANDOM_LENGTH), (byte) => ALPHABET[byte % ALPHABET.length]).join("");
+  return `msg_${encodeTime(now)}${random}`;
+}
 
 // src/relayClient.ts
 var LOOPBACK_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -25066,14 +25077,18 @@ var RelayClient = class {
     return new RelayApiError(response.status, code, message);
   }
   /**
-   * Long-polls GET /v1/events. Resolves with an empty batch on server-side
-   * timeout. The fetch itself is aborted at timeoutSeconds + 15s so a hung
-   * connection cannot wedge the loop.
+   * Long-polls GET /v1/events for everything after `after`. Resolves with an
+   * empty batch on server-side timeout. The fetch itself is aborted at
+   * timeoutSeconds + 15s so a hung connection cannot wedge the loop.
+   *
+   * A plain pull: no exclusive consumer, no acknowledgement handshake, and it
+   * coexists with a webhook. Delivery is at least once, so an event seen
+   * before is ignored rather than reconciled.
    */
   async pollEvents(params) {
     const timeoutSeconds = params.timeoutSeconds ?? 25;
     const url2 = new URL(`${this.baseUrl}/v1/events`);
-    url2.searchParams.set("cursor", String(params.cursor));
+    url2.searchParams.set("after", String(params.after));
     url2.searchParams.set("timeout", String(timeoutSeconds));
     url2.searchParams.set("limit", String(params.limit ?? 100));
     const signals = [AbortSignal.timeout((timeoutSeconds + 15) * 1e3)];
@@ -25084,19 +25099,23 @@ var RelayClient = class {
     });
     if (!response.ok) throw await this.parseError(response);
     const body = await response.json();
+    const nextCursor = typeof body.next_cursor === "number" ? body.next_cursor : params.after;
     return {
       events: Array.isArray(body.events) ? body.events : [],
-      next_cursor: typeof body.next_cursor === "number" ? body.next_cursor : params.cursor
+      next_cursor: nextCursor,
+      latest: typeof body.latest === "number" ? body.latest : nextCursor,
+      has_more: body.has_more === true
     };
   }
-  /** POST /v1/messages with the mandatory Idempotency-Key header. */
-  async sendMessage(body, idempotencyKey) {
+  /**
+   * POST /v1/messages. The body's `message_id` is the whole idempotency
+   * mechanism: replaying it returns the message it already committed, so
+   * there is no key header to send.
+   */
+  async sendMessage(body) {
     const response = await this.fetchImpl(`${this.baseUrl}/v1/messages`, {
       method: "POST",
-      headers: this.headers({
-        "Content-Type": "application/json",
-        "Idempotency-Key": idempotencyKey
-      }),
+      headers: this.headers({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(3e4)
     });
@@ -25216,7 +25235,7 @@ function blockAndQuarantineCorrupt(path, blockedPath) {
   renameSync(path, quarantined);
   return quarantined;
 }
-function defaultConsumerLedger() {
+function defaultEventLedger() {
   return {
     recent_event_ids: [],
     pending_deliveries: {}
@@ -25248,28 +25267,28 @@ var StateStore = class {
   sessionStatePath;
   sessionLedgerPath;
   sessionLedgerBlockedPath;
-  consumerState = { cursor: 0 };
+  accountState = { cursor: 0 };
   routingState = {};
-  consumerLedger = defaultConsumerLedger();
+  eventLedger = defaultEventLedger();
   sessionLedger = defaultSessionLedger();
   constructor(rootDir, scope2) {
     this.accountDir = accountStateDir(rootDir, scope2);
     this.dir = sessionStateDir(rootDir, scope2);
-    this.statePath = join(this.accountDir, "consumer-state.json");
-    this.stateBlockedPath = join(this.accountDir, "consumer-state.blocked");
-    this.ledgerPath = join(this.accountDir, "consumer-ledger.json");
-    this.ledgerBlockedPath = join(this.accountDir, "consumer-ledger.blocked");
+    this.statePath = join(this.accountDir, "account-state.json");
+    this.stateBlockedPath = join(this.accountDir, "account-state.blocked");
+    this.ledgerPath = join(this.accountDir, "event-ledger.json");
+    this.ledgerBlockedPath = join(this.accountDir, "event-ledger.blocked");
     this.sessionStatePath = join(this.dir, "routing.json");
     this.sessionLedgerPath = join(this.dir, "session-ledger.json");
     this.sessionLedgerBlockedPath = join(this.dir, "session-ledger.blocked");
     ensurePrivateDir(this.accountDir);
     ensurePrivateDir(this.dir);
     this.throwIfBlocked(this.statePath, this.stateBlockedPath);
-    this.loadConsumerState();
+    this.loadAccountState();
     this.loadRoutingState();
     this.throwIfBlocked(this.ledgerPath, this.ledgerBlockedPath);
     this.throwIfBlocked(this.sessionLedgerPath, this.sessionLedgerBlockedPath);
-    this.loadConsumerLedger();
+    this.loadEventLedger();
     this.loadSessionLedger();
     this.prune();
   }
@@ -25283,7 +25302,7 @@ var StateStore = class {
     }
     throw new CorruptLedgerError(path, quarantined);
   }
-  loadConsumerState() {
+  loadAccountState() {
     if (!existsSync(this.statePath)) return;
     try {
       const parsed = JSON.parse(readFileSync(this.statePath, "utf8"));
@@ -25293,7 +25312,7 @@ var StateStore = class {
       if (parsed.owner_user_id !== void 0 && (typeof parsed.owner_user_id !== "string" || parsed.owner_user_id.length === 0)) {
         throw new Error("invalid owner user id");
       }
-      this.consumerState = parsed;
+      this.accountState = parsed;
     } catch {
       const quarantined = blockAndQuarantineCorrupt(this.statePath, this.stateBlockedPath);
       throw new CorruptLedgerError(this.statePath, quarantined);
@@ -25305,11 +25324,6 @@ var StateStore = class {
       const parsed = JSON.parse(readFileSync(this.sessionStatePath, "utf8"));
       if (parsed.last_conversation_id !== void 0 && typeof parsed.last_conversation_id !== "string") {
         throw new Error("invalid routing state");
-      }
-      if (parsed.pending_invocations !== void 0 && (typeof parsed.pending_invocations !== "object" || parsed.pending_invocations === null || Array.isArray(parsed.pending_invocations) || Object.entries(parsed.pending_invocations).some(
-        ([conversationId, invocationId]) => !conversationId.startsWith("cnv_") || typeof invocationId !== "string"
-      ))) {
-        throw new Error("invalid pending invocations");
       }
       if (parsed.observed_conversation_ids !== void 0 && (!Array.isArray(parsed.observed_conversation_ids) || parsed.observed_conversation_ids.some(
         (conversationId) => typeof conversationId !== "string" || !conversationId.startsWith("cnv_")
@@ -25326,14 +25340,14 @@ var StateStore = class {
       this.routingState = {};
     }
   }
-  loadConsumerLedger() {
+  loadEventLedger() {
     if (!existsSync(this.ledgerPath)) return;
     try {
       const parsed = JSON.parse(readFileSync(this.ledgerPath, "utf8"));
       if (!Array.isArray(parsed.recent_event_ids) || typeof parsed.pending_deliveries !== "object" || parsed.pending_deliveries === null) {
-        throw new Error("invalid consumer ledger shape");
+        throw new Error("invalid event ledger shape");
       }
-      this.consumerLedger = parsed;
+      this.eventLedger = parsed;
     } catch {
       const quarantined = blockAndQuarantineCorrupt(this.ledgerPath, this.ledgerBlockedPath);
       throw new CorruptLedgerError(this.ledgerPath, quarantined);
@@ -25346,7 +25360,13 @@ var StateStore = class {
       if (typeof parsed.pending_approvals !== "object" || parsed.pending_approvals === null || typeof parsed.outbound_sends !== "object" || parsed.outbound_sends === null) {
         throw new Error("invalid session ledger shape");
       }
-      this.sessionLedger = parsed;
+      const ledger = parsed;
+      for (const [id, approval] of Object.entries(ledger.pending_approvals)) {
+        if (typeof approval.message_id !== "string" || approval.message_id.length === 0) {
+          delete ledger.pending_approvals[id];
+        }
+      }
+      this.sessionLedger = ledger;
     } catch {
       const quarantined = blockAndQuarantineCorrupt(
         this.sessionLedgerPath,
@@ -25357,19 +25377,19 @@ var StateStore = class {
   }
   get() {
     return {
-      ...this.consumerState,
+      ...this.accountState,
       ...this.routingState,
       observed_conversation_ids: [...this.routingState.observed_conversation_ids ?? []]
     };
   }
   update(patch) {
     if (patch.cursor !== void 0 || patch.owner_user_id !== void 0) {
-      this.consumerState = {
-        ...this.consumerState,
+      this.accountState = {
+        ...this.accountState,
         ...patch.cursor !== void 0 ? { cursor: patch.cursor } : {},
         ...patch.owner_user_id !== void 0 ? { owner_user_id: patch.owner_user_id } : {}
       };
-      writeJsonAtomic(this.statePath, this.consumerState);
+      writeJsonAtomic(this.statePath, this.accountState);
     }
     if (patch.last_conversation_id !== void 0) {
       this.recordConversation(patch.last_conversation_id);
@@ -25394,32 +25414,6 @@ var StateStore = class {
     return (this.routingState.observed_conversation_ids ?? []).includes(conversationId);
   }
   /**
-   * Remember the invocation a group message arrived under. A newer invocation
-   * replaces an older unanswered one: the reply this session is about to send
-   * answers the message Claude actually saw last.
-   */
-  recordInvocation(conversationId, invocationId) {
-    this.routingState = {
-      ...this.routingState,
-      pending_invocations: {
-        ...this.routingState.pending_invocations ?? {},
-        [conversationId]: invocationId
-      }
-    };
-    writeJsonAtomic(this.sessionStatePath, this.routingState);
-  }
-  invocationFor(conversationId) {
-    return this.routingState.pending_invocations?.[conversationId];
-  }
-  /** Spend the invocation once its reply is committed by Relay. */
-  consumeInvocation(conversationId) {
-    const pending = { ...this.routingState.pending_invocations ?? {} };
-    if (!(conversationId in pending)) return;
-    delete pending[conversationId];
-    this.routingState = { ...this.routingState, pending_invocations: pending };
-    writeJsonAtomic(this.sessionStatePath, this.routingState);
-  }
-  /**
    * Bind a permission notification to its only safe active destination.
    * Claude's channel permission payload has no chat id. A pending delivery is
    * the strongest available causal link; if multiple conversations are
@@ -25427,7 +25421,7 @@ var StateStore = class {
    */
   permissionConversationId() {
     const pending = new Set(
-      Object.values(this.consumerLedger.pending_deliveries).map(
+      Object.values(this.eventLedger.pending_deliveries).map(
         (delivery) => delivery.conversation_id
       )
     );
@@ -25436,8 +25430,8 @@ var StateStore = class {
     const observed = this.routingState.observed_conversation_ids ?? [];
     return observed.length === 1 ? observed[0] : void 0;
   }
-  saveConsumerLedger() {
-    writeJsonAtomic(this.ledgerPath, this.consumerLedger);
+  saveEventLedger() {
+    writeJsonAtomic(this.ledgerPath, this.eventLedger);
   }
   saveSessionLedger() {
     writeJsonAtomic(this.sessionLedgerPath, this.sessionLedger);
@@ -25458,48 +25452,48 @@ var StateStore = class {
     if (dirty) this.saveSessionLedger();
   }
   hasSeenEvent(eventId) {
-    return this.consumerLedger.recent_event_ids.includes(eventId) || Object.hasOwn(this.consumerLedger.pending_deliveries, eventId) || Object.values(this.sessionLedger.pending_approvals).some(
+    return this.eventLedger.recent_event_ids.includes(eventId) || Object.hasOwn(this.eventLedger.pending_deliveries, eventId) || Object.values(this.sessionLedger.pending_approvals).some(
       (approval) => approval.verdict_event_id === eventId
     );
   }
   queueDelivery(delivery) {
     if (this.hasSeenEvent(delivery.event_id)) return false;
-    if (Object.keys(this.consumerLedger.pending_deliveries).length >= PENDING_DELIVERIES_LIMIT) {
+    if (Object.keys(this.eventLedger.pending_deliveries).length >= PENDING_DELIVERIES_LIMIT) {
       throw new Error(
         `pending delivery ledger reached ${PENDING_DELIVERIES_LIMIT}; acknowledge existing deliveries before polling more`
       );
     }
-    this.consumerLedger.pending_deliveries[delivery.event_id] = delivery;
-    this.saveConsumerLedger();
+    this.eventLedger.pending_deliveries[delivery.event_id] = delivery;
+    this.saveEventLedger();
     return true;
   }
   pendingDeliveries() {
-    return Object.values(this.consumerLedger.pending_deliveries).sort(
+    return Object.values(this.eventLedger.pending_deliveries).sort(
       (a, b) => a.created_at - b.created_at
     );
   }
   pendingDelivery(eventId) {
-    return this.consumerLedger.pending_deliveries[eventId];
+    return this.eventLedger.pending_deliveries[eventId];
   }
   acknowledgeDelivery(eventId) {
-    if (!Object.hasOwn(this.consumerLedger.pending_deliveries, eventId)) return false;
-    delete this.consumerLedger.pending_deliveries[eventId];
-    this.consumerLedger.recent_event_ids.push(eventId);
-    this.consumerLedger.recent_event_ids = this.consumerLedger.recent_event_ids.slice(
+    if (!Object.hasOwn(this.eventLedger.pending_deliveries, eventId)) return false;
+    delete this.eventLedger.pending_deliveries[eventId];
+    this.eventLedger.recent_event_ids.push(eventId);
+    this.eventLedger.recent_event_ids = this.eventLedger.recent_event_ids.slice(
       -RECENT_EVENT_IDS_LIMIT
     );
-    this.saveConsumerLedger();
+    this.saveEventLedger();
     return true;
   }
   markEventSeen(eventId) {
-    if (!this.consumerLedger.recent_event_ids.includes(eventId)) {
-      this.consumerLedger.recent_event_ids.push(eventId);
-      this.consumerLedger.recent_event_ids = this.consumerLedger.recent_event_ids.slice(
+    if (!this.eventLedger.recent_event_ids.includes(eventId)) {
+      this.eventLedger.recent_event_ids.push(eventId);
+      this.eventLedger.recent_event_ids = this.eventLedger.recent_event_ids.slice(
         -RECENT_EVENT_IDS_LIMIT
       );
     }
-    delete this.consumerLedger.pending_deliveries[eventId];
-    this.saveConsumerLedger();
+    delete this.eventLedger.pending_deliveries[eventId];
+    this.saveEventLedger();
   }
   registerApproval(request, conversationId, remoteAllowEnabled, now = Date.now()) {
     this.prune(now);
@@ -25515,6 +25509,7 @@ var StateStore = class {
     const approval = {
       request,
       conversation_id: conversationId,
+      message_id: relayMessageId(now),
       created_at: now,
       expires_at: now + DEFAULT_APPROVAL_TTL_MS,
       remote_allow_enabled: remoteAllowEnabled
@@ -25552,14 +25547,19 @@ var StateStore = class {
     approval.verdict = behavior;
     approval.verdict_event_id = eventId;
     this.saveSessionLedger();
-    this.consumerLedger.recent_event_ids.push(eventId);
-    this.consumerLedger.recent_event_ids = this.consumerLedger.recent_event_ids.slice(
+    this.eventLedger.recent_event_ids.push(eventId);
+    this.eventLedger.recent_event_ids = this.eventLedger.recent_event_ids.slice(
       -RECENT_EVENT_IDS_LIMIT
     );
-    this.saveConsumerLedger();
+    this.saveEventLedger();
     return approval;
   }
-  registerOutboundSend(sendId, payloadHash, idempotencyKey, now = Date.now()) {
+  /**
+   * Bind a logical send to one payload and one `msg_` id. A retry under the
+   * same send_id gets the id the first attempt used, which is what makes the
+   * retry a replay rather than a second message.
+   */
+  registerOutboundSend(sendId, payloadHash, now = Date.now()) {
     this.prune(now);
     const existing = this.sessionLedger.outbound_sends[sendId];
     if (existing) {
@@ -25568,7 +25568,11 @@ var StateStore = class {
       }
       return existing;
     }
-    const created = { payload_hash: payloadHash, idempotency_key: idempotencyKey, created_at: now };
+    const created = {
+      payload_hash: payloadHash,
+      message_id: relayMessageId(now),
+      created_at: now
+    };
     this.sessionLedger.outbound_sends[sendId] = created;
     this.saveSessionLedger();
     return created;
@@ -25580,78 +25584,10 @@ var StateStore = class {
     this.saveSessionLedger();
   }
 };
-function pidIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error51) {
-    return error51.code === "EPERM";
-  }
-}
-var ConsumerLock = class {
-  path;
-  held = false;
-  constructor(rootDir, scope2) {
-    const accountDir = accountStateDir(rootDir, scope2);
-    ensurePrivateDir(accountDir);
-    this.path = join(accountDir, "consumer.lock");
-    const record2 = {
-      pid: process.pid,
-      hostname: hostname3(),
-      session_id_hash: hashKey(scope2.sessionId),
-      created_at: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const fd = openSync(this.path, "wx", 384);
-        try {
-          writeFileSync(fd, `${JSON.stringify(record2)}
-`, "utf8");
-          fsyncSync(fd);
-        } finally {
-          closeSync(fd);
-        }
-        this.held = true;
-        return;
-      } catch (error51) {
-        if (error51.code !== "EEXIST") throw error51;
-        let existing = {};
-        try {
-          existing = JSON.parse(readFileSync(this.path, "utf8"));
-        } catch {
-        }
-        if (existing.hostname === hostname3() && typeof existing.pid === "number" && pidIsAlive(existing.pid)) {
-          throw new Error(
-            `Relay agent already has an active channel consumer (pid ${existing.pid}); close that Claude session before starting another`
-          );
-        }
-        try {
-          unlinkSync(this.path);
-        } catch (unlinkError) {
-          if (unlinkError.code !== "ENOENT") throw unlinkError;
-        }
-      }
-    }
-    throw new Error("could not acquire the Relay channel consumer lock");
-  }
-  release() {
-    if (!this.held) return;
-    try {
-      const current = JSON.parse(readFileSync(this.path, "utf8"));
-      if (current.pid === process.pid) unlinkSync(this.path);
-    } catch (error51) {
-      if (error51.code !== "ENOENT") throw error51;
-    } finally {
-      this.held = false;
-    }
-  }
-};
 
 // src/poller.ts
 var BASE_BACKOFF_MS = 1e3;
 var MAX_BACKOFF_MS = 6e4;
-var CONFLICT_BACKOFF_MS = 3e4;
 function defaultSleep(ms, signal) {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
@@ -25672,7 +25608,7 @@ function startPoller(options) {
     while (!controller.signal.aborted) {
       try {
         const batch = await options.client.pollEvents({
-          cursor: options.getCursor(),
+          after: options.getCursor(),
           timeoutSeconds: options.timeoutSeconds ?? 25,
           signal: controller.signal
         });
@@ -25701,10 +25637,7 @@ function startPoller(options) {
         if (controller.signal.aborted) return;
         let waitMs = backoffMs;
         if (error51 instanceof RelayApiError) {
-          if (error51.status === 409) {
-            options.log(`long-poll conflict (${error51.code}): ${error51.message}; retrying in ${CONFLICT_BACKOFF_MS / 1e3}s`);
-            waitMs = CONFLICT_BACKOFF_MS;
-          } else if (error51.status === 401) {
+          if (error51.status === 401) {
             options.log("agent token rejected (401); stopping channel \u2014 check ~/.claude/channels/relay/.env");
             controller.abort();
             return;
@@ -25787,7 +25720,6 @@ if (process.argv.includes("--check")) {
 }
 var client = null;
 var state = null;
-var consumerLock = null;
 var scope = null;
 var owner = null;
 var poller = null;
@@ -25865,9 +25797,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
     throw new Error(`unknown tool: ${request.params.name}`);
   }
   if (!client || !state || !scope) {
-    return toolError(
-      "Relay channel is not ready: configure RELAY_AGENT_TOKEN and ensure no other Claude session owns this agent's event consumer."
-    );
+    return toolError("Relay channel is not ready: configure RELAY_AGENT_TOKEN.");
   }
   const { chat_id, text, send_id } = request.params.arguments;
   if (typeof chat_id !== "string" || !chat_id.startsWith("cnv_")) {
@@ -25882,20 +25812,14 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (typeof send_id !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(send_id)) {
     return toolError("send_id must be 1-128 letters, digits, dot, underscore, colon, or hyphen");
   }
-  const body = buildReply(chat_id, text, state.invocationFor(chat_id));
-  const payloadHash = hashJson(body);
-  const idempotencyKey = `claude-reply-${createHash2("sha256").update(`${scope.baseUrl}
-${scope.agentId}
-${scope.sessionId}
-${send_id}`).digest("hex")}`;
+  const payloadHash = hashJson({ chat_id, text });
   try {
-    const registered = state.registerOutboundSend(send_id, payloadHash, idempotencyKey);
+    const registered = state.registerOutboundSend(send_id, payloadHash);
     if (registered.confirmed_at) {
       return { content: [{ type: "text", text: "already sent" }] };
     }
-    await client.sendMessage(body, registered.idempotency_key);
+    await client.sendMessage(buildReply(chat_id, text, registered.message_id));
     state.confirmOutboundSend(send_id);
-    if (body.invocation_id) state.consumeInvocation(chat_id);
     return { content: [{ type: "text", text: "sent" }] };
   } catch (error51) {
     const detail = error51 instanceof RelayApiError ? `${error51.status} ${error51.code}: ${error51.message}` : String(error51);
@@ -25913,8 +25837,12 @@ var PermissionRequestSchema = external_exports.object({
 });
 async function postPermissionCard(approval) {
   if (!client || !state) return;
-  const card = buildPermissionCard(approval.request, approval.conversation_id);
-  await client.sendMessage(card.body, card.idempotencyKey);
+  const card = buildPermissionCard(
+    approval.request,
+    approval.conversation_id,
+    approval.message_id
+  );
+  await client.sendMessage(card.body);
   state.markApprovalCardSent(approval.request.request_id);
   log(
     `relayed permission request ${approval.request.request_id} (${approval.request.tool_name}) to ${approval.conversation_id}`
@@ -25932,19 +25860,12 @@ mcp.setNotificationHandler(PermissionRequestSchema, async ({ params }) => {
     );
     return;
   }
-  if (state.invocationFor(conversationId)) {
-    log(
-      `permission request ${params.request_id} not relayed: ${conversationId} is a group invocation that owes its single message to the reply; review it at the local terminal`
-    );
-    return;
-  }
   const request = params;
-  const card = buildPermissionCard(request, conversationId);
   try {
     const approval = state.registerApproval(
       request,
       conversationId,
-      card.remoteAllowEnabled
+      hasCompletePermissionInput(request.input_preview)
     );
     await postPermissionCard(approval);
   } catch (error51) {
@@ -26021,9 +25942,6 @@ async function handleEvent(event) {
     }
     case "message": {
       state.recordConversation(action.conversationId);
-      if (action.invocationId) {
-        state.recordInvocation(action.conversationId, action.invocationId);
-      }
       const delivery = {
         event_id: event.event_id,
         content: action.content,
@@ -26123,14 +26041,9 @@ async function startChannel() {
     agentId: resolution.agentId,
     sessionId: config2.sessionId
   };
-  let nextLock = null;
   try {
-    nextLock = new ConsumerLock(config2.dir, scope);
-    const nextState = new StateStore(config2.dir, scope);
-    state = nextState;
-    consumerLock = nextLock;
+    state = new StateStore(config2.dir, scope);
   } catch (error51) {
-    nextLock?.release();
     log(`refusing to start channel (fail closed): ${error51 instanceof Error ? error51.message : String(error51)}`);
     return;
   }
@@ -26175,12 +26088,6 @@ async function shutdown(reason) {
     }
   }
   poller = null;
-  try {
-    consumerLock?.release();
-  } catch (error51) {
-    log(`failed to release consumer lock: ${String(error51)}`);
-  }
-  consumerLock = null;
 }
 mcp.oninitialized = () => {
   void startChannel();
@@ -26193,5 +26100,4 @@ process.once("SIGINT", () => {
 process.once("SIGTERM", () => {
   void shutdown("SIGTERM").finally(() => process.exit(0));
 });
-process.once("beforeExit", () => consumerLock?.release());
 await mcp.connect(new StdioServerTransport());

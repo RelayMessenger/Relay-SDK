@@ -24,8 +24,8 @@ afterwards:
 3. Record the `event_id` and hand the event to something that will outlive
    the request.
 4. Return 200. The sender sees Delivered from here.
-5. Do the work: mark responding, send the reply with an idempotency key
-   derived from `event_id`.
+5. Do the work: mark read, then send the reply under the `msg_` id you minted
+   before the first attempt.
 
 Steps 1–3 are what make the acknowledgement honest rather than merely fast.
 Answering before the event is verified and safely in hand would be a claim
@@ -43,11 +43,13 @@ This example uses an in-process queue, which is lost on a crash or a redeploy.
 That is the one piece to replace for production: a real queue, a job table, a
 Durable Object. `accept()` in `src/index.ts` is the seam.
 
-The `event_id`-derived idempotency key is what makes your own retries safe: a
-replayed event repeats the same send instead of double-posting.
+The reply's `msg_` id is what makes your own retries safe. Mint it once, before
+the first attempt, and reuse it: the same id replays the stored message, while
+a fresh one on retry is how you post the reply twice. Persist it beside the job
+when the queue is durable.
 
 ### Delivered and Read are different claims
 
 Delivered is automatic and transport-level — you cannot record it, suppress
-it, or fake it; answering 2xx *is* the receipt. Read is yours: `setResponding`
+it, or fake it; answering 2xx *is* the receipt. Read is yours: `markRead`
 records it, and it says the agent is engaged with the message.

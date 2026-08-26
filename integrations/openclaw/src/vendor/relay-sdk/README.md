@@ -1,20 +1,17 @@
 # Vendored `@relaymessenger/sdk` client
 
-`client.ts`, `errors.ts`, `types.ts`, and `url.ts` are **verbatim copies** of
-`packages/sdk/src/` in this same repository. Do not edit them here. Fix the SDK
-and re-copy.
+`client.ts`, `errors.ts`, `types.ts`, `ulid.ts`, and `url.ts` are **verbatim
+copies** of `packages/sdk/src/` in this same repository. Do not edit them here.
+Fix the SDK and re-copy.
 
 ## Why a copy
 
-The plugin used to carry its own hand-rolled Relay client. The two drifted, and
-the drift shipped a defect: the plugin's client had no `invocationId` on
-`sendMessage`, `setTyping`, or `setResponding`, so the first group mention an
-agent received wedged its whole event stream (REL-167). The SDK client has
-always had those parameters.
+The plugin used to carry its own hand-rolled Relay client beside the SDK's. Two
+clients against one API is two chances to get the API wrong, and the second one
+had no owner. Vendoring adopts the SDK's client now instead of growing a rival.
 
 The SDK is not published to npm yet (`packages/cli/CLAUDE.md`), so the plugin
-cannot depend on it. Vendoring adopts the correct client now instead of growing
-a second one.
+cannot depend on it.
 
 ## Removing this directory
 

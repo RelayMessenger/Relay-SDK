@@ -98,7 +98,7 @@ describe("server.ts end to end against a mock Relay", () => {
         return;
       }
       if (req.method === "GET" && url.pathname === "/v1/events") {
-        const batch = pollBatches.shift() ?? { events: [], next_cursor: Number(url.searchParams.get("cursor") ?? 0) };
+        const batch = pollBatches.shift() ?? { events: [], next_cursor: Number(url.searchParams.get("after") ?? 0) };
         // Small delay so the loop cannot spin hot on empty batches.
         await new Promise((resolve) => setTimeout(resolve, 25));
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -219,10 +219,16 @@ describe("server.ts end to end against a mock Relay", () => {
     );
     await waitFor(() => posted.length > 0, "permission card POST");
     const post = posted[0];
-    assert.equal(post.headers["idempotency-key"], "agent-perm-abcde");
+    // The card's identity is the body's message id; no header carries a key.
+    assert.equal(post.headers["idempotency-key"], undefined);
     assert.equal(post.headers.authorization, "Bearer rly_e2e_token");
-    const body = post.body as { conversation_id: string; parts: { type: string; text?: string }[] };
+    const body = post.body as {
+      conversation_id: string;
+      message_id: string;
+      parts: { type: string; text?: string }[];
+    };
     assert.equal(body.conversation_id, "cnv_e2e");
+    assert.match(body.message_id, /^msg_[0-9a-hjkmnp-tv-z]{26}$/);
     assert.deepEqual(body.parts.map((p) => p.type), ["text", "data"]);
     assert.ok(body.parts[0].text?.includes('Reply "yes abcde" to allow or "no abcde" to deny.'));
   });
@@ -278,8 +284,8 @@ describe("server.ts end to end against a mock Relay", () => {
     call(20, "done");
     await waitFor(() => rpcResponses.has(20), "first reply tool response");
     assert.equal(posted.length, 2);
-    const firstKey = posted[1].headers["idempotency-key"];
-    assert.match(String(firstKey), /^claude-reply-[a-f0-9]{64}$/);
+    const sent = posted[1].body as { message_id: string };
+    assert.match(sent.message_id, /^msg_[0-9a-hjkmnp-tv-z]{26}$/);
 
     // A confirmed retry is answered from the durable send ledger, with no
     // second HTTP request.
@@ -288,7 +294,7 @@ describe("server.ts end to end against a mock Relay", () => {
     assert.equal(posted.length, 2);
 
     // Reusing the logical id for different content is rejected rather than
-    // silently sending under a new idempotency key.
+    // silently sending under a new message id.
     call(22, "different");
     await waitFor(() => rpcResponses.has(22), "mismatched retry response");
     const mismatch = rpcResponses.get(22) as { result?: { isError?: boolean } };

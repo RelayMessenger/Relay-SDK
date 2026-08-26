@@ -1,41 +1,42 @@
 /**
- * Wire types for the Relay v1 developer API, scoped to what this adapter
- * consumes and produces. The authoritative contract is the published OpenAPI
- * document at https://docs.relayapp.im/api-reference. The part discriminator
- * is `type`.
+ * Wire types for the Relay developer API, scoped to what this adapter consumes
+ * and produces. The authoritative contract is the published OpenAPI document at
+ * https://docs.relayapp.im/api-reference. The part discriminator is `type`.
+ *
+ * Message content is immutable: there is no edit, no unsend, no version and no
+ * tombstone. A message that exists has parts, so nothing here is optional
+ * because a tombstone might have dropped it.
  */
 
 export interface RelayEventEnvelope<TData = unknown> {
   event_id: string;
+  /** This agent's position in its own log; the poll cursor. */
+  sequence?: number;
   event_type: string;
   agent_id: string;
+  conversation_id?: string | null;
   created_at: string;
   data: TData;
 }
 
+/**
+ * Anyone who can act in a conversation. There is no `system` actor: a group
+ * notice is a real message sent by the person who caused it.
+ */
 export interface RelaySender {
-  kind: "user" | "agent" | "system";
+  kind: "user" | "agent";
   id: string;
 }
 
 /**
- * Inline mention of a conversation participant. Offsets are UTF-16 code units
- * into the part's `text`, which holds the inserted display name with no "@".
- * Ranges are sorted by `start` and never overlap.
+ * A mention is the handle it names. A sender confirms handles from the
+ * client's suggestion list, and the server checks each one is really written
+ * as `@handle` in the part's `text`. There are no offsets: a range could mark
+ * any word as a mention of anyone, a handle can only ever mark itself.
  */
-export interface RelayMentionRange {
-  start: number;
-  length: number;
-  participant_id: string;
-}
+export type RelayMention = string;
 
-export type RelayTextStyle =
-  | "bold"
-  | "italic"
-  | "underline"
-  | "strikethrough"
-  | "monospace"
-  | "spoiler";
+export type RelayTextStyle = "bold" | "italic" | "underline" | "strikethrough";
 
 /**
  * One formatting run over a text part, offsets in UTF-16 code units like
@@ -53,7 +54,7 @@ export type RelayOutgoingPart =
   | {
       type: "text";
       text: string;
-      mentions?: RelayMentionRange[];
+      mentions?: RelayMention[];
       styles?: RelayStyleRange[];
     }
   | {
@@ -68,10 +69,13 @@ export type RelayOutgoingPart =
 
 /** Stored canonical part as delivered in events and history. */
 export interface RelayPart {
+  /** Permanent part identity, assigned at commit. */
+  part_id: string;
+  /** Position of this part in the message, from 0. */
+  part_index: number;
   type: string;
-  part_index?: number;
   text?: string;
-  mentions?: RelayMentionRange[];
+  mentions?: RelayMention[];
   styles?: RelayStyleRange[];
   url?: string;
   attachment_id?: string;
@@ -90,47 +94,64 @@ export interface RelayPart {
 }
 
 /**
- * A message as Relay projects it for this agent. A tombstone carries no
- * `parts`, so every reader must treat that field as optional.
+ * The reply edge: a pointer, never a copy.
+ *
+ * Relay stores no quote snapshot, so there is nothing to go stale. Draw the
+ * quote from the target message you already hold; a target this reader cannot
+ * see resolves to nothing and the reply renders without one.
  */
+export interface RelayReplyRef {
+  message_id: string;
+  /** Present when the reply targeted one specific part. */
+  part_id?: string;
+}
+
+/**
+ * A reaction as projected onto a message. One per (message, target slot,
+ * actor): adding a second emoji to the same slot replaces the first.
+ */
+export interface RelayReaction {
+  /** The part this reaction targets; null for a whole-message reaction. */
+  target_part_id: string | null;
+  emoji: string;
+  actor_kind: "user" | "agent";
+  actor_id: string;
+  created_at: string;
+}
+
+/** `notice` is a group notice ("Alice added Bob"), sent by the person who did it. */
+export type RelayMessageKind = "message" | "notice";
+
+/** A message as Relay projects it for this agent. */
 export interface RelayMessage {
   id: string;
   conversation_id: string;
   sequence: number;
+  kind: RelayMessageKind;
   sender: RelaySender;
   is_from_me?: boolean;
-  parts?: RelayPart[];
-  reply_to?: { message_id?: string } | null;
-  invoked_agents?: string[];
-  reactions?: unknown[];
+  parts: RelayPart[];
+  reply_to?: RelayReplyRef | null;
+  /** Resolved on reads. Send responses and event payloads omit it. */
+  reactions?: RelayReaction[];
   fallback_text?: string;
   status: string;
   delivered_at?: string;
   read_at?: string;
-  edited_at?: string;
-  unsent_at?: string;
   created_at: string;
 }
 
 export interface RelayMessageEventData {
   message: RelayMessage;
-  invocation_id?: string;
-}
-
-export interface RelayMessageUnsentEventData {
-  message_id: string;
-  conversation_id: string;
-  sequence: number;
 }
 
 /**
- * The 202 from `POST /v1/messages`. The server splits the accepted parts at
- * ingest: each visible non-media part becomes its own message, contiguous
- * media parts stay one media message, and a voice memo always commits alone,
- * so one send commits one or more messages, in display order.
+ * The 202 from `POST /v1/messages`. One send is one message: the `msg_` id the
+ * client minted is the message's identity and the send's only retry key.
  */
 export interface RelaySendResult {
-  messages: RelayMessage[];
+  message_id: string;
+  message: RelayMessage;
 }
 
 export interface RelayConversation {
@@ -171,15 +192,9 @@ export interface RelayAttachment {
  */
 export type RelayReactionType = "emoji";
 
-/**
- * The raw payload this adapter hands to the Chat SDK. It carries the group
- * invocation id alongside the message because Relay scopes a group reply to
- * the invocation that produced the inbound event, and `Adapter.postMessage`
- * never sees the event.
- */
+/** The raw payload this adapter hands to the Chat SDK. */
 export interface RelayRawMessage {
   message: RelayMessage;
-  invocation_id?: string;
   event_id?: string;
   event_type?: string;
 }

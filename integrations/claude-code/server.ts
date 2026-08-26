@@ -8,9 +8,13 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-import { buildPermissionCard, buildReply, classifyEvent } from "./src/bridge.ts";
 import {
-  ConsumerLock,
+  buildPermissionCard,
+  buildReply,
+  classifyEvent,
+  hasCompletePermissionInput,
+} from "./src/bridge.ts";
+import {
   StateStore,
   loadConfig,
   type PendingApproval,
@@ -21,7 +25,7 @@ import {
 import { startPoller } from "./src/poller.ts";
 import { RelayApiError, RelayClient } from "./src/relayClient.ts";
 import { RetryWindow } from "./src/retryWindow.ts";
-import type { PermissionRequest, RelayEvent, SendMessageBody } from "./src/types.ts";
+import type { PermissionRequest, RelayEvent } from "./src/types.ts";
 import { createRequire } from "node:module";
 
 // Baked in at build time from package.json rather than restated here. Three
@@ -76,7 +80,6 @@ if (process.argv.includes("--check")) {
 
 let client: RelayClient | null = null;
 let state: StateStore | null = null;
-let consumerLock: ConsumerLock | null = null;
 let scope: StateScope | null = null;
 let owner: string | null = null;
 let poller: ReturnType<typeof startPoller> | null = null;
@@ -168,9 +171,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
     throw new Error(`unknown tool: ${request.params.name}`);
   }
   if (!client || !state || !scope) {
-    return toolError(
-      "Relay channel is not ready: configure RELAY_AGENT_TOKEN and ensure no other Claude session owns this agent's event consumer.",
-    );
+    return toolError("Relay channel is not ready: configure RELAY_AGENT_TOKEN.");
   }
   const { chat_id, text, send_id } = request.params.arguments as {
     chat_id?: unknown;
@@ -190,22 +191,17 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
     return toolError("send_id must be 1-128 letters, digits, dot, underscore, colon, or hyphen");
   }
 
-  // A group reply must carry the invocation Relay supplied, and a retry of the
-  // same send_id must hash identically, so the id is only spent once the send
-  // is confirmed.
-  const body = buildReply(chat_id, text, state.invocationFor(chat_id));
-  const payloadHash = hashJson(body);
-  const idempotencyKey = `claude-reply-${createHash("sha256")
-    .update(`${scope.baseUrl}\n${scope.agentId}\n${scope.sessionId}\n${send_id}`)
-    .digest("hex")}`;
+  // The send_id names the logical send; the ledger binds it to one payload
+  // and one `msg_` id, and that id is what makes a retry a replay instead of a
+  // second message.
+  const payloadHash = hashJson({ chat_id, text });
   try {
-    const registered = state.registerOutboundSend(send_id, payloadHash, idempotencyKey);
+    const registered = state.registerOutboundSend(send_id, payloadHash);
     if (registered.confirmed_at) {
       return { content: [{ type: "text", text: "already sent" }] };
     }
-    await client.sendMessage(body, registered.idempotency_key);
+    await client.sendMessage(buildReply(chat_id, text, registered.message_id));
     state.confirmOutboundSend(send_id);
-    if (body.invocation_id) state.consumeInvocation(chat_id);
     return { content: [{ type: "text", text: "sent" }] };
   } catch (error) {
     const detail =
@@ -226,8 +222,12 @@ const PermissionRequestSchema = z.object({
 
 async function postPermissionCard(approval: PendingApproval): Promise<void> {
   if (!client || !state) return;
-  const card = buildPermissionCard(approval.request, approval.conversation_id);
-  await client.sendMessage(card.body, card.idempotencyKey);
+  const card = buildPermissionCard(
+    approval.request,
+    approval.conversation_id,
+    approval.message_id,
+  );
+  await client.sendMessage(card.body);
   state.markApprovalCardSent(approval.request.request_id);
   log(
     `relayed permission request ${approval.request.request_id} (${approval.request.tool_name}) to ${approval.conversation_id}`,
@@ -246,29 +246,20 @@ mcp.setNotificationHandler(PermissionRequestSchema, async ({ params }) => {
     );
     return;
   }
-  // A group invocation buys exactly one message, which the reply owes. Posting
-  // a card there would spend it and leave the turn unable to answer, so a group
-  // approval stays at the local terminal instead.
-  if (state.invocationFor(conversationId)) {
-    log(
-      `permission request ${params.request_id} not relayed: ${conversationId} is a group invocation that owes its single message to the reply; review it at the local terminal`,
-    );
-    return;
-  }
   const request = params as PermissionRequest;
-  const card = buildPermissionCard(request, conversationId);
   try {
     // Durable registration precedes the POST. A reply that races the HTTP
-    // response therefore still matches an open request.
+    // response therefore still matches an open request, and the record carries
+    // the message id the card commits under.
     const approval = state.registerApproval(
       request,
       conversationId,
-      card.remoteAllowEnabled,
+      hasCompletePermissionInput(request.input_preview),
     );
     await postPermissionCard(approval);
   } catch (error) {
-    // The durable record remains for the retry supervisor. The stable
-    // idempotency key makes an unknown-outcome retry safe.
+    // The durable record remains for the retry supervisor, and its message id
+    // makes an unknown-outcome retry a replay.
     log(`failed to relay permission request ${params.request_id}: ${String(error)}; will retry`);
   }
 });
@@ -353,12 +344,6 @@ async function handleEvent(event: RelayEvent): Promise<void> {
     }
     case "message": {
       state.recordConversation(action.conversationId);
-      // Durable before Claude is told about the message: the reply tool reads
-      // this back, possibly after a restart, and a group reply without it is
-      // rejected by Relay.
-      if (action.invocationId) {
-        state.recordInvocation(action.conversationId, action.invocationId);
-      }
       const delivery: PendingDelivery = {
         event_id: event.event_id,
         content: action.content,
@@ -471,16 +456,9 @@ async function startChannel(): Promise<void> {
     agentId: resolution.agentId,
     sessionId: config.sessionId,
   };
-  let nextLock: ConsumerLock | null = null;
   try {
-    // StateStore construction loads and prunes shared ledgers, so exclusive
-    // ownership must be established before even constructing it.
-    nextLock = new ConsumerLock(config.dir, scope);
-    const nextState = new StateStore(config.dir, scope);
-    state = nextState;
-    consumerLock = nextLock;
+    state = new StateStore(config.dir, scope);
   } catch (error) {
-    nextLock?.release();
     log(`refusing to start channel (fail closed): ${error instanceof Error ? error.message : String(error)}`);
     return;
   }
@@ -531,12 +509,6 @@ async function shutdown(reason: string): Promise<void> {
     }
   }
   poller = null;
-  try {
-    consumerLock?.release();
-  } catch (error) {
-    log(`failed to release consumer lock: ${String(error)}`);
-  }
-  consumerLock = null;
 }
 
 mcp.oninitialized = () => {
@@ -551,6 +523,4 @@ process.once("SIGINT", () => {
 process.once("SIGTERM", () => {
   void shutdown("SIGTERM").finally(() => process.exit(0));
 });
-process.once("beforeExit", () => consumerLock?.release());
-
 await mcp.connect(new StdioServerTransport());

@@ -13,3 +13,11 @@ test("every documented ACP preset is accepted and unknown engines fail", () => {
   }
   assert.throws(() => parseFlags(["--engine", "made-up-agent"]), /must be one of/);
 });
+
+test("the agent's name and handle are separate flags, and neither accepts an empty value", () => {
+  const flags = parseFlags(["--name", "Work Laptop", "--handle", "work_laptop"]);
+  assert.equal(flags.name, "Work Laptop");
+  assert.equal(flags.handle, "work_laptop");
+  assert.equal(parseFlags([]).handle, undefined);
+  assert.throws(() => parseFlags(["--handle"]), /--handle needs a value/);
+});

@@ -65,10 +65,13 @@ export async function sendMcpMessage(
     context.accountIdentity,
   );
   const logicalSend = ledger.register(sendId, context.conversationId, text);
-  await context.client.postMessage(
-    { conversation_id: context.conversationId, parts: [{ type: "text", text }] },
-    logicalSend.idempotency_key,
-  );
+  await context.client.postMessage({
+    conversation_id: context.conversationId,
+    // The ledger's durable message id, so a retry after a lost response is a
+    // replay rather than a second message to the owner.
+    message_id: logicalSend.message_id,
+    parts: [{ type: "text", text }],
+  });
   ledger.confirm(logicalSend);
   return { sent: true, message: "Sent." };
 }

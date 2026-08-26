@@ -183,7 +183,7 @@ try {
   gateway.stderr.on("data", (chunk) => { gatewayOutput += chunk.toString(); });
 
   const deadline = Date.now() + 45_000;
-  while (!mockOutput.includes("POST /v1/messages")) {
+  while (!mockOutput.includes("POST /v2/conversations/cnv_harness_1/messages")) {
     if (gateway.exitCode !== null) {
       throw new Error(`OpenClaw gateway exited before the Relay reply\n${gatewayOutput}\n${mockOutput}`);
     }
@@ -195,18 +195,15 @@ try {
   for (const proof of [
     "GET /v1/agents/me",
     "GET /v1/events",
-    "POST /v1/conversations/cnv_harness_1/responding",
     "completion request",
-    "POST /v1/messages",
+    "POST /v2/conversations/cnv_harness_1/messages",
   ]) {
     if (!mockOutput.includes(proof)) throw new Error(`missing gateway proof: ${proof}\n${mockOutput}`);
   }
-  const respondingIndex = mockOutput.indexOf(
-    "POST /v1/conversations/cnv_harness_1/responding",
-  );
   const completionIndex = mockOutput.indexOf("completion request");
-  if (respondingIndex < 0 || completionIndex < 0 || respondingIndex > completionIndex) {
-    throw new Error(`responding did not precede engine execution\n${mockOutput}`);
+  const sendIndex = mockOutput.indexOf("POST /v2/conversations/cnv_harness_1/messages");
+  if (completionIndex > sendIndex) {
+    throw new Error(`the reply was sent before the engine ran\n${mockOutput}`);
   }
   process.stdout.write("OpenClaw installed-runtime gateway harness passed end to end.\n");
 } finally {

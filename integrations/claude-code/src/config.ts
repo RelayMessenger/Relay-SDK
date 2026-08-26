@@ -1,10 +1,10 @@
 /**
- * Configuration, namespaced durable state, and exclusive-consumer locking.
+ * Configuration and namespaced durable state.
  *
  * Credentials remain in the user-selected channel directory. Runtime state is
  * keyed by canonical API origin and Relay agent id, with routing, approvals,
- * and logical sends additionally isolated by Claude session. The consumer
- * cursor is account-scoped so sequential sessions cannot replay history.
+ * and logical sends additionally isolated by Claude session. The poll cursor
+ * is account-scoped so sequential sessions cannot replay history.
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -17,12 +17,12 @@ import {
   openSync,
   readFileSync,
   renameSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, hostname } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { relayMessageId } from "./ids.ts";
 import { normalizeRelayBaseUrl } from "./relayClient.ts";
 import type { PermissionBehavior, PermissionRequest } from "./types.ts";
 
@@ -47,6 +47,11 @@ export interface StateScope {
 export interface PendingApproval {
   request: PermissionRequest;
   conversation_id: string;
+  /**
+   * The id the approval card commits under, minted once at registration. A
+   * retry of the card reuses it, so a prompt relayed twice is one message.
+   */
+  message_id: string;
   created_at: number;
   expires_at: number;
   remote_allow_enabled: boolean;
@@ -65,12 +70,14 @@ export interface PendingDelivery {
 
 export interface OutboundSend {
   payload_hash: string;
-  idempotency_key: string;
+  /** The `msg_` id this logical send committed under; a retry reuses it. */
+  message_id: string;
   created_at: number;
   confirmed_at?: number;
 }
 
-interface ConsumerState {
+interface AccountState {
+  /** Last event sequence this account handled; sent back as `after`. */
   cursor: number;
   owner_user_id?: string;
 }
@@ -79,18 +86,11 @@ interface SessionRoutingState {
   last_conversation_id?: string;
   /** Conversations whose owner-authenticated messages reached this session. */
   observed_conversation_ids?: string[];
-  /**
-   * conversation_id → the group invocation awaiting this session's single
-   * reply. Relay completes an invocation on the first message that carries it,
-   * so exactly one outbound message may spend each entry. Absence means the
-   * conversation is direct and needs no id.
-   */
-  pending_invocations?: Record<string, string>;
 }
 
-export interface ChannelState extends ConsumerState, SessionRoutingState {}
+export interface RelayChannelState extends AccountState, SessionRoutingState {}
 
-interface ConsumerLedger {
+interface EventLedger {
   recent_event_ids: string[];
   pending_deliveries: Record<string, PendingDelivery>;
 }
@@ -223,7 +223,7 @@ function blockAndQuarantineCorrupt(path: string, blockedPath: string): string {
   return quarantined;
 }
 
-function defaultConsumerLedger(): ConsumerLedger {
+function defaultEventLedger(): EventLedger {
   return {
     recent_event_ids: [],
     pending_deliveries: {},
@@ -265,29 +265,29 @@ export class StateStore {
   readonly sessionStatePath: string;
   readonly sessionLedgerPath: string;
   readonly sessionLedgerBlockedPath: string;
-  private consumerState: ConsumerState = { cursor: 0 };
+  private accountState: AccountState = { cursor: 0 };
   private routingState: SessionRoutingState = {};
-  private consumerLedger: ConsumerLedger = defaultConsumerLedger();
+  private eventLedger: EventLedger = defaultEventLedger();
   private sessionLedger: SessionLedger = defaultSessionLedger();
 
   constructor(rootDir: string, scope: StateScope) {
     this.accountDir = accountStateDir(rootDir, scope);
     this.dir = sessionStateDir(rootDir, scope);
-    this.statePath = join(this.accountDir, "consumer-state.json");
-    this.stateBlockedPath = join(this.accountDir, "consumer-state.blocked");
-    this.ledgerPath = join(this.accountDir, "consumer-ledger.json");
-    this.ledgerBlockedPath = join(this.accountDir, "consumer-ledger.blocked");
+    this.statePath = join(this.accountDir, "account-state.json");
+    this.stateBlockedPath = join(this.accountDir, "account-state.blocked");
+    this.ledgerPath = join(this.accountDir, "event-ledger.json");
+    this.ledgerBlockedPath = join(this.accountDir, "event-ledger.blocked");
     this.sessionStatePath = join(this.dir, "routing.json");
     this.sessionLedgerPath = join(this.dir, "session-ledger.json");
     this.sessionLedgerBlockedPath = join(this.dir, "session-ledger.blocked");
     ensurePrivateDir(this.accountDir);
     ensurePrivateDir(this.dir);
     this.throwIfBlocked(this.statePath, this.stateBlockedPath);
-    this.loadConsumerState();
+    this.loadAccountState();
     this.loadRoutingState();
     this.throwIfBlocked(this.ledgerPath, this.ledgerBlockedPath);
     this.throwIfBlocked(this.sessionLedgerPath, this.sessionLedgerBlockedPath);
-    this.loadConsumerLedger();
+    this.loadEventLedger();
     this.loadSessionLedger();
     this.prune();
   }
@@ -306,10 +306,10 @@ export class StateStore {
     throw new CorruptLedgerError(path, quarantined);
   }
 
-  private loadConsumerState(): void {
+  private loadAccountState(): void {
     if (!existsSync(this.statePath)) return;
     try {
-      const parsed = JSON.parse(readFileSync(this.statePath, "utf8")) as Partial<ConsumerState>;
+      const parsed = JSON.parse(readFileSync(this.statePath, "utf8")) as Partial<AccountState>;
       if (
         typeof parsed.cursor !== "number" ||
         !Number.isSafeInteger(parsed.cursor) ||
@@ -323,7 +323,7 @@ export class StateStore {
       ) {
         throw new Error("invalid owner user id");
       }
-      this.consumerState = parsed as ConsumerState;
+      this.accountState = parsed as AccountState;
     } catch {
       const quarantined = blockAndQuarantineCorrupt(this.statePath, this.stateBlockedPath);
       throw new CorruptLedgerError(this.statePath, quarantined);
@@ -339,18 +339,6 @@ export class StateStore {
         typeof parsed.last_conversation_id !== "string"
       ) {
         throw new Error("invalid routing state");
-      }
-      if (
-        parsed.pending_invocations !== undefined &&
-        (typeof parsed.pending_invocations !== "object" ||
-          parsed.pending_invocations === null ||
-          Array.isArray(parsed.pending_invocations) ||
-          Object.entries(parsed.pending_invocations).some(
-            ([conversationId, invocationId]) =>
-              !conversationId.startsWith("cnv_") || typeof invocationId !== "string",
-          ))
-      ) {
-        throw new Error("invalid pending invocations");
       }
       if (
         parsed.observed_conversation_ids !== undefined &&
@@ -377,18 +365,18 @@ export class StateStore {
     }
   }
 
-  private loadConsumerLedger(): void {
+  private loadEventLedger(): void {
     if (!existsSync(this.ledgerPath)) return;
     try {
-      const parsed = JSON.parse(readFileSync(this.ledgerPath, "utf8")) as Partial<ConsumerLedger>;
+      const parsed = JSON.parse(readFileSync(this.ledgerPath, "utf8")) as Partial<EventLedger>;
       if (
         !Array.isArray(parsed.recent_event_ids) ||
         typeof parsed.pending_deliveries !== "object" ||
         parsed.pending_deliveries === null
       ) {
-        throw new Error("invalid consumer ledger shape");
+        throw new Error("invalid event ledger shape");
       }
-      this.consumerLedger = parsed as ConsumerLedger;
+      this.eventLedger = parsed as EventLedger;
     } catch {
       const quarantined = blockAndQuarantineCorrupt(this.ledgerPath, this.ledgerBlockedPath);
       throw new CorruptLedgerError(this.ledgerPath, quarantined);
@@ -407,7 +395,16 @@ export class StateStore {
       ) {
         throw new Error("invalid session ledger shape");
       }
-      this.sessionLedger = parsed as SessionLedger;
+      const ledger = parsed as SessionLedger;
+      // An approval written before message ids existed has no id to commit its
+      // card under. Dropping it costs one prompt, which then waits at the local
+      // terminal; keeping it would POST a body Relay rejects.
+      for (const [id, approval] of Object.entries(ledger.pending_approvals)) {
+        if (typeof approval.message_id !== "string" || approval.message_id.length === 0) {
+          delete ledger.pending_approvals[id];
+        }
+      }
+      this.sessionLedger = ledger;
     } catch {
       const quarantined = blockAndQuarantineCorrupt(
         this.sessionLedgerPath,
@@ -417,22 +414,22 @@ export class StateStore {
     }
   }
 
-  get(): ChannelState {
+  get(): RelayChannelState {
     return {
-      ...this.consumerState,
+      ...this.accountState,
       ...this.routingState,
       observed_conversation_ids: [...(this.routingState.observed_conversation_ids ?? [])],
     };
   }
 
-  update(patch: Partial<ChannelState>): void {
+  update(patch: Partial<RelayChannelState>): void {
     if (patch.cursor !== undefined || patch.owner_user_id !== undefined) {
-      this.consumerState = {
-        ...this.consumerState,
+      this.accountState = {
+        ...this.accountState,
         ...(patch.cursor !== undefined ? { cursor: patch.cursor } : {}),
         ...(patch.owner_user_id !== undefined ? { owner_user_id: patch.owner_user_id } : {}),
       };
-      writeJsonAtomic(this.statePath, this.consumerState);
+      writeJsonAtomic(this.statePath, this.accountState);
     }
     if (patch.last_conversation_id !== undefined) {
       this.recordConversation(patch.last_conversation_id);
@@ -460,35 +457,6 @@ export class StateStore {
   }
 
   /**
-   * Remember the invocation a group message arrived under. A newer invocation
-   * replaces an older unanswered one: the reply this session is about to send
-   * answers the message Claude actually saw last.
-   */
-  recordInvocation(conversationId: string, invocationId: string): void {
-    this.routingState = {
-      ...this.routingState,
-      pending_invocations: {
-        ...(this.routingState.pending_invocations ?? {}),
-        [conversationId]: invocationId,
-      },
-    };
-    writeJsonAtomic(this.sessionStatePath, this.routingState);
-  }
-
-  invocationFor(conversationId: string): string | undefined {
-    return this.routingState.pending_invocations?.[conversationId];
-  }
-
-  /** Spend the invocation once its reply is committed by Relay. */
-  consumeInvocation(conversationId: string): void {
-    const pending = { ...(this.routingState.pending_invocations ?? {}) };
-    if (!(conversationId in pending)) return;
-    delete pending[conversationId];
-    this.routingState = { ...this.routingState, pending_invocations: pending };
-    writeJsonAtomic(this.sessionStatePath, this.routingState);
-  }
-
-  /**
    * Bind a permission notification to its only safe active destination.
    * Claude's channel permission payload has no chat id. A pending delivery is
    * the strongest available causal link; if multiple conversations are
@@ -496,7 +464,7 @@ export class StateStore {
    */
   permissionConversationId(): string | undefined {
     const pending = new Set(
-      Object.values(this.consumerLedger.pending_deliveries).map(
+      Object.values(this.eventLedger.pending_deliveries).map(
         (delivery) => delivery.conversation_id,
       ),
     );
@@ -506,8 +474,8 @@ export class StateStore {
     return observed.length === 1 ? observed[0] : undefined;
   }
 
-  private saveConsumerLedger(): void {
-    writeJsonAtomic(this.ledgerPath, this.consumerLedger);
+  private saveEventLedger(): void {
+    writeJsonAtomic(this.ledgerPath, this.eventLedger);
   }
 
   private saveSessionLedger(): void {
@@ -535,8 +503,8 @@ export class StateStore {
 
   hasSeenEvent(eventId: string): boolean {
     return (
-      this.consumerLedger.recent_event_ids.includes(eventId) ||
-      Object.hasOwn(this.consumerLedger.pending_deliveries, eventId) ||
+      this.eventLedger.recent_event_ids.includes(eventId) ||
+      Object.hasOwn(this.eventLedger.pending_deliveries, eventId) ||
       Object.values(this.sessionLedger.pending_approvals).some(
         (approval) => approval.verdict_event_id === eventId,
       )
@@ -545,46 +513,46 @@ export class StateStore {
 
   queueDelivery(delivery: PendingDelivery): boolean {
     if (this.hasSeenEvent(delivery.event_id)) return false;
-    if (Object.keys(this.consumerLedger.pending_deliveries).length >= PENDING_DELIVERIES_LIMIT) {
+    if (Object.keys(this.eventLedger.pending_deliveries).length >= PENDING_DELIVERIES_LIMIT) {
       throw new Error(
         `pending delivery ledger reached ${PENDING_DELIVERIES_LIMIT}; acknowledge existing deliveries before polling more`,
       );
     }
-    this.consumerLedger.pending_deliveries[delivery.event_id] = delivery;
-    this.saveConsumerLedger();
+    this.eventLedger.pending_deliveries[delivery.event_id] = delivery;
+    this.saveEventLedger();
     return true;
   }
 
   pendingDeliveries(): PendingDelivery[] {
-    return Object.values(this.consumerLedger.pending_deliveries).sort(
+    return Object.values(this.eventLedger.pending_deliveries).sort(
       (a, b) => a.created_at - b.created_at,
     );
   }
 
   pendingDelivery(eventId: string): PendingDelivery | undefined {
-    return this.consumerLedger.pending_deliveries[eventId];
+    return this.eventLedger.pending_deliveries[eventId];
   }
 
   acknowledgeDelivery(eventId: string): boolean {
-    if (!Object.hasOwn(this.consumerLedger.pending_deliveries, eventId)) return false;
-    delete this.consumerLedger.pending_deliveries[eventId];
-    this.consumerLedger.recent_event_ids.push(eventId);
-    this.consumerLedger.recent_event_ids = this.consumerLedger.recent_event_ids.slice(
+    if (!Object.hasOwn(this.eventLedger.pending_deliveries, eventId)) return false;
+    delete this.eventLedger.pending_deliveries[eventId];
+    this.eventLedger.recent_event_ids.push(eventId);
+    this.eventLedger.recent_event_ids = this.eventLedger.recent_event_ids.slice(
       -RECENT_EVENT_IDS_LIMIT,
     );
-    this.saveConsumerLedger();
+    this.saveEventLedger();
     return true;
   }
 
   markEventSeen(eventId: string): void {
-    if (!this.consumerLedger.recent_event_ids.includes(eventId)) {
-      this.consumerLedger.recent_event_ids.push(eventId);
-      this.consumerLedger.recent_event_ids = this.consumerLedger.recent_event_ids.slice(
+    if (!this.eventLedger.recent_event_ids.includes(eventId)) {
+      this.eventLedger.recent_event_ids.push(eventId);
+      this.eventLedger.recent_event_ids = this.eventLedger.recent_event_ids.slice(
         -RECENT_EVENT_IDS_LIMIT,
       );
     }
-    delete this.consumerLedger.pending_deliveries[eventId];
-    this.saveConsumerLedger();
+    delete this.eventLedger.pending_deliveries[eventId];
+    this.saveEventLedger();
   }
 
   registerApproval(
@@ -606,6 +574,7 @@ export class StateStore {
     const approval: PendingApproval = {
       request,
       conversation_id: conversationId,
+      message_id: relayMessageId(now),
       created_at: now,
       expires_at: now + DEFAULT_APPROVAL_TTL_MS,
       remote_allow_enabled: remoteAllowEnabled,
@@ -652,20 +621,20 @@ export class StateStore {
     approval.verdict = behavior;
     approval.verdict_event_id = eventId;
     this.saveSessionLedger();
-    this.consumerLedger.recent_event_ids.push(eventId);
-    this.consumerLedger.recent_event_ids = this.consumerLedger.recent_event_ids.slice(
+    this.eventLedger.recent_event_ids.push(eventId);
+    this.eventLedger.recent_event_ids = this.eventLedger.recent_event_ids.slice(
       -RECENT_EVENT_IDS_LIMIT,
     );
-    this.saveConsumerLedger();
+    this.saveEventLedger();
     return approval;
   }
 
-  registerOutboundSend(
-    sendId: string,
-    payloadHash: string,
-    idempotencyKey: string,
-    now = Date.now(),
-  ): OutboundSend {
+  /**
+   * Bind a logical send to one payload and one `msg_` id. A retry under the
+   * same send_id gets the id the first attempt used, which is what makes the
+   * retry a replay rather than a second message.
+   */
+  registerOutboundSend(sendId: string, payloadHash: string, now = Date.now()): OutboundSend {
     this.prune(now);
     const existing = this.sessionLedger.outbound_sends[sendId];
     if (existing) {
@@ -674,7 +643,11 @@ export class StateStore {
       }
       return existing;
     }
-    const created = { payload_hash: payloadHash, idempotency_key: idempotencyKey, created_at: now };
+    const created = {
+      payload_hash: payloadHash,
+      message_id: relayMessageId(now),
+      created_at: now,
+    };
     this.sessionLedger.outbound_sends[sendId] = created;
     this.saveSessionLedger();
     return created;
@@ -685,87 +658,5 @@ export class StateStore {
     if (!send) return;
     send.confirmed_at = now;
     this.saveSessionLedger();
-  }
-}
-
-interface LockRecord {
-  pid: number;
-  hostname: string;
-  session_id_hash: string;
-  created_at: string;
-}
-
-function pidIsAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
-export class ConsumerLock {
-  readonly path: string;
-  private held = false;
-
-  constructor(rootDir: string, scope: StateScope) {
-    const accountDir = accountStateDir(rootDir, scope);
-    ensurePrivateDir(accountDir);
-    this.path = join(accountDir, "consumer.lock");
-    const record: LockRecord = {
-      pid: process.pid,
-      hostname: hostname(),
-      session_id_hash: hashKey(scope.sessionId),
-      created_at: new Date().toISOString(),
-    };
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const fd = openSync(this.path, "wx", 0o600);
-        try {
-          writeFileSync(fd, `${JSON.stringify(record)}\n`, "utf8");
-          fsyncSync(fd);
-        } finally {
-          closeSync(fd);
-        }
-        this.held = true;
-        return;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        let existing: Partial<LockRecord> = {};
-        try {
-          existing = JSON.parse(readFileSync(this.path, "utf8")) as Partial<LockRecord>;
-        } catch {
-          // Malformed lock is treated as stale and replaced below.
-        }
-        if (
-          existing.hostname === hostname() &&
-          typeof existing.pid === "number" &&
-          pidIsAlive(existing.pid)
-        ) {
-          throw new Error(
-            `Relay agent already has an active channel consumer (pid ${existing.pid}); close that Claude session before starting another`,
-          );
-        }
-        try {
-          unlinkSync(this.path);
-        } catch (unlinkError) {
-          if ((unlinkError as NodeJS.ErrnoException).code !== "ENOENT") throw unlinkError;
-        }
-      }
-    }
-    throw new Error("could not acquire the Relay channel consumer lock");
-  }
-
-  release(): void {
-    if (!this.held) return;
-    try {
-      const current = JSON.parse(readFileSync(this.path, "utf8")) as Partial<LockRecord>;
-      if (current.pid === process.pid) unlinkSync(this.path);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    } finally {
-      this.held = false;
-    }
   }
 }

@@ -1,7 +1,7 @@
 # Showcase agent
 
-Forkable custom Relay agent. Long-polls `GET /v1/events`, marks responding,
-replies with an idempotent text message, and stops typing.
+Forkable custom Relay agent. Polls `GET /v1/events`, marks read, replies with
+one text message, and stops typing.
 
 ## Setup
 

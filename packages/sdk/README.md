@@ -3,9 +3,9 @@
 Shared Relay transport for native plugins and runnable examples.
 
 Raw HTTPS against `https://api.relayapp.im` remains the public contract. This
-package is a thin TypeScript binding used by host plugins: Agent Token auth,
-Standard Webhooks verification, durable long-poll cursors, event dedupe, and
-idempotent `POST /v1/messages`.
+package is a thin TypeScript binding used by host plugins: API-key auth,
+Standard Webhooks verification, durable event cursors, event dedupe, and sends
+whose client-minted `msg_` id is the retry key.
 
 ```ts
 import { createRelayClient, runPollLoop, MemoryDedupe } from "@relaymessenger/sdk";
@@ -25,11 +25,11 @@ await runPollLoop({
 });
 ```
 
-## Message model v2
+## Messages
 
-`sendMessageV2` commits one send as one message: text and media stay together
-as ordered parts, and every part comes back with a permanent `part_id` that
-replies, reactions and edits address.
+`sendMessage` commits one send as one message: text and media stay together as
+ordered parts, and every part comes back with a permanent `part_id` that
+replies and reactions address.
 
 ```ts
 import { createRelayClient, relayId } from "@relaymessenger/sdk";
@@ -39,7 +39,7 @@ const client = createRelayClient({ token: process.env.RELAY_AGENT_TOKEN! });
 // Mint the id once per logical send and reuse it across retries: it is both
 // the message's identity and the retry key.
 const messageId = relayId("msg");
-const { message } = await client.sendMessageV2({
+const { message } = await client.sendMessage({
   conversationId,
   messageId,
   parts: [
@@ -50,12 +50,11 @@ const { message } = await client.sendMessageV2({
 
 const photo = message.parts[1]!;
 await client.react({ messageId, operation: "add", emoji: "🔥", targetPartId: photo.part_id });
-await client.editMessage({
-  messageId,
-  expectedVersion: message.version,
-  operations: [{ action: "remove", part_id: photo.part_id }],
-});
 ```
+
+Message content is immutable: there is no edit and no unsend, so a message you
+hold never changes underneath you and a reply's pointer never has to be
+re-resolved.
 
 `src/types.ts` is derived field for field from
 `schemas/message-v2.schema.json`, which Relay-Server owns and generates from

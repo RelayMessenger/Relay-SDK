@@ -74,9 +74,9 @@ describe("renderRelayPartsText", () => {
     ).toBe("[attachment] https://cdn/x.png\n[attachment] https://cdn/z.png");
   });
 
-  it("renders a group system message's text and mutation data together", () => {
-    // Group system messages are the one shape the split leaves untouched:
-    // one message carrying a text part plus a group.mutation data part.
+  it("renders a group notice's text and mutation data together", () => {
+    // A group notice is one message: the human line, then the machine-readable
+    // record of what changed.
     expect(
       renderRelayPartsText([
         { type: "text", text: "Atlas added June to the group." },
@@ -174,27 +174,22 @@ describe("buildRelayInboundFacts", () => {
     expect(buildRelayInboundFacts(event({ data: {} }), { agentId: AGENT_ID })).toBeNull();
   });
 
-  // REL-167: every server call about a group message has to name the
-  // invocation that delivered it, so the id has to survive this mapping.
-  it("carries the group invocation id", () => {
+  // A group notice is authored by the person who caused it, so it arrives as
+  // a user message and the sender check cannot filter it. Nobody addressed it
+  // to the agent.
+  it("returns null for a group notice", () => {
     const facts = buildRelayInboundFacts(
-      event({ data: { message: message(), invocation_id: "inv_01abc" } }),
+      event({
+        data: {
+          message: message({
+            kind: "notice",
+            parts: [{ type: "text", text: "Atlas added June to the group." }],
+            fallback_text: "Atlas added June to the group.",
+          }),
+        },
+      }),
       { agentId: AGENT_ID },
     );
-    expect(facts?.invocationId).toBe("inv_01abc");
-  });
-
-  it("leaves the invocation id unset for a direct message", () => {
-    const facts = buildRelayInboundFacts(event(), { agentId: AGENT_ID });
-    expect(facts?.invocationId).toBeUndefined();
-    expect(Object.keys(facts!)).not.toContain("invocationId");
-  });
-
-  it("ignores an empty invocation id rather than sending a blank one", () => {
-    const facts = buildRelayInboundFacts(
-      event({ data: { message: message(), invocation_id: "   " } }),
-      { agentId: AGENT_ID },
-    );
-    expect(facts?.invocationId).toBeUndefined();
+    expect(facts).toBeNull();
   });
 });

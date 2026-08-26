@@ -1,8 +1,6 @@
 import type { RelayClient } from "./client.js";
 import { RelayApiError, isAbortError } from "./errors.js";
-import { replyIdempotencyKey } from "./idempotency.js";
 import type { EventDedupe } from "./memory-dedupe.js";
-import { isVisibleMessage } from "./types.js";
 import type {
   MessageReceivedData,
   MessageReceivedEvent,
@@ -17,19 +15,15 @@ const TRANSIENT_BASE_DELAY_MS = 500;
 const TRANSIENT_MAX_DELAY_MS = 30_000;
 
 /**
- * What a quoting reply should point at.
- *
- * Prefer the target's first part's stable `part_id`: it keeps naming that part
- * after an edit reorders or removes it, where `part_index: 0` would follow the
- * slot and silently come to mean a different part. The index is the fallback
- * for a payload stored before part identities existed, which `/v1/events`
- * still replays verbatim.
+ * What a quoting reply should point at: the target's first part, by its
+ * permanent id. A reply is a pointer, so the client that renders it draws the
+ * quote from the target message it already holds.
  */
-function quoteTarget(message: RelayMessage): RelayReplyTarget {
-  const partId = isVisibleMessage(message) ? message.parts[0]?.part_id : undefined;
+function replyTarget(message: RelayMessage): RelayReplyTarget {
+  const partId = message.parts[0]?.part_id;
   return partId
     ? { message_id: message.id, part_id: partId }
-    : { message_id: message.id, part_index: 0 };
+    : { message_id: message.id };
 }
 
 export type ReplyOptions = {
@@ -43,7 +37,6 @@ export type ReplyOptions = {
 export type MessageHandlerContext = {
   event: MessageReceivedEvent;
   message: MessageReceivedData["message"];
-  invocationId?: string;
   client: RelayClient;
   reply: {
     text: (text: string, options?: ReplyOptions) => Promise<RelaySendResult>;
@@ -52,8 +45,7 @@ export type MessageHandlerContext = {
       options?: ReplyOptions,
     ) => Promise<RelaySendResult>;
   };
-  responding: (label?: string) => Promise<void>;
-  typing: (started?: boolean, label?: string) => Promise<void>;
+  typing: (started?: boolean) => Promise<void>;
 };
 
 export type PollLoopParams = {
@@ -106,59 +98,36 @@ function buildContext(
   event: MessageReceivedEvent,
 ): MessageHandlerContext {
   const message = event.data.message;
-  const invocationId = event.data.invocation_id;
-  let ordinal = 0;
 
-  const ctx: MessageHandlerContext = {
+  return {
     event,
     message,
     client,
     reply: {
-      text: async (text, options) => {
-        const key = replyIdempotencyKey(event.event_id, String(ordinal++));
-        return client.sendText({
-          conversationId: message.conversation_id,
-          text,
-          idempotencyKey: key,
-          ...(invocationId ? { invocationId } : {}),
-          ...(options?.quote ? { replyTo: quoteTarget(message) } : {}),
-        });
-      },
-      parts: async (parts, options) => {
-        const key = replyIdempotencyKey(event.event_id, String(ordinal++));
-        return client.sendMessage({
-          conversationId: message.conversation_id,
-          parts,
-          idempotencyKey: key,
-          ...(invocationId ? { invocationId } : {}),
-          ...(options?.quote ? { replyTo: quoteTarget(message) } : {}),
-        });
-      },
-    },
-    responding: async (label) => {
-      await client.setResponding({
+      text: async (text, options) => client.sendText({
         conversationId: message.conversation_id,
-        messageId: message.id,
-        ...(label ? { label } : {}),
-        ...(invocationId ? { invocationId } : {}),
-      });
-    },
-    typing: async (started = true, label) => {
-      await client.setTyping({
+        text,
+        ...(options?.quote ? { replyTo: replyTarget(message) } : {}),
+      }),
+      parts: async (parts, options) => client.sendMessage({
         conversationId: message.conversation_id,
-        started,
-        ...(label ? { label } : {}),
-        ...(invocationId ? { invocationId } : {}),
-      });
+        parts,
+        ...(options?.quote ? { replyTo: replyTarget(message) } : {}),
+      }),
+    },
+    typing: async (started = true) => {
+      await client.setTyping({ conversationId: message.conversation_id, started });
     },
   };
-  if (invocationId) ctx.invocationId = invocationId;
-  return ctx;
 }
 
 /**
- * Long-poll receive loop for hosts that cannot expose a public webhook URL.
- * Webhooks and long polling are mutually exclusive per Agent Token.
+ * Receive loop for hosts that cannot expose a public webhook URL.
+ *
+ * A plain pull of the agent's event log. It coexists with webhooks, holds no
+ * exclusive consumer slot, and has nothing to reconcile: a cursor that falls
+ * behind just reads more events. Delivery is at least once, so `dedupe`
+ * decides what has already been handled.
  */
 export async function runPollLoop(params: PollLoopParams): Promise<void> {
   const signal = params.abortSignal ?? new AbortController().signal;
@@ -179,7 +148,7 @@ export async function runPollLoop(params: PollLoopParams): Promise<void> {
     let page;
     try {
       page = await params.client.pollEvents({
-        cursor: params.getCursor(),
+        after: params.getCursor(),
         timeoutSeconds: params.timeoutSeconds ?? 30,
         ...(params.limit === undefined ? {} : { limit: params.limit }),
         signal,
@@ -188,24 +157,7 @@ export async function runPollLoop(params: PollLoopParams): Promise<void> {
       if (signal.aborted || isAbortError(error)) return;
       if (error instanceof RelayApiError && error.terminal) {
         // Retrying cannot fix these; surface them to the operator.
-        if (error.status === 410) {
-          log(
-            "[relay] cursor expired (410): the cursor is behind the seven-day " +
-              "retention ceiling. Reconcile from conversation history; do not " +
-              "reset the cursor to zero.",
-          );
-        } else if (error.status === 422) {
-          const highest = error.details?.["highest_delivered_cursor"];
-          log(
-            "[relay] cursor ahead of the delivered ledger (422): reconcile " +
-              "history over REST, then resume from " +
-              (highest === undefined
-                ? "error.details.highest_delivered_cursor."
-                : `cursor ${String(highest)}.`),
-          );
-        } else if (error.kind === "conflict") {
-          log(`[relay] long poll conflict: ${error.message}`);
-        }
+        log(`[relay] poll failed permanently: ${error.message}`);
         throw error;
       }
       transientAttempts += 1;
@@ -223,7 +175,7 @@ export async function runPollLoop(params: PollLoopParams): Promise<void> {
 
       const sender = event.data.message.sender;
       if (sender.kind === "agent") continue;
-      if (params.allowSender && sender.kind === "user" && !params.allowSender(sender.id)) {
+      if (params.allowSender && !params.allowSender(sender.id)) {
         params.dedupe.record(event.event_id);
         continue;
       }

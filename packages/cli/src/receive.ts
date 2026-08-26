@@ -1,6 +1,6 @@
 /**
  * Receive loop: long-poll GET /v1/events → durable queue → engine turn →
- * one finalized POST /v1/messages per turn.
+ * one finalized message per turn.
  *
  * Reliability contract:
  *  - Durable-before-ack: inbound events are appended to state.json's
@@ -11,16 +11,15 @@
  *  - Debounce: rapid messages in one conversation coalesce for ~800 ms into a
  *    single engine turn.
  *  - Supervisor: poll/turn failures restart with exponential backoff + jitter.
- *  - Cursor faults: Relay rejects a cursor it never delivered (422) and one
- *    that fell behind the seven-day event retention (410 cursor_expired).
- *    Neither is retryable on the same cursor, so both reconcile from
- *    conversation history first and then resume or stop, never re-poll blind.
+ *  - Polling is a plain pull: no exclusive consumer, no cursor faults to
+ *    recover from, and it coexists with a webhook on the same agent. A cursor
+ *    that falls behind simply reads more events.
  */
 import { createHash } from "node:crypto";
-import { RelayApiError, type RelayClient } from "./api.js";
+import { relayId } from "@relaymessenger/sdk";
+import type { RelayClient } from "./api.js";
 import type { BridgeState, RelayEvent, RelayMessage, StateStore } from "./store.js";
 import type { EngineAdapter, PermissionAsk, PermissionDecision } from "./engine/types.js";
-import { engineDisplayName } from "./engine/catalog.js";
 import { PermissionBroker } from "./permissions.js";
 
 export interface ReceiveLoopOptions {
@@ -33,60 +32,16 @@ export interface ReceiveLoopOptions {
   setTimeoutImpl?: typeof setTimeout;
 }
 
-export function turnIdempotencyKey(conversationId: string, eventIds: string[]): string {
+/**
+ * The local ledger key for one turn's exact event batch. Purely durable-state
+ * identity — what `attempted_turns` and `pending_replies` are keyed on — not
+ * anything the wire sees: a send's retry key is its `msg_` id.
+ */
+export function turnLedgerKey(conversationId: string, eventIds: string[]): string {
   const digest = createHash("sha256")
     .update(JSON.stringify([conversationId, eventIds]))
     .digest("hex");
   return `relay-turn-${digest.slice(0, 40)}`;
-}
-
-/**
- * Group events carry `data.invocation_id`; direct events do not. Its presence
- * is how the bridge tells the two apart, and the id is required on every
- * outbound call for that turn.
- */
-export function invocationIdForEvent(event: RelayEvent | undefined): string | undefined {
-  const value = event?.data?.invocation_id;
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-/**
- * The batch a single turn may consume. Direct conversations coalesce a burst
- * into one turn as before. A group invocation is single-use server-side (one
- * message completes it), so a group turn is capped at the oldest invocation
- * and later invocations stay queued for their own turns and their own replies.
- */
-export function batchForTurn(queue: RelayEvent[]): RelayEvent[] {
-  const invocationId = invocationIdForEvent(queue[0]);
-  if (!invocationId) return [...queue];
-  return queue.filter((event) => invocationIdForEvent(event) === invocationId);
-}
-
-/** Conversations read (and named in the recovery log line) after a cursor fault. */
-const CURSOR_RECOVERY_CONVERSATIONS = 25;
-
-/** What the supervisor does with a cursor fault after the recovery ran. */
-type CursorFaultOutcome = "resumed" | "terminal" | "unhandled";
-
-/**
- * Relay's undelivered-cursor fault names its own recovery target in
- * `error.details`: `highest_delivered_cursor` for a cursor the ledger never
- * handed out, `latest_sequence` for one past the agent's newest event. A
- * recovery only ever lowers the cursor. Raising it would acknowledge, and let
- * the retention sweep delete, events this bridge has never read.
- */
-export function undeliveredCursorTarget(
-  error: { status?: number; details?: Record<string, unknown> },
-  cursor: number,
-): number | undefined {
-  if (error.status !== 422) return undefined;
-  for (const key of ["highest_delivered_cursor", "latest_sequence"]) {
-    const value = error.details?.[key];
-    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value < cursor) {
-      return value;
-    }
-  }
-  return undefined;
 }
 
 export function promptTextFromMessages(messages: RelayMessage[]): string {
@@ -158,12 +113,10 @@ export class ReceiveLoop {
 
   /**
    * A turn snapshots its batch at start, so a message that lands while the
-   * turn runs cannot advance that turn's /responding watermark and would sit
-   * at "Delivered" until its own turn — after the reply, plus another
-   * debounce. Mark the queue head read now instead. /read is the receipt
-   * without /responding's typing side effect, so the running turn's tool
-   * label survives. Best-effort: the next turn's /responding still covers
-   * the same watermark durably, so a failure here only delays the receipt.
+   * turn runs would sit at "Delivered" until its own turn — after the reply,
+   * plus another debounce. Mark the queue head read now instead.
+   * Best-effort: the next turn's own read receipt covers the same watermark,
+   * so a failure here only delays it.
    */
   private ackQueuedBehindTurn(conversationId: string): void {
     if (!this.turnChains.has(conversationId)) return;
@@ -173,117 +126,6 @@ export class ReceiveLoop {
     void this.client
       .markRead(conversationId, newest.id)
       .catch((error) => this.log(`mid-turn read receipt failed for ${conversationId}: ${error}`));
-  }
-
-  /**
-   * Read the canonical record after a cursor fault. Conversation history is
-   * Relay's documented recovery path: the event log can no longer say what
-   * moved, so the bridge names the head of every conversation it can still
-   * see. Nothing is replayed into the engine and nothing is invented for the
-   * events Relay deleted.
-   */
-  private async reconcileHistory(): Promise<string> {
-    const conversationIds = new Set<string>(Object.keys(this.state.current.pending_events));
-    const owner = this.state.current.owner_conversation_id;
-    if (owner) conversationIds.add(owner);
-    try {
-      const listed = await this.client.listConversations(CURSOR_RECOVERY_CONVERSATIONS);
-      for (const conversation of listed.conversations ?? []) {
-        if (conversation?.id) conversationIds.add(conversation.id);
-      }
-    } catch (error) {
-      this.log(`conversation listing failed during cursor recovery: ${error}`);
-    }
-    const heads: string[] = [];
-    const readable = [...conversationIds].slice(0, CURSOR_RECOVERY_CONVERSATIONS);
-    for (const conversationId of readable) {
-      try {
-        const { messages } = await this.client.listMessages(conversationId, 1);
-        const newest = messages?.[0];
-        heads.push(
-          newest
-            ? `${conversationId} head ${newest.id} seq ${newest.sequence}` +
-              `${newest.created_at ? ` at ${newest.created_at}` : ""}`
-            : `${conversationId} empty`,
-        );
-      } catch (error) {
-        heads.push(`${conversationId} unreadable (${error instanceof Error ? error.message : error})`);
-      }
-    }
-    if (conversationIds.size > readable.length) {
-      heads.push(`${conversationIds.size - readable.length} further conversations not read`);
-    }
-    return heads.length > 0 ? heads.join("; ") : "no conversations were visible to reconcile";
-  }
-
-  /**
-   * Apply Relay's cursor-fault contract. Both faults are permanent for the
-   * cursor that produced them, so neither may fall through to the generic
-   * retry: an undelivered cursor resumes from the ledger position Relay
-   * reports. For an expired cursor, the bridge first reads canonical history,
-   * then explicitly confirms that reconciliation so Relay can advance only
-   * across the proven retention gap.
-   */
-  private async recoverFromCursorFault(error: RelayApiError): Promise<CursorFaultOutcome> {
-    const cursor = this.state.current.cursor;
-    const target = undeliveredCursorTarget(error, cursor);
-    if (target !== undefined) {
-      const history = await this.reconcileHistory();
-      this.state.current.cursor = target;
-      this.state.persist();
-      this.log(
-        `poll cursor ${cursor} was never delivered by Relay (422 ${error.code ?? "invalid_request"}); ` +
-          `reconciled conversation history and resumed from Relay's highest delivered cursor ${target}. ` +
-          `Events after ${target} are redelivered and deduplicated by event_id, so nothing is skipped. ` +
-          `History head: ${history}`,
-      );
-      return "resumed";
-    }
-    if (error.status === 410 && error.code === "cursor_expired") {
-      const history = await this.reconcileHistory();
-      const highestDelivered = error.details?.highest_delivered_cursor;
-      const advertisedResume = error.details?.resume_cursor;
-      const reconciliationRequired = error.details?.reconciliation_required;
-      if (
-        reconciliationRequired === true
-        && typeof highestDelivered === "number"
-        && Number.isSafeInteger(highestDelivered)
-        && highestDelivered >= 0
-        && highestDelivered <= cursor
-      ) {
-        const reconciled = await this.client.reconcileEvents(highestDelivered);
-        if (
-          reconciled.reconciled !== true
-          || !Number.isSafeInteger(reconciled.resume_cursor)
-          || reconciled.resume_cursor < 0
-          || (
-            typeof advertisedResume === "number"
-            && reconciled.resume_cursor !== advertisedResume
-          )
-        ) {
-          throw new Error(
-            `Relay returned an invalid cursor reconciliation response for expired cursor ${cursor}`,
-          );
-        }
-        this.state.current.cursor = reconciled.resume_cursor;
-        this.state.persist();
-        this.log(
-          `Relay expired poll cursor ${cursor} (410 cursor_expired); reconciled canonical conversation ` +
-            `history, confirmed the retention gap, and resumed from ${reconciled.resume_cursor}. ` +
-            `Deleted events cannot be replayed, but polling is live again. History head: ${history}`,
-        );
-        return "resumed";
-      }
-      this.log(
-        `fatal: Relay expired this bridge's poll cursor ${cursor} (410 cursor_expired). Relay keeps the event ` +
-          `log for seven days, so events recorded after that cursor were deleted before this bridge read them. ` +
-          `They cannot be replayed, and any message they carried stays unanswered and is unrecoverable from the ` +
-          `event log; conversation history below is the only record of it. History head: ${history}. Polling ` +
-          `stops because this server did not advertise the explicit reconciliation contract.`,
-      );
-      return "terminal";
-    }
-    return "unhandled";
   }
 
   /** Returns the conversation id when the event was enqueued for the engine. */
@@ -297,12 +139,9 @@ export class ReceiveLoop {
       this.log(`ignoring message from non-owner sender ${message.sender.id}`);
       return undefined;
     }
-    // First owner message pins the default notify/MCP conversation. A group
-    // is never that conversation: sends there need an invocation this agent
-    // does not have, and approvals must reach the owner alone.
-    if (!invocationIdForEvent(event)) {
-      this.state.current.owner_conversation_id ??= message.conversation_id;
-    }
+    // First owner message pins the default notify/MCP conversation, and with
+    // it the only conversation an approval card may be shown in.
+    this.state.current.owner_conversation_id ??= message.conversation_id;
     if (this.broker.consumeReply(message)) return undefined;
     const queue = (this.state.current.pending_events[message.conversation_id] ??= []);
     queue.push(event);
@@ -360,21 +199,17 @@ export class ReceiveLoop {
     this.state.persist();
   }
 
-  private async postNotice(
-    conversationId: string,
-    text: string,
-    key: string,
-    invocationId?: string,
-  ): Promise<void> {
+  /**
+   * A one-shot explanation to the owner. Never retried — the batch it
+   * describes is already cleared — so its id is minted inline rather than
+   * persisted.
+   */
+  private async postNotice(conversationId: string, text: string): Promise<void> {
     try {
-      await this.client.postMessage(
-        {
-          conversation_id: conversationId,
-          parts: [{ type: "text", text }],
-          ...(invocationId ? { invocation_id: invocationId } : {}),
-        },
-        key,
-      );
+      await this.client.postMessage({
+        conversation_id: conversationId,
+        parts: [{ type: "text", text }],
+      });
     } catch (error) {
       this.log(`notice post failed for ${conversationId}: ${error}`);
     }
@@ -388,22 +223,30 @@ export class ReceiveLoop {
     );
   }
 
-  /** Idempotently deliver an engine-completed reply without rerunning tools. */
+  /**
+   * Deliver an engine-completed reply without rerunning tools. Every attempt
+   * reuses the reply's persisted `msg_` id, so a retry after a lost response
+   * is a replay rather than a second message.
+   */
   private async deliverPendingReply(
     turnKey: string,
     reply: NonNullable<BridgeState["pending_replies"]>[string],
   ): Promise<boolean> {
+    if (!reply.message_id) {
+      // A queue written before ids were the retry key. Adopt one and make it
+      // durable BEFORE the first attempt, or the retry would send twice.
+      reply.message_id = relayId("msg");
+      (this.state.current.pending_replies ??= {})[turnKey] = reply;
+      this.state.persist();
+    }
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        await this.client.postMessage(
-          {
-            conversation_id: reply.conversation_id,
-            parts: [{ type: "text", text: reply.text }],
-            ...(reply.invocation_id ? { invocation_id: reply.invocation_id } : {}),
-          },
-          turnKey,
-        );
+        await this.client.postMessage({
+          conversation_id: reply.conversation_id,
+          message_id: reply.message_id,
+          parts: [{ type: "text", text: reply.text }],
+        });
         return true;
       } catch (error) {
         lastError = error;
@@ -433,9 +276,9 @@ export class ReceiveLoop {
       return;
     }
 
-    // Recover the exact prefix a previous invocation durably claimed before
-    // it disappeared. Later events may already be queued; they must survive
-    // and run separately, while the attempted prefix is never re-executed.
+    // Recover the exact prefix a previous run durably claimed before it
+    // disappeared. Later events may already be queued; they must survive and
+    // run separately, while the attempted prefix is never re-executed.
     const attempted = (this.state.current.attempted_turns ??= {})[conversationId];
     if (attempted) {
       const queue = this.state.current.pending_events[conversationId] ?? [];
@@ -451,23 +294,19 @@ export class ReceiveLoop {
       this.log(
         `turn ${attempted.turn_key} was interrupted; dropping its ${prefix.length}-event prefix, not re-executing`,
       );
-      const interruptedInvocation = invocationIdForEvent(prefix[prefix.length - 1]);
       this.clearBatch(conversationId, prefix, attempted.turn_key);
       await this.postNotice(
         conversationId,
         "The bridge restarted while working on your last message, so it was not retried " +
           "automatically (its tools may have partially run). Send it again to retry.",
-        `${attempted.turn_key}-crashed`,
-        interruptedInvocation,
       );
       return;
     }
 
     // Snapshot: routeEvent keeps appending to the live queue while the turn
     // runs, and the post-turn filter must only remove what THIS turn consumed.
-    const events = batchForTurn(this.state.current.pending_events[conversationId] ?? []);
+    const events = [...(this.state.current.pending_events[conversationId] ?? [])];
     if (events.length === 0) return;
-    const invocationId = invocationIdForEvent(events[events.length - 1]);
     const messages = events
       .map((event) => event.data?.message)
       .filter((message): message is RelayMessage => message !== undefined);
@@ -489,29 +328,19 @@ export class ReceiveLoop {
     }
 
     const lastMessage = messages[messages.length - 1]!;
-    const respondingLabel = engineDisplayName(this.engine.engine);
-    // Mark the complete debounced watermark before engine execution. A
-    // rejected /responding call propagates visibly and leaves the batch
-    // unattempted, so no tool turn can run behind a stale Delivered receipt.
-    await this.client.setResponding(
-      conversationId,
-      lastMessage.id,
-      respondingLabel,
-      invocationId,
-    );
+    // Advance the read watermark over the complete debounced batch before the
+    // engine runs. A rejected receipt propagates visibly and leaves the batch
+    // unattempted, so no tool turn can run behind a stale Delivered stamp.
+    await this.client.markRead(conversationId, lastMessage.id);
 
-    const typing = this.startTyping(
-      conversationId,
-      invocationId,
-      respondingLabel,
-    );
+    const typing = this.startTyping(conversationId);
     try {
       // Crash semantics: engine/tool side effects are at-most-once per batch.
       // The exact event-id batch is persisted AFTER replay-safe lifecycle
       // preflight and BEFORE the engine starts. A later message cannot change
       // or overwrite which prefix was already attempted.
       const eventIds = events.map((event) => event.event_id);
-      const turnKey = turnIdempotencyKey(conversationId, eventIds);
+      const turnKey = turnLedgerKey(conversationId, eventIds);
       (this.state.current.attempted_turns ??= {})[conversationId] = {
         turn_key: turnKey,
         event_ids: eventIds,
@@ -525,8 +354,8 @@ export class ReceiveLoop {
           { conversationId, cwd: this.cwd },
           promptText,
           {
-            onToolEvent: (event) => typing.setLabel(event.title ?? "Working…"),
-            onPermissionAsk: (ask) => this.askPermission(conversationId, invocationId, ask),
+            onToolEvent: (event) => typing.note(event.title ?? "Working…"),
+            onPermissionAsk: (ask) => this.askPermission(conversationId, ask),
           },
         );
       } catch (error) {
@@ -539,8 +368,6 @@ export class ReceiveLoop {
           conversationId,
           `The ${this.engine.engine} turn failed: ${String(error instanceof Error ? error.message : error).slice(0, 300)}\n` +
             "Send your message again to retry.",
-          `${turnKey}-failed`,
-          invocationId,
         );
         return;
       }
@@ -554,13 +381,12 @@ export class ReceiveLoop {
         event_ids: events.map((event) => event.event_id),
         text,
         created_at: new Date().toISOString(),
-        ...(invocationId ? { invocation_id: invocationId } : {}),
+        // Minted with the text, not at delivery: this id is the reply's only
+        // retry key, so it has to survive the crash that forces a retry.
+        message_id: relayId("msg"),
       };
       (this.state.current.pending_replies ??= {})[turnKey] = pendingReply;
       this.state.persist();
-      // Clearing typing needs the invocation still pending, and the reply is
-      // what completes it, so stop before delivering rather than in `finally`.
-      if (invocationId) await typing.stop();
       if (await this.deliverPendingReply(turnKey, pendingReply)) {
         this.clearBatch(conversationId, events, turnKey);
       } else {
@@ -574,45 +400,38 @@ export class ReceiveLoop {
   }
 
   /**
-   * Route an approval card. A group invocation is spent by the single reply it
-   * owes, so a card posted into the group would consume it and leave the turn
-   * unable to answer. Group approvals therefore go to the owner's direct
-   * conversation with this agent, and deny when there is no such conversation
-   * to ask in.
+   * Route an approval card. The card carries the tool's raw input, so it may
+   * only be shown where the owner alone reads it: the conversation pinned by
+   * their first message. An ask arriving from anywhere else — a group the
+   * owner spoke in — is routed there, and denied outright when no such
+   * conversation exists yet.
    */
   private async askPermission(
     conversationId: string,
-    invocationId: string | undefined,
     ask: PermissionAsk,
   ): Promise<PermissionDecision> {
-    if (!invocationId) return this.broker.ask(conversationId, ask, this.engine.engine);
-    const direct = this.state.current.owner_conversation_id;
-    if (!direct || direct === conversationId) {
+    const owner = this.state.current.owner_conversation_id;
+    if (owner === conversationId) return this.broker.ask(conversationId, ask, this.engine.engine);
+    if (!owner) {
       this.log(
-        `group approval for ${ask.toolName ?? "a tool"} denied: no direct conversation with the owner to ask in`,
+        `approval for ${ask.toolName ?? "a tool"} denied: no owner conversation to ask in`,
       );
       return this.broker.denyUnaskable(ask);
     }
-    this.log(`group approval routed to the owner's direct conversation ${direct}`);
-    return this.broker.ask(direct, ask, this.engine.engine);
+    this.log(`approval routed to the owner's conversation ${owner}`);
+    return this.broker.ask(owner, ask, this.engine.engine);
   }
 
-  private startTyping(
-    conversationId: string,
-    invocationId: string | undefined,
-    initialLabel: string,
-  ) {
-    let label: string | undefined = initialLabel;
+  /**
+   * Ephemeral typing: fire and forget, no lease and no label, so the phone
+   * hides the indicator on its own if this process dies mid-turn.
+   */
+  private startTyping(conversationId: string) {
     let active = true;
-    const push = async (reason: "start" | "label" | "keepalive") => {
+    const push = async (reason: "start" | "tool" | "keepalive") => {
       if (!active) return;
       try {
-        await this.client.setTyping(
-          conversationId,
-          true,
-          label,
-          invocationId,
-        );
+        await this.client.setTyping(conversationId, true);
       } catch (error) {
         this.log(`typing ${reason} failed for ${conversationId}: ${error}`);
       }
@@ -623,21 +442,17 @@ export class ReceiveLoop {
     }, 20_000);
     interval.unref?.();
     return {
-      setLabel: (next: string) => {
-        label = next.slice(0, 80);
-        void push("label");
+      /** A tool started. Relay carries no label, so it only reaches the log. */
+      note: (title: string) => {
+        this.log(`${conversationId}: ${title.slice(0, 80)}`);
+        void push("tool");
       },
       stop: async () => {
         if (!active) return;
         active = false;
         clearInterval(interval);
         try {
-          await this.client.setTyping(
-            conversationId,
-            false,
-            undefined,
-            invocationId,
-          );
+          await this.client.setTyping(conversationId, false);
         } catch (error) {
           this.log(`typing stop failed for ${conversationId}: ${error}`);
         }
@@ -665,21 +480,8 @@ export class ReceiveLoop {
         await this.pollOnce();
         failures = 0;
       } catch (error: any) {
-        if (error instanceof RelayApiError && (error.status === 410 || error.status === 422)) {
-          const outcome = await this.recoverFromCursorFault(error);
-          if (outcome === "resumed") {
-            failures = 0;
-            continue;
-          }
-          if (outcome === "terminal") throw error;
-        }
-        if (error?.status === 409) {
-          // Another consumer (webhook or second long-poll) owns this token.
-          this.log(`fatal: ${error.message}`);
-          throw error;
-        }
         if (error?.status === 401) {
-          this.log("fatal: agent token rejected (401); run `relaymessenger pair` again.");
+          this.log("fatal: agent API key rejected (401); run `relaymessenger pair` again.");
           throw error;
         }
         failures += 1;

@@ -5,7 +5,7 @@ export class RelayApiError extends Error {
   readonly status: number | undefined;
   readonly kind: RelayApiErrorKind;
   readonly code: string | undefined;
-  /** Structured `error.details` from the response body, e.g. `highest_delivered_cursor` on 422. */
+  /** Structured `error.details` from the response body. */
   readonly details: Record<string, unknown> | undefined;
 
   constructor(
@@ -50,12 +50,4 @@ export function classifyRelayHttpStatus(status: number): RelayApiErrorKind {
 
 export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
-}
-
-export function isRelayWebhookConflict(error: unknown): error is RelayApiError {
-  return (
-    error instanceof RelayApiError &&
-    error.status === 409 &&
-    error.code !== "terminated_by_other_consumer"
-  );
 }

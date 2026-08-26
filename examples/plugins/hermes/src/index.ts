@@ -59,7 +59,7 @@ export async function startHermesRelayChannel(
         me.owner_user_id ? senderId === me.owner_user_id : true),
     onMessage: async (ctx) => {
       try {
-        await ctx.responding("Working…");
+        await ctx.typing(true);
         const replyText = await options.handleTurn(ctx);
         if (replyText !== null) {
           await ctx.reply.text(replyText);

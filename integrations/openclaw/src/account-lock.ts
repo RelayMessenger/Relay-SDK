@@ -44,7 +44,15 @@ function readOwner(path: string): LockOwner | undefined {
   return undefined;
 }
 
-/** Atomic filesystem lease preventing two OpenClaw processes polling one agent. */
+/**
+ * Atomic filesystem lease preventing two OpenClaw processes on this machine
+ * from running the same agent.
+ *
+ * Not a server constraint — Relay is happy to serve any number of pollers, and
+ * every one of them receives every event. That is the problem: two processes
+ * holding one agent's token both answer the same message, and the person sees
+ * the reply twice.
+ */
 export class RelayAccountLock {
   private readonly lockPath: string;
   private readonly ownerPath: string;
@@ -83,7 +91,7 @@ export class RelayAccountLock {
           const claimant = owner
             ? `account "${owner.account_id}" (pid ${owner.pid})`
             : "an existing process with unreadable ownership";
-          throw new Error(`relay: this agent already has an active consumer in ${claimant}`);
+          throw new Error(`relay: this agent is already being run by ${claimant}`);
         }
         const stalePath = `${this.lockPath}.stale-${Date.now()}-${randomUUID()}`;
         try {
@@ -94,7 +102,7 @@ export class RelayAccountLock {
         }
       }
     }
-    throw new Error("relay: could not acquire the agent consumer lock");
+    throw new Error("relay: could not acquire the agent lock");
   }
 
   release(): void {

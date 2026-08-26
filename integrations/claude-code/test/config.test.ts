@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
-  ConsumerLock,
   CorruptLedgerError,
   RECENT_EVENT_IDS_LIMIT,
   StateStore,
@@ -107,7 +106,7 @@ describe("namespaced durable state", () => {
     assert.equal(new Set(paths).size, 4);
   });
 
-  it("shares the consumer cursor/dedupe across sequential sessions without sharing approvals", () => {
+  it("shares the account cursor/dedupe across sequential sessions without sharing approvals", () => {
     const dir = tempDir();
     const sessionA = new StateStore(dir, SCOPE);
     sessionA.queueDelivery({
@@ -200,10 +199,10 @@ describe("namespaced durable state", () => {
     assert.throws(() => new StateStore(dir, SCOPE), CorruptLedgerError);
     assert.ok(
       readdirSync(store.accountDir).some((name) =>
-        name.startsWith("consumer-state.json.corrupt-"),
+        name.startsWith("account-state.json.corrupt-"),
       ),
     );
-    assert.ok(readdirSync(store.accountDir).includes("consumer-state.blocked"));
+    assert.ok(readdirSync(store.accountDir).includes("account-state.blocked"));
     // The persisted marker keeps later restarts blocked; they cannot reset to
     // cursor zero and replay evt_0 after it aged out of the 500-id ledger.
     assert.throws(() => new StateStore(dir, SCOPE), CorruptLedgerError);
@@ -217,10 +216,10 @@ describe("namespaced durable state", () => {
     assert.throws(() => new StateStore(dir, SCOPE), CorruptLedgerError);
     assert.ok(
       readdirSync(store.accountDir).some((name) =>
-        name.startsWith("consumer-ledger.json.corrupt-"),
+        name.startsWith("event-ledger.json.corrupt-"),
       ),
     );
-    assert.ok(readdirSync(store.accountDir).includes("consumer-ledger.blocked"));
+    assert.ok(readdirSync(store.accountDir).includes("event-ledger.blocked"));
     // A later restart must remain blocked rather than silently creating a
     // fresh ledger and replaying old events.
     assert.throws(() => new StateStore(dir, SCOPE), CorruptLedgerError);
@@ -241,102 +240,30 @@ describe("namespaced durable state", () => {
     assert.equal(approval.card_sent_at, undefined);
   });
 
-  it("binds a send_id to one payload and preserves its idempotency key", () => {
+  it("binds a send_id to one payload and one message id, across a restart", () => {
     const dir = tempDir();
     const store = new StateStore(dir, SCOPE);
-    const first = store.registerOutboundSend("reply-1", "hash-a", "claude-reply-key", 1);
-    const retry = new StateStore(dir, SCOPE).registerOutboundSend(
-      "reply-1",
-      "hash-a",
-      "ignored-new-key",
-      2,
-    );
-    assert.equal(retry.idempotency_key, first.idempotency_key);
-    assert.throws(() => store.registerOutboundSend("reply-1", "hash-b", "other", 3));
-  });
-});
-
-describe("exclusive consumer lock", () => {
-  it("allows only one live consumer per origin and agent", () => {
-    const dir = tempDir();
-    const first = new ConsumerLock(dir, SCOPE);
-    assert.throws(
-      () => new ConsumerLock(dir, { ...SCOPE, sessionId: "another-session" }),
-      /already has an active channel consumer/,
-    );
-    first.release();
-    const next = new ConsumerLock(dir, { ...SCOPE, sessionId: "another-session" });
-    next.release();
+    const first = store.registerOutboundSend("reply-1", "hash-a", 1);
+    assert.match(first.message_id, /^msg_[0-9a-hjkmnp-tv-z]{26}$/);
+    // The retry is a replay only because it reuses the first attempt's id, and
+    // the reply tool may well run in a process that never made that attempt.
+    const retry = new StateStore(dir, SCOPE).registerOutboundSend("reply-1", "hash-a", 2);
+    assert.equal(retry.message_id, first.message_id);
+    assert.throws(() => store.registerOutboundSend("reply-1", "hash-b", 3));
   });
 
-  it("the losing process cannot construct StateStore or prune shared ledgers", () => {
-    const dir = tempDir();
-    const setup = new StateStore(dir, SCOPE);
-    setup.registerApproval(
-      {
-        request_id: "abcde",
-        tool_name: "Bash",
-        description: "expired",
-        input_preview: "echo safe",
-      },
-      "cnv_1",
-      false,
-      0,
-    );
-    const before = readFileSync(setup.sessionLedgerPath, "utf8");
-    const first = new ConsumerLock(dir, SCOPE);
-    try {
-      assert.throws(() => {
-        const losingLock = new ConsumerLock(dir, { ...SCOPE, sessionId: "loser" });
-        // This line is intentionally unreachable while the winner owns it.
-        new StateStore(dir, SCOPE);
-        losingLock.release();
-      }, /already has an active channel consumer/);
-      assert.equal(readFileSync(setup.sessionLedgerPath, "utf8"), before);
-    } finally {
-      first.release();
-    }
-  });
-});
-
-describe("group invocation routing state", () => {
-  it("survives a restart and is spent exactly once", () => {
+  it("gives each approval its own durable card id", () => {
     const dir = tempDir();
     const store = new StateStore(dir, SCOPE);
-    store.recordConversation("cnv_group");
-    store.recordInvocation("cnv_group", "inv_01");
-    // A restart is the case that matters: the reply tool may run in a process
-    // that never saw the inbound event.
-    const reloaded = new StateStore(dir, SCOPE);
-    assert.equal(reloaded.invocationFor("cnv_group"), "inv_01");
-    reloaded.consumeInvocation("cnv_group");
-    assert.equal(reloaded.invocationFor("cnv_group"), undefined);
-    assert.equal(new StateStore(dir, SCOPE).invocationFor("cnv_group"), undefined);
-    // Consuming an already-spent conversation is a no-op, not a throw.
-    reloaded.consumeInvocation("cnv_group");
-  });
-
-  it("a newer invocation replaces an older unanswered one", () => {
-    const dir = tempDir();
-    const store = new StateStore(dir, SCOPE);
-    store.recordInvocation("cnv_group", "inv_01");
-    store.recordInvocation("cnv_group", "inv_02");
-    assert.equal(store.invocationFor("cnv_group"), "inv_02");
-  });
-
-  it("a direct conversation never gains one", () => {
-    const dir = tempDir();
-    const store = new StateStore(dir, SCOPE);
-    store.recordConversation("cnv_direct");
-    assert.equal(store.invocationFor("cnv_direct"), undefined);
-  });
-
-  it("corrupt invocation state is quarantined instead of trusted", () => {
-    const dir = tempDir();
-    const store = new StateStore(dir, SCOPE);
-    store.recordInvocation("cnv_group", "inv_01");
-    const statePath = join(sessionStateDir(dir, SCOPE), "routing.json");
-    writeFileSync(statePath, JSON.stringify({ pending_invocations: { cnv_group: 7 } }));
-    assert.equal(new StateStore(dir, SCOPE).invocationFor("cnv_group"), undefined);
+    const request = {
+      request_id: "abcde",
+      tool_name: "Bash",
+      description: "List",
+      input_preview: '{"command":"ls"}',
+    };
+    const first = store.registerApproval(request, "cnv_1", true);
+    assert.match(first.message_id, /^msg_[0-9a-hjkmnp-tv-z]{26}$/);
+    // A restart re-posting the same card must commit the same message.
+    assert.equal(new StateStore(dir, SCOPE).pendingApproval("abcde")?.message_id, first.message_id);
   });
 });

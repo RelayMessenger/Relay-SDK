@@ -3,14 +3,20 @@ export type RelayAccountLifecycleLease = {
   release: () => void;
 };
 
-/** Owns exactly one abortable long-poll lifecycle per configured account. */
+/**
+ * Owns exactly one abortable receive loop per configured account.
+ *
+ * Purely local bookkeeping: nothing on the server minds a second poller, but
+ * two loops for one account inside this process would answer every message
+ * twice.
+ */
 export function createRelayAccountLifecycleRegistry() {
   const controllers = new Map<string, AbortController>();
 
   return {
     acquire(accountId: string, parentSignal: AbortSignal): RelayAccountLifecycleLease {
       if (controllers.has(accountId)) {
-        throw new Error(`relay: account "${accountId}" already has an active consumer`);
+        throw new Error(`relay: account "${accountId}" already has an active receive loop`);
       }
       const controller = new AbortController();
       controllers.set(accountId, controller);

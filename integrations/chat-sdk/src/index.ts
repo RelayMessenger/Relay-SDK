@@ -1,7 +1,6 @@
 export {
   createRelayAdapter,
   RelayAdapter,
-  RelayInvocationSpentError,
   RELAY_ADAPTER_NAME,
 } from "./adapter.js";
 export type { RelayAdapterOptions } from "./adapter.js";
@@ -26,13 +25,9 @@ export {
   renderRawText,
 } from "./format.js";
 export type { RenderedText } from "./format.js";
-export {
-  DedupeWindow,
-  deriveIdempotencyKey,
-  unkeyedIdempotencyKey,
-} from "./idempotency.js";
+export { DedupeWindow } from "./dedupe.js";
 export { toRelayReaction } from "./reactions.js";
-export type { RelayReaction } from "./reactions.js";
+export type { RelayOutgoingReaction } from "./reactions.js";
 export {
   decodeWebhookSecret,
   verifyWebhookSignature,
@@ -40,6 +35,7 @@ export {
   WebhookVerificationError,
 } from "./signature.js";
 export type { VerifyOptions } from "./signature.js";
+export { relayId, ulid } from "./ulid.js";
 export {
   decodeRelayThreadId,
   encodeRelayThreadId,

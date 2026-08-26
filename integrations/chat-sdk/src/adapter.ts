@@ -3,7 +3,6 @@ import {
   NotImplementedError,
   cardChildToFallbackText,
   emphasis,
-  inlineCode,
   isCardElement,
   paragraph,
   root,
@@ -43,11 +42,7 @@ import {
   renderRawText,
   type RenderedText,
 } from "./format.js";
-import {
-  DedupeWindow,
-  deriveIdempotencyKey,
-  unkeyedIdempotencyKey,
-} from "./idempotency.js";
+import { DedupeWindow } from "./dedupe.js";
 import { toRelayReaction } from "./reactions.js";
 import {
   decodeWebhookSecret,
@@ -59,12 +54,10 @@ import {
   encodeRelayThreadId,
   relayChannelIdFromThreadId,
 } from "./threadId.js";
-import { activeTurn, runInTurn, type RelayTurn } from "./turn.js";
 import type {
   RelayEventEnvelope,
   RelayMessage,
   RelayMessageEventData,
-  RelayMessageUnsentEventData,
   RelayOutgoingPart,
   RelayPart,
   RelayRawMessage,
@@ -97,18 +90,6 @@ const DEFAULT_HISTORY_LIMIT = 50;
 
 /** `GET /v1/conversations/{id}/messages` clamps `limit` to this server side. */
 const MAX_HISTORY_LIMIT = 100;
-
-/**
- * A group turn tried to commit a second message. Relay's invocation is single
- * use, so there is nothing valid for the second message to cite and the server
- * would answer 403.
- */
-export class RelayInvocationSpentError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RelayInvocationSpentError";
-  }
-}
 
 function json(status: number, body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), {
@@ -177,8 +158,8 @@ function joinTextParts(parts: RelayPart[]): {
 /**
  * Rebuild an inline mdast run sequence from Relay's text plus style ranges, so
  * `message.formatted` carries the emphasis the sender actually applied instead
- * of a flat string. `underline` and `spoiler` have no mdast node, so those runs
- * keep their words and lose only the decoration.
+ * of a flat string. `underline` has no mdast node, so those runs keep their
+ * words and lose only the decoration.
  */
 function formattedFromParts(value: string, styles: RelayPart["styles"]): FormattedContent {
   if (!value) return root([]);
@@ -192,9 +173,7 @@ function formattedFromParts(value: string, styles: RelayPart["styles"]): Formatt
       children.push(textNode(value.slice(cursor, range.start)));
     }
     const slice = value.slice(range.start, range.start + range.length);
-    let node: Content = range.styles.includes("monospace")
-      ? inlineCode(slice)
-      : textNode(slice);
+    let node: Content = textNode(slice);
     if (range.styles.includes("strikethrough")) node = strikethrough([node]);
     if (range.styles.includes("italic")) node = emphasis([node]);
     if (range.styles.includes("bold")) node = strong([node]);
@@ -213,11 +192,9 @@ function formattedFromParts(value: string, styles: RelayPart["styles"]): Formatt
  * to one: a Relay conversation has no enclosing channel, and a thread id is
  * `relay:{conversation_id}`.
  *
- * Two Relay rules shape the surface. A streamed turn commits exactly one
- * canonical message, so `stream` buffers and posts once rather than editing a
- * draft bubble into place. And a group reply is scoped to the single-use
- * invocation that produced the inbound event, so the first send of a turn
- * carries it and a second cannot.
+ * One Relay rule shapes the surface: message content is immutable and one send
+ * is one message. So `stream` buffers and posts once rather than editing a
+ * draft bubble into place, and there is nothing to edit or unsend afterwards.
  */
 export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
   readonly name = RELAY_ADAPTER_NAME;
@@ -278,7 +255,7 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
   parseMessage(raw: RelayRawMessage): Message<RelayRawMessage> {
     const message = raw.message;
     const threadId = this.encodeThreadId({ conversationId: message.conversation_id });
-    const parts = message.parts ?? [];
+    const parts = message.parts;
     const textParts = parts.filter((part) => part.type === "text");
     const joined = joinTextParts(textParts);
     const value = joined.text || message.fallback_text || "";
@@ -323,18 +300,17 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
         fullName: message.sender.id,
         isBot: message.sender.kind === "agent",
         isMe: message.is_from_me ?? false,
-        ...(message.sender.kind === "system" ? { isSystem: true } : {}),
       },
       metadata: {
         dateSent: new Date(message.created_at),
-        edited: Boolean(message.edited_at),
-        ...(message.edited_at ? { editedAt: new Date(message.edited_at) } : {}),
+        // Relay message content is immutable, so this is never anything else.
+        // The Chat SDK requires the field.
+        edited: false,
       },
       attachments,
       ...(links.length > 0 ? { links } : {}),
       // Relay delivers `message.received` to an agent only when the message is
-      // addressed to it: always in a direct conversation, and in a group only
-      // to agents with an invocation relationship to that message.
+      // addressed to it, so anything that arrives here is for this agent.
       isMention: true,
     });
   }
@@ -351,43 +327,30 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
     return this.sendParts(conversationId, threadId, parts);
   }
 
+  /**
+   * Relay has no edit route: message content is immutable, with no revisions,
+   * no version and no tombstone. The Chat SDK's `Adapter` requires the method,
+   * so it says that plainly rather than silently posting a second message.
+   */
   async editMessage(
     threadId: string,
-    messageId: string,
-    message: AdapterPostableMessage,
+    _messageId: string,
+    _message: AdapterPostableMessage,
   ): Promise<RawMessage<RelayRawMessage>> {
     this.decodeThreadId(threadId);
-    const parts = await this.buildParts(message);
-    // Relay rejects attachment-bearing edits outright, so name that here
-    // rather than letting the server answer 422 with no context.
-    if (parts.some((part) => part.type === "media" || part.type === "voice_memo")) {
-      throw new NotImplementedError(
-        "Relay edits must stay text-bearing: media and voice memo parts are rejected",
-        "editMessage",
-      );
-    }
-    // Relay accepts exactly one text part per edit: an edit replaces one
-    // message's text, and one text part carries at most 8 KB. Text long
-    // enough to chunk cannot be an edit of one message, so refuse it here
-    // rather than sending a multi-part PATCH the server answers 422 to, or
-    // silently truncating the caller's content.
-    if (parts.length !== 1) {
-      throw new NotImplementedError(
-        "a Relay edit replaces one message with one text part of at most 8 KB; shorten the edit or post a new message",
-        "editMessage",
-      );
-    }
-    const result = await this.client.edit(messageId, parts);
-    return {
-      id: result.message.id,
-      threadId,
-      raw: { message: result.message },
-    };
+    throw new NotImplementedError(
+      "Relay messages are immutable: there is no edit route, so post a new message instead",
+      "editMessage",
+    );
   }
 
-  async deleteMessage(threadId: string, messageId: string): Promise<void> {
+  /** Relay has no unsend route either; see `editMessage`. */
+  async deleteMessage(threadId: string, _messageId: string): Promise<void> {
     this.decodeThreadId(threadId);
-    await this.client.unsend(messageId);
+    throw new NotImplementedError(
+      "Relay messages are immutable: there is no unsend route",
+      "deleteMessage",
+    );
   }
 
   async addReaction(
@@ -411,31 +374,27 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
   }
 
   /**
-   * Relay's typing indicator is ephemeral and carries an optional label of up
-   * to 80 characters. The invocation is peeked rather than consumed: typing is
-   * not the group reply the invocation is spent on.
+   * Relay's typing indicator is ephemeral and fire and forget: nothing is
+   * stored, no lease is taken, and the recipient's client hides it on its own.
    *
-   * Failures are swallowed. Group typing without a live pending invocation is a
-   * 403 (`Relay-Server/server/src/domain/typing.ts:70-73`), which is exactly
-   * what typing after the first send of a group turn looks like. The Chat SDK
-   * treats this call as best effort and has no `stopTyping` to strand, so a
-   * hint that cannot be shown must never take the reply down with it.
+   * The Chat SDK offers a `status` label; Relay's typing route carries no
+   * label, so the argument is accepted for the interface and dropped rather
+   * than smuggled into the conversation as a message.
    */
-  async startTyping(threadId: string, status?: string): Promise<void> {
+  async startTyping(threadId: string, _status?: string): Promise<void> {
     const { conversationId } = this.decodeThreadId(threadId);
-    const turn = activeTurn(conversationId);
-    try {
-      await this.client.typing({
-        conversationId,
-        started: true,
-        ...(status ? { label: status.slice(0, 80) } : {}),
-        ...(turn?.invocationId && !turn.invocationUsed
-          ? { invocationId: turn.invocationId }
-          : {}),
-      });
-    } catch {
-      // The indicator is decoration. The turn continues.
-    }
+    await this.client.typing({ conversationId, started: true });
+  }
+
+  /**
+   * Take the indicator down before it times out. The Chat SDK has no
+   * `stopTyping` hook, so this is the adapter's own surface: a handler that
+   * finishes without posting would otherwise leave the bubble up until the
+   * recipient's client expires it.
+   */
+  async stopTyping(threadId: string): Promise<void> {
+    const { conversationId } = this.decodeThreadId(threadId);
+    await this.client.typing({ conversationId, started: false });
   }
 
   async markAsRead(threadId: string, messageId: string): Promise<void> {
@@ -627,9 +586,7 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
     } catch (error) {
       // Give the claim back. A thrown handler answers 5xx, which is Relay's
       // signal to redeliver, and a retained claim would turn every redelivery
-      // into a 200 that did nothing: the message would be lost outright. The
-      // `Idempotency-Key` on each send is what keeps the retry from posting
-      // twice whatever the first attempt already committed.
+      // into a 200 that did nothing: the message would be lost outright.
       this.dedupe.release(envelope.event_id);
       throw error;
     }
@@ -641,76 +598,23 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
     options?: WebhookOptions,
   ): Promise<void> {
     const chat = this.chat as ChatInstance;
-    switch (envelope.event_type) {
-      case "message.received": {
-        const data = envelope.data as RelayMessageEventData;
-        const raw: RelayRawMessage = {
-          message: data.message,
-          invocation_id: data.invocation_id,
-          event_id: envelope.event_id,
-          event_type: envelope.event_type,
-        };
-        const threadId = this.encodeThreadId({
-          conversationId: data.message.conversation_id,
-        });
-        const turn: RelayTurn = {
-          conversationId: data.message.conversation_id,
-          eventId: envelope.event_id,
-          invocationId: data.invocation_id,
-          invocationUsed: false,
-          sent: 0,
-        };
-        // Bind the turn to this dispatch's async context, so a second event on
-        // the same conversation cannot take it over while this one waits.
-        await runInTurn(turn, () =>
-          chat.processMessage(this, threadId, this.parseMessage(raw), options),
-        );
-        return;
-      }
-      case "message.edited": {
-        const data = envelope.data as RelayMessageEventData;
-        const raw: RelayRawMessage = {
-          message: data.message,
-          event_id: envelope.event_id,
-          event_type: envelope.event_type,
-        };
-        await chat.processMessageUpdated(
-          {
-            adapter: this,
-            threadId: this.encodeThreadId({
-              conversationId: data.message.conversation_id,
-            }),
-            message: this.parseMessage(raw),
-          },
-          options,
-        );
-        return;
-      }
-      case "message.unsent": {
-        const data = envelope.data as RelayMessageUnsentEventData;
-        const threadId = this.encodeThreadId({
-          conversationId: data.conversation_id,
-        });
-        await chat.processMessageDeleted(
-          {
-            adapter: this,
-            threadId,
-            channelId: this.channelIdFromThreadId(threadId),
-            messageId: data.message_id,
-            deletedAt: new Date(envelope.created_at),
-            raw: envelope,
-          },
-          options,
-        );
-        return;
-      }
-      default:
-        // Reaction, receipt, conversation, and group invite events acknowledge
-        // without dispatch. `reaction.added` carries an undocumented `reaction`
-        // object in the OpenAPI, so there is nothing stable to map onto the
-        // Chat SDK's ReactionEvent yet.
-        return;
+    if (envelope.event_type !== "message.received") {
+      // Receipt, reaction, conversation and poll events acknowledge without
+      // dispatch. Relay's `reaction.*` payload has no stable mapping onto the
+      // Chat SDK's ReactionEvent yet, and an unknown future type must never
+      // break the consumer.
+      return;
     }
+    const data = envelope.data as RelayMessageEventData;
+    const raw: RelayRawMessage = {
+      message: data.message,
+      event_id: envelope.event_id,
+      event_type: envelope.event_type,
+    };
+    const threadId = this.encodeThreadId({
+      conversationId: data.message.conversation_id,
+    });
+    await chat.processMessage(this, threadId, this.parseMessage(raw), options);
   }
 
   private async buildParts(
@@ -815,83 +719,27 @@ export class RelayAdapter implements Adapter<RelayThreadId, RelayRawMessage> {
   }
 
   /**
-   * Send the parts in one call when they fit, and as follow-up calls when
-   * they do not. The server splits each call at ingest into one or more
-   * messages, and the one call that carries the invocation owns every message
-   * it commits. A group turn cannot overflow, and cannot POST twice: Relay's
-   * invocation is single use per call, so a second POST has nothing valid to
-   * cite and the server answers 403.
+   * Commit the parts. One send is one message, so a reply that fits Relay's
+   * 32-part ceiling arrives as exactly one message and nothing splits it.
+   *
+   * A reply past that ceiling is the adapter's own decision to make, and it
+   * chooses several messages over refusing the send or dropping the tail: 32
+   * parts is a quarter of a megabyte of text, so this is the far edge rather
+   * than the common path. The Chat SDK's post contract names one raw message,
+   * so the first committed one stands for the whole reply.
    */
   private async sendParts(
     conversationId: string,
     threadId: string,
     parts: RelayOutgoingPart[],
   ): Promise<RawMessage<RelayRawMessage>> {
-    const turn = activeTurn(conversationId);
-    const batches: RelayOutgoingPart[][] = [];
-    for (let i = 0; i < parts.length; i += MAX_PARTS_PER_MESSAGE) {
-      batches.push(parts.slice(i, i + MAX_PARTS_PER_MESSAGE));
-    }
-    // Relay carries an invocation only on a group event, so a turn holding one
-    // is a group turn for as long as it lives. Test that rather than testing
-    // whether an invocation is still available: once it is spent, the second
-    // send would otherwise go out bare and be refused by the server.
-    const groupTurn = turn?.invocationId !== undefined ? turn : undefined;
-    if (groupTurn?.invocationUsed) {
-      throw new RelayInvocationSpentError(
-        "this group turn already replied, and one Relay invocation permits one message",
-      );
-    }
-    const invocationId = groupTurn?.invocationId;
-    if (batches.length > 1 && invocationId) {
-      throw new RelayInvocationSpentError(
-        `this reply needs ${batches.length} Relay send calls, and one Relay invocation permits one call`,
-      );
-    }
-
-    // The ordinal is the send's logical position in the turn, so a retry lands
-    // on the key the first attempt used and Relay replays it instead of
-    // posting a second message. The base counts what this turn has already
-    // committed and is read once, before the loop: it advances only on a
-    // successful send, so an attempt that threw does not push the next key
-    // along and a redelivery of the whole event starts from zero again.
-    const base = turn?.sent ?? 0;
-
     let first: RawMessage<RelayRawMessage> | undefined;
-    for (const [index, batch] of batches.entries()) {
-      const idempotencyKey = turn
-        ? deriveIdempotencyKey(turn.eventId, base + index)
-        : unkeyedIdempotencyKey(conversationId);
-      const result = await this.client.send({
+    for (let index = 0; index < parts.length; index += MAX_PARTS_PER_MESSAGE) {
+      const { message } = await this.client.send({
         conversationId,
-        parts: batch,
-        idempotencyKey,
-        ...(first === undefined && invocationId ? { invocationId } : {}),
+        parts: parts.slice(index, index + MAX_PARTS_PER_MESSAGE),
       });
-      if (turn) {
-        turn.sent += 1;
-        if (first === undefined && invocationId) turn.invocationUsed = true;
-      }
-      // One call commits one or more messages; the Chat SDK's post contract
-      // names a single raw message, so the first committed one stands for the
-      // whole send. A 202 that carries none is a server contract violation:
-      // surface it as a 502 so a generic status-classing retry treats it as
-      // transient, instead of handing the caller undefined as a message.
-      const [committed] = result.messages;
-      if (!committed) {
-        throw new RelayApiError(
-          502,
-          "empty_send",
-          "relay: 202 carried no messages",
-        );
-      }
-      if (first === undefined) {
-        first = {
-          id: committed.id,
-          threadId,
-          raw: { message: committed },
-        };
-      }
+      first ??= { id: message.id, threadId, raw: { message } };
     }
     if (!first) {
       throw new RelayApiError(502, "empty_send", "relay: send committed no messages");

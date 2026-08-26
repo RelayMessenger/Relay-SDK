@@ -8,43 +8,38 @@ See [BREAKING-CHANGES.md](./BREAKING-CHANGES.md) for what counts as a break.
 
 ## [Unreleased]
 
-### Fixed
-
-- `sendMessage` read `body.message` from a response the server sends as
-  `{ message_id, messages }`. Every send resolved with `message: undefined`
-  while TypeScript reported a `RelayMessage`, so the fault surfaced later at the
-  consumer rather than at the call. It now reads `messages`, exposes the whole
-  array, and raises a retryable `RelayApiError` when a send returns no committed
-  message instead of resolving with nothing.
+This package has not shipped a release yet, so the entry below describes the
+whole surface rather than a diff against a published version.
 
 ### Added
 
-- `sendMessageV2({ conversationId, messageId?, parts, replyTo?, invokedAgentIds?, fallbackText? })`.
+- `createRelayClient({ token, baseUrl?, fetchImpl?, requestTimeoutMs? })` over
+  the Relay agent API, authenticating with an `rly_live_` API key.
+- `sendMessage({ conversationId, messageId?, parts, replyTo?, fallbackText? })`.
   One send is one message: mixed text and media stay together, and every part
   comes back with a permanent `part_id`. Mints a `msg_` ULID when `messageId` is
-  absent; that id is both the message's identity and the retry key, so no
-  `Idempotency-Key` is involved.
-- `editMessage({ messageId, operationId?, expectedVersion, operations })` and
-  `unsendMessage({ messageId, operationId? })` for the `/v2` mutation routes.
-  `expectedVersion` is optimistic concurrency; a stale value is refused rather
-  than overwriting somebody else's edit.
-- `react({ messageId, operation, emoji, targetPartId?, operationId? })`.
-  Omitting `targetPartId` reacts to the whole message; supplying it reacts to
-  one exact part, of any kind.
-- `uploadAttachment`, `getHistory`, `markDelivered`, and `reconcileEvents`.
-- `buildEditRequest` and `MAX_OPERATIONS_PER_EDIT`, so an edit body can be built
-  and asserted without a server.
-- `classifyCursorGap`, which names an expired cursor and a cursor ahead of
-  Relay's, both of which are terminal to a poll loop and neither of which a
-  retry repairs.
+  absent; that id is both the message's identity and the send's only retry key,
+  so no `Idempotency-Key` is involved. `sendMessageV1` is the same call against
+  the `/v1` route, which answers with a one-element array.
+- `react({ messageId, operation, emoji, targetPartId? })`. Omitting
+  `targetPartId` reacts to the whole message; supplying it reacts to one exact
+  part, of any kind. One reaction per actor per slot, and repeating a request
+  changes nothing.
+- `pollEvents({ after, timeoutSeconds?, limit? })`, a plain pull of the agent's
+  durable event log returning `{ events, nextCursor, latest, hasMore }`. It
+  coexists with webhooks, holds no consumer slot, and has nothing to reconcile.
+- `getPoll`, `votePoll` and `closePoll` for the poll routes.
+- `uploadAttachment`, `getHistory`, `markRead`, `markDelivered`, and
+  `setTyping`, which is one fire-and-forget `{ started }` flag with no lease.
 - A dependency-free ULID generator: `ulid`, `relayId`, `isRelayId`,
   `createUlidFactory`, `RELAY_ID_PATTERN`. Lowercase Crockford base32, and
   monotonic within a process so ids minted in the same millisecond still sort in
   creation order.
-- `isKnownPartKind` and `isVisibleMessage` for narrowing, plus the wire types
-  the message model publishes: `RelayReaction`, `RelayReplyQuote`,
-  `RelayRevision`, `RelayEditCapabilities`, `RelayPartOperation`,
-  `RelayReceiptSummary`, `RelayTombstone`, `RelayVisibleMessage`.
+- `runPollLoop`, `MemoryDedupe`, `createFileCursorStore` and
+  `verifyWebhookSignature` for hosts that receive rather than poll.
+- `isKnownPartKind` for narrowing, plus the wire types the message model
+  publishes: `RelayMessage`, `RelayPart`, `RelayActor`, `RelayReaction`,
+  `RelayReplyRef`, `RelayPoll`, `RelayReceipt`, `RelayEventEnvelope`.
 - `scripts/check-types-against-schema.mjs`, wired into `npm run check`. It reads
   `schemas/message-v2.schema.json` and fails the build when a property the
   contract publishes has no counterpart in `src/types.ts`. Set
@@ -53,27 +48,34 @@ See [BREAKING-CHANGES.md](./BREAKING-CHANGES.md) for what counts as a break.
 
 ### Changed
 
-- `types.ts` is now derived field for field from
+- `types.ts` is derived field for field from
   `schemas/message-v2.schema.json`, a byte copy of the file Relay-Server
   generates from real server responses.
-- `RelayPart` gains `part_id`, `part_index` and `position`, and its `type` is
-  `string` rather than a closed union. Relay ships new part kinds without a
-  version bump, so a client that rejected one would break on a message it could
-  have rendered. Narrow with `isKnownPartKind` and fall back to the message's
-  `fallback_text`.
+- `RelayPart["type"]` is `string` rather than a closed union. Relay ships new
+  part kinds without a version bump, so a client that rejected one would break
+  on a message it could have rendered. Narrow with `isKnownPartKind` and fall
+  back to the message's `fallback_text`.
 - Every wire type carries an index signature, because Relay adds optional
   members additively.
-- `RelayReplyRef` is the projected reply edge and now carries `part_id`,
-  `quote_state` and `quote`. The shape a caller sends is `RelayReplyTarget`,
-  where `part_index` is deprecated in favour of `part_id`.
-- `RelaySendResult` gains `messages`. `message` stays as the first committed
-  message so callers written before the `/v1` split keep working.
-- `RelayEventEnvelope` gains `schema_version`.
 
-### Deprecated
+### Removed
 
-- `RelaySendResult.messageId`. A `/v1` send can commit several messages, so a
-  single id was never the whole answer; read `messages`. On `/v2` it is simply
-  the id you minted.
-- `RelayReplyTarget.part_index`. Accepted on `/v1` only, where Relay translates
-  it to that part's `part_id` at the boundary and never stores the index.
+Relay's server cleanup removed the features below outright. See
+[BREAKING-CHANGES.md](./BREAKING-CHANGES.md) for the full table.
+
+- Message editing, unsending and deletion, and everything that modelled them:
+  `editMessage`, `unsendMessage`, `buildEditRequest`, `MAX_OPERATIONS_PER_EDIT`,
+  `isVisibleMessage`, and the `version`, `revisions`, `edit_capabilities` and
+  tombstone shapes. Message content is immutable.
+- The `/v1` send split. `RelaySendResult` is `{ messageId, message }`.
+- Invocations and responding: `setResponding`, `invocationId`,
+  `invokedAgentIds`, and `MessageHandlerContext.responding`.
+- The event-consumer model: `reconcileEvents`, `classifyCursorGap`,
+  `isRelayWebhookConflict`, and the `cursor_expired` / `terminated_by_other_consumer`
+  failure modes.
+- All idempotency machinery beyond the `msg_` id: the `idempotency` module,
+  `deriveIdempotencyKey`, `replyIdempotencyKey`, and every `Idempotency-Key`
+  header.
+- Reply quotes (`RelayReplyQuote`, `RelayQuoteState`) and the `part_index` reply
+  and reaction forms.
+- The `monospace` and `spoiler` text styles and the `system` sender kind.

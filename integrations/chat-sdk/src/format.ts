@@ -13,7 +13,7 @@ import type { RelayStyleRange, RelayTextStyle } from "./types.js";
  * Constructs Relay has no style for keep their information in the text rather
  * than losing it: a link whose label differs from its target renders as
  * `label (url)`, a blockquote keeps a `> ` line prefix, and a table is drawn as
- * a monospace ASCII grid.
+ * an ASCII grid whose column alignment survives in the characters themselves.
  */
 export interface RenderedText {
   text: string;
@@ -175,7 +175,13 @@ function renderInline(
         ]);
         break;
       case "inlineCode":
-        builder.append(node.value, [...styles, "monospace"]);
+        // Relay's style set is bold | italic | underline | strikethrough, and
+        // none of them is a fixed-width face. The closest surviving rendering
+        // for code is therefore no run at all: the characters are what carry
+        // code, and dressing them in a decoration Relay does have would say
+        // something about the span that the author never wrote. Emphasis
+        // already in scope still applies.
+        builder.append(node.value, styles);
         break;
       case "break":
         builder.append("\n", []);
@@ -223,8 +229,11 @@ function renderBlock(node: Nodes): RenderedText {
       return builder.finish();
     }
     case "code": {
+      // Same reasoning as `inlineCode`: Relay has no monospace style, so a
+      // fenced block keeps its own line breaks and indentation verbatim and
+      // takes no style run rather than being bolded or italicised whole.
       const builder = new TextBuilder();
-      builder.append(node.value, ["monospace"]);
+      builder.append(node.value, []);
       return builder.finish();
     }
     case "blockquote": {

@@ -6,7 +6,8 @@ The plugin is a self-contained MCP stdio server for Claude Code's experimental
 
 - Owner-authenticated Relay messages enter the session as
   `notifications/claude/channel` events.
-- The `reply` tool sends a logical message back with retry-safe idempotency.
+- The `reply` tool sends a logical message back under a `msg_` id, so a
+  retry replays that message instead of sending a second one.
 - Permission prompts can be reviewed and denied from Relay. Remote Allow is
   available only when Claude supplies a complete, verifiable tool-input JSON;
   otherwise approval remains local.
@@ -16,8 +17,6 @@ The plugin is a self-contained MCP stdio server for Claude Code's experimental
 - Node.js 20.11 or newer
 - Claude Code with channel support (channels remain a research preview)
 - A Relay agent and Agent Token
-- No webhook enabled for that agent: Relay permits one event consumer, so
-  long-polling and webhook delivery are mutually exclusive
 
 ## Install
 
@@ -29,6 +28,11 @@ npm install -g @relaymessenger/cli
 relaymessenger pair
 relaymessenger install-claude
 ```
+
+`pair` runs the OAuth device-authorization flow: it prints a short user code
+and a verification link, you approve the device in the Relay app, and the CLI
+picks up the agent's API key when you do. Nothing is pasted into the terminal
+and the code expires on its own if you walk away.
 
 `install-claude` strictly validates the bundled source, copies it to a stable
 content-addressed directory under the paired account's private Relay runtime,
@@ -92,9 +96,10 @@ claude --dangerously-load-development-channels plugin:relay@relaymessenger-bundl
 
 Use `server:relay` instead when registered as a bare MCP server.
 
-Only one live Claude session may consume an agent's event stream. A second
-session fails closed instead of stealing the long-poll consumer. Use a
-different Relay agent when two sessions must receive messages concurrently.
+`GET /v1/events` is a plain pull that coexists with webhooks, and every reader
+of an agent's stream receives every event. Two Claude sessions on one agent
+therefore both see each message and both answer it: give each session its own
+Relay agent unless you want the conversation answered twice.
 
 ## Delivery and retry contract
 
@@ -112,8 +117,10 @@ cannot make arbitrary tools exactly-once.
 
 Outbound `reply` calls require a `send_id`. Reuse the same `send_id`,
 conversation, and text for an unknown-outcome retry; use a new `send_id` for an
-intentional repeat. The mapping is persisted before the HTTP request, and
-reusing an id with different content is rejected.
+intentional repeat. The ledger binds a `send_id` to one payload and one `msg_`
+id before the HTTP request, so a retry carries the id the first attempt used
+and Relay replays the committed message rather than posting a second. Reusing
+an id with different content is rejected.
 
 ## Permission safety and data boundary
 
@@ -142,16 +149,16 @@ only for an agent no one else can message.
 State lives below `~/.claude/channels/relay/state/`, namespaced first by the
 canonical API origin and Relay agent id. The account directory contains:
 
-- `consumer-state.json` for the shared cursor and TOFU owner pin
-- `consumer-ledger.json` for unacknowledged deliveries and recent event ids
+- `account-state.json` for the shared cursor and TOFU owner pin
+- `event-ledger.json` for unacknowledged deliveries and recent event ids
 
-Those two files are account-scoped so a later Claude session inherits the
-consumer position instead of replaying retained history. Each hashed session
+Those two files are account-scoped so a later Claude session inherits the poll
+position instead of replaying retained history. Each hashed session
 subdirectory separately contains `routing.json` and `session-ledger.json` for
 last-conversation routing, permission registrations, and logical outbound
 sends. A new session cannot answer an old session's permission card.
 
-Writes use owner-only files and atomic rename. If consumer cursor state or
+Writes use owner-only files and atomic rename. If the cursor state or
 either security-critical ledger is corrupt, startup fails closed and preserves
 a block marker plus the quarantined file instead of resetting the cursor or
 silently replaying old events. Session routing state may be quarantined and

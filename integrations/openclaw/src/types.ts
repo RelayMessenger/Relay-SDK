@@ -1,25 +1,28 @@
 // Relay wire types plus the plugin's config and resolved-account shapes. The
-// long-poll receive contract is GET /v1/events?cursor&timeout&limit ->
-// { events, next_cursor }, cursor N acknowledges everything <= N.
+// receive contract is a plain pull: GET /v1/events?after&timeout&limit ->
+// { events, next_cursor, latest, has_more }, and `after` N means "everything
+// newer than N". Delivery is at least once and nothing is exclusive, so the
+// cursor is a local watermark rather than an acknowledgement handshake.
 
 export type RelaySender = {
-  // `system` is real on the wire: a group's own notices are authored by it
-  // (creating a group commits "<name> created <title>"). Only `user` messages
-  // start a turn, and `buildRelayInboundFacts` drops everything else.
-  kind: "user" | "agent" | "system";
+  // An actor is a person or an agent. A group's own notices are not authored
+  // by the system: "Atlas added June" is a `notice` message sent by Atlas.
+  kind: "user" | "agent";
   id: string;
 };
 
 // Inline mention of a conversation participant. Offsets are UTF-16 code
 // units into the part's text, which holds the inserted display name with
 // no "@". Ranges are sorted by start and never overlap.
-export type RelayMentionRange = {
-  start: number;
-  length: number;
-  participant_id: string;
-};
+/**
+ * A mention is the handle it names. A sender confirms handles from the
+ * client's suggestion list, and the server checks each one is really written
+ * as `@handle` in the part's `text`. There are no offsets: a range could mark
+ * any word as a mention of anyone, a handle can only ever mark itself.
+ */
+export type RelayMention = string;
 
-export type RelayTextStyle = "bold" | "italic" | "underline" | "strikethrough" | "monospace" | "spoiler";
+export type RelayTextStyle = "bold" | "italic" | "underline" | "strikethrough";
 
 // One formatting run over a text part, offsets in UTF-16 code units like
 // mentions. An EMPTY styles array on the part is meaningful: it marks
@@ -34,7 +37,7 @@ export type RelayTextPart = {
   part_index?: number;
   type: "text";
   text: string;
-  mentions?: RelayMentionRange[];
+  mentions?: RelayMention[];
   styles?: RelayStyleRange[];
 };
 
@@ -77,17 +80,25 @@ export type RelayPart =
   | RelayLinkPreviewPart
   | RelayDataPart;
 
+// A reply is a pointer, never a copy: there is no stored quote to go stale.
+// Draw the quote from the target message if this client still holds it.
 export type RelayReplyRef = {
-  message_id?: string;
-} | null;
+  message_id: string;
+  part_id?: string;
+};
+
+// `notice` is a group notice ("Atlas added June"), carried as a real message
+// from the person who caused it. Only `message` starts an agent turn.
+export type RelayMessageKind = "message" | "notice";
 
 export type RelayMessage = {
   id: string;
   conversation_id: string;
   sequence: number;
+  kind?: RelayMessageKind;
   sender: RelaySender;
   parts: RelayPart[];
-  reply_to?: RelayReplyRef;
+  reply_to?: RelayReplyRef | null;
   fallback_text: string;
   status: string;
   created_at: string;
@@ -108,17 +119,6 @@ export type RelayEvent = {
   created_at: string;
   data: {
     message?: RelayMessage;
-    /**
-     * Present only when this event belongs to a group invocation: a human
-     * mentioned the agent, replied to it, or picked it. In a group the server
-     * delivers nothing to an agent that was not invoked, and every call the
-     * agent then makes about the message must carry this id back
-     * (`/typing`, `/responding`, and the reply itself all refuse without it).
-     * A direct message never carries one — the server rejects
-     * `invoked_agent_ids` outside a group — so its presence is also how the
-     * plugin knows it is in a group.
-     */
-    invocation_id?: string;
     [key: string]: unknown;
   };
 };
@@ -136,15 +136,12 @@ export type RelayAgentProfile = {
 
 export type RelayEventsPage = {
   events: RelayEvent[];
+  // Pass back as `after` on the next poll.
   nextCursor: number;
-};
-
-// The 202 from POST /v1/messages. The server splits the accepted parts at
-// ingest: each visible non-media part becomes its own message, contiguous
-// media parts stay one media message, and a voice memo always commits alone,
-// so one send commits one or more messages, in display order.
-export type RelaySendResult = {
-  messages: RelayMessage[];
+  // Highest sequence the server has issued this agent, and whether the page
+  // stopped short of it. `hasMore` means poll again without waiting.
+  latest: number;
+  hasMore: boolean;
 };
 
 // ---------------------------------------------------------------------------

@@ -5,7 +5,6 @@ import {
   RelayApiError,
   WebhookVerificationError,
 } from "./errors.js";
-import { replyIdempotencyKey } from "./idempotency.js";
 import { MemoryDedupe } from "./memory-dedupe.js";
 import { runPollLoop } from "./poll-loop.js";
 import { verifyWebhookSignature } from "./signature.js";
@@ -47,12 +46,6 @@ describe("classifyRelayHttpStatus", () => {
     expect(classifyRelayHttpStatus(409)).toBe("conflict");
     expect(classifyRelayHttpStatus(429)).toBe("retryable");
     expect(classifyRelayHttpStatus(400)).toBe("rejected");
-  });
-});
-
-describe("replyIdempotencyKey", () => {
-  it("is stable for an event", () => {
-    expect(replyIdempotencyKey("evt_1")).toBe("reply-evt_1-0");
   });
 });
 
@@ -123,43 +116,9 @@ describe("RelayApiError", () => {
   });
 });
 
-describe("RelayClient responding", () => {
-  it("still requires an Agent Token for authenticated clients", () => {
-    expect(() => createRelayClient({ token: " " })).toThrow(
-      /Agent Token is required/,
-    );
-  });
-
-  it("posts the consumed watermark, label, and invocation", async () => {
-    const requests: Array<{ url: string; body: unknown }> = [];
-    const client = createRelayClient({
-      token: "rly_test",
-      fetchImpl: async (input, init) => {
-        requests.push({
-          url: input,
-          body: init?.body ? JSON.parse(String(init.body)) : undefined,
-        });
-        return new Response(null, { status: 204 });
-      },
-    });
-
-    await client.setResponding({
-      conversationId: "cnv/a",
-      messageId: "msg_2",
-      label: "Claude Code",
-      invocationId: "inv_1",
-    });
-
-    expect(requests).toEqual([
-      {
-        url: "https://api.relayapp.im/v1/conversations/cnv%2Fa/responding",
-        body: {
-          message_id: "msg_2",
-          label: "Claude Code",
-          invocation_id: "inv_1",
-        },
-      },
-    ]);
+describe("RelayClient construction", () => {
+  it("requires an API key", () => {
+    expect(() => createRelayClient({ token: " " })).toThrow(/API key is required/);
   });
 });
 
@@ -173,7 +132,10 @@ describe("RelayClient receipts", () => {
           url: input,
           body: init?.body ? JSON.parse(String(init.body)) : undefined,
         });
-        return new Response(null, { status: 204 });
+        return new Response(
+          JSON.stringify({ receipt: { message_id: "msg_2" }, advanced: true }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
       },
     });
 
@@ -205,43 +167,20 @@ describe("runPollLoop", () => {
     onMessage: () => {},
   };
 
-  it("throws on a 410 cursor_expired instead of retrying", async () => {
+  it("surfaces a terminal poll failure instead of retrying it", async () => {
     let polls = 0;
     const client = {
       pollEvents: async () => {
         polls += 1;
-        throw new RelayApiError("cursor expired", {
-          status: 410,
-          kind: classifyRelayHttpStatus(410),
-          code: "cursor_expired",
+        throw new RelayApiError("bad key", {
+          status: 401,
+          kind: classifyRelayHttpStatus(401),
         });
       },
     } as unknown as RelayClient;
     await expect(
       runPollLoop({ ...baseParams, client }),
-    ).rejects.toMatchObject({ status: 410 });
-    expect(polls).toBe(1);
-  });
-
-  it("throws on a 422 cursor-ahead error instead of retrying", async () => {
-    let polls = 0;
-    const client = {
-      pollEvents: async () => {
-        polls += 1;
-        throw new RelayApiError("cursor ahead", {
-          status: 422,
-          kind: classifyRelayHttpStatus(422),
-          code: "invalid_request",
-          details: { highest_delivered_cursor: 41 },
-        });
-      },
-    } as unknown as RelayClient;
-    await expect(
-      runPollLoop({ ...baseParams, client }),
-    ).rejects.toMatchObject({
-      status: 422,
-      details: { highest_delivered_cursor: 41 },
-    });
+    ).rejects.toMatchObject({ status: 401 });
     expect(polls).toBe(1);
   });
 
@@ -250,32 +189,34 @@ describe("runPollLoop", () => {
     const abort = new AbortController();
     const event: MessageReceivedEvent = {
       event_id: "evt_1",
+      sequence: 1,
       event_type: "message.received",
       agent_id: "agt_1",
+      conversation_id: "cnv_1",
       created_at: "2026-08-16T00:00:00.000Z",
       data: {
         message: {
           id: "msg_1",
           conversation_id: "cnv_1",
           sequence: 1,
+          kind: "message",
           sender: { kind: "user", id: "usr_1" },
           is_from_me: false,
           parts: [
-            { part_id: "prt_1", part_index: 0, position: 0, type: "text", text: "hi" },
+            { part_id: "prt_1", part_index: 0, type: "text", text: "hi" },
           ],
           reply_to: null,
           fallback_text: "hi",
           status: "sent",
-          version: 1,
           created_at: "2026-08-16T00:00:00.000Z",
         },
       },
     };
     const client = {
-      pollEvents: async () => ({ events: [event], nextCursor: 1 }),
+      pollEvents: async () => ({ events: [event], nextCursor: 1, latest: 1, hasMore: false }),
       sendText: async (params: Record<string, unknown>) => {
         sends.push(params);
-        return { messages: [event.data.message] };
+        return { messageId: "msg_2", message: event.data.message };
       },
     } as unknown as RelayClient;
 
@@ -292,8 +233,7 @@ describe("runPollLoop", () => {
 
     expect(sends).toHaveLength(2);
     expect(sends[0]).not.toHaveProperty("replyTo");
-    // A quote targets the part by its stable id, never by its slot: the wire
-    // carries no part_index for a message that has part identities.
+    // A reply is a pointer at one exact part, never a copied quote.
     expect(sends[1]?.replyTo).toEqual({ message_id: "msg_1", part_id: "prt_1" });
   });
 });

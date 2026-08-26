@@ -2,7 +2,7 @@
 /**
  * relaymessenger: bridge your local coding agent to Relay.
  *
- *   relaymessenger pair [--engine <preset>] [--name <device-name>]
+ *   relaymessenger pair [--name <display-name>] [--handle <handle>]
  *   relaymessenger start [--engine <preset>] [--dir <path>]
  *   relaymessenger install-codex
  *   relaymessenger install-claude
@@ -36,7 +36,9 @@ import {
 
 const USAGE = `relaymessenger — bridge your local coding agent to Relay (https://relayapp.im)
 
-  relaymessenger pair            pair this machine with the Relay app (QR + code)
+  relaymessenger pair            create this machine's agent by approving a code in the Relay app
+      --name <display name>   shown in Relay (default: this machine's hostname)
+      --handle <handle>       the agent's @handle (default: derived from the name)
   relaymessenger start           receive messages and drive the engine
       --engine <preset>       (default claude)
       presets: ${ENGINE_HELP}
@@ -58,13 +60,17 @@ async function main(): Promise<number> {
     case "pair": {
       // RELAY_API_ORIGIN is a development/testing override; production default.
       const origin = resolveApiOrigin();
-      await pair({ origin, engine: flags.engine, deviceName: flags.name });
+      await pair({
+        origin,
+        ...(flags.name ? { deviceName: flags.name } : {}),
+        ...(flags.handle ? { handle: flags.handle } : {}),
+      });
       return 0;
     }
     case "start": {
       const config = new ConfigStore().load();
       if (!config?.agent_token) {
-        console.error("Not paired. Run `relaymessenger pair` first.");
+        console.error("No agent on this machine. Run `relaymessenger pair` first.");
         return 1;
       }
       const ownerUserId = resolveOwnerUserId(config); // fail closed without a pinned owner
@@ -119,7 +125,7 @@ async function main(): Promise<number> {
         try {
           await loop.run();
         } finally {
-          // Fatal loop exits (409/401 throws) must not leave a detached engine
+          // A fatal loop exit (a 401 throw) must not leave a detached engine
           // process group running without its bridge.
           loop.stop();
           await engine.dispose().catch(() => {});

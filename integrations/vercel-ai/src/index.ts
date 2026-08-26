@@ -5,7 +5,6 @@ export { RelayApiError, RelayClient } from "./client.js";
 export type {
   RelayClientOptions,
   SendOptions,
-  StreamOptions,
   TypingOptions,
 } from "./client.js";
 export {
@@ -13,6 +12,7 @@ export {
   WebhookSecretError,
   WebhookVerificationError,
 } from "./signature.js";
+export { relayId, ulid } from "./ulid.js";
 export { createWebhookHandler } from "./webhook.js";
 export type { WebhookContext, WebhookHandler, WebhookOptions } from "./webhook.js";
 export type * from "./types.js";

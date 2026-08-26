@@ -51,8 +51,9 @@ eve deploy
 - `streaming: false` is deliberate. Relay commits one canonical message per
   turn, so the reply posts once when the turn completes rather than editing a
   partial bubble into place.
-- In a group, Relay delivers a message to an agent only when that agent was
-  invoked, and the reply is scoped to that single-use invocation. The adapter
-  carries the invocation id into the first reply of the turn for you.
+- In a group, an agent is an ordinary member: it receives every message in the
+  conversation and replies like anyone else. There is no invocation to wait for
+  and none to scope a reply to, so decide for yourself when a message is meant
+  for you — a mention range in a text part is the usual signal.
 - Human-in-the-loop cards deliver as text. Relay has no interactive components,
   so the buttons do not render and a person cannot answer the prompt in the app.

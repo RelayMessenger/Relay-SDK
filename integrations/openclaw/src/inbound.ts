@@ -86,12 +86,6 @@ export type RelayInboundFacts = {
   replyToId?: string;
   text: string;
   timestamp?: number;
-  /**
-   * The group invocation this message belongs to, when it is group work.
-   * Every subsequent server call about this message must carry it back, and
-   * because only a group mints one, its presence is also the group signal.
-   */
-  invocationId?: string;
 };
 
 /**
@@ -110,6 +104,12 @@ export function buildRelayInboundFacts(
   if (!message || !message.id || !message.conversation_id) {
     return null;
   }
+  // A group notice ("Atlas added June") is a real message from the person who
+  // caused it, so the sender check below cannot filter it. It is a record of
+  // something that happened, never something addressed to the agent.
+  if (message.kind === "notice") {
+    return null;
+  }
   // Agent-authored messages never start a local agent turn. This drops our
   // own event echo and prevents agent-to-agent loops even if an id is
   // mistakenly added to the user allowlist.
@@ -121,10 +121,6 @@ export function buildRelayInboundFacts(
     return null;
   }
   const createdAtMs = Date.parse(message.created_at);
-  const invocationId = typeof event.data.invocation_id === "string"
-    && event.data.invocation_id.trim()
-    ? event.data.invocation_id
-    : undefined;
   return {
     eventId: event.event_id,
     messageId: message.id,
@@ -134,6 +130,5 @@ export function buildRelayInboundFacts(
     ...(message.reply_to?.message_id ? { replyToId: message.reply_to.message_id } : {}),
     text,
     ...(Number.isFinite(createdAtMs) ? { timestamp: createdAtMs } : {}),
-    ...(invocationId ? { invocationId } : {}),
   };
 }

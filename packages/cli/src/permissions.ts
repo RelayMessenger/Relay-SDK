@@ -21,6 +21,7 @@
  * to the engine as a prompt; abandoned files age out after deadline + grace.
  */
 import { randomInt } from "node:crypto";
+import { relayId } from "@relaymessenger/sdk";
 import type { RelayClient, RelayOutgoingPart } from "./api.js";
 import type { ApprovalStore, PendingApproval, RelayMessage } from "./store.js";
 import type { PermissionAsk, PermissionDecision } from "./engine/types.js";
@@ -174,12 +175,17 @@ export interface PermissionCardInput {
   inputPreview?: string;
 }
 
+/**
+ * The card is one message with two parts, and its `msg_` id is minted here so
+ * the caller can make it durable before the POST: reposting the same id is a
+ * replay, which is what keeps a retried ask from stacking cards on the phone.
+ */
 export function buildPermissionCard(input: PermissionCardInput): {
   body: {
     conversation_id: string;
+    message_id: string;
     parts: RelayOutgoingPart[];
   };
-  idempotencyKey: string;
 } {
   const toolName = sanitizeRelayedText(input.toolName ?? "", 100) || "a tool";
   const description = sanitizeRelayedText(input.description ?? "", MAX_DESCRIPTION_CHARS);
@@ -195,6 +201,7 @@ export function buildPermissionCard(input: PermissionCardInput): {
   return {
     body: {
       conversation_id: input.conversationId,
+      message_id: relayId("msg"),
       parts: [
         { type: "text", text: lines.join("\n") },
         {
@@ -213,7 +220,6 @@ export function buildPermissionCard(input: PermissionCardInput): {
         },
       ],
     },
-    idempotencyKey: `agent-perm-${id}`,
   };
 }
 
@@ -363,7 +369,9 @@ export class PermissionBroker {
       return denyDecision(approval);
     }
 
-    // Durable (create-once) before the card goes out.
+    // Durable (create-once) before the card goes out, carrying the id the
+    // card will commit under so a repost cannot become a second card.
+    approval.relay_message_id = card.body.message_id;
     this.approvals.create(approval);
 
     // Arm the waiter BEFORE the card goes out: a fast tap can race the POST's
@@ -383,15 +391,7 @@ export class PermissionBroker {
     });
 
     try {
-      const posted = await this.client.postMessage(card.body, card.idempotencyKey);
-      // The waiter may already have resolved (fast tap): only annotate while
-      // the approval file is still ours. The card's text and data parts land
-      // as separate messages; the last one is the data card the tap targets.
-      const cardMessage = posted.messages.at(-1);
-      if (this.waiters.has(requestId) && cardMessage) {
-        approval.relay_message_id = cardMessage.id;
-        this.approvals.put(approval);
-      }
+      await this.client.postMessage(card.body);
     } catch (error) {
       // Card never reached the phone: withdraw the ask and deny.
       const waiter = this.waiters.get(requestId);

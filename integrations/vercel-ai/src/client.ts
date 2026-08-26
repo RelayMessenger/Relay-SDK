@@ -1,9 +1,5 @@
-import type {
-  RelayOutgoingPart,
-  SendResult,
-  StreamSendResult,
-  UIMessageStreamSource,
-} from "./types.js";
+import type { RelayMessage, RelayOutgoingPart, SendResult } from "./types.js";
+import { relayId } from "./ulid.js";
 
 export interface RelayClientOptions {
   token: string;
@@ -15,29 +11,20 @@ export interface RelayClientOptions {
 export interface SendOptions {
   conversationId: string;
   parts: RelayOutgoingPart[];
-  idempotencyKey: string;
-  invocationId?: string;
-  replyTo?: { messageId: string };
-}
-
-export interface StreamOptions {
-  conversationId: string;
   /**
-   * A Vercel AI SDK UI message stream: chunk objects from
-   * `toUIMessageStream(...)`, already-encoded SSE bytes, an SSE `Response`,
-   * or a legacy `toUIMessageStreamResponse()` result.
+   * The message's identity, minted client side. Omit and the client mints one.
+   * Reuse the same id across retries of one logical send: that is the whole
+   * idempotency mechanism, so minting a fresh one on a retry is how you send
+   * the same message twice.
    */
-  stream: UIMessageStreamSource;
-  idempotencyKey: string;
-  invocationId?: string;
-  replyTo?: { messageId: string };
+  messageId?: string;
+  replyTo?: { messageId: string; partId?: string };
+  fallbackText?: string;
 }
 
 export interface TypingOptions {
   conversationId: string;
   started?: boolean;
-  label?: string;
-  invocationId?: string;
 }
 
 export class RelayApiError extends Error {
@@ -52,62 +39,6 @@ export class RelayApiError extends Error {
 }
 
 const DEFAULT_BASE_URL = "https://api.relayapp.im";
-
-/**
- * SSE-encode a stream of UI message chunk objects, byte-for-byte what ai@7's
- * `createUIMessageStreamResponse` writes: `data: <json>\n\n` per chunk and a
- * final `data: [DONE]\n\n` (ai 7.0.66 dist/index.js:6459-6471, 6485-6503).
- *
- * The same stream type carries both already-encoded SSE bytes and chunk
- * objects, so the mode is decided from the FIRST chunk and then fixed for the
- * life of the stream: an `ArrayBuffer` view means bytes, anything else means
- * objects. A byte stream is forwarded untouched and gets no terminator
- * appended, because whoever encoded it already wrote one.
- */
-function encodeUIMessageStream(
-  source: ReadableStream<unknown>,
-): ReadableStream<Uint8Array> {
-  const reader = source.getReader();
-  const encoder = new TextEncoder();
-  let bytesMode: boolean | undefined;
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      const { done, value } = await reader.read();
-      if (done) {
-        // The object path owns the terminator. An empty stream never chose a
-        // mode, so it terminates too: whoever produced zero chunks also wrote
-        // zero terminators, and the server must not wait on a bare body.
-        if (bytesMode !== true) {
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-        }
-        controller.close();
-        return;
-      }
-      bytesMode ??= ArrayBuffer.isView(value);
-      if (bytesMode) {
-        controller.enqueue(value as Uint8Array);
-        return;
-      }
-      // JSON.stringify returns undefined for undefined/functions/symbols,
-      // which would put invalid `data: undefined` frames on the wire.
-      const json = JSON.stringify(value) ?? "null";
-      controller.enqueue(encoder.encode(`data: ${json}\n\n`));
-    },
-    cancel(reason) {
-      return reader.cancel(reason);
-    },
-  });
-}
-
-function streamBody(source: UIMessageStreamSource): ReadableStream<Uint8Array> {
-  if (source instanceof ReadableStream) return encodeUIMessageStream(source);
-  const response =
-    source instanceof Response ? source : source.toUIMessageStreamResponse();
-  if (!response.body) {
-    throw new Error("UI message stream response has no body");
-  }
-  return response.body;
-}
 
 async function raiseForStatus(response: Response): Promise<void> {
   if (response.ok) return;
@@ -127,9 +58,9 @@ async function raiseForStatus(response: Response): Promise<void> {
 
 /**
  * Minimal Relay v1 client covering exactly what a webhook-driven Vercel AI
- * SDK backend needs: idempotent sends, one-shot UI-message-stream commits,
- * and the ephemeral typing indicator. Raw HTTPS remains the canonical
- * contract; see https://docs.relayapp.im/api-reference/overview.
+ * SDK backend needs: sends keyed by a client-minted message id, and the
+ * ephemeral typing indicator. Raw HTTPS remains the canonical contract; see
+ * https://docs.relayapp.im/api-reference/overview.
  */
 export class RelayClient {
   private readonly token: string;
@@ -143,25 +74,50 @@ export class RelayClient {
     this.fetchImpl = options.fetch ?? fetch;
   }
 
+  /**
+   * `POST /v1/messages`. One send is one message, keyed by the `msg_` id the
+   * client minted: Relay replays that id rather than committing it twice, and
+   * refuses another sender's claim on it with 409. There is no idempotency
+   * header.
+   */
   async send(options: SendOptions): Promise<SendResult> {
+    const messageId = options.messageId ?? relayId("msg");
     const response = await this.fetchImpl(`${this.baseUrl}/v1/messages`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.token}`,
         "Content-Type": "application/json",
-        "Idempotency-Key": options.idempotencyKey,
       },
       body: JSON.stringify({
         conversation_id: options.conversationId,
+        message_id: messageId,
         parts: options.parts,
-        ...(options.invocationId ? { invocation_id: options.invocationId } : {}),
         ...(options.replyTo
-          ? { reply_to: { message_id: options.replyTo.messageId } }
+          ? {
+              reply_to: {
+                message_id: options.replyTo.messageId,
+                ...(options.replyTo.partId ? { part_id: options.replyTo.partId } : {}),
+              },
+            }
           : {}),
+        ...(options.fallbackText === undefined
+          ? {}
+          : { fallback_text: options.fallbackText }),
       }),
     });
     await raiseForStatus(response);
-    return (await response.json()) as SendResult;
+    const body = (await response.json()) as {
+      message_id?: string;
+      message?: RelayMessage;
+    };
+    if (!body.message) {
+      throw new RelayApiError(
+        502,
+        "empty_send",
+        "relay: 202 carried no committed message",
+      );
+    }
+    return { message_id: body.message_id ?? messageId, message: body.message };
   }
 
   async sendText(
@@ -172,39 +128,11 @@ export class RelayClient {
   }
 
   /**
-   * Forward a Vercel AI SDK UI message stream to Relay in one request.
-   * Relay consumes the whole stream and commits one or more finished
-   * messages, one per bubble; there are no draft bubbles to clean up.
+   * Ephemeral typing indicator; never enters the event log. Fire and forget:
+   * nothing is stored, no lease is taken, and the recipient's client hides the
+   * indicator on its own. Send the start again while still composing to keep
+   * it alive.
    */
-  async stream(options: StreamOptions): Promise<StreamSendResult> {
-    const query = new URLSearchParams({
-      stream: "true",
-      conversation_id: options.conversationId,
-    });
-    if (options.invocationId) query.set("invocation_id", options.invocationId);
-    if (options.replyTo) {
-      query.set("reply_to", options.replyTo.messageId);
-    }
-    const response = await this.fetchImpl(
-      `${this.baseUrl}/v1/messages?${query}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.token}`,
-          "Content-Type": "text/event-stream",
-          "Idempotency-Key": options.idempotencyKey,
-          "x-vercel-ai-ui-message-stream": "v1",
-        },
-        body: streamBody(options.stream),
-        // Node's fetch requires half-duplex for streamed request bodies.
-        duplex: "half",
-      } as RequestInit,
-    );
-    await raiseForStatus(response);
-    return (await response.json()) as StreamSendResult;
-  }
-
-  /** Ephemeral typing indicator; never enters the event log. */
   async typing(options: TypingOptions): Promise<void> {
     const response = await this.fetchImpl(
       `${this.baseUrl}/v1/conversations/${options.conversationId}/typing`,
@@ -214,13 +142,7 @@ export class RelayClient {
           Authorization: `Bearer ${this.token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          started: options.started ?? true,
-          ...(options.label ? { label: options.label } : {}),
-          ...(options.invocationId
-            ? { invocation_id: options.invocationId }
-            : {}),
-        }),
+        body: JSON.stringify({ started: options.started ?? true }),
       },
     );
     await raiseForStatus(response);

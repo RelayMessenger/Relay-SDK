@@ -79,68 +79,86 @@ describe("RelayClient against a mocked Relay server", () => {
   before(async () => relay.start());
   after(async () => relay.stop());
 
-  it("pollEvents sends cursor/timeout/limit and bearer auth", async () => {
-    relay.enqueue(200, { events: [event("evt_1", "hi")], next_cursor: 4 });
+  it("pollEvents sends after/timeout/limit and bearer auth", async () => {
+    relay.enqueue(200, {
+      events: [event("evt_1", "hi")],
+      next_cursor: 4,
+      latest: 9,
+      has_more: true,
+    });
     const client = new RelayClient({ baseUrl: relay.baseUrl, token: "rly_test" });
-    const batch = await client.pollEvents({ cursor: 3, timeoutSeconds: 1, limit: 50 });
+    const batch = await client.pollEvents({ after: 3, timeoutSeconds: 1, limit: 50 });
 
     assert.equal(batch.next_cursor, 4);
+    assert.equal(batch.latest, 9);
+    assert.equal(batch.has_more, true);
     assert.equal(batch.events.length, 1);
     const request = relay.requests.at(-1);
     assert.ok(request);
     assert.equal(request.method, "GET");
     const url = new URL(request.url, relay.baseUrl);
     assert.equal(url.pathname, "/v1/events");
-    assert.equal(url.searchParams.get("cursor"), "3");
+    assert.equal(url.searchParams.get("after"), "3");
     assert.equal(url.searchParams.get("timeout"), "1");
     assert.equal(url.searchParams.get("limit"), "50");
     assert.equal(request.headers.authorization, "Bearer rly_test");
   });
 
-  it("reply handler body: sendMessage posts parts with the Idempotency-Key header", async () => {
+  it("defaults latest to the page cursor when the server omits the extras", async () => {
+    relay.enqueue(200, { events: [], next_cursor: 7 });
+    const client = new RelayClient({ baseUrl: relay.baseUrl, token: "rly_test" });
+    const batch = await client.pollEvents({ after: 7, timeoutSeconds: 1 });
+    assert.equal(batch.latest, 7);
+    assert.equal(batch.has_more, false);
+  });
+
+  it("reply handler body: sendMessage posts parts under the minted message id", async () => {
     relay.enqueue(202, { message_id: "msg_9", message: {} });
     const client = new RelayClient({ baseUrl: relay.baseUrl, token: "rly_test" });
-    await client.sendMessage(buildReply("cnv_1", "on it"), "claude-reply-123456");
+    await client.sendMessage(buildReply("cnv_1", "on it", "msg_01k1m9x2ph4vb7k0d3wzr8ftqe"));
 
     const request = relay.requests.at(-1);
     assert.ok(request);
     assert.equal(request.method, "POST");
     assert.equal(new URL(request.url, relay.baseUrl).pathname, "/v1/messages");
-    assert.equal(request.headers["idempotency-key"], "claude-reply-123456");
+    // The id in the body is the retry key; no header carries one.
+    assert.equal(request.headers["idempotency-key"], undefined);
     assert.equal(request.headers["content-type"], "application/json");
     assert.deepEqual(request.body, {
       conversation_id: "cnv_1",
+      message_id: "msg_01k1m9x2ph4vb7k0d3wzr8ftqe",
       parts: [{ type: "text", text: "on it" }],
     });
   });
 
-  it("permission card posts text + data parts with the stable per-request key", async () => {
+  it("permission card posts text + data parts under its durable message id", async () => {
     relay.enqueue(202, { message_id: "msg_10", message: {} });
     const client = new RelayClient({ baseUrl: relay.baseUrl, token: "rly_test" });
     const card = buildPermissionCard(
       { request_id: "abcde", tool_name: "Bash", description: "List files", input_preview: "ls" },
       "cnv_1",
+      "msg_01k1m9x2ph4vb7k0d3wzr8ftqf",
     );
-    await client.sendMessage(card.body, card.idempotencyKey);
+    await client.sendMessage(card.body);
 
     const request = relay.requests.at(-1);
     assert.ok(request);
-    assert.equal(request.headers["idempotency-key"], "agent-perm-abcde");
-    const body = request.body as { parts: { type: string }[] };
+    const body = request.body as { message_id: string; parts: { type: string }[] };
+    assert.equal(body.message_id, "msg_01k1m9x2ph4vb7k0d3wzr8ftqf");
     assert.deepEqual(body.parts.map((p) => p.type), ["text", "data"]);
   });
 
   it("surfaces Relay error envelopes as RelayApiError", async () => {
-    relay.enqueue(409, {
-      error: { code: "terminated_by_other_consumer", message: "another consumer took over" },
+    relay.enqueue(422, {
+      error: { code: "invalid_request", message: "text part exceeds the byte cap" },
     });
     const client = new RelayClient({ baseUrl: relay.baseUrl, token: "rly_test" });
     await assert.rejects(
-      client.pollEvents({ cursor: 0, timeoutSeconds: 1 }),
+      client.pollEvents({ after: 0, timeoutSeconds: 1 }),
       (error: unknown) => {
         assert.ok(error instanceof RelayApiError);
-        assert.equal(error.status, 409);
-        assert.equal(error.code, "terminated_by_other_consumer");
+        assert.equal(error.status, 422);
+        assert.equal(error.code, "invalid_request");
         return true;
       },
     );

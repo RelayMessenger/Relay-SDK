@@ -2,7 +2,7 @@
  * Durable local state for the relaymessenger bridge.
  *
  * Everything lives under ~/.relaymessenger (override with RELAYMESSENGER_HOME):
- *   config.json    — active agent token, API origin, owner_user_id (chmod 600)
+ *   config.json    — active agent API key, API origin, owner_user_id (chmod 600)
  *   accounts/<origin-agent-hash>/state.json — receive cursor, dedupe set,
  *                    pending events. EXCLUSIVELY
  *                    owned (written) by the `start` loop process; other
@@ -35,6 +35,7 @@ import {
   writeSync,
 } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
+import { isRelayId, relayId } from "@relaymessenger/sdk";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
@@ -42,7 +43,7 @@ export function relaymessengerHome(): string {
   if (process.env.RELAYMESSENGER_HOME) return process.env.RELAYMESSENGER_HOME;
   const home = join(homedir(), ".relaymessenger");
   // The CLI shipped as `relayapp` through 0.2.0. Adopt that state dir once so
-  // an existing pairing survives the rename; never merge two live dirs.
+  // an existing agent survives the rename; never merge two live dirs.
   const legacy = join(homedir(), ".relayapp");
   if (!existsSync(home) && existsSync(legacy)) {
     renameSync(legacy, home);
@@ -52,10 +53,16 @@ export function relaymessengerHome(): string {
 
 export interface RelayConfig {
   api_origin: string;
+  /**
+   * The agent's `rly_live_` API key, issued with the agent by
+   * `POST /v1/me/agents`. Named `agent_token` because that is where every
+   * shipped config already keeps it.
+   */
   agent_token: string;
   /**
-   * The Relay user id allowed to drive this bridge. Pinned at pair time from
-   * GET /v1/agents/me; overridable with RELAY_OWNER_USER_ID. Everything the
+   * The Relay user id allowed to drive this bridge. Pinned when the device
+   * flow completes, from GET /v1/agents/me; overridable with
+   * RELAY_OWNER_USER_ID. Everything the
    * bridge does — prompts, approvals, notify targets — is gated on it.
    */
   owner_user_id?: string;
@@ -93,7 +100,7 @@ export function runtimeHomeForConfig(
   baseHome = relaymessengerHome(),
 ): string {
   if (!config.api_origin || !config.agent_token) {
-    throw new Error("Cannot select Relay runtime state without a paired origin and agent token.");
+    throw new Error("Cannot select Relay runtime state without a paired origin and agent API key.");
   }
   const identity = relayIdentityForConfig(config);
   const namespace = createHash("sha256")
@@ -145,17 +152,14 @@ export interface RelayEvent {
 }
 
 /**
- * Inline mention of a conversation participant. Offsets are UTF-16 code
- * units into the part's `text`, which holds the inserted display name with
- * no "@". Ranges are sorted by `start` and never overlap.
+ * A mention is the handle it names. A sender confirms handles from the
+ * client's suggestion list, and the server checks each one is really written
+ * as `@handle` in the part's `text`. There are no offsets: a range could mark
+ * any word as a mention of anyone, a handle can only ever mark itself.
  */
-export interface RelayMentionRange {
-  start: number;
-  length: number;
-  participant_id: string;
-}
+export type RelayMention = string;
 
-export type RelayTextStyle = "bold" | "italic" | "underline" | "strikethrough" | "monospace" | "spoiler";
+export type RelayTextStyle = "bold" | "italic" | "underline" | "strikethrough";
 
 /**
  * One formatting run over a text part, offsets in UTF-16 code units like
@@ -170,11 +174,13 @@ export interface RelayStyleRange {
 
 /** Stored canonical part as delivered in events and history. */
 export interface RelayPart {
+  /** Permanent part identity, assigned at commit. */
+  part_id?: string;
   type: string;
   part_index?: number;
   text?: string;
   /** Text parts only. */
-  mentions?: RelayMentionRange[];
+  mentions?: RelayMention[];
   styles?: RelayStyleRange[];
   url?: string;
   attachment_id?: string;
@@ -192,10 +198,13 @@ export interface RelayMessage {
   id: string;
   conversation_id: string;
   sequence: number;
+  /** `notice` is a group notice, sent by the person who caused it. */
+  kind?: "message" | "notice";
   sender: { kind: "user" | "agent"; id: string };
   parts: RelayPart[];
   fallback_text: string;
-  reply_to?: { message_id?: string } | null;
+  /** A pointer, never a copy: Relay stores no quote snapshot. */
+  reply_to?: { message_id: string; part_id?: string } | null;
   created_at?: string;
 }
 
@@ -204,7 +213,7 @@ export interface BridgeState {
   seen_event_ids: string[];
   pending_events: Record<string, RelayEvent[]>;
   /**
-   * conversation_id → turn idempotency key persisted immediately BEFORE the
+   * conversation_id → turn ledger key persisted immediately BEFORE the
    * engine turn starts and cleared on success. A marker found at startup means
    * a previous process crashed mid-turn: that batch is dropped with a notice
    * instead of re-executed, so engine/tool side effects (deploys, deletions,
@@ -215,8 +224,8 @@ export interface BridgeState {
     { turn_key: string; event_ids: string[]; started_at: string }
   >;
   /**
-   * Engine-completed replies waiting for idempotent Relay delivery. The full
-   * reply is persisted before the POST, so a restart can redeliver it without
+   * Engine-completed replies waiting for Relay delivery. The full reply is
+   * persisted before the POST, so a restart can redeliver it without
    * executing the engine or its tools again.
    */
   pending_replies?: Record<
@@ -227,11 +236,12 @@ export interface BridgeState {
       text: string;
       created_at: string;
       /**
-       * Group turns only: the invocation this reply answers. Persisted with the
-       * text because delivery may happen in a later process, after the queued
-       * events that carried it are gone.
+       * The `msg_` id this reply will commit under. It IS the retry key —
+       * resending it is a replay, minting a new one sends the message twice —
+       * so it has to survive the restart that made a retry necessary. Absent
+       * only in a queue written before ids were the retry key.
        */
-      invocation_id?: string;
+      message_id?: string;
     }
   >;
   /**
@@ -339,7 +349,7 @@ function bridgeStateIsValid(raw: Partial<BridgeState>): boolean {
         typeof reply.conversation_id === "string" &&
         typeof reply.text === "string" &&
         typeof reply.created_at === "string" &&
-        (reply.invocation_id === undefined || typeof reply.invocation_id === "string") &&
+        (reply.message_id === undefined || typeof reply.message_id === "string") &&
         Array.isArray(reply.event_ids) &&
         reply.event_ids.every((id: unknown) => typeof id === "string"),
     ) &&
@@ -545,7 +555,8 @@ export interface McpOutboundSend {
   account_identity: string;
   conversation_id: string;
   payload_hash: string;
-  idempotency_key: string;
+  /** The `msg_` id this logical send commits under, and its only retry key. */
+  message_id: string;
   created_at: string;
   confirmed_at?: string;
 }
@@ -553,8 +564,9 @@ export interface McpOutboundSend {
 /**
  * Create-once ledger for Codex MCP logical sends. Each caller-provided send_id
  * is permanently bound to one account, origin, conversation, and exact body.
- * An ambiguous POST can therefore be repeated after a process restart with
- * the same server idempotency key, while changed content fails closed.
+ * An ambiguous POST can therefore be repeated after a process restart under
+ * the same message id — which Relay treats as a replay — while changed
+ * content fails closed.
  */
 export class McpSendLedger {
   constructor(
@@ -599,18 +611,19 @@ export class McpSendLedger {
           throw new Error(`send_id ${sendId} was already used for different content or account`);
         }
       }
-      if (typeof existing.idempotency_key !== "string" || existing.idempotency_key.length === 0) {
-        throw new Error(`Codex MCP send ledger is invalid; refusing retry (${path})`);
-      }
-      return existing;
+      if (isRelayId(existing.message_id, "msg")) return existing;
+      // An entry written before message ids were the retry key names an
+      // `Idempotency-Key` header Relay no longer honours, so it cannot make
+      // THIS send a replay of the earlier one. Adopt an id now so every
+      // further retry of this send_id is.
+      const upgraded: McpOutboundSend = { ...existing, message_id: relayId("msg") };
+      atomicWriteJson(path, upgraded, 0o600);
+      return upgraded;
     }
 
-    const scopeHash = createHash("sha256")
-      .update(`${expected.api_origin}\0${this.accountIdentity}\0${sendId}`)
-      .digest("hex");
     const created: McpOutboundSend = {
       ...expected,
-      idempotency_key: `relay-mcp-${scopeHash}`,
+      message_id: relayId("msg"),
       created_at: new Date().toISOString(),
     };
     try {

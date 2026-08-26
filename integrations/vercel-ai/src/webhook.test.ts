@@ -17,8 +17,11 @@ function envelope(overrides: Partial<MessageReceivedEvent> = {}): MessageReceive
         id: "msg_01TEST",
         conversation_id: "cnv_01TEST",
         sequence: 4,
+        kind: "message",
         sender: { kind: "user", id: "usr_01TEST" },
-        parts: [{ type: "text", text: "hello", part_index: 0 }],
+        parts: [
+          { part_id: "prt_01TEST", part_index: 0, type: "text", text: "hello" },
+        ],
         created_at: "2026-07-26T00:00:00.000Z",
       },
     },
@@ -47,7 +50,7 @@ function relayWithMockFetch() {
     void url;
     void init;
     return new Response(
-      JSON.stringify({ messages: [{ id: "msg_out" }] }),
+      JSON.stringify({ message_id: "msg_out", message: { id: "msg_out" } }),
       { status: 202, headers: { "Content-Type": "application/json" } },
     );
   });
@@ -85,64 +88,29 @@ describe("createWebhookHandler", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://api.example.test/v1/messages");
     const headers = init.headers as Record<string, string>;
-    expect(headers["Idempotency-Key"]).toBe("evt_01TEST:0");
-    expect(JSON.parse(init.body as string)).toMatchObject({
+    expect(headers["Idempotency-Key"]).toBeUndefined();
+    const body = JSON.parse(init.body as string) as { message_id: string };
+    expect(body.message_id).toMatch(/^msg_[0-9a-hjkmnp-tv-z]{26}$/);
+    expect(body).toMatchObject({
       conversation_id: "cnv_01TEST",
       parts: [{ type: "text", text: "hi back" }],
     });
   });
 
-  it("derives sequential idempotency keys per reply within one event", async () => {
+  it("gives each reply in one event its own message id", async () => {
+    // One send is one message, and the id IS the retry key, so two replies in
+    // one turn must not share one: they are two messages, not a replay.
     const { relay, fetchMock } = relayWithMockFetch();
     const handler = relay.webhook(async ({ reply }) => {
       await reply.text("one");
       await reply.text("two");
     });
     await handler(signedRequest(JSON.stringify(envelope())));
-    const keys = fetchMock.mock.calls.map(
-      ([, init]) => (init!.headers as Record<string, string>)["Idempotency-Key"],
+    const ids = fetchMock.mock.calls.map(
+      ([, init]) => (JSON.parse(init!.body as string) as { message_id: string }).message_id,
     );
-    expect(keys[0]).toBe("evt_01TEST:0");
-    expect(keys[1]).toBe("evt_01TEST:1");
-  });
-
-  it("keys a reply by event and position, whatever the model wrote", async () => {
-    // Relay hashes the request beside the key and answers 409 when one key
-    // returns with a different body, otherwise it replays the first response.
-    // So the key must NOT vary with the content: a redelivery whose model
-    // wrote something else has to collide, or it posts a second message to the
-    // person instead of being refused.
-    const texts = ["first answer", "first answer", "second answer"];
-    const keys: string[] = [];
-    for (const text of texts) {
-      const { relay, fetchMock } = relayWithMockFetch();
-      const handler = relay.webhook(async ({ reply }) => {
-        await reply.text(text);
-      });
-      await handler(signedRequest(JSON.stringify(envelope())));
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-      keys.push((init.headers as Record<string, string>)["Idempotency-Key"]);
-    }
-    expect(keys[0]).toBe(keys[1]);
-    expect(keys[2]).toBe(keys[0]);
-  });
-
-  it("threads invocation_id from group deliveries into replies", async () => {
-    const { relay, fetchMock } = relayWithMockFetch();
-    const handler = relay.webhook(async ({ invocationId, reply }) => {
-      expect(invocationId).toBe("inv_01TEST");
-      await reply.text("group reply");
-    });
-    const body = JSON.stringify(
-      envelope({
-        data: { ...envelope().data, invocation_id: "inv_01TEST" },
-      }),
-    );
-    await handler(signedRequest(body));
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(init.body as string)).toMatchObject({
-      invocation_id: "inv_01TEST",
-    });
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
   });
 
   it("deduplicates a redelivered event_id", async () => {

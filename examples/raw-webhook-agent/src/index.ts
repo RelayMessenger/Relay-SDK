@@ -1,9 +1,8 @@
 import { createServer } from "node:http";
 import {
   createRelayClient,
-  isVisibleMessage,
   MemoryDedupe,
-  replyIdempotencyKey,
+  relayId,
   verifyWebhookSignature,
   type MessageReceivedEvent,
 } from "@relaymessenger/sdk";
@@ -95,29 +94,26 @@ function accept(event: MessageReceivedEvent): void {
 
 async function respond(event: MessageReceivedEvent): Promise<void> {
   const message = event.data.message;
-  // A replayed event can carry a tombstone for a message that has since been
-  // unsent, and a tombstone has no parts to echo.
-  if (!isVisibleMessage(message)) return;
-  const invocationId = event.data.invocation_id;
+  // Mint the reply's id BEFORE the first attempt and reuse it on every retry.
+  // That id is the message's identity and the send's whole idempotency story:
+  // the same id replays the stored message, a fresh one sends a second copy.
+  // Minting it here is only good enough because this handler retries in
+  // process; a durable queue must persist the id alongside the job.
+  const replyId = relayId("msg");
   try {
     // Read is the rung you control, and it is a different claim from
     // Delivered: this says the agent is engaged with the message, which is
     // true from here on. Delivered was already recorded by the 200 above.
-    await client.setResponding({
+    await client.markRead({
       conversationId: message.conversation_id,
       messageId: message.id,
-      ...(invocationId ? { invocationId } : {}),
     });
     const text =
       message.parts.find((part) => part.type === "text")?.text ?? "(empty)";
-    await client.sendText({
+    await client.sendMessage({
       conversationId: message.conversation_id,
-      text: `Webhook echo: ${text}`,
-      // Derived from event_id, so a retry replays the same send instead of
-      // double-posting. That is what makes retrying safe now that retrying is
-      // your job.
-      idempotencyKey: replyIdempotencyKey(event.event_id),
-      ...(invocationId ? { invocationId } : {}),
+      messageId: replyId,
+      parts: [{ type: "text", text: `Webhook echo: ${text}` }],
     });
   } finally {
     // Always, even on the failure path: a typist left raised over a reply that
@@ -125,7 +121,6 @@ async function respond(event: MessageReceivedEvent): Promise<void> {
     await client.setTyping({
       conversationId: message.conversation_id,
       started: false,
-      ...(invocationId ? { invocationId } : {}),
     }).catch(() => {});
   }
 }

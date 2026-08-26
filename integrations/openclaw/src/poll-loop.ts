@@ -1,8 +1,10 @@
 // startAccount receive engine: abort-aware long poll over GET /v1/events with
 // claim -> durable attempt commit -> dispatch per event and the cursor advanced
-// only after the batch's commits. The supervisor owns restart/backoff: this loop settles
-// (throws) on terminal auth failure and consumer conflicts, and only sleeps
-// in-loop for transient errors.
+// only after the batch's commits. The poll is a plain pull that coexists with
+// webhooks and holds nothing exclusive, so a cursor that falls behind simply
+// reads more events. The supervisor owns restart/backoff: this loop settles
+// (throws) on terminal auth failure, and only sleeps in-loop for transient
+// errors.
 import { RelayApiError, isAbortError } from "./client.js";
 import type { RelayClient } from "./client.js";
 import type { RelayCursorStore } from "./cursor-store.js";
@@ -74,7 +76,7 @@ export async function runRelayPollLoop(params: RelayPollLoopParams): Promise<voi
     let page;
     try {
       page = await params.client.pollEvents({
-        cursor: params.cursorStore.current(),
+        after: params.cursorStore.current(),
         timeoutSeconds: params.timeoutSeconds ?? 30,
         ...(params.limit === undefined ? {} : { limit: params.limit }),
         signal: params.abortSignal,
@@ -86,12 +88,6 @@ export async function runRelayPollLoop(params: RelayPollLoopParams): Promise<voi
       if (error instanceof RelayApiError && error.kind === "auth") {
         // Token revoked: settle so the supervisor applies terminalDisconnect
         // (server-channels.ts:718) — an operator has to fix the token.
-        throw error;
-      }
-      if (error instanceof RelayApiError && error.kind === "conflict") {
-        // Another consumer took the long poll. Settle and let the
-        // supervisor's backoff arbitrate.
-        log(`[relay] long poll terminated by another consumer: ${error.message}`);
         throw error;
       }
       transientAttempts += 1;

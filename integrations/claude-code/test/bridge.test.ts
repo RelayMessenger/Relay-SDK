@@ -296,7 +296,7 @@ describe("verdict gating on outstanding requests", () => {
 });
 
 describe("permission card", () => {
-  it("builds a text part + origin-tagged data part with a stable idempotency key", () => {
+  it("builds a text part + origin-tagged data part under the caller's message id", () => {
     const card = buildPermissionCard(
       {
         request_id: "abcde",
@@ -305,9 +305,9 @@ describe("permission card", () => {
         input_preview: '{"command": "ls -la"}',
       },
       "cnv_9",
+      "msg_01k1m9x2ph4vb7k0d3wzr8ftqe",
     );
-    assert.equal(card.idempotencyKey, "agent-perm-abcde");
-    assert.ok(card.idempotencyKey.length >= 8);
+    assert.equal(card.body.message_id, "msg_01k1m9x2ph4vb7k0d3wzr8ftqe");
     assert.equal(card.body.conversation_id, "cnv_9");
     assert.equal(card.body.parts.length, 2);
 
@@ -343,6 +343,7 @@ describe("permission card", () => {
     const card = buildPermissionCard(
       { request_id: "abcde", tool_name: "Bash", description: hostile, input_preview: "" },
       "cnv_9",
+      "msg_01k1m9x2ph4vb7k0d3wzr8ftqe",
     );
     const text = card.body.parts[0].text ?? "";
     assert.ok(!text.includes("‮"));
@@ -368,6 +369,7 @@ describe("permission card", () => {
         input_preview: truncated,
       },
       "cnv_9",
+      "msg_01k1m9x2ph4vb7k0d3wzr8ftqe",
     );
     assert.equal(card.remoteAllowEnabled, false);
     assert.ok(card.body.parts[0].text?.includes("Remote Allow is disabled"));
@@ -409,48 +411,24 @@ describe("unsafe remote verdict", () => {
   });
 });
 
-describe("group invocations", () => {
-  function groupEvent(invocationId: string): RelayEvent {
-    const event = messageEvent({ conversation_id: "cnv_group" });
-    (event.data as Record<string, unknown>).invocation_id = invocationId;
-    return event;
-  }
-
-  it("surfaces the invocation id on the action and in the channel meta", () => {
-    const action = classifyEvent(groupEvent("inv_01"), OWNER);
-    assert(action.kind === "message");
-    assert.equal(action.invocationId, "inv_01");
-    assert.deepEqual(action.meta, {
-      chat_id: "cnv_group",
-      sender: OWNER,
-      invocation_id: "inv_01",
-    });
-  });
-
-  it("leaves a direct message with no invocation id", () => {
-    const action = classifyEvent(messageEvent({}), OWNER);
-    assert(action.kind === "message");
-    assert.equal(action.invocationId, undefined);
-    assert.equal(action.meta.invocation_id, undefined);
-  });
-
-  it("ignores a non-string invocation id rather than sending a malformed reply", () => {
-    const event = messageEvent({ conversation_id: "cnv_group" });
-    (event.data as Record<string, unknown>).invocation_id = 42;
-    const action = classifyEvent(event, OWNER);
-    assert(action.kind === "message");
-    assert.equal(action.invocationId, undefined);
-  });
-
-  it("puts the invocation id on the reply body, and omits it when absent", () => {
-    assert.deepEqual(buildReply("cnv_group", "on it", "inv_01"), {
-      conversation_id: "cnv_group",
-      parts: [{ type: "text", text: "on it" }],
-      invocation_id: "inv_01",
-    });
-    assert.deepEqual(buildReply("cnv_1", "on it"), {
+describe("reply body", () => {
+  it("carries the conversation, the text, and the id the send owns", () => {
+    assert.deepEqual(buildReply("cnv_1", "on it", "msg_01k1m9x2ph4vb7k0d3wzr8ftqe"), {
       conversation_id: "cnv_1",
+      message_id: "msg_01k1m9x2ph4vb7k0d3wzr8ftqe",
       parts: [{ type: "text", text: "on it" }],
     });
+  });
+});
+
+describe("group notices", () => {
+  // A notice is sent by the person who caused it, so it clears the sender
+  // gate. It is a record of a membership change, not something said to Claude.
+  it("never reaches Claude, even from the owner", () => {
+    const event = messageEvent({
+      parts: [{ part_index: 0, type: "text", text: "Alice added Bob to the group." }],
+    });
+    (event.data as { message: Record<string, unknown> }).message.kind = "notice";
+    assert.equal(classifyEvent(event, OWNER).kind, "ignore");
   });
 });

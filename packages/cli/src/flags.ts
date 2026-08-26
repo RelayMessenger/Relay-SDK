@@ -5,6 +5,7 @@ export interface CliFlags {
   engine: EngineName;
   dir?: string;
   name?: string;
+  handle?: string;
   rest: string[];
 }
 
@@ -28,6 +29,10 @@ export function parseFlags(argv: string[]): CliFlags {
       const value = argv[++i];
       if (!value) throw new Error("--name needs a value");
       flags.name = value;
+    } else if (arg === "--handle") {
+      const value = argv[++i];
+      if (!value) throw new Error("--handle needs a value");
+      flags.handle = value;
     } else flags.rest.push(arg);
   }
   return flags;

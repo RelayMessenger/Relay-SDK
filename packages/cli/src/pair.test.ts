@@ -5,7 +5,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { RelayClient } from "./api.js";
-import { ownerUserIdFromMe, pair, profileCaptionForVisibility, profileUrlForHandle } from "./pair.js";
+import {
+  handleFromDeviceName,
+  isValidAgentHandle,
+  ownerUserIdFromMe,
+  pair,
+  type PairOptions,
+  profileCaptionForVisibility,
+  profileUrlForHandle,
+} from "./pair.js";
 import {
   ApprovalStore,
   ConfigStore,
@@ -23,140 +31,430 @@ function listen(server: Server): Promise<number> {
   });
 }
 
+/** One scripted `POST /api/auth/device/token` answer. */
+type TokenReply = [status: number, body: Record<string, unknown>];
+
+const GRANTED: TokenReply = [
+  200,
+  { access_token: "sess_device", token_type: "Bearer", expires_in: 3600, scope: "" },
+];
+const PENDING: TokenReply = [400, { error: "authorization_pending" }];
+
 interface MockOptions {
-  /** Return 500 for the first N status polls (transient-failure path). */
-  failPollsWith500?: number;
-  /** Number of "pending" responses before "claimed". */
-  pendingPolls?: number;
+  /** Scripted token answers, in order. The last one repeats. */
+  tokenReplies?: TokenReply[];
+  /** Seconds the grant stays valid. */
+  expiresIn?: number;
+  /** Seconds between polls the server asks for. */
+  interval?: number;
+  /** Omit verification_uri_complete, leaving only the bare verification_uri. */
+  omitCompleteUri?: boolean;
   /** Omit owner_user_id from /v1/agents/me. */
   omitOwner?: boolean;
   /** Return 500 for the first N authenticated profile reads. */
   failMeWith500?: number;
-  /** Reject a specifically stale saved token while accepting the new claim. */
+  /** Reject a specifically stale saved key while accepting the new agent. */
   staleToken401?: boolean;
-  /** Omit handle from both the claim response and /v1/agents/me. */
+  /** Omit handle from both the creation response and /v1/agents/me. */
   omitHandle?: boolean;
-  /** contactAccessPolicies.visibility as GET /v1/agents/me reports it. */
+  /** contactAccessPolicies.visibility, as both the creation and profile reads report it. */
   visibility?: string;
+  /** Fail agent creation with this status + body. */
+  createAgentError?: [status: number, body: Record<string, unknown>];
 }
 
 function mockServer(options: MockOptions = {}) {
-  const requests: Array<{ method: string; url: string; auth?: string }> = [];
-  let polls = 0;
-  let remaining500 = options.failPollsWith500 ?? 0;
-  let remainingMe500 = options.failMeWith500 ?? 0;
-  const pendingPolls = options.pendingPolls ?? 1;
+  const requests: Array<{
+    method: string;
+    url: string;
+    auth?: string;
+    contentType?: string;
+    body?: any;
+  }> = [];
+  const replies = [...(options.tokenReplies ?? [GRANTED])];
   const server = createServer((req, res) => {
-    requests.push({ method: req.method!, url: req.url!, auth: req.headers.authorization });
-    const json = (status: number, body: unknown) => {
-      res.writeHead(status, { "content-type": "application/json" });
-      res.end(JSON.stringify(body));
-    };
-    if (req.method === "POST" && req.url === "/v1/pairings") {
-      return json(201, {
-        pairing_id: "pair_123",
-        code: "KITE-MANGO-47",
-        url: "https://relayapp.im/pair/KITE-MANGO-47",
-        poll_token: "rlyp_secret",
-        expires_in: 600,
-      });
-    }
-    if (req.method === "GET" && req.url === "/v1/pairings/pair_123?wait=true") {
-      if (remaining500 > 0) {
-        remaining500 -= 1;
-        return json(500, { error: { code: "internal", message: "transient blip" } });
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk) => chunks.push(chunk as Buffer));
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf8");
+      let body: any;
+      try {
+        body = raw ? JSON.parse(raw) : undefined;
+      } catch {
+        body = raw;
       }
-      polls += 1;
-      if (polls <= pendingPolls) return json(200, { status: "pending" });
-      return json(200, {
-        status: "claimed",
-        agent_token: "rly_agent_token_abc",
-        agent: options.omitHandle
-          ? { display_name: "Laptop" }
-          : { handle: "laptop", display_name: "Laptop" },
+      requests.push({
+        method: req.method!,
+        url: req.url!,
+        auth: req.headers.authorization,
+        contentType: req.headers["content-type"],
+        body,
       });
-    }
-    if (req.method === "GET" && req.url === "/v1/agents/me") {
-      if (options.staleToken401 && req.headers.authorization === "Bearer stale-token") {
-        return json(401, { error: { code: "unauthorized", message: "revoked" } });
+      const json = (status: number, payload: unknown) => {
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(JSON.stringify(payload));
+      };
+
+      if (req.method === "POST" && req.url === "/api/auth/device/code") {
+        return json(200, {
+          device_code: "dev_secret",
+          user_code: "KITE-MANGO",
+          verification_uri: "https://relayapp.im/device",
+          ...(options.omitCompleteUri
+            ? {}
+            : { verification_uri_complete: "https://relayapp.im/device?code=KITE-MANGO" }),
+          expires_in: options.expiresIn ?? 600,
+          interval: options.interval ?? 5,
+        });
       }
-      if (remainingMe500 > 0) {
-        remainingMe500 -= 1;
-        return json(500, { error: { code: "internal", message: "profile unavailable" } });
+      if (req.method === "POST" && req.url === "/api/auth/device/token") {
+        // Form-encoded is refused with 415, so the client must send JSON.
+        if (!String(req.headers["content-type"]).includes("application/json")) {
+          return json(415, { message: "unsupported media type", code: "UNSUPPORTED_MEDIA_TYPE" });
+        }
+        const reply = replies.length > 1 ? replies.shift()! : replies[0]!;
+        return json(reply[0], reply[1]);
       }
-      // Live wire shape: the profile is nested under `agent`.
-      return json(200, {
-        agent: {
-          id: "agt_1",
-          ...(options.omitHandle ? {} : { handle: "laptop" }),
-          ...(options.omitOwner ? {} : { owner_user_id: "usr_owner_1" }),
-          ...(options.visibility ? { visibility: options.visibility } : {}),
-        },
-      });
-    }
-    json(404, { error: { code: "not_found", message: "nope" } });
+      if (req.method === "POST" && req.url === "/v1/me/agents") {
+        if (options.createAgentError) {
+          return json(options.createAgentError[0], options.createAgentError[1]);
+        }
+        return json(201, {
+          agent: {
+            id: "agt_1",
+            ...(options.omitHandle ? {} : { handle: "laptop" }),
+            displayName: "laptop",
+            ...(options.visibility ? { visibility: options.visibility } : {}),
+          },
+          token: "rly_live_abc",
+          conversation_id: "cnv_owner",
+        });
+      }
+      if (req.method === "GET" && req.url === "/v1/agents/me") {
+        if (options.staleToken401 && req.headers.authorization === "Bearer stale-token") {
+          return json(401, { error: { code: "unauthorized", message: "revoked" } });
+        }
+        if ((options.failMeWith500 ?? 0) > 0) {
+          options.failMeWith500! -= 1;
+          return json(500, { error: { code: "internal", message: "profile unavailable" } });
+        }
+        // Live wire shape: the profile is nested under `agent`.
+        return json(200, {
+          agent: {
+            id: "agt_1",
+            ...(options.omitHandle ? {} : { handle: "laptop" }),
+            ...(options.omitOwner ? {} : { owner_user_id: "usr_owner_1" }),
+            ...(options.visibility ? { visibility: options.visibility } : {}),
+          },
+        });
+      }
+      json(404, { error: { code: "not_found", message: "nope" } });
+    });
   });
-  return { server, requests, pollCount: () => polls };
+  return {
+    server,
+    requests,
+    countOf: (method: string, url: string) =>
+      requests.filter((entry) => entry.method === method && entry.url === url).length,
+  };
 }
 
-async function runPair(port: number, home: string) {
+/**
+ * A clock the poll loop drives itself: sleeping advances it, so wall-clock
+ * expiry and the requested interval are both observable without waiting.
+ */
+function fakeClock() {
+  let current = 1_000_000;
+  const delays: number[] = [];
+  return {
+    delays,
+    now: () => current,
+    sleep: async (ms: number) => {
+      delays.push(ms);
+      current += ms;
+    },
+    random: () => 0,
+  };
+}
+
+async function runPair(port: number, home: string, overrides: Partial<PairOptions> = {}) {
   const origin = `http://127.0.0.1:${port}`;
   const config = new ConfigStore(home);
   const lines: string[] = [];
   const qrPayloads: string[] = [];
+  const clock = fakeClock();
   await pair({
     origin,
-    engine: "claude",
-    deviceName: "test-box",
+    deviceName: "laptop",
     config,
     client: new RelayClient(origin),
     agentClientFor: (token) => new RelayClient(origin, token),
     out: (line) => lines.push(line),
     renderQr: (url) => qrPayloads.push(url),
+    now: clock.now,
+    sleep: clock.sleep,
+    random: clock.random,
+    ...overrides,
   });
-  return { origin, config, lines, qrPayloads };
+  return { origin, config, lines, qrPayloads, delays: clock.delays };
 }
 
-test("pair: QR + code, long-poll until claimed, token + pinned owner stored privately where supported", async () => {
-  const { server, requests, pollCount } = mockServer({ pendingPolls: 1 });
+test("pair: QR + user code, poll until approved, key + pinned owner stored privately where supported", async () => {
+  const { server, requests, countOf } = mockServer();
   const port = await listen(server);
   const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-"));
   try {
     const { origin, config, lines, qrPayloads } = await runPair(port, home);
 
-    // QR encodes the claim url; the short code is shown beside it. Once the
-    // owner is pinned, the SAME renderQr is reused for the agent's own
-    // profile — REL-301: there is no in-app QR surface, so this terminal
-    // print is the only place a profile QR exists.
+    // The QR encodes the complete verification url; the short user code is
+    // shown beside it. Once the owner is pinned, the SAME renderQr is reused
+    // for the agent's own profile — REL-301: there is no in-app QR surface,
+    // so this terminal print is the only place a profile QR exists.
     assert.deepEqual(qrPayloads, [
-      "https://relayapp.im/pair/KITE-MANGO-47",
+      "https://relayapp.im/device?code=KITE-MANGO",
       "https://relayapp.im/@laptop",
     ]);
-    assert.ok(lines.some((line) => line.includes("KITE-MANGO-47")));
+    assert.ok(lines.some((line) => line.includes("KITE-MANGO")));
     assert.ok(lines.some((line) => line.includes("https://relayapp.im/@laptop")));
-    assert.ok(lines.some((line) => line.includes("@laptop")));
 
-    // Poll long-polled with the poll_token bearer, not an agent token.
-    const poll = requests.find((entry) => entry.url.startsWith("/v1/pairings/pair_123"));
-    assert.equal(poll?.auth, "Bearer rlyp_secret");
-    assert.ok(pollCount() >= 2, "kept polling while pending");
+    // The token request is JSON with the RFC 8628 grant type; a form-encoded
+    // body would have been refused with 415.
+    const poll = requests.find((entry) => entry.url === "/api/auth/device/token");
+    assert.match(poll!.contentType!, /application\/json/);
+    assert.equal(poll!.body.grant_type, "urn:ietf:params:oauth:grant-type:device_code");
+    assert.equal(poll!.body.device_code, "dev_secret");
 
-    // Owner pin used the delivered agent token.
+    // The agent is created with the device session, and only then is the
+    // agent's own key used for the profile read.
+    const create = requests.find((entry) => entry.url === "/v1/me/agents");
+    assert.equal(create?.auth, "Bearer sess_device");
+    assert.deepEqual(create?.body, { handle: "laptop", displayName: "laptop" });
     const me = requests.find((entry) => entry.url === "/v1/agents/me");
-    assert.equal(me?.auth, "Bearer rly_agent_token_abc");
+    assert.equal(me?.auth, "Bearer rly_live_abc");
+    assert.equal(countOf("POST", "/v1/me/agents"), 1);
 
-    // Token + owner are durably stored. POSIX platforms also expose the
+    // Key + owner are durably stored. POSIX platforms also expose the
     // owner-only mode bits; Windows ACLs do not map to a meaningful 0o600.
     const stored = JSON.parse(readFileSync(config.path, "utf8"));
-    assert.equal(stored.agent_token, "rly_agent_token_abc");
+    assert.equal(stored.agent_token, "rly_live_abc");
     assert.equal(stored.owner_user_id, "usr_owner_1");
     assert.equal(stored.api_origin, origin);
+    assert.equal(stored.agent.handle, "laptop");
+    assert.equal(stored.agent.display_name, "laptop");
     if (process.platform !== "win32") {
       assert.equal(statSync(config.path).mode & 0o777, 0o600);
     }
   } finally {
     server.close();
   }
+});
+
+test("pair: authorization_pending keeps polling at the server's interval until the grant lands", async () => {
+  const { server, countOf } = mockServer({
+    interval: 5,
+    tokenReplies: [PENDING, PENDING, GRANTED],
+  });
+  const port = await listen(server);
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-pending-"));
+  try {
+    const { config, delays } = await runPair(port, home);
+    assert.equal(config.load()?.agent_token, "rly_live_abc");
+    // Three polls, each waiting the advertised five seconds first. Jitter is
+    // seeded to zero here; that it is ADDED is the next test's subject.
+    assert.deepEqual(delays, [5_000, 5_000, 5_000]);
+    assert.equal(countOf("POST", "/api/auth/device/token"), 3);
+  } finally {
+    server.close();
+  }
+});
+
+test("pair: polling waits interval + jitter, because the server times every poll it rejects", async () => {
+  const { server } = mockServer({ interval: 5, tokenReplies: [PENDING, GRANTED] });
+  const port = await listen(server);
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-jitter-"));
+  try {
+    const { delays } = await runPair(port, home, { random: () => 0.5 });
+    // Arriving at exactly `interval` intermittently reads as too fast against
+    // the server's lastPolledAt, so every wait carries a little slack.
+    assert.deepEqual(delays, [5_500, 5_500]);
+  } finally {
+    server.close();
+  }
+});
+
+test("pair: slow_down widens the interval by five seconds and keeps the same device code", async () => {
+  const { server, requests } = mockServer({
+    interval: 5,
+    tokenReplies: [[400, { error: "slow_down" }], [400, { error: "slow_down" }], GRANTED],
+  });
+  const port = await listen(server);
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-slowdown-"));
+  try {
+    const { config, delays } = await runPair(port, home);
+    assert.equal(config.load()?.agent_token, "rly_live_abc");
+    assert.deepEqual(delays, [5_000, 10_000, 15_000]);
+    const codes = requests
+      .filter((entry) => entry.url === "/api/auth/device/token")
+      .map((entry) => entry.body.device_code);
+    assert.deepEqual(codes, ["dev_secret", "dev_secret", "dev_secret"], "slow_down reuses the grant");
+  } finally {
+    server.close();
+  }
+});
+
+test("pair: access_denied stops with its own message and creates nothing", async () => {
+  const { server, countOf } = mockServer({
+    tokenReplies: [[400, { error: "access_denied", error_description: "user declined" }]],
+  });
+  const port = await listen(server);
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-denied-"));
+  try {
+    await assert.rejects(() => runPair(port, home), /declined in the Relay app/);
+    assert.equal(countOf("POST", "/v1/me/agents"), 0);
+    assert.equal(new ConfigStore(home).load(), undefined);
+  } finally {
+    server.close();
+  }
+});
+
+test("pair: expired_token and wall-clock expiry both report the code expired", async () => {
+  const expiredByServer = mockServer({ tokenReplies: [[400, { error: "expired_token" }]] });
+  const port = await listen(expiredByServer.server);
+  try {
+    await assert.rejects(
+      () => runPair(port, mkdtempSync(join(tmpdir(), "relaymessenger-pair-exp-"))),
+      /code expired before it was approved/,
+    );
+  } finally {
+    expiredByServer.server.close();
+  }
+
+  // Wall clock: the grant lives 12 s and the server asks for 5 s polls, so the
+  // third wait crosses the deadline and the client stops on its own rather
+  // than polling a code it knows is dead.
+  const neverApproved = mockServer({ expiresIn: 12, interval: 5, tokenReplies: [PENDING] });
+  const port2 = await listen(neverApproved.server);
+  try {
+    await assert.rejects(
+      () => runPair(port2, mkdtempSync(join(tmpdir(), "relaymessenger-pair-wall-"))),
+      /code expired before it was approved/,
+    );
+    assert.equal(neverApproved.countOf("POST", "/api/auth/device/token"), 2);
+  } finally {
+    neverApproved.server.close();
+  }
+});
+
+test("pair: invalid_grant names the reason a retry cannot fix", async () => {
+  const { server } = mockServer({ tokenReplies: [[400, { error: "invalid_grant" }]] });
+  const port = await listen(server);
+  try {
+    await assert.rejects(
+      () => runPair(port, mkdtempSync(join(tmpdir(), "relaymessenger-pair-invalid-"))),
+      /no longer recognises this code/,
+    );
+  } finally {
+    server.close();
+  }
+});
+
+test("pair: Better Auth's own { message, code } shape is reported, not read as an RFC 8628 state", async () => {
+  const { server } = mockServer({
+    tokenReplies: [[400, { message: "device_code is required", code: "INVALID_DEVICE_CODE" }]],
+  });
+  const port = await listen(server);
+  try {
+    await assert.rejects(
+      () => runPair(port, mkdtempSync(join(tmpdir(), "relaymessenger-pair-shape-"))),
+      /device_code is required \(INVALID_DEVICE_CODE\)/,
+    );
+  } finally {
+    server.close();
+  }
+});
+
+test("pair: a 5xx on the token endpoint is transient and polling continues", async () => {
+  const { server, countOf } = mockServer({
+    tokenReplies: [[502, { message: "bad gateway" }], PENDING, GRANTED],
+  });
+  const port = await listen(server);
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-5xx-"));
+  try {
+    const { config, lines } = await runPair(port, home);
+    assert.equal(config.load()?.agent_token, "rly_live_abc");
+    assert.ok(lines.some((line) => line.startsWith("(retrying")));
+    assert.equal(countOf("POST", "/api/auth/device/token"), 3);
+  } finally {
+    server.close();
+  }
+});
+
+test("pair: a server without verification_uri_complete falls back to the bare verification url", async () => {
+  const { server } = mockServer({ omitCompleteUri: true });
+  const port = await listen(server);
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-uri-"));
+  try {
+    const { qrPayloads } = await runPair(port, home);
+    assert.equal(qrPayloads[0], "https://relayapp.im/device");
+  } finally {
+    server.close();
+  }
+});
+
+test("pair: a taken handle is reported before anything is stored, with the flag that fixes it", async () => {
+  const { server } = mockServer({
+    createAgentError: [409, { error: { code: "handle_taken", message: "@laptop is already taken" } }],
+  });
+  const port = await listen(server);
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-taken-"));
+  try {
+    await assert.rejects(() => runPair(port, home), /--handle <handle>/);
+    assert.equal(new ConfigStore(home).load(), undefined);
+  } finally {
+    server.close();
+  }
+});
+
+test("pair: a device name with no valid handle in it is refused before anyone is asked to approve", async () => {
+  const { server, requests, countOf } = mockServer();
+  const port = await listen(server);
+  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-badname-"));
+  try {
+    await assert.rejects(
+      () => runPair(port, home, { deviceName: "42" }),
+      /Pass one with `relaymessenger pair --handle/,
+    );
+    assert.equal(countOf("POST", "/api/auth/device/code"), 0, "no code was requested");
+
+    // An explicit handle rescues the same machine name.
+    const { config } = await runPair(port, home, { deviceName: "42", handle: "shed_bot" });
+    assert.equal(config.load()?.agent_token, "rly_live_abc");
+    const create = requests.find((entry) => entry.url === "/v1/me/agents");
+    assert.deepEqual(create?.body, { handle: "shed_bot", displayName: "42" });
+  } finally {
+    server.close();
+  }
+});
+
+test("handles derived from a machine name obey Relay's grammar or are refused", () => {
+  assert.equal(handleFromDeviceName("Morrison's MacBook Pro"), "morrison_s_macbook_pro");
+  assert.equal(handleFromDeviceName("laptop"), "laptop");
+  assert.equal(handleFromDeviceName("dev-box-01.local"), "dev_box_01_local");
+  // Leading non-letters are dropped, not rewritten into a leading underscore.
+  assert.equal(handleFromDeviceName("2020-imac"), "imac");
+  // Nothing valid survives: too short, or no letter to start with.
+  assert.equal(handleFromDeviceName("42"), undefined);
+  assert.equal(handleFromDeviceName("--"), undefined);
+  assert.equal(handleFromDeviceName("ok"), undefined);
+
+  assert.equal(isValidAgentHandle("laptop"), true);
+  assert.equal(isValidAgentHandle("a_b_c"), true);
+  assert.equal(isValidAgentHandle("Laptop"), false);
+  assert.equal(isValidAgentHandle("a__b"), false);
+  assert.equal(isValidAgentHandle("trailing_"), false);
+  assert.equal(isValidAgentHandle("1st"), false);
+  assert.equal(isValidAgentHandle("ab"), false);
+  assert.equal(isValidAgentHandle("a".repeat(33)), false);
 });
 
 test("REL-301: profileUrlForHandle matches Relay-iOS's Contact.profileShareURL exactly", () => {
@@ -170,17 +468,17 @@ test("REL-301: profileCaptionForVisibility matches measured server behavior, not
   // exists only to name a RESTRICTION the reader can't see from the link itself.
   assert.equal(profileCaptionForVisibility("public"), undefined);
   // "unlisted" still 200s from the anonymous GET /v1/contacts/:handle/profile
-  // (Relay-Server server/src/routes/contacts.ts:1383-1455, no session check) —
-  // anyone holding the link opens it — but it stays out of Store browse/search
-  // (server/src/domain/agentCreation.ts:188-191), which isn't visible from the
-  // link, so it's the one fact worth telling the owner.
+  // (Relay-Server server/src/routes/contacts.ts, no session check) — anyone
+  // holding the link opens it — but it stays out of Store browse/search
+  // (server/src/domain/agentCreation.ts), which isn't visible from the link,
+  // so it's the one fact worth telling the owner.
   assert.equal(
     profileCaptionForVisibility("unlisted"),
     "Unlisted — anyone with the link can open this profile, but it won't turn up in search.",
   );
-  // "private" 404s from that same anonymous route (contacts.ts:1441-1442) and the
-  // signed-in counterpart at GET /v1/contacts/:handle only admits the owner
-  // (contacts.ts:319-336: `or(ne(visibility, "private"), eq(ownerUserId, user.id))`).
+  // "private" 404s from that same anonymous route and the signed-in
+  // counterpart at GET /v1/contacts/:handle only admits the owner
+  // (`or(ne(visibility, "private"), eq(ownerUserId, user.id))`).
   assert.equal(
     profileCaptionForVisibility("private"),
     "Private — only you can open this; the link won't work for anyone else.",
@@ -202,7 +500,7 @@ test("REL-301: the profile QR always prints regardless of visibility — caption
     // missing-handle guard skips the whole block rather than printing "@undefined".
     [undefined, undefined],
   ] as const) {
-    const { server } = mockServer({ pendingPolls: 0, visibility });
+    const { server } = mockServer(visibility ? { visibility } : {});
     const port = await listen(server);
     const label = visibility ?? "field-absent";
     const home = mkdtempSync(join(tmpdir(), `relaymessenger-pair-vis-${label}-`));
@@ -231,21 +529,20 @@ test("REL-301: the profile QR always prints regardless of visibility — caption
   }
 });
 
-test("REL-301: a server that omits handle finishes pairing without printing a profile block", async () => {
-  const { server } = mockServer({ pendingPolls: 0, omitHandle: true });
+test("REL-301: a server that omits handle finishes without printing a profile block", async () => {
+  const { server } = mockServer({ omitHandle: true });
   const port = await listen(server);
   const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-nohandle-"));
   try {
     const { config, lines, qrPayloads } = await runPair(port, home);
 
-    // Pairing still succeeds and the token is stored — a missing handle must
-    // not be treated as a pairing failure.
-    assert.equal(config.load()?.agent_token, "rly_agent_token_abc");
+    // The key is stored — a missing handle must not read as a failure.
+    assert.equal(config.load()?.agent_token, "rly_live_abc");
     assert.equal(config.load()?.owner_user_id, "usr_owner_1");
 
-    // No profile block: only the pairing QR was rendered, and no line
+    // No profile block: only the approval QR was rendered, and no line
     // mentions a bare "@" handle.
-    assert.deepEqual(qrPayloads, ["https://relayapp.im/pair/KITE-MANGO-47"]);
+    assert.deepEqual(qrPayloads, ["https://relayapp.im/device?code=KITE-MANGO"]);
     assert.ok(!lines.some((line) => line.startsWith("  @")));
     assert.ok(lines.some((line) => line.includes("Next: relaymessenger start")));
   } finally {
@@ -263,8 +560,8 @@ test("regression: owner id is parsed from the live nested { agent: { owner_user_
   assert.equal(ownerUserIdFromMe({}), undefined);
 });
 
-test("re-pair isolates cursor, queued work, approvals, destinations, and engine sessions", async () => {
-  const { server } = mockServer({ pendingPolls: 0 });
+test("a new agent isolates cursor, queued work, approvals, destinations, and engine sessions", async () => {
+  const { server } = mockServer();
   const port = await listen(server);
   const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-isolation-"));
   const origin = `http://127.0.0.1:${port}`;
@@ -322,30 +619,17 @@ test("re-pair isolates cursor, queued work, approvals, destinations, and engine 
   }
 });
 
-test("pair (L3): transient poll failures retry until the claim lands", async () => {
-  const { server } = mockServer({ failPollsWith500: 2, pendingPolls: 0 });
-  const port = await listen(server);
-  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-"));
-  try {
-    const { config } = await runPair(port, home);
-    const stored = JSON.parse(readFileSync(config.path, "utf8"));
-    assert.equal(stored.agent_token, "rly_agent_token_abc");
-  } finally {
-    server.close();
-  }
-});
-
-test("pair (H3): fails closed when the server reports no owner, but keeps the token", async () => {
-  const { server } = mockServer({ pendingPolls: 0, omitOwner: true });
+test("pair (H3): fails closed when the server reports no owner, but keeps the key", async () => {
+  const { server } = mockServer({ omitOwner: true });
   const port = await listen(server);
   const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-"));
   const hadEnv = process.env.RELAY_OWNER_USER_ID;
   delete process.env.RELAY_OWNER_USER_ID;
   try {
     await assert.rejects(() => runPair(port, home), /RELAY_OWNER_USER_ID/);
-    // The locally durable token was not lost to the finalization failure.
+    // The locally durable key was not lost to the finalization failure.
     const stored = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
-    assert.equal(stored.agent_token, "rly_agent_token_abc");
+    assert.equal(stored.agent_token, "rly_live_abc");
     assert.equal(stored.owner_user_id, undefined);
   } finally {
     if (hadEnv !== undefined) process.env.RELAY_OWNER_USER_ID = hadEnv;
@@ -353,31 +637,31 @@ test("pair (H3): fails closed when the server reports no owner, but keeps the to
   }
 });
 
-test("pair resumes a saved token after transient owner lookup without creating another agent", async () => {
-  const { server, requests } = mockServer({ pendingPolls: 0, failMeWith500: 1 });
+test("pair resumes a saved key after transient owner lookup without creating another agent", async () => {
+  const { server, countOf } = mockServer({ failMeWith500: 1 });
   const port = await listen(server);
   const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-resume-"));
   try {
-    await assert.rejects(() => runPair(port, home), /resume owner pinning with this saved token/);
+    await assert.rejects(() => runPair(port, home), /resume owner pinning with this saved key/);
     const saved = new ConfigStore(home).load()!;
-    assert.equal(saved.agent_token, "rly_agent_token_abc");
+    assert.equal(saved.agent_token, "rly_live_abc");
     assert.equal(saved.owner_user_id, undefined);
 
     const resumed = await runPair(port, home);
     assert.equal(resumed.config.load()?.owner_user_id, "usr_owner_1");
     assert.ok(resumed.lines.some((line) => line.includes("Resuming owner pinning")));
     assert.equal(
-      requests.filter((request) => request.method === "POST" && request.url === "/v1/pairings").length,
+      countOf("POST", "/v1/me/agents"),
       1,
-      "resume must not create or overwrite with a second paired agent",
+      "resume must not create or overwrite with a second agent",
     );
   } finally {
     server.close();
   }
 });
 
-test("pair replaces a saved same-origin token rejected with 401 instead of selecting it forever", async () => {
-  const { server, requests } = mockServer({ pendingPolls: 0, staleToken401: true });
+test("pair replaces a saved same-origin key rejected with 401 instead of selecting it forever", async () => {
+  const { server, countOf } = mockServer({ staleToken401: true });
   const port = await listen(server);
   const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-stale-"));
   const origin = `http://127.0.0.1:${port}`;
@@ -385,51 +669,10 @@ test("pair replaces a saved same-origin token rejected with 401 instead of selec
   config.save({ api_origin: origin, agent_token: "stale-token" });
   try {
     const result = await runPair(port, home);
-    assert.equal(result.config.load()?.agent_token, "rly_agent_token_abc");
+    assert.equal(result.config.load()?.agent_token, "rly_live_abc");
     assert.equal(result.config.load()?.owner_user_id, "usr_owner_1");
-    assert.match(result.lines.join("\n"), /rejected \(401\).*fresh pairing/);
-    assert.equal(
-      requests.filter((request) => request.method === "POST" && request.url === "/v1/pairings").length,
-      1,
-    );
-  } finally {
-    server.close();
-  }
-});
-
-test("pair: expired pairing surfaces a clear error", async () => {
-  const server = createServer((req, res) => {
-    if (req.method === "POST" && req.url === "/v1/pairings") {
-      res.writeHead(201, { "content-type": "application/json" });
-      res.end(
-        JSON.stringify({
-          pairing_id: "pair_dead",
-          code: "X",
-          url: "https://relayapp.im/pair/X",
-          poll_token: "rlyp_x",
-          expires_in: 600,
-        }),
-      );
-      return;
-    }
-    res.writeHead(404, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: { code: "not_found", message: "expired" } }));
-  });
-  const port = await listen(server);
-  const home = mkdtempSync(join(tmpdir(), "relaymessenger-pair-"));
-  const origin = `http://127.0.0.1:${port}`;
-  try {
-    await assert.rejects(
-      () =>
-        pair({
-          origin,
-          config: new ConfigStore(home),
-          client: new RelayClient(origin),
-          out: () => {},
-          renderQr: () => {},
-        }),
-      /expired/i,
-    );
+    assert.match(result.lines.join("\n"), /rejected \(401\).*fresh approval/);
+    assert.equal(countOf("POST", "/v1/me/agents"), 1);
   } finally {
     server.close();
   }

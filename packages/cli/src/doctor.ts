@@ -1,4 +1,4 @@
-/** `relaymessenger doctor` — environment and pairing health checks. */
+/** `relaymessenger doctor` — environment and agent health checks. */
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -31,7 +31,7 @@ export async function doctor(out: (line: string) => void = console.log): Promise
 
   const config = new ConfigStore();
   const loaded = config.load();
-  if (check(Boolean(loaded?.agent_token), "paired (config.json has agent_token)", config.path)) {
+  if (check(Boolean(loaded?.agent_token), "agent key stored (config.json)", config.path)) {
     if (process.platform !== "win32") {
       const mode = statSync(config.path).mode & 0o777;
       check(mode === 0o600, "config.json is chmod 600", `mode ${mode.toString(8)}`);
@@ -60,7 +60,7 @@ export async function doctor(out: (line: string) => void = console.log): Promise
       check(false, `API reachable (${origin})`, String(error?.message ?? error));
     }
   } else {
-    out("     run `relaymessenger pair` to connect this machine to a Relay agent");
+    out("     run `relaymessenger pair` to create this machine's Relay agent");
   }
 
   if (loaded?.agent_token) {
@@ -91,7 +91,7 @@ export async function doctor(out: (line: string) => void = console.log): Promise
       check(false, "runtime state readable", String(error));
     }
   } else {
-    out("info  runtime state unavailable until this machine is paired");
+    out("info  runtime state unavailable until this machine has an agent");
   }
 
   for (const [engine, pkg] of Object.entries(ADAPTER_PACKAGES)) {

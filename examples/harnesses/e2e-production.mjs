@@ -44,7 +44,7 @@ const client = createRelayClient({ token });
 const me = await client.getMe();
 console.log(`e2e: authenticated as @${me.handle} (${me.id})`);
 
-const page = await client.pollEvents({ cursor: 0, timeoutSeconds: 2, limit: 10 });
+const page = await client.pollEvents({ after: 0, timeoutSeconds: 2, limit: 10 });
 console.log(
   `e2e: poll ok, ${page.events.length} event(s), next_cursor=${page.nextCursor}`,
 );

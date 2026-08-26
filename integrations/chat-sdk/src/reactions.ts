@@ -59,7 +59,11 @@ function isEmojiValue(value: EmojiValue | string): value is EmojiValue {
   return typeof value === "object" && value !== null && "name" in value;
 }
 
-export interface RelayReaction {
+/**
+ * A reaction as this adapter submits it. Distinct from `RelayReaction` in
+ * `types.ts`, which is the reaction Relay projects back onto a message.
+ */
+export interface RelayOutgoingReaction {
   type: RelayReactionType;
   emoji?: string;
 }
@@ -69,7 +73,7 @@ export interface RelayReaction {
  * `EmojiValue`, a `:shortcode:`, a bare well-known name, the `{{emoji:name}}`
  * placeholder an `EmojiValue` stringifies to, or a literal character.
  */
-export function toRelayReaction(input: EmojiValue | string): RelayReaction {
+export function toRelayReaction(input: EmojiValue | string): RelayOutgoingReaction {
   let name: string | undefined;
   let literal: string | undefined;
 

@@ -29,8 +29,6 @@ export type InboundAction =
       meta: Record<string, string>;
       conversationId: string;
       sender: string;
-      /** Present when the message is a group invocation; required on its reply. */
-      invocationId?: string;
     };
 
 /**
@@ -147,17 +145,6 @@ function extractMessage(event: RelayEvent): RelayMessage | null {
   return m;
 }
 
-/**
- * Group deliveries carry `data.invocation_id`; direct ones do not. Presence is
- * how this plugin tells a group message from a direct one.
- */
-function extractInvocationId(event: RelayEvent): string | undefined {
-  const data = event.data;
-  if (typeof data !== "object" || data === null) return undefined;
-  const value = (data as Record<string, unknown>).invocation_id;
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
 function textOfMessage(message: RelayMessage): string {
   const texts = message.parts
     .filter((part) => part.type === "text" && typeof part.text === "string" && part.text.length > 0)
@@ -189,6 +176,11 @@ export function classifyEvent(
   const message = extractMessage(event);
   if (!message) return { kind: "ignore", reason: "malformed message.received payload" };
 
+  // A group notice ("Alice added Bob") is authored by the person who did it,
+  // so it passes the sender gate below. Nobody said it to Claude.
+  if (message.kind === "notice") {
+    return { kind: "ignore", reason: "group notice" };
+  }
   // Gate on the sender's identity (user id), never the conversation.
   if (message.sender.kind !== "user") {
     return { kind: "ignore", reason: `non-user sender kind ${message.sender.kind}` };
@@ -228,18 +220,15 @@ export function classifyEvent(
   }
 
   if (text.length === 0) return { kind: "ignore", reason: "empty message body" };
-  const invocationId = extractInvocationId(event);
   return {
     kind: "message",
     content: text,
     meta: {
       chat_id: message.conversation_id,
       sender: message.sender.id,
-      ...(invocationId ? { invocation_id: invocationId } : {}),
     },
     conversationId: message.conversation_id,
     sender: message.sender.id,
-    ...(invocationId ? { invocationId } : {}),
   };
 }
 
@@ -294,7 +283,6 @@ export function hasCompletePermissionInput(value: string): boolean {
 
 export interface PermissionCard {
   body: SendMessageBody;
-  idempotencyKey: string;
   remoteAllowEnabled: boolean;
 }
 
@@ -304,10 +292,14 @@ export interface PermissionCard {
  * origin-tagged with the request id for tap replies); the text part is the
  * human-readable rendering plus the "yes <id>" / "no <id>" text fallback, so
  * clients without data-part rendering still work.
+ *
+ * `messageId` comes from the durable approval record, so re-relaying the same
+ * prompt after a restart commits the one card again instead of a second one.
  */
 export function buildPermissionCard(
   request: PermissionRequest,
   conversationId: string,
+  messageId: string,
 ): PermissionCard {
   const toolName = sanitizeRelayedText(request.tool_name, 100) || "a tool";
   const description = sanitizeRelayedText(request.description, MAX_DESCRIPTION_CHARS);
@@ -359,6 +351,7 @@ export function buildPermissionCard(
   return {
     body: {
       conversation_id: conversationId,
+      message_id: messageId,
       parts: [
         { type: "text", text: lines.join("\n") },
         {
@@ -376,23 +369,16 @@ export function buildPermissionCard(
         },
       ],
     },
-    // Deterministic per request id: a retried relay of the same prompt can
-    // never post the card twice. (Server requires 8..255 chars.)
-    idempotencyKey: `agent-perm-${id}`,
     remoteAllowEnabled,
   };
 }
 
-/** Builds the reply-tool send body. */
-export function buildReply(
-  chatId: string,
-  text: string,
-  invocationId?: string,
-): SendMessageBody {
+/** Builds the reply-tool send body under the id this logical send owns. */
+export function buildReply(chatId: string, text: string, messageId: string): SendMessageBody {
   return {
     conversation_id: chatId,
+    message_id: messageId,
     parts: [{ type: "text", text }],
-    ...(invocationId ? { invocation_id: invocationId } : {}),
   };
 }
 

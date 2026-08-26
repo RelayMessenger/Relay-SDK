@@ -23,11 +23,13 @@ describe("renderMarkdown", () => {
     expect(rendered.styles[0]?.styles.slice().sort()).toEqual(["bold", "italic"]);
   });
 
-  it("maps inline code and strikethrough onto Relay styles", () => {
+  it("keeps inline code's characters and gives it no style run", () => {
+    // Relay's styles are bold | italic | underline | strikethrough, none of
+    // them fixed width, so code takes no run rather than a decoration the
+    // author never wrote. Strikethrough beside it still maps.
     const rendered = renderMarkdown("run `npm ci` ~~later~~");
     expect(rendered.text).toBe("run npm ci later");
     expect(rendered.styles).toEqual([
-      { start: 4, length: 6, styles: ["monospace"] },
       { start: 11, length: 5, styles: ["strikethrough"] },
     ]);
   });
@@ -57,12 +59,10 @@ describe("renderMarkdown", () => {
     expect(rendered.styles).toEqual([{ start: 0, length: 5, styles: ["bold"] }]);
   });
 
-  it("keeps a fenced code block verbatim and monospaced", () => {
+  it("keeps a fenced code block verbatim and unstyled", () => {
     const rendered = renderMarkdown("```\nconst a = 1;\n```");
     expect(rendered.text).toBe("const a = 1;");
-    expect(rendered.styles).toEqual([
-      { start: 0, length: 12, styles: ["monospace"] },
-    ]);
+    expect(rendered.styles).toEqual([]);
   });
 
   it("separates blocks with a blank line", () => {

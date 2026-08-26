@@ -1,9 +1,5 @@
 export {
-  buildEditRequest,
-  classifyCursorGap,
   createRelayClient,
-  MAX_OPERATIONS_PER_EDIT,
-  type CursorGap,
   type RelayClient,
   type RelayClientOptions,
 } from "./client.js";
@@ -12,14 +8,9 @@ export {
   WebhookVerificationError,
   classifyRelayHttpStatus,
   isAbortError,
-  isRelayWebhookConflict,
   type RelayApiErrorKind,
 } from "./errors.js";
 export { createFileCursorStore, type FileCursorStore } from "./file-cursor.js";
-export {
-  deriveIdempotencyKey,
-  replyIdempotencyKey,
-} from "./idempotency.js";
 export { MemoryDedupe, type EventDedupe } from "./memory-dedupe.js";
 export {
   runPollLoop,
@@ -31,46 +22,35 @@ export {
   verifyWebhookSignature,
   type VerifyWebhookOptions,
 } from "./signature.js";
-export {
-  isKnownPartKind,
-  isVisibleMessage,
-  KNOWN_PART_KINDS,
-} from "./types.js";
+export { isKnownPartKind, KNOWN_PART_KINDS } from "./types.js";
 export type {
   MessageReceivedData,
   MessageReceivedEvent,
+  RelayActor,
   RelayAgentProfile,
   RelayAttachment,
-  RelayEditCapabilities,
-  RelayEditRequest,
   RelayEventEnvelope,
   RelayEventsPage,
+  RelayEventType,
   RelayHistoryPage,
   RelayId,
   RelayKnownPartKind,
   RelayMediaKind,
-  RelayMentionRange,
+  RelayMention,
   RelayMessage,
+  RelayMessageKind,
   RelayMessageStatus,
   RelayOutgoingPart,
   RelayPart,
-  RelayPartEditAction,
-  RelayPartOperation,
-  RelayQuoteState,
   RelayReaction,
   RelayReactionResult,
-  RelayReceiptSummary,
-  RelayReconcileResult,
-  RelayReplyQuote,
+  RelayReceipt,
   RelayReplyRef,
   RelayReplyTarget,
-  RelayRevision,
   RelaySender,
   RelaySendResult,
   RelayStyleRange,
   RelayTextStyle,
-  RelayTombstone,
-  RelayVisibleMessage,
 } from "./types.js";
 export {
   createUlidFactory,
