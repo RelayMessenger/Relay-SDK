@@ -42,7 +42,7 @@
     "smol-toml": "^1.8.0"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "2.1.233",
+    "@anthropic-ai/claude-code": "2.1.241",
     "@types/cross-spawn": "6.0.6",
     "@types/node": "^26.2.0",
     "@types/qrcode-terminal": "^0.12.2",

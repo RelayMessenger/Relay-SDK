@@ -32,7 +32,7 @@
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
     "undici": "^8.10.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "openclaw": {
