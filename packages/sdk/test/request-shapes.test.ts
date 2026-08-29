@@ -131,6 +131,8 @@ describe("Relay v1 request shapes", () => {
     await client.socketMode.retrieve();
     await client.socketMode.update("socket");
     await client.socketMode.createConnection();
+    await client.contacts.retrieve("weather");
+    await client.contacts.install("contact-id", { source: "share_link" });
 
     expect(calls.map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
@@ -139,7 +141,9 @@ describe("Relay v1 request shapes", () => {
           .replace("{chatId}", "chat-id")
           .replace("{messageId}", "message-id")
           .replace("{attachmentId}", "attachment-id")
-          .replace("{subscriptionId}", "subscription-id"),
+          .replace("{subscriptionId}", "subscription-id")
+          .replace("{handle}", "weather")
+          .replace("{contactId}", "contact-id"),
       ]),
     );
     expect(calls.every((call) =>

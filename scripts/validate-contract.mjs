@@ -15,8 +15,8 @@ const manifest = JSON.parse(
 );
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 21);
-assert.equal(operationJSON.length, 34);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 23);
+assert.equal(operationJSON.length, 36);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 11);
 
 for (const forbidden of [
@@ -64,8 +64,8 @@ if (existsSync(source)) {
       });
     }
   }
-  assert.equal(Object.keys(document.paths).length, 21);
-  assert.equal(Object.keys(document.components.schemas).length, 90);
+  assert.equal(Object.keys(document.paths).length, 23);
+  assert.equal(Object.keys(document.components.schemas).length, 94);
   assert.deepEqual(sourceOperations, manifest.operations);
   assert.equal(Object.keys(document["x-relay-webhooks"]).length, 11);
   assert.deepEqual(
@@ -97,8 +97,8 @@ if (existsSync(source)) {
 console.log(JSON.stringify({
   ok: true,
   package: "@relayapp/sdk",
-  paths: 21,
-  operations: 34,
+  paths: 23,
+  operations: 36,
   callbacks: 11,
   openapi_sha256: manifest.sha256,
 }));

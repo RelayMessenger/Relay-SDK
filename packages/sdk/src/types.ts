@@ -488,6 +488,40 @@ export interface SocketAckFrame {
   through_sequence: string;
 }
 
+export interface ContactInstallation {
+  id: string;
+  state: "active";
+  source: "exact_handle" | "share_link";
+  conversationId: UUID;
+  canRemove: boolean;
+}
+
+export interface AgentContact {
+  id: UUID;
+  handle: string;
+  displayName: string;
+  tagline: string;
+  avatarUrl: string | null;
+  accentColor: string | null;
+  capabilities: string[];
+  installation: ContactInstallation | null;
+  status: "active" | "inactive";
+  createdAt: string;
+}
+
+export interface ResolveContactResponse {
+  agent: AgentContact;
+}
+
+export interface InstallContactParams {
+  source: "exact_handle" | "share_link";
+}
+
+export interface InstallContactResponse {
+  agent: AgentContact;
+  conversation_id: UUID;
+}
+
 export interface MessageWebhookData {
   chat: {
     id: UUID;

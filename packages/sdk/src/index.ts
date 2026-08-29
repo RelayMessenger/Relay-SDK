@@ -3,6 +3,7 @@ export {
   BlockedHandles,
   Chats,
   ContactCard,
+  Contacts,
   Messages,
   Relay,
   SocketMode,

@@ -21,6 +21,8 @@ import type {
   ContactCardRetrieveParams,
   ContactCardRetrieveResponse,
   ContactCardUpdateParams,
+  InstallContactParams,
+  InstallContactResponse,
   Message,
   MessageAddReactionParams,
   MessageAddReactionResponse,
@@ -33,6 +35,7 @@ import type {
   ParticipantAddParams,
   ParticipantRemoveParams,
   RequestOptions,
+  ResolveContactResponse,
   SocketConnection,
   SocketModeState,
   UnblockHandleParams,
@@ -702,6 +705,34 @@ export class SocketMode {
   }
 }
 
+export class Contacts {
+  constructor(private readonly transport: Transport) {}
+
+  retrieve(
+    handle: string,
+    options?: RequestOptions,
+  ): Promise<ResolveContactResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/contacts/${pathID(handle.replace(/^@/, ""))}`,
+      options,
+    });
+  }
+
+  install(
+    contactID: string,
+    body: InstallContactParams,
+    options?: RequestOptions,
+  ): Promise<InstallContactResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/me/contacts/${pathID(contactID)}`,
+      body,
+      options,
+    });
+  }
+}
+
 export class Relay {
   readonly baseURL: string;
   readonly chats: Chats;
@@ -712,6 +743,7 @@ export class Relay {
   readonly contactCard: ContactCard;
   readonly blockedHandles: BlockedHandles;
   readonly socketMode: SocketMode;
+  readonly contacts: Contacts;
   readonly webhooks: Webhooks;
 
   constructor(options: RelayOptions) {
@@ -725,6 +757,7 @@ export class Relay {
     this.contactCard = new ContactCard(transport);
     this.blockedHandles = new BlockedHandles(transport);
     this.socketMode = new SocketMode(transport);
+    this.contacts = new Contacts(transport);
     this.webhooks = new Webhooks(options.webhookSecret ?? null);
   }
 }

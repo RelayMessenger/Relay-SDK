@@ -174,6 +174,16 @@ export const RELAY_V1_OPERATIONS = [
     "method": "POST",
     "path": "/v1/socket-connections",
     "operationId": "createSocketConnection"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/contacts/{handle}",
+    "operationId": "resolveContact"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/me/contacts/{contactId}",
+    "operationId": "installContact"
   }
 ] as const satisfies readonly RelayV1Operation[];
 

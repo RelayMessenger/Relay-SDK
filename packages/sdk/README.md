@@ -43,6 +43,7 @@ Useful Linq method names are retained:
 - `contactCard.create`, `retrieve`, `update`
 - `blockedHandles.list`, `block`, `unblock`
 - `socketMode.retrieve`, `update`, `createConnection`
+- `contacts.retrieve`, `install`
 
 Relay additionally exposes the user-only
 `messages.acknowledgeDelivered(messageId)`. Agent Tokens receive `403` from

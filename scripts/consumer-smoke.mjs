@@ -55,7 +55,7 @@ try {
       import packageJSON from "@relayapp/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relayapp/sdk");
       assert.equal(packageJSON.version, "0.1.0");
-      assert.equal(RELAY_V1_OPERATIONS.length, 34);
+      assert.equal(RELAY_V1_OPERATIONS.length, 36);
       assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 11);
       const client = new Relay({
         apiKey: "consumer-test",
@@ -65,6 +65,7 @@ try {
       assert.equal(typeof client.webhooks.unwrap, "function");
       assert.equal(typeof client.socketMode.createConnection, "function");
       assert.equal(typeof client.blockedHandles.block, "function");
+      assert.equal(typeof client.contacts.install, "function");
       for (const key of ["pollEvents", "realtime", "responding", "typing"]) {
         assert.equal(key in client, false);
         assert.equal(key in client.chats, false);
