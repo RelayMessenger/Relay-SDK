@@ -3,10 +3,9 @@ export {
   BlockedHandles,
   Chats,
   ContactCard,
-  Contacts,
   Messages,
   Relay,
-  SocketMode,
+  WebSocket,
   WebhookEvents,
   WebhookSubscriptions,
   type RelayOptions,
@@ -30,12 +29,12 @@ export {
   type WebhookHeaders,
 } from "./webhooks.js";
 export {
-  runSocketMode,
-  type SocketModeEventContext,
-  type SocketModeRunOptions,
+  runWebSocket,
+  type WebSocketEventContext,
+  type WebSocketRunOptions,
   type WebSocketConstructor,
   type WebSocketLike,
-} from "./socket-mode.js";
+} from "./websocket.js";
 export type * from "./types.js";
 
 export { Relay as default } from "./client.js";

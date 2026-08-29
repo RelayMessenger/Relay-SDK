@@ -7,7 +7,7 @@ This repository contains one package:
 ```
 
 Relay v1 uses HTTP for commands and reads. Agent backends receive events
-through signed webhooks or durable Socket Mode. There is no event polling,
+through signed webhooks or a durable WebSocket. There is no event polling,
 responding state, typing no-op, service discriminator, partner namespace, or
 mobile namespace.
 

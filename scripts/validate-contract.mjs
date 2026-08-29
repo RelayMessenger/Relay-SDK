@@ -15,8 +15,11 @@ const manifest = JSON.parse(
 );
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 23);
-assert.equal(operationJSON.length, 36);
+assert.equal(manifest.path_count, 22);
+assert.equal(manifest.schema_count, 92);
+assert.equal(manifest.callback_count, 11);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 22);
+assert.equal(operationJSON.length, 35);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 11);
 
 for (const forbidden of [
@@ -26,6 +29,10 @@ for (const forbidden of [
   "/responding",
   "/api/partner",
   "/api/mobile",
+  "/socket-mode",
+  "/socket-connections",
+  "/v1/contacts",
+  "/v1/me/contacts",
 ]) {
   assert.equal(
     operationJSON.some((operation) => operation.path.includes(forbidden)),
@@ -35,12 +42,26 @@ for (const forbidden of [
 }
 assert.ok(operationJSON.some((operation) =>
   operation.path === "/v1/messages/{messageId}/delivered"));
+assert.ok(operationJSON.some((operation) =>
+  operation.path === "/v1/chats/{chatId}/share_contact_card"));
+assert.ok(operationJSON.some((operation) =>
+  operation.path === "/v1/websocket"));
+assert.ok(operationJSON.some((operation) =>
+  operation.path === "/v1/websocket-connections"));
 
 const client = new Relay({
   apiKey: "contract-check",
   fetch: async () => new Response("{}", { status: 200 }),
 });
-for (const forbidden of ["pollEvents", "poll", "realtime", "responding", "typing"]) {
+for (const forbidden of [
+  "pollEvents",
+  "poll",
+  "realtime",
+  "responding",
+  "typing",
+  "socketMode",
+  "contacts",
+]) {
   assert.equal(forbidden in client, false, `unsupported client field: ${forbidden}`);
   assert.equal(forbidden in client.messages, false, `unsupported message field: ${forbidden}`);
   assert.equal(forbidden in client.chats, false, `unsupported chat field: ${forbidden}`);
@@ -64,10 +85,13 @@ if (existsSync(source)) {
       });
     }
   }
-  assert.equal(Object.keys(document.paths).length, 23);
-  assert.equal(Object.keys(document.components.schemas).length, 94);
+  assert.equal(Object.keys(document.paths).length, manifest.path_count);
+  assert.equal(Object.keys(document.components.schemas).length, manifest.schema_count);
   assert.deepEqual(sourceOperations, manifest.operations);
-  assert.equal(Object.keys(document["x-relay-webhooks"]).length, 11);
+  assert.equal(
+    Object.keys(document["x-relay-webhooks"]).length,
+    manifest.callback_count,
+  );
   assert.deepEqual(
     document.components.schemas.WebhookEventType.enum,
     [...RELAY_WEBHOOK_EVENT_TYPES],
@@ -78,13 +102,66 @@ if (existsSync(source)) {
   );
   assert.deepEqual(
     document.components.schemas.DeliveryStatus.enum,
-    ["sent", "delivered", "received", "read"],
+    ["sent", "delivered", "read"],
   );
+  assert.deepEqual(
+    document.components.schemas.WebSocketSettings.required,
+    ["enabled", "acked_through"],
+  );
+  assert.deepEqual(
+    document.components.schemas.WebSocketSettingsUpdate.required,
+    ["enabled"],
+  );
+  assert.equal(
+    document.components.schemas.WebSocketSettings.properties.enabled.type,
+    "boolean",
+  );
+  assert.equal(
+    document.components.schemas.WebSocketSettingsUpdate.properties.enabled.type,
+    "boolean",
+  );
+  assert.deepEqual(
+    document.components.schemas.WebSocketDisconnectFrame.properties.reason.enum,
+    ["disabled", "replaced", "revoked", "heartbeat_timeout", "restart"],
+  );
+  assert.deepEqual(
+    document.components.schemas.WebSocketErrorFrame.properties.code.enum,
+    [
+      "invalid_frame",
+      "ack_out_of_range",
+      "stale_connection",
+      "ack_failed",
+      "delivery_failed",
+    ],
+  );
+  assert.deepEqual(
+    document["x-relay-websocket-close-codes"],
+    {
+      "1011": "Relay could not load or commit delivery state; reconnect and resume.",
+      "1012": "Relay is restarting; reconnect and resume.",
+      "4401": "The ticket or Agent Token is invalid, revoked, or disabled.",
+      "4408": "The heartbeat timed out.",
+      "4409": "A newer connection replaced this one.",
+    },
+  );
+  for (const obsoleteSchema of [
+    "SocketModeState",
+    "SocketConnection",
+    "SocketReadyFrame",
+    "SocketEventFrame",
+    "SocketAckFrame",
+  ]) {
+    assert.equal(
+      obsoleteSchema in document.components.schemas,
+      false,
+      `${obsoleteSchema} is obsolete`,
+    );
+  }
   for (const [schema, fields] of Object.entries({
     Chat: ["health_status", "is_archived"],
     Reaction: ["sticker"],
     SendMessageResult: ["from_selection", "previous_chat_id"],
-    Message: ["reconciled_at", "effect", "service"],
+    Message: ["reconciled_at", "effect", "service", "is_delivered", "is_read"],
     ChatInfo: ["is_active"],
   })) {
     const properties = document.components.schemas[schema].properties;
@@ -97,8 +174,9 @@ if (existsSync(source)) {
 console.log(JSON.stringify({
   ok: true,
   package: "@relayapp/sdk",
-  paths: 23,
-  operations: 36,
-  callbacks: 11,
+  paths: manifest.path_count,
+  operations: operationJSON.length,
+  schemas: manifest.schema_count,
+  callbacks: manifest.callback_count,
   openapi_sha256: manifest.sha256,
 }));

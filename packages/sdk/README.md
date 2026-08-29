@@ -30,9 +30,19 @@ await relay.chats.messages.send(chatId, {
 });
 ```
 
+## Share your Contact Card
+
+```ts
+await relay.chats.shareContactCard(chatId);
+```
+
+This shares the authenticated agent's configured Contact Card in an existing
+Chat. It does not create a Chat.
+
 Useful Linq method names are retained:
 
-- `chats.create`, `retrieve`, `update`, `listChats`, `leaveChat`, `markAsRead`
+- `chats.create`, `retrieve`, `update`, `listChats`, `leaveChat`, `markAsRead`,
+  `shareContactCard`
 - `chats.messages.list`, `chats.messages.send`
 - `chats.participants.add`, `chats.participants.remove`
 - `chats.sendVoicememo`
@@ -42,12 +52,12 @@ Useful Linq method names are retained:
 - `webhookSubscriptions.create`, `retrieve`, `update`, `list`, `delete`
 - `contactCard.create`, `retrieve`, `update`
 - `blockedHandles.list`, `block`, `unblock`
-- `socketMode.retrieve`, `update`, `createConnection`
-- `contacts.retrieve`, `install`
+- `websocket.retrieve`, `update`, `createConnection`
 
 Relay additionally exposes the user-only
 `messages.acknowledgeDelivered(messageId)`. Agent Tokens receive `403` from
-that route because agent delivery is acknowledged by a successful webhook.
+that route because agent delivery is acknowledged by a successful webhook or
+WebSocket ACK.
 
 ## Raw attachment upload
 
@@ -82,13 +92,14 @@ const event = relay.webhooks.unwrap(rawBody, {
 ```
 
 Verification follows Standard Webhooks and must use the unmodified raw body.
-Return `2xx` quickly; Relay uses that response as the agent's Delivered ACK.
+Commit the complete event to a durable inbox, then return `2xx` before running
+the handler or model. Relay uses that response as the agent's Delivered ACK.
 
-## Socket Mode
+## WebSocket
 
 ```ts
-await relay.socketMode.update("socket");
-await relay.socketMode.run({
+await relay.websocket.update({ enabled: true });
+await relay.websocket.run({
   onEvent: async (event, { sequence }) => {
     // This promise must resolve only after a durable inbox commit.
     await inbox.insertOnce(event.event_id, event);
@@ -97,15 +108,25 @@ await relay.socketMode.run({
 });
 ```
 
-The SDK requests one-use connection tickets, reconnects with jitter, and sends
-a cumulative ACK after `onEvent` resolves:
+The SDK validates the ready checkpoint and contiguous decimal sequences,
+requests a fresh one-use ticket for every reconnect, and sends a cumulative ACK
+only after `onEvent` resolves:
 
 ```json
 { "type": "ack", "through_sequence": "42" }
 ```
 
-The ACK means durable acceptance, not handler or model completion. Replies use
-the normal idempotent REST message API.
+Unacknowledged events replay after reconnect, so the inbox must deduplicate by
+`event_id`. The ACK means durable acceptance, not handler or model completion.
+Replies use the normal idempotent REST message API.
+
+The runner obtains a fresh ticket and reconnects after `heartbeat_timeout`,
+`restart`, close codes `1011`, `1012`, or `4408`, and retryable
+`ack_failed`/`delivery_failed` errors. It rejects on `disabled`, `replaced`,
+`revoked`, a non-retryable API response, or a protocol violation. Restart it
+only after the operator action, credential issue, or contract mismatch has
+been resolved. Disabling WebSocket delivery returns `409` while events remain
+unacknowledged.
 
 There is intentionally no poll, mobile realtime, responding, typing, service,
 partner/mobile namespace, edit, unsend, payment, or unrelated integration API.

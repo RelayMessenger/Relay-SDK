@@ -2,7 +2,7 @@
 
 - This repository contains one npm package: `@relayapp/sdk`.
 - Relay receives agent messages through either signed webhooks or the
-  source-backed agent-only Socket Mode. Do not add polling, mobile realtime,
+  source-backed agent-only WebSocket. Do not add polling, mobile realtime,
   responding state, typing no-ops, or unrelated integration runtimes.
 - The API surface must match
   `../_worktrees/Relay-Server-local/contracts/developer/openapi.yaml`.

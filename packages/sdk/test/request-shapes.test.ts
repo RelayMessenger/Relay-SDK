@@ -24,6 +24,7 @@ const responder = (calls: Captured[]) => async (
     (method === "POST" && (
       url.pathname.endsWith("/read")
       || url.pathname.endsWith("/delivered")
+      || url.pathname.endsWith("/share_contact_card")
     ))
     || (method === "DELETE" && (
       url.pathname.startsWith("/v1/attachments/")
@@ -69,6 +70,7 @@ describe("Relay v1 request shapes", () => {
     await client.chats.participants.remove("chat-id", { handle: "carol" });
     await client.chats.leaveChat("chat-id");
     await client.chats.markAsRead("chat-id");
+    await client.chats.shareContactCard("chat-id");
     await client.messages.create({
       to: ["bob"],
       message: { parts: [{ type: "text", value: "hello" }] },
@@ -128,11 +130,9 @@ describe("Relay v1 request shapes", () => {
       first_name: "New Echo",
     });
     await client.messages.acknowledgeDelivered("message-id");
-    await client.socketMode.retrieve();
-    await client.socketMode.update("socket");
-    await client.socketMode.createConnection();
-    await client.contacts.retrieve("weather");
-    await client.contacts.install("contact-id", { source: "share_link" });
+    await client.websocket.retrieve();
+    await client.websocket.update({ enabled: true });
+    await client.websocket.createConnection();
 
     expect(calls.map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
@@ -141,22 +141,23 @@ describe("Relay v1 request shapes", () => {
           .replace("{chatId}", "chat-id")
           .replace("{messageId}", "message-id")
           .replace("{attachmentId}", "attachment-id")
-          .replace("{subscriptionId}", "subscription-id")
-          .replace("{handle}", "weather")
-          .replace("{contactId}", "contact-id"),
+          .replace("{subscriptionId}", "subscription-id"),
       ]),
     );
     expect(calls.every((call) =>
       call.headers.get("authorization") === "Bearer agent-token")).toBe(true);
 
-    const createMessage = calls[8]!;
+    const sharedContactCard = calls[8]!;
+    expect(sharedContactCard.body).toBeUndefined();
+
+    const createMessage = calls[9]!;
     expect(createMessage.headers.get("idempotency-key")).toBe("message-key");
     expect(JSON.parse(String(createMessage.body))).toEqual({
       to: ["bob"],
       message: { parts: [{ type: "text", value: "hello" }] },
     });
 
-    const chatMessage = calls[9]!;
+    const chatMessage = calls[10]!;
     expect(chatMessage.headers.get("idempotency-key")).toBe("chat-message-key");
     expect(JSON.parse(String(chatMessage.body))).toEqual({
       message: {
@@ -176,6 +177,12 @@ describe("Relay v1 request shapes", () => {
     expect(JSON.parse(String(contactUpdate.body))).toEqual({
       first_name: "New Echo",
     });
+
+    const websocketUpdate = calls.find((call) =>
+      call.method === "PUT" && call.url.pathname === "/v1/websocket")!;
+    expect(JSON.parse(String(websocketUpdate.body))).toEqual({
+      enabled: true,
+    });
   });
 
   it("has no polling, typing, responding, mobile realtime, or service surface", () => {
@@ -187,6 +194,8 @@ describe("Relay v1 request shapes", () => {
     expect(client).not.toHaveProperty("realtime");
     expect(client).not.toHaveProperty("responding");
     expect(client).not.toHaveProperty("typing");
+    expect(client).not.toHaveProperty("socketMode");
+    expect(client).not.toHaveProperty("contacts");
     expect(client.chats).not.toHaveProperty("typing");
     expect(client.messages).not.toHaveProperty("poll");
   });

@@ -21,8 +21,6 @@ import type {
   ContactCardRetrieveParams,
   ContactCardRetrieveResponse,
   ContactCardUpdateParams,
-  InstallContactParams,
-  InstallContactResponse,
   Message,
   MessageAddReactionParams,
   MessageAddReactionResponse,
@@ -35,10 +33,10 @@ import type {
   ParticipantAddParams,
   ParticipantRemoveParams,
   RequestOptions,
-  ResolveContactResponse,
-  SocketConnection,
-  SocketModeState,
   UnblockHandleParams,
+  WebSocketConnection,
+  WebSocketSettings,
+  WebSocketSettingsUpdate,
   WebhookEventListResponse,
   WebhookSubscription,
   WebhookSubscriptionCreateParams,
@@ -48,9 +46,9 @@ import type {
 } from "./types.js";
 import { Webhooks } from "./webhooks.js";
 import {
-  runSocketMode,
-  type SocketModeRunOptions,
-} from "./socket-mode.js";
+  runWebSocket,
+  type WebSocketRunOptions,
+} from "./websocket.js";
 
 type FetchLike = (
   input: string | URL | Request,
@@ -384,6 +382,14 @@ export class Chats {
     });
   }
 
+  shareContactCard(chatID: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/chats/${pathID(chatID)}/share_contact_card`,
+      options,
+    });
+  }
+
   sendVoicememo(
     chatID: string,
     body: ChatSendVoicememoParams,
@@ -663,73 +669,45 @@ export class BlockedHandles {
   }
 }
 
-export class SocketMode {
+export class WebSocket {
   constructor(private readonly transport: Transport) {}
 
-  retrieve(options?: RequestOptions): Promise<SocketModeState> {
+  retrieve(options?: RequestOptions): Promise<WebSocketSettings> {
     return this.transport.request({
       method: "GET",
-      path: "/v1/socket-mode",
+      path: "/v1/websocket",
       options,
     });
   }
 
   update(
-    mode: "webhook" | "socket",
+    body: WebSocketSettingsUpdate,
     options?: RequestOptions,
-  ): Promise<SocketModeState> {
+  ): Promise<WebSocketSettings> {
     return this.transport.request({
       method: "PUT",
-      path: "/v1/socket-mode",
-      body: { mode },
+      path: "/v1/websocket",
+      body,
       options,
     });
   }
 
-  createConnection(options?: RequestOptions): Promise<SocketConnection> {
+  createConnection(options?: RequestOptions): Promise<WebSocketConnection> {
     return this.transport.request({
       method: "POST",
-      path: "/v1/socket-connections",
+      path: "/v1/websocket-connections",
       body: {},
       options,
     });
   }
 
   /**
-   * Keeps one outbound Socket Mode connection alive. `onEvent` must return
+   * Keeps one outbound WebSocket connection alive. `onEvent` must return
    * only after the event is committed to a durable inbox; the SDK sends the
    * cumulative ACK after that promise resolves.
    */
-  run(options: SocketModeRunOptions): Promise<void> {
-    return runSocketMode(() => this.createConnection(), options);
-  }
-}
-
-export class Contacts {
-  constructor(private readonly transport: Transport) {}
-
-  retrieve(
-    handle: string,
-    options?: RequestOptions,
-  ): Promise<ResolveContactResponse> {
-    return this.transport.request({
-      method: "GET",
-      path: `/v1/contacts/${pathID(handle.replace(/^@/, ""))}`,
-      options,
-    });
-  }
-
-  install(
-    contactID: string,
-    body: InstallContactParams,
-    options?: RequestOptions,
-  ): Promise<InstallContactResponse> {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/me/contacts/${pathID(contactID)}`,
-      body,
-      options,
-    });
+  run(options: WebSocketRunOptions): Promise<void> {
+    return runWebSocket(() => this.createConnection(), options);
   }
 }
 
@@ -742,8 +720,7 @@ export class Relay {
   readonly webhookSubscriptions: WebhookSubscriptions;
   readonly contactCard: ContactCard;
   readonly blockedHandles: BlockedHandles;
-  readonly socketMode: SocketMode;
-  readonly contacts: Contacts;
+  readonly websocket: WebSocket;
   readonly webhooks: Webhooks;
 
   constructor(options: RelayOptions) {
@@ -756,8 +733,7 @@ export class Relay {
     this.webhookSubscriptions = new WebhookSubscriptions(transport);
     this.contactCard = new ContactCard(transport);
     this.blockedHandles = new BlockedHandles(transport);
-    this.socketMode = new SocketMode(transport);
-    this.contacts = new Contacts(transport);
+    this.websocket = new WebSocket(transport);
     this.webhooks = new Webhooks(options.webhookSecret ?? null);
   }
 }

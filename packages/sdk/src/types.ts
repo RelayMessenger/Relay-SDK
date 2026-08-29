@@ -12,7 +12,6 @@ export interface RequestOptions {
 export type DeliveryStatus =
   | "sent"
   | "delivered"
-  | "received"
   | "read";
 
 export type ReactionType =
@@ -95,7 +94,8 @@ export type SystemEventType =
   | "participant_added"
   | "participant_removed"
   | "group_name_updated"
-  | "group_icon_updated";
+  | "group_icon_updated"
+  | "contact_card_shared";
 
 export interface SystemEvent {
   type: SystemEventType;
@@ -103,6 +103,7 @@ export interface SystemEvent {
   subject: SystemEventParty | null;
   value: string | null;
   icon_attachment_id: UUID | null;
+  contact_card: ContactCardItem | null;
 }
 
 export interface SystemPartResponse {
@@ -135,8 +136,6 @@ export interface SentMessage {
   sent_at: string | null;
   delivered_at?: string | null;
   delivery_status: DeliveryStatus;
-  /** @deprecated Use delivery_status. */
-  is_read: boolean;
   from_handle?: ChatHandle | null;
   reply_to?: ReplyTo | null;
   is_system_message: boolean;
@@ -150,11 +149,9 @@ export interface Message {
   from_handle?: ChatHandle | null;
   parts?: MessagePartResponse[] | null;
   reply_to?: ReplyTo | null;
+  is_system_message: boolean;
+  system_event?: SystemEvent | null;
   is_from_me: boolean;
-  /** @deprecated Use delivery_status. */
-  is_delivered: boolean;
-  /** @deprecated Use delivery_status. */
-  is_read: boolean;
   delivery_status: DeliveryStatus;
   created_at: string;
   updated_at: string;
@@ -407,10 +404,10 @@ export interface WebhookSubscriptionListResponse {
 export interface ContactCardItem {
   handle: string;
   first_name: string;
-  last_name?: string | null;
-  image_url?: string | null;
+  last_name: string | null;
+  image_url: string | null;
   is_active: boolean;
-  kind?: "user" | "agent";
+  kind: "user" | "agent";
 }
 
 export interface ContactCardCreateParams {
@@ -431,8 +428,8 @@ export interface ContactCardRetrieveResponse {
 export interface ContactCardUpdateParams {
   handle: string;
   first_name?: string;
-  last_name?: string;
-  image_url?: string;
+  last_name?: string | null;
+  image_url?: string | null;
 }
 
 export interface BlockedHandle {
@@ -458,18 +455,22 @@ export interface UnblockHandleParams {
   handle: string;
 }
 
-export interface SocketModeState {
-  mode: "webhook" | "socket";
-  acked_through?: string;
+export interface WebSocketSettings {
+  enabled: boolean;
+  acked_through: string;
 }
 
-export interface SocketConnection {
+export interface WebSocketSettingsUpdate {
+  enabled: boolean;
+}
+
+export interface WebSocketConnection {
   url: string;
   expires_at: string;
   subprotocol: "relay.v1.json";
 }
 
-export interface SocketReadyFrame {
+export interface WebSocketReadyFrame {
   type: "ready";
   connection_id: UUID;
   acked_through: string;
@@ -477,49 +478,40 @@ export interface SocketReadyFrame {
   max_in_flight: number;
 }
 
-export interface SocketEventFrame<T = Record<string, unknown>> {
+export interface WebSocketEventFrame<T = Record<string, unknown>> {
   type: "event";
   sequence: string;
   event: RelayWebhookEnvelope<T>;
 }
 
-export interface SocketAckFrame {
+export interface WebSocketAckFrame {
   type: "ack";
   through_sequence: string;
 }
 
-export interface ContactInstallation {
-  id: string;
-  state: "active";
-  source: "exact_handle" | "share_link";
-  conversationId: UUID;
-  canRemove: boolean;
+export interface WebSocketErrorFrame {
+  type: "error";
+  code: WebSocketErrorCode;
+  message: string;
+  fatal: boolean;
+  retryable: boolean;
 }
 
-export interface AgentContact {
-  id: UUID;
-  handle: string;
-  displayName: string;
-  tagline: string;
-  avatarUrl: string | null;
-  accentColor: string | null;
-  capabilities: string[];
-  installation: ContactInstallation | null;
-  status: "active" | "inactive";
-  createdAt: string;
-}
+export type WebSocketErrorCode =
+  | "invalid_frame"
+  | "ack_out_of_range"
+  | "stale_connection"
+  | "ack_failed"
+  | "delivery_failed";
 
-export interface ResolveContactResponse {
-  agent: AgentContact;
-}
-
-export interface InstallContactParams {
-  source: "exact_handle" | "share_link";
-}
-
-export interface InstallContactResponse {
-  agent: AgentContact;
-  conversation_id: UUID;
+export interface WebSocketDisconnectFrame {
+  type: "disconnect";
+  reason:
+    | "disabled"
+    | "replaced"
+    | "revoked"
+    | "heartbeat_timeout"
+    | "restart";
 }
 
 export interface MessageWebhookData {

@@ -9,6 +9,7 @@ import Relay, {
   type Reaction,
   type RelayWebhookEnvelope,
   type SentMessage,
+  type WebSocketDisconnectFrame,
 } from "@relayapp/sdk";
 
 const relay = new Relay({
@@ -22,7 +23,14 @@ const content: MessageContent = {
 };
 
 await relay.chats.messages.send("chat-id", { message: content });
+await relay.chats.shareContactCard("chat-id");
 await relay.messages.acknowledgeDelivered("message-id");
+await relay.websocket.update({ enabled: true });
+const reconnect: WebSocketDisconnectFrame = {
+  type: "disconnect",
+  reason: "heartbeat_timeout",
+};
+void reconnect;
 await relay.webhookSubscriptions.create({
   target_url: "https://receiver.test/webhook",
   subscribed_events: ["message.received"],
@@ -69,6 +77,10 @@ relay.chats.typing;
 relay.responding;
 // @ts-expect-error The SDK does not expose Linq poll resources.
 relay.messages.poll;
+// @ts-expect-error Socket Mode is not Relay vocabulary.
+relay.socketMode;
+// @ts-expect-error Relay has no contacts client resource.
+relay.contacts;
 const withService: MessageContent = {
   parts: [{ type: "text", value: "No" }],
   // @ts-expect-error Relay messages have no service discriminator.

@@ -47,6 +47,11 @@ export const RELAY_V1_OPERATIONS = [
   },
   {
     "method": "POST",
+    "path": "/v1/chats/{chatId}/share_contact_card",
+    "operationId": "shareContactWithChat"
+  },
+  {
+    "method": "POST",
     "path": "/v1/messages",
     "operationId": "sendMessage"
   },
@@ -162,28 +167,18 @@ export const RELAY_V1_OPERATIONS = [
   },
   {
     "method": "GET",
-    "path": "/v1/socket-mode",
-    "operationId": "getSocketMode"
+    "path": "/v1/websocket",
+    "operationId": "getWebSocketSettings"
   },
   {
     "method": "PUT",
-    "path": "/v1/socket-mode",
-    "operationId": "setSocketMode"
+    "path": "/v1/websocket",
+    "operationId": "updateWebSocketSettings"
   },
   {
     "method": "POST",
-    "path": "/v1/socket-connections",
-    "operationId": "createSocketConnection"
-  },
-  {
-    "method": "GET",
-    "path": "/v1/contacts/{handle}",
-    "operationId": "resolveContact"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/me/contacts/{contactId}",
-    "operationId": "installContact"
+    "path": "/v1/websocket-connections",
+    "operationId": "createWebSocketConnection"
   }
 ] as const satisfies readonly RelayV1Operation[];
 

@@ -1,8 +1,8 @@
 {
   "source": "Relay-Server-local/contracts/developer/openapi.yaml",
-  "sha256": "da387a6ec0a0d84091321a964a75f111f2e102f1c8c116f7d4b85350169504bf",
-  "path_count": 23,
-  "schema_count": 94,
+  "sha256": "93b65f59db886bd560802d1eb668804666cb62c08633e3fc1ab0286b383208cc",
+  "path_count": 22,
+  "schema_count": 92,
   "callback_count": 11,
   "operations": [
     {
@@ -44,6 +44,11 @@
       "method": "POST",
       "path": "/v1/chats/{chatId}/read",
       "operationId": "markChatAsRead"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chats/{chatId}/share_contact_card",
+      "operationId": "shareContactWithChat"
     },
     {
       "method": "POST",
@@ -162,28 +167,18 @@
     },
     {
       "method": "GET",
-      "path": "/v1/socket-mode",
-      "operationId": "getSocketMode"
+      "path": "/v1/websocket",
+      "operationId": "getWebSocketSettings"
     },
     {
       "method": "PUT",
-      "path": "/v1/socket-mode",
-      "operationId": "setSocketMode"
+      "path": "/v1/websocket",
+      "operationId": "updateWebSocketSettings"
     },
     {
       "method": "POST",
-      "path": "/v1/socket-connections",
-      "operationId": "createSocketConnection"
-    },
-    {
-      "method": "GET",
-      "path": "/v1/contacts/{handle}",
-      "operationId": "resolveContact"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/me/contacts/{contactId}",
-      "operationId": "installContact"
+      "path": "/v1/websocket-connections",
+      "operationId": "createWebSocketConnection"
     }
   ]
 }
