@@ -1,7 +1,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/relayapp/Relay-SDK/security/advisories/new
+    url: https://github.com/RelayMessenger/Relay-SDK/security/advisories/new
     about: Report vulnerabilities privately.
   - name: Relay documentation
     url: https://docs.relayapp.im
