@@ -16,15 +16,14 @@ const manifest = JSON.parse(
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.path_count, 22);
-assert.equal(manifest.schema_count, 92);
-assert.equal(manifest.callback_count, 11);
+assert.equal(manifest.schema_count, 99);
+assert.equal(manifest.callback_count, 13);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 22);
-assert.equal(operationJSON.length, 35);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 11);
+assert.equal(operationJSON.length, 36);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 13);
 
 for (const forbidden of [
   "/v1/events",
-  "/typing",
   "/realtime",
   "/responding",
   "/api/partner",
@@ -47,7 +46,13 @@ assert.ok(operationJSON.some((operation) =>
 assert.ok(operationJSON.some((operation) =>
   operation.path === "/v1/websocket"));
 assert.ok(operationJSON.some((operation) =>
-  operation.path === "/v1/websocket-connections"));
+  operation.path === "/v1/chats/{chatId}/typing"
+  && operation.method === "POST"));
+assert.ok(operationJSON.some((operation) =>
+  operation.path === "/v1/chats/{chatId}/typing"
+  && operation.method === "DELETE"));
+assert.equal(operationJSON.some((operation) =>
+  operation.path === "/v1/websocket-connections"), false);
 
 const client = new Relay({
   apiKey: "contract-check",
@@ -106,7 +111,7 @@ if (existsSync(source)) {
   );
   assert.deepEqual(
     document.components.schemas.WebSocketSettings.required,
-    ["enabled", "acked_through"],
+    ["enabled", "acked_through", "full_sync_through"],
   );
   assert.deepEqual(
     document.components.schemas.WebSocketSettingsUpdate.required,
@@ -132,6 +137,8 @@ if (existsSync(source)) {
       "stale_connection",
       "ack_failed",
       "delivery_failed",
+      "full_sync_required",
+      "full_sync_mismatch",
     ],
   );
   assert.deepEqual(
@@ -139,7 +146,7 @@ if (existsSync(source)) {
     {
       "1011": "Relay could not load or commit delivery state; reconnect and resume.",
       "1012": "Relay is restarting; reconnect and resume.",
-      "4401": "The ticket or Agent Token is invalid, revoked, or disabled.",
+      "4401": "The Agent Token is invalid, revoked, or WebSocket delivery is disabled.",
       "4408": "The heartbeat timed out.",
       "4409": "A newer connection replaced this one.",
     },
@@ -150,6 +157,7 @@ if (existsSync(source)) {
     "SocketReadyFrame",
     "SocketEventFrame",
     "SocketAckFrame",
+    "WebSocketConnection",
   ]) {
     assert.equal(
       obsoleteSchema in document.components.schemas,
@@ -169,6 +177,47 @@ if (existsSync(source)) {
       assert.equal(field in properties, false, `${schema}.${field} is obsolete`);
     }
   }
+  assert.ok(
+    "deliveries" in document.components.schemas.Message.properties,
+    "Message.deliveries is required in the SDK contract",
+  );
+  assert.deepEqual(
+    document.components.schemas.WebSocketReadyFrame.required,
+    [
+      "type",
+      "connection_id",
+      "acked_through",
+      "full_sync_required",
+      "full_sync_through",
+      "heartbeat_interval_ms",
+      "max_in_flight",
+    ],
+  );
+  assert.deepEqual(
+    document.components.schemas.WebSocketFullSyncFrame.properties.reason.enum,
+    ["checkpoint_outside_retention"],
+  );
+  for (const name of [
+    "ChatTypingIndicatorStartedEvent",
+    "ChatTypingIndicatorStoppedEvent",
+  ]) {
+    assert.deepEqual(
+      document.components.schemas[name].required,
+      ["chat_id", "contact"],
+    );
+    assert.equal(
+      document.components.schemas[name].properties.contact.$ref,
+      "#/components/schemas/TypingContact",
+    );
+  }
+  assert.equal(
+    document.components.schemas.SupportedContentType.enum.includes("image/webp"),
+    true,
+  );
+  assert.equal(
+    document.components.schemas.SupportedContentType.enum.includes("image/svg+xml"),
+    false,
+  );
 }
 
 console.log(JSON.stringify({

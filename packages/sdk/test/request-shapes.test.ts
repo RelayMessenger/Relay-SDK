@@ -25,11 +25,13 @@ const responder = (calls: Captured[]) => async (
       url.pathname.endsWith("/read")
       || url.pathname.endsWith("/delivered")
       || url.pathname.endsWith("/share_contact_card")
+      || url.pathname.endsWith("/typing")
     ))
     || (method === "DELETE" && (
       url.pathname.startsWith("/v1/attachments/")
       || url.pathname.startsWith("/v1/webhook-subscriptions/")
       || url.pathname === "/v1/blocked_handles"
+      || url.pathname.endsWith("/typing")
     ))
   );
   if (noContent) return new Response(null, { status: 204 });
@@ -69,6 +71,8 @@ describe("Relay v1 request shapes", () => {
     await client.chats.participants.add("chat-id", { handle: "carol" });
     await client.chats.participants.remove("chat-id", { handle: "carol" });
     await client.chats.leaveChat("chat-id");
+    await client.chats.startTyping("chat-id");
+    await client.chats.stopTyping("chat-id");
     await client.chats.markAsRead("chat-id");
     await client.chats.shareContactCard("chat-id");
     await client.messages.create({
@@ -132,7 +136,6 @@ describe("Relay v1 request shapes", () => {
     await client.messages.acknowledgeDelivered("message-id");
     await client.websocket.retrieve();
     await client.websocket.update({ enabled: true });
-    await client.websocket.createConnection();
 
     expect(calls.map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
@@ -147,17 +150,17 @@ describe("Relay v1 request shapes", () => {
     expect(calls.every((call) =>
       call.headers.get("authorization") === "Bearer agent-token")).toBe(true);
 
-    const sharedContactCard = calls[8]!;
+    const sharedContactCard = calls[10]!;
     expect(sharedContactCard.body).toBeUndefined();
 
-    const createMessage = calls[9]!;
+    const createMessage = calls[11]!;
     expect(createMessage.headers.get("idempotency-key")).toBe("message-key");
     expect(JSON.parse(String(createMessage.body))).toEqual({
       to: ["bob"],
       message: { parts: [{ type: "text", value: "hello" }] },
     });
 
-    const chatMessage = calls[10]!;
+    const chatMessage = calls[12]!;
     expect(chatMessage.headers.get("idempotency-key")).toBe("chat-message-key");
     expect(JSON.parse(String(chatMessage.body))).toEqual({
       message: {
@@ -185,7 +188,7 @@ describe("Relay v1 request shapes", () => {
     });
   });
 
-  it("has no polling, typing, responding, mobile realtime, or service surface", () => {
+  it("exposes real typing commands without polling or invented realtime surfaces", () => {
     const client = new Relay({
       apiKey: "token",
       fetch: responder([]),
@@ -197,6 +200,9 @@ describe("Relay v1 request shapes", () => {
     expect(client).not.toHaveProperty("socketMode");
     expect(client).not.toHaveProperty("contacts");
     expect(client.chats).not.toHaveProperty("typing");
+    expect(client.chats).toHaveProperty("startTyping");
+    expect(client.chats).toHaveProperty("stopTyping");
+    expect(client.websocket).not.toHaveProperty("createConnection");
     expect(client.messages).not.toHaveProperty("poll");
   });
 });

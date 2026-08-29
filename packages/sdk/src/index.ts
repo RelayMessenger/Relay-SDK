@@ -31,6 +31,7 @@ export {
 export {
   runWebSocket,
   type WebSocketEventContext,
+  type WebSocketFullSyncContext,
   type WebSocketRunOptions,
   type WebSocketConstructor,
   type WebSocketLike,

@@ -1,16 +1,21 @@
+import NodeWebSocket from "ws";
 import type {
   RelayWebhookEnvelope,
-  WebSocketConnection,
   WebSocketDisconnectFrame,
   WebSocketErrorFrame,
   WebSocketEventFrame,
+  WebSocketFullSyncFrame,
   WebSocketReadyFrame,
 } from "./types.js";
-import { RelayAPIError } from "./errors.js";
 import { RELAY_WEBHOOK_EVENT_TYPES } from "./operations.js";
 
 export interface WebSocketEventContext {
   sequence: string;
+}
+
+export interface WebSocketFullSyncContext {
+  throughSequence: string;
+  reason: WebSocketFullSyncFrame["reason"];
 }
 
 export interface WebSocketLike {
@@ -27,7 +32,10 @@ export interface WebSocketLike {
 }
 
 export interface WebSocketConstructor {
-  new (url: string, protocols?: string | string[]): WebSocketLike;
+  new (
+    url: string,
+    options?: { headers?: Record<string, string> },
+  ): WebSocketLike;
 }
 
 export interface WebSocketRunOptions {
@@ -40,6 +48,11 @@ export interface WebSocketRunOptions {
     event: RelayWebhookEnvelope,
     context: WebSocketEventContext,
   ): Promise<void>;
+  /**
+   * Replace local state with a complete REST snapshot through this sequence.
+   * Resolve only after that snapshot is durably committed.
+   */
+  onFullSync(context: WebSocketFullSyncContext): Promise<void>;
   onError?(error: unknown): void;
 }
 
@@ -106,6 +119,8 @@ const WEBSOCKET_ERROR_CODES = new Set([
   "stale_connection",
   "ack_failed",
   "delivery_failed",
+  "full_sync_required",
+  "full_sync_mismatch",
 ]);
 const CLIENT_CLOSE_DURABLE_ACCEPTANCE = 4001;
 const CLIENT_CLOSE_PROTOCOL_ERROR = 4002;
@@ -123,12 +138,20 @@ const parseReady = (value: unknown): WebSocketReadyFrame => {
       "type",
       "connection_id",
       "acked_through",
+      "full_sync_required",
+      "full_sync_through",
       "heartbeat_interval_ms",
       "max_in_flight",
     ])
     || value.type !== "ready"
     || !validUUID(value.connection_id)
     || !validSequence(value.acked_through)
+    || typeof value.full_sync_required !== "boolean"
+    || (
+      value.full_sync_required
+        ? !validSequence(value.full_sync_through)
+        : value.full_sync_through !== null
+    )
     || !Number.isInteger(value.heartbeat_interval_ms)
     || (value.heartbeat_interval_ms as number) < 1
     || !Number.isInteger(value.max_in_flight)
@@ -162,6 +185,21 @@ const parseEvent = (value: unknown): WebSocketEventFrame => {
     );
   }
   return value as unknown as WebSocketEventFrame;
+};
+
+const parseFullSync = (value: unknown): WebSocketFullSyncFrame => {
+  if (
+    !isRecord(value)
+    || !hasExactKeys(value, ["type", "through_sequence", "reason"])
+    || value.type !== "full_sync"
+    || !validSequence(value.through_sequence)
+    || value.reason !== "checkpoint_outside_retention"
+  ) {
+    throw new WebSocketProtocolError(
+      "Relay WebSocket received an invalid FULL sync frame.",
+    );
+  }
+  return value as unknown as WebSocketFullSyncFrame;
 };
 
 const parseError = (value: unknown): WebSocketErrorFrame => {
@@ -219,12 +257,12 @@ class WebSocketStoppedError extends Error {
   }
 }
 
-class DurableAcceptanceError extends Error {
+class DurableApplicationError extends Error {
   readonly closeCode = CLIENT_CLOSE_DURABLE_ACCEPTANCE;
 
-  constructor(cause: unknown) {
+  constructor(operation: "event" | "FULL sync", cause: unknown) {
     super(
-      `Relay WebSocket durable acceptance failed: ${
+      `Relay WebSocket durable ${operation} application failed: ${
         cause instanceof Error ? cause.message : String(cause)
       }`,
       { cause },
@@ -241,56 +279,45 @@ class RetryableWebSocketError extends Error {
   }
 }
 
-const parseConnection = (
-  value: WebSocketConnection,
-): WebSocketConnection => {
-  const record = value as unknown;
-  if (!isRecord(record)) {
-    throw new WebSocketProtocolError(
-      "Relay returned an invalid WebSocket connection ticket.",
-    );
-  }
+const deriveWebSocketURL = (baseURL: string): string => {
   let url: URL;
   try {
-    url = new URL(String(record.url));
+    url = new URL(baseURL);
   } catch {
-    throw new WebSocketProtocolError(
-      "Relay returned an invalid WebSocket connection ticket.",
-    );
+    throw new TypeError("Relay baseURL must be an absolute HTTP(S) URL.");
   }
   if (
-    !hasExactKeys(record, [
-      "url",
-      "expires_at",
-      "subprotocol",
-    ])
-    || typeof record.url !== "string"
-    || typeof record.expires_at !== "string"
-    || (url.protocol !== "ws:" && url.protocol !== "wss:")
+    (url.protocol !== "http:" && url.protocol !== "https:")
     || url.username !== ""
     || url.password !== ""
-    || Number.isNaN(Date.parse(record.expires_at))
-    || record.subprotocol !== "relay.v1.json"
   ) {
-    throw new WebSocketProtocolError(
-      "Relay returned an invalid WebSocket connection ticket.",
-    );
+    throw new TypeError("Relay baseURL must be an absolute HTTP(S) URL.");
   }
-  return value;
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = "/v1/websocket";
+  url.search = "";
+  url.hash = "";
+  return url.toString();
 };
 
 const runConnection = (
-  connection: WebSocketConnection,
+  url: string,
+  agentToken: string,
   options: WebSocketRunOptions,
   Constructor: WebSocketConstructor,
   onReady: () => void,
 ): Promise<void> =>
   new Promise((resolve, reject) => {
-    const socket = new Constructor(connection.url, connection.subprotocol);
+    const socket = new Constructor(url, {
+      headers: {
+        Authorization: `Bearer ${agentToken}`,
+      },
+    });
     let chain = Promise.resolve();
     let settled = false;
     let ready = false;
     let acceptedThrough: bigint | undefined;
+    let fullSyncThrough: bigint | null | undefined;
 
     const finish = (error?: unknown): void => {
       if (settled) return;
@@ -304,6 +331,17 @@ const runConnection = (
     };
     const stopReceiving = (): void => {
       socket.removeEventListener("message", onMessage);
+    };
+    const send = (frame: unknown): void => {
+      try {
+        socket.send(JSON.stringify(frame));
+      } catch (cause) {
+        throw new RetryableWebSocketError(
+          `Relay WebSocket could not send a client frame: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`,
+        );
+      }
     };
     const onMessage = (message: { data: unknown }): void => {
       chain = chain.then(async () => {
@@ -326,6 +364,9 @@ const runConnection = (
           const parsed = parseReady(frame);
           ready = true;
           acceptedThrough = BigInt(parsed.acked_through);
+          fullSyncThrough = parsed.full_sync_required
+            ? BigInt(parsed.full_sync_through!)
+            : null;
           onReady();
           return;
         }
@@ -353,9 +394,41 @@ const runConnection = (
           }
           throw new RetryableWebSocketError(parsed.message);
         }
-        if (!ready || acceptedThrough === undefined) {
+        if (!ready || acceptedThrough === undefined || fullSyncThrough === undefined) {
           throw new WebSocketProtocolError(
-            "Relay WebSocket received an event before the ready frame.",
+            "Relay WebSocket received a data frame before the ready frame.",
+          );
+        }
+        if (isRecord(frame) && frame.type === "full_sync") {
+          const fullSync = parseFullSync(frame);
+          if (
+            fullSyncThrough === null
+            || BigInt(fullSync.through_sequence) !== fullSyncThrough
+          ) {
+            throw new WebSocketProtocolError(
+              "Relay WebSocket FULL sync did not match the ready checkpoint.",
+            );
+          }
+          try {
+            await options.onFullSync({
+              throughSequence: fullSync.through_sequence,
+              reason: fullSync.reason,
+            });
+          } catch (cause) {
+            throw new DurableApplicationError("FULL sync", cause);
+          }
+          if (options.signal?.aborted) return;
+          send({
+            type: "full_sync_complete",
+            through_sequence: fullSync.through_sequence,
+          });
+          acceptedThrough = fullSyncThrough;
+          fullSyncThrough = null;
+          return;
+        }
+        if (fullSyncThrough !== null) {
+          throw new WebSocketProtocolError(
+            "Relay WebSocket received an event while FULL sync was pending.",
           );
         }
         const event = parseEvent(frame);
@@ -368,14 +441,14 @@ const runConnection = (
         try {
           await options.onEvent(event.event, { sequence: event.sequence });
         } catch (cause) {
-          throw new DurableAcceptanceError(cause);
+          throw new DurableApplicationError("event", cause);
         }
         acceptedThrough = sequence;
         if (options.signal?.aborted) return;
-        socket.send(JSON.stringify({
+        send({
           type: "ack",
           through_sequence: event.sequence,
-        }));
+        });
       }).catch((error) => {
         stopReceiving();
         socket.close(
@@ -385,14 +458,14 @@ const runConnection = (
               ? error.closeCode
               : error instanceof RetryableWebSocketError
                 ? error.closeCode
-              : CLIENT_CLOSE_DURABLE_ACCEPTANCE,
+                : CLIENT_CLOSE_DURABLE_ACCEPTANCE,
           error instanceof WebSocketStoppedError
             ? "Relay stopped this consumer"
             : error instanceof WebSocketProtocolError
               ? "protocol error"
               : error instanceof RetryableWebSocketError
                 ? "Relay requested reconnect"
-              : "durable acceptance failed",
+                : "durable application failed",
         );
         finish(error);
       });
@@ -400,15 +473,24 @@ const runConnection = (
     const onClose = (event: { code?: number; reason?: string }): void => {
       stopReceiving();
       void chain.then(() => {
-        if (event.code === 4409) {
+        if (options.signal?.aborted) {
+          finish();
+          return;
+        }
+        if (event.code === 4401 || event.code === 4409) {
           finish(new WebSocketStoppedError(
-            `Relay WebSocket closed permanently (${event.code}): ${event.reason ?? "authorization or ownership changed"}.`,
+            `Relay WebSocket closed permanently (${event.code}): ${
+              event.reason ?? "authorization or ownership changed"
+            }.`,
+            event.code,
           ));
           return;
         }
         if (!ready) {
           finish(new Error(
-            `Relay WebSocket closed before ready (${event.code ?? 1006}): ${event.reason ?? "connection ended"}.`,
+            `Relay WebSocket closed before ready (${event.code ?? 1006}): ${
+              event.reason ?? "connection ended"
+            }.`,
           ));
           return;
         }
@@ -417,34 +499,36 @@ const runConnection = (
     };
     const onSocketError = (): void => {
       stopReceiving();
+      if (options.signal?.aborted) {
+        void chain.then(() => finish(), finish);
+        return;
+      }
       const error = new Error("Relay WebSocket connection failed.");
       void chain.then(() => finish(error), finish);
     };
     const onAbort = (): void => {
       stopReceiving();
-      socket.close(1000, "aborted");
-      void chain.then(() => finish(), finish);
+      try {
+        socket.close(1000, "aborted");
+      } catch {
+        void chain.then(() => finish(), finish);
+      }
     };
 
     socket.addEventListener("message", onMessage);
     socket.addEventListener("close", onClose);
     socket.addEventListener("error", onSocketError);
-    options.signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
+    else options.signal?.addEventListener("abort", onAbort, { once: true });
   });
 
 export const runWebSocket = async (
-  createConnection: () => Promise<WebSocketConnection>,
+  baseURL: string,
+  agentToken: string,
   options: WebSocketRunOptions,
 ): Promise<void> => {
   const Constructor = options.WebSocket
-    ?? (globalThis as typeof globalThis & {
-      WebSocket?: WebSocketConstructor;
-    }).WebSocket;
-  if (!Constructor) {
-    throw new Error(
-      "A WebSocket implementation is required in this runtime.",
-    );
-  }
+    ?? (NodeWebSocket as unknown as WebSocketConstructor);
   const minimum = options.minReconnectDelayMs ?? 500;
   const maximum = options.maxReconnectDelayMs ?? 30_000;
   if (
@@ -457,13 +541,18 @@ export const runWebSocket = async (
       "WebSocket reconnect delays must be finite and maxReconnectDelayMs must be at least minReconnectDelayMs.",
     );
   }
+  if (!agentToken.trim()) {
+    throw new TypeError("A Relay Agent Token is required for WebSocket delivery.");
+  }
+  const url = deriveWebSocketURL(baseURL);
   const random = options.random ?? Math.random;
   let attempt = 0;
 
   while (!options.signal?.aborted) {
     try {
       await runConnection(
-        parseConnection(await createConnection()),
+        url,
+        agentToken,
         options,
         Constructor,
         () => {
@@ -476,7 +565,6 @@ export const runWebSocket = async (
       if (
         error instanceof WebSocketStoppedError
         || error instanceof WebSocketProtocolError
-        || (error instanceof RelayAPIError && !error.retryable)
       ) throw error;
       attempt += 1;
     }

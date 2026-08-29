@@ -89,6 +89,13 @@ export interface SystemEventParty {
   kind: "user" | "agent";
 }
 
+export type TypingContact = SystemEventParty;
+
+export interface TypingIndicatorWebhookData {
+  chat_id: UUID;
+  contact: TypingContact;
+}
+
 export type SystemEventType =
   | "chat_created"
   | "participant_added"
@@ -158,6 +165,13 @@ export interface Message {
   sent_at?: string | null;
   delivered_at?: string | null;
   read_at?: string | null;
+  deliveries?: MessageDelivery[];
+}
+
+export interface MessageDelivery {
+  contact: ChatHandle;
+  delivered_at: string | null;
+  read_at: string | null;
 }
 
 export interface Chat {
@@ -289,7 +303,6 @@ export type SupportedContentType =
   | "image/heif"
   | "image/tiff"
   | "image/bmp"
-  | "image/svg+xml"
   | "image/webp"
   | "image/x-icon"
   | "video/mp4"
@@ -458,22 +471,19 @@ export interface UnblockHandleParams {
 export interface WebSocketSettings {
   enabled: boolean;
   acked_through: string;
+  full_sync_through: string | null;
 }
 
 export interface WebSocketSettingsUpdate {
   enabled: boolean;
 }
 
-export interface WebSocketConnection {
-  url: string;
-  expires_at: string;
-  subprotocol: "relay.v1.json";
-}
-
 export interface WebSocketReadyFrame {
   type: "ready";
   connection_id: UUID;
   acked_through: string;
+  full_sync_required: boolean;
+  full_sync_through: string | null;
   heartbeat_interval_ms: number;
   max_in_flight: number;
 }
@@ -486,6 +496,17 @@ export interface WebSocketEventFrame<T = Record<string, unknown>> {
 
 export interface WebSocketAckFrame {
   type: "ack";
+  through_sequence: string;
+}
+
+export interface WebSocketFullSyncFrame {
+  type: "full_sync";
+  through_sequence: string;
+  reason: "checkpoint_outside_retention";
+}
+
+export interface WebSocketFullSyncCompleteFrame {
+  type: "full_sync_complete";
   through_sequence: string;
 }
 
@@ -502,7 +523,9 @@ export type WebSocketErrorCode =
   | "ack_out_of_range"
   | "stale_connection"
   | "ack_failed"
-  | "delivery_failed";
+  | "delivery_failed"
+  | "full_sync_required"
+  | "full_sync_mismatch";
 
 export interface WebSocketDisconnectFrame {
   type: "disconnect";
@@ -543,5 +566,5 @@ export interface RelayWebhookEnvelope<T = Record<string, unknown>> {
 }
 
 export type RelayWebhookEvent = RelayWebhookEnvelope<
-  MessageWebhookData | Record<string, unknown>
+  MessageWebhookData | TypingIndicatorWebhookData | Record<string, unknown>
 >;

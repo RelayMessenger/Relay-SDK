@@ -1,9 +1,9 @@
 {
   "source": "Relay-Server-local/contracts/developer/openapi.yaml",
-  "sha256": "93b65f59db886bd560802d1eb668804666cb62c08633e3fc1ab0286b383208cc",
+  "sha256": "09142cf0608946cba970f1280c8200723de035f58acd04586e881c1c7ba4e7ee",
   "path_count": 22,
-  "schema_count": 92,
-  "callback_count": 11,
+  "schema_count": 99,
+  "callback_count": 13,
   "operations": [
     {
       "method": "POST",
@@ -39,6 +39,16 @@
       "method": "POST",
       "path": "/v1/chats/{chatId}/leave",
       "operationId": "leaveChat"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chats/{chatId}/typing",
+      "operationId": "startTyping"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/chats/{chatId}/typing",
+      "operationId": "stopTyping"
     },
     {
       "method": "POST",
@@ -174,11 +184,6 @@
       "method": "PUT",
       "path": "/v1/websocket",
       "operationId": "updateWebSocketSettings"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/websocket-connections",
-      "operationId": "createWebSocketConnection"
     }
   ]
 }

@@ -55,16 +55,19 @@ try {
       import packageJSON from "@relayapp/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relayapp/sdk");
       assert.equal(packageJSON.version, "0.1.0");
-      assert.equal(RELAY_V1_OPERATIONS.length, 35);
-      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 11);
+      assert.equal(RELAY_V1_OPERATIONS.length, 36);
+      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 13);
       const client = new Relay({
         apiKey: "consumer-test",
         fetch: async () => new Response("{}", { status: 200 }),
       });
       assert.equal(typeof client.chats.messages.send, "function");
+      assert.equal(typeof client.chats.startTyping, "function");
+      assert.equal(typeof client.chats.stopTyping, "function");
       assert.equal(typeof client.chats.shareContactCard, "function");
       assert.equal(typeof client.webhooks.unwrap, "function");
-      assert.equal(typeof client.websocket.createConnection, "function");
+      assert.equal(typeof client.websocket.run, "function");
+      assert.equal("createConnection" in client.websocket, false);
       assert.equal(typeof client.blockedHandles.block, "function");
       assert.equal("socketMode" in client, false);
       assert.equal("contacts" in client, false);

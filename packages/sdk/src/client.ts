@@ -34,7 +34,6 @@ import type {
   ParticipantRemoveParams,
   RequestOptions,
   UnblockHandleParams,
-  WebSocketConnection,
   WebSocketSettings,
   WebSocketSettingsUpdate,
   WebhookEventListResponse,
@@ -232,6 +231,10 @@ class Transport {
       );
     }
   }
+
+  runWebSocket(options: WebSocketRunOptions): Promise<void> {
+    return runWebSocket(this.baseURL, this.#apiKey, options);
+  }
 }
 
 class ChatMessages {
@@ -370,6 +373,24 @@ export class Chats {
       method: "POST",
       path: `/v1/chats/${pathID(chatID)}/leave`,
       options,
+    });
+  }
+
+  startTyping(chatID: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/chats/${pathID(chatID)}/typing`,
+      options,
+      retryable: true,
+    });
+  }
+
+  stopTyping(chatID: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/chats/${pathID(chatID)}/typing`,
+      options,
+      retryable: true,
     });
   }
 
@@ -692,22 +713,14 @@ export class WebSocket {
     });
   }
 
-  createConnection(options?: RequestOptions): Promise<WebSocketConnection> {
-    return this.transport.request({
-      method: "POST",
-      path: "/v1/websocket-connections",
-      body: {},
-      options,
-    });
-  }
-
   /**
    * Keeps one outbound WebSocket connection alive. `onEvent` must return
    * only after the event is committed to a durable inbox; the SDK sends the
-   * cumulative ACK after that promise resolves.
+   * cumulative ACK after that promise resolves. `onFullSync` must return only
+   * after a complete REST snapshot is durably applied.
    */
   run(options: WebSocketRunOptions): Promise<void> {
-    return runWebSocket(() => this.createConnection(), options);
+    return this.transport.runWebSocket(options);
   }
 }
 

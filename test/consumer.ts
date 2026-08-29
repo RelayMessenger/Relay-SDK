@@ -6,9 +6,11 @@ import Relay, {
   type Message,
   type MessageContent,
   type MessageCreateResponse,
+  type MessageDelivery,
   type Reaction,
   type RelayWebhookEnvelope,
   type SentMessage,
+  type TypingIndicatorWebhookData,
   type WebSocketDisconnectFrame,
 } from "@relayapp/sdk";
 
@@ -25,7 +27,22 @@ const content: MessageContent = {
 await relay.chats.messages.send("chat-id", { message: content });
 await relay.chats.shareContactCard("chat-id");
 await relay.messages.acknowledgeDelivered("message-id");
+await relay.chats.startTyping("chat-id");
+await relay.chats.stopTyping("chat-id");
 await relay.websocket.update({ enabled: true });
+void relay.websocket.run({
+  onEvent: async (_event, { sequence }) => {
+    sequence satisfies string;
+  },
+  onFullSync: async ({ throughSequence, reason }) => {
+    throughSequence satisfies string;
+    reason satisfies "checkpoint_outside_retention";
+  },
+});
+// @ts-expect-error FULL sync handling is required for durable WebSocket recovery.
+void relay.websocket.run({ onEvent: async () => {} });
+// @ts-expect-error Direct WebSocket auth replaced connection-ticket creation.
+relay.websocket.createConnection;
 const reconnect: WebSocketDisconnectFrame = {
   type: "disconnect",
   reason: "heartbeat_timeout",
@@ -55,6 +72,8 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "chat.created",
   "chat.group_name_updated",
   "chat.group_icon_updated",
+  "chat.typing_indicator.started",
+  "chat.typing_indicator.stopped",
 ];
 
 const envelope: RelayWebhookEnvelope = {
@@ -69,9 +88,19 @@ const envelope: RelayWebhookEnvelope = {
 };
 void envelope;
 
+const typingData: TypingIndicatorWebhookData = {
+  chat_id: "01993d50-b4ce-71e6-8e65-35d325d95ddc",
+  contact: {
+    id: "01993d50-b4ce-71e6-8e65-35d325d95dde",
+    handle: "alice",
+    kind: "user",
+  },
+};
+typingData.contact.handle satisfies string;
+
 // @ts-expect-error Relay has no polling transport.
 relay.pollEvents();
-// @ts-expect-error Typing no-ops are absent until real transport exists.
+// @ts-expect-error Typing is exposed as real start/stop commands, not a fake resource.
 relay.chats.typing;
 // @ts-expect-error Responding state is not a Relay API.
 relay.responding;
@@ -91,6 +120,7 @@ declare const chat: Chat;
 // @ts-expect-error Relay does not expose fake archived chat state.
 chat.is_archived;
 declare const message: Message;
+(message.deliveries ?? []) satisfies MessageDelivery[];
 // @ts-expect-error Reconciliation bookkeeping is not a message field.
 message.reconciled_at;
 declare const sendResult: MessageCreateResponse;

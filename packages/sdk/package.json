@@ -32,7 +32,8 @@
   },
   "license": "MIT",
   "dependencies": {
-    "standardwebhooks": "^1.0.0"
+    "standardwebhooks": "^1.0.0",
+    "ws": "^8.21.0"
   },
   "publishConfig": {
     "access": "public"

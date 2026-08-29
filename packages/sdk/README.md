@@ -42,7 +42,7 @@ Chat. It does not create a Chat.
 Useful Linq method names are retained:
 
 - `chats.create`, `retrieve`, `update`, `listChats`, `leaveChat`, `markAsRead`,
-  `shareContactCard`
+  `shareContactCard`, `startTyping`, `stopTyping`
 - `chats.messages.list`, `chats.messages.send`
 - `chats.participants.add`, `chats.participants.remove`
 - `chats.sendVoicememo`
@@ -52,12 +52,36 @@ Useful Linq method names are retained:
 - `webhookSubscriptions.create`, `retrieve`, `update`, `list`, `delete`
 - `contactCard.create`, `retrieve`, `update`
 - `blockedHandles.list`, `block`, `unblock`
-- `websocket.retrieve`, `update`, `createConnection`
+- `websocket.retrieve`, `update`, `run`
 
 Relay additionally exposes the user-only
 `messages.acknowledgeDelivered(messageId)`. Agent Tokens receive `403` from
 that route because agent delivery is acknowledged by a successful webhook or
 WebSocket ACK.
+
+Every retrieved `Message` may include `deliveries`, one entry per recipient:
+
+```ts
+for (const delivery of message.deliveries ?? []) {
+  console.log(
+    delivery.contact.handle,
+    delivery.delivered_at,
+    delivery.read_at,
+  );
+}
+```
+
+Relay records this per-recipient truth for direct and group Chats.
+
+## Typing
+
+```ts
+await relay.chats.startTyping(chatId);
+await relay.chats.stopTyping(chatId);
+```
+
+Calling `startTyping` again refreshes the indicator. These are real API
+commands, not local UI state.
 
 ## Raw attachment upload
 
@@ -105,12 +129,21 @@ await relay.websocket.run({
     await inbox.insertOnce(event.event_id, event);
     console.log("accepted", sequence);
   },
+  onFullSync: async ({ throughSequence, reason }) => {
+    // Fetch the complete REST state and atomically replace the local snapshot.
+    const snapshot = await loadCompleteRelayState(relay);
+    await inbox.replaceWithSnapshot(snapshot, { throughSequence, reason });
+  },
 });
 ```
 
-The SDK validates the ready checkpoint and contiguous decimal sequences,
-requests a fresh one-use ticket for every reconnect, and sends a cumulative ACK
-only after `onEvent` resolves:
+The SDK derives `wss://<Relay host>/v1/websocket` from `baseURL` and sends the
+same Agent Token in the WebSocket upgrade `Authorization` header. It does not
+create a connection ticket, put credentials in the URL, or request a
+subprotocol.
+
+The SDK validates the ready checkpoint and contiguous decimal sequences, then
+sends a cumulative ACK only after `onEvent` resolves:
 
 ```json
 { "type": "ack", "through_sequence": "42" }
@@ -120,13 +153,16 @@ Unacknowledged events replay after reconnect, so the inbox must deduplicate by
 `event_id`. The ACK means durable acceptance, not handler or model completion.
 Replies use the normal idempotent REST message API.
 
-The runner obtains a fresh ticket and reconnects after `heartbeat_timeout`,
-`restart`, close codes `1011`, `1012`, or `4408`, and retryable
-`ack_failed`/`delivery_failed` errors. It rejects on `disabled`, `replaced`,
-`revoked`, a non-retryable API response, or a protocol violation. Restart it
-only after the operator action, credential issue, or contract mismatch has
-been resolved. Disabling WebSocket delivery returns `409` while events remain
-unacknowledged.
+If Relay reports that the stored checkpoint is older than retained event
+history, it sends a `full_sync` frame. `onFullSync` must fetch and durably apply
+a complete REST snapshot. The SDK sends `full_sync_complete` only after that
+promise resolves, and it will not ACK events while FULL sync is pending.
 
-There is intentionally no poll, mobile realtime, responding, typing, service,
+The runner uses capped, jittered exponential reconnect after `heartbeat_timeout`,
+`restart`, close codes `1011`, `1012`, or `4408`, send failures, and retryable
+`ack_failed`/`delivery_failed` errors. It rejects on `disabled`, `replaced`,
+`revoked`, Agent Token rejection, or a protocol violation. Restart it only
+after the operator action, credential issue, or contract mismatch is resolved.
+
+There is intentionally no poll, mobile realtime, responding, service,
 partner/mobile namespace, edit, unsend, payment, or unrelated integration API.

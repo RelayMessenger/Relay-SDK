@@ -42,6 +42,16 @@ export const RELAY_V1_OPERATIONS = [
   },
   {
     "method": "POST",
+    "path": "/v1/chats/{chatId}/typing",
+    "operationId": "startTyping"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/chats/{chatId}/typing",
+    "operationId": "stopTyping"
+  },
+  {
+    "method": "POST",
     "path": "/v1/chats/{chatId}/read",
     "operationId": "markChatAsRead"
   },
@@ -174,11 +184,6 @@ export const RELAY_V1_OPERATIONS = [
     "method": "PUT",
     "path": "/v1/websocket",
     "operationId": "updateWebSocketSettings"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/websocket-connections",
-    "operationId": "createWebSocketConnection"
   }
 ] as const satisfies readonly RelayV1Operation[];
 
@@ -193,5 +198,7 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "participant.removed",
   "chat.created",
   "chat.group_name_updated",
-  "chat.group_icon_updated"
+  "chat.group_icon_updated",
+  "chat.typing_indicator.started",
+  "chat.typing_indicator.stopped"
 ] as const;

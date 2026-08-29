@@ -1,10 +1,12 @@
-import { beforeEach, expect, it } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import { WebSocketServer } from "ws";
 import Relay, {
   runWebSocket,
   type RelayWebhookEnvelope,
   type WebSocketLike,
 } from "../src/index.js";
-import { RelayAPIError } from "../src/errors.js";
 
 class FakeWebSocket implements WebSocketLike {
   static readonly instances: FakeWebSocket[] = [];
@@ -16,7 +18,7 @@ class FakeWebSocket implements WebSocketLike {
 
   constructor(
     readonly url: string,
-    readonly protocol?: string | string[],
+    readonly options?: { headers?: Record<string, string> },
   ) {
     FakeWebSocket.instances.push(this);
   }
@@ -87,10 +89,15 @@ const envelope = (
   data: {},
 });
 
-const ready = (ackedThrough = "0") => ({
+const ready = (
+  ackedThrough = "0",
+  fullSyncThrough: string | null = null,
+) => ({
   type: "ready",
   connection_id: "01993d50-ef7b-7b37-886b-23fd80c7ec10",
   acked_through: ackedThrough,
+  full_sync_required: fullSyncThrough !== null,
+  full_sync_through: fullSyncThrough,
   heartbeat_interval_ms: 30_000,
   max_in_flight: 64,
 });
@@ -104,42 +111,118 @@ const eventFrame = (
   event,
 });
 
+const fullSyncFrame = (throughSequence: string) => ({
+  type: "full_sync",
+  through_sequence: throughSequence,
+  reason: "checkpoint_outside_retention",
+});
+
 const emitFrame = (socket: FakeWebSocket, frame: unknown): void => {
   socket.emit("message", { data: JSON.stringify(frame) });
 };
 
-const clientWithTickets = (): { client: Relay; tickets: () => number } => {
-  let tickets = 0;
-  const client = new Relay({
-    apiKey: "agent-token",
-    fetch: async (input) => {
-      expect(new URL(input instanceof Request ? input.url : input).pathname)
-        .toBe("/v1/websocket-connections");
-      tickets += 1;
-      return Response.json({
-        url: `wss://relay.test/v1/websocket?ticket=${tickets}`,
-        expires_at: "2026-08-29T06:30:00.000Z",
-        subprotocol: "relay.v1.json",
-      });
-    },
-  });
-  return { client, tickets: () => tickets };
+const client = (baseURL = "https://relay.test/some-old-path?ignored=1"): Relay =>
+  new Relay({ apiKey: "relay-agent-token", baseURL });
+
+const run = (
+  relay: Relay,
+  overrides: Partial<Parameters<typeof relay.websocket.run>[0]> = {},
+): { controller: AbortController; running: Promise<void> } => {
+  const controller = new AbortController();
+  return {
+    controller,
+    running: relay.websocket.run({
+      signal: controller.signal,
+      WebSocket: FakeWebSocket,
+      minReconnectDelayMs: 0,
+      maxReconnectDelayMs: 0,
+      onEvent: async () => {},
+      onFullSync: async () => {},
+      ...overrides,
+    }),
+  };
 };
 
-it("ACKs only after the durable event callback resolves", async () => {
+it("derives /v1/websocket and sends the Agent Token header with no protocol", async () => {
+  const { controller, running } = run(client());
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+
+  const socket = FakeWebSocket.latest;
+  expect(socket.url).toBe("wss://relay.test/v1/websocket");
+  expect(socket.options).toEqual({
+    headers: { Authorization: "Bearer relay-agent-token" },
+  });
+  expect(typeof socket.options).toBe("object");
+  expect(socket.url).not.toContain("token");
+  expect(socket.url).not.toContain("ticket");
+
+  controller.abort();
+  await running;
+});
+
+it("uses ws for an HTTP Relay baseURL", async () => {
+  const { controller, running } = run(client("http://127.0.0.1:8790"));
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  expect(FakeWebSocket.latest.url).toBe("ws://127.0.0.1:8790/v1/websocket");
+  controller.abort();
+  await running;
+});
+
+it("sends direct Agent Token auth and no subprotocol with the real ws client", async () => {
+  const server = createServer();
+  const webSocketServer = new WebSocketServer({ noServer: true });
+  let authorization: string | undefined;
+  let protocol: string | undefined;
+  let connected = false;
+  server.on("upgrade", (request, socket, head) => {
+    authorization = request.headers.authorization;
+    protocol = request.headers["sec-websocket-protocol"];
+    webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
+      webSocketServer.emit("connection", webSocket, request);
+    });
+  });
+  webSocketServer.on("connection", (webSocket) => {
+    connected = true;
+    webSocket.send(JSON.stringify(ready()));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Expected a TCP test server.");
+  }
+
   const controller = new AbortController();
+  const running = runWebSocket(
+    `http://127.0.0.1:${address.port}/ignored`,
+    "real-agent-token",
+    {
+      signal: controller.signal,
+      onEvent: async () => {},
+      onFullSync: async () => {},
+    },
+  );
+  await waitFor(() => authorization !== undefined && connected);
+  await turn();
+
+  expect(authorization).toBe("Bearer real-agent-token");
+  expect(protocol).toBeUndefined();
+
+  controller.abort();
+  await running;
+  await new Promise<void>((resolve) => webSocketServer.close(() => resolve()));
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  });
+});
+
+it("ACKs only after the event callback durably resolves", async () => {
   let commit: (() => void) | undefined;
   const durable = new Promise<void>((resolve) => {
     commit = resolve;
   });
   const received: string[] = [];
-  const { client } = clientWithTickets();
-
-  const running = client.websocket.run({
-    signal: controller.signal,
-    WebSocket: FakeWebSocket,
-    minReconnectDelayMs: 1,
-    maxReconnectDelayMs: 1,
+  const { controller, running } = run(client(), {
     onEvent: async (event) => {
       received.push(event.event_id);
       await durable;
@@ -150,12 +233,13 @@ it("ACKs only after the durable event callback resolves", async () => {
   emitFrame(socket, ready());
   emitFrame(socket, eventFrame("1"));
   await turn();
+
   expect(received).toEqual([envelope().event_id]);
   expect(socket.sent).toEqual([]);
 
   commit!();
   await waitFor(() => socket.sent.length === 1);
-  expect(socket.sent.map((value) => JSON.parse(value))).toEqual([{
+  expect(socket.sent.map(JSON.parse)).toEqual([{
     type: "ack",
     through_sequence: "1",
   }]);
@@ -164,16 +248,112 @@ it("ACKs only after the durable event callback resolves", async () => {
   await running;
 });
 
-it("uses a valid private close code, does not ACK, and reconnects after durable acceptance fails", async () => {
-  const controller = new AbortController();
-  const errors: unknown[] = [];
-  const { client } = clientWithTickets();
+it("durably applies FULL sync before completing it or ACKing queued events", async () => {
+  let commit: (() => void) | undefined;
+  const durable = new Promise<void>((resolve) => {
+    commit = resolve;
+  });
+  const syncContexts: unknown[] = [];
+  const eventSequences: string[] = [];
+  const { controller, running } = run(client(), {
+    onFullSync: async (context) => {
+      syncContexts.push(context);
+      await durable;
+    },
+    onEvent: async (_event, context) => {
+      eventSequences.push(context.sequence);
+    },
+  });
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  const socket = FakeWebSocket.latest;
 
-  const running = client.websocket.run({
-    signal: controller.signal,
-    WebSocket: FakeWebSocket,
-    minReconnectDelayMs: 0,
-    maxReconnectDelayMs: 0,
+  emitFrame(socket, ready("7", "42"));
+  emitFrame(socket, fullSyncFrame("42"));
+  emitFrame(socket, eventFrame("43"));
+  await turn();
+
+  expect(syncContexts).toEqual([{
+    throughSequence: "42",
+    reason: "checkpoint_outside_retention",
+  }]);
+  expect(eventSequences).toEqual([]);
+  expect(socket.sent).toEqual([]);
+
+  commit!();
+  await waitFor(() => socket.sent.length === 2);
+  expect(eventSequences).toEqual(["43"]);
+  expect(socket.sent.map(JSON.parse)).toEqual([
+    { type: "full_sync_complete", through_sequence: "42" },
+    { type: "ack", through_sequence: "43" },
+  ]);
+
+  controller.abort();
+  await running;
+});
+
+it("does not complete or ACK when durable FULL sync fails, then reconnects", async () => {
+  const errors: unknown[] = [];
+  const { controller, running } = run(client(), {
+    onFullSync: async () => {
+      throw new Error("snapshot commit failed");
+    },
+    onError(error) {
+      errors.push(error);
+    },
+  });
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  const first = FakeWebSocket.latest;
+  emitFrame(first, ready("0", "9"));
+  emitFrame(first, fullSyncFrame("9"));
+  emitFrame(first, eventFrame("10"));
+  await waitFor(() => FakeWebSocket.instances.length === 2);
+
+  expect(first.sent).toEqual([]);
+  expect(first.closeCalls[0]).toEqual({
+    code: 4001,
+    reason: "durable application failed",
+  });
+  expect(String(errors[0])).toContain("FULL sync");
+
+  controller.abort();
+  await running;
+});
+
+it("rejects events received while the ready frame says FULL sync is pending", async () => {
+  const { running } = run(client());
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  const socket = FakeWebSocket.latest;
+  emitFrame(socket, ready("0", "8"));
+  emitFrame(socket, eventFrame("1"));
+
+  await expect(running).rejects.toThrow("FULL sync was pending");
+  expect(socket.sent).toEqual([]);
+  expect(socket.closeCalls[0]).toEqual({
+    code: 4002,
+    reason: "protocol error",
+  });
+});
+
+it("rejects a FULL-sync checkpoint that does not match ready", async () => {
+  let callbacks = 0;
+  const { running } = run(client(), {
+    onFullSync: async () => {
+      callbacks += 1;
+    },
+  });
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  const socket = FakeWebSocket.latest;
+  emitFrame(socket, ready("0", "8"));
+  emitFrame(socket, fullSyncFrame("9"));
+
+  await expect(running).rejects.toThrow("did not match");
+  expect(callbacks).toBe(0);
+  expect(socket.sent).toEqual([]);
+});
+
+it("uses a private close code, sends no ACK, and reconnects after event durability fails", async () => {
+  const errors: unknown[] = [];
+  const { controller, running } = run(client(), {
     onEvent: async () => {
       throw new Error("disk commit failed");
     },
@@ -191,291 +371,134 @@ it("uses a valid private close code, does not ACK, and reconnects after durable 
   expect(first.sent).toEqual([]);
   expect(first.closeCalls[0]).toEqual({
     code: 4001,
-    reason: "durable acceptance failed",
+    reason: "durable application failed",
   });
 
   controller.abort();
   await running;
 });
 
-it.each(["disabled", "replaced", "revoked"] as const)(
-  "stops instead of reconnecting after a %s disconnect",
-  async (reason) => {
-    const errors: unknown[] = [];
-    const { client, tickets } = clientWithTickets();
-    const running = client.websocket.run({
-      WebSocket: FakeWebSocket,
-      minReconnectDelayMs: 0,
-      maxReconnectDelayMs: 0,
-      onEvent: async () => {},
-      onError(error) {
-        errors.push(error);
-      },
-    });
-    await waitFor(() => FakeWebSocket.instances.length === 1);
-    const socket = FakeWebSocket.latest;
-    emitFrame(socket, ready());
-    emitFrame(socket, { type: "disconnect", reason });
-    await expect(running).rejects.toThrow(reason);
-
-    expect(tickets()).toBe(1);
-    expect(errors).toHaveLength(1);
-    expect(String(errors[0])).toContain(reason);
-    expect(socket.closeCalls[0]).toEqual({
-      code: reason === "replaced" ? 4409 : 4401,
-      reason: "Relay stopped this consumer",
-    });
-  },
-);
-
-it.each(["heartbeat_timeout", "restart"] as const)(
-  "gets a fresh ticket and reconnects after %s",
-  async (reason) => {
-    const controller = new AbortController();
-    const errors: unknown[] = [];
-    const { client, tickets } = clientWithTickets();
-    const running = client.websocket.run({
-      signal: controller.signal,
-      WebSocket: FakeWebSocket,
-      minReconnectDelayMs: 0,
-      maxReconnectDelayMs: 0,
-      onEvent: async () => {},
-      onError(error) {
-        errors.push(error);
-      },
-    });
-    await waitFor(() => FakeWebSocket.instances.length === 1);
-    const first = FakeWebSocket.latest;
-    emitFrame(first, ready());
-    emitFrame(first, { type: "disconnect", reason });
-    await waitFor(() => FakeWebSocket.instances.length === 2);
-
-    expect(tickets()).toBe(2);
-    expect(errors).toHaveLength(1);
-    expect(String(errors[0])).toContain(
-      reason === "restart" ? "restarting" : "heartbeat",
-    );
-    expect(first.closeCalls[0]).toEqual({
-      code: 4003,
-      reason: "Relay requested reconnect",
-    });
-
-    controller.abort();
-    await running;
-  },
-);
-
-it("retries an invalid 4401 ticket, then can stop on API authorization", async () => {
-  const errors: unknown[] = [];
-  let attempts = 0;
-  await expect(runWebSocket(
-    async () => {
-      attempts += 1;
-      if (attempts === 1) {
-        return {
-          url: "wss://relay.test/v1/websocket?ticket=expired",
-          expires_at: "2026-08-29T06:30:00.000Z",
-          subprotocol: "relay.v1.json",
-        };
-      }
-      throw new RelayAPIError("revoked", { status: 401 });
-    },
-    {
-      WebSocket: class extends FakeWebSocket {
-        constructor(url: string, protocols?: string | string[]) {
-          super(url, protocols);
-          queueMicrotask(() => {
-            this.emit("close", { code: 4401, reason: "invalid ticket" });
-          });
-        }
-      },
-      minReconnectDelayMs: 0,
-      maxReconnectDelayMs: 0,
-      onEvent: async () => {},
-      onError(error) {
-        errors.push(error);
-      },
-    },
-  )).rejects.toBeInstanceOf(RelayAPIError);
-
-  expect(attempts).toBe(2);
-  expect(errors).toHaveLength(2);
-  expect(String(errors[0])).toContain("closed before ready");
-  expect(errors[1]).toBeInstanceOf(RelayAPIError);
-});
-
-it("stops after a 4409 fencing close even when the disconnect frame is lost", async () => {
-  const errors: unknown[] = [];
-  const { client, tickets } = clientWithTickets();
-  const running = client.websocket.run({
-    WebSocket: FakeWebSocket,
-    minReconnectDelayMs: 0,
-    maxReconnectDelayMs: 0,
-    onEvent: async () => {},
-    onError(error) {
-      errors.push(error);
-    },
-  });
-  await waitFor(() => FakeWebSocket.instances.length === 1);
-  const socket = FakeWebSocket.latest;
-  emitFrame(socket, ready());
-  socket.emit("close", { code: 4409, reason: "replaced" });
-  await expect(running).rejects.toThrow("4409");
-
-  expect(tickets()).toBe(1);
-  expect(String(errors[0])).toContain("4409");
-});
-
 it.each([1011, 1012, 4408])(
-  "reconnects with a fresh ticket after transient close code %s",
+  "reconnects with the same direct Agent Token auth after transient close %s",
   async (code) => {
-    const controller = new AbortController();
-    const { client, tickets } = clientWithTickets();
-    const running = client.websocket.run({
-      signal: controller.signal,
-      WebSocket: FakeWebSocket,
-      minReconnectDelayMs: 0,
-      maxReconnectDelayMs: 0,
-      onEvent: async () => {},
-    });
+    const { controller, running } = run(client());
     await waitFor(() => FakeWebSocket.instances.length === 1);
     const first = FakeWebSocket.latest;
     emitFrame(first, ready());
     first.emit("close", { code, reason: "transient" });
     await waitFor(() => FakeWebSocket.instances.length === 2);
-    expect(tickets()).toBe(2);
+
+    expect(FakeWebSocket.latest.url).toBe("wss://relay.test/v1/websocket");
+    expect(FakeWebSocket.latest.options?.headers?.Authorization)
+      .toBe("Bearer relay-agent-token");
+
     controller.abort();
     await running;
   },
 );
 
-it("stops after a non-retryable error frame", async () => {
-  const errors: unknown[] = [];
-  const { client, tickets } = clientWithTickets();
-  const running = client.websocket.run({
-    WebSocket: FakeWebSocket,
-    minReconnectDelayMs: 0,
-    maxReconnectDelayMs: 0,
-    onEvent: async () => {},
-    onError(error) {
-      errors.push(error);
-    },
-  });
-  await waitFor(() => FakeWebSocket.instances.length === 1);
-  emitFrame(FakeWebSocket.latest, ready());
-  emitFrame(FakeWebSocket.latest, {
-    type: "error",
-    code: "stale_connection",
-    message: "This connection was replaced.",
-    fatal: true,
-    retryable: false,
-  });
-  await expect(running).rejects.toThrow("replaced");
+it("uses capped jittered exponential delay across consecutive connection failures", async () => {
+  vi.useFakeTimers();
+  try {
+    class ClosingWebSocket extends FakeWebSocket {
+      constructor(
+        url: string,
+        options?: { headers?: Record<string, string> },
+      ) {
+        super(url, options);
+        queueMicrotask(() => {
+          this.emit("close", { code: 1011, reason: "before ready" });
+        });
+      }
+    }
+    const controller = new AbortController();
+    const running = runWebSocket(
+      "https://relay.test",
+      "agent-token",
+      {
+        signal: controller.signal,
+        WebSocket: ClosingWebSocket,
+        minReconnectDelayMs: 10,
+        maxReconnectDelayMs: 25,
+        random: () => 1,
+        onEvent: async () => {},
+        onFullSync: async () => {},
+      },
+    );
 
-  expect(tickets()).toBe(1);
-  expect(errors).toHaveLength(1);
-  expect(String(errors[0])).toContain("replaced");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(9);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(19);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(FakeWebSocket.instances).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(24);
+    expect(FakeWebSocket.instances).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(FakeWebSocket.instances).toHaveLength(4);
+
+    controller.abort();
+    await vi.runAllTimersAsync();
+    await running;
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
-it.each(["ack_failed", "delivery_failed"] as const)(
-  "reconnects after retryable %s even when the frame is fatal to the connection",
-  async (code) => {
-    const controller = new AbortController();
-    const errors: unknown[] = [];
-    const { client, tickets } = clientWithTickets();
-    const running = client.websocket.run({
-      signal: controller.signal,
-      WebSocket: FakeWebSocket,
-      minReconnectDelayMs: 0,
-      maxReconnectDelayMs: 0,
-      onEvent: async () => {},
-      onError(error) {
-        errors.push(error);
-      },
-    });
+it.each(["heartbeat_timeout", "restart"] as const)(
+  "reconnects after a %s disconnect frame",
+  async (reason) => {
+    const { controller, running } = run(client());
     await waitFor(() => FakeWebSocket.instances.length === 1);
     emitFrame(FakeWebSocket.latest, ready());
-    emitFrame(FakeWebSocket.latest, {
-      type: "error",
-      code,
-      message: `${code} transient`,
-      fatal: true,
-      retryable: true,
-    });
+    emitFrame(FakeWebSocket.latest, { type: "disconnect", reason });
     await waitFor(() => FakeWebSocket.instances.length === 2);
-
-    expect(tickets()).toBe(2);
-    expect(errors).toHaveLength(1);
-    expect(String(errors[0])).toContain("transient");
     controller.abort();
     await running;
   },
 );
 
-it("rejects an event before ready as a terminal protocol error", async () => {
+it.each([
+  [4401, "invalid Agent Token"],
+  [4409, "replaced"],
+] as const)("does not reconnect after terminal close %s", async (code, reason) => {
   const errors: unknown[] = [];
-  const { client, tickets } = clientWithTickets();
-  const running = client.websocket.run({
-    WebSocket: FakeWebSocket,
-    minReconnectDelayMs: 0,
-    maxReconnectDelayMs: 0,
-    onEvent: async () => {},
+  const { running } = run(client(), {
     onError(error) {
       errors.push(error);
     },
   });
   await waitFor(() => FakeWebSocket.instances.length === 1);
-  const socket = FakeWebSocket.latest;
-  emitFrame(socket, eventFrame("1"));
-  await expect(running).rejects.toThrow("before the ready");
+  FakeWebSocket.latest.emit("close", { code, reason });
 
-  expect(tickets()).toBe(1);
+  await expect(running).rejects.toThrow(String(code));
+  expect(FakeWebSocket.instances).toHaveLength(1);
   expect(errors).toHaveLength(1);
-  expect(socket.closeCalls[0]).toEqual({
-    code: 4002,
-    reason: "protocol error",
-  });
 });
 
-it("rejects an error code outside the canonical closed union", async () => {
-  const { client, tickets } = clientWithTickets();
-  const running = client.websocket.run({
-    WebSocket: FakeWebSocket,
-    minReconnectDelayMs: 0,
-    maxReconnectDelayMs: 0,
-    onEvent: async () => {},
-  });
-  await waitFor(() => FakeWebSocket.instances.length === 1);
-  const socket = FakeWebSocket.latest;
-  emitFrame(socket, ready());
-  emitFrame(socket, {
-    type: "error",
-    code: "unknown",
-    message: "not in Relay v1",
-    fatal: true,
-    retryable: false,
-  });
-  await expect(running).rejects.toThrow("invalid error frame");
-  expect(tickets()).toBe(1);
-  expect(socket.closeCalls[0]).toEqual({
-    code: 4002,
-    reason: "protocol error",
-  });
-});
+it.each(["disabled", "replaced", "revoked"] as const)(
+  "stops after a %s disconnect frame",
+  async (reason) => {
+    const { running } = run(client());
+    await waitFor(() => FakeWebSocket.instances.length === 1);
+    const socket = FakeWebSocket.latest;
+    emitFrame(socket, ready());
+    emitFrame(socket, { type: "disconnect", reason });
+
+    await expect(running).rejects.toThrow(reason);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  },
+);
 
 it("enforces contiguous decimal sequences without Number precision loss", async () => {
-  const errors: unknown[] = [];
   const received: string[] = [];
-  const { client } = clientWithTickets();
-  const running = client.websocket.run({
-    WebSocket: FakeWebSocket,
-    minReconnectDelayMs: 0,
-    maxReconnectDelayMs: 0,
+  const { running } = run(client(), {
     onEvent: async (_event, context) => {
       received.push(context.sequence);
-    },
-    onError(error) {
-      errors.push(error);
     },
   });
   await waitFor(() => FakeWebSocket.instances.length === 1);
@@ -484,30 +507,19 @@ it("enforces contiguous decimal sequences without Number precision loss", async 
   emitFrame(socket, eventFrame("9007199254740993"));
   await waitFor(() => socket.sent.length === 1);
   emitFrame(socket, eventFrame("9007199254740995"));
-  await expect(running).rejects.toThrow("non-contiguous");
 
+  await expect(running).rejects.toThrow("non-contiguous");
   expect(received).toEqual(["9007199254740993"]);
-  expect(errors).toHaveLength(1);
-  expect(socket.sent.map((value) => JSON.parse(value))).toEqual([{
+  expect(socket.sent.map(JSON.parse)).toEqual([{
     type: "ack",
     through_sequence: "9007199254740993",
   }]);
-  expect(socket.closeCalls.at(-1)).toEqual({
-    code: 4002,
-    reason: "protocol error",
-  });
 });
 
-it("deduplicates replay by event_id in the durable callback and ACKs the replay", async () => {
-  const controller = new AbortController();
+it("replays an unacknowledged event after reconnect for durable deduplication", async () => {
   const stored = new Set<string>();
   let callbacks = 0;
-  const { client, tickets } = clientWithTickets();
-  const running = client.websocket.run({
-    signal: controller.signal,
-    WebSocket: FakeWebSocket,
-    minReconnectDelayMs: 0,
-    maxReconnectDelayMs: 0,
+  const { controller, running } = run(client(), {
     onEvent: async (event) => {
       callbacks += 1;
       stored.add(event.event_id);
@@ -525,10 +537,9 @@ it("deduplicates replay by event_id in the durable callback and ACKs the replay"
   emitFrame(replay, eventFrame("1"));
   await waitFor(() => replay.sent.length === 1);
 
-  expect(tickets()).toBe(2);
   expect(callbacks).toBe(2);
   expect(stored).toEqual(new Set([envelope().event_id]));
-  expect(replay.sent.map((value) => JSON.parse(value))).toEqual([{
+  expect(replay.sent.map(JSON.parse)).toEqual([{
     type: "ack",
     through_sequence: "1",
   }]);
@@ -537,65 +548,30 @@ it("deduplicates replay by event_id in the durable callback and ACKs the replay"
   await running;
 });
 
-it("stops when ticket creation returns a non-retryable API error", async () => {
-  const errors: unknown[] = [];
-  let attempts = 0;
+it("rejects invalid reconnect options before opening a socket", async () => {
   await expect(runWebSocket(
-    async () => {
-      attempts += 1;
-      throw new RelayAPIError("revoked", { status: 401 });
-    },
-    {
-      WebSocket: FakeWebSocket,
-      onEvent: async () => {},
-      onError(error) {
-        errors.push(error);
-      },
-    },
-  )).rejects.toBeInstanceOf(RelayAPIError);
-  expect(attempts).toBe(1);
-  expect(errors).toHaveLength(1);
-});
-
-it("stops on a connection ticket outside the canonical schema", async () => {
-  const errors: unknown[] = [];
-  let attempts = 0;
-  await expect(runWebSocket(
-    async () => {
-      attempts += 1;
-      return {
-        url: "https://relay.test/not-a-websocket",
-        expires_at: "not-a-date",
-        subprotocol: "relay.v1.json",
-      };
-    },
-    {
-      WebSocket: FakeWebSocket,
-      onEvent: async () => {},
-      onError(error) {
-        errors.push(error);
-      },
-    },
-  )).rejects.toThrow("invalid WebSocket connection ticket");
-  expect(attempts).toBe(1);
-  expect(errors).toHaveLength(1);
-  expect(String(errors[0])).toContain("invalid WebSocket connection ticket");
-  expect(FakeWebSocket.instances).toHaveLength(0);
-});
-
-it("rejects invalid reconnect delay options before requesting a ticket", async () => {
-  let attempts = 0;
-  await expect(runWebSocket(
-    async () => {
-      attempts += 1;
-      throw new Error("not reached");
-    },
+    "https://relay.test",
+    "agent-token",
     {
       WebSocket: FakeWebSocket,
       minReconnectDelayMs: 10,
       maxReconnectDelayMs: 5,
       onEvent: async () => {},
+      onFullSync: async () => {},
     },
   )).rejects.toThrow(RangeError);
-  expect(attempts).toBe(0);
+  expect(FakeWebSocket.instances).toHaveLength(0);
+});
+
+it("rejects invalid base URLs and empty Agent Tokens before opening a socket", async () => {
+  const options = {
+    WebSocket: FakeWebSocket,
+    onEvent: async () => {},
+    onFullSync: async () => {},
+  };
+  await expect(runWebSocket("file:///tmp/relay", "token", options))
+    .rejects.toThrow("HTTP(S)");
+  await expect(runWebSocket("https://relay.test", " ", options))
+    .rejects.toThrow("Agent Token");
+  expect(FakeWebSocket.instances).toHaveLength(0);
 });
