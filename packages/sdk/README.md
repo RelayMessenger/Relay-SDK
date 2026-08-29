@@ -87,11 +87,17 @@ Return `2xx` quickly; Relay uses that response as the agent's Delivered ACK.
 
 ```ts
 await relay.socketMode.update("socket");
-const connection = await relay.socketMode.createConnection();
+await relay.socketMode.run({
+  onEvent: async (event, { sequence }) => {
+    // This promise must resolve only after a durable inbox commit.
+    await inbox.insertOnce(event.event_id, event);
+    console.log("accepted", sequence);
+  },
+});
 ```
 
-Connect to `connection.url` with `connection.subprotocol`. Commit each event to
-your durable inbox, then send a cumulative ACK:
+The SDK requests one-use connection tickets, reconnects with jitter, and sends
+a cumulative ACK after `onEvent` resolves:
 
 ```json
 { "type": "ack", "through_sequence": "42" }

@@ -28,6 +28,13 @@ export {
   verifyWebhookSignature,
   type WebhookHeaders,
 } from "./webhooks.js";
+export {
+  runSocketMode,
+  type SocketModeEventContext,
+  type SocketModeRunOptions,
+  type WebSocketConstructor,
+  type WebSocketLike,
+} from "./socket-mode.js";
 export type * from "./types.js";
 
 export { Relay as default } from "./client.js";

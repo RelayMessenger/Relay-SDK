@@ -44,6 +44,10 @@ import type {
   WebhookSubscriptionUpdateParams,
 } from "./types.js";
 import { Webhooks } from "./webhooks.js";
+import {
+  runSocketMode,
+  type SocketModeRunOptions,
+} from "./socket-mode.js";
 
 type FetchLike = (
   input: string | URL | Request,
@@ -686,6 +690,15 @@ export class SocketMode {
       body: {},
       options,
     });
+  }
+
+  /**
+   * Keeps one outbound Socket Mode connection alive. `onEvent` must return
+   * only after the event is committed to a durable inbox; the SDK sends the
+   * cumulative ACK after that promise resolves.
+   */
+  run(options: SocketModeRunOptions): Promise<void> {
+    return runSocketMode(() => this.createConnection(), options);
   }
 }
 
