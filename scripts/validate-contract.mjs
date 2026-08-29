@@ -222,7 +222,7 @@ if (existsSync(source)) {
 
 console.log(JSON.stringify({
   ok: true,
-  package: "@relayapp/sdk",
+  package: "@relaymessenger/sdk",
   paths: manifest.path_count,
   operations: operationJSON.length,
   schemas: manifest.schema_count,

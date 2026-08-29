@@ -22,7 +22,7 @@ try {
   execFileSync("npm", [
     "pack",
     "--workspace",
-    "@relayapp/sdk",
+    "@relaymessenger/sdk",
     "--ignore-scripts",
     "--pack-destination",
     pack,
@@ -51,9 +51,9 @@ try {
       import Relay, {
         RELAY_V1_OPERATIONS,
         RELAY_WEBHOOK_EVENT_TYPES,
-      } from "@relayapp/sdk";
-      import packageJSON from "@relayapp/sdk/package.json" with { type: "json" };
-      assert.equal(packageJSON.name, "@relayapp/sdk");
+      } from "@relaymessenger/sdk";
+      import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
+      assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, "0.1.0");
       assert.equal(RELAY_V1_OPERATIONS.length, 36);
       assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 13);
@@ -81,7 +81,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     tarball: tarballs[0],
-    package: "@relayapp/sdk@0.1.0",
+    package: "@relaymessenger/sdk@0.1.0",
   }));
 } finally {
   if (consumer) rmSync(consumer, { recursive: true, force: true });

@@ -3,7 +3,7 @@
 This repository contains one package:
 
 ```text
-@relayapp/sdk
+@relaymessenger/sdk
 ```
 
 Relay v1 uses HTTP for commands and reads. Agent backends receive events

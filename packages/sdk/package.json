@@ -1,5 +1,5 @@
 {
-  "name": "@relayapp/sdk",
+  "name": "@relaymessenger/sdk",
   "version": "0.1.0",
   "description": "TypeScript SDK for the Relay v1 messaging API and signed webhooks.",
   "type": "module",

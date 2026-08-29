@@ -6,10 +6,10 @@
     "packages/sdk"
   ],
   "scripts": {
-    "clean": "npm run clean --workspace @relayapp/sdk",
-    "check": "npm run check --workspace @relayapp/sdk",
-    "build": "npm run build --workspace @relayapp/sdk",
-    "test": "npm run test --workspace @relayapp/sdk",
+    "clean": "npm run clean --workspace @relaymessenger/sdk",
+    "check": "npm run check --workspace @relaymessenger/sdk",
+    "build": "npm run build --workspace @relaymessenger/sdk",
+    "test": "npm run test --workspace @relaymessenger/sdk",
     "contract:check": "node scripts/validate-contract.mjs",
     "consumer:types": "tsc -p test/tsconfig.json --noEmit",
     "pack:smoke": "node scripts/consumer-smoke.mjs",

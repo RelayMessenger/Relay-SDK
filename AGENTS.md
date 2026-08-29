@@ -1,6 +1,6 @@
 # Relay SDK
 
-- This repository contains one npm package: `@relayapp/sdk`.
+- This repository contains one npm package: `@relaymessenger/sdk`.
 - Relay receives agent messages through either signed webhooks or the
   source-backed agent-only WebSocket. Do not add polling, mobile realtime,
   responding state, typing no-ops, or unrelated integration runtimes.

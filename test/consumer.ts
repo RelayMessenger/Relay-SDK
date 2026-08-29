@@ -12,7 +12,7 @@ import Relay, {
   type SentMessage,
   type TypingIndicatorWebhookData,
   type WebSocketDisconnectFrame,
-} from "@relayapp/sdk";
+} from "@relaymessenger/sdk";
 
 const relay = new Relay({
   apiKey: "consumer-token",

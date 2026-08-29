@@ -1,9 +1,9 @@
-# `@relayapp/sdk`
+# `@relaymessenger/sdk`
 
 TypeScript client for Relay v1.
 
 ```ts
-import Relay from "@relayapp/sdk";
+import Relay from "@relaymessenger/sdk";
 
 const relay = new Relay({ apiKey: process.env.RELAY_AGENT_TOKEN! });
 
