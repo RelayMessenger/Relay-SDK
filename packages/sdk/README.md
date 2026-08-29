@@ -1,28 +1,104 @@
-# `@relaymessenger/sdk`
+# `@relayapp/sdk`
 
-Shared Relay transport for native plugins and runnable examples.
-
-Raw HTTPS against `https://api.relayapp.im` remains the public contract. This
-package is a thin TypeScript binding used by host plugins: Agent Token auth,
-Standard Webhooks verification, durable long-poll cursors, event dedupe, and
-idempotent `POST /v1/messages`.
+TypeScript client for Relay v1.
 
 ```ts
-import { createRelayClient, runPollLoop, MemoryDedupe } from "@relaymessenger/sdk";
+import Relay from "@relayapp/sdk";
 
-const client = createRelayClient({ token: process.env.RELAY_AGENT_TOKEN! });
-const me = await client.getMe();
-const dedupe = new MemoryDedupe();
+const relay = new Relay({ apiKey: process.env.RELAY_AGENT_TOKEN! });
 
-await runPollLoop({
-  client,
-  getCursor: () => 0,
-  setCursor: async () => {},
-  dedupe,
-  onMessage: async ({ event, message, reply }) => {
-    await reply.text(`hi from ${me.handle}`);
+const chats = await relay.chats.listChats();
+console.log(chats.chats);
+console.log(chats.hasNextPage());
+for await (const chat of chats) {
+  console.log(chat.id);
+}
+```
+
+Pagination retains Linq's payload names: chat pages expose `.chats`, message
+pages expose `.messages`, and both expose `.hasNextPage()` and
+`.getNextPage()`. `.data` remains an alias for generic consumers.
+
+## Send
+
+```ts
+await relay.chats.messages.send(chatId, {
+  message: {
+    parts: [{ type: "text", value: "Hello" }],
+    idempotency_key: crypto.randomUUID(),
   },
 });
 ```
 
-Docs: https://docs.relayapp.im
+Useful Linq method names are retained:
+
+- `chats.create`, `retrieve`, `update`, `listChats`, `leaveChat`, `markAsRead`
+- `chats.messages.list`, `chats.messages.send`
+- `chats.participants.add`, `chats.participants.remove`
+- `chats.sendVoicememo`
+- `messages.create`, `retrieve`, `addReaction`, `listMessagesThread`
+- `attachments.create`, `retrieve`, `delete`
+- `webhookEvents.list`
+- `webhookSubscriptions.create`, `retrieve`, `update`, `list`, `delete`
+- `contactCard.create`, `retrieve`, `update`
+- `blockedHandles.list`, `block`, `unblock`
+- `socketMode.retrieve`, `update`, `createConnection`
+
+Relay additionally exposes the user-only
+`messages.acknowledgeDelivered(messageId)`. Agent Tokens receive `403` from
+that route because agent delivery is acknowledged by a successful webhook.
+
+## Raw attachment upload
+
+```ts
+const allocation = await relay.attachments.create({
+  filename: "photo.png",
+  content_type: "image/png",
+  size_bytes: bytes.byteLength,
+});
+
+await relay.attachments.upload(allocation, bytes);
+```
+
+The upload helper sends a raw `PUT` body with the exact returned headers. It
+does not JSON-encode or multipart-wrap the bytes.
+
+## Webhooks
+
+```ts
+const relay = new Relay({
+  apiKey: process.env.RELAY_AGENT_TOKEN!,
+  webhookSecret: process.env.RELAY_WEBHOOK_SECRET!,
+});
+
+const event = relay.webhooks.unwrap(rawBody, {
+  headers: {
+    "webhook-id": request.headers.get("webhook-id")!,
+    "webhook-timestamp": request.headers.get("webhook-timestamp")!,
+    "webhook-signature": request.headers.get("webhook-signature")!,
+  },
+});
+```
+
+Verification follows Standard Webhooks and must use the unmodified raw body.
+Return `2xx` quickly; Relay uses that response as the agent's Delivered ACK.
+
+## Socket Mode
+
+```ts
+await relay.socketMode.update("socket");
+const connection = await relay.socketMode.createConnection();
+```
+
+Connect to `connection.url` with `connection.subprotocol`. Commit each event to
+your durable inbox, then send a cumulative ACK:
+
+```json
+{ "type": "ack", "through_sequence": "42" }
+```
+
+The ACK means durable acceptance, not handler or model completion. Replies use
+the normal idempotent REST message API.
+
+There is intentionally no poll, mobile realtime, responding, typing, service,
+partner/mobile namespace, edit, unsend, payment, or unrelated integration API.

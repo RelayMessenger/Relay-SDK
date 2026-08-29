@@ -1,0 +1,6 @@
+@relayapp/sdk preserves selected resource organization and method names from
+@linqapp/sdk 0.49.1, developed by Linq and distributed under the Apache License
+2.0. The Apache license text is included in LICENSES/Apache-2.0.txt.
+
+Relay's implementation, API host, v1 paths, types, and supported product
+surface are independent. Linq does not sponsor or endorse this package.

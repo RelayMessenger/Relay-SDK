@@ -1,82 +1,521 @@
-/** Wire types for the Relay v1 developer API used by plugins and examples. */
+import type { RELAY_WEBHOOK_EVENT_TYPES } from "./operations.js";
 
-export type RelaySender = {
-  kind: "user" | "agent" | "system";
-  id: string;
-  display_name?: string;
-};
+export type UUID = string;
 
-export type RelayOutgoingPart =
-  | { type: "text"; text: string }
-  | { type: "media"; attachment_id?: string; url?: string }
-  | { type: "voice_memo"; attachment_id?: string; url?: string; duration_ms?: number }
-  | { type: "link_preview"; url: string }
-  | { type: "data"; data: Record<string, unknown> };
+export interface RequestOptions {
+  signal?: AbortSignal;
+  timeout?: number;
+  maxRetries?: number;
+  headers?: HeadersInit;
+}
 
-export type RelayPart = {
-  type: string;
-  part_index?: number;
-  text?: string;
-  url?: string;
-  attachment_id?: string;
-  duration_ms?: number;
-  data?: Record<string, unknown>;
-  [key: string]: unknown;
-};
+export type DeliveryStatus =
+  | "sent"
+  | "delivered"
+  | "received"
+  | "read";
 
-export type RelayReplyRef = {
-  message_id: string;
-};
+export type ReactionType =
+  | "love"
+  | "like"
+  | "dislike"
+  | "laugh"
+  | "emphasize"
+  | "question"
+  | "custom";
 
-export type RelayMessage = {
-  id: string;
-  conversation_id: string;
-  sequence: number;
-  sender: RelaySender;
-  parts: RelayPart[];
-  reply_to?: RelayReplyRef | null;
-  fallback_text?: string;
-  status?: string;
-  created_at: string;
-};
-
-export type RelayEventEnvelope<TData = Record<string, unknown>> = {
-  event_id: string;
-  event_type: string;
-  agent_id: string;
-  created_at: string;
-  data: TData;
-};
-
-export type MessageReceivedData = {
-  message: RelayMessage;
-  invocation_id?: string;
-};
-
-export type MessageReceivedEvent = RelayEventEnvelope<MessageReceivedData>;
-
-export type RelayAgentProfile = {
-  id: string;
-  owner_user_id?: string;
+export interface ChatHandle {
+  id: UUID;
   handle: string;
-  display_name: string;
-  tagline?: string;
+  status?: "active" | "left" | "removed" | null;
+  joined_at: string;
+  left_at?: string | null;
+  is_me?: boolean | null;
+  kind?: "user" | "agent";
+  display_name?: string | null;
   avatar_url?: string | null;
-  visibility?: "private" | "unlisted" | "public";
-  created_at?: string;
-};
+}
 
-export type RelayEventsPage = {
-  events: RelayEventEnvelope[];
-  nextCursor: number;
-};
+export interface Reaction {
+  is_me: boolean;
+  handle: ChatHandle;
+  type: ReactionType;
+  custom_emoji?: string | null;
+}
 
-/**
- * The 202 from `POST /v1/messages`. The server splits the accepted parts at
- * ingest: each visible non-media part becomes its own message, contiguous
- * media parts stay one media message, and a voice memo always commits alone,
- * so one send commits one or more messages, in display order.
- */
-export type RelaySendResult = {
-  messages: RelayMessage[];
-};
+export interface TextPart {
+  type: "text";
+  value: string;
+  mention?: string | null;
+  mention_range?: [number, number] | null;
+}
+
+export interface MediaPart {
+  type: "media";
+  url?: string;
+  attachment_id?: UUID;
+}
+
+export interface LinkPart {
+  type: "link";
+  value: string;
+}
+
+export type MessagePart = TextPart | MediaPart | LinkPart;
+
+export interface TextPartResponse extends TextPart {
+  reactions: Reaction[] | null;
+}
+
+export interface MediaPartResponse {
+  type: "media";
+  id: UUID;
+  url: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  duration_ms?: number | null;
+  width?: number | null;
+  height?: number | null;
+  reactions: Reaction[] | null;
+}
+
+export interface LinkPartResponse extends LinkPart {
+  reactions: Reaction[] | null;
+}
+
+export interface SystemEventParty {
+  id: UUID;
+  handle: string;
+  kind: "user" | "agent";
+}
+
+export type SystemEventType =
+  | "chat_created"
+  | "participant_added"
+  | "participant_removed"
+  | "group_name_updated"
+  | "group_icon_updated";
+
+export interface SystemEvent {
+  type: SystemEventType;
+  actor: SystemEventParty;
+  subject: SystemEventParty | null;
+  value: string | null;
+  icon_attachment_id: UUID | null;
+}
+
+export interface SystemPartResponse {
+  type: "system";
+  value: string;
+  reactions: null;
+}
+
+export type MessagePartResponse =
+  | TextPartResponse
+  | MediaPartResponse
+  | LinkPartResponse
+  | SystemPartResponse;
+
+export interface ReplyTo {
+  message_id: UUID;
+  part_index?: number;
+}
+
+export interface MessageContent {
+  parts: MessagePart[];
+  reply_to?: ReplyTo;
+  idempotency_key?: string;
+}
+
+export interface SentMessage {
+  id: UUID;
+  parts: MessagePartResponse[];
+  created_at: string;
+  sent_at: string | null;
+  delivered_at?: string | null;
+  delivery_status: DeliveryStatus;
+  /** @deprecated Use delivery_status. */
+  is_read: boolean;
+  from_handle?: ChatHandle | null;
+  reply_to?: ReplyTo | null;
+  is_system_message: boolean;
+  system_event?: SystemEvent | null;
+}
+
+export interface Message {
+  id: UUID;
+  chat_id: UUID;
+  from?: string | null;
+  from_handle?: ChatHandle | null;
+  parts?: MessagePartResponse[] | null;
+  reply_to?: ReplyTo | null;
+  is_from_me: boolean;
+  /** @deprecated Use delivery_status. */
+  is_delivered: boolean;
+  /** @deprecated Use delivery_status. */
+  is_read: boolean;
+  delivery_status: DeliveryStatus;
+  created_at: string;
+  updated_at: string;
+  sent_at?: string | null;
+  delivered_at?: string | null;
+  read_at?: string | null;
+}
+
+export interface Chat {
+  id: UUID;
+  display_name: string | null;
+  group_chat_icon?: string | null;
+  handles: ChatHandle[];
+  is_group: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatCreateParams {
+  from: string;
+  to: string[];
+  message: MessageContent;
+}
+
+export interface ChatCreateResponse {
+  chat: Pick<
+    Chat,
+    "id" | "display_name" | "is_group" | "handles"
+  > & { message: SentMessage };
+}
+
+export interface ChatUpdateParams {
+  display_name?: string;
+  group_chat_icon?: UUID | null;
+}
+
+export interface AcceptedResponse {
+  status?: string;
+  message?: string;
+  trace_id?: string;
+}
+
+export interface ChatUpdateResponse {
+  status?: string;
+  chat_id?: UUID;
+}
+
+export interface ChatListChatsParams {
+  cursor?: string;
+  limit?: number;
+}
+
+export interface ParticipantAddParams {
+  handle: string;
+}
+
+export type ParticipantRemoveParams = ParticipantAddParams;
+
+export interface MessageSendParams {
+  message: MessageContent;
+}
+
+export interface MessageSendResponse {
+  chat_id: UUID;
+  message: SentMessage;
+}
+
+export interface MessageCreateParams {
+  to: string[];
+  message: MessageContent;
+  "Idempotency-Key"?: string;
+}
+
+export interface MessageCreateResponse {
+  from: string;
+  chat_id: UUID;
+  created_new_chat: boolean;
+  is_group: boolean;
+  handles: ChatHandle[];
+  message: SentMessage;
+}
+
+export interface MessageListParams {
+  cursor?: string;
+  limit?: number;
+}
+
+export interface MessageThreadParams extends MessageListParams {
+  order?: "asc" | "desc";
+}
+
+export interface MessageAddReactionParams {
+  operation: "add" | "remove";
+  type: ReactionType;
+  custom_emoji?: string;
+  part_index?: number;
+}
+
+export type MessageAddReactionResponse = AcceptedResponse;
+
+export type ChatSendVoicememoParams =
+  | { attachment_id: UUID; voice_memo_url?: never }
+  | { voice_memo_url: string; attachment_id?: never };
+
+export interface VoiceMemoAttachment {
+  id: UUID;
+  url: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  duration_ms?: number | null;
+}
+
+export interface ChatSendVoicememoResponse {
+  voice_memo: {
+    id: UUID;
+    from: string;
+    to: string[];
+    status: string;
+    voice_memo: VoiceMemoAttachment;
+    created_at: string;
+    chat: {
+      id: UUID;
+      handles: ChatHandle[];
+      is_group: boolean;
+    };
+  };
+}
+
+export type SupportedContentType =
+  | "image/jpeg"
+  | "image/png"
+  | "image/gif"
+  | "image/heic"
+  | "image/heif"
+  | "image/tiff"
+  | "image/bmp"
+  | "image/svg+xml"
+  | "image/webp"
+  | "image/x-icon"
+  | "video/mp4"
+  | "video/quicktime"
+  | "video/mpeg"
+  | "video/mpeg2"
+  | "video/x-m4v"
+  | "video/x-msvideo"
+  | "video/3gpp"
+  | "audio/mpeg"
+  | "audio/mp3"
+  | "audio/x-m4a"
+  | "audio/mp4"
+  | "audio/x-caf"
+  | "audio/x-wav"
+  | "audio/x-aiff"
+  | "audio/aiff"
+  | "audio/aac"
+  | "audio/midi"
+  | "audio/amr"
+  | "application/pdf"
+  | "application/vnd.apple.pkpass"
+  | "text/plain"
+  | "text/markdown"
+  | "text/vcard"
+  | "text/rtf"
+  | "text/csv"
+  | "text/html"
+  | "text/calendar"
+  | "application/msword"
+  | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  | "application/vnd.ms-excel"
+  | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  | "application/vnd.ms-powerpoint"
+  | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+  | "application/x-iwork-pages-sffpages"
+  | "application/x-iwork-numbers-sffnumbers"
+  | "application/x-iwork-keynote-sffkey"
+  | "application/epub+zip"
+  | "text/xml"
+  | "application/json"
+  | "application/zip"
+  | "application/x-gzip";
+
+export interface AttachmentCreateParams {
+  filename: string;
+  content_type: SupportedContentType;
+  size_bytes: number;
+  duration_ms?: number | null;
+  width?: number | null;
+  height?: number | null;
+}
+
+export interface AttachmentCreateResponse {
+  attachment_id: UUID;
+  upload_url: string;
+  download_url: string;
+  http_method: "PUT";
+  expires_at: string;
+  required_headers: Record<string, string>;
+}
+
+export interface Attachment {
+  id: UUID;
+  filename: string;
+  content_type: SupportedContentType;
+  size_bytes: number;
+  status: "pending" | "complete" | "failed";
+  download_url?: string;
+  created_at: string;
+  duration_ms?: number | null;
+  width?: number | null;
+  height?: number | null;
+}
+
+export type WebhookEventType = (typeof RELAY_WEBHOOK_EVENT_TYPES)[number];
+
+export interface WebhookEventListResponse {
+  events: WebhookEventType[];
+  doc_url: string;
+}
+
+export interface WebhookSubscription {
+  id: UUID;
+  target_url: string;
+  subscribed_events: WebhookEventType[];
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebhookSubscriptionCreateParams {
+  target_url: string;
+  subscribed_events: WebhookEventType[];
+}
+
+export interface WebhookSubscriptionCreateResponse
+  extends WebhookSubscription {
+  signing_secret: string;
+}
+
+export interface WebhookSubscriptionUpdateParams {
+  target_url?: string;
+  subscribed_events?: WebhookEventType[];
+  is_active?: boolean;
+}
+
+export interface WebhookSubscriptionListResponse {
+  subscriptions: WebhookSubscription[];
+}
+
+export interface ContactCardItem {
+  handle: string;
+  first_name: string;
+  last_name?: string | null;
+  image_url?: string | null;
+  is_active: boolean;
+  kind?: "user" | "agent";
+}
+
+export interface ContactCardCreateParams {
+  handle: string;
+  first_name: string;
+  last_name?: string;
+  image_url?: string;
+}
+
+export interface ContactCardRetrieveParams {
+  handle?: string;
+}
+
+export interface ContactCardRetrieveResponse {
+  contact_cards: ContactCardItem[];
+}
+
+export interface ContactCardUpdateParams {
+  handle: string;
+  first_name?: string;
+  last_name?: string;
+  image_url?: string;
+}
+
+export interface BlockedHandle {
+  handle: string;
+  reason: string | null;
+  blocked_at: string;
+}
+
+export interface BlockedHandleListResponse {
+  blocked_handles: BlockedHandle[];
+}
+
+export interface BlockHandleParams {
+  handle: string;
+  reason?: string;
+}
+
+export interface BlockHandleResponse {
+  blocked_handle: BlockedHandle;
+}
+
+export interface UnblockHandleParams {
+  handle: string;
+}
+
+export interface SocketModeState {
+  mode: "webhook" | "socket";
+  acked_through?: string;
+}
+
+export interface SocketConnection {
+  url: string;
+  expires_at: string;
+  subprotocol: "relay.v1.json";
+}
+
+export interface SocketReadyFrame {
+  type: "ready";
+  connection_id: UUID;
+  acked_through: string;
+  heartbeat_interval_ms: number;
+  max_in_flight: number;
+}
+
+export interface SocketEventFrame<T = Record<string, unknown>> {
+  type: "event";
+  sequence: string;
+  event: RelayWebhookEnvelope<T>;
+}
+
+export interface SocketAckFrame {
+  type: "ack";
+  through_sequence: string;
+}
+
+export interface MessageWebhookData {
+  chat: {
+    id: UUID;
+    is_group?: boolean | null;
+    owner_handle?: ChatHandle | null;
+  };
+  id: UUID;
+  idempotency_key?: string | null;
+  direction: "inbound" | "outbound";
+  sender_handle: ChatHandle;
+  parts: MessagePartResponse[];
+  sent_at?: string | null;
+  delivered_at?: string | null;
+  read_at?: string | null;
+  reply_to?: ReplyTo | null;
+}
+
+export interface RelayWebhookEnvelope<T = Record<string, unknown>> {
+  api_version: "v1";
+  webhook_version: "2026-02-03";
+  event_type: WebhookEventType;
+  event_id: UUID;
+  created_at: string;
+  trace_id: string;
+  agent_id: UUID;
+  data: T;
+}
+
+export type RelayWebhookEvent = RelayWebhookEnvelope<
+  MessageWebhookData | Record<string, unknown>
+>;

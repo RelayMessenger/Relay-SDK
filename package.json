@@ -1,44 +1,25 @@
 {
-  "name": "relaymessenger-dev",
+  "name": "relay-sdk-workspace",
   "private": true,
+  "type": "module",
   "workspaces": [
-    "packages/cli",
-    "packages/sdk",
-    "integrations/chat-sdk",
-    "integrations/claude-code",
-    "integrations/openclaw",
-    "integrations/vercel-ai",
-    "examples/plugins/hermes",
-    "examples/raw-webhook-agent",
-    "examples/showcase-agent"
+    "packages/sdk"
   ],
   "scripts": {
-    "check": "npm run check --workspaces",
-    "build": "npm run build --workspaces",
-    "test": "npm run test --workspaces",
-    "validate": "npm run build --workspace @relaymessenger/sdk && npm run check && npm run build && npm test",
-    "manifests:check": "node examples/harnesses/validate-manifests.mjs",
-    "sdk:consumer-smoke": "node examples/harnesses/packed-consumer.mjs",
-    "e2e:production": "node examples/harnesses/e2e-production.mjs",
-    "validate:claude-plugin": "npm exec --workspace @relaymessenger/cli -- claude plugin validate ../../integrations/claude-code --strict && npm exec --workspace @relaymessenger/cli -- claude plugin validate ../../ --strict",
-    "test:release": "node --test scripts/*.test.mjs",
-    "runtime:smoke": "node scripts/acp-runtime-smoke.mjs",
-    "gateway:harness": "npm run gateway:harness --workspace @relaymessenger/openclaw-plugin",
-    "pack:check": "node scripts/cli-release.mjs pack-json-smoke && node scripts/pack-smoke.mjs && npm run pack:smoke --workspace relay-claude-channel && npm run pack:smoke --workspace @relaymessenger/openclaw-plugin"
+    "clean": "npm run clean --workspace @relayapp/sdk",
+    "check": "npm run check --workspace @relayapp/sdk",
+    "build": "npm run build --workspace @relayapp/sdk",
+    "test": "npm run test --workspace @relayapp/sdk",
+    "contract:check": "node scripts/validate-contract.mjs",
+    "consumer:types": "tsc -p test/tsconfig.json --noEmit",
+    "pack:smoke": "node scripts/consumer-smoke.mjs",
+    "validate": "npm run clean && npm run check && npm run build && npm test && npm run contract:check && npm run consumer:types && npm run pack:smoke"
   },
   "devDependencies": {
-    "@hono/node-server": "^2.1.1",
-    "@types/node": "^26.2.0",
-    "tsx": "^4.23.12",
-    "typescript": "^7.0.2",
-    "undici": "^8.10.0",
-    "vitest": "^4.1.10"
-  },
-  "overrides": {
-    "openclaw": {
-      "undici": "^8.10.0"
-    },
-    "undici": "^8.10.0"
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0",
+    "yaml": "^2.8.1"
   },
   "engines": {
     "node": ">=22.22.3"

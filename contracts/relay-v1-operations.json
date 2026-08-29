@@ -1,0 +1,179 @@
+{
+  "source": "Relay-Server-local/contracts/developer/openapi.yaml",
+  "sha256": "a8fedec2bdb7009efceb9a75a014092e132c8cd555432676b718b463f7d9be42",
+  "path_count": 21,
+  "schema_count": 90,
+  "callback_count": 11,
+  "operations": [
+    {
+      "method": "POST",
+      "path": "/v1/chats",
+      "operationId": "createChat"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/chats",
+      "operationId": "listChats"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/chats/{chatId}",
+      "operationId": "getChat"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/chats/{chatId}",
+      "operationId": "updateChat"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chats/{chatId}/participants",
+      "operationId": "addParticipant"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/chats/{chatId}/participants",
+      "operationId": "removeParticipant"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chats/{chatId}/leave",
+      "operationId": "leaveChat"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chats/{chatId}/read",
+      "operationId": "markChatAsRead"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/messages",
+      "operationId": "sendMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chats/{chatId}/messages",
+      "operationId": "sendMessageToChat"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/chats/{chatId}/messages",
+      "operationId": "getMessages"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/messages/{messageId}/thread",
+      "operationId": "getMessageThread"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chats/{chatId}/voicememo",
+      "operationId": "sendVoiceMemoToChat"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/messages/{messageId}",
+      "operationId": "getMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/messages/{messageId}/reactions",
+      "operationId": "sendReaction"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/attachments",
+      "operationId": "requestUpload"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/attachments/{attachmentId}",
+      "operationId": "getAttachment"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/attachments/{attachmentId}",
+      "operationId": "deleteAttachment"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/blocked_handles",
+      "operationId": "listBlockedHandles"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/blocked_handles",
+      "operationId": "blockHandle"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/blocked_handles",
+      "operationId": "unblockHandle"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/webhook-events",
+      "operationId": "listWebhookEvents"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/webhook-subscriptions",
+      "operationId": "createWebhookSubscription"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/webhook-subscriptions",
+      "operationId": "listWebhookSubscriptions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/webhook-subscriptions/{subscriptionId}",
+      "operationId": "getWebhookSubscription"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/webhook-subscriptions/{subscriptionId}",
+      "operationId": "updateWebhookSubscription"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/webhook-subscriptions/{subscriptionId}",
+      "operationId": "deleteWebhookSubscription"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/contact_card",
+      "operationId": "getContactCard"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/contact_card",
+      "operationId": "setupContactCard"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/contact_card",
+      "operationId": "updateContactCard"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/messages/{messageId}/delivered",
+      "operationId": "acknowledgeMessageDelivered"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/socket-mode",
+      "operationId": "getSocketMode"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/socket-mode",
+      "operationId": "setSocketMode"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/socket-connections",
+      "operationId": "createSocketConnection"
+    }
+  ]
+}
