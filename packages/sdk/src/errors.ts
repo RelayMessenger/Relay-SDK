@@ -41,9 +41,9 @@ export type RelayWebhookConfiguredErrorOptions = Omit<
 >;
 
 /**
- * The Agent has at least one Webhook subscription, so Relay rejected the
- * WebSocket upgrade with HTTP 409. Delete every Webhook subscription before
- * connecting through the WebSocket.
+ * The Agent has at least one Webhook subscription, so Relay either rejected
+ * the WebSocket upgrade with HTTP 409 or closed a live socket with code 4410.
+ * Delete every Webhook subscription before connecting through the WebSocket.
  */
 export class RelayWebhookConfiguredError extends RelayAPIError {
   constructor(
