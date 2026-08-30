@@ -591,6 +591,23 @@ it.each(["webhook_configured", "revoked"] as const)(
   },
 );
 
+it("answers each Relay JSON ping with a JSON pong", async () => {
+  const { controller, running } = run(client());
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  const socket = FakeWebSocket.latest;
+  emitFrame(socket, ready());
+  emitFrame(socket, {
+    type: "ping",
+    sent_at: "2026-08-30T09:16:22.142Z",
+  });
+
+  await waitFor(() => socket.sent.length === 1);
+  expect(socket.sent.map(JSON.parse)).toEqual([{ type: "pong" }]);
+
+  controller.abort();
+  await running;
+});
+
 it("pings after 30 seconds and reconnects after 60 seconds without a pong", async () => {
   vi.useFakeTimers();
   try {
