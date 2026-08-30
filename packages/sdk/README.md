@@ -15,8 +15,7 @@ for await (const chat of chats) {
 }
 ```
 
-Pagination retains Linq's payload names: chat pages expose `.chats`, message
-pages expose `.messages`, and both expose `.hasNextPage()` and
+Chat pages expose `.chats`, message pages expose `.messages`, and both expose `.hasNextPage()` and
 `.getNextPage()`. `.data` remains an alias for generic consumers.
 
 ## Send
@@ -37,9 +36,9 @@ await relay.chats.shareContactCard(chatId);
 ```
 
 This shares the authenticated agent's configured Contact Card in an existing
-Chat. It does not create a Chat.
+Chat.
 
-Useful Linq method names are retained:
+Available resource methods:
 
 - `chats.create`, `retrieve`, `update`, `listChats`, `leaveChat`, `markAsRead`,
   `shareContactCard`, `startTyping`, `stopTyping`
@@ -54,10 +53,8 @@ Useful Linq method names are retained:
 - `blockedHandles.list`, `block`, `unblock`
 - `websocket.run`
 
-Relay additionally exposes the user-only
-`messages.acknowledgeDelivered(messageId)`. Agent Tokens receive `403` from
-that route because agent delivery is acknowledged by a successful webhook or
-WebSocket ACK.
+`messages.acknowledgeDelivered(messageId)` uses a user session. Agent delivery
+advances after a successful webhook or WebSocket ACK.
 
 Every retrieved `Message` may include `deliveries`, one entry per recipient:
 
@@ -80,8 +77,7 @@ await relay.chats.startTyping(chatId);
 await relay.chats.stopTyping(chatId);
 ```
 
-Calling `startTyping` again refreshes the indicator. These are real API
-commands, not local UI state.
+Calling `startTyping` again refreshes the indicator.
 
 ## Raw attachment upload
 
@@ -95,8 +91,8 @@ const allocation = await relay.attachments.create({
 await relay.attachments.upload(allocation, bytes);
 ```
 
-The upload helper sends a raw `PUT` body with the exact returned headers. It
-does not JSON-encode or multipart-wrap the bytes.
+The upload helper sends the bytes as a raw `PUT` body with the exact returned
+headers.
 
 ## Webhooks
 
@@ -136,10 +132,9 @@ await relay.websocket.run({
 });
 ```
 
-Relay has no WebSocket mode or enable setting. If the Agent has one or more
-Webhook subscriptions, Relay delivers through those Webhooks and rejects the
-WebSocket upgrade with HTTP `409`. Delete every Webhook subscription before
-starting the WebSocket. The SDK reports that conflict as
+With one or more saved Webhook subscriptions, Relay delivers through those
+Webhooks. With an empty subscription list, connect by WebSocket. A WebSocket
+upgrade with saved subscriptions returns HTTP `409` as
 `RelayWebhookConfiguredError`.
 
 Creating the first Webhook subscription while sockets are connected closes
@@ -148,20 +143,19 @@ last subscription makes the WebSocket path available again. Relay retains
 undelivered events across either change.
 
 The SDK derives `wss://<Relay host>/v1/websocket` from `baseURL` and sends the
-same Agent Token in the WebSocket upgrade `Authorization` header. It does not
-create a connection ticket, put credentials in the URL, or request a
-subprotocol.
+Agent Token in the WebSocket upgrade `Authorization` header.
 
-The SDK validates the ready checkpoint and contiguous decimal sequences, then
-sends a cumulative ACK only after `onEvent` resolves:
+The SDK validates the ready checkpoint, rejects sequence gaps, and routes
+replayed sequences through your durable deduplication handler. It sends a
+cumulative ACK after `onEvent` resolves:
 
 ```json
 { "type": "ack", "through_sequence": "42" }
 ```
 
-Unacknowledged events replay after reconnect, so the inbox must deduplicate by
-`event_id`. The ACK means durable acceptance, not handler or model completion.
-Replies use the normal idempotent REST message API.
+Unacknowledged events replay after reconnect, so the inbox deduplicates by
+`event_id`. Resolve `onEvent` after durable acceptance, then run model work and
+send replies through the idempotent REST Message API.
 
 The WebSocket and each signed Webhook carry the same
 `RelayWebhookEnvelope`, so one durable event handler can serve either path.
@@ -169,17 +163,14 @@ Webhook retries remain at-least-once and can repeat an `event_id`.
 
 If Relay reports that the stored checkpoint is older than retained event
 history, it sends a `full_sync` frame. `onFullSync` must fetch and durably apply
-a complete REST snapshot. The SDK sends `full_sync_complete` only after that
-promise resolves, and it will not ACK events while FULL sync is pending.
+a complete REST snapshot. The SDK sends `full_sync_complete` after that promise
+resolves, then resumes event ACKs.
 
-The runner uses capped, jittered exponential reconnect after `heartbeat_timeout`,
-`restart`, close codes `1011`, `1012`, or `4408`, send failures, and retryable
-`ack_failed`/`delivery_failed` errors. It rejects on `replaced`, `revoked`,
-Agent Token rejection, HTTP `409`, another terminal server-policy
-close, or a protocol violation. Where the WebSocket implementation exposes
-protocol ping/pong, the SDK pings every 30 seconds and reconnects when no pong
-arrives for 60 seconds. Restart it only after the Webhook configuration,
-credential issue, or contract mismatch is resolved.
+Relay sends a JSON ping every 30 seconds. The SDK answers with a JSON pong and
+also uses the Node WebSocket heartbeat to detect a dead connection.
 
-There is intentionally no poll, mobile realtime, responding, service,
-partner/mobile namespace, edit, unsend, payment, or unrelated integration API.
+The runner uses capped, jittered exponential reconnect after
+`heartbeat_timeout`, `restart`, close codes `1011`, `1012`, or `4408`, send
+failures, and retryable `ack_failed` or `delivery_failed` errors. Revoked
+credentials, HTTP `409`, terminal server-policy closes, and protocol violations
+stop the runner so the operator can correct the configuration.
