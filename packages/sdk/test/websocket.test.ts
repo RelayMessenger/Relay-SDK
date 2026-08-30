@@ -752,6 +752,31 @@ it("replays an unacknowledged event after reconnect for durable deduplication", 
   await running;
 });
 
+it("passes a duplicate sequence to durable deduplication without regressing ACK", async () => {
+  let callbacks = 0;
+  const { controller, running } = run(client(), {
+    onEvent: async () => {
+      callbacks += 1;
+    },
+  });
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  const socket = FakeWebSocket.latest;
+  emitFrame(socket, ready());
+  emitFrame(socket, eventFrame("1"));
+  await waitFor(() => socket.sent.length === 1);
+  emitFrame(socket, eventFrame("1"));
+  await waitFor(() => socket.sent.length === 2);
+
+  expect(callbacks).toBe(2);
+  expect(socket.sent.map(JSON.parse)).toEqual([
+    { type: "ack", through_sequence: "1" },
+    { type: "ack", through_sequence: "1" },
+  ]);
+
+  controller.abort();
+  await running;
+});
+
 it("rejects invalid reconnect options before opening a socket", async () => {
   await expect(runWebSocket(
     "https://relay.test",

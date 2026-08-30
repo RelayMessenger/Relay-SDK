@@ -603,7 +603,7 @@ const runConnection = (
         }
         const event = parseEvent(frame);
         const sequence = BigInt(event.sequence);
-        if (sequence !== acceptedThrough + 1n) {
+        if (sequence > acceptedThrough + 1n) {
           throw new WebSocketProtocolError(
             "Relay WebSocket received a non-contiguous event sequence.",
           );
@@ -613,11 +613,13 @@ const runConnection = (
         } catch (cause) {
           throw new DurableApplicationError("event", cause);
         }
-        acceptedThrough = sequence;
+        if (sequence === acceptedThrough + 1n) {
+          acceptedThrough = sequence;
+        }
         if (options.signal?.aborted) return;
         send({
           type: "ack",
-          through_sequence: event.sequence,
+          through_sequence: acceptedThrough.toString(),
         });
       }).catch((error) => {
         stopReceiving();
