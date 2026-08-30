@@ -251,10 +251,10 @@ const parseDisconnect = (value: unknown): WebSocketDisconnectFrame => {
     || !hasExactKeys(value, ["type", "reason"])
     || value.type !== "disconnect"
     || ![
-      "replaced",
       "revoked",
       "heartbeat_timeout",
       "restart",
+      "webhook_configured",
     ].includes(String(value.reason))
   ) {
     throw new WebSocketProtocolError(
@@ -520,9 +520,15 @@ const runConnection = (
                 : "Relay WebSocket heartbeat timed out.",
             );
           }
+          if (parsed.reason === "webhook_configured") {
+            throw new RelayWebhookConfiguredError(
+              "Webhook delivery is now configured for this Agent.",
+              { code: 4410 },
+            );
+          }
           throw new WebSocketStoppedError(
             `Relay WebSocket disconnected permanently: ${parsed.reason}.`,
-            parsed.reason === "replaced" ? 4409 : 4401,
+            4401,
           );
         }
         if (isRecord(frame) && frame.type === "error") {
@@ -613,6 +619,19 @@ const runConnection = (
       void chain.then(() => {
         if (options.signal?.aborted) {
           finish();
+          return;
+        }
+        if (event.code === 4410) {
+          finish(new RelayWebhookConfiguredError(
+            event.reason || "Webhook delivery is now configured for this Agent.",
+            {
+              code: 4410,
+              body: {
+                close_code: 4410,
+                reason: event.reason ?? "",
+              },
+            },
+          ));
           return;
         }
         if (

@@ -520,10 +520,10 @@ export type WebSocketErrorCode =
 export interface WebSocketDisconnectFrame {
   type: "disconnect";
   reason:
-    | "replaced"
     | "revoked"
     | "heartbeat_timeout"
-    | "restart";
+    | "restart"
+    | "webhook_configured";
 }
 
 export interface MessageWebhookData {

@@ -526,10 +526,7 @@ it.each(["heartbeat_timeout", "restart"] as const)(
   },
 );
 
-it.each([
-  [4401, "invalid Agent Token"],
-  [4409, "replaced"],
-] as const)("does not reconnect after terminal close %s", async (code, reason) => {
+it("does not reconnect after a terminal credential close", async () => {
   const errors: unknown[] = [];
   const { running } = run(client(), {
     onError(error) {
@@ -537,11 +534,28 @@ it.each([
     },
   });
   await waitFor(() => FakeWebSocket.instances.length === 1);
-  FakeWebSocket.latest.emit("close", { code, reason });
+  FakeWebSocket.latest.emit("close", {
+    code: 4401,
+    reason: "invalid Agent Token",
+  });
 
-  await expect(running).rejects.toThrow(String(code));
+  await expect(running).rejects.toThrow("4401");
   expect(FakeWebSocket.instances).toHaveLength(1);
   expect(errors).toHaveLength(1);
+});
+
+it("surfaces close code 4410 as a Webhook configuration conflict", async () => {
+  const { running } = run(client());
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  FakeWebSocket.latest.emit("close", {
+    code: 4410,
+    reason: "webhook delivery is now configured",
+  });
+
+  const error = await running.catch((cause) => cause);
+  expect(error).toBeInstanceOf(RelayWebhookConfiguredError);
+  expect(error).toMatchObject({ code: 4410, retryable: false });
+  expect(FakeWebSocket.instances).toHaveLength(1);
 });
 
 it("treats an otherwise unknown server policy close as terminal", async () => {
@@ -557,7 +571,7 @@ it("treats an otherwise unknown server policy close as terminal", async () => {
   expect(FakeWebSocket.instances).toHaveLength(1);
 });
 
-it.each(["replaced", "revoked"] as const)(
+it.each(["webhook_configured", "revoked"] as const)(
   "stops after a %s disconnect frame",
   async (reason) => {
     const { running } = run(client());
@@ -566,7 +580,13 @@ it.each(["replaced", "revoked"] as const)(
     emitFrame(socket, ready());
     emitFrame(socket, { type: "disconnect", reason });
 
-    await expect(running).rejects.toThrow(reason);
+    const error = await running.catch((cause) => cause);
+    if (reason === "webhook_configured") {
+      expect(error).toBeInstanceOf(RelayWebhookConfiguredError);
+      expect(error).toMatchObject({ code: 4410, retryable: false });
+    } else {
+      expect(String(error)).toContain(reason);
+    }
     expect(FakeWebSocket.instances).toHaveLength(1);
   },
 );

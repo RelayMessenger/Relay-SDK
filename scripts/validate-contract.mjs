@@ -13,18 +13,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(
   readFileSync(resolve(root, "contracts/relay-v1-operations.json"), "utf8"),
 );
-// The owner-ratified transport decision removes these stale setting routes
-// while the locked Server OpenAPI is being updated in its own repository.
-const supersededSourceOperations = [
+// The WebSocket upgrade is documented in OpenAPI but is implemented by
+// runWebSocket rather than as a generated REST resource method.
+const sourceOnlyOperations = [
   {
     method: "GET",
     path: "/v1/websocket",
-    operationId: "getWebSocketSettings",
-  },
-  {
-    method: "PUT",
-    path: "/v1/websocket",
-    operationId: "updateWebSocketSettings",
+    operationId: "connectAgentWebSocket",
   },
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
@@ -138,7 +133,7 @@ if (existsSync(source)) {
     manifest.source_schema_count,
   );
   const excluded = new Set(
-    supersededSourceOperations.map((operation) =>
+    sourceOnlyOperations.map((operation) =>
       `${operation.method} ${operation.path} ${operation.operationId}`
     ),
   );
@@ -179,11 +174,16 @@ if (existsSync(source)) {
     ],
   );
   assert.equal(
-    Object.values(document["x-relay-websocket-close-codes"]).some((value) =>
-      /webhook.+configured/i.test(String(value))
-    ),
+    document["x-relay-websocket-close-codes"]["4410"],
+    "Webhook delivery is now configured for this Agent.",
+  );
+  assert.equal(
+    "4409" in document["x-relay-websocket-close-codes"],
     false,
-    "Server now provides the dedicated Webhook-configured close code; add it to the SDK contract",
+  );
+  assert.deepEqual(
+    document.components.schemas.WebSocketDisconnectFrame.properties.reason.enum,
+    ["revoked", "heartbeat_timeout", "restart", "webhook_configured"],
   );
   for (const obsoleteSchema of [
     "SocketModeState",

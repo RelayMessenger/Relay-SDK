@@ -1,6 +1,6 @@
 {
   "source": "Relay-Server-local/contracts/developer/openapi.yaml",
-  "source_openapi_sha256": "09142cf0608946cba970f1280c8200723de035f58acd04586e881c1c7ba4e7ee",
+  "source_openapi_sha256": "075381533048785b837df3bcb35b9cde00e7694dc02732b2f15d4f441ef9a1dd",
   "source_path_count": 22,
   "source_schema_count": 99,
   "callback_count": 13,
