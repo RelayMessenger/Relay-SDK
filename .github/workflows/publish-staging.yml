@@ -1,0 +1,133 @@
+name: Publish npm staging
+
+on:
+  push:
+    branches: [staging]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-sdk-npm-staging
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Prove and retain package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.3
+          cache: npm
+          registry-url: https://registry.npmjs.org/
+      - run: npm ci
+      - run: npm run validate
+      - name: Assert staging package identity
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import manifest from "./packages/sdk/package.json" with { type: "json" };
+          assert.match(manifest.version, /^\d+\.\d+\.\d+-staging\.\d+$/);
+          assert.deepEqual(manifest.publishConfig, {
+            access: "public",
+            registry: "https://registry.npmjs.org/",
+            tag: "staging",
+          });
+          NODE
+      - name: Build and retain one tarball
+        run: |
+          mkdir -p .release-tmp/npm-staging
+          npm run build
+          npm pack \
+            --workspace @relaymessenger/sdk \
+            --ignore-scripts \
+            --pack-destination .release-tmp/npm-staging
+          test "$(find .release-tmp/npm-staging -maxdepth 1 -name '*.tgz' | wc -l)" -eq 1
+      - name: Prove exact tarball
+        run: |
+          VERSION="$(node -p "require('./packages/sdk/package.json').version")"
+          TARBALL="$(find .release-tmp/npm-staging -maxdepth 1 -name '*.tgz' -print -quit)"
+          node scripts/package-proof.mjs \
+            --package "$TARBALL" \
+            --expected-version "$VERSION" \
+            --receipt .release-tmp/npm-staging/tarball-proof-node-22.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-sdk-npm-staging-${{ github.sha }}
+          path: .release-tmp/npm-staging/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish staging tag
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+      - uses: actions/download-artifact@v4
+        with:
+          name: relay-sdk-npm-staging-${{ github.sha }}
+          path: .release-tmp/npm-staging
+      - name: Re-prove retained tarball on Node 24
+        run: |
+          VERSION="$(node -p "require('./packages/sdk/package.json').version")"
+          TARBALL="$(find .release-tmp/npm-staging -maxdepth 1 -name '*.tgz' -print -quit)"
+          node scripts/package-proof.mjs \
+            --package "$TARBALL" \
+            --expected-version "$VERSION" \
+            --receipt .release-tmp/npm-staging/tarball-proof-node-24.json
+      - name: Reconcile and publish once
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          TARBALL="$(find .release-tmp/npm-staging -maxdepth 1 -name '*.tgz' -print -quit)"
+          node scripts/publish-staging.mjs \
+            --tarball "$TARBALL" \
+            --receipt .release-tmp/npm-staging/npm-publish.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relay-sdk-npm-staging-publish-${{ github.sha }}
+          path: .release-tmp/npm-staging/
+          if-no-files-found: error
+          retention-days: 30
+
+  registry:
+    name: Prove registry install on Node ${{ matrix.node }}
+    needs: publish
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22.22.3, 24]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          registry-url: https://registry.npmjs.org/
+      - name: Install and prove staging tag
+        run: |
+          VERSION="$(node -p "require('./packages/sdk/package.json').version")"
+          node scripts/package-proof.mjs \
+            --package @relaymessenger/sdk@staging \
+            --expected-version "$VERSION" \
+            --receipt "registry-proof-node-${{ matrix.node }}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-sdk-registry-node-${{ matrix.node }}-${{ github.sha }}
+          path: registry-proof-node-${{ matrix.node }}.json
+          if-no-files-found: error
+          retention-days: 30
