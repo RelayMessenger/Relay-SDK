@@ -334,20 +334,6 @@ export class Chats {
     });
   }
 
-  /**
-   * User session only. Hides this conversation for the authenticated user.
-   */
-  deleteConversation(
-    chatID: string,
-    options?: RequestOptions,
-  ): Promise<void> {
-    return this.transport.request({
-      method: "DELETE",
-      path: `/v1/me/conversations/${pathID(chatID)}`,
-      options,
-    });
-  }
-
   update(
     chatID: string,
     body: ChatUpdateParams,
@@ -500,20 +486,6 @@ export class Messages {
     );
   }
 
-  /**
-   * User session only. Agent delivery is acknowledged by webhook `2xx`.
-   */
-  acknowledgeDelivered(
-    messageID: string,
-    options?: RequestOptions,
-  ): Promise<void> {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/messages/${pathID(messageID)}/delivered`,
-      options,
-      retryable: true,
-    });
-  }
 }
 
 export class Attachments {

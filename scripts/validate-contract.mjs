@@ -13,6 +13,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(
   readFileSync(resolve(root, "contracts/relay-v1-operations.json"), "utf8"),
 );
+const canonicalSourcePath =
+  "_worktrees/Relay-Server-local/contracts/developer/openapi.yaml";
+assert.equal(
+  manifest.source,
+  canonicalSourcePath,
+  "SDK contract source must remain the canonical Server developer OpenAPI",
+);
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 const sourceOnlyOperations = [
@@ -22,16 +29,77 @@ const sourceOnlyOperations = [
     operationId: "connectAgentWebSocket",
   },
 ];
+const allowedOperationSignatures = [
+  "POST /v1/chats",
+  "GET /v1/chats",
+  "GET /v1/chats/{chatId}",
+  "PUT /v1/chats/{chatId}",
+  "POST /v1/chats/{chatId}/participants",
+  "DELETE /v1/chats/{chatId}/participants",
+  "POST /v1/chats/{chatId}/leave",
+  "POST /v1/chats/{chatId}/typing",
+  "DELETE /v1/chats/{chatId}/typing",
+  "POST /v1/chats/{chatId}/read",
+  "POST /v1/chats/{chatId}/share_contact_card",
+  "POST /v1/messages",
+  "POST /v1/chats/{chatId}/messages",
+  "GET /v1/chats/{chatId}/messages",
+  "GET /v1/messages/{messageId}/thread",
+  "POST /v1/chats/{chatId}/voicememo",
+  "GET /v1/messages/{messageId}",
+  "POST /v1/messages/{messageId}/reactions",
+  "POST /v1/attachments",
+  "GET /v1/attachments/{attachmentId}",
+  "DELETE /v1/attachments/{attachmentId}",
+  "GET /v1/blocked_handles",
+  "POST /v1/blocked_handles",
+  "DELETE /v1/blocked_handles",
+  "GET /v1/webhook-events",
+  "POST /v1/webhook-subscriptions",
+  "GET /v1/webhook-subscriptions",
+  "GET /v1/webhook-subscriptions/{subscriptionId}",
+  "PUT /v1/webhook-subscriptions/{subscriptionId}",
+  "DELETE /v1/webhook-subscriptions/{subscriptionId}",
+  "GET /v1/contact_card",
+  "POST /v1/contact_card",
+  "PATCH /v1/contact_card",
+];
+const forbiddenPathPrefixes = [
+  "/v1/me/",
+  "/v1/client/",
+  "/v1/console/",
+  "/v1/internal/",
+  "/api/auth/",
+];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 35);
-assert.equal(manifest.path_count, 22);
-assert.equal(manifest.source_path_count, 23);
+assert.equal(manifest.operation_count, 33);
+assert.equal(manifest.path_count, 20);
+assert.equal(manifest.source_path_count, 21);
 assert.equal(manifest.source_schema_count, 99);
 assert.equal(manifest.callback_count, 13);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 22);
-assert.equal(operationJSON.length, 35);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 20);
+assert.equal(operationJSON.length, 33);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 13);
+assert.deepEqual(
+  operationJSON.map((operation) => `${operation.method} ${operation.path}`),
+  allowedOperationSignatures,
+  "SDK REST operations must remain inside the approved public allowlist",
+);
+for (const prefix of forbiddenPathPrefixes) {
+  assert.equal(
+    operationJSON.some((operation) => operation.path.startsWith(prefix)),
+    false,
+    `private route prefix leaked into SDK: ${prefix}`,
+  );
+}
+assert.equal(
+  operationJSON.some(
+    (operation) => operation.operationId === "acknowledgeMessageDelivered",
+  ),
+  false,
+  "user delivery acknowledgement leaked into SDK",
+);
 
 for (const forbidden of [
   "/v1/events",
@@ -42,7 +110,6 @@ for (const forbidden of [
   "/socket-mode",
   "/socket-connections",
   "/v1/contacts",
-  "/v1/me/contacts",
 ]) {
   assert.equal(
     operationJSON.some((operation) => operation.path.includes(forbidden)),
@@ -50,11 +117,6 @@ for (const forbidden of [
     `unsupported path leaked into SDK: ${forbidden}`,
   );
 }
-assert.ok(operationJSON.some((operation) =>
-  operation.path === "/v1/messages/{messageId}/delivered"));
-assert.ok(operationJSON.some((operation) =>
-  operation.path === "/v1/me/conversations/{chatId}"
-  && operation.method === "DELETE"));
 assert.ok(operationJSON.some((operation) =>
   operation.path === "/v1/chats/{chatId}/share_contact_card"));
 assert.equal(operationJSON.some((operation) =>
@@ -72,26 +134,68 @@ const client = new Relay({
   apiKey: "contract-check",
   fetch: async () => new Response("{}", { status: 200 }),
 });
-for (const forbidden of [
-  "pollEvents",
-  "poll",
-  "realtime",
-  "responding",
-  "typing",
-  "socketMode",
-  "contacts",
-]) {
-  assert.equal(forbidden in client, false, `unsupported client field: ${forbidden}`);
-  assert.equal(forbidden in client.messages, false, `unsupported message field: ${forbidden}`);
-  assert.equal(forbidden in client.chats, false, `unsupported chat field: ${forbidden}`);
-}
-for (const forbidden of ["retrieve", "update", "enabled", "settings"]) {
-  assert.equal(
-    forbidden in client.websocket,
-    false,
-    `unsupported WebSocket setting leaked into SDK: ${forbidden}`,
-  );
-}
+const publicMethods = (value) =>
+  Object.getOwnPropertyNames(Object.getPrototypeOf(value))
+    .filter((name) => name !== "constructor")
+    .sort();
+assert.deepEqual(Object.keys(client).sort(), [
+  "attachments",
+  "baseURL",
+  "blockedHandles",
+  "chats",
+  "contactCard",
+  "messages",
+  "webhookEvents",
+  "webhookSubscriptions",
+  "webhooks",
+  "websocket",
+]);
+assert.deepEqual(publicMethods(client.chats), [
+  "create",
+  "leaveChat",
+  "listChats",
+  "markAsRead",
+  "retrieve",
+  "sendVoicememo",
+  "shareContactCard",
+  "startTyping",
+  "stopTyping",
+  "update",
+]);
+assert.deepEqual(publicMethods(client.messages), [
+  "addReaction",
+  "create",
+  "listMessagesThread",
+  "retrieve",
+]);
+assert.deepEqual(publicMethods(client.chats.messages), ["list", "send"]);
+assert.deepEqual(publicMethods(client.chats.participants), ["add", "remove"]);
+assert.deepEqual(publicMethods(client.attachments), [
+  "create",
+  "delete",
+  "retrieve",
+  "upload",
+]);
+assert.deepEqual(publicMethods(client.webhookEvents), ["list"]);
+assert.deepEqual(publicMethods(client.webhookSubscriptions), [
+  "create",
+  "delete",
+  "list",
+  "retrieve",
+  "update",
+]);
+assert.deepEqual(publicMethods(client.contactCard), [
+  "create",
+  "retrieve",
+  "update",
+]);
+assert.deepEqual(publicMethods(client.blockedHandles), [
+  "block",
+  "list",
+  "unblock",
+]);
+assert.deepEqual(publicMethods(client.websocket), ["run"]);
+assert.deepEqual(publicMethods(client.webhooks), ["unwrap", "verify"]);
 
 const decision = resolve(root, "..", manifest.transport_decision.source);
 if (existsSync(decision)) {
@@ -106,7 +210,7 @@ if (existsSync(decision)) {
 }
 
 const source = process.env.RELAY_OPENAPI_SOURCE
-  ?? resolve(root, "..", manifest.source);
+  ?? resolve(root, "..", canonicalSourcePath);
 if (existsSync(source)) {
   const bytes = readFileSync(source);
   const hash = createHash("sha256").update(bytes).digest("hex");
@@ -232,18 +336,20 @@ if (existsSync(source)) {
     document.components.schemas.ChatHandle.properties.greeting_message.maxLength,
     1024,
   );
-  assert.equal(
-    "is_default" in document.components.schemas.ChatHandle.properties,
-    false,
-    "ChatHandle.is_default is private and must not enter the public contract",
-  );
-  assert.equal(
-    document.paths["/v1/me/conversations/{chatId}"].delete.operationId,
-    "deleteConversation",
-  );
-  assert.ok(
-    document.paths["/v1/me/conversations/{chatId}"].delete.responses["409"],
-    "Default Agent conversation deletion must remain guarded",
+  assert.deepEqual(
+    Object.keys(document.components.schemas.ChatHandle.properties),
+    [
+      "id",
+      "handle",
+      "status",
+      "joined_at",
+      "left_at",
+      "is_me",
+      "kind",
+      "display_name",
+      "avatar_url",
+      "greeting_message",
+    ],
   );
   assert.deepEqual(
     document.components.schemas.WebSocketReadyFrame.required,

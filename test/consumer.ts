@@ -27,8 +27,6 @@ const content: MessageContent = {
 
 await relay.chats.messages.send("chat-id", { message: content });
 await relay.chats.shareContactCard("chat-id");
-await relay.messages.acknowledgeDelivered("message-id");
-await relay.chats.deleteConversation("conversation-id");
 await relay.chats.startTyping("chat-id");
 await relay.chats.stopTyping("chat-id");
 void relay.websocket.run({
@@ -123,8 +121,6 @@ const withService: MessageContent = {
 void withService;
 declare const chat: Chat;
 chat.handles[0]!.greeting_message satisfies string | null;
-// @ts-expect-error Default-agent state is private to Relay.
-chat.handles[0]!.is_default;
 const userHandle: ChatHandle = {
   id: "user-id",
   handle: "alice",
@@ -141,16 +137,6 @@ const agentHandle: ChatHandle = {
   greeting_message: "Hello",
 };
 void agentHandle;
-const privateDefaultStateMustNotCompile: ChatHandle = {
-  id: "invalid-user-id",
-  handle: "echo",
-  joined_at: new Date().toISOString(),
-  kind: "agent",
-  greeting_message: "Hello",
-  // @ts-expect-error Default-agent state is not part of the public SDK.
-  is_default: true,
-};
-void privateDefaultStateMustNotCompile;
 // @ts-expect-error Relay does not expose fake archived chat state.
 chat.is_archived;
 declare const message: Message;

@@ -1,15 +1,15 @@
 {
-  "source": "Relay-Docs/api-reference/openapi.yaml",
-  "source_openapi_sha256": "dc76618fcb8e09aa41e26c1be79548f09cb4e3810f1ec171db0fda043ab5d8d2",
-  "source_path_count": 23,
+  "source": "_worktrees/Relay-Server-local/contracts/developer/openapi.yaml",
+  "source_openapi_sha256": "d43599c9e551785c544fdcc940d4e8f234529cd1721498ce0a7da088d5514ec8",
+  "source_path_count": 21,
   "source_schema_count": 99,
   "callback_count": 13,
   "transport_decision": {
     "source": "Relay-Research/research/relay-rebuild-20260828/TRANSPORT-DECISION-20260829.md",
     "sha256": "6140351159f830a4a6b4be67e2e6a9cce27eeb9a6cd83c67c54331df26d2fe74"
   },
-  "path_count": 22,
-  "operation_count": 35,
+  "path_count": 20,
+  "operation_count": 33,
   "operations": [
     {
       "method": "POST",
@@ -175,16 +175,6 @@
       "method": "PATCH",
       "path": "/v1/contact_card",
       "operationId": "updateContactCard"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/messages/{messageId}/delivered",
-      "operationId": "acknowledgeMessageDelivered"
-    },
-    {
-      "method": "DELETE",
-      "path": "/v1/me/conversations/{chatId}",
-      "operationId": "deleteConversation"
     }
   ]
 }

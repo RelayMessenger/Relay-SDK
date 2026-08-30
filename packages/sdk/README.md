@@ -40,8 +40,8 @@ Chat.
 
 Available resource methods:
 
-- `chats.create`, `retrieve`, `update`, `listChats`, `deleteConversation`,
-  `leaveChat`, `markAsRead`, `shareContactCard`, `startTyping`, `stopTyping`
+- `chats.create`, `retrieve`, `update`, `listChats`, `leaveChat`, `markAsRead`,
+  `shareContactCard`, `startTyping`, `stopTyping`
 - `chats.messages.list`, `chats.messages.send`
 - `chats.participants.add`, `chats.participants.remove`
 - `chats.sendVoicememo`
@@ -52,12 +52,6 @@ Available resource methods:
 - `contactCard.create`, `retrieve`, `update`
 - `blockedHandles.list`, `block`, `unblock`
 - `websocket.run`
-
-`messages.acknowledgeDelivered(messageId)` uses a user session. Agent delivery
-advances after a successful webhook or WebSocket ACK.
-
-`chats.deleteConversation(chatId)` also uses a user session. It hides
-that conversation for the authenticated user.
 
 Every retrieved `Message` may include `deliveries`, one entry per recipient:
 
