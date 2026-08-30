@@ -1,9 +1,15 @@
 {
   "source": "Relay-Server-local/contracts/developer/openapi.yaml",
-  "sha256": "09142cf0608946cba970f1280c8200723de035f58acd04586e881c1c7ba4e7ee",
-  "path_count": 22,
-  "schema_count": 99,
+  "source_openapi_sha256": "09142cf0608946cba970f1280c8200723de035f58acd04586e881c1c7ba4e7ee",
+  "source_path_count": 22,
+  "source_schema_count": 99,
   "callback_count": 13,
+  "transport_decision": {
+    "source": "Relay-Research/research/relay-rebuild-20260828/TRANSPORT-DECISION-20260829.md",
+    "sha256": "6140351159f830a4a6b4be67e2e6a9cce27eeb9a6cd83c67c54331df26d2fe74"
+  },
+  "path_count": 21,
+  "operation_count": 34,
   "operations": [
     {
       "method": "POST",
@@ -174,16 +180,6 @@
       "method": "POST",
       "path": "/v1/messages/{messageId}/delivered",
       "operationId": "acknowledgeMessageDelivered"
-    },
-    {
-      "method": "GET",
-      "path": "/v1/websocket",
-      "operationId": "getWebSocketSettings"
-    },
-    {
-      "method": "PUT",
-      "path": "/v1/websocket",
-      "operationId": "updateWebSocketSettings"
     }
   ]
 }

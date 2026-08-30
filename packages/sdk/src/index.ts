@@ -10,7 +10,12 @@ export {
   WebhookSubscriptions,
   type RelayOptions,
 } from "./client.js";
-export { RelayAPIError, type RelayAPIErrorOptions } from "./errors.js";
+export {
+  RelayAPIError,
+  RelayWebhookConfiguredError,
+  type RelayAPIErrorOptions,
+  type RelayWebhookConfiguredErrorOptions,
+} from "./errors.js";
 export {
   RELAY_V1_OPERATIONS,
   RELAY_WEBHOOK_EVENT_TYPES,

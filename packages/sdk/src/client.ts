@@ -34,8 +34,6 @@ import type {
   ParticipantRemoveParams,
   RequestOptions,
   UnblockHandleParams,
-  WebSocketSettings,
-  WebSocketSettingsUpdate,
   WebhookEventListResponse,
   WebhookSubscription,
   WebhookSubscriptionCreateParams,
@@ -692,26 +690,6 @@ export class BlockedHandles {
 
 export class WebSocket {
   constructor(private readonly transport: Transport) {}
-
-  retrieve(options?: RequestOptions): Promise<WebSocketSettings> {
-    return this.transport.request({
-      method: "GET",
-      path: "/v1/websocket",
-      options,
-    });
-  }
-
-  update(
-    body: WebSocketSettingsUpdate,
-    options?: RequestOptions,
-  ): Promise<WebSocketSettings> {
-    return this.transport.request({
-      method: "PUT",
-      path: "/v1/websocket",
-      body,
-      options,
-    });
-  }
 
   /**
    * Keeps one outbound WebSocket connection alive. `onEvent` must return

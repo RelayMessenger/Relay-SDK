@@ -52,7 +52,7 @@ Useful Linq method names are retained:
 - `webhookSubscriptions.create`, `retrieve`, `update`, `list`, `delete`
 - `contactCard.create`, `retrieve`, `update`
 - `blockedHandles.list`, `block`, `unblock`
-- `websocket.retrieve`, `update`, `run`
+- `websocket.run`
 
 Relay additionally exposes the user-only
 `messages.acknowledgeDelivered(messageId)`. Agent Tokens receive `403` from
@@ -122,7 +122,6 @@ the handler or model. Relay uses that response as the agent's Delivered ACK.
 ## WebSocket
 
 ```ts
-await relay.websocket.update({ enabled: true });
 await relay.websocket.run({
   onEvent: async (event, { sequence }) => {
     // This promise must resolve only after a durable inbox commit.
@@ -136,6 +135,17 @@ await relay.websocket.run({
   },
 });
 ```
+
+Relay has no WebSocket mode or enable setting. If the Agent has one or more
+Webhook subscriptions, Relay delivers through those Webhooks and rejects the
+WebSocket upgrade with HTTP `409`. Delete every Webhook subscription before
+starting the WebSocket. The SDK reports that conflict as
+`RelayWebhookConfiguredError`.
+
+Creating the first Webhook subscription while sockets are connected closes
+those sockets and moves undelivered events to Webhook delivery. Deleting the
+last subscription makes the WebSocket path available again. Relay retains
+undelivered events across either change.
 
 The SDK derives `wss://<Relay host>/v1/websocket` from `baseURL` and sends the
 same Agent Token in the WebSocket upgrade `Authorization` header. It does not
@@ -153,6 +163,10 @@ Unacknowledged events replay after reconnect, so the inbox must deduplicate by
 `event_id`. The ACK means durable acceptance, not handler or model completion.
 Replies use the normal idempotent REST message API.
 
+The WebSocket and each signed Webhook carry the same
+`RelayWebhookEnvelope`, so one durable event handler can serve either path.
+Webhook retries remain at-least-once and can repeat an `event_id`.
+
 If Relay reports that the stored checkpoint is older than retained event
 history, it sends a `full_sync` frame. `onFullSync` must fetch and durably apply
 a complete REST snapshot. The SDK sends `full_sync_complete` only after that
@@ -160,9 +174,12 @@ promise resolves, and it will not ACK events while FULL sync is pending.
 
 The runner uses capped, jittered exponential reconnect after `heartbeat_timeout`,
 `restart`, close codes `1011`, `1012`, or `4408`, send failures, and retryable
-`ack_failed`/`delivery_failed` errors. It rejects on `disabled`, `replaced`,
-`revoked`, Agent Token rejection, or a protocol violation. Restart it only
-after the operator action, credential issue, or contract mismatch is resolved.
+`ack_failed`/`delivery_failed` errors. It rejects on `replaced`, `revoked`,
+Agent Token rejection, HTTP `409`, another terminal server-policy
+close, or a protocol violation. Where the WebSocket implementation exposes
+protocol ping/pong, the SDK pings every 30 seconds and reconnects when no pong
+arrives for 60 seconds. Restart it only after the Webhook configuration,
+credential issue, or contract mismatch is resolved.
 
 There is intentionally no poll, mobile realtime, responding, service,
 partner/mobile namespace, edit, unsend, payment, or unrelated integration API.

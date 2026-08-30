@@ -1,4 +1,5 @@
 import NodeWebSocket from "ws";
+import { RelayWebhookConfiguredError } from "./errors.js";
 import type {
   RelayWebhookEnvelope,
   WebSocketDisconnectFrame,
@@ -29,6 +30,15 @@ export interface WebSocketLike {
   ): void;
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  ping?(): void;
+  on?(
+    type: string,
+    listener: (...args: any[]) => void,
+  ): unknown;
+  off?(
+    type: string,
+    listener: (...args: any[]) => void,
+  ): unknown;
 }
 
 export interface WebSocketConstructor {
@@ -122,9 +132,18 @@ const WEBSOCKET_ERROR_CODES = new Set([
   "full_sync_required",
   "full_sync_mismatch",
 ]);
+const HEARTBEAT_PING_INTERVAL_MS = 30_000;
+const HEARTBEAT_PONG_TIMEOUT_MS = 60_000;
 const CLIENT_CLOSE_DURABLE_ACCEPTANCE = 4001;
 const CLIENT_CLOSE_PROTOCOL_ERROR = 4002;
 const CLIENT_CLOSE_RECONNECT = 4003;
+
+interface UpgradeResponseLike {
+  statusCode?: number;
+  statusMessage?: string;
+  setEncoding?(encoding: string): void;
+  on(type: string, listener: (...args: any[]) => void): unknown;
+}
 
 class WebSocketProtocolError extends Error {
   readonly closeCode = CLIENT_CLOSE_PROTOCOL_ERROR;
@@ -232,7 +251,6 @@ const parseDisconnect = (value: unknown): WebSocketDisconnectFrame => {
     || !hasExactKeys(value, ["type", "reason"])
     || value.type !== "disconnect"
     || ![
-      "disabled",
       "replaced",
       "revoked",
       "heartbeat_timeout",
@@ -279,6 +297,52 @@ class RetryableWebSocketError extends Error {
   }
 }
 
+const upgradeResponseBody = (
+  status: number,
+  statusMessage: string | undefined,
+  textBody: string,
+): RelayWebhookConfiguredError | WebSocketStoppedError | RetryableWebSocketError => {
+  let body: unknown = textBody;
+  let message: string | undefined;
+  let traceId: string | undefined;
+  try {
+    const parsed = textBody ? JSON.parse(textBody) as unknown : undefined;
+    body = parsed;
+    if (isRecord(parsed)) {
+      if (typeof parsed.trace_id === "string") traceId = parsed.trace_id;
+      if (
+        isRecord(parsed.error)
+        && typeof parsed.error.message === "string"
+      ) {
+        message = parsed.error.message;
+      }
+    }
+  } catch {
+    // Keep the unparsed response body for diagnostics.
+  }
+
+  if (status === 409) {
+    return new RelayWebhookConfiguredError(
+      message
+        ?? "This Agent delivers by webhook; delete its webhook subscription to use the WebSocket.",
+      {
+        ...(traceId === undefined ? {} : { traceId }),
+        body,
+      },
+    );
+  }
+
+  const fallback = status > 0
+    ? `Relay WebSocket upgrade failed with HTTP ${status}${
+      statusMessage ? ` ${statusMessage}` : ""
+    }.`
+    : "Relay WebSocket upgrade failed before receiving an HTTP status.";
+  const errorMessage = message ?? fallback;
+  return status === 429 || status >= 500 || status === 0
+    ? new RetryableWebSocketError(errorMessage)
+    : new WebSocketStoppedError(errorMessage);
+};
+
 const deriveWebSocketURL = (baseURL: string): string => {
   let url: URL;
   try {
@@ -318,13 +382,19 @@ const runConnection = (
     let ready = false;
     let acceptedThrough: bigint | undefined;
     let fullSyncThrough: bigint | null | undefined;
+    let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+    let lastPongAt = 0;
 
     const finish = (error?: unknown): void => {
       if (settled) return;
       settled = true;
+      if (heartbeatTimer !== undefined) clearInterval(heartbeatTimer);
+      heartbeatTimer = undefined;
       socket.removeEventListener("message", onMessage);
       socket.removeEventListener("close", onClose);
       socket.removeEventListener("error", onSocketError);
+      socket.off?.("pong", onPong);
+      socket.off?.("unexpected-response", onUnexpectedResponse);
       options.signal?.removeEventListener("abort", onAbort);
       if (error === undefined) resolve();
       else reject(error);
@@ -342,6 +412,73 @@ const runConnection = (
           }`,
         );
       }
+    };
+    const closeForRetry = (error: RetryableWebSocketError): void => {
+      stopReceiving();
+      try {
+        socket.close(error.closeCode, "Relay requested reconnect");
+      } finally {
+        finish(error);
+      }
+    };
+    const onPong = (): void => {
+      lastPongAt = Date.now();
+    };
+    const startHeartbeat = (): void => {
+      if (
+        heartbeatTimer !== undefined
+        || socket.ping === undefined
+        || socket.on === undefined
+      ) {
+        return;
+      }
+      lastPongAt = Date.now();
+      socket.on("pong", onPong);
+      heartbeatTimer = setInterval(() => {
+        if (Date.now() - lastPongAt >= HEARTBEAT_PONG_TIMEOUT_MS) {
+          closeForRetry(new RetryableWebSocketError(
+            "Relay WebSocket did not receive a pong within 60 seconds.",
+          ));
+          return;
+        }
+        try {
+          socket.ping?.();
+        } catch (cause) {
+          closeForRetry(new RetryableWebSocketError(
+            `Relay WebSocket ping failed: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }`,
+          ));
+        }
+      }, HEARTBEAT_PING_INTERVAL_MS);
+    };
+    const onUnexpectedResponse = (
+      _request: unknown,
+      response: UpgradeResponseLike,
+    ): void => {
+      const chunks: string[] = [];
+      let bytes = 0;
+      response.setEncoding?.("utf8");
+      response.on("data", (chunk: unknown) => {
+        if (bytes >= 65_536) return;
+        const value = String(chunk);
+        bytes += value.length;
+        chunks.push(value.slice(0, Math.max(0, 65_536 - (bytes - value.length))));
+      });
+      response.on("end", () => {
+        finish(upgradeResponseBody(
+          response.statusCode ?? 0,
+          response.statusMessage,
+          chunks.join(""),
+        ));
+      });
+      response.on("error", () => {
+        finish(upgradeResponseBody(
+          response.statusCode ?? 0,
+          response.statusMessage,
+          chunks.join(""),
+        ));
+      });
     };
     const onMessage = (message: { data: unknown }): void => {
       chain = chain.then(async () => {
@@ -367,6 +504,7 @@ const runConnection = (
           fullSyncThrough = parsed.full_sync_required
             ? BigInt(parsed.full_sync_through!)
             : null;
+          startHeartbeat();
           onReady();
           return;
         }
@@ -477,10 +615,15 @@ const runConnection = (
           finish();
           return;
         }
-        if (event.code === 4401 || event.code === 4409) {
+        if (
+          event.code !== undefined
+          && event.code >= 4400
+          && event.code <= 4499
+          && event.code !== 4408
+        ) {
           finish(new WebSocketStoppedError(
             `Relay WebSocket closed permanently (${event.code}): ${
-              event.reason ?? "authorization or ownership changed"
+              event.reason ?? "server policy changed"
             }.`,
             event.code,
           ));
@@ -518,6 +661,7 @@ const runConnection = (
     socket.addEventListener("message", onMessage);
     socket.addEventListener("close", onClose);
     socket.addEventListener("error", onSocketError);
+    socket.on?.("unexpected-response", onUnexpectedResponse);
     if (options.signal?.aborted) onAbort();
     else options.signal?.addEventListener("abort", onAbort, { once: true });
   });
@@ -565,6 +709,7 @@ export const runWebSocket = async (
       if (
         error instanceof WebSocketStoppedError
         || error instanceof WebSocketProtocolError
+        || error instanceof RelayWebhookConfiguredError
       ) throw error;
       attempt += 1;
     }

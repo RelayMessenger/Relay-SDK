@@ -13,13 +13,29 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(
   readFileSync(resolve(root, "contracts/relay-v1-operations.json"), "utf8"),
 );
+// The owner-ratified transport decision removes these stale setting routes
+// while the locked Server OpenAPI is being updated in its own repository.
+const supersededSourceOperations = [
+  {
+    method: "GET",
+    path: "/v1/websocket",
+    operationId: "getWebSocketSettings",
+  },
+  {
+    method: "PUT",
+    path: "/v1/websocket",
+    operationId: "updateWebSocketSettings",
+  },
+];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.path_count, 22);
-assert.equal(manifest.schema_count, 99);
+assert.equal(manifest.operation_count, 34);
+assert.equal(manifest.path_count, 21);
+assert.equal(manifest.source_path_count, 22);
+assert.equal(manifest.source_schema_count, 99);
 assert.equal(manifest.callback_count, 13);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 22);
-assert.equal(operationJSON.length, 36);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 21);
+assert.equal(operationJSON.length, 34);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 13);
 
 for (const forbidden of [
@@ -43,8 +59,8 @@ assert.ok(operationJSON.some((operation) =>
   operation.path === "/v1/messages/{messageId}/delivered"));
 assert.ok(operationJSON.some((operation) =>
   operation.path === "/v1/chats/{chatId}/share_contact_card"));
-assert.ok(operationJSON.some((operation) =>
-  operation.path === "/v1/websocket"));
+assert.equal(operationJSON.some((operation) =>
+  operation.path === "/v1/websocket"), false);
 assert.ok(operationJSON.some((operation) =>
   operation.path === "/v1/chats/{chatId}/typing"
   && operation.method === "POST"));
@@ -71,13 +87,36 @@ for (const forbidden of [
   assert.equal(forbidden in client.messages, false, `unsupported message field: ${forbidden}`);
   assert.equal(forbidden in client.chats, false, `unsupported chat field: ${forbidden}`);
 }
+for (const forbidden of ["retrieve", "update", "enabled", "settings"]) {
+  assert.equal(
+    forbidden in client.websocket,
+    false,
+    `unsupported WebSocket setting leaked into SDK: ${forbidden}`,
+  );
+}
+
+const decision = resolve(root, "..", manifest.transport_decision.source);
+if (existsSync(decision)) {
+  const decisionHash = createHash("sha256")
+    .update(readFileSync(decision))
+    .digest("hex");
+  assert.equal(
+    decisionHash,
+    manifest.transport_decision.sha256,
+    "Final Agent transport decision changed; refresh SDK behavior",
+  );
+}
 
 const source = process.env.RELAY_OPENAPI_SOURCE
   ?? resolve(root, "../_worktrees/Relay-Server-local/contracts/developer/openapi.yaml");
 if (existsSync(source)) {
   const bytes = readFileSync(source);
   const hash = createHash("sha256").update(bytes).digest("hex");
-  assert.equal(hash, manifest.sha256, "Relay OpenAPI changed; refresh SDK contract");
+  assert.equal(
+    hash,
+    manifest.source_openapi_sha256,
+    "Relay OpenAPI changed; refresh SDK contract",
+  );
   const document = YAML.parse(bytes.toString("utf8"));
   const sourceOperations = [];
   for (const [path, item] of Object.entries(document.paths)) {
@@ -90,9 +129,27 @@ if (existsSync(source)) {
       });
     }
   }
-  assert.equal(Object.keys(document.paths).length, manifest.path_count);
-  assert.equal(Object.keys(document.components.schemas).length, manifest.schema_count);
-  assert.deepEqual(sourceOperations, manifest.operations);
+  assert.equal(
+    Object.keys(document.paths).length,
+    manifest.source_path_count,
+  );
+  assert.equal(
+    Object.keys(document.components.schemas).length,
+    manifest.source_schema_count,
+  );
+  const excluded = new Set(
+    supersededSourceOperations.map((operation) =>
+      `${operation.method} ${operation.path} ${operation.operationId}`
+    ),
+  );
+  assert.deepEqual(
+    sourceOperations.filter((operation) =>
+      !excluded.has(
+        `${operation.method} ${operation.path} ${operation.operationId}`,
+      )
+    ),
+    manifest.operations,
+  );
   assert.equal(
     Object.keys(document["x-relay-webhooks"]).length,
     manifest.callback_count,
@@ -110,26 +167,6 @@ if (existsSync(source)) {
     ["sent", "delivered", "read"],
   );
   assert.deepEqual(
-    document.components.schemas.WebSocketSettings.required,
-    ["enabled", "acked_through", "full_sync_through"],
-  );
-  assert.deepEqual(
-    document.components.schemas.WebSocketSettingsUpdate.required,
-    ["enabled"],
-  );
-  assert.equal(
-    document.components.schemas.WebSocketSettings.properties.enabled.type,
-    "boolean",
-  );
-  assert.equal(
-    document.components.schemas.WebSocketSettingsUpdate.properties.enabled.type,
-    "boolean",
-  );
-  assert.deepEqual(
-    document.components.schemas.WebSocketDisconnectFrame.properties.reason.enum,
-    ["disabled", "replaced", "revoked", "heartbeat_timeout", "restart"],
-  );
-  assert.deepEqual(
     document.components.schemas.WebSocketErrorFrame.properties.code.enum,
     [
       "invalid_frame",
@@ -141,15 +178,12 @@ if (existsSync(source)) {
       "full_sync_mismatch",
     ],
   );
-  assert.deepEqual(
-    document["x-relay-websocket-close-codes"],
-    {
-      "1011": "Relay could not load or commit delivery state; reconnect and resume.",
-      "1012": "Relay is restarting; reconnect and resume.",
-      "4401": "The Agent Token is invalid, revoked, or WebSocket delivery is disabled.",
-      "4408": "The heartbeat timed out.",
-      "4409": "A newer connection replaced this one.",
-    },
+  assert.equal(
+    Object.values(document["x-relay-websocket-close-codes"]).some((value) =>
+      /webhook.+configured/i.test(String(value))
+    ),
+    false,
+    "Server now provides the dedicated Webhook-configured close code; add it to the SDK contract",
   );
   for (const obsoleteSchema of [
     "SocketModeState",
@@ -225,7 +259,8 @@ console.log(JSON.stringify({
   package: "@relaymessenger/sdk",
   paths: manifest.path_count,
   operations: operationJSON.length,
-  schemas: manifest.schema_count,
+  source_schemas: manifest.source_schema_count,
   callbacks: manifest.callback_count,
-  openapi_sha256: manifest.sha256,
+  openapi_sha256: manifest.source_openapi_sha256,
+  transport_decision_sha256: manifest.transport_decision.sha256,
 }));

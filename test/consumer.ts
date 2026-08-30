@@ -29,7 +29,6 @@ await relay.chats.shareContactCard("chat-id");
 await relay.messages.acknowledgeDelivered("message-id");
 await relay.chats.startTyping("chat-id");
 await relay.chats.stopTyping("chat-id");
-await relay.websocket.update({ enabled: true });
 void relay.websocket.run({
   onEvent: async (_event, { sequence }) => {
     sequence satisfies string;
@@ -43,6 +42,10 @@ void relay.websocket.run({
 void relay.websocket.run({ onEvent: async () => {} });
 // @ts-expect-error Direct WebSocket auth replaced connection-ticket creation.
 relay.websocket.createConnection;
+// @ts-expect-error WebSocket delivery is selected by Webhook configuration.
+relay.websocket.retrieve;
+// @ts-expect-error Relay has no WebSocket mode or enable toggle.
+relay.websocket.update;
 const reconnect: WebSocketDisconnectFrame = {
   type: "disconnect",
   reason: "heartbeat_timeout",

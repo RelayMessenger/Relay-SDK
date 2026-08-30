@@ -35,5 +35,25 @@ export class RelayAPIError extends Error {
   }
 }
 
+export type RelayWebhookConfiguredErrorOptions = Omit<
+  RelayAPIErrorOptions,
+  "status"
+>;
+
+/**
+ * The Agent has at least one Webhook subscription, so Relay rejected the
+ * WebSocket upgrade with HTTP 409. Delete every Webhook subscription before
+ * connecting through the WebSocket.
+ */
+export class RelayWebhookConfiguredError extends RelayAPIError {
+  constructor(
+    message = "This Agent delivers by webhook; delete its webhook subscription to use the WebSocket.",
+    options: RelayWebhookConfiguredErrorOptions = {},
+  ) {
+    super(message, { ...options, status: 409 });
+    this.name = "RelayWebhookConfiguredError";
+  }
+}
+
 export const isAbortError = (error: unknown): boolean =>
   error instanceof Error && error.name === "AbortError";

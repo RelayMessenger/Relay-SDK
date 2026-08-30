@@ -3,6 +3,7 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import Relay, {
+  RelayWebhookConfiguredError,
   runWebSocket,
   type RelayWebhookEnvelope,
   type WebSocketLike,
@@ -58,6 +59,16 @@ class FakeWebSocket implements WebSocketLike {
 
   emit(type: string, event: any): void {
     for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+
+  on(type: string, listener: (...args: any[]) => void): this {
+    this.addEventListener(type, listener);
+    return this;
+  }
+
+  off(type: string, listener: (...args: any[]) => void): this {
+    this.removeEventListener(type, listener);
+    return this;
   }
 }
 
@@ -213,6 +224,59 @@ it("sends direct Agent Token auth and no subprotocol with the real ws client", a
   await new Promise<void>((resolve) => webSocketServer.close(() => resolve()));
   await new Promise<void>((resolve, reject) => {
     server.close((error) => error ? reject(error) : resolve());
+  });
+});
+
+it("returns a typed HTTP 409 error when Webhooks configure the Agent path", async () => {
+  const server = createServer();
+  const body = JSON.stringify({
+    error: {
+      status: 409,
+      message: "This Agent delivers by webhook; delete its webhook subscription to use the WebSocket.",
+    },
+    trace_id: "trace-webhook-conflict",
+  });
+  let upgrades = 0;
+  server.on("upgrade", (_request, socket) => {
+    upgrades += 1;
+    socket.end([
+      "HTTP/1.1 409 Conflict",
+      "Content-Type: application/json",
+      `Content-Length: ${Buffer.byteLength(body)}`,
+      "Connection: close",
+      "",
+      body,
+    ].join("\r\n"));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Expected a TCP test server.");
+  }
+
+  const error = await runWebSocket(
+    `http://127.0.0.1:${address.port}`,
+    "agent-with-webhook",
+    {
+      minReconnectDelayMs: 0,
+      maxReconnectDelayMs: 0,
+      onEvent: async () => {},
+      onFullSync: async () => {},
+    },
+  ).catch((cause) => cause);
+
+  expect(error).toBeInstanceOf(RelayWebhookConfiguredError);
+  expect(error).toMatchObject({
+    status: 409,
+    traceId: "trace-webhook-conflict",
+    retryable: false,
+  });
+  expect(String(error)).toContain("delete its webhook subscription");
+  expect(upgrades).toBe(1);
+
+  await new Promise<void>((resolve, reject) => {
+    server.close((cause) => cause ? reject(cause) : resolve());
   });
 });
 
@@ -480,7 +544,20 @@ it.each([
   expect(errors).toHaveLength(1);
 });
 
-it.each(["disabled", "replaced", "revoked"] as const)(
+it("treats an otherwise unknown server policy close as terminal", async () => {
+  const { running } = run(client());
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  emitFrame(FakeWebSocket.latest, ready());
+  FakeWebSocket.latest.emit("close", {
+    code: 4499,
+    reason: "server delivery policy changed",
+  });
+
+  await expect(running).rejects.toThrow("4499");
+  expect(FakeWebSocket.instances).toHaveLength(1);
+});
+
+it.each(["replaced", "revoked"] as const)(
   "stops after a %s disconnect frame",
   async (reason) => {
     const { running } = run(client());
@@ -493,6 +570,96 @@ it.each(["disabled", "replaced", "revoked"] as const)(
     expect(FakeWebSocket.instances).toHaveLength(1);
   },
 );
+
+it("pings after 30 seconds and reconnects after 60 seconds without a pong", async () => {
+  vi.useFakeTimers();
+  try {
+    class HeartbeatWebSocket extends FakeWebSocket {
+      pingCalls = 0;
+
+      ping(): void {
+        this.pingCalls += 1;
+      }
+    }
+    const errors: unknown[] = [];
+    const controller = new AbortController();
+    const running = runWebSocket(
+      "https://relay.test",
+      "agent-token",
+      {
+        signal: controller.signal,
+        WebSocket: HeartbeatWebSocket,
+        minReconnectDelayMs: 0,
+        maxReconnectDelayMs: 0,
+        onEvent: async () => {},
+        onFullSync: async () => {},
+        onError(error) {
+          errors.push(error);
+        },
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    const first = FakeWebSocket.latest as HeartbeatWebSocket;
+    emitFrame(first, ready());
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(first.pingCalls).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(first.pingCalls).toBe(1);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersToNextTimerAsync();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(String(errors[0])).toContain("pong within 60 seconds");
+
+    controller.abort();
+    await vi.runAllTimersAsync();
+    await running;
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("keeps the 30-second heartbeat alive when pong frames arrive", async () => {
+  vi.useFakeTimers();
+  try {
+    class HeartbeatWebSocket extends FakeWebSocket {
+      pingCalls = 0;
+
+      ping(): void {
+        this.pingCalls += 1;
+      }
+    }
+    const controller = new AbortController();
+    const running = runWebSocket(
+      "https://relay.test",
+      "agent-token",
+      {
+        signal: controller.signal,
+        WebSocket: HeartbeatWebSocket,
+        onEvent: async () => {},
+        onFullSync: async () => {},
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    const socket = FakeWebSocket.latest as HeartbeatWebSocket;
+    emitFrame(socket, ready());
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(socket.pingCalls).toBe(1);
+    socket.emit("pong", {});
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(socket.pingCalls).toBe(2);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    controller.abort();
+    await vi.runAllTimersAsync();
+    await running;
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 it("enforces contiguous decimal sequences without Number precision loss", async () => {
   const received: string[] = [];

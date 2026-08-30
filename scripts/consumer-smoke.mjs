@@ -55,7 +55,7 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, "0.1.0");
-      assert.equal(RELAY_V1_OPERATIONS.length, 36);
+      assert.equal(RELAY_V1_OPERATIONS.length, 34);
       assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 13);
       const client = new Relay({
         apiKey: "consumer-test",
@@ -68,6 +68,8 @@ try {
       assert.equal(typeof client.webhooks.unwrap, "function");
       assert.equal(typeof client.websocket.run, "function");
       assert.equal("createConnection" in client.websocket, false);
+      assert.equal("retrieve" in client.websocket, false);
+      assert.equal("update" in client.websocket, false);
       assert.equal(typeof client.blockedHandles.block, "function");
       assert.equal("socketMode" in client, false);
       assert.equal("contacts" in client, false);

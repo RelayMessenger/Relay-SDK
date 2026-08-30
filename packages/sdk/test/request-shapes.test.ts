@@ -134,8 +134,6 @@ describe("Relay v1 request shapes", () => {
       first_name: "New Echo",
     });
     await client.messages.acknowledgeDelivered("message-id");
-    await client.websocket.retrieve();
-    await client.websocket.update({ enabled: true });
 
     expect(calls.map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
@@ -181,11 +179,8 @@ describe("Relay v1 request shapes", () => {
       first_name: "New Echo",
     });
 
-    const websocketUpdate = calls.find((call) =>
-      call.method === "PUT" && call.url.pathname === "/v1/websocket")!;
-    expect(JSON.parse(String(websocketUpdate.body))).toEqual({
-      enabled: true,
-    });
+    expect(calls.some((call) =>
+      call.url.pathname === "/v1/websocket")).toBe(false);
   });
 
   it("exposes real typing commands without polling or invented realtime surfaces", () => {
@@ -203,6 +198,9 @@ describe("Relay v1 request shapes", () => {
     expect(client.chats).toHaveProperty("startTyping");
     expect(client.chats).toHaveProperty("stopTyping");
     expect(client.websocket).not.toHaveProperty("createConnection");
+    expect(client.websocket).not.toHaveProperty("retrieve");
+    expect(client.websocket).not.toHaveProperty("update");
+    expect(client.websocket).toHaveProperty("run");
     expect(client.messages).not.toHaveProperty("poll");
   });
 });

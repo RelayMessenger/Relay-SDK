@@ -174,16 +174,6 @@ export const RELAY_V1_OPERATIONS = [
     "method": "POST",
     "path": "/v1/messages/{messageId}/delivered",
     "operationId": "acknowledgeMessageDelivered"
-  },
-  {
-    "method": "GET",
-    "path": "/v1/websocket",
-    "operationId": "getWebSocketSettings"
-  },
-  {
-    "method": "PUT",
-    "path": "/v1/websocket",
-    "operationId": "updateWebSocketSettings"
   }
 ] as const satisfies readonly RelayV1Operation[];
 

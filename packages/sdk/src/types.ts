@@ -468,16 +468,6 @@ export interface UnblockHandleParams {
   handle: string;
 }
 
-export interface WebSocketSettings {
-  enabled: boolean;
-  acked_through: string;
-  full_sync_through: string | null;
-}
-
-export interface WebSocketSettingsUpdate {
-  enabled: boolean;
-}
-
 export interface WebSocketReadyFrame {
   type: "ready";
   connection_id: UUID;
@@ -530,7 +520,6 @@ export type WebSocketErrorCode =
 export interface WebSocketDisconnectFrame {
   type: "disconnect";
   reason:
-    | "disabled"
     | "replaced"
     | "revoked"
     | "heartbeat_timeout"
