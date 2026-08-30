@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   mkdtempSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -43,6 +44,23 @@ try {
     "--no-fund",
     tarball,
   ], { cwd: consumer, stdio: "ignore" });
+  const packedTypes = readFileSync(
+    resolve(
+      consumer,
+      "node_modules",
+      "@relaymessenger",
+      "sdk",
+      "dist",
+      "types.d.ts",
+    ),
+    "utf8",
+  );
+  assert.match(packedTypes, /greeting_message:/);
+  assert.doesNotMatch(
+    packedTypes,
+    /is_default/,
+    "Private default-agent state leaked into the packed SDK declarations",
+  );
   execFileSync(process.execPath, [
     "--input-type=module",
     "--eval",

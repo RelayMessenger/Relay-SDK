@@ -37,13 +37,11 @@ interface ChatHandleBase {
 export interface UserChatHandle extends ChatHandleBase {
   kind: "user";
   greeting_message: null;
-  is_default: false;
 }
 
 export interface AgentChatHandle extends ChatHandleBase {
   kind: "agent";
   greeting_message: string | null;
-  is_default: boolean;
 }
 
 export type ChatHandle = UserChatHandle | AgentChatHandle;

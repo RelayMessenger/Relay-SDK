@@ -226,7 +226,6 @@ if (existsSync(source)) {
       "joined_at",
       "kind",
       "greeting_message",
-      "is_default",
     ],
   );
   assert.equal(
@@ -234,8 +233,9 @@ if (existsSync(source)) {
     1024,
   );
   assert.equal(
-    document.components.schemas.ChatHandle.properties.is_default.default,
+    "is_default" in document.components.schemas.ChatHandle.properties,
     false,
+    "ChatHandle.is_default is private and must not enter the public contract",
   );
   assert.equal(
     document.paths["/v1/me/conversations/{chatId}"].delete.operationId,

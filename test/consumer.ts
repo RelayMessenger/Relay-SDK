@@ -123,14 +123,14 @@ const withService: MessageContent = {
 void withService;
 declare const chat: Chat;
 chat.handles[0]!.greeting_message satisfies string | null;
-chat.handles[0]!.is_default satisfies boolean;
+// @ts-expect-error Default-agent state is private to Relay.
+chat.handles[0]!.is_default;
 const userHandle: ChatHandle = {
   id: "user-id",
   handle: "alice",
   joined_at: new Date().toISOString(),
   kind: "user",
   greeting_message: null,
-  is_default: false,
 };
 void userHandle;
 const agentHandle: ChatHandle = {
@@ -139,19 +139,18 @@ const agentHandle: ChatHandle = {
   joined_at: new Date().toISOString(),
   kind: "agent",
   greeting_message: "Hello",
-  is_default: true,
 };
 void agentHandle;
-// @ts-expect-error User Contacts cannot be default agents.
-const invalidUserHandle: ChatHandle = {
+const privateDefaultStateMustNotCompile: ChatHandle = {
   id: "invalid-user-id",
-  handle: "bob",
+  handle: "echo",
   joined_at: new Date().toISOString(),
-  kind: "user",
-  greeting_message: null,
+  kind: "agent",
+  greeting_message: "Hello",
+  // @ts-expect-error Default-agent state is not part of the public SDK.
   is_default: true,
 };
-void invalidUserHandle;
+void privateDefaultStateMustNotCompile;
 // @ts-expect-error Relay does not expose fake archived chat state.
 chat.is_archived;
 declare const message: Message;
