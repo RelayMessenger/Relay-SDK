@@ -14,6 +14,9 @@ import { execFileSync } from "node:child_process";
 import ts from "typescript";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const packageManifest = JSON.parse(
+  readFileSync(resolve(root, "packages", "sdk", "package.json"), "utf8"),
+);
 const release = resolve(root, ".release-tmp");
 const pack = resolve(release, "pack");
 rmSync(release, { recursive: true, force: true });
@@ -104,7 +107,7 @@ try {
       } from "@relaymessenger/sdk";
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
-      assert.equal(packageJSON.version, "0.1.0");
+      assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
       assert.equal(RELAY_V1_OPERATIONS.length, 33);
       assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 13);
       const allowedOperations = new Set([
@@ -229,7 +232,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     tarball: tarballs[0],
-    package: "@relaymessenger/sdk@0.1.0",
+    package: `@relaymessenger/sdk@${packageManifest.version}`,
   }));
 } finally {
   if (consumer) rmSync(consumer, { recursive: true, force: true });

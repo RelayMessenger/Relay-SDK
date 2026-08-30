@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/sdk",
-  "version": "0.1.0",
+  "version": "0.3.0-staging.0",
   "description": "TypeScript SDK for the Relay v1 messaging API and signed webhooks.",
   "type": "module",
   "main": "./dist/index.js",
@@ -36,7 +36,9 @@
     "ws": "^8.21.0"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "tag": "staging"
   },
   "repository": {
     "type": "git",

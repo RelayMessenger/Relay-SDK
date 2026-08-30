@@ -12,6 +12,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const packageManifest = JSON.parse(
+  readFileSync(resolve(root, "packages", "sdk", "package.json"), "utf8"),
+);
 const release = resolve(root, ".release-tmp", "staging");
 const pack = resolve(release, "pack");
 const consumer = resolve(release, "consumer");
@@ -160,7 +163,7 @@ const remoteResult = JSON.parse(execFileSync(process.execPath, [runner], {
 rmSync(release, { recursive: true, force: true });
 console.log(JSON.stringify({
   ...remoteResult,
-  package: "@relaymessenger/sdk@0.1.0",
+  package: `@relaymessenger/sdk@${packageManifest.version}`,
   tarball: tarballs[0],
   tarball_sha256: tarballSHA256,
   published: false,
