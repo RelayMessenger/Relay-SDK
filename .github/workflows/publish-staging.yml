@@ -3,6 +3,7 @@ name: Publish npm staging
 on:
   push:
     branches: [staging]
+  workflow_dispatch:
 
 permissions:
   contents: read
