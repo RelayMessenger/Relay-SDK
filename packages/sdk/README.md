@@ -53,9 +53,6 @@ Available resource methods:
 - `blockedHandles.list`, `block`, `unblock`
 - `websocket.run`
 
-`messages.acknowledgeDelivered(messageId)` uses a user session. Agent delivery
-advances after a successful webhook or WebSocket ACK.
-
 Every retrieved `Message` may include `deliveries`, one entry per recipient:
 
 ```ts

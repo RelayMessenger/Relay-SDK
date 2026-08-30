@@ -23,7 +23,6 @@ const responder = (calls: Captured[]) => async (
   const noContent = (
     (method === "POST" && (
       url.pathname.endsWith("/read")
-      || url.pathname.endsWith("/delivered")
       || url.pathname.endsWith("/share_contact_card")
       || url.pathname.endsWith("/typing")
     ))
@@ -133,7 +132,6 @@ describe("Relay v1 request shapes", () => {
       handle: "echo",
       first_name: "New Echo",
     });
-    await client.messages.acknowledgeDelivered("message-id");
 
     expect(calls.map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
@@ -183,24 +181,73 @@ describe("Relay v1 request shapes", () => {
       call.url.pathname === "/v1/websocket")).toBe(false);
   });
 
-  it("exposes real typing commands without polling or invented realtime surfaces", () => {
+  it("exposes only the approved resource surface", () => {
     const client = new Relay({
       apiKey: "token",
       fetch: responder([]),
-    }) as unknown as Record<string, unknown>;
-    expect(client).not.toHaveProperty("pollEvents");
-    expect(client).not.toHaveProperty("realtime");
-    expect(client).not.toHaveProperty("responding");
-    expect(client).not.toHaveProperty("typing");
-    expect(client).not.toHaveProperty("socketMode");
-    expect(client).not.toHaveProperty("contacts");
-    expect(client.chats).not.toHaveProperty("typing");
-    expect(client.chats).toHaveProperty("startTyping");
-    expect(client.chats).toHaveProperty("stopTyping");
-    expect(client.websocket).not.toHaveProperty("createConnection");
-    expect(client.websocket).not.toHaveProperty("retrieve");
-    expect(client.websocket).not.toHaveProperty("update");
-    expect(client.websocket).toHaveProperty("run");
-    expect(client.messages).not.toHaveProperty("poll");
+    });
+    const methods = (value: object): string[] =>
+      Object.getOwnPropertyNames(Object.getPrototypeOf(value))
+        .filter((name) => name !== "constructor")
+        .sort();
+
+    expect(Object.keys(client).sort()).toEqual([
+      "attachments",
+      "baseURL",
+      "blockedHandles",
+      "chats",
+      "contactCard",
+      "messages",
+      "webhookEvents",
+      "webhookSubscriptions",
+      "webhooks",
+      "websocket",
+    ]);
+    expect(methods(client.chats)).toEqual([
+      "create",
+      "leaveChat",
+      "listChats",
+      "markAsRead",
+      "retrieve",
+      "sendVoicememo",
+      "shareContactCard",
+      "startTyping",
+      "stopTyping",
+      "update",
+    ]);
+    expect(methods(client.messages)).toEqual([
+      "addReaction",
+      "create",
+      "listMessagesThread",
+      "retrieve",
+    ]);
+    expect(methods(client.chats.messages)).toEqual(["list", "send"]);
+    expect(methods(client.chats.participants)).toEqual(["add", "remove"]);
+    expect(methods(client.attachments)).toEqual([
+      "create",
+      "delete",
+      "retrieve",
+      "upload",
+    ]);
+    expect(methods(client.webhookEvents)).toEqual(["list"]);
+    expect(methods(client.webhookSubscriptions)).toEqual([
+      "create",
+      "delete",
+      "list",
+      "retrieve",
+      "update",
+    ]);
+    expect(methods(client.contactCard)).toEqual([
+      "create",
+      "retrieve",
+      "update",
+    ]);
+    expect(methods(client.blockedHandles)).toEqual([
+      "block",
+      "list",
+      "unblock",
+    ]);
+    expect(methods(client.websocket)).toEqual(["run"]);
+    expect(methods(client.webhooks)).toEqual(["unwrap", "verify"]);
   });
 });

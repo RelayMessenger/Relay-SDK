@@ -16,24 +16,32 @@ const release = resolve(root, ".release-tmp", "staging");
 const pack = resolve(release, "pack");
 const consumer = resolve(release, "consumer");
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const structuralOnly = process.argv.includes("--structural");
+const manifest = JSON.parse(
+  readFileSync(resolve(root, "contracts/relay-v1-operations.json"), "utf8"),
+);
+assert.equal(manifest.operation_count, 33);
+assert.equal(manifest.operations.length, manifest.operation_count);
 
 const baseURL = process.env.RELAY_BASE_URL?.trim();
 const agentToken = process.env.RELAY_AGENT_TOKEN?.trim();
-if (!baseURL) {
+if (!structuralOnly && !baseURL) {
   throw new Error("RELAY_BASE_URL is required.");
 }
-if (!agentToken) {
+if (!structuralOnly && !agentToken) {
   throw new Error("RELAY_AGENT_TOKEN is required.");
 }
 
-const target = new URL(baseURL);
-if (!["http:", "https:"].includes(target.protocol)) {
-  throw new Error("RELAY_BASE_URL must be an absolute HTTP(S) URL.");
-}
-if (target.hostname === "api.relayapp.im") {
-  throw new Error(
-    "staging:validate refuses the production API host; inject staging or local.",
-  );
+const target = structuralOnly ? null : new URL(baseURL);
+if (target) {
+  if (!["http:", "https:"].includes(target.protocol)) {
+    throw new Error("RELAY_BASE_URL must be an absolute HTTP(S) URL.");
+  }
+  if (target.hostname === "api.relayapp.im") {
+    throw new Error(
+      "staging:validate refuses the production API host; inject staging or local.",
+    );
+  }
 }
 
 rmSync(release, { recursive: true, force: true });
@@ -80,6 +88,27 @@ writeFileSync(runner, `
   import assert from "node:assert/strict";
   import Relay, { RELAY_V1_OPERATIONS } from "@relaymessenger/sdk";
 
+  const expectedOperations = ${JSON.stringify(manifest.operations)};
+  assert.deepEqual(
+    RELAY_V1_OPERATIONS.map((operation) => ({ ...operation })),
+    expectedOperations,
+  );
+  assert.equal(
+    new Set(RELAY_V1_OPERATIONS.map((operation) => operation.path)).size,
+    ${manifest.path_count},
+  );
+  if (process.env.RELAY_STRUCTURAL_ONLY === "1") {
+    process.stdout.write(JSON.stringify({
+      ok: true,
+      structural_only: true,
+      operations: RELAY_V1_OPERATIONS.length,
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+    }));
+    process.exit(0);
+  }
+
   const baseURL = process.env.RELAY_BASE_URL;
   const client = new Relay({
     apiKey: process.env.RELAY_AGENT_TOKEN,
@@ -91,7 +120,6 @@ writeFileSync(runner, `
     expectedBaseURL = expectedBaseURL.slice(0, -1);
   }
   assert.equal(client.baseURL, expectedBaseURL);
-  assert.equal(RELAY_V1_OPERATIONS.length, 34);
   assert.equal(
     RELAY_V1_OPERATIONS.some((operation) => operation.path === "/v1/websocket"),
     false,
@@ -121,12 +149,15 @@ const remoteResult = JSON.parse(execFileSync(process.execPath, [runner], {
   encoding: "utf8",
   env: {
     ...process.env,
-    RELAY_BASE_URL: target.toString().replace(/\/$/, ""),
-    RELAY_AGENT_TOKEN: agentToken,
+    RELAY_STRUCTURAL_ONLY: structuralOnly ? "1" : "0",
+    ...(target
+      ? { RELAY_BASE_URL: target.toString().replace(/\/$/, "") }
+      : {}),
+    ...(agentToken ? { RELAY_AGENT_TOKEN: agentToken } : {}),
   },
 }));
 
-rmSync(consumer, { recursive: true, force: true });
+rmSync(release, { recursive: true, force: true });
 console.log(JSON.stringify({
   ...remoteResult,
   package: "@relaymessenger/sdk@0.1.0",

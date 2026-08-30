@@ -486,20 +486,6 @@ export class Messages {
     );
   }
 
-  /**
-   * User session only. Agent delivery is acknowledged by webhook `2xx`.
-   */
-  acknowledgeDelivered(
-    messageID: string,
-    options?: RequestOptions,
-  ): Promise<void> {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/messages/${pathID(messageID)}/delivered`,
-      options,
-      retryable: true,
-    });
-  }
 }
 
 export class Attachments {

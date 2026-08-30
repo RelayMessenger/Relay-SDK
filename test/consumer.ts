@@ -1,6 +1,7 @@
 import Relay, {
   RELAY_WEBHOOK_EVENT_TYPES,
   type Chat,
+  type ChatHandle,
   type ChatSendVoicememoResponse,
   type DeliveryStatus,
   type Message,
@@ -26,7 +27,6 @@ const content: MessageContent = {
 
 await relay.chats.messages.send("chat-id", { message: content });
 await relay.chats.shareContactCard("chat-id");
-await relay.messages.acknowledgeDelivered("message-id");
 await relay.chats.startTyping("chat-id");
 await relay.chats.stopTyping("chat-id");
 void relay.websocket.run({
@@ -120,6 +120,23 @@ const withService: MessageContent = {
 };
 void withService;
 declare const chat: Chat;
+chat.handles[0]!.greeting_message satisfies string | null;
+const userHandle: ChatHandle = {
+  id: "user-id",
+  handle: "alice",
+  joined_at: new Date().toISOString(),
+  kind: "user",
+  greeting_message: null,
+};
+void userHandle;
+const agentHandle: ChatHandle = {
+  id: "agent-id",
+  handle: "echo",
+  joined_at: new Date().toISOString(),
+  kind: "agent",
+  greeting_message: "Hello",
+};
+void agentHandle;
 // @ts-expect-error Relay does not expose fake archived chat state.
 chat.is_archived;
 declare const message: Message;
