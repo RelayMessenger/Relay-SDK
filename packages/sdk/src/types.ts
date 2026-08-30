@@ -500,6 +500,15 @@ export interface WebSocketFullSyncCompleteFrame {
   through_sequence: string;
 }
 
+export interface WebSocketPingFrame {
+  type: "ping";
+  sent_at: string;
+}
+
+export interface WebSocketPongFrame {
+  type: "pong";
+}
+
 export interface WebSocketErrorFrame {
   type: "error";
   code: WebSocketErrorCode;

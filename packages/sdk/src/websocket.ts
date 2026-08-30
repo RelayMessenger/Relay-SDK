@@ -6,6 +6,7 @@ import type {
   WebSocketErrorFrame,
   WebSocketEventFrame,
   WebSocketFullSyncFrame,
+  WebSocketPingFrame,
   WebSocketReadyFrame,
 } from "./types.js";
 import { RELAY_WEBHOOK_EVENT_TYPES } from "./operations.js";
@@ -219,6 +220,21 @@ const parseFullSync = (value: unknown): WebSocketFullSyncFrame => {
     );
   }
   return value as unknown as WebSocketFullSyncFrame;
+};
+
+const parsePing = (value: unknown): WebSocketPingFrame => {
+  if (
+    !isRecord(value)
+    || !hasExactKeys(value, ["type", "sent_at"])
+    || value.type !== "ping"
+    || typeof value.sent_at !== "string"
+    || Number.isNaN(Date.parse(value.sent_at))
+  ) {
+    throw new WebSocketProtocolError(
+      "Relay WebSocket received an invalid ping frame.",
+    );
+  }
+  return value as unknown as WebSocketPingFrame;
 };
 
 const parseError = (value: unknown): WebSocketErrorFrame => {
@@ -530,6 +546,16 @@ const runConnection = (
             `Relay WebSocket disconnected permanently: ${parsed.reason}.`,
             4401,
           );
+        }
+        if (isRecord(frame) && frame.type === "ping") {
+          if (!ready) {
+            throw new WebSocketProtocolError(
+              "Relay WebSocket received a ping before the ready frame.",
+            );
+          }
+          parsePing(frame);
+          send({ type: "pong" });
+          return;
         }
         if (isRecord(frame) && frame.type === "error") {
           const parsed = parseError(frame);
