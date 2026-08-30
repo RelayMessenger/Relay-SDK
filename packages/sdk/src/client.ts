@@ -1,293 +1,732 @@
-import {
-  RelayApiError,
-  classifyRelayHttpStatus,
-  isAbortError,
-} from "./errors.js";
+import { RelayAPIError, isAbortError } from "./errors.js";
+import { ChatsPage, MessagesPage } from "./pagination.js";
 import type {
-  RelayAgentProfile,
-  RelayEventsPage,
-  RelayOutgoingPart,
-  RelayReplyRef,
-  RelaySendResult,
+  AcceptedResponse,
+  Attachment,
+  AttachmentCreateParams,
+  AttachmentCreateResponse,
+  BlockedHandleListResponse,
+  BlockHandleParams,
+  BlockHandleResponse,
+  Chat,
+  ChatCreateParams,
+  ChatCreateResponse,
+  ChatListChatsParams,
+  ChatSendVoicememoParams,
+  ChatSendVoicememoResponse,
+  ChatUpdateParams,
+  ChatUpdateResponse,
+  ContactCardItem,
+  ContactCardCreateParams,
+  ContactCardRetrieveParams,
+  ContactCardRetrieveResponse,
+  ContactCardUpdateParams,
+  Message,
+  MessageAddReactionParams,
+  MessageAddReactionResponse,
+  MessageCreateParams,
+  MessageCreateResponse,
+  MessageListParams,
+  MessageSendParams,
+  MessageSendResponse,
+  MessageThreadParams,
+  ParticipantAddParams,
+  ParticipantRemoveParams,
+  RequestOptions,
+  UnblockHandleParams,
+  WebhookEventListResponse,
+  WebhookSubscription,
+  WebhookSubscriptionCreateParams,
+  WebhookSubscriptionCreateResponse,
+  WebhookSubscriptionListResponse,
+  WebhookSubscriptionUpdateParams,
 } from "./types.js";
-import { normalizeRelayBaseUrl } from "./url.js";
+import { Webhooks } from "./webhooks.js";
+import {
+  runWebSocket,
+  type WebSocketRunOptions,
+} from "./websocket.js";
 
-type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+type FetchLike = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>;
 
-export type RelayClientOptions = {
-  token: string;
-  baseUrl?: string;
-  fetchImpl?: FetchLike;
-  requestTimeoutMs?: number;
-};
-
-export type RelayClient = {
-  readonly baseUrl: string;
-  getMe: (params?: { signal?: AbortSignal }) => Promise<RelayAgentProfile>;
-  pollEvents: (params: {
-    cursor: number;
-    timeoutSeconds?: number;
-    limit?: number;
-    signal?: AbortSignal;
-  }) => Promise<RelayEventsPage>;
-  sendMessage: (params: {
-    conversationId: string;
-    parts: RelayOutgoingPart[];
-    replyTo?: RelayReplyRef;
-    invocationId?: string;
-    idempotencyKey: string;
-    signal?: AbortSignal;
-  }) => Promise<RelaySendResult>;
-  sendText: (params: {
-    conversationId: string;
-    text: string;
-    replyTo?: RelayReplyRef;
-    invocationId?: string;
-    idempotencyKey: string;
-    signal?: AbortSignal;
-  }) => Promise<RelaySendResult>;
-  setTyping: (params: {
-    conversationId: string;
-    started: boolean;
-    label?: string;
-    invocationId?: string;
-    signal?: AbortSignal;
-  }) => Promise<void>;
-  setResponding: (params: {
-    conversationId: string;
-    messageId: string;
-    label?: string;
-    invocationId?: string;
-    signal?: AbortSignal;
-  }) => Promise<void>;
-  /**
-   * Advance the delivered watermark to `messageId`, and every earlier message
-   * from other participants with it.
-   *
-   * Most agents never call this. Delivered means the agent's endpoint has the
-   * message, so Relay records it from the transport itself: a webhook gets it
-   * when the endpoint answers `2xx`, and a `GET /v1/events` consumer gets it
-   * when the cursor moves past the event. Neither needs a line of code, and
-   * neither can suppress it.
-   *
-   * The exception is a transcript poller — a client that reads
-   * `GET /v1/conversations/:id/messages` on a timer. Reading history records
-   * no receipt, so nothing on the server ever learns the message arrived.
-   * That client, and only that client, has to say so itself.
-   *
-   * Send it on ingest, before anything that implies a read. The server
-   * advances the delivered watermark whenever it records a read, so a
-   * delivered receipt that arrives after a read for the same message is
-   * silently dropped: the sender goes straight from "Sent" to "Read" and never
-   * sees "Delivered". Skipping this call costs the middle rung of the ladder,
-   * not the top one.
-   */
-  markDelivered: (params: {
-    conversationId: string;
-    messageId: string;
-    signal?: AbortSignal;
-  }) => Promise<void>;
-  markRead: (params: {
-    conversationId: string;
-    messageId: string;
-    signal?: AbortSignal;
-  }) => Promise<void>;
-};
-
-async function readErrorDetail(response: Response): Promise<{
-  code?: string;
-  message: string;
-  details?: Record<string, unknown>;
-}> {
-  try {
-    const body = (await response.json()) as {
-      error?: { code?: string; message?: string; details?: Record<string, unknown> };
-      message?: string;
-    };
-    return {
-      ...(body?.error?.code ? { code: body.error.code } : {}),
-      ...(body?.error?.details ? { details: body.error.details } : {}),
-      message: body?.error?.message ?? body?.message ?? "",
-    };
-  } catch {
-    return { message: "" };
-  }
+export interface RelayOptions {
+  apiKey: string;
+  baseURL?: string;
+  webhookSecret?: string | null;
+  maxRetries?: number;
+  timeout?: number;
+  retryBaseDelayMs?: number;
+  fetch?: FetchLike;
 }
 
-export function createRelayClient(options: RelayClientOptions): RelayClient {
-  if (!options.token.trim()) {
-    throw new Error("relay: Agent Token is required");
-  }
-  const baseUrl = normalizeRelayBaseUrl(options.baseUrl);
-  const fetchImpl: FetchLike =
-    options.fetchImpl ?? ((input, init) => fetch(input, init));
-  const requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
+interface InternalRequest {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  path: string;
+  query?: object;
+  body?: unknown;
+  options?: RequestOptions | undefined;
+  idempotencyKey?: string;
+  retryable?: boolean;
+}
 
-  const request = async (params: {
-    method: string;
-    path: string;
-    query?: Record<string, string | number | boolean | undefined>;
-    body?: unknown;
-    headers?: Record<string, string>;
-    signal?: AbortSignal;
-    timeoutMs?: number;
-  }): Promise<Response> => {
-    const url = new URL(`${baseUrl}${params.path}`);
-    for (const [key, value] of Object.entries(params.query ?? {})) {
-      if (value !== undefined) url.searchParams.set(key, String(value));
+interface ErrorBody {
+  error?: {
+    status?: number;
+    code?: number;
+    message?: string;
+    doc_url?: string;
+    retry_after?: number;
+  };
+  trace_id?: string;
+}
+
+const delay = async (milliseconds: number, signal?: AbortSignal): Promise<void> => {
+  if (milliseconds <= 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, milliseconds);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    }, { once: true });
+  });
+};
+
+const pathID = (value: string): string => encodeURIComponent(value);
+
+class Transport {
+  readonly baseURL: string;
+  readonly #apiKey: string;
+  readonly #fetch: FetchLike;
+  readonly #maxRetries: number;
+  readonly #timeout: number;
+  readonly #retryBaseDelayMs: number;
+
+  constructor(options: RelayOptions) {
+    if (!options.apiKey?.trim()) throw new Error("Relay API key is required.");
+    this.baseURL = (options.baseURL ?? "https://api.relayapp.im").replace(/\/+$/, "");
+    this.#apiKey = options.apiKey;
+    this.#fetch = options.fetch ?? globalThis.fetch;
+    this.#maxRetries = options.maxRetries ?? 2;
+    this.#timeout = options.timeout ?? 15_000;
+    this.#retryBaseDelayMs = options.retryBaseDelayMs ?? 250;
+  }
+
+  async request<T>(request: InternalRequest): Promise<T> {
+    const url = new URL(`${this.baseURL}${request.path}`);
+    for (const [name, value] of Object.entries(request.query ?? {})) {
+      if (value !== undefined) url.searchParams.set(name, String(value));
     }
-    const timeoutSignal = AbortSignal.timeout(params.timeoutMs ?? requestTimeoutMs);
-    const signal = params.signal
-      ? AbortSignal.any([params.signal, timeoutSignal])
-      : timeoutSignal;
-    let response: Response;
-    try {
-      response = await fetchImpl(url.toString(), {
-        method: params.method,
-        headers: {
-          authorization: `Bearer ${options.token}`,
-          ...(params.body === undefined ? {} : { "content-type": "application/json" }),
-          ...params.headers,
-        },
-        ...(params.body === undefined ? {} : { body: JSON.stringify(params.body) }),
-        signal,
-      });
-    } catch (error) {
-      if (timeoutSignal.aborted && !params.signal?.aborted) {
-        throw new RelayApiError(
-          `relay: ${params.method} ${params.path} timed out after ${params.timeoutMs ?? requestTimeoutMs}ms`,
-          { kind: "retryable" },
-        );
+    const maxRetries = request.options?.maxRetries ?? this.#maxRetries;
+    const mayRetry = request.retryable === true
+      || request.method === "GET"
+      || request.method === "PUT"
+      || request.method === "PATCH"
+      || request.method === "DELETE"
+      || request.idempotencyKey !== undefined;
+
+    for (let attempt = 0; ; attempt += 1) {
+      const timeout = request.options?.timeout ?? this.#timeout;
+      const timeoutSignal = AbortSignal.timeout(timeout);
+      const signal = request.options?.signal
+        ? AbortSignal.any([request.options.signal, timeoutSignal])
+        : timeoutSignal;
+      const headers = new Headers(request.options?.headers);
+      headers.set("authorization", `Bearer ${this.#apiKey}`);
+      headers.set("accept", "application/json");
+      if (request.body !== undefined) headers.set("content-type", "application/json");
+      if (request.idempotencyKey) {
+        headers.set("idempotency-key", request.idempotencyKey);
       }
-      if (isAbortError(error)) throw error;
-      throw new RelayApiError(`relay: network error: ${String(error)}`, {
-        kind: "retryable",
-      });
-    }
-    if (!response.ok) {
-      const detail = await readErrorDetail(response);
-      throw new RelayApiError(
-        `relay: ${params.method} ${params.path} failed with ${response.status}${detail.message ? `: ${detail.message}` : ""}`,
+
+      let response: Response;
+      try {
+        response = await this.#fetch(url, {
+          method: request.method,
+          headers,
+          ...(request.body === undefined
+            ? {}
+            : { body: JSON.stringify(request.body) }),
+          signal,
+        });
+      } catch (cause) {
+        if (request.options?.signal?.aborted) throw cause;
+        if (isAbortError(cause) && !timeoutSignal.aborted) throw cause;
+        const error = new RelayAPIError(
+          timeoutSignal.aborted
+            ? `Relay request timed out after ${timeout}ms.`
+            : "Relay network request failed.",
+          { cause },
+        );
+        if (!mayRetry || attempt >= maxRetries) throw error;
+        await delay(this.#retryBaseDelayMs * 2 ** attempt, request.options?.signal);
+        continue;
+      }
+
+      if (response.ok) {
+        if (response.status === 204) return undefined as T;
+        const text = await response.text();
+        return (text ? JSON.parse(text) : undefined) as T;
+      }
+
+      const text = await response.text();
+      let body: ErrorBody | undefined;
+      try {
+        body = text ? JSON.parse(text) as ErrorBody : undefined;
+      } catch {
+        body = undefined;
+      }
+      const retryAfter = body?.error?.retry_after
+        ?? Number(response.headers.get("retry-after") ?? NaN);
+      const error = new RelayAPIError(
+        body?.error?.message
+          ?? `Relay request failed with HTTP ${response.status}.`,
         {
           status: response.status,
-          kind: classifyRelayHttpStatus(response.status),
-          ...(detail.code ? { code: detail.code } : {}),
-          ...(detail.details ? { details: detail.details } : {}),
+          ...(body?.error?.code === undefined ? {} : { code: body.error.code }),
+          ...(body?.trace_id === undefined ? {} : { traceId: body.trace_id }),
+          ...(body?.error?.doc_url === undefined
+            ? {}
+            : { docURL: body.error.doc_url }),
+          ...(Number.isFinite(retryAfter) ? { retryAfter } : {}),
+          body: body ?? text,
         },
       );
+      if (!mayRetry || !error.retryable || attempt >= maxRetries) throw error;
+      const wait = Number.isFinite(retryAfter)
+        ? retryAfter * 1_000
+        : this.#retryBaseDelayMs * 2 ** attempt;
+      await delay(wait, request.options?.signal);
     }
-    return response;
-  };
+  }
 
-  const client: RelayClient = {
-    baseUrl,
-
-    getMe: async (params) => {
-      const response = await request({
-        method: "GET",
-        path: "/v1/agents/me",
-        ...(params?.signal ? { signal: params.signal } : {}),
+  async upload(
+    allocation: AttachmentCreateResponse,
+    data: BodyInit,
+    options: RequestOptions = {},
+  ): Promise<void> {
+    const headers = new Headers(allocation.required_headers);
+    for (const [name, value] of new Headers(options.headers)) {
+      headers.set(name, value);
+    }
+    let response: Response;
+    try {
+      response = await this.#fetch(allocation.upload_url, {
+        method: "PUT",
+        headers,
+        body: data,
+        ...(options.signal ? { signal: options.signal } : {}),
       });
-      const body = (await response.json()) as { agent: RelayAgentProfile };
-      return body.agent;
-    },
+    } catch (cause) {
+      throw new RelayAPIError("Relay attachment upload failed.", { cause });
+    }
+    if (!response.ok) {
+      throw new RelayAPIError(
+        `Relay attachment upload failed with HTTP ${response.status}.`,
+        { status: response.status },
+      );
+    }
+  }
 
-    pollEvents: async (params) => {
-      const timeoutSeconds = Math.min(Math.max(params.timeoutSeconds ?? 30, 1), 30);
-      const response = await request({
-        method: "GET",
-        path: "/v1/events",
-        query: {
-          cursor: params.cursor,
-          timeout: timeoutSeconds,
-          ...(params.limit === undefined ? {} : { limit: params.limit }),
-        },
-        ...(params.signal ? { signal: params.signal } : {}),
-        timeoutMs: (timeoutSeconds + 15) * 1_000,
-      });
-      const body = (await response.json()) as {
-        events?: RelayEventsPage["events"];
-        next_cursor?: number;
-      };
-      const events = Array.isArray(body.events) ? body.events : [];
-      const nextCursor =
-        typeof body.next_cursor === "number" && Number.isSafeInteger(body.next_cursor)
-          ? body.next_cursor
-          : params.cursor;
-      return { events, nextCursor };
-    },
-
-    sendMessage: async (params) => {
-      const response = await request({
-        method: "POST",
-        path: "/v1/messages",
-        headers: { "idempotency-key": params.idempotencyKey },
-        body: {
-          conversation_id: params.conversationId,
-          parts: params.parts,
-          ...(params.invocationId ? { invocation_id: params.invocationId } : {}),
-          ...(params.replyTo ? { reply_to: params.replyTo } : {}),
-        },
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
-      const body = (await response.json()) as {
-        messages: RelaySendResult["messages"];
-      };
-      return { messages: body.messages };
-    },
-
-    sendText: async (params) => {
-      const { text, ...rest } = params;
-      return client.sendMessage({
-        ...rest,
-        parts: [{ type: "text", text }],
-      });
-    },
-
-    setTyping: async (params) => {
-      await request({
-        method: "POST",
-        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/typing`,
-        body: {
-          started: params.started,
-          ...(params.label ? { label: params.label } : {}),
-          ...(params.invocationId ? { invocation_id: params.invocationId } : {}),
-        },
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
-    },
-
-    setResponding: async (params) => {
-      await request({
-        method: "POST",
-        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/responding`,
-        body: {
-          message_id: params.messageId,
-          ...(params.label ? { label: params.label } : {}),
-          ...(params.invocationId ? { invocation_id: params.invocationId } : {}),
-        },
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
-    },
-
-    markDelivered: async (params) => {
-      await request({
-        method: "POST",
-        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/delivered`,
-        body: { message_id: params.messageId },
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
-    },
-
-    markRead: async (params) => {
-      await request({
-        method: "POST",
-        path: `/v1/conversations/${encodeURIComponent(params.conversationId)}/read`,
-        body: { message_id: params.messageId },
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
-    },
-  };
-
-  return client;
+  runWebSocket(options: WebSocketRunOptions): Promise<void> {
+    return runWebSocket(this.baseURL, this.#apiKey, options);
+  }
 }
+
+class ChatMessages {
+  constructor(private readonly transport: Transport) {}
+
+  async list(
+    chatID: string,
+    query: MessageListParams = {},
+    options?: RequestOptions,
+  ): Promise<MessagesPage<Message>> {
+    const body = await this.transport.request<{
+      messages: Message[];
+      next_cursor?: string | null;
+    }>({
+      method: "GET",
+      path: `/v1/chats/${pathID(chatID)}/messages`,
+      query,
+      options,
+    });
+    return new MessagesPage(
+      { data: body.messages, nextCursor: body.next_cursor ?? null },
+      (cursor) => this.list(chatID, { ...query, cursor }, options),
+    );
+  }
+
+  send(
+    chatID: string,
+    body: MessageSendParams,
+    options?: RequestOptions,
+  ): Promise<MessageSendResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/chats/${pathID(chatID)}/messages`,
+      body,
+      options,
+      ...(body.message.idempotency_key
+        ? { idempotencyKey: body.message.idempotency_key }
+        : {}),
+    });
+  }
+}
+
+class ChatParticipants {
+  constructor(private readonly transport: Transport) {}
+
+  add(
+    chatID: string,
+    body: ParticipantAddParams,
+    options?: RequestOptions,
+  ): Promise<AcceptedResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/chats/${pathID(chatID)}/participants`,
+      body,
+      options,
+    });
+  }
+
+  remove(
+    chatID: string,
+    body: ParticipantRemoveParams,
+    options?: RequestOptions,
+  ): Promise<AcceptedResponse> {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/chats/${pathID(chatID)}/participants`,
+      body,
+      options,
+    });
+  }
+}
+
+export class Chats {
+  readonly messages: ChatMessages;
+  readonly participants: ChatParticipants;
+
+  constructor(private readonly transport: Transport) {
+    this.messages = new ChatMessages(transport);
+    this.participants = new ChatParticipants(transport);
+  }
+
+  create(body: ChatCreateParams, options?: RequestOptions): Promise<ChatCreateResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: "/v1/chats",
+      body,
+      options,
+      ...(body.message.idempotency_key
+        ? { idempotencyKey: body.message.idempotency_key }
+        : {}),
+    });
+  }
+
+  retrieve(chatID: string, options?: RequestOptions): Promise<Chat> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/chats/${pathID(chatID)}`,
+      options,
+    });
+  }
+
+  update(
+    chatID: string,
+    body: ChatUpdateParams,
+    options?: RequestOptions,
+  ): Promise<ChatUpdateResponse> {
+    return this.transport.request({
+      method: "PUT",
+      path: `/v1/chats/${pathID(chatID)}`,
+      body,
+      options,
+    });
+  }
+
+  async listChats(
+    query: ChatListChatsParams = {},
+    options?: RequestOptions,
+  ): Promise<ChatsPage<Chat>> {
+    const body = await this.transport.request<{
+      chats: Chat[];
+      next_cursor?: string | null;
+    }>({
+      method: "GET",
+      path: "/v1/chats",
+      query,
+      options,
+    });
+    return new ChatsPage(
+      { data: body.chats, nextCursor: body.next_cursor ?? null },
+      (cursor) => this.listChats({ ...query, cursor }, options),
+    );
+  }
+
+  leaveChat(chatID: string, options?: RequestOptions): Promise<AcceptedResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/chats/${pathID(chatID)}/leave`,
+      options,
+    });
+  }
+
+  startTyping(chatID: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/chats/${pathID(chatID)}/typing`,
+      options,
+      retryable: true,
+    });
+  }
+
+  stopTyping(chatID: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/chats/${pathID(chatID)}/typing`,
+      options,
+      retryable: true,
+    });
+  }
+
+  markAsRead(chatID: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/chats/${pathID(chatID)}/read`,
+      options,
+      retryable: true,
+    });
+  }
+
+  shareContactCard(chatID: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/chats/${pathID(chatID)}/share_contact_card`,
+      options,
+    });
+  }
+
+  sendVoicememo(
+    chatID: string,
+    body: ChatSendVoicememoParams,
+    options?: RequestOptions,
+  ): Promise<ChatSendVoicememoResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/chats/${pathID(chatID)}/voicememo`,
+      body,
+      options,
+    });
+  }
+}
+
+export class Messages {
+  constructor(private readonly transport: Transport) {}
+
+  create(
+    params: MessageCreateParams,
+    options?: RequestOptions,
+  ): Promise<MessageCreateResponse> {
+    const { "Idempotency-Key": headerKey, ...body } = params;
+    const idempotencyKey = headerKey ?? body.message.idempotency_key;
+    return this.transport.request({
+      method: "POST",
+      path: "/v1/messages",
+      body,
+      options,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    });
+  }
+
+  retrieve(messageID: string, options?: RequestOptions): Promise<Message> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/messages/${pathID(messageID)}`,
+      options,
+    });
+  }
+
+  addReaction(
+    messageID: string,
+    body: MessageAddReactionParams,
+    options?: RequestOptions,
+  ): Promise<MessageAddReactionResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/messages/${pathID(messageID)}/reactions`,
+      body,
+      options,
+    });
+  }
+
+  async listMessagesThread(
+    messageID: string,
+    query: MessageThreadParams = {},
+    options?: RequestOptions,
+  ): Promise<MessagesPage<Message>> {
+    const body = await this.transport.request<{
+      messages: Message[];
+      next_cursor?: string | null;
+    }>({
+      method: "GET",
+      path: `/v1/messages/${pathID(messageID)}/thread`,
+      query,
+      options,
+    });
+    return new MessagesPage(
+      { data: body.messages, nextCursor: body.next_cursor ?? null },
+      (cursor) => this.listMessagesThread(
+        messageID,
+        { ...query, cursor },
+        options,
+      ),
+    );
+  }
+
+  /**
+   * User session only. Agent delivery is acknowledged by webhook `2xx`.
+   */
+  acknowledgeDelivered(
+    messageID: string,
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/messages/${pathID(messageID)}/delivered`,
+      options,
+      retryable: true,
+    });
+  }
+}
+
+export class Attachments {
+  constructor(private readonly transport: Transport) {}
+
+  create(
+    body: AttachmentCreateParams,
+    options?: RequestOptions,
+  ): Promise<AttachmentCreateResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: "/v1/attachments",
+      body,
+      options,
+    });
+  }
+
+  retrieve(attachmentID: string, options?: RequestOptions): Promise<Attachment> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/attachments/${pathID(attachmentID)}`,
+      options,
+    });
+  }
+
+  delete(attachmentID: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/attachments/${pathID(attachmentID)}`,
+      options,
+    });
+  }
+
+  upload(
+    allocation: AttachmentCreateResponse,
+    data: BodyInit,
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.transport.upload(allocation, data, options);
+  }
+}
+
+export class WebhookEvents {
+  constructor(private readonly transport: Transport) {}
+
+  list(options?: RequestOptions): Promise<WebhookEventListResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/webhook-events",
+      options,
+    });
+  }
+}
+
+export class WebhookSubscriptions {
+  constructor(private readonly transport: Transport) {}
+
+  create(
+    body: WebhookSubscriptionCreateParams,
+    options?: RequestOptions,
+  ): Promise<WebhookSubscriptionCreateResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: "/v1/webhook-subscriptions",
+      body,
+      options,
+    });
+  }
+
+  retrieve(
+    subscriptionID: string,
+    options?: RequestOptions,
+  ): Promise<WebhookSubscription> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/webhook-subscriptions/${pathID(subscriptionID)}`,
+      options,
+    });
+  }
+
+  update(
+    subscriptionID: string,
+    body: WebhookSubscriptionUpdateParams,
+    options?: RequestOptions,
+  ): Promise<WebhookSubscription> {
+    return this.transport.request({
+      method: "PUT",
+      path: `/v1/webhook-subscriptions/${pathID(subscriptionID)}`,
+      body,
+      options,
+    });
+  }
+
+  list(options?: RequestOptions): Promise<WebhookSubscriptionListResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/webhook-subscriptions",
+      options,
+    });
+  }
+
+  delete(subscriptionID: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/webhook-subscriptions/${pathID(subscriptionID)}`,
+      options,
+    });
+  }
+}
+
+export class ContactCard {
+  constructor(private readonly transport: Transport) {}
+
+  create(
+    body: ContactCardCreateParams,
+    options?: RequestOptions,
+  ): Promise<ContactCardItem> {
+    return this.transport.request({
+      method: "POST",
+      path: "/v1/contact_card",
+      body,
+      options,
+    });
+  }
+
+  retrieve(
+    query: ContactCardRetrieveParams = {},
+    options?: RequestOptions,
+  ): Promise<ContactCardRetrieveResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/contact_card",
+      query,
+      options,
+    });
+  }
+
+  update(
+    params: ContactCardUpdateParams,
+    options?: RequestOptions,
+  ): Promise<ContactCardItem> {
+    const { handle, ...body } = params;
+    return this.transport.request({
+      method: "PATCH",
+      path: "/v1/contact_card",
+      query: { handle },
+      body,
+      options,
+    });
+  }
+}
+
+export class BlockedHandles {
+  constructor(private readonly transport: Transport) {}
+
+  list(options?: RequestOptions): Promise<BlockedHandleListResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/blocked_handles",
+      options,
+    });
+  }
+
+  block(
+    body: BlockHandleParams,
+    options?: RequestOptions,
+  ): Promise<BlockHandleResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: "/v1/blocked_handles",
+      body,
+      options,
+    });
+  }
+
+  unblock(
+    body: UnblockHandleParams,
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.transport.request({
+      method: "DELETE",
+      path: "/v1/blocked_handles",
+      body,
+      options,
+    });
+  }
+}
+
+export class WebSocket {
+  constructor(private readonly transport: Transport) {}
+
+  /**
+   * Keeps one outbound WebSocket connection alive. `onEvent` must return
+   * only after the event is committed to a durable inbox; the SDK sends the
+   * cumulative ACK after that promise resolves. `onFullSync` must return only
+   * after a complete REST snapshot is durably applied.
+   */
+  run(options: WebSocketRunOptions): Promise<void> {
+    return this.transport.runWebSocket(options);
+  }
+}
+
+export class Relay {
+  readonly baseURL: string;
+  readonly chats: Chats;
+  readonly messages: Messages;
+  readonly attachments: Attachments;
+  readonly webhookEvents: WebhookEvents;
+  readonly webhookSubscriptions: WebhookSubscriptions;
+  readonly contactCard: ContactCard;
+  readonly blockedHandles: BlockedHandles;
+  readonly websocket: WebSocket;
+  readonly webhooks: Webhooks;
+
+  constructor(options: RelayOptions) {
+    const transport = new Transport(options);
+    this.baseURL = transport.baseURL;
+    this.chats = new Chats(transport);
+    this.messages = new Messages(transport);
+    this.attachments = new Attachments(transport);
+    this.webhookEvents = new WebhookEvents(transport);
+    this.webhookSubscriptions = new WebhookSubscriptions(transport);
+    this.contactCard = new ContactCard(transport);
+    this.blockedHandles = new BlockedHandles(transport);
+    this.websocket = new WebSocket(transport);
+    this.webhooks = new Webhooks(options.webhookSecret ?? null);
+  }
+}
+
+export default Relay;

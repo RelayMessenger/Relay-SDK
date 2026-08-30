@@ -1,0 +1,185 @@
+{
+  "source": "Relay-Server-local/contracts/developer/openapi.yaml",
+  "source_openapi_sha256": "09142cf0608946cba970f1280c8200723de035f58acd04586e881c1c7ba4e7ee",
+  "source_path_count": 22,
+  "source_schema_count": 99,
+  "callback_count": 13,
+  "transport_decision": {
+    "source": "Relay-Research/research/relay-rebuild-20260828/TRANSPORT-DECISION-20260829.md",
+    "sha256": "6140351159f830a4a6b4be67e2e6a9cce27eeb9a6cd83c67c54331df26d2fe74"
+  },
+  "path_count": 21,
+  "operation_count": 34,
+  "operations": [
+    {
+      "method": "POST",
+      "path": "/v1/chats",
+      "operationId": "createChat"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/chats",
+      "operationId": "listChats"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/chats/{chatId}",
+      "operationId": "getChat"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/chats/{chatId}",
+      "operationId": "updateChat"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chats/{chatId}/participants",
+      "operationId": "addParticipant"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/chats/{chatId}/participants",
+      "operationId": "removeParticipant"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chats/{chatId}/leave",
+      "operationId": "leaveChat"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chats/{chatId}/typing",
+      "operationId": "startTyping"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/chats/{chatId}/typing",
+      "operationId": "stopTyping"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chats/{chatId}/read",
+      "operationId": "markChatAsRead"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chats/{chatId}/share_contact_card",
+      "operationId": "shareContactWithChat"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/messages",
+      "operationId": "sendMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chats/{chatId}/messages",
+      "operationId": "sendMessageToChat"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/chats/{chatId}/messages",
+      "operationId": "getMessages"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/messages/{messageId}/thread",
+      "operationId": "getMessageThread"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chats/{chatId}/voicememo",
+      "operationId": "sendVoiceMemoToChat"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/messages/{messageId}",
+      "operationId": "getMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/messages/{messageId}/reactions",
+      "operationId": "sendReaction"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/attachments",
+      "operationId": "requestUpload"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/attachments/{attachmentId}",
+      "operationId": "getAttachment"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/attachments/{attachmentId}",
+      "operationId": "deleteAttachment"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/blocked_handles",
+      "operationId": "listBlockedHandles"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/blocked_handles",
+      "operationId": "blockHandle"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/blocked_handles",
+      "operationId": "unblockHandle"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/webhook-events",
+      "operationId": "listWebhookEvents"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/webhook-subscriptions",
+      "operationId": "createWebhookSubscription"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/webhook-subscriptions",
+      "operationId": "listWebhookSubscriptions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/webhook-subscriptions/{subscriptionId}",
+      "operationId": "getWebhookSubscription"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/webhook-subscriptions/{subscriptionId}",
+      "operationId": "updateWebhookSubscription"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/webhook-subscriptions/{subscriptionId}",
+      "operationId": "deleteWebhookSubscription"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/contact_card",
+      "operationId": "getContactCard"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/contact_card",
+      "operationId": "setupContactCard"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/contact_card",
+      "operationId": "updateContactCard"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/messages/{messageId}/delivered",
+      "operationId": "acknowledgeMessageDelivered"
+    }
+  ]
+}

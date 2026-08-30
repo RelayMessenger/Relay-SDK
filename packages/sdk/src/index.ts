@@ -1,43 +1,46 @@
 export {
-  createRelayClient,
-  type RelayClient,
-  type RelayClientOptions,
+  Attachments,
+  BlockedHandles,
+  Chats,
+  ContactCard,
+  Messages,
+  Relay,
+  WebSocket,
+  WebhookEvents,
+  WebhookSubscriptions,
+  type RelayOptions,
 } from "./client.js";
 export {
-  RelayApiError,
-  WebhookVerificationError,
-  classifyRelayHttpStatus,
-  isAbortError,
-  isRelayWebhookConflict,
-  type RelayApiErrorKind,
+  RelayAPIError,
+  RelayWebhookConfiguredError,
+  type RelayAPIErrorOptions,
+  type RelayWebhookConfiguredErrorOptions,
 } from "./errors.js";
-export { createFileCursorStore, type FileCursorStore } from "./file-cursor.js";
 export {
-  deriveIdempotencyKey,
-  replyIdempotencyKey,
-} from "./idempotency.js";
-export { MemoryDedupe, type EventDedupe } from "./memory-dedupe.js";
+  RELAY_V1_OPERATIONS,
+  RELAY_WEBHOOK_EVENT_TYPES,
+  type RelayV1Operation,
+} from "./operations.js";
 export {
-  runPollLoop,
-  type MessageHandlerContext,
-  type PollLoopParams,
-  type ReplyOptions,
-} from "./poll-loop.js";
+  ChatsPage,
+  MessagesPage,
+  RelayPage,
+  type PageBody,
+} from "./pagination.js";
 export {
+  Webhooks,
+  WebhookVerificationError,
   verifyWebhookSignature,
-  type VerifyWebhookOptions,
-} from "./signature.js";
-export type {
-  MessageReceivedData,
-  MessageReceivedEvent,
-  RelayAgentProfile,
-  RelayEventEnvelope,
-  RelayEventsPage,
-  RelayMessage,
-  RelayOutgoingPart,
-  RelayPart,
-  RelayReplyRef,
-  RelaySender,
-  RelaySendResult,
-} from "./types.js";
-export { DEFAULT_RELAY_BASE_URL, normalizeRelayBaseUrl } from "./url.js";
+  type WebhookHeaders,
+} from "./webhooks.js";
+export {
+  runWebSocket,
+  type WebSocketEventContext,
+  type WebSocketFullSyncContext,
+  type WebSocketRunOptions,
+  type WebSocketConstructor,
+  type WebSocketLike,
+} from "./websocket.js";
+export type * from "./types.js";
+
+export { Relay as default } from "./client.js";

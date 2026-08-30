@@ -1,4 +1,0 @@
-interface:
-  display_name: "ACP Adapter Authoring"
-  short_description: "Build and prove Relay ACP integrations"
-  default_prompt: "Use $acp-adapter-authoring to author and validate this Relay coding-agent integration."

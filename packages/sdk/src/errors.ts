@@ -1,61 +1,59 @@
-export type RelayApiErrorKind = "auth" | "conflict" | "retryable" | "rejected";
+export interface RelayAPIErrorOptions {
+  status?: number;
+  code?: number;
+  traceId?: string;
+  docURL?: string;
+  retryAfter?: number;
+  body?: unknown;
+  cause?: unknown;
+}
 
-/** Classified Relay API failure. `terminal` means retrying the same request cannot succeed. */
-export class RelayApiError extends Error {
+export class RelayAPIError extends Error {
   readonly status: number | undefined;
-  readonly kind: RelayApiErrorKind;
-  readonly code: string | undefined;
-  /** Structured `error.details` from the response body, e.g. `highest_delivered_cursor` on 422. */
-  readonly details: Record<string, unknown> | undefined;
+  readonly code: number | undefined;
+  readonly traceId: string | undefined;
+  readonly docURL: string | undefined;
+  readonly retryAfter: number | undefined;
+  readonly body: unknown;
 
-  constructor(
-    message: string,
-    params: {
-      status?: number;
-      kind: RelayApiErrorKind;
-      code?: string;
-      details?: Record<string, unknown>;
-    },
-  ) {
-    super(message);
-    this.name = "RelayApiError";
-    this.status = params.status;
-    this.kind = params.kind;
-    this.code = params.code;
-    this.details = params.details;
-  }
-
-  get terminal(): boolean {
-    return this.kind !== "retryable";
+  constructor(message: string, options: RelayAPIErrorOptions = {}) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "RelayAPIError";
+    this.status = options.status;
+    this.code = options.code;
+    this.traceId = options.traceId;
+    this.docURL = options.docURL;
+    this.retryAfter = options.retryAfter;
+    this.body = options.body;
   }
 
   get retryable(): boolean {
-    return this.kind === "retryable";
+    return this.status === undefined
+      || this.status === 408
+      || this.status === 429
+      || this.status >= 500;
   }
 }
 
-export class WebhookVerificationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "WebhookVerificationError";
+export type RelayWebhookConfiguredErrorOptions = Omit<
+  RelayAPIErrorOptions,
+  "status"
+>;
+
+/**
+ * The Agent has at least one Webhook subscription, so Relay rejected the
+ * WebSocket upgrade with HTTP 409. Delete every Webhook subscription before
+ * connecting through the WebSocket.
+ */
+export class RelayWebhookConfiguredError extends RelayAPIError {
+  constructor(
+    message = "This Agent delivers by webhook; delete its webhook subscription to use the WebSocket.",
+    options: RelayWebhookConfiguredErrorOptions = {},
+  ) {
+    super(message, { ...options, status: 409 });
+    this.name = "RelayWebhookConfiguredError";
   }
 }
 
-export function classifyRelayHttpStatus(status: number): RelayApiErrorKind {
-  if (status === 401) return "auth";
-  if (status === 409) return "conflict";
-  if (status === 408 || status === 429 || status >= 500) return "retryable";
-  return "rejected";
-}
-
-export function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
-export function isRelayWebhookConflict(error: unknown): error is RelayApiError {
-  return (
-    error instanceof RelayApiError &&
-    error.status === 409 &&
-    error.code !== "terminated_by_other_consumer"
-  );
-}
+export const isAbortError = (error: unknown): boolean =>
+  error instanceof Error && error.name === "AbortError";

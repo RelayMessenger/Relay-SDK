@@ -1,48 +1,53 @@
 {
   "name": "@relaymessenger/sdk",
-  "version": "0.2.0",
-  "description": "Relay transport library: HTTPS client, Standard Webhooks verify, durable long-poll, idempotent sends.",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the Relay v1 messaging API and signed webhooks.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
-    "dist",
+    "dist/",
     "LICENSE",
+    "LICENSES/",
+    "NOTICE",
     "README.md"
   ],
   "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --config vitest.config.ts",
+    "test": "vitest run",
     "prepack": "npm run build"
   },
   "engines": {
-    "node": ">=22.18"
+    "node": ">=22.22.3"
   },
   "license": "MIT",
+  "dependencies": {
+    "standardwebhooks": "^1.0.0",
+    "ws": "^8.21.0"
+  },
   "publishConfig": {
     "access": "public"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/relaymessenger/Relay-SDK.git",
+    "url": "git+https://github.com/RelayMessenger/Relay-SDK.git",
     "directory": "packages/sdk"
   },
   "homepage": "https://docs.relayapp.im",
-  "bugs": {
-    "url": "https://github.com/relaymessenger/Relay-SDK/issues"
-  },
   "keywords": [
     "relay",
-    "relaymessenger",
+    "messaging",
     "agents",
-    "webhooks",
-    "long-poll"
+    "webhooks"
   ]
 }
