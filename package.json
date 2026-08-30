@@ -14,7 +14,8 @@
     "consumer:types": "tsc -p test/tsconfig.json --noEmit",
     "pack:smoke": "node scripts/consumer-smoke.mjs",
     "staging:validate": "node scripts/staging-validate.mjs",
-    "validate": "npm run clean && npm run check && npm run build && npm test && npm run contract:check && npm run consumer:types && npm run pack:smoke"
+    "staging:validate:structural": "node scripts/staging-validate.mjs --structural",
+    "validate": "npm run clean && npm run check && npm run build && npm test && npm run contract:check && npm run consumer:types && npm run pack:smoke && npm run staging:validate:structural"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
