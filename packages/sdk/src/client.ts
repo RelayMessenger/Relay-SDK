@@ -334,6 +334,20 @@ export class Chats {
     });
   }
 
+  /**
+   * User session only. Hides this conversation for the authenticated user.
+   */
+  deleteConversation(
+    chatID: string,
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/me/conversations/${pathID(chatID)}`,
+      options,
+    });
+  }
+
   update(
     chatID: string,
     body: ChatUpdateParams,

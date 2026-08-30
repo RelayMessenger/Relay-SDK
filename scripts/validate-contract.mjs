@@ -24,13 +24,13 @@ const sourceOnlyOperations = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 34);
-assert.equal(manifest.path_count, 21);
-assert.equal(manifest.source_path_count, 22);
+assert.equal(manifest.operation_count, 35);
+assert.equal(manifest.path_count, 22);
+assert.equal(manifest.source_path_count, 23);
 assert.equal(manifest.source_schema_count, 99);
 assert.equal(manifest.callback_count, 13);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 21);
-assert.equal(operationJSON.length, 34);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 22);
+assert.equal(operationJSON.length, 35);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 13);
 
 for (const forbidden of [
@@ -52,6 +52,9 @@ for (const forbidden of [
 }
 assert.ok(operationJSON.some((operation) =>
   operation.path === "/v1/messages/{messageId}/delivered"));
+assert.ok(operationJSON.some((operation) =>
+  operation.path === "/v1/me/conversations/{chatId}"
+  && operation.method === "DELETE"));
 assert.ok(operationJSON.some((operation) =>
   operation.path === "/v1/chats/{chatId}/share_contact_card"));
 assert.equal(operationJSON.some((operation) =>
@@ -103,7 +106,7 @@ if (existsSync(decision)) {
 }
 
 const source = process.env.RELAY_OPENAPI_SOURCE
-  ?? resolve(root, "../_worktrees/Relay-Server-local/contracts/developer/openapi.yaml");
+  ?? resolve(root, "..", manifest.source);
 if (existsSync(source)) {
   const bytes = readFileSync(source);
   const hash = createHash("sha256").update(bytes).digest("hex");
@@ -214,6 +217,33 @@ if (existsSync(source)) {
   assert.ok(
     "deliveries" in document.components.schemas.Message.properties,
     "Message.deliveries is required in the SDK contract",
+  );
+  assert.deepEqual(
+    document.components.schemas.ChatHandle.required,
+    [
+      "id",
+      "handle",
+      "joined_at",
+      "kind",
+      "greeting_message",
+      "is_default",
+    ],
+  );
+  assert.equal(
+    document.components.schemas.ChatHandle.properties.greeting_message.maxLength,
+    1024,
+  );
+  assert.equal(
+    document.components.schemas.ChatHandle.properties.is_default.default,
+    false,
+  );
+  assert.equal(
+    document.paths["/v1/me/conversations/{chatId}"].delete.operationId,
+    "deleteConversation",
+  );
+  assert.ok(
+    document.paths["/v1/me/conversations/{chatId}"].delete.responses["409"],
+    "Default Agent conversation deletion must remain guarded",
   );
   assert.deepEqual(
     document.components.schemas.WebSocketReadyFrame.required,

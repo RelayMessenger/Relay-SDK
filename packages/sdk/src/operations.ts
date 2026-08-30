@@ -174,6 +174,11 @@ export const RELAY_V1_OPERATIONS = [
     "method": "POST",
     "path": "/v1/messages/{messageId}/delivered",
     "operationId": "acknowledgeMessageDelivered"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/me/conversations/{chatId}",
+    "operationId": "deleteConversation"
   }
 ] as const satisfies readonly RelayV1Operation[];
 

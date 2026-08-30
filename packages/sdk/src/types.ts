@@ -23,17 +23,30 @@ export type ReactionType =
   | "question"
   | "custom";
 
-export interface ChatHandle {
+interface ChatHandleBase {
   id: UUID;
   handle: string;
   status?: "active" | "left" | "removed" | null;
   joined_at: string;
   left_at?: string | null;
   is_me?: boolean | null;
-  kind?: "user" | "agent";
   display_name?: string | null;
   avatar_url?: string | null;
 }
+
+export interface UserChatHandle extends ChatHandleBase {
+  kind: "user";
+  greeting_message: null;
+  is_default: false;
+}
+
+export interface AgentChatHandle extends ChatHandleBase {
+  kind: "agent";
+  greeting_message: string | null;
+  is_default: boolean;
+}
+
+export type ChatHandle = UserChatHandle | AgentChatHandle;
 
 export interface Reaction {
   is_me: boolean;

@@ -91,7 +91,7 @@ writeFileSync(runner, `
     expectedBaseURL = expectedBaseURL.slice(0, -1);
   }
   assert.equal(client.baseURL, expectedBaseURL);
-  assert.equal(RELAY_V1_OPERATIONS.length, 34);
+  assert.equal(RELAY_V1_OPERATIONS.length, 35);
   assert.equal(
     RELAY_V1_OPERATIONS.some((operation) => operation.path === "/v1/websocket"),
     false,

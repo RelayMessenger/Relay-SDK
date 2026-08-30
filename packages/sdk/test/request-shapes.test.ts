@@ -30,6 +30,7 @@ const responder = (calls: Captured[]) => async (
     || (method === "DELETE" && (
       url.pathname.startsWith("/v1/attachments/")
       || url.pathname.startsWith("/v1/webhook-subscriptions/")
+      || url.pathname.startsWith("/v1/me/conversations/")
       || url.pathname === "/v1/blocked_handles"
       || url.pathname.endsWith("/typing")
     ))
@@ -134,6 +135,7 @@ describe("Relay v1 request shapes", () => {
       first_name: "New Echo",
     });
     await client.messages.acknowledgeDelivered("message-id");
+    await client.chats.deleteConversation("chat-id");
 
     expect(calls.map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
@@ -179,6 +181,7 @@ describe("Relay v1 request shapes", () => {
       first_name: "New Echo",
     });
 
+    expect(calls.at(-1)?.url.pathname).toBe("/v1/me/conversations/chat-id");
     expect(calls.some((call) =>
       call.url.pathname === "/v1/websocket")).toBe(false);
   });
