@@ -135,6 +135,9 @@ if (event.event_type === "contact.removed") {
 }
 ```
 
+The initial staged Relay webhook contract uses
+`webhook_version: "2026-08-30"` on every event envelope.
+
 Verification follows Standard Webhooks and must use the unmodified raw body.
 Commit the complete event to a durable inbox, then return `2xx` before running
 the handler or model. Relay uses that response as the agent's Delivered ACK.

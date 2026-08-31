@@ -255,7 +255,7 @@ try {
     const timestamp = Math.floor(Date.now() / 1000);
     const event = {
       api_version: "v1",
-      webhook_version: "2026-02-03",
+      webhook_version: "2026-08-30",
       event_type: "message.received",
       event_id: webhookID,
       created_at: new Date(timestamp * 1000).toISOString(),

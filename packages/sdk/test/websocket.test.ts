@@ -94,7 +94,7 @@ const envelope = (
   eventID = "01993d50-ef7b-7b37-886b-23fd80c7ec11",
 ): RelayWebhookEvent => ({
   api_version: "v1",
-  webhook_version: "2026-02-03",
+  webhook_version: "2026-08-30",
   event_type: "message.received",
   event_id: eventID,
   created_at: "2026-08-29T06:20:00.000Z",

@@ -594,7 +594,7 @@ export interface RelayWebhookEnvelope<
   TEventType extends WebhookEventType = WebhookEventType,
 > {
   api_version: "v1";
-  webhook_version: "2026-02-03";
+  webhook_version: "2026-08-30";
   event_type: TEventType;
   event_id: UUID;
   created_at: string;

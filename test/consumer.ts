@@ -90,7 +90,7 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
 
 const envelope: RelayWebhookEnvelope = {
   api_version: "v1",
-  webhook_version: "2026-02-03",
+  webhook_version: "2026-08-30",
   event_type: "message.received",
   event_id: "event-id",
   created_at: new Date().toISOString(),

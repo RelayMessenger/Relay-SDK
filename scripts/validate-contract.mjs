@@ -280,6 +280,11 @@ if (existsSync(source)) {
     Object.keys(document["x-relay-webhooks"]).length,
     manifest.callback_count,
   );
+  for (const [name, callback] of Object.entries(document["x-relay-webhooks"])) {
+    assert.equal(name.endsWith(".v2026-08-30"), true);
+    assert.deepEqual(callback.post.tags, ["2026-08-30"]);
+    assert.equal(callback.post.operationId.endsWith("V20260830"), true);
+  }
   assert.deepEqual(
     document.components.schemas.WebhookEventType.enum,
     [...RELAY_WEBHOOK_EVENT_TYPES],
@@ -287,6 +292,10 @@ if (existsSync(source)) {
   assert.deepEqual(
     document.components.schemas.WebhookEnvelopeBase.properties.api_version.enum,
     ["v1"],
+  );
+  assert.deepEqual(
+    document.components.schemas.WebhookEnvelopeBase.properties.webhook_version.enum,
+    ["2026-08-30"],
   );
   assert.deepEqual(
     document.components.schemas.DeliveryStatus.enum,
@@ -426,12 +435,12 @@ if (existsSync(source)) {
     ["id", "handle", "display_name"],
   );
   assert.equal(
-    document["x-relay-webhooks"]["contact.added.v2026-02-03"].post
+    document["x-relay-webhooks"]["contact.added.v2026-08-30"].post
       .requestBody.content["application/json"].schema.$ref,
     "#/components/schemas/ContactAddedWebhook",
   );
   assert.equal(
-    document["x-relay-webhooks"]["contact.removed.v2026-02-03"].post
+    document["x-relay-webhooks"]["contact.removed.v2026-08-30"].post
       .requestBody.content["application/json"].schema.$ref,
     "#/components/schemas/ContactRemovedWebhook",
   );
