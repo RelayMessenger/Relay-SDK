@@ -1,11 +1,14 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import Relay, {
   RelayWebhookConfiguredError,
   runWebSocket,
-  type RelayWebhookEnvelope,
+  type ContactAddedWebhookEvent,
+  type ContactRemovedWebhookEvent,
+  type RelayWebhookEvent,
   type WebSocketLike,
 } from "../src/index.js";
 
@@ -89,7 +92,7 @@ const waitFor = async (predicate: () => boolean): Promise<void> => {
 
 const envelope = (
   eventID = "01993d50-ef7b-7b37-886b-23fd80c7ec11",
-): RelayWebhookEnvelope => ({
+): RelayWebhookEvent => ({
   api_version: "v1",
   webhook_version: "2026-02-03",
   event_type: "message.received",
@@ -97,7 +100,26 @@ const envelope = (
   created_at: "2026-08-29T06:20:00.000Z",
   trace_id: "trace",
   agent_id: "01993d50-d2a8-7fe2-8b76-9eaf04816377",
-  data: {},
+  data: {
+    chat: {
+      id: "01993d50-ef7b-7b37-886b-23fd80c7ec12",
+      is_group: false,
+      owner_handle: null,
+    },
+    id: "01993d50-ef7b-7b37-886b-23fd80c7ec13",
+    direction: "inbound",
+    sender_handle: {
+      id: "01993d50-ef7b-7b37-886b-23fd80c7ec14",
+      handle: "advait",
+      joined_at: "2026-08-29T06:20:00.000Z",
+      kind: "user",
+      display_name: "Advait",
+      avatar_url: null,
+      tagline: null,
+      verified: false,
+    },
+    parts: [],
+  },
 });
 
 const ready = (
@@ -115,7 +137,7 @@ const ready = (
 
 const eventFrame = (
   sequence: string,
-  event = envelope(),
+  event: RelayWebhookEvent = envelope(),
 ) => ({
   type: "event",
   sequence,
@@ -131,6 +153,12 @@ const fullSyncFrame = (throughSequence: string) => ({
 const emitFrame = (socket: FakeWebSocket, frame: unknown): void => {
   socket.emit("message", { data: JSON.stringify(frame) });
 };
+
+const fixture = <T extends RelayWebhookEvent>(name: string): T =>
+  JSON.parse(readFileSync(
+    new URL(`./fixtures/${name}.json`, import.meta.url),
+    "utf8",
+  )) as T;
 
 const client = (baseURL = "https://relay.test/some-old-path?ignored=1"): Relay =>
   new Relay({ apiKey: "relay-agent-token", baseURL });
@@ -307,6 +335,62 @@ it("ACKs only after the event callback durably resolves", async () => {
     type: "ack",
     through_sequence: "1",
   }]);
+
+  controller.abort();
+  await running;
+});
+
+it("delivers typed contact.added and contact.removed events before cumulative ACKs", async () => {
+  const received: Array<{
+    type: string;
+    handle: string;
+    chatID?: string;
+  }> = [];
+  const { controller, running } = run(client(), {
+    onEvent: async (event) => {
+      if (event.event_type === "contact.added") {
+        received.push({
+          type: event.event_type,
+          handle: event.data.contact.handle,
+          chatID: event.data.chat_id,
+        });
+      } else if (event.event_type === "contact.removed") {
+        received.push({
+          type: event.event_type,
+          handle: event.data.contact.handle,
+        });
+      }
+    },
+  });
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  const socket = FakeWebSocket.latest;
+  emitFrame(socket, ready());
+  emitFrame(socket, eventFrame(
+    "1",
+    fixture<ContactAddedWebhookEvent>("contact.added"),
+  ));
+  await waitFor(() => socket.sent.length === 1);
+  emitFrame(socket, eventFrame(
+    "2",
+    fixture<ContactRemovedWebhookEvent>("contact.removed"),
+  ));
+  await waitFor(() => socket.sent.length === 2);
+
+  expect(received).toEqual([
+    {
+      type: "contact.added",
+      handle: "advait",
+      chatID: "01993d50-b4ce-71e6-8e65-35d325d95de0",
+    },
+    {
+      type: "contact.removed",
+      handle: "advait",
+    },
+  ]);
+  expect(socket.sent.map(JSON.parse)).toEqual([
+    { type: "ack", through_sequence: "1" },
+    { type: "ack", through_sequence: "2" },
+  ]);
 
   controller.abort();
   await running;

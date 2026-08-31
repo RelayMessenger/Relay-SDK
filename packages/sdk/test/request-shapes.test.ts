@@ -37,6 +37,9 @@ const responder = (calls: Captured[]) => async (
   if (method === "GET" && url.pathname === "/v1/chats") {
     return Response.json({ chats: [], next_cursor: null });
   }
+  if (method === "POST" && url.pathname === "/v1/contact_requests") {
+    return Response.json({ state: "pending" }, { status: 201 });
+  }
   if (
     method === "GET"
     && (
@@ -132,6 +135,11 @@ describe("Relay v1 request shapes", () => {
       handle: "echo",
       first_name: "New Echo",
     });
+    const contactRequest = await client.contactRequests.create({
+      handle: "advait",
+      "Idempotency-Key": "contact-request-key",
+    });
+    expect(contactRequest).toEqual({ state: "pending" });
 
     expect(calls.map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
@@ -177,6 +185,14 @@ describe("Relay v1 request shapes", () => {
       first_name: "New Echo",
     });
 
+    const createContactRequest = calls.at(-1)!;
+    expect(createContactRequest.headers.get("idempotency-key")).toBe(
+      "contact-request-key",
+    );
+    expect(JSON.parse(String(createContactRequest.body))).toEqual({
+      handle: "advait",
+    });
+
     expect(calls.some((call) =>
       call.url.pathname === "/v1/websocket")).toBe(false);
   });
@@ -197,6 +213,7 @@ describe("Relay v1 request shapes", () => {
       "blockedHandles",
       "chats",
       "contactCard",
+      "contactRequests",
       "messages",
       "webhookEvents",
       "webhookSubscriptions",
@@ -242,6 +259,7 @@ describe("Relay v1 request shapes", () => {
       "retrieve",
       "update",
     ]);
+    expect(methods(client.contactRequests)).toEqual(["create"]);
     expect(methods(client.blockedHandles)).toEqual([
       "block",
       "list",

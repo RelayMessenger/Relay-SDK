@@ -30,18 +30,18 @@ interface ChatHandleBase {
   joined_at: string;
   left_at?: string | null;
   is_me?: boolean | null;
-  display_name?: string | null;
-  avatar_url?: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+  tagline: string | null;
+  verified: boolean;
 }
 
 export interface UserChatHandle extends ChatHandleBase {
   kind: "user";
-  greeting_message: null;
 }
 
 export interface AgentChatHandle extends ChatHandleBase {
   kind: "agent";
-  greeting_message: string | null;
 }
 
 export type ChatHandle = UserChatHandle | AgentChatHandle;
@@ -456,6 +456,15 @@ export interface ContactCardUpdateParams {
   image_url?: string | null;
 }
 
+export interface ContactRequestCreateParams {
+  handle: string;
+  "Idempotency-Key"?: string;
+}
+
+export interface ContactRequestCreateResponse {
+  state: "pending";
+}
+
 export interface BlockedHandle {
   handle: string;
   reason: string | null;
@@ -489,10 +498,12 @@ export interface WebSocketReadyFrame {
   max_in_flight: number;
 }
 
-export interface WebSocketEventFrame<T = Record<string, unknown>> {
+export interface WebSocketEventFrame<
+  TEvent extends RelayWebhookEvent = RelayWebhookEvent,
+> {
   type: "event";
   sequence: string;
-  event: RelayWebhookEnvelope<T>;
+  event: TEvent;
 }
 
 export interface WebSocketAckFrame {
@@ -563,10 +574,28 @@ export interface MessageWebhookData {
   reply_to?: ReplyTo | null;
 }
 
-export interface RelayWebhookEnvelope<T = Record<string, unknown>> {
+export interface ContactEventContact {
+  id: UUID;
+  handle: string;
+  display_name: string;
+}
+
+export interface ContactAddedEvent {
+  contact: ContactEventContact;
+  chat_id: UUID;
+}
+
+export interface ContactRemovedEvent {
+  contact: ContactEventContact;
+}
+
+export interface RelayWebhookEnvelope<
+  T = Record<string, unknown>,
+  TEventType extends WebhookEventType = WebhookEventType,
+> {
   api_version: "v1";
   webhook_version: "2026-02-03";
-  event_type: WebhookEventType;
+  event_type: TEventType;
   event_id: UUID;
   created_at: string;
   trace_id: string;
@@ -574,6 +603,45 @@ export interface RelayWebhookEnvelope<T = Record<string, unknown>> {
   data: T;
 }
 
-export type RelayWebhookEvent = RelayWebhookEnvelope<
-  MessageWebhookData | TypingIndicatorWebhookData | Record<string, unknown>
+export type ContactAddedWebhook = RelayWebhookEnvelope<
+  ContactAddedEvent,
+  "contact.added"
 >;
+
+export type ContactRemovedWebhook = RelayWebhookEnvelope<
+  ContactRemovedEvent,
+  "contact.removed"
+>;
+
+export type ContactAddedWebhookData = ContactAddedEvent;
+export type ContactRemovedWebhookData = ContactRemovedEvent;
+export type ContactAddedWebhookEvent = ContactAddedWebhook;
+export type ContactRemovedWebhookEvent = ContactRemovedWebhook;
+
+type MessageWebhookEventType =
+  | "message.sent"
+  | "message.received"
+  | "message.read"
+  | "message.delivered";
+
+type TypingIndicatorWebhookEventType =
+  | "chat.typing_indicator.started"
+  | "chat.typing_indicator.stopped";
+
+type OtherWebhookEventType = Exclude<
+  WebhookEventType,
+  | MessageWebhookEventType
+  | TypingIndicatorWebhookEventType
+  | "contact.added"
+  | "contact.removed"
+>;
+
+export type RelayWebhookEvent =
+  | RelayWebhookEnvelope<MessageWebhookData, MessageWebhookEventType>
+  | RelayWebhookEnvelope<
+    TypingIndicatorWebhookData,
+    TypingIndicatorWebhookEventType
+  >
+  | ContactAddedWebhookEvent
+  | ContactRemovedWebhookEvent
+  | RelayWebhookEnvelope<Record<string, unknown>, OtherWebhookEventType>;

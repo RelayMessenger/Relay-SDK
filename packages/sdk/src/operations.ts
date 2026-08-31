@@ -169,6 +169,11 @@ export const RELAY_V1_OPERATIONS = [
     "method": "PATCH",
     "path": "/v1/contact_card",
     "operationId": "updateContactCard"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/contact_requests",
+    "operationId": "createContactRequest"
   }
 ] as const satisfies readonly RelayV1Operation[];
 
@@ -185,5 +190,7 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "chat.group_name_updated",
   "chat.group_icon_updated",
   "chat.typing_indicator.started",
-  "chat.typing_indicator.stopped"
+  "chat.typing_indicator.stopped",
+  "contact.added",
+  "contact.removed"
 ] as const;

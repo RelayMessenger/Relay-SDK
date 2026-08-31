@@ -1,7 +1,7 @@
 import NodeWebSocket from "ws";
 import { RelayWebhookConfiguredError } from "./errors.js";
 import type {
-  RelayWebhookEnvelope,
+  RelayWebhookEvent,
   WebSocketDisconnectFrame,
   WebSocketErrorFrame,
   WebSocketEventFrame,
@@ -56,7 +56,7 @@ export interface WebSocketRunOptions {
   maxReconnectDelayMs?: number;
   random?: () => number;
   onEvent(
-    event: RelayWebhookEnvelope,
+    event: RelayWebhookEvent,
     context: WebSocketEventContext,
   ): Promise<void>;
   /**

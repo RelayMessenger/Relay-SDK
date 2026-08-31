@@ -87,14 +87,14 @@ try {
     "is_me",
     "display_name",
     "avatar_url",
+    "tagline",
+    "verified",
   ]);
   assert.deepEqual(interfaceFields("UserChatHandle"), [
     "kind",
-    "greeting_message",
   ]);
   assert.deepEqual(interfaceFields("AgentChatHandle"), [
     "kind",
-    "greeting_message",
   ]);
   execFileSync(process.execPath, [
     "--input-type=module",
@@ -108,8 +108,8 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 33);
-      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 13);
+      assert.equal(RELAY_V1_OPERATIONS.length, 34);
+      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 15);
       const allowedOperations = new Set([
         "POST /v1/chats",
         "GET /v1/chats",
@@ -144,6 +144,7 @@ try {
         "GET /v1/contact_card",
         "POST /v1/contact_card",
         "PATCH /v1/contact_card",
+        "POST /v1/contact_requests",
       ]);
       assert.deepEqual(
         new Set(RELAY_V1_OPERATIONS.map(
@@ -220,6 +221,7 @@ try {
         "retrieve",
         "update",
       ]);
+      assert.deepEqual(methods(client.contactRequests), ["create"]);
       assert.deepEqual(methods(client.blockedHandles), [
         "block",
         "list",
