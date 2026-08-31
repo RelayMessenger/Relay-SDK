@@ -82,6 +82,11 @@ assert.equal(manifest.callback_count, 15);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 21);
 assert.equal(operationJSON.length, 34);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 15);
+assert.equal(
+  operationJSON.every((operation) => operation.path.startsWith("/v1/")),
+  true,
+  "Every SDK operation must stay in the Relay /v1 namespace",
+);
 assert.deepEqual(
   operationJSON.map((operation) => `${operation.method} ${operation.path}`),
   allowedOperationSignatures,
@@ -100,6 +105,17 @@ assert.equal(
   ),
   false,
   "user delivery acknowledgement leaked into SDK",
+);
+assert.deepEqual(
+  operationJSON.filter((operation) =>
+    operation.operationId === "markChatAsRead"
+    || operation.path.endsWith("/read")),
+  [{
+    method: "POST",
+    path: "/v1/chats/{chatId}/read",
+    operationId: "markChatAsRead",
+  }],
+  "Read must remain the single explicit Chat operation",
 );
 
 for (const forbidden of [

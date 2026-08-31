@@ -53,6 +53,33 @@ const responder = (calls: Captured[]) => async (
 };
 
 describe("Relay v1 request shapes", () => {
+  it("marks Read only through an explicit chats.markAsRead call", async () => {
+    const calls: Captured[] = [];
+    const client = new Relay({
+      apiKey: "agent-token",
+      baseURL: "https://api.example.test",
+      maxRetries: 0,
+      fetch: responder(calls),
+    });
+
+    await client.chats.messages.list("chat/id");
+    await client.messages.retrieve("message-id");
+
+    expect(calls.filter((call) => call.url.pathname.endsWith("/read")))
+      .toEqual([]);
+
+    await client.chats.markAsRead("chat/id");
+
+    const readCalls = calls.filter((call) =>
+      call.url.pathname.endsWith("/read"));
+    expect(readCalls).toHaveLength(1);
+    expect(readCalls[0]).toMatchObject({
+      method: "POST",
+      body: undefined,
+    });
+    expect(readCalls[0]!.url.pathname).toBe("/v1/chats/chat%2Fid/read");
+  });
+
   it("exposes every current operation and no extra HTTP route", async () => {
     const calls: Captured[] = [];
     const client = new Relay({
