@@ -21,6 +21,8 @@ import type {
   ContactCardRetrieveParams,
   ContactCardRetrieveResponse,
   ContactCardUpdateParams,
+  ContactRequestCreateParams,
+  ContactRequestCreateResponse,
   Message,
   MessageAddReactionParams,
   MessageAddReactionResponse,
@@ -638,6 +640,24 @@ export class ContactCard {
   }
 }
 
+export class ContactRequests {
+  constructor(private readonly transport: Transport) {}
+
+  create(
+    params: ContactRequestCreateParams,
+    options?: RequestOptions,
+  ): Promise<ContactRequestCreateResponse> {
+    const { "Idempotency-Key": idempotencyKey, ...body } = params;
+    return this.transport.request({
+      method: "POST",
+      path: "/v1/contact_requests",
+      body,
+      options,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    });
+  }
+}
+
 export class BlockedHandles {
   constructor(private readonly transport: Transport) {}
 
@@ -696,6 +716,7 @@ export class Relay {
   readonly webhookEvents: WebhookEvents;
   readonly webhookSubscriptions: WebhookSubscriptions;
   readonly contactCard: ContactCard;
+  readonly contactRequests: ContactRequests;
   readonly blockedHandles: BlockedHandles;
   readonly websocket: WebSocket;
   readonly webhooks: Webhooks;
@@ -709,6 +730,7 @@ export class Relay {
     this.webhookEvents = new WebhookEvents(transport);
     this.webhookSubscriptions = new WebhookSubscriptions(transport);
     this.contactCard = new ContactCard(transport);
+    this.contactRequests = new ContactRequests(transport);
     this.blockedHandles = new BlockedHandles(transport);
     this.websocket = new WebSocket(transport);
     this.webhooks = new Webhooks(options.webhookSecret ?? null);

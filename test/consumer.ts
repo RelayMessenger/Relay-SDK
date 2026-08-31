@@ -3,6 +3,8 @@ import Relay, {
   type Chat,
   type ChatHandle,
   type ChatSendVoicememoResponse,
+  type ContactAddedWebhookEvent,
+  type ContactRemovedWebhookEvent,
   type DeliveryStatus,
   type Message,
   type MessageContent,
@@ -55,6 +57,11 @@ await relay.webhookSubscriptions.create({
   target_url: "https://receiver.test/webhook",
   subscribed_events: ["message.received"],
 });
+const addRequest = await relay.contactRequests.create({
+  handle: "advait",
+  "Idempotency-Key": "contact-request-key",
+});
+addRequest.state satisfies "pending";
 
 const page = await relay.chats.listChats();
 page.chats satisfies Chat[];
@@ -77,6 +84,8 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "chat.group_icon_updated",
   "chat.typing_indicator.started",
   "chat.typing_indicator.stopped",
+  "contact.added",
+  "contact.removed",
 ];
 
 const envelope: RelayWebhookEnvelope = {
@@ -111,8 +120,12 @@ relay.responding;
 relay.messages.poll;
 // @ts-expect-error Socket Mode is not Relay vocabulary.
 relay.socketMode;
-// @ts-expect-error Relay has no contacts client resource.
+// @ts-expect-error Private user Contact operations are not in the Agent SDK.
 relay.contacts;
+// @ts-expect-error The Agent SDK cannot list private user Contact requests.
+relay.contactRequests.list();
+// @ts-expect-error The Agent SDK cannot ignore private user Contact requests.
+relay.contactRequests.ignore({ handle: "echo" });
 const withService: MessageContent = {
   parts: [{ type: "text", value: "No" }],
   // @ts-expect-error Relay messages have no service discriminator.
@@ -120,13 +133,17 @@ const withService: MessageContent = {
 };
 void withService;
 declare const chat: Chat;
-chat.handles[0]!.greeting_message satisfies string | null;
+chat.handles[0]!.tagline satisfies string | null;
+chat.handles[0]!.verified satisfies boolean;
 const userHandle: ChatHandle = {
   id: "user-id",
   handle: "alice",
   joined_at: new Date().toISOString(),
   kind: "user",
-  greeting_message: null,
+  display_name: "Alice",
+  avatar_url: null,
+  tagline: null,
+  verified: false,
 };
 void userHandle;
 const agentHandle: ChatHandle = {
@@ -134,9 +151,16 @@ const agentHandle: ChatHandle = {
   handle: "echo",
   joined_at: new Date().toISOString(),
   kind: "agent",
-  greeting_message: "Hello",
+  display_name: "Echo",
+  avatar_url: "https://cdn.relayapp.im/echo.png",
+  tagline: "Weather when you need it",
+  verified: true,
 };
 void agentHandle;
+// @ts-expect-error Greetings are not part of Relay Add.
+agentHandle.greeting_message;
+// @ts-expect-error Premium-handle state is private.
+agentHandle.is_premium_handle;
 // @ts-expect-error Relay does not expose fake archived chat state.
 chat.is_archived;
 declare const message: Message;
@@ -161,3 +185,14 @@ void failedStatus;
 // @ts-expect-error Webhook envelopes are Relay v1.
 const oldEnvelope: RelayWebhookEnvelope = { ...envelope, api_version: "v3" };
 void oldEnvelope;
+
+declare const added: ContactAddedWebhookEvent;
+added.event_type satisfies "contact.added";
+added.data.contact.display_name satisfies string;
+added.data.chat_id satisfies string;
+
+declare const removed: ContactRemovedWebhookEvent;
+removed.event_type satisfies "contact.removed";
+removed.data.contact.handle satisfies string;
+// @ts-expect-error contact.removed does not disclose a Chat ID.
+removed.data.chat_id;

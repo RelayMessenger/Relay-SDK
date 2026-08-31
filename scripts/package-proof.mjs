@@ -139,6 +139,7 @@ try {
       "Chats",
       "ChatsPage",
       "ContactCard",
+      "ContactRequests",
       "Messages",
       "MessagesPage",
       "RELAY_V1_OPERATIONS",
@@ -194,6 +195,9 @@ try {
         if (url.pathname === "/v1/chats") {
           return Response.json({ chats: [], next_cursor: null });
         }
+        if (url.pathname === "/v1/contact_requests") {
+          return Response.json({ state: "pending" }, { status: 201 });
+        }
         return Response.json({ accepted: true }, { status: 202 });
       },
     });
@@ -206,6 +210,13 @@ try {
         idempotency_key: "package-proof-message",
       },
     });
+    assert.deepEqual(
+      await relay.contactRequests.create({
+        handle: "advait",
+        "Idempotency-Key": "package-proof-contact-request",
+      }),
+      { state: "pending" },
+    );
     assert.deepEqual(requests, [
       {
         url: "https://api.staging.relayapp.im/v1/chats?limit=1",
@@ -225,6 +236,15 @@ try {
             parts: [{ type: "text", value: "Hello" }],
             idempotency_key: "package-proof-message",
           },
+        },
+      },
+      {
+        url: "https://api.staging.relayapp.im/v1/contact_requests",
+        method: "POST",
+        authorization: "Bearer package-proof-token",
+        idempotencyKey: "package-proof-contact-request",
+        body: {
+          handle: "advait",
         },
       },
     ]);
@@ -282,6 +302,8 @@ try {
       runWebSocket,
       verifyWebhookSignature,
       type RelayWebhookEnvelope,
+      type ContactAddedWebhookEvent,
+      type ContactRemovedWebhookEvent,
       type WebSocketRunOptions,
     } from "@relaymessenger/sdk";
 
@@ -299,6 +321,13 @@ try {
     verifyWebhookSignature satisfies Function;
     declare const envelope: RelayWebhookEnvelope;
     envelope.agent_id satisfies string;
+    declare const added: ContactAddedWebhookEvent;
+    added.data.chat_id satisfies string;
+    declare const removed: ContactRemovedWebhookEvent;
+    removed.data.contact.handle satisfies string;
+    void relay.contactRequests.create({ handle: "advait" });
+    // @ts-expect-error user Contact request listing is private.
+    relay.contactRequests.list();
     // @ts-expect-error polling is not part of Relay.
     relay.pollEvents();
     // @ts-expect-error private user routes are not SDK resources.

@@ -86,6 +86,72 @@ describe("Relay transport", () => {
     });
   });
 
+  it("uses RelayAPIError for paid-agent HTTP 402 responses", async () => {
+    const client = new Relay({
+      apiKey: "free-agent-token",
+      maxRetries: 3,
+      retryBaseDelayMs: 0,
+      fetch: async () => Response.json({
+        error: {
+          status: 402,
+          code: 2402,
+          message: "A paid Handle is required to Add a user first.",
+          doc_url: "https://docs.relayapp.im/errors/paid-handle-required",
+        },
+        trace_id: "trace-paid-handle-required",
+      }, { status: 402 }),
+    });
+
+    const error = await client.contactRequests
+      .create({ handle: "advait" })
+      .catch((value: unknown) => value);
+    expect(error).toBeInstanceOf(RelayAPIError);
+    expect(error).toMatchObject({
+      status: 402,
+      code: 2402,
+      traceId: "trace-paid-handle-required",
+      docURL: "https://docs.relayapp.im/errors/paid-handle-required",
+      retryable: false,
+    });
+  });
+
+  it("retries Add requests only when an idempotency key is present", async () => {
+    let safeCalls = 0;
+    const safe = new Relay({
+      apiKey: "paid-agent-token",
+      maxRetries: 1,
+      retryBaseDelayMs: 0,
+      fetch: async () => {
+        safeCalls += 1;
+        return safeCalls === 1
+          ? Response.json({ error: { message: "later" } }, { status: 503 })
+          : Response.json({ state: "pending" }, { status: 201 });
+      },
+    });
+    await expect(safe.contactRequests.create({
+      handle: "advait",
+      "Idempotency-Key": "safe-add-key",
+    })).resolves.toEqual({ state: "pending" });
+    expect(safeCalls).toBe(2);
+
+    let unsafeCalls = 0;
+    const unsafe = new Relay({
+      apiKey: "paid-agent-token",
+      maxRetries: 3,
+      retryBaseDelayMs: 0,
+      fetch: async () => {
+        unsafeCalls += 1;
+        return Response.json(
+          { error: { message: "later" } },
+          { status: 503 },
+        );
+      },
+    });
+    await expect(unsafe.contactRequests.create({ handle: "advait" }))
+      .rejects.toBeInstanceOf(RelayAPIError);
+    expect(unsafeCalls).toBe(1);
+  });
+
   it("uploads raw bytes without Relay authorization", async () => {
     const bytes = new Uint8Array([1, 2, 3]);
     let captured: { input: string; init?: RequestInit } | undefined;

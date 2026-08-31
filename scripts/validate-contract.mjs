@@ -14,7 +14,7 @@ const manifest = JSON.parse(
   readFileSync(resolve(root, "contracts/relay-v1-operations.json"), "utf8"),
 );
 const canonicalSourcePath =
-  "_worktrees/Relay-Server-local/contracts/developer/openapi.yaml";
+  "_worktrees/Relay-Server-add/contracts/developer/openapi.yaml";
 assert.equal(
   manifest.source,
   canonicalSourcePath,
@@ -63,6 +63,7 @@ const allowedOperationSignatures = [
   "GET /v1/contact_card",
   "POST /v1/contact_card",
   "PATCH /v1/contact_card",
+  "POST /v1/contact_requests",
 ];
 const forbiddenPathPrefixes = [
   "/v1/me/",
@@ -73,14 +74,14 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 33);
-assert.equal(manifest.path_count, 20);
-assert.equal(manifest.source_path_count, 21);
-assert.equal(manifest.source_schema_count, 99);
-assert.equal(manifest.callback_count, 13);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 20);
-assert.equal(operationJSON.length, 33);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 13);
+assert.equal(manifest.operation_count, 34);
+assert.equal(manifest.path_count, 21);
+assert.equal(manifest.source_path_count, 22);
+assert.equal(manifest.source_schema_count, 106);
+assert.equal(manifest.callback_count, 15);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 21);
+assert.equal(operationJSON.length, 34);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 15);
 assert.deepEqual(
   operationJSON.map((operation) => `${operation.method} ${operation.path}`),
   allowedOperationSignatures,
@@ -129,6 +130,27 @@ assert.ok(operationJSON.some((operation) =>
   && operation.method === "DELETE"));
 assert.equal(operationJSON.some((operation) =>
   operation.path === "/v1/websocket-connections"), false);
+assert.deepEqual(
+  operationJSON.filter((operation) =>
+    operation.path === "/v1/contact_requests"),
+  [{
+    method: "POST",
+    path: "/v1/contact_requests",
+    operationId: "createContactRequest",
+  }],
+  "Only the public Agent Add-request operation belongs in the SDK",
+);
+for (const unsupported of [
+  "/v1/broadcasts",
+  "/v1/proactive_messages",
+  "/v1/installations",
+]) {
+  assert.equal(
+    operationJSON.some((operation) => operation.path === unsupported),
+    false,
+    `${unsupported} is not a Relay API`,
+  );
+}
 
 const client = new Relay({
   apiKey: "contract-check",
@@ -144,6 +166,7 @@ assert.deepEqual(Object.keys(client).sort(), [
   "blockedHandles",
   "chats",
   "contactCard",
+  "contactRequests",
   "messages",
   "webhookEvents",
   "webhookSubscriptions",
@@ -189,6 +212,7 @@ assert.deepEqual(publicMethods(client.contactCard), [
   "retrieve",
   "update",
 ]);
+assert.deepEqual(publicMethods(client.contactRequests), ["create"]);
 assert.deepEqual(publicMethods(client.blockedHandles), [
   "block",
   "list",
@@ -329,12 +353,11 @@ if (existsSync(source)) {
       "handle",
       "joined_at",
       "kind",
-      "greeting_message",
+      "display_name",
+      "avatar_url",
+      "tagline",
+      "verified",
     ],
-  );
-  assert.equal(
-    document.components.schemas.ChatHandle.properties.greeting_message.maxLength,
-    1024,
   );
   assert.deepEqual(
     Object.keys(document.components.schemas.ChatHandle.properties),
@@ -348,8 +371,69 @@ if (existsSync(source)) {
       "kind",
       "display_name",
       "avatar_url",
-      "greeting_message",
+      "tagline",
+      "verified",
     ],
+  );
+  assert.equal(
+    document.components.schemas.ChatHandle.properties.tagline.maxLength,
+    60,
+  );
+  assert.equal(
+    document.components.schemas.ChatHandle.properties.verified.type,
+    "boolean",
+  );
+  for (const privateField of [
+    "greeting_message",
+    "is_default",
+    "is_premium_handle",
+    "billing_plan",
+    "installation",
+  ]) {
+    assert.equal(
+      privateField in document.components.schemas.ChatHandle.properties,
+      false,
+      `ChatHandle.${privateField} must not enter the SDK`,
+    );
+  }
+  assert.deepEqual(
+    document.components.schemas.CreateContactRequest.required,
+    ["handle"],
+  );
+  assert.deepEqual(
+    Object.keys(document.components.schemas.CreateContactRequest.properties),
+    ["handle"],
+  );
+  assert.deepEqual(
+    document.components.schemas.CreateContactRequestResult
+      .properties.state.enum,
+    ["pending"],
+  );
+  assert.ok(
+    document.paths["/v1/contact_requests"].post.responses["402"],
+    "Contact requests must expose paid-agent HTTP 402 behavior",
+  );
+  assert.deepEqual(
+    document.components.schemas.ContactAddedEvent.required,
+    ["contact", "chat_id"],
+  );
+  assert.deepEqual(
+    document.components.schemas.ContactRemovedEvent.required,
+    ["contact"],
+  );
+  assert.deepEqual(
+    document.components.schemas.ContactEventContact.required,
+    ["id", "handle", "display_name"],
+  );
+  assert.equal(
+    document["x-relay-webhooks"]["contact.added.v2026-02-03"].post
+      .requestBody.content["application/json"].schema.$ref,
+    "#/components/schemas/ContactAddedWebhook",
+  );
+  assert.equal(
+    document["x-relay-webhooks"]["contact.removed.v2026-02-03"].post
+      .requestBody.content["application/json"].schema.$ref,
+    "#/components/schemas/ContactRemovedWebhook",
   );
   assert.deepEqual(
     document.components.schemas.WebSocketReadyFrame.required,

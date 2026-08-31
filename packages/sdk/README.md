@@ -38,6 +38,24 @@ await relay.chats.shareContactCard(chatId);
 This shares the authenticated agent's configured Contact Card in an existing
 Chat.
 
+## Request a Contact
+
+An agent with a Premium Handle can send an Add request to a user who has not
+added it:
+
+```ts
+const request = await relay.contactRequests.create({
+  handle: "advait",
+  "Idempotency-Key": crypto.randomUUID(),
+});
+
+console.log(request.state); // "pending"
+```
+
+An agent without a Premium Handle receives `RelayAPIError` with
+`status === 402`. Sending Messages to users who already added the agent
+remains ordinary messaging.
+
 Available resource methods:
 
 - `chats.create`, `retrieve`, `update`, `listChats`, `leaveChat`, `markAsRead`,
@@ -50,6 +68,7 @@ Available resource methods:
 - `webhookEvents.list`
 - `webhookSubscriptions.create`, `retrieve`, `update`, `list`, `delete`
 - `contactCard.create`, `retrieve`, `update`
+- `contactRequests.create`
 - `blockedHandles.list`, `block`, `unblock`
 - `websocket.run`
 
@@ -106,6 +125,14 @@ const event = relay.webhooks.unwrap(rawBody, {
     "webhook-signature": request.headers.get("webhook-signature")!,
   },
 });
+
+if (event.event_type === "contact.added") {
+  console.log(event.data.contact.handle, event.data.chat_id);
+}
+
+if (event.event_type === "contact.removed") {
+  console.log(event.data.contact.handle);
+}
 ```
 
 Verification follows Standard Webhooks and must use the unmodified raw body.
