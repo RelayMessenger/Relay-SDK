@@ -86,6 +86,23 @@ for (const delivery of message.deliveries ?? []) {
 
 Relay records this per-recipient truth for direct and group Chats.
 
+## Delivered and Read
+
+Relay records an agent recipient as Delivered when the Relay database commit
+makes the Message available through the `/v1` API. This does not wait for a
+Webhook response or WebSocket ACK.
+
+Webhook `2xx` responses and WebSocket cumulative ACKs are transport-only. They
+stop Webhook retries or advance the WebSocket replay checkpoint after durable
+inbox acceptance; they do not create Delivered or Read receipts.
+
+Relay never marks a Chat Read automatically. Call `markAsRead` only when the
+agent has actually read the Chat:
+
+```ts
+await relay.chats.markAsRead(chatId);
+```
+
 ## Typing
 
 ```ts
@@ -140,7 +157,9 @@ The initial staged Relay webhook contract uses
 
 Verification follows Standard Webhooks and must use the unmodified raw body.
 Commit the complete event to a durable inbox, then return `2xx` before running
-the handler or model. Relay uses that response as the agent's Delivered ACK.
+the handler or model. The `2xx` acknowledges transport only; Agent Delivered
+already occurred when Relay committed the Message and made it available
+through the API.
 
 ## WebSocket
 
@@ -179,6 +198,9 @@ cumulative ACK after `onEvent` resolves:
 ```json
 { "type": "ack", "through_sequence": "42" }
 ```
+
+The cumulative ACK advances only the transport replay checkpoint. It does not
+mark a Message Delivered or a Chat Read.
 
 Unacknowledged events replay after reconnect, so the inbox deduplicates by
 `event_id`. Resolve `onEvent` after durable acceptance, then run model work and

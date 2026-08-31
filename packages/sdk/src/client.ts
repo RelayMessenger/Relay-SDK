@@ -394,6 +394,10 @@ export class Chats {
     });
   }
 
+  /**
+   * Explicitly marks the visible Messages in this Chat as Read.
+   * The SDK never calls this method automatically.
+   */
   markAsRead(chatID: string, options?: RequestOptions): Promise<void> {
     return this.transport.request({
       method: "POST",
@@ -700,8 +704,9 @@ export class WebSocket {
   /**
    * Keeps one outbound WebSocket connection alive. `onEvent` must return
    * only after the event is committed to a durable inbox; the SDK sends the
-   * cumulative ACK after that promise resolves. `onFullSync` must return only
-   * after a complete REST snapshot is durably applied.
+   * transport-only cumulative ACK after that promise resolves. The ACK does
+   * not change Delivered or Read receipts. `onFullSync` must return only after
+   * a complete REST snapshot is durably applied.
    */
   run(options: WebSocketRunOptions): Promise<void> {
     return this.transport.runWebSocket(options);

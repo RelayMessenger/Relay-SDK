@@ -55,11 +55,17 @@ describe("Standard Webhooks", () => {
       "webhook-signature": new Webhook(secret).sign(id, timestamp, body),
     };
     verifyWebhookSignature(secret, body, headers);
+    const apiCalls: string[] = [];
     const client = new Relay({
       apiKey: "token",
       webhookSecret: secret,
+      fetch: async (input) => {
+        apiCalls.push(String(input));
+        return new Response(null, { status: 204 });
+      },
     });
     expect(client.webhooks.unwrap(body, { headers })).toEqual(event);
+    expect(apiCalls).toEqual([]);
   });
 
   it("rejects a changed body", () => {

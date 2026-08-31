@@ -55,6 +55,10 @@ export interface WebSocketRunOptions {
   minReconnectDelayMs?: number;
   maxReconnectDelayMs?: number;
   random?: () => number;
+  /**
+   * Commit the event to a durable inbox before resolving. Resolution advances
+   * the transport replay checkpoint only; it does not mark Delivered or Read.
+   */
   onEvent(
     event: RelayWebhookEvent,
     context: WebSocketEventContext,
@@ -192,7 +196,7 @@ const parseEvent = (value: unknown): WebSocketEventFrame => {
     || !validSequence(value.sequence)
     || !isRecord(value.event)
     || value.event.api_version !== "v1"
-    || typeof value.event.webhook_version !== "string"
+    || value.event.webhook_version !== "2026-08-30"
     || !WEBHOOK_EVENT_TYPES.has(String(value.event.event_type))
     || !validUUID(value.event.event_id)
     || typeof value.event.created_at !== "string"

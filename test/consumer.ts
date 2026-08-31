@@ -31,9 +31,12 @@ await relay.chats.messages.send("chat-id", { message: content });
 await relay.chats.shareContactCard("chat-id");
 await relay.chats.startTyping("chat-id");
 await relay.chats.stopTyping("chat-id");
+await relay.chats.markAsRead("chat-id");
 void relay.websocket.run({
-  onEvent: async (_event, { sequence }) => {
-    sequence satisfies string;
+  onEvent: async (_event, context) => {
+    context.sequence satisfies string;
+    // @ts-expect-error WebSocket transport ACK context has no Read control.
+    context.markAsRead("chat-id");
   },
   onFullSync: async ({ throughSequence, reason }) => {
     throughSequence satisfies string;
@@ -185,6 +188,12 @@ void failedStatus;
 // @ts-expect-error Webhook envelopes are Relay v1.
 const oldEnvelope: RelayWebhookEnvelope = { ...envelope, api_version: "v3" };
 void oldEnvelope;
+const oldWebhookEnvelope: RelayWebhookEnvelope = {
+  ...envelope,
+  // @ts-expect-error Relay uses only the 2026-08-30 Webhook contract.
+  webhook_version: "2026-08-29",
+};
+void oldWebhookEnvelope;
 
 declare const added: ContactAddedWebhookEvent;
 added.event_type satisfies "contact.added";

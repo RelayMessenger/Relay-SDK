@@ -308,13 +308,22 @@ it("returns a typed HTTP 409 error when Webhooks configure the Agent path", asyn
   });
 });
 
-it("ACKs only after the event callback durably resolves", async () => {
+it("sends a transport-only ACK after durable handling without marking Read", async () => {
   let commit: (() => void) | undefined;
   const durable = new Promise<void>((resolve) => {
     commit = resolve;
   });
   const received: string[] = [];
-  const { controller, running } = run(client(), {
+  const apiCalls: string[] = [];
+  const relay = new Relay({
+    apiKey: "relay-agent-token",
+    baseURL: "https://relay.test",
+    fetch: async (input) => {
+      apiCalls.push(String(input));
+      return new Response(null, { status: 204 });
+    },
+  });
+  const { controller, running } = run(relay, {
     onEvent: async (event) => {
       received.push(event.event_id);
       await durable;
@@ -335,9 +344,34 @@ it("ACKs only after the event callback durably resolves", async () => {
     type: "ack",
     through_sequence: "1",
   }]);
+  expect(apiCalls).toEqual([]);
 
   controller.abort();
   await running;
+});
+
+it.each([
+  ["API", { api_version: "v3" }],
+  ["Webhook", { webhook_version: "2026-08-29" }],
+])("rejects an event outside the Relay %s version", async (_name, override) => {
+  let callbacks = 0;
+  const { running } = run(client(), {
+    onEvent: async () => {
+      callbacks += 1;
+    },
+  });
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  const socket = FakeWebSocket.latest;
+  emitFrame(socket, ready());
+  emitFrame(socket, {
+    type: "event",
+    sequence: "1",
+    event: { ...envelope(), ...override },
+  });
+
+  await expect(running).rejects.toThrow("invalid event frame");
+  expect(callbacks).toBe(0);
+  expect(socket.sent).toEqual([]);
 });
 
 it("delivers typed contact.added and contact.removed events before cumulative ACKs", async () => {
