@@ -2142,10 +2142,10 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "scripts/validate-host-manifests.sh",
       "source_sha256": "ec362a887efbc5587aa7b9b5344b0f213ed89079028e74d6cee5bf96802ffb71",
-      "destination_sha256": "ec362a887efbc5587aa7b9b5344b0f213ed89079028e74d6cee5bf96802ffb71",
+      "destination_sha256": "09d4c73797c7cfc586f75dc2e2965dbf46868a2ff4b6953c38e9488fa218c02e",
       "source_mode": "100755",
       "destination_mode": "100755",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "tooling/skills-distributions/scripts/validate.py",
@@ -2373,10 +2373,10 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/plugins/codex/validate.sh",
       "source_sha256": "f4235c9b22f7e5b66a02138f6bbc6a9e9f7b797896e454d1bf1f9d2ad56b54e6",
-      "destination_sha256": "f4235c9b22f7e5b66a02138f6bbc6a9e9f7b797896e454d1bf1f9d2ad56b54e6",
+      "destination_sha256": "987c164ac4293539afb98dddd7278ff49cf942ac8e295e1975dd51c919874610",
       "source_mode": "100755",
       "destination_mode": "100755",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "tooling/skills-distributions/src/plugins/cursor/.github/workflows/ci.yml",
@@ -2450,10 +2450,10 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/plugins/cursor/validate.sh",
       "source_sha256": "c6907c26d3a942f88e1fa1ccb076d4ef51ed7e2726b5779dd1eaaed470a0f8ff",
-      "destination_sha256": "c6907c26d3a942f88e1fa1ccb076d4ef51ed7e2726b5779dd1eaaed470a0f8ff",
+      "destination_sha256": "c5c80b1ee3c41c42dbe4f588af17251563b176efdb1f0311f0210cdb3894f1fd",
       "source_mode": "100755",
       "destination_mode": "100755",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "tooling/skills-distributions/src/plugins/version.json",

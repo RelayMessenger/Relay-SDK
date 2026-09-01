@@ -21,6 +21,10 @@ jobs:
         with:
           node-version: 22.22.3
           cache: npm
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: 0.12.8
+          enable-cache: false
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
       - run: npm ci
       - run: npm run validate

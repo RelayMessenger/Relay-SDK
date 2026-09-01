@@ -9,7 +9,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 curl -fsSL "$VALIDATOR_URL" -o "$WORK/validate_plugin.py"
-uv run --with pyyaml "$WORK/validate_plugin.py" "$PLUGIN_ROOT"
+uv run --with pyyaml==6.0.3 "$WORK/validate_plugin.py" "$PLUGIN_ROOT"
 node "$TARGET_DIR/scripts/validate-distribution.mjs" manifest
 
 echo "validated Codex distribution"
