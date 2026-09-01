@@ -31,6 +31,11 @@ assert.ok(
   runtime.includes(Buffer.from(JSON.stringify(packageJSON.version))),
   "generated runtime does not embed the package version",
 );
+assert.doesNotMatch(
+  runtime.toString("utf8"),
+  /(?:\.\.\/)+(?:node_modules|sdk)\//u,
+  "generated runtime contains install-layout-dependent module labels",
+);
 
 process.stdout.write(
   `artifact identity passed: ${packageJSON.name}@${packageJSON.version} runtime sha256=${digest(runtime)}\n`,

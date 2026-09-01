@@ -27,7 +27,15 @@ await build({
   },
 });
 const bundled = await readFile(outfile, "utf8");
-await writeFile(outfile, bundled.replace(/^[\t ]+$/gmu, ""), "utf8");
+const normalized = bundled
+  .replace(/^\/\/ (?:\.\.\/)+node_modules\//gmu, "// node_modules/")
+  .replace(/"(?:(?:\.\.\/)+)node_modules\//gu, '"node_modules/')
+  .replace(
+    /^\/\/ (?:\.\.\/)+sdk\//gmu,
+    "// node_modules/@relaymessenger/sdk/",
+  )
+  .replace(/^[\t ]+$/gmu, "");
+await writeFile(outfile, normalized, "utf8");
 await chmod(outfile, 0o755);
 await mkdir(dirname(pluginOutfile), { recursive: true });
 await copyFile(outfile, pluginOutfile);
