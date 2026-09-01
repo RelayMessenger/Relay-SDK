@@ -161,12 +161,9 @@ assert.deepEqual(
   receipt.registry.publishConfig,
 );
 assert.equal(
-  packument["dist-tags"]?.latest,
-  receipt.registry.distTagsObserved.latest,
-);
-assert.equal(
-  packument["dist-tags"]?.staging,
-  receipt.registry.distTagsObserved.staging,
+  receipt.registry.distTagsObserved.mutable,
+  true,
+  "registry receipt must identify npm dist-tags as mutable observations",
 );
 assert.equal(registryVersion.dist?.tarball, receipt.registry.dist.tarball);
 assert.equal(
