@@ -1,0 +1,150 @@
+name: Publish package staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Canonical package workspace
+        required: true
+        type: choice
+        options:
+          - sdk
+          - chat-sdk-adapter
+          - cli
+          - mcp
+          - openclaw
+          - claude-code
+      commit_sha:
+        description: Exact 40-character staging commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-monorepo-package-staging-${{ inputs.package }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: >-
+      github.repository == 'RelayMessenger/Relay-SDK' &&
+      github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify exact staging input
+        env:
+          EXPECTED_SHA: ${{ inputs.commit_sha }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          case "$EXPECTED_SHA" in
+            (""|*[!0-9a-f]*) exit 2 ;;
+          esac
+          test "${#EXPECTED_SHA}" -eq 40
+          test "$EXPECTED_SHA" = "$EVENT_SHA"
+
+  package:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      workspace: ${{ steps.resolve.outputs.workspace }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify canonical staging SHA
+        env:
+          EXPECTED_SHA: ${{ inputs.commit_sha }}
+        run: |
+          git fetch origin staging
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$EXPECTED_SHA" = "$(git rev-parse origin/staging)"
+          test -z "$(git status --porcelain)"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm install --global npm@11.19.1 --no-audit --no-fund
+      - run: npm ci
+      - id: resolve
+        run: node scripts/release-catalog.mjs --key '${{ inputs.package }}'
+      - name: Verify OpenClaw staging release identity
+        if: inputs.package == 'openclaw'
+        working-directory: packages/openclaw
+        env:
+          RELEASE_SHA: ${{ inputs.commit_sha }}
+          RELEASE_VERSION: ${{ steps.resolve.outputs.version }}
+          RELEASE_TAG: staging
+        run: node scripts/staging-release-guard.mjs
+      - name: Verify Claude Code staging release identity
+        if: inputs.package == 'claude-code'
+        working-directory: packages/claude-code
+        env:
+          RELEASE_SHA: ${{ inputs.commit_sha }}
+          RELEASE_VERSION: ${{ steps.resolve.outputs.version }}
+          RELEASE_TAG: staging
+        run: node scripts/staging-release-guard.mjs
+      - name: Validate selected package
+        run: npm run '${{ steps.resolve.outputs.validate }}'
+      - name: Pack one retained tarball
+        run: |
+          mkdir -p .release-tmp/package-staging
+          IDENTITY='${{ steps.resolve.outputs.directory }}/.release/npm-staging/release-identity.json'
+          if [ -f "$IDENTITY" ]; then
+            cp "$IDENTITY" .release-tmp/package-staging/release-identity.json
+          fi
+          npm pack \
+            --workspace '${{ steps.resolve.outputs.workspace }}' \
+            --ignore-scripts \
+            --pack-destination .release-tmp/package-staging
+          test "$(find .release-tmp/package-staging -name '*.tgz' | wc -l)" -eq 1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: relay-${{ inputs.package }}-${{ github.sha }}
+          path: .release-tmp/package-staging/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: npm-staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.commit_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: relay-${{ inputs.package }}-${{ github.sha }}
+          path: .release-tmp/package-staging
+      - name: Publish or reconcile exactly once
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+        run: |
+          npm install --global npm@12.0.2 --no-audit --no-fund
+          TARBALL="$(find .release-tmp/package-staging -name '*.tgz' -print -quit)"
+          node scripts/publish-package-staging.mjs \
+            --tarball "$TARBALL" \
+            --package '${{ needs.package.outputs.workspace }}' \
+            --receipt .release-tmp/package-staging/publish.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: relay-${{ inputs.package }}-publish-${{ github.sha }}
+          path: .release-tmp/package-staging/
+          if-no-files-found: error
+          retention-days: 30

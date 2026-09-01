@@ -1,0 +1,76 @@
+{
+  "name": "relay-claude-channel",
+  "version": "0.3.0-staging.0",
+  "description": "Relay Messenger channel for Claude Code over Relay v1 WebSocket delivery.",
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "npm@12.0.2",
+  "author": {
+    "name": "Relay Messenger",
+    "url": "https://relayapp.im"
+  },
+  "engines": {
+    "node": ">=22.22.3"
+  },
+  "files": [
+    ".claude-plugin/",
+    ".mcp.json",
+    "commands/",
+    "contracts/relay-v1.lock.json",
+    "plugin/",
+    "runtime/",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "tsc --noEmit",
+    "clean": "node -e \"require('node:fs').rmSync('runtime',{recursive:true,force:true})\"",
+    "contract:check": "node scripts/contract-check.mjs",
+    "artifact:check": "node scripts/artifact-check.mjs",
+    "prepack": "npm run verify",
+    "start": "node runtime/server.mjs",
+    "test": "vitest run",
+    "test:protocol": "vitest run test/protocol.test.ts",
+    "verify": "npm run check && npm run test && npm run contract:check && npm run build && npm run artifact:check",
+    "pack:smoke": "npm run prepack && node scripts/pack-smoke.mjs",
+    "claude:validate": "claude plugin validate . --strict && claude plugin validate ./plugin --strict && claude plugin validate ./plugin/commands --strict",
+    "release:validate": "npm run pack:smoke && npm run claude:validate"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "@relaymessenger/sdk": "0.3.0-staging.4"
+  },
+  "devDependencies": {
+    "@types/node": "26.0.0",
+    "@types/ws": "8.18.1",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10",
+    "ws": "8.21.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "tag": "staging",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RelayMessenger/Relay-SDK.git",
+    "directory": "packages/claude-code"
+  },
+  "homepage": "https://github.com/RelayMessenger/Relay-SDK/tree/main/packages/claude-code#readme",
+  "bugs": {
+    "url": "https://github.com/RelayMessenger/Relay-SDK/issues"
+  },
+  "keywords": [
+    "relay",
+    "claude-code",
+    "channel",
+    "mcp",
+    "messaging"
+  ]
+}

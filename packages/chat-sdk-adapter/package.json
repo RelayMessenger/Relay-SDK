@@ -1,0 +1,79 @@
+{
+  "name": "@relaymessenger/chat-sdk-adapter",
+  "version": "0.3.0-staging.0",
+  "description": "Vendor-official Relay adapter for Vercel Chat SDK.",
+  "keywords": [
+    "relay",
+    "chat-sdk",
+    "adapter",
+    "messaging",
+    "webhook"
+  ],
+  "homepage": "https://docs.relayapp.im/ecosystem/chat-sdk",
+  "bugs": {
+    "url": "https://github.com/RelayMessenger/Relay-SDK/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RelayMessenger/Relay-SDK.git",
+    "directory": "packages/chat-sdk-adapter"
+  },
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "tag": "staging",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "npm run test:unit && npm run test:workerd",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:workerd": "vitest run --config vitest.workerd.config.ts",
+    "test:installed": "node scripts/test-installed-package.mjs",
+    "test:all": "npm run check && npm run build && npm run test && npm run test:installed",
+    "example:check": "RELAY_EXAMPLE_CHECK=1 node examples/server.mjs",
+    "prepack": "npm run check && npm run test && npm run build",
+    "wrangler:types": "wrangler types",
+    "wrangler:types:check": "wrangler types --check"
+  },
+  "peerDependencies": {
+    "chat": "^4.39.0"
+  },
+  "dependencies": {
+    "@chat-adapter/shared": "4.39.0"
+  },
+  "devDependencies": {
+    "@chat-adapter/state-memory": "4.39.0",
+    "@chat-adapter/tests": "4.39.0",
+    "@cloudflare/vitest-plugin": "1.1.2",
+    "@types/node": "26.4.0",
+    "@vitest/coverage-v8": "4.1.11",
+    "chat": "4.39.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11",
+    "wrangler": "4.127.1",
+    "yaml": "2.9.0"
+  }
+}

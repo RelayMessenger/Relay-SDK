@@ -1,0 +1,25 @@
+{
+  "relayServer": {
+    "repository": "RelayMessenger/Relay-Server",
+    "commit": "9b4d5bb32cc749c6fd271969948c385300d404d6",
+    "openapiPath": "contracts/developer/openapi.yaml",
+    "sha256": "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5"
+  },
+  "relaySdk": {
+    "package": "@relaymessenger/sdk",
+    "version": "0.3.0-staging.4",
+    "integrity": "sha512-S47nMr+igXPIgLOgkKGUSOU7WpSQZZqsByZhbavUz87C3j0Zevy6jv9IT2t+ZS40TuLqjS9FTPnQ/MpMfLdngQ=="
+  },
+  "claudeCode": {
+    "documentation": [
+      "https://code.claude.com/docs/en/channels",
+      "https://code.claude.com/docs/en/channels-reference",
+      "https://code.claude.com/docs/en/plugins-reference",
+      "https://code.claude.com/docs/en/plugin-marketplaces"
+    ],
+    "officialPluginRepository": "anthropics/claude-plugins-official",
+    "officialPluginCommit": "ed404106fcd80ba98ecb7c851e531dcb626d13b7",
+    "validatedCliVersion": "2.1.252",
+    "retrievedOn": "2026-09-01"
+  }
+}

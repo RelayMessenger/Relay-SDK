@@ -1,0 +1,71 @@
+{
+  "name": "@relaymessenger/mcp",
+  "version": "0.1.0-staging.1",
+  "description": "Local MCP v2 stdio server for current Relay messaging tools.",
+  "type": "module",
+  "bin": {
+    "relay-mcp": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js",
+      "default": "./dist/server.js"
+    },
+    "./auth": {
+      "types": "./dist/auth.d.ts",
+      "import": "./dist/auth.js",
+      "default": "./dist/auth.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "contract:check": "node scripts/check-contract.mjs",
+    "boundaries:check": "node scripts/check-boundaries.mjs",
+    "protocol:test": "node scripts/protocol-smoke.mjs",
+    "inspector:test": "node scripts/inspector-smoke.mjs",
+    "pack:smoke": "node scripts/tarball-smoke.mjs",
+    "validate": "npm run clean && npm run check && npm run build && npm test && npm run contract:check && npm run boundaries:check && npm run protocol:test && npm run inspector:test && npm run pack:smoke",
+    "prepack": "npm run validate"
+  },
+  "engines": {
+    "node": ">=22.22.3"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "@relaymessenger/sdk": "0.3.0-staging.4",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/inspector": "2.4.0",
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "tag": "staging",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RelayMessenger/Relay-SDK.git",
+    "directory": "packages/mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/RelayMessenger/Relay-SDK/issues"
+  },
+  "homepage": "https://docs.relayapp.im"
+}

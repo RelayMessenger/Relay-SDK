@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "relay",
+  "version": "1.0.0",
+  "description": "Build and review Relay v1 agent messaging integrations.",
+  "author": {
+    "name": "Relay",
+    "url": "https://relayapp.im"
+  },
+  "homepage": "https://docs.relayapp.im",
+  "repository": "https://github.com/RelayMessenger/Relay-SDK",
+  "license": "MIT",
+  "keywords": [
+    "relay",
+    "messaging",
+    "agents",
+    "webhooks",
+    "websocket"
+  ]
+}

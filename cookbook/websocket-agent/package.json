@@ -1,0 +1,32 @@
+{
+  "name": "@relaymessenger/cookbook-websocket-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Acknowledged Relay WebSocket process with a durable inbox and complete FULL sync.",
+  "type": "module",
+  "scripts": {
+    "build:native": "node scripts/build-private-sqlite-helper.mjs",
+    "prestart": "npm run build:native",
+    "start": "tsx src/process.ts",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "prebuild": "npm run build:native",
+    "build": "tsc -p tsconfig.build.json",
+    "pretest": "npm run build:native",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@relaymessenger/sdk": "0.3.0-staging.4"
+  },
+  "engines": {
+    "node": ">=22.22.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RelayMessenger/Relay-SDK.git",
+    "directory": "cookbook/websocket-agent"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/RelayMessenger/Relay-SDK/issues"
+  }
+}

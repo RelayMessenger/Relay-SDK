@@ -1,0 +1,96 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "relay-think-agent-starter-development",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "secrets": {
+    "required": [
+      "RELAY_AGENT_TOKEN",
+      "RELAY_WEBHOOK_SECRET"
+    ]
+  },
+  "vars": {
+    "MODEL_ID": "@cf/openai/gpt-oss-120b",
+    "RELAY_AGENT_HANDLE": "your_agent_handle",
+    "RELAY_API_ORIGIN": "https://api.staging.relayapp.im"
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RelayChat",
+        "class_name": "RelayChatAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RelayConversationAgent"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["RelayChatAgent"],
+      "deleted_classes": ["RelayConversationAgent"]
+    }
+  ],
+  "env": {
+    "staging": {
+      "name": "relay-think-agent-starter-staging",
+      "secrets": {
+        "required": [
+          "RELAY_AGENT_TOKEN",
+          "RELAY_WEBHOOK_SECRET"
+        ]
+      },
+      "vars": {
+        "MODEL_ID": "@cf/openai/gpt-oss-120b",
+        "RELAY_AGENT_HANDLE": "your_agent_handle",
+        "RELAY_API_ORIGIN": "https://api.staging.relayapp.im"
+      },
+      "ai": {
+        "binding": "AI"
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "RelayChat",
+            "class_name": "RelayChatAgent"
+          }
+        ]
+      }
+    },
+    "production": {
+      "name": "relay-think-agent-starter",
+      "secrets": {
+        "required": [
+          "RELAY_AGENT_TOKEN",
+          "RELAY_WEBHOOK_SECRET"
+        ]
+      },
+      "vars": {
+        "MODEL_ID": "@cf/openai/gpt-oss-120b",
+        "RELAY_AGENT_HANDLE": "your_agent_handle",
+        "RELAY_API_ORIGIN": "https://api.relayapp.im"
+      },
+      "ai": {
+        "binding": "AI"
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "RelayChat",
+            "class_name": "RelayChatAgent"
+          }
+        ]
+      }
+    }
+  }
+}

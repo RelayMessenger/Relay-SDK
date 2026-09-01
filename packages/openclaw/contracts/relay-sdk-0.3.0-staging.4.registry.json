@@ -1,0 +1,58 @@
+{
+  "schema": "relay-sdk-registry-receipt/v1",
+  "source": {
+    "repository": "RelayMessenger/Relay-SDK",
+    "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
+    "packageJsonPath": "packages/sdk/package.json",
+    "packageJsonSha256": "b9d0f5bba2c5ba5eea904ca4ad490795c01b0a67bd5592d7fdbea50a7ed8b29b",
+    "contractPath": "contracts/relay-v1-openapi.yaml",
+    "contractSha256": "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5"
+  },
+  "registry": {
+    "packumentUrl": "https://registry.npmjs.org/@relaymessenger%2fsdk",
+    "package": "@relaymessenger/sdk",
+    "version": "0.3.0-staging.4",
+    "publishedAt": "2026-09-01T03:05:27.371Z",
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/RelayMessenger/Relay-SDK.git",
+      "directory": "packages/sdk"
+    },
+    "publishConfig": {
+      "access": "public",
+      "registry": "https://registry.npmjs.org/",
+      "tag": "staging"
+    },
+    "distTagsObserved": {
+      "latest": "0.2.0",
+      "staging": "0.3.0-staging.4",
+      "mutable": true
+    },
+    "dist": {
+      "tarball": "https://registry.npmjs.org/@relaymessenger/sdk/-/sdk-0.3.0-staging.4.tgz",
+      "integrity": "sha512-S47nMr+igXPIgLOgkKGUSOU7WpSQZZqsByZhbavUz87C3j0Zevy6jv9IT2t+ZS40TuLqjS9FTPnQ/MpMfLdngQ==",
+      "shasum": "fa1356cfb37b8d64683b0734c054c4afbacbfe1d",
+      "sha256": "73ffd16c0ed4b07d9ff4b90d7efc5e1bf1b2fb82e833089d097b6757c4e94848",
+      "bytes": 36322,
+      "fileCount": 37,
+      "unpackedSize": 167419,
+      "signatureMetadata": [
+        {
+          "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+          "sig": "MEUCIDyZ96e+A/d85Ay57ET/5PGqltJRBpF5//j9GkhnqE2EAiEAoytprMukWmB1BlSxp5sCENpI8YC1kKwRaNzAvLHjqhY="
+        }
+      ]
+    },
+    "installedArtifact": {
+      "packageJsonSha256": "b9d0f5bba2c5ba5eea904ca4ad490795c01b0a67bd5592d7fdbea50a7ed8b29b",
+      "typesSha256": "efa163145777ad4df93263d87605794ca099dd8db6fe1b36cc71d0873377a653"
+    }
+  },
+  "provenanceBoundary": {
+    "registryGitHead": null,
+    "registryAttestations": null,
+    "attestationEndpoint": "https://registry.npmjs.org/-/npm/v1/attestations/@relaymessenger%2fsdk@0.3.0-staging.4",
+    "attestationEndpointObservedStatus": 404,
+    "claim": "The exact registry tarball integrity and publication metadata are verified, and its package.json bytes match Relay-SDK commit 8570546ce30ab39d702409893006dbccd351f2b4. npm registry metadata exposes neither gitHead nor an attestation for this version, so this receipt does not claim cryptographic source-to-tarball provenance."
+  }
+}

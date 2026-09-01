@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "canonical_repository": "https://github.com/RelayMessenger/Relay-SDK",
+  "imports": {
+    "packages/sdk": {
+      "repository": "https://github.com/RelayMessenger/Relay-SDK",
+      "commit": "8570546ce30ab39d702409893006dbccd351f2b4"
+    },
+    "packages/chat-sdk-adapter": {
+      "repository": "https://github.com/RelayMessenger/Relay-Chat-SDK",
+      "commit": "eecf94a4d38bc021917e54dfed57e268657c17af"
+    },
+    "packages/cli": {
+      "repository": "https://github.com/RelayMessenger/Relay-CLI",
+      "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18"
+    },
+    "packages/mcp": {
+      "repository": "https://github.com/RelayMessenger/Relay-MCP",
+      "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914"
+    },
+    "packages/openclaw": {
+      "repository": "https://github.com/RelayMessenger/Relay-OpenClaw",
+      "commit": "ff013f2247adb9360ece63799874024c216d040c"
+    },
+    "packages/claude-code": {
+      "repository": "https://github.com/RelayMessenger/Relay-Claude-Code",
+      "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780"
+    },
+    "skills/relay": {
+      "repository": "https://github.com/RelayMessenger/Relay-Skills",
+      "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023"
+    },
+    "tooling/skills-distributions": {
+      "repository": "https://github.com/RelayMessenger/Relay-Skills",
+      "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023"
+    },
+    "cookbook/webhook-receiver": {
+      "repository": "https://github.com/RelayMessenger/Relay-Examples",
+      "commit": "0177a9184c9005651688a7e9f42903952991b20f"
+    },
+    "cookbook/websocket-agent": {
+      "repository": "https://github.com/RelayMessenger/Relay-Examples",
+      "commit": "0177a9184c9005651688a7e9f42903952991b20f"
+    },
+    "cookbook/messages-and-attachments": {
+      "repository": "https://github.com/RelayMessenger/Relay-Examples",
+      "commit": "0177a9184c9005651688a7e9f42903952991b20f"
+    },
+    "cookbook/cloudflare-think-agent": {
+      "repository": "https://github.com/RelayMessenger/Relay-Agent-Starter",
+      "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399"
+    }
+  }
+}

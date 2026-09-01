@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "relay",
+  "displayName": "Relay Messenger",
+  "description": "Relay Messenger channel for Claude Code with durable acknowledged delivery, explicit Read receipts, and retry-safe replies.",
+  "version": "0.3.0-staging.0",
+  "author": {
+    "name": "Relay Messenger",
+    "url": "https://relayapp.im"
+  },
+  "homepage": "https://github.com/RelayMessenger/Relay-SDK/tree/main/packages/claude-code#readme",
+  "repository": "https://github.com/RelayMessenger/Relay-SDK",
+  "license": "MIT",
+  "keywords": [
+    "relay",
+    "messaging",
+    "channel",
+    "mcp",
+    "claude-code"
+  ],
+  "defaultEnabled": false,
+  "mcpServers": "./.mcp.json",
+  "channels": [
+    {
+      "server": "relay"
+    }
+  ],
+  "userConfig": {
+    "agent_token": {
+      "type": "string",
+      "title": "Relay Agent Token",
+      "description": "Agent Token used only by the local Relay channel process.",
+      "sensitive": true,
+      "required": true
+    },
+    "allowed_senders": {
+      "type": "string",
+      "title": "Allowed Relay senders",
+      "description": "Comma-separated Relay user UUIDs or exact Handles allowed to inject messages.",
+      "required": true
+    },
+    "base_url": {
+      "type": "string",
+      "title": "Relay API origin",
+      "description": "HTTPS Relay API origin. Change only for a trusted non-production Relay environment.",
+      "required": true,
+      "default": "https://api.relayapp.im"
+    }
+  }
+}

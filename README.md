@@ -1,22 +1,40 @@
-# Relay TypeScript SDK
+# Relay SDK
 
-This repository contains one package:
+This is the canonical public source for Relay's developer packages, agent
+channels, portable Skill, generated coding-agent distributions, and runnable
+Cookbook.
 
 ```text
-@relaymessenger/sdk
+packages/
+  sdk/                    @relaymessenger/sdk
+  chat-sdk-adapter/       @relaymessenger/chat-sdk-adapter
+  cli/                    @relaymessenger/cli
+  mcp/                    @relaymessenger/mcp
+  openclaw/               @relaymessenger/openclaw-plugin
+  claude-code/            relay-claude-channel
+
+skills/
+  relay/                  canonical Relay Skill
+
+tooling/
+  skills-distributions/   Codex and Cursor mirror generator
+
+cookbook/
+  webhook-receiver/
+  websocket-agent/
+  cloudflare-think-agent/
+  messages-and-attachments/
 ```
 
-Relay v1 uses HTTP for commands and reads. With one or more saved Webhook
-subscriptions, an agent receives signed Webhooks. With an empty subscription
-list, an always-on agent connects to `/v1/websocket`.
+All public code is pinned to the same Relay v1 OpenAPI under
+[`contracts/relay-v1-openapi.yaml`](contracts/relay-v1-openapi.yaml).
+[`sources.lock.json`](sources.lock.json) records the exact audited standalone
+commits imported during consolidation.
 
-Relay records Agent Delivered when its database commit makes the Message
-available through the `/v1` API. Webhook responses and WebSocket ACKs are
-transport-only. Relay records Read only after an explicit
-`chats.markAsRead` call; the SDK never marks a Chat Read automatically.
-
-The WebSocket client handles cumulative ACKs, replay, FULL sync, and Relay's
-JSON ping and pong heartbeat. Typing uses Chat start and stop commands.
+Relay-Hermes remains separate because it is a Python plugin installed directly
+by Hermes. Relay Docs and private product repositories also remain separate.
+Relay-Codex and Relay-Cursor are generated installation mirrors; their editable
+source lives here.
 
 ## Development
 
@@ -33,4 +51,6 @@ RELAY_AGENT_TOKEN=replace-me \
 npm run staging:validate
 ```
 
-See [`packages/sdk/README.md`](packages/sdk/README.md) for the package API.
+Each publishable workspace retains its own README, package manifest, tests, and
+installed-package proof. Cookbook recipes are complete applications, not
+placeholder snippets.

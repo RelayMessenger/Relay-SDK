@@ -1,0 +1,77 @@
+{
+  "relayServer": {
+    "repository": "RelayMessenger/Relay-Server",
+    "commit": "9b4d5bb32cc749c6fd271969948c385300d404d6",
+    "openapiPath": "contracts/developer/openapi.yaml",
+    "sha256": "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5"
+  },
+  "relaySdk": {
+    "package": "@relaymessenger/sdk",
+    "version": "0.3.0-staging.4",
+    "integrity": "sha512-S47nMr+igXPIgLOgkKGUSOU7WpSQZZqsByZhbavUz87C3j0Zevy6jv9IT2t+ZS40TuLqjS9FTPnQ/MpMfLdngQ==",
+    "operationsSha256": "8429a056605fa9555fcb34067bbb34f7e364ed18c17ec7786b2c1621044012f1",
+    "registryReceipt": "contracts/relay-sdk-0.3.0-staging.4.registry.json",
+    "source": {
+      "repository": "RelayMessenger/Relay-SDK",
+      "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
+      "carriedOpenapiSha256": "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5"
+    },
+    "usedOperations": [
+      {
+        "method": "GET",
+        "path": "/v1/chats",
+        "operationId": "listChats"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/chats/{chatId}/messages",
+        "operationId": "getMessages"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/messages/{messageId}",
+        "operationId": "getMessage"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/chats/{chatId}/messages",
+        "operationId": "sendMessageToChat"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/chats/{chatId}/read",
+        "operationId": "markChatAsRead"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/chats/{chatId}/typing",
+        "operationId": "startTyping"
+      },
+      {
+        "method": "DELETE",
+        "path": "/v1/chats/{chatId}/typing",
+        "operationId": "stopTyping"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/webhook-subscriptions",
+        "operationId": "listWebhookSubscriptions"
+      }
+    ],
+    "usedWebSocketFrames": {
+      "serverToSdk": [
+        "ready",
+        "event",
+        "full_sync",
+        "ping",
+        "error",
+        "disconnect"
+      ],
+      "sdkToServer": [
+        "ack",
+        "full_sync_complete",
+        "pong"
+      ]
+    }
+  }
+}

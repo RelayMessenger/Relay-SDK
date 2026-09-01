@@ -1,0 +1,171 @@
+{
+  "name": "@relaymessenger/openclaw-plugin",
+  "version": "0.4.0-staging.0",
+  "description": "Native Relay channel plugin for OpenClaw",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.3"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./setup": "./dist/setup-entry.js"
+  },
+  "files": [
+    "LICENSE",
+    "README.md",
+    "contracts/relay-v1.lock.json",
+    "contracts/relay-sdk-0.3.0-staging.4.registry.json",
+    "openclaw.plugin.json",
+    "index.ts",
+    "setup-entry.ts",
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "dist/**/*.js",
+    "dist/**/*.d.ts"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "validate": "npm run check && npm run build && npm test && npm run contract:verify && npm run contract:test",
+    "release:validate": "node scripts/release-validate.mjs",
+    "contract:verify": "node scripts/verify-contract-provenance.mjs",
+    "contract:test": "node --test test/*.test.mjs",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "gateway:harness": "node scripts/gateway-harness.mjs",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@relaymessenger/sdk": "0.3.0-staging.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "openclaw": "2026.8.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.8.1 <2026.9.0"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "staging",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RelayMessenger/Relay-SDK.git",
+    "directory": "packages/openclaw"
+  },
+  "homepage": "https://docs.relayapp.im/integrations/openclaw",
+  "bugs": {
+    "url": "https://github.com/RelayMessenger/Relay-SDK/issues"
+  },
+  "keywords": [
+    "openclaw",
+    "relay",
+    "messaging",
+    "channel"
+  ],
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "runtimeExtensions": [
+      "./dist/index.js"
+    ],
+    "setupEntry": "./setup-entry.ts",
+    "runtimeSetupEntry": "./dist/setup-entry.js",
+    "channel": {
+      "id": "relay",
+      "configuredState": {
+        "env": {
+          "anyOf": [
+            "RELAY_AGENT_TOKEN"
+          ]
+        }
+      },
+      "label": "Relay",
+      "selectionLabel": "Relay",
+      "detailLabel": "Relay Messenger",
+      "docsPath": "https://docs.relayapp.im/integrations/openclaw",
+      "docsLabel": "Relay OpenClaw",
+      "blurb": "Message your OpenClaw through Relay.",
+      "systemImage": "message",
+      "markdownCapable": false,
+      "order": 70,
+      "commands": {
+        "nativeCommandsAutoEnabled": false,
+        "nativeSkillsAutoEnabled": false
+      },
+      "setup": {
+        "fields": [
+          {
+            "key": "token",
+            "kind": "string",
+            "sensitive": true,
+            "cli": {
+              "flags": "--token <token>",
+              "description": "Relay Agent Token"
+            }
+          },
+          {
+            "key": "tokenFile",
+            "kind": "string",
+            "sensitive": true,
+            "cli": {
+              "flags": "--token-file <path>",
+              "description": "File containing a Relay Agent Token"
+            }
+          },
+          {
+            "key": "baseUrl",
+            "kind": "string",
+            "cli": {
+              "flags": "--base-url <url>",
+              "description": "Relay API origin"
+            }
+          },
+          {
+            "key": "allowFrom",
+            "kind": "string-list",
+            "cli": {
+              "flags": "--allow-from <contacts>",
+              "description": "Allowed Relay Contact IDs or Handles"
+            }
+          },
+          {
+            "key": "useEnv",
+            "kind": "boolean",
+            "cli": {
+              "flags": "--use-env",
+              "description": "Use RELAY_AGENT_TOKEN"
+            },
+            "envVars": [
+              "RELAY_AGENT_TOKEN"
+            ]
+          }
+        ]
+      }
+    },
+    "install": {
+      "npmSpec": "@relaymessenger/openclaw-plugin",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.8.1",
+      "allowInvalidConfigRecovery": true
+    },
+    "compat": {
+      "pluginApi": ">=2026.8.1 <2026.9.0"
+    },
+    "build": {
+      "openclawVersion": "2026.8.1"
+    }
+  }
+}

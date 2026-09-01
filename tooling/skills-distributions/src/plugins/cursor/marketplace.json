@@ -1,0 +1,16 @@
+{
+  "name": "relay-plugin-marketplace",
+  "owner": {
+    "name": "Relay"
+  },
+  "metadata": {
+    "description": "Relay v1 coding-agent guidance and documentation search."
+  },
+  "plugins": [
+    {
+      "name": "relay",
+      "source": "./",
+      "description": "Build and review Relay v1 agent messaging integrations."
+    }
+  ]
+}
