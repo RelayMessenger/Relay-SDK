@@ -11,8 +11,9 @@
     "check": "npm run check --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "sources:check": "node scripts/validate-sources.mjs",
+    "sources:check": "node scripts/validate-sources.mjs && node scripts/verify-import-provenance.mjs",
     "workflows:check": "node scripts/validate-workflows.mjs",
+    "proof:clean": "node scripts/verify-clean-tracked.mjs",
     "contract:check": "node scripts/validate-contract.mjs && node scripts/validate-contract-failures.mjs && node scripts/validate-contract-copies.mjs",
     "consumer:types": "tsc -p test/tsconfig.json --noEmit",
     "pack:smoke": "node scripts/consumer-smoke.mjs",
@@ -26,7 +27,7 @@
     "validate:claude-code": "npm run verify --workspace relay-claude-channel && npm run pack:smoke --workspace relay-claude-channel",
     "validate:skills": "python3 tooling/skills-distributions/scripts/validate.py && tooling/skills-distributions/scripts/validate-host-manifests.sh",
     "validate:cookbook": "npm run test:all --workspace @relaymessenger/cookbook-cloudflare-think-agent && npm run check --workspace @relaymessenger/cookbook-webhook-receiver && npm run build --workspace @relaymessenger/cookbook-webhook-receiver && npm test --workspace @relaymessenger/cookbook-webhook-receiver && npm run check --workspace @relaymessenger/cookbook-websocket-agent && npm run build --workspace @relaymessenger/cookbook-websocket-agent && npm test --workspace @relaymessenger/cookbook-websocket-agent && npm run check --workspace @relaymessenger/cookbook-messages-and-attachments && npm run build --workspace @relaymessenger/cookbook-messages-and-attachments && npm test --workspace @relaymessenger/cookbook-messages-and-attachments",
-    "validate": "npm run sources:check && npm run workflows:check && npm run validate:sdk && npm run contract:check && npm run validate:chat-sdk && npm run validate:cli && npm run validate:mcp && npm run validate:openclaw && npm run validate:claude-code && npm run validate:skills && npm run validate:cookbook"
+    "validate": "npm run sources:check && npm run workflows:check && npm run validate:sdk && npm run contract:check && npm run validate:chat-sdk && npm run validate:cli && npm run validate:mcp && npm run validate:openclaw && npm run validate:claude-code && npm run validate:skills && npm run validate:cookbook && npm run proof:clean"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
