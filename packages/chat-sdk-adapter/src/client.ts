@@ -10,6 +10,7 @@ import {
 } from "./credentials.js";
 import { assertRelayUuid } from "./thread-id.js";
 import type {
+  RelayAttachment,
   RelayAttachmentAllocation,
   RelayChat,
   RelayGetMessagesResult,
@@ -297,6 +298,21 @@ export class RelayClient {
     );
   }
 
+  /**
+   * Read Attachment metadata, including a freshly minted `download_url`.
+   *
+   * Relay mints the download link at request time, so this is how an expired
+   * link is replaced. The route authorizes any Chat participant who could read
+   * the Message the Attachment belongs to, not only its owner.
+   */
+  async getAttachment(attachmentId: string): Promise<RelayAttachment> {
+    assertRelayUuid(attachmentId, "attachmentId");
+    return this.request<RelayAttachment>(
+      `/v1/attachments/${encodeURIComponent(attachmentId)}`,
+      { method: "GET" },
+    );
+  }
+
   async allocateAttachment(
     options: Omit<RelayUploadOptions, "body"> & { sizeBytes: number },
   ): Promise<RelayAttachmentAllocation> {
@@ -369,10 +385,9 @@ export class RelayClient {
    * Download the bytes of an inbound Relay media part.
    *
    * A Relay media URL is a sealed download capability: the transfer route is
-   * unauthenticated, so no Agent Token is sent, and the capability expires 15
+   * unauthenticated, so no Agent Token is sent, and the capability expires 60
    * minutes after Relay minted it. A download after that window fails with
-   * HTTP 404, and Relay exposes no agent-facing route that re-mints a URL from
-   * an attachment id.
+   * HTTP 404; `getAttachment` mints a replacement.
    */
   async downloadAttachment(options: {
     attachmentId?: string;

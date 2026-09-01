@@ -816,8 +816,13 @@ selfMessageContract({
 });
 
 const ATTACHMENT_URL =
-  "https://api.relayapp.im/api/partner/v3/attachment-transfers/sealed-token";
+  "https://cdn.relayapp.im/attachments/stale-token";
+const FRESH_ATTACHMENT_URL =
+  "https://cdn.relayapp.im/attachments/fresh-token";
+const METADATA_URL =
+  `https://api.relayapp.im/v1/attachments/${IDS.attachment}`;
 const ATTACHMENT_BYTES = new TextEncoder().encode("relay-inbound-bytes");
+const FRESH_BYTES = new TextEncoder().encode("relay-re-minted-bytes");
 
 function mediaPart() {
   return {
@@ -834,14 +839,40 @@ function mediaPart() {
 }
 
 function mediaHarness(
-  download: () => Response = () =>
-    new Response(ATTACHMENT_BYTES, {
-      headers: { "content-type": "image/png" },
-      status: 200,
-    }),
+  options: {
+    download?: () => Response;
+    metadata?: () => Response;
+  } = {},
 ) {
+  const download =
+    options.download ??
+    (() =>
+      new Response(ATTACHMENT_BYTES, {
+        headers: { "content-type": "image/png" },
+        status: 200,
+      }));
+  const metadata =
+    options.metadata ??
+    (() =>
+      jsonResponse({
+        content_type: "image/png",
+        created_at: "2026-08-30T12:00:00.000Z",
+        download_url: FRESH_ATTACHMENT_URL,
+        filename: "receipt.png",
+        id: IDS.attachment,
+        size_bytes: ATTACHMENT_BYTES.byteLength,
+        status: "complete",
+      }));
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-    if (String(input) === ATTACHMENT_URL) return download();
+    const url = String(input);
+    if (url === ATTACHMENT_URL) return download();
+    if (url === METADATA_URL) return metadata();
+    if (url === FRESH_ATTACHMENT_URL) {
+      return new Response(FRESH_BYTES, {
+        headers: { "content-type": "image/png" },
+        status: 200,
+      });
+    }
     return new Response(null, { status: 204 });
   });
   const adapter = createRelayAdapter({
@@ -878,9 +909,9 @@ describe("inbound attachment bytes", () => {
   });
 
   it("names the attachment and the status when the download fails", async () => {
-    const { message } = mediaHarness(
-      () => new Response("", { status: 503 }),
-    );
+    const { message } = mediaHarness({
+      download: () => new Response("", { status: 503 }),
+    });
     const attachment = message.attachments[0];
 
     await expect(attachment?.fetchData?.()).rejects.toThrow(
@@ -905,8 +936,45 @@ describe("inbound attachment bytes", () => {
       serialized as Attachment,
     );
     const data = await rehydrated.fetchData?.();
+    expect(new Uint8Array(data as ArrayBuffer)).toEqual(FRESH_BYTES);
+  });
+
+  it("re-mints the download link from the attachment id", async () => {
+    const { adapter, fetchMock, message } = mediaHarness();
+    const serialized = JSON.parse(
+      JSON.stringify(message.toJSON()),
+    ).attachments[0] as Attachment;
+
+    const data = await adapter
+      .rehydrateAttachment(serialized)
+      .fetchData?.();
+
+    expect(new Uint8Array(data as ArrayBuffer)).toEqual(FRESH_BYTES);
+    const requested = fetchMock.mock.calls.map((call) =>
+      String(call[0]),
+    );
+    expect(requested).toEqual([METADATA_URL, FRESH_ATTACHMENT_URL]);
+    expect(requested).not.toContain(ATTACHMENT_URL);
+  });
+
+  it("falls back to the stored URL when the id cannot serve one", async () => {
+    const { adapter, fetchMock, message } = mediaHarness({
+      metadata: () => jsonResponse({ error: { code: "not_found" } }, 404),
+    });
+    const serialized = JSON.parse(
+      JSON.stringify(message.toJSON()),
+    ).attachments[0] as Attachment;
+
+    const data = await adapter
+      .rehydrateAttachment(serialized)
+      .fetchData?.();
+
     expect(new Uint8Array(data as ArrayBuffer)).toEqual(
       ATTACHMENT_BYTES,
     );
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+      METADATA_URL,
+      ATTACHMENT_URL,
+    ]);
   });
 });

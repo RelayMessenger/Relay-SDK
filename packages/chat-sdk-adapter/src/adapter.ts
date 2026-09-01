@@ -299,24 +299,79 @@ export class RelayAdapter
   }
 
   /**
+   * Mint a replacement download URL for an attachment id.
+   *
+   * Returns `undefined` when the call cannot produce one and the caller still
+   * holds a fallback URL; rethrows when there is nothing to fall back to, so a
+   * genuine authorization or not-found failure is never swallowed.
+   */
+  private async freshDownloadUrl(
+    attachmentId: string,
+    hasFallback: boolean,
+  ): Promise<string | undefined> {
+    try {
+      const attachment = await this.client.getAttachment(attachmentId);
+      if (attachment.download_url) return attachment.download_url;
+    } catch (error) {
+      if (!hasFallback) throw error;
+      return undefined;
+    }
+    if (!hasFallback) {
+      throw new ValidationError(
+        "relay",
+        `Relay attachment ${attachmentId} has no download URL`,
+      );
+    }
+    return undefined;
+  }
+
+  /**
+   * Build the `fetchData` closure for an attachment that survived a queue.
+   *
+   * The stored URL may already have expired, so the id is tried first: Relay
+   * mints a new download link on every `GET /v1/attachments/{attachmentId}`.
+   * The serialized URL is the fallback for the one case the id cannot cover —
+   * an attachment whose `fetchMetadata` predates this adapter version.
+   */
+  private rehydratedAttachmentData(
+    attachmentId: string | undefined,
+    url: string | undefined,
+  ): () => Promise<ArrayBuffer> {
+    return async () => {
+      const fresh = attachmentId
+        ? await this.freshDownloadUrl(attachmentId, url !== undefined)
+        : undefined;
+      const target = fresh ?? url;
+      if (!target) {
+        throw new ValidationError(
+          "relay",
+          "A rehydrated Relay attachment needs fetchMetadata.attachmentId "
+            + "or a URL",
+        );
+      }
+      return this.client.downloadAttachment({
+        ...(attachmentId ? { attachmentId } : {}),
+        url: target,
+      });
+    };
+  }
+
+  /**
    * Rebuild `fetchData` on an attachment that survived serialization.
    *
    * `Message.toJSON()` drops `data` and `fetchData`, so Chat SDK calls this
-   * when a queue or debounce strategy rehydrates a Message. The Relay media
-   * URL kept in `fetchMetadata.url` is the whole capability; it expires 15
-   * minutes after Relay minted it, and a rehydrated download after that window
-   * fails with HTTP 404 because Relay has no agent-facing route that re-mints
-   * a URL from `fetchMetadata.attachmentId`.
+   * when a queue or debounce strategy rehydrates a Message. A Relay download
+   * URL expires 60 minutes after Relay minted it, and a queue can hold a
+   * Message for longer, so this re-mints from `fetchMetadata.attachmentId` and
+   * falls back to the stored URL only when the id call cannot serve one.
    */
   rehydrateAttachment(attachment: Attachment): Attachment {
+    const attachmentId = attachment.fetchMetadata?.attachmentId;
     const url = attachment.fetchMetadata?.url ?? attachment.url;
-    if (!url) return attachment;
+    if (!attachmentId && !url) return attachment;
     return {
       ...attachment,
-      fetchData: this.attachmentData(
-        url,
-        attachment.fetchMetadata?.attachmentId,
-      ),
+      fetchData: this.rehydratedAttachmentData(attachmentId, url),
     };
   }
 

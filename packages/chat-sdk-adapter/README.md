@@ -152,17 +152,21 @@ for (const attachment of message.attachments) {
 }
 ```
 
-**A Relay media URL expires 15 minutes after Relay minted it.** The URL is a
+**A Relay download URL expires 60 minutes after Relay minted it.** The URL is a
 sealed, unauthenticated download capability, so `fetchData()` sends no Agent
 Token; after that window the download fails with `RelayApiError` HTTP 404.
-Fetch the bytes during the webhook turn, or persist them yourself. Relay has no
-agent-facing route that re-mints a URL from an attachment id.
 
-`Message.toJSON()` drops `fetchData`, so queue and debounce strategies call
-`rehydrateAttachment()` to rebuild it. The adapter keeps both the URL and the
-attachment id in `fetchMetadata` and rebuilds from the stored URL — a message
-that waits longer than 15 minutes in a queue rehydrates an attachment whose
-download is already expired.
+That expiry is not a limit on queued work. `Message.toJSON()` drops
+`fetchData`, so queue and debounce strategies call `rehydrateAttachment()` to
+rebuild it — and the rebuilt closure calls `GET /v1/attachments/{attachmentId}`
+first, which mints a new 60-minute download link on every request. A Message may
+sit in a queue for as long as you like and still read its bytes. The serialized
+URL is kept in `fetchMetadata` only as the fallback for an attachment whose
+metadata predates this behavior.
+
+`GET /v1/attachments/{attachmentId}` authorizes any Chat participant who could
+read the Message, so an agent reads the attachments of messages sent to it
+without owning them.
 
 Relay text parts are plain text and are limited to 10,000 UTF-16 code units.
 Long Chat SDK text is split without breaking surrogate pairs. A Relay Message
