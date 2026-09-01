@@ -2,35 +2,39 @@ import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { parseArgs } from "node:util";
 
-import Relay, { type SupportedContentType } from "@relaymessenger/sdk";
+import Relay from "@relaymessenger/sdk";
 
-import { sendMessageWithAttachment } from "./send.js";
 import { relayApiOrigin } from "./config.js";
+import {
+  sendImage,
+  type ImageContentType,
+} from "./send.js";
 
-const SUPPORTED_TYPES = [
-  "application/json",
-  "application/pdf",
-  "application/zip",
+const IMAGE_TYPES = [
   "image/jpeg",
   "image/png",
-  "text/csv",
-  "text/markdown",
-  "text/plain",
-] as const satisfies readonly SupportedContentType[];
+  "image/gif",
+  "image/heic",
+  "image/heif",
+  "image/tiff",
+  "image/bmp",
+  "image/webp",
+  "image/x-icon",
+] as const satisfies readonly ImageContentType[];
 
 function required(value: string | undefined, flag: string): string {
   if (!value?.trim()) throw new Error(`${flag} is required`);
   return value;
 }
 
-function contentType(value: string | undefined): SupportedContentType {
+function imageContentType(value: string | undefined): ImageContentType {
   const candidate = required(value, "--content-type");
-  if (!(SUPPORTED_TYPES as readonly string[]).includes(candidate)) {
+  if (!(IMAGE_TYPES as readonly string[]).includes(candidate)) {
     throw new Error(
-      `--content-type must be one of: ${SUPPORTED_TYPES.join(", ")}`,
+      `--content-type must be one of: ${IMAGE_TYPES.join(", ")}`,
     );
   }
-  return candidate as SupportedContentType;
+  return candidate as ImageContentType;
 }
 
 const { values } = parseArgs({
@@ -39,7 +43,6 @@ const { values } = parseArgs({
     "content-type": { type: "string" },
     file: { type: "string" },
     "idempotency-key": { type: "string" },
-    text: { type: "string" },
   },
   strict: true,
 });
@@ -49,18 +52,17 @@ const relay = new Relay({
   apiKey: required(process.env.RELAY_AGENT_TOKEN, "RELAY_AGENT_TOKEN"),
   baseURL: relayApiOrigin(process.env.RELAY_API_URL),
 });
-const result = await sendMessageWithAttachment(relay, {
+const result = await sendImage(relay, {
   chatId: required(values["chat-id"], "--chat-id"),
-  file: {
+  image: {
     bytes: await readFile(file),
-    contentType: contentType(values["content-type"]),
+    contentType: imageContentType(values["content-type"]),
     filename: basename(file),
   },
   idempotencyKey: required(
     values["idempotency-key"],
     "--idempotency-key",
   ),
-  ...(values.text ? { text: values.text } : {}),
 });
 
 console.log(JSON.stringify(result, null, 2));

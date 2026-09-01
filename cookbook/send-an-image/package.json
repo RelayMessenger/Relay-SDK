@@ -1,8 +1,8 @@
 {
-  "name": "@relaymessenger/cookbook-messages-and-attachments",
+  "name": "@relaymessenger/cookbook-send-an-image",
   "version": "1.0.0",
   "private": true,
-  "description": "Direct Relay SDK Message and Attachment example.",
+  "description": "Upload and send one Relay image.",
   "type": "module",
   "scripts": {
     "start": "tsx src/cli.ts",
@@ -19,7 +19,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/RelayMessenger/Relay-SDK.git",
-    "directory": "cookbook/messages-and-attachments"
+    "directory": "cookbook/send-an-image"
   },
   "license": "MIT",
   "bugs": {

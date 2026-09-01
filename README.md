@@ -23,7 +23,9 @@ cookbook/
   webhook-receiver/
   websocket-agent/
   cloudflare-think-agent/
-  messages-and-attachments/
+  send-a-message/
+  send-an-image/
+  send-a-voice-memo/
 ```
 
 All public code is pinned to the same Relay v1 OpenAPI under

@@ -42,10 +42,6 @@
       "repository": "https://github.com/RelayMessenger/Relay-Examples",
       "commit": "0177a9184c9005651688a7e9f42903952991b20f"
     },
-    "cookbook/messages-and-attachments": {
-      "repository": "https://github.com/RelayMessenger/Relay-Examples",
-      "commit": "0177a9184c9005651688a7e9f42903952991b20f"
-    },
     "cookbook/cloudflare-think-agent": {
       "repository": "https://github.com/RelayMessenger/Relay-Agent-Starter",
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399"
