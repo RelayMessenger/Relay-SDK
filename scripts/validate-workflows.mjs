@@ -104,4 +104,19 @@ assert.ok(
 );
 assert.doesNotMatch(publish, /--tag\s+(?:latest|next)\b/u);
 
+const publishProgram = readFileSync(
+  "scripts/publish-package-staging.mjs",
+  "utf8",
+);
+assert.match(
+  publishProgram,
+  /Array\.isArray\(existing\.value\)/u,
+  "registry integrity reconciliation must normalize npm's single-value array",
+);
+assert.match(
+  publishProgram,
+  /observedIntegrities,\s*\n\s*\[integrity\]/u,
+  "registry integrity reconciliation must still require exactly one match",
+);
+
 console.log("validated immutable CI and staging-only package publication");

@@ -102,7 +102,14 @@ if (!existing.found) {
     );
   }
 }
-assert.equal(existing.value, integrity, `${spec} integrity differs`);
+const observedIntegrities = Array.isArray(existing.value)
+  ? existing.value
+  : [existing.value];
+assert.deepEqual(
+  observedIntegrities,
+  [integrity],
+  `${spec} integrity differs`,
+);
 const after = view(manifest.name, "dist-tags");
 assert.equal(after.found, true);
 assert.equal(after.value.staging, manifest.version);
