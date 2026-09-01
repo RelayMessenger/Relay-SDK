@@ -71,7 +71,13 @@ const view = (target, field) => {
     }
     throw new Error(result.stderr || result.stdout);
   }
-  return { found: true, value: JSON.parse(result.stdout) };
+  const parsed = JSON.parse(result.stdout);
+  return {
+    found: true,
+    value: Array.isArray(parsed) && parsed.length === 1
+      ? parsed[0]
+      : parsed,
+  };
 };
 
 const before = view(manifest.name, "dist-tags");

@@ -110,8 +110,13 @@ const publishProgram = readFileSync(
 );
 assert.match(
   publishProgram,
+  /Array\.isArray\(parsed\) && parsed\.length === 1/u,
+  "npm view must normalize npm 12's single-result array",
+);
+assert.match(
+  publishProgram,
   /Array\.isArray\(existing\.value\)/u,
-  "registry integrity reconciliation must normalize npm's single-value array",
+  "registry integrity reconciliation must defend against array output",
 );
 assert.match(
   publishProgram,
