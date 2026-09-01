@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/sdk",
-  "version": "0.3.0-staging.3",
+  "version": "0.3.0-staging.4",
   "description": "TypeScript SDK for the Relay v1 messaging API and signed webhooks.",
   "type": "module",
   "main": "./dist/index.js",

@@ -458,7 +458,6 @@ export interface ContactCardUpdateParams {
 
 export interface ContactRequestCreateParams {
   handle: string;
-  "Idempotency-Key"?: string;
 }
 
 export interface ContactRequestCreateResponse {

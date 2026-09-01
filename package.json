@@ -10,7 +10,7 @@
     "check": "npm run check --workspace @relaymessenger/sdk",
     "build": "npm run build --workspace @relaymessenger/sdk",
     "test": "npm run test --workspace @relaymessenger/sdk",
-    "contract:check": "node scripts/validate-contract.mjs",
+    "contract:check": "node scripts/validate-contract.mjs && node scripts/validate-contract-failures.mjs",
     "consumer:types": "tsc -p test/tsconfig.json --noEmit",
     "pack:smoke": "node scripts/consumer-smoke.mjs",
     "staging:validate": "node scripts/staging-validate.mjs",

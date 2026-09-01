@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
@@ -10,15 +10,30 @@ import Relay, {
 } from "../packages/sdk/dist/index.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const readRequiredFile = (path, label) => {
+  try {
+    return readFileSync(path);
+  } catch (cause) {
+    throw new Error(`${label} is missing or unreadable: ${path}`, { cause });
+  }
+};
 const manifest = JSON.parse(
   readFileSync(resolve(root, "contracts/relay-v1-operations.json"), "utf8"),
 );
-const canonicalSourcePath =
-  "_worktrees/Relay-Server-add/contracts/developer/openapi.yaml";
+const canonicalSourcePath = "contracts/relay-v1-openapi.yaml";
 assert.equal(
   manifest.source,
   canonicalSourcePath,
-  "SDK contract source must remain the canonical Server developer OpenAPI",
+  "SDK contract source must remain the carried canonical Server OpenAPI",
+);
+assert.deepEqual(
+  manifest.upstream,
+  {
+    repository: "https://github.com/RelayMessenger/Relay-Server.git",
+    commit: "886d97e127c31492f06c87cf3e7a90ae35153d8d",
+    path: "contracts/developer/openapi.yaml",
+  },
+  "SDK contract provenance must identify the exact Server source",
 );
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
@@ -237,22 +252,33 @@ assert.deepEqual(publicMethods(client.blockedHandles), [
 assert.deepEqual(publicMethods(client.websocket), ["run"]);
 assert.deepEqual(publicMethods(client.webhooks), ["unwrap", "verify"]);
 
-const decision = resolve(root, "..", manifest.transport_decision.source);
-if (existsSync(decision)) {
-  const decisionHash = createHash("sha256")
-    .update(readFileSync(decision))
-    .digest("hex");
-  assert.equal(
-    decisionHash,
-    manifest.transport_decision.sha256,
-    "Final Agent transport decision changed; refresh SDK behavior",
-  );
-}
+assert.deepEqual(
+  manifest.transport_decision,
+  {
+    source: "contracts/agent-transport-decision.md",
+    sha256: "6140351159f830a4a6b4be67e2e6a9cce27eeb9a6cd83c67c54331df26d2fe74",
+    upstream: {
+      repository: "https://github.com/RelayMessenger/Relay-Research.git",
+      commit: "2c876f70ea360164849169187aca622b88f8e319",
+      path: "research/relay-rebuild-20260828/TRANSPORT-DECISION-20260829.md",
+    },
+  },
+  "SDK transport provenance must identify the exact Research source",
+);
+const decision = resolve(root, manifest.transport_decision.source);
+const decisionHash = createHash("sha256")
+  .update(readRequiredFile(decision, "Final Agent transport decision"))
+  .digest("hex");
+assert.equal(
+  decisionHash,
+  manifest.transport_decision.sha256,
+  "Final Agent transport decision changed; refresh SDK behavior",
+);
 
 const source = process.env.RELAY_OPENAPI_SOURCE
-  ?? resolve(root, "..", canonicalSourcePath);
-if (existsSync(source)) {
-  const bytes = readFileSync(source);
+  ?? resolve(root, canonicalSourcePath);
+const validateOpenAPI = () => {
+  const bytes = readRequiredFile(source, "Relay OpenAPI");
   const hash = createHash("sha256").update(bytes).digest("hex");
   assert.equal(
     hash,
@@ -260,6 +286,7 @@ if (existsSync(source)) {
     "Relay OpenAPI changed; refresh SDK contract",
   );
   const document = YAML.parse(bytes.toString("utf8"));
+  assert.equal(document.openapi, "3.1.0");
   const sourceOperations = [];
   for (const [path, item] of Object.entries(document.paths)) {
     for (const [method, operation] of Object.entries(item)) {
@@ -425,9 +452,51 @@ if (existsSync(source)) {
     document.components.schemas.CreateContactRequest.required,
     ["handle"],
   );
+  assert.equal(
+    document.components.schemas.CreateContactRequest.additionalProperties,
+    false,
+  );
   assert.deepEqual(
     Object.keys(document.components.schemas.CreateContactRequest.properties),
     ["handle"],
+  );
+  assert.deepEqual(
+    document.paths["/v1/contact_requests"].post.parameters ?? [],
+    [],
+    "Contact requests must not advertise idempotency",
+  );
+  for (const path of [
+    "/v1/chats",
+    "/v1/messages",
+    "/v1/chats/{chatId}/messages",
+  ]) {
+    const idempotencyHeaders = (
+      document.paths[path].post.parameters ?? []
+    ).filter((parameter) =>
+      parameter.name === "Idempotency-Key"
+      && parameter.in === "header"
+    );
+    assert.equal(
+      idempotencyHeaders.length,
+      1,
+      `${path} must retain its Idempotency-Key header`,
+    );
+    assert.equal(idempotencyHeaders[0].required, false);
+    assert.equal(idempotencyHeaders[0].schema.type, "string");
+    assert.equal(idempotencyHeaders[0].schema.maxLength, 255);
+  }
+  assert.deepEqual(
+    document.components.schemas.MessageContent.required,
+    ["parts"],
+  );
+  assert.equal(
+    document.components.schemas.MessageContent.properties.idempotency_key.type,
+    "string",
+  );
+  assert.equal(
+    document.components.schemas.MessageContent.properties
+      .idempotency_key.maxLength,
+    255,
   );
   assert.deepEqual(
     document.components.schemas.CreateContactRequestResult
@@ -497,7 +566,8 @@ if (existsSync(source)) {
     document.components.schemas.SupportedContentType.enum.includes("image/svg+xml"),
     false,
   );
-}
+};
+validateOpenAPI();
 
 console.log(JSON.stringify({
   ok: true,
