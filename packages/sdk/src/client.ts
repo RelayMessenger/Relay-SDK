@@ -110,7 +110,11 @@ class Transport {
     if (!options.apiKey?.trim()) throw new Error("Relay API key is required.");
     this.baseURL = (options.baseURL ?? "https://api.relayapp.im").replace(/\/+$/, "");
     this.#apiKey = options.apiKey;
-    this.#fetch = options.fetch ?? globalThis.fetch;
+    const selectedFetch = options.fetch ?? globalThis.fetch;
+    // Workerd's native fetch validates its receiver. Retaining the bare
+    // function and later calling it as a Transport field changes `this` to
+    // the Transport instance, so every request fails before reaching Relay.
+    this.#fetch = selectedFetch.bind(globalThis);
     this.#maxRetries = options.maxRetries ?? 2;
     this.#timeout = options.timeout ?? 15_000;
     this.#retryBaseDelayMs = options.retryBaseDelayMs ?? 250;

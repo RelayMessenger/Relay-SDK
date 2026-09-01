@@ -1,7 +1,30 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import Relay, { RelayAPIError } from "../src/index.js";
 
 describe("Relay transport", () => {
+  it("preserves the global receiver required by Workers fetch", async () => {
+    let receiver: unknown;
+    vi.stubGlobal("fetch", async function (
+      this: unknown,
+      _input: string | URL | Request,
+      _init?: RequestInit,
+    ): Promise<Response> {
+      receiver = this;
+      return Response.json({ chats: [], next_cursor: null });
+    });
+    try {
+      const client = new Relay({
+        apiKey: "token",
+        baseURL: "https://api.example.test",
+        maxRetries: 0,
+      });
+      await client.chats.listChats();
+      expect(receiver).toBe(globalThis);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("retries retryable GET failures", async () => {
     let calls = 0;
     const client = new Relay({
