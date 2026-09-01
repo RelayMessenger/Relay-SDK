@@ -25,7 +25,8 @@
     },
     "distTagsObserved": {
       "latest": "0.3.0-staging.4",
-      "staging": "0.3.0-staging.5"
+      "staging": "0.3.0-staging.5",
+      "mutable": true
     },
     "dist": {
       "tarball": "https://registry.npmjs.org/@relaymessenger/sdk/-/sdk-0.3.0-staging.5.tgz",
