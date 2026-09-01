@@ -21820,7 +21820,8 @@ var Transport = class {
       throw new Error("Relay API key is required.");
     this.baseURL = (options.baseURL ?? "https://api.relayapp.im").replace(/\/+$/, "");
     this.#apiKey = options.apiKey;
-    this.#fetch = options.fetch ?? globalThis.fetch;
+    const selectedFetch = options.fetch ?? globalThis.fetch;
+    this.#fetch = selectedFetch.bind(globalThis);
     this.#maxRetries = options.maxRetries ?? 2;
     this.#timeout = options.timeout ?? 15e3;
     this.#retryBaseDelayMs = options.retryBaseDelayMs ?? 250;
@@ -23687,7 +23688,7 @@ var RelayStateStore = class {
 };
 
 // server.ts
-var VERSION = true ? "0.3.0-staging.0" : createRequire(import.meta.url)("./package.json").version;
+var VERSION = true ? "0.3.0-staging.1" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);
