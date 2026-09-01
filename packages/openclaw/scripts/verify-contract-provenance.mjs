@@ -21,6 +21,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const readJson = (path) =>
   JSON.parse(readFileSync(join(root, path), "utf8"));
 const lock = readJson("contracts/relay-v1.lock.json");
+const sourceLock = readJson("../../sources.lock.json");
 const receipt = readJson(lock.relaySdk.registryReceipt);
 const require = createRequire(import.meta.url);
 
@@ -253,7 +254,11 @@ assert.equal(
 const installedSource = JSON.parse(
   readFileSync(join(root, "..", "sdk", "SOURCE.json"), "utf8"),
 );
-assert.equal(installedSource.commit, lock.relaySdk.source.commit);
+assert.equal(
+  installedSource.commit,
+  sourceLock.imports["packages/sdk"].commit,
+  "SDK SOURCE.json must retain the imported upstream commit",
+);
 const installedPackage = readFileSync(installedPackagePath);
 const installedTypes = readFileSync(
   join(dirname(installedPackagePath), "dist", "types.d.ts"),

@@ -1251,7 +1251,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "scripts/verify-contract-provenance.mjs",
       "source_sha256": "53e6f2ce6d82b9917fc9ca90bc966c12e7fcf39ff450fb13d4b3f1112f79f903",
-      "destination_sha256": "fe81d6fa1fbe1a400d5dffa9efd8e620ab13498e9c0448c806389f4a8eca1ef5",
+      "destination_sha256": "57e3d9d1a53004382e10e2307c5403952f99a5a75b5593ac258c0da563ab9c9f",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1482,7 +1482,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "test/contracts.test.mjs",
       "source_sha256": "7f34f5cc839cb8be852fe69c3c692b14d4de99e84122472f6ddedd0d06f9642d",
-      "destination_sha256": "4bd619edc82690ea6f4e8bdb590fa911ff3b3ea64853dfd76d119b5158064cb4",
+      "destination_sha256": "1097a51755445edc9e326be185a1e76da051d440aeb8b6125a12d2fa8b875d3b",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

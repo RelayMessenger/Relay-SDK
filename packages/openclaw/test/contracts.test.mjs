@@ -88,7 +88,7 @@ test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
   assert.equal(installedSdk.version, contractLock.relaySdk.version);
   assert.equal(
     installedSdkSource.commit,
-    contractLock.relaySdk.source.commit,
+    sourceLock.imports["packages/sdk"].commit,
   );
   assert.equal(
     sdkRegistryReceipt.registry.dist.integrity,
@@ -102,13 +102,18 @@ test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
     sdkRegistryReceipt.provenanceBoundary.registryGitHead,
     null,
   );
-  assert.equal(
+  assert.deepEqual(
     sdkRegistryReceipt.provenanceBoundary.registryAttestations,
-    null,
+    {
+      url: "https://registry.npmjs.org/-/npm/v1/attestations/@relaymessenger%2fsdk@0.3.0-staging.5",
+      provenance: {
+        predicateType: "https://slsa.dev/provenance/v1",
+      },
+    },
   );
   assert.match(
     sdkRegistryReceipt.provenanceBoundary.claim,
-    /does not claim cryptographic source-to-tarball provenance/u,
+    /does not claim that the registry attestation independently proves the source commit/u,
   );
   assert.equal(
     createHash("sha256")
