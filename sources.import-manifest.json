@@ -3385,7 +3385,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "contracts/relay-sdk-0.3.0-staging.4.registry.json",
       "source_sha256": "97302337835edde22192bdf84a20f7d37860b068c7130bf02aff457ba093c139",
-      "destination_sha256": "553c7723d12e18d736f279b6efac7e3daa10a56488d3af1e3ad1d6edabfd6b59",
+      "destination_sha256": "b6162392376f6b5d93e89ea9171d2c47da1c6dfc4b15001c9de9a44b81226bb1",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

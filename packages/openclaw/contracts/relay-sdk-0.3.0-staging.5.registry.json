@@ -48,11 +48,11 @@
           "predicateType": "https://slsa.dev/provenance/v1"
         }
       }
+    },
+    "installedArtifact": {
+      "packageJsonSha256": "2cd3b01e65725ab55d5b520ded6c1235e1f4c74af0ff07478d3ba029d67eda1a",
+      "typesSha256": "efa163145777ad4df93263d87605794ca099dd8db6fe1b36cc71d0873377a653"
     }
-  },
-  "installedArtifact": {
-    "packageJsonSha256": "2cd3b01e65725ab55d5b520ded6c1235e1f4c74af0ff07478d3ba029d67eda1a",
-    "typesSha256": "efa163145777ad4df93263d87605794ca099dd8db6fe1b36cc71d0873377a653"
   },
   "provenanceBoundary": {
     "registryGitHead": null,
