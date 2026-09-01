@@ -10,6 +10,7 @@ import {
 } from "./credentials.js";
 import { assertRelayUuid } from "./thread-id.js";
 import type {
+  RelayAttachment,
   RelayAttachmentAllocation,
   RelayChat,
   RelayGetMessagesResult,
@@ -297,6 +298,21 @@ export class RelayClient {
     );
   }
 
+  /**
+   * Read Attachment metadata, including a freshly minted `download_url`.
+   *
+   * Relay mints the download link at request time, so this is how an expired
+   * link is replaced. The route authorizes any Chat participant who could read
+   * the Message the Attachment belongs to, not only its owner.
+   */
+  async getAttachment(attachmentId: string): Promise<RelayAttachment> {
+    assertRelayUuid(attachmentId, "attachmentId");
+    return this.request<RelayAttachment>(
+      `/v1/attachments/${encodeURIComponent(attachmentId)}`,
+      { method: "GET" },
+    );
+  }
+
   async allocateAttachment(
     options: Omit<RelayUploadOptions, "body"> & { sizeBytes: number },
   ): Promise<RelayAttachmentAllocation> {
@@ -363,5 +379,42 @@ export class RelayClient {
       );
     }
     return allocation;
+  }
+
+  /**
+   * Download the bytes of an inbound Relay media part.
+   *
+   * A Relay media URL is a sealed download capability: the transfer route is
+   * unauthenticated, so no Agent Token is sent, and the capability expires 60
+   * minutes after Relay minted it. A download after that window fails with
+   * HTTP 404; `getAttachment` mints a replacement.
+   */
+  async downloadAttachment(options: {
+    attachmentId?: string;
+    url: string;
+  }): Promise<ArrayBuffer> {
+    const label = options.attachmentId ?? options.url;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(options.url);
+    } catch (error) {
+      throw new NetworkError(
+        "relay",
+        `Network error downloading Relay attachment ${label}`,
+        error instanceof Error ? error : undefined,
+      );
+    }
+    if (!response.ok) {
+      const body = await parseResponseBody(response);
+      const details = errorDetails(body, response.status);
+      throw new RelayApiError(
+        response.status,
+        details.code,
+        `Failed to download Relay attachment ${label}: `
+          + `HTTP ${response.status}`,
+        body,
+      );
+    }
+    return await response.arrayBuffer();
   }
 }

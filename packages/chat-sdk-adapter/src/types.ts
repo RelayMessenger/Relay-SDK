@@ -213,6 +213,23 @@ export interface RelayReactionEvent {
   reaction_type: RelayReactionType;
 }
 
+/**
+ * `GET /v1/attachments/{attachmentId}` metadata. `download_url` is optional in
+ * the locked v1 contract, so a caller must handle its absence.
+ */
+export interface RelayAttachment {
+  content_type: string;
+  created_at: string;
+  download_url?: string;
+  duration_ms?: number | null;
+  filename: string;
+  height?: number | null;
+  id: string;
+  size_bytes: number;
+  status: "pending" | "complete" | "failed";
+  width?: number | null;
+}
+
 export interface RelayAttachmentAllocation {
   attachment_id: string;
   download_url: string;
