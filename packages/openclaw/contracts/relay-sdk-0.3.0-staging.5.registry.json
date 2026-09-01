@@ -1,0 +1,68 @@
+{
+  "schema": "relay-sdk-registry-receipt/v1",
+  "source": {
+    "repository": "RelayMessenger/Relay-SDK",
+    "commit": "776a9a7873f41c0c9947439c44444674a7d55c5d",
+    "packageJsonPath": "packages/sdk/package.json",
+    "packageJsonSha256": "2cd3b01e65725ab55d5b520ded6c1235e1f4c74af0ff07478d3ba029d67eda1a",
+    "contractPath": "contracts/relay-v1-openapi.yaml",
+    "contractSha256": "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5"
+  },
+  "registry": {
+    "packumentUrl": "https://registry.npmjs.org/@relaymessenger%2fsdk",
+    "package": "@relaymessenger/sdk",
+    "version": "0.3.0-staging.5",
+    "publishedAt": "2026-09-01T18:08:51.723Z",
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/RelayMessenger/Relay-SDK.git",
+      "directory": "packages/sdk"
+    },
+    "publishConfig": {
+      "access": "public",
+      "registry": "https://registry.npmjs.org/",
+      "tag": "staging"
+    },
+    "distTagsObserved": {
+      "latest": "0.3.0-staging.4",
+      "staging": "0.3.0-staging.5"
+    },
+    "dist": {
+      "tarball": "https://registry.npmjs.org/@relaymessenger/sdk/-/sdk-0.3.0-staging.5.tgz",
+      "integrity": "sha512-mVtK8Tv8WVKCkZLzZMbAbazlrf8VrVtu6UcQE4wY685UPLrHqlYm/2XoQstyTP6unik9xiVQC9L5CwR4lxP70w==",
+      "shasum": "7549747779b301a0dc60259fa64729e9e7d7db6a",
+      "sha256": "ac9336350a82590a0c0d9960ef971858e5ad77413078fe7e82ad5f99a1a3cc9e",
+      "bytes": 36545,
+      "fileCount": 37,
+      "unpackedSize": 167814,
+      "signatureMetadata": [
+        {
+          "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+          "sig": "MEYCIQC/HnUppjEuFAkql79k8scZSDgECdY5clQ19ufRu6WkXQIhAK1iXKe+bjI3+us+VmA2j/KMpXbwkbaYzlKh4yzLwCZ6"
+        }
+      ],
+      "attestations": {
+        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@relaymessenger%2fsdk@0.3.0-staging.5",
+        "provenance": {
+          "predicateType": "https://slsa.dev/provenance/v1"
+        }
+      }
+    }
+  },
+  "installedArtifact": {
+    "packageJsonSha256": "2cd3b01e65725ab55d5b520ded6c1235e1f4c74af0ff07478d3ba029d67eda1a",
+    "typesSha256": "efa163145777ad4df93263d87605794ca099dd8db6fe1b36cc71d0873377a653"
+  },
+  "provenanceBoundary": {
+    "registryGitHead": null,
+    "registryAttestations": {
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@relaymessenger%2fsdk@0.3.0-staging.5",
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1"
+      }
+    },
+    "attestationEndpoint": "https://registry.npmjs.org/-/npm/v1/attestations/@relaymessenger%2fsdk@0.3.0-staging.5",
+    "attestationEndpointObservedStatus": 200,
+    "claim": "The exact registry tarball, npm signature, and SLSA provenance metadata are recorded. The package.json bytes match the Relay-SDK 776a9a7 release commit; the receipt does not claim that the registry attestation independently proves the source commit."
+  }
+}

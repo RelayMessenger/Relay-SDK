@@ -7,7 +7,7 @@ package and the `relay` Claude plugin is maintained in
 under `packages/claude-code`.
 
 The channel is rebuilt for Relay v1. It uses
-`@relaymessenger/sdk@0.3.0-staging.4` and one acknowledged outbound connection
+`@relaymessenger/sdk@0.3.0-staging.5` and one acknowledged outbound connection
 to `/v1/websocket`; it does not use the removed Events polling, Conversation,
 or private Agent identity APIs.
 
@@ -211,7 +211,7 @@ stale WebSocket connections server-side.
 - Relay Server commit `9b4d5bb32cc749c6fd271969948c385300d404d6`;
 - `contracts/developer/openapi.yaml` SHA-256
   `f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5`;
-- `@relaymessenger/sdk@0.3.0-staging.4`; and
+- `@relaymessenger/sdk@0.3.0-staging.5`; and
 - the official Claude Code documentation and validation baseline used on
   2026-09-01.
 

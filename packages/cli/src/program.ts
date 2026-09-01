@@ -119,7 +119,7 @@ export const createProgram = (
   const program = new Command()
     .name("relay")
     .description("Official CLI for Relay v1 Agent resources.")
-    .version("0.5.0-staging.0")
+    .version("0.5.0-staging.1")
     .option("--profile <name>", "local Relay profile", process.env.RELAY_PROFILE);
   program.exitOverride();
   program.configureOutput({

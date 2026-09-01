@@ -139,7 +139,7 @@ export const createRelayMcpServer = (
   const server = new McpServer(
     {
       name: "relay",
-      version: "0.1.0-staging.1",
+      version: "0.1.0-staging.2",
     },
     {
       capabilities: { tools: {} },

@@ -163,7 +163,7 @@ durable ACK and idempotent REST reply.
 release: Relay Server
 `9b4d5bb32cc749c6fd271969948c385300d404d6`, OpenAPI SHA-256
 `f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5`,
-and the exact `@relaymessenger/sdk@0.3.0-staging.4` registry integrity, source
+and the exact `@relaymessenger/sdk@0.3.0-staging.5` registry integrity, source
 commit `8570546ce30ab39d702409893006dbccd351f2b4`, REST operations, and WebSocket
 frames consumed by the plugin.
 
@@ -174,7 +174,7 @@ and proves that the fixture bytes match that commit before packaging. The
 public Relay-SDK monorepo does not require credentials for the private Server
 source and does not overstate what npm metadata can attest.
 
-`contracts/relay-sdk-0.3.0-staging.4.registry.json` records immutable npm
+`contracts/relay-sdk-0.3.0-staging.5.registry.json` records immutable npm
 publication metadata and tarball digests. Validation downloads the registry
 tarball, verifies SHA-1, SHA-256, and SHA-512 integrity, checks the installed
 SDK, and compares its package metadata with exact SDK commit `8570546`.

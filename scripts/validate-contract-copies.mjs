@@ -28,7 +28,7 @@ const skillLock = JSON.parse(
   ),
 );
 assert.equal(skillLock.api.openapi_sha256, expected);
-assert.equal(skillLock.sdk.commit, "8570546ce30ab39d702409893006dbccd351f2b4");
-assert.equal(skillLock.sdk.version, "0.3.0-staging.4");
+assert.equal(skillLock.sdk.commit, "776a9a7873f41c0c9947439c44444674a7d55c5d");
+assert.equal(skillLock.sdk.version, "0.3.0-staging.5");
 
 console.log(`validated ${copies.length} byte-exact Relay v1 OpenAPI copies`);

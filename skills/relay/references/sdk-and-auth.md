@@ -18,7 +18,7 @@ Install the current locked prerelease through its documented tag:
 npm install @relaymessenger/sdk@staging
 ```
 
-The locked package is `@relaymessenger/sdk@0.3.0-staging.4` and requires Node
+The locked package is `@relaymessenger/sdk@0.3.0-staging.5` and requires Node
 22.22.3 or newer.
 
 ```typescript
