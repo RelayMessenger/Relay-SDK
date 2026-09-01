@@ -187,7 +187,7 @@ assert.equal(
   registryVersion.gitHead ?? null,
   receipt.provenanceBoundary.registryGitHead,
 );
-assert.equal(
+assert.deepEqual(
   registryVersion.dist?.attestations ?? null,
   receipt.provenanceBoundary.registryAttestations,
 );

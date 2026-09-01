@@ -1251,7 +1251,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "scripts/verify-contract-provenance.mjs",
       "source_sha256": "53e6f2ce6d82b9917fc9ca90bc966c12e7fcf39ff450fb13d4b3f1112f79f903",
-      "destination_sha256": "7a0d0bb174bd5432c59d84121cbfb6d8df545159603f7ab4f0114b13cb4655c2",
+      "destination_sha256": "fe81d6fa1fbe1a400d5dffa9efd8e620ab13498e9c0448c806389f4a8eca1ef5",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
