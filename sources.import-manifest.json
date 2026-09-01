@@ -1548,10 +1548,10 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": ".gitignore",
       "source_sha256": "8fa1b009818329cbdef4987395e5d88a4a6ebf94e298b642a9b6f79bf503f4d0",
-      "destination_sha256": "8fa1b009818329cbdef4987395e5d88a4a6ebf94e298b642a9b6f79bf503f4d0",
+      "destination_sha256": "3870ff9bb24d1b1d385748c21598681af558c1230c431056805e8a96f1758364",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/claude-code/.mcp.json",
