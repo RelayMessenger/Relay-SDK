@@ -92,7 +92,10 @@ describe("Relay v1 request shapes", () => {
     await client.chats.create({
       from: "alice",
       to: ["bob"],
-      message: { parts: [{ type: "text", value: "hello" }] },
+      message: {
+        parts: [{ type: "text", value: "hello" }],
+        idempotency_key: "chat-create-key",
+      },
     });
     await client.chats.listChats({ cursor: "chat-cursor", limit: 20 });
     await client.chats.retrieve("chat-id");
@@ -164,7 +167,6 @@ describe("Relay v1 request shapes", () => {
     });
     const contactRequest = await client.contactRequests.create({
       handle: "advait",
-      "Idempotency-Key": "contact-request-key",
     });
     expect(contactRequest).toEqual({ state: "pending" });
 
@@ -180,6 +182,17 @@ describe("Relay v1 request shapes", () => {
     );
     expect(calls.every((call) =>
       call.headers.get("authorization") === "Bearer agent-token")).toBe(true);
+
+    const createChat = calls[0]!;
+    expect(createChat.headers.get("idempotency-key")).toBe("chat-create-key");
+    expect(JSON.parse(String(createChat.body))).toEqual({
+      from: "alice",
+      to: ["bob"],
+      message: {
+        parts: [{ type: "text", value: "hello" }],
+        idempotency_key: "chat-create-key",
+      },
+    });
 
     const sharedContactCard = calls[10]!;
     expect(sharedContactCard.body).toBeUndefined();
@@ -213,9 +226,7 @@ describe("Relay v1 request shapes", () => {
     });
 
     const createContactRequest = calls.at(-1)!;
-    expect(createContactRequest.headers.get("idempotency-key")).toBe(
-      "contact-request-key",
-    );
+    expect(createContactRequest.headers.get("idempotency-key")).toBeNull();
     expect(JSON.parse(String(createContactRequest.body))).toEqual({
       handle: "advait",
     });

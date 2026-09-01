@@ -62,9 +62,21 @@ await relay.webhookSubscriptions.create({
 });
 const addRequest = await relay.contactRequests.create({
   handle: "advait",
-  "Idempotency-Key": "contact-request-key",
 });
 addRequest.state satisfies "pending";
+relay.contactRequests.create({
+  handle: "advait",
+  // @ts-expect-error Contact requests accept only a handle.
+  "Idempotency-Key": "contact-request-key",
+});
+await relay.messages.create({
+  to: ["advait"],
+  message: {
+    parts: [{ type: "text", value: "Hello" }],
+    idempotency_key: "message-body-key",
+  },
+  "Idempotency-Key": "message-header-key",
+});
 
 const page = await relay.chats.listChats();
 page.chats satisfies Chat[];

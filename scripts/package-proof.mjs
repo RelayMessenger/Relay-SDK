@@ -213,7 +213,7 @@ try {
     assert.deepEqual(
       await relay.contactRequests.create({
         handle: "advait",
-        "Idempotency-Key": "package-proof-contact-request",
+        "Idempotency-Key": "must-not-be-forwarded",
       }),
       { state: "pending" },
     );
@@ -242,7 +242,7 @@ try {
         url: "https://api.staging.relayapp.im/v1/contact_requests",
         method: "POST",
         authorization: "Bearer package-proof-token",
-        idempotencyKey: "package-proof-contact-request",
+        idempotencyKey: null,
         body: {
           handle: "advait",
         },
@@ -326,6 +326,19 @@ try {
     declare const removed: ContactRemovedWebhookEvent;
     removed.data.contact.handle satisfies string;
     void relay.contactRequests.create({ handle: "advait" });
+    relay.contactRequests.create({
+      handle: "advait",
+      // @ts-expect-error Contact requests accept only a handle.
+      "Idempotency-Key": "contact-request-key",
+    });
+    void relay.messages.create({
+      to: ["advait"],
+      message: {
+        parts: [{ type: "text", value: "Hello" }],
+        idempotency_key: "message-body-key",
+      },
+      "Idempotency-Key": "message-header-key",
+    });
     // @ts-expect-error user Contact request listing is private.
     relay.contactRequests.list();
     // @ts-expect-error polling is not part of Relay.

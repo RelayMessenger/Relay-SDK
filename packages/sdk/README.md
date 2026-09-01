@@ -46,7 +46,6 @@ added it:
 ```ts
 const request = await relay.contactRequests.create({
   handle: "advait",
-  "Idempotency-Key": crypto.randomUUID(),
 });
 
 console.log(request.state); // "pending"

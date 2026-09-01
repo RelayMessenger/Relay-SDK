@@ -96,6 +96,19 @@ try {
   assert.deepEqual(interfaceFields("AgentChatHandle"), [
     "kind",
   ]);
+  assert.deepEqual(interfaceFields("ContactRequestCreateParams"), [
+    "handle",
+  ]);
+  assert.deepEqual(interfaceFields("MessageContent"), [
+    "parts",
+    "reply_to",
+    "idempotency_key",
+  ]);
+  assert.deepEqual(interfaceFields("MessageCreateParams"), [
+    "to",
+    "message",
+    "\"Idempotency-Key\"",
+  ]);
   execFileSync(process.execPath, [
     "--input-type=module",
     "--eval",

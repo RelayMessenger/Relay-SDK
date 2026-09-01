@@ -648,16 +648,14 @@ export class ContactRequests {
   constructor(private readonly transport: Transport) {}
 
   create(
-    params: ContactRequestCreateParams,
+    { handle }: ContactRequestCreateParams,
     options?: RequestOptions,
   ): Promise<ContactRequestCreateResponse> {
-    const { "Idempotency-Key": idempotencyKey, ...body } = params;
     return this.transport.request({
       method: "POST",
       path: "/v1/contact_requests",
-      body,
+      body: { handle },
       options,
-      ...(idempotencyKey ? { idempotencyKey } : {}),
     });
   }
 }
