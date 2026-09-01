@@ -1,6 +1,17 @@
 name: Publish package staging
 
 on:
+  push:
+    branches:
+      - staging
+    paths:
+      - .github/workflows/publish-package-staging.yml
+      - package.json
+      - package-lock.json
+      - packages/claude-code/**
+      - packages/sdk/**
+      - scripts/publish-package-staging.mjs
+      - scripts/release-catalog.mjs
   workflow_dispatch:
     inputs:
       package:
@@ -22,8 +33,12 @@ on:
 permissions:
   contents: read
 
+env:
+  RELEASE_PACKAGE: ${{ github.event_name == 'push' && 'claude-code' || inputs.package }}
+  RELEASE_SHA: ${{ github.event_name == 'push' && github.sha || inputs.commit_sha }}
+
 concurrency:
-  group: relay-monorepo-package-staging-${{ inputs.package }}
+  group: relay-monorepo-package-staging-${{ github.event_name == 'push' && 'claude-code' || inputs.package }}
   cancel-in-progress: false
 
 jobs:
@@ -35,7 +50,7 @@ jobs:
     steps:
       - name: Verify exact staging input
         env:
-          EXPECTED_SHA: ${{ inputs.commit_sha }}
+          EXPECTED_SHA: ${{ github.event_name == 'push' && github.sha || inputs.commit_sha }}
           EVENT_SHA: ${{ github.sha }}
         run: |
           case "$EXPECTED_SHA" in
@@ -54,12 +69,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ inputs.commit_sha }}
+          ref: ${{ env.RELEASE_SHA }}
           fetch-depth: 0
           persist-credentials: false
       - name: Verify canonical staging SHA
         env:
-          EXPECTED_SHA: ${{ inputs.commit_sha }}
+          EXPECTED_SHA: ${{ env.RELEASE_SHA }}
         run: |
           git fetch origin staging
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
@@ -72,20 +87,18 @@ jobs:
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
       - run: npm ci
       - id: resolve
-        run: node scripts/release-catalog.mjs --key '${{ inputs.package }}'
+        run: node scripts/release-catalog.mjs --key "$RELEASE_PACKAGE"
       - name: Verify OpenClaw staging release identity
-        if: inputs.package == 'openclaw'
+        if: env.RELEASE_PACKAGE == 'openclaw'
         working-directory: packages/openclaw
         env:
-          RELEASE_SHA: ${{ inputs.commit_sha }}
           RELEASE_VERSION: ${{ steps.resolve.outputs.version }}
           RELEASE_TAG: staging
         run: node scripts/staging-release-guard.mjs
       - name: Verify Claude Code staging release identity
-        if: inputs.package == 'claude-code'
+        if: env.RELEASE_PACKAGE == 'claude-code'
         working-directory: packages/claude-code
         env:
-          RELEASE_SHA: ${{ inputs.commit_sha }}
           RELEASE_VERSION: ${{ steps.resolve.outputs.version }}
           RELEASE_TAG: staging
         run: node scripts/staging-release-guard.mjs
@@ -105,7 +118,7 @@ jobs:
           test "$(find .release-tmp/package-staging -name '*.tgz' | wc -l)" -eq 1
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: relay-${{ inputs.package }}-${{ github.sha }}
+          name: relay-${{ env.RELEASE_PACKAGE }}-${{ github.sha }}
           path: .release-tmp/package-staging/
           if-no-files-found: error
           retention-days: 30
@@ -121,7 +134,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ inputs.commit_sha }}
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -129,7 +142,7 @@ jobs:
           registry-url: https://registry.npmjs.org/
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: relay-${{ inputs.package }}-${{ github.sha }}
+          name: relay-${{ env.RELEASE_PACKAGE }}-${{ github.sha }}
           path: .release-tmp/package-staging
       - name: Publish or reconcile exactly once
         env:
@@ -144,7 +157,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: relay-${{ inputs.package }}-publish-${{ github.sha }}
+          name: relay-${{ env.RELEASE_PACKAGE }}-publish-${{ github.sha }}
           path: .release-tmp/package-staging/
           if-no-files-found: error
           retention-days: 30

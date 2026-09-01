@@ -40,6 +40,21 @@ assert.match(publish, /NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_PUBLISH_TOKEN \}\}/u
 assert.match(publish, /id-token:\s*write/u);
 assert.match(publish, /github\.repository == 'RelayMessenger\/Relay-SDK'/u);
 assert.match(publish, /github\.ref == 'refs\/heads\/staging'/u);
+assert.match(
+  publish,
+  /push:\s*\n\s*branches:\s*\n\s*-\s*staging/u,
+  "automatic publication must be staging-only",
+);
+assert.match(
+  publish,
+  /github\.event_name == 'push' && 'claude-code' \|\| inputs\.package/u,
+  "a staging push may automatically select only the missing Claude package",
+);
+assert.match(
+  publish,
+  /paths:[\s\S]*packages\/claude-code\/\*\*/u,
+  "automatic Claude publication must be path-scoped",
+);
 assert.doesNotMatch(publish, /--tag\s+(?:latest|next)\b/u);
 
 console.log("validated immutable CI and staging-only package publication");
