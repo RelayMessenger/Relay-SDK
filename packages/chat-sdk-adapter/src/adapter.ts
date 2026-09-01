@@ -280,6 +280,46 @@ export class RelayAdapter
     return toPlainText(content);
   }
 
+  /**
+   * Build the Chat SDK `fetchData` closure for one Relay media part.
+   *
+   * The download runs through this adapter's own Relay client, so a consumer
+   * supplied `fetch` (Workers, a proxy, a test double) serves attachment bytes
+   * exactly as it serves every other Relay call.
+   */
+  private attachmentData(
+    url: string,
+    attachmentId?: string,
+  ): () => Promise<ArrayBuffer> {
+    return () =>
+      this.client.downloadAttachment({
+        ...(attachmentId ? { attachmentId } : {}),
+        url,
+      });
+  }
+
+  /**
+   * Rebuild `fetchData` on an attachment that survived serialization.
+   *
+   * `Message.toJSON()` drops `data` and `fetchData`, so Chat SDK calls this
+   * when a queue or debounce strategy rehydrates a Message. The Relay media
+   * URL kept in `fetchMetadata.url` is the whole capability; it expires 15
+   * minutes after Relay minted it, and a rehydrated download after that window
+   * fails with HTTP 404 because Relay has no agent-facing route that re-mints
+   * a URL from `fetchMetadata.attachmentId`.
+   */
+  rehydrateAttachment(attachment: Attachment): Attachment {
+    const url = attachment.fetchMetadata?.url ?? attachment.url;
+    if (!url) return attachment;
+    return {
+      ...attachment,
+      fetchData: this.attachmentData(
+        url,
+        attachment.fetchMetadata?.attachmentId,
+      ),
+    };
+  }
+
   parseMessage(raw: RelayRawMessage): Message<RelayRawMessage> {
     const threadId = this.encodeThreadId({ chatId: raw.chatId });
     const message = raw.message;
@@ -311,7 +351,8 @@ export class RelayAdapter
         > => part.type === "media",
       )
       .map((part) => ({
-        fetchMetadata: { attachmentId: part.id },
+        fetchData: this.attachmentData(part.url, part.id),
+        fetchMetadata: { attachmentId: part.id, url: part.url },
         ...(part.height != null ? { height: part.height } : {}),
         mimeType: part.mime_type,
         name: part.filename,

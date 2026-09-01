@@ -3,7 +3,12 @@ import {
   createMockState,
   selfMessageContract,
 } from "@chat-adapter/tests";
-import { Chat, NotImplementedError, type Adapter } from "chat";
+import {
+  Chat,
+  NotImplementedError,
+  type Adapter,
+  type Attachment,
+} from "chat";
 import { describe, expect, it, vi } from "vitest";
 import {
   createRelayAdapter,
@@ -808,4 +813,100 @@ selfMessageContract({
     await adapter.initialize(chat);
     return { adapter, chat };
   },
+});
+
+const ATTACHMENT_URL =
+  "https://api.relayapp.im/api/partner/v3/attachment-transfers/sealed-token";
+const ATTACHMENT_BYTES = new TextEncoder().encode("relay-inbound-bytes");
+
+function mediaPart() {
+  return {
+    filename: "receipt.png",
+    height: 480,
+    id: IDS.attachment,
+    mime_type: "image/png",
+    reactions: null,
+    size_bytes: ATTACHMENT_BYTES.byteLength,
+    type: "media" as const,
+    url: ATTACHMENT_URL,
+    width: 640,
+  };
+}
+
+function mediaHarness(
+  download: () => Response = () =>
+    new Response(ATTACHMENT_BYTES, {
+      headers: { "content-type": "image/png" },
+      status: 200,
+    }),
+) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input) === ATTACHMENT_URL) return download();
+    return new Response(null, { status: 204 });
+  });
+  const adapter = createRelayAdapter({
+    fetch: fetchMock as typeof fetch,
+    token: "agent-token",
+    webhookSecret: WEBHOOK_SECRET,
+  });
+  const message = adapter.parseMessage({
+    chatId: IDS.chat,
+    createdAt: "2026-08-30T12:00:00.000Z",
+    eventType: "message.received",
+    message: webhookMessage({ parts: [mediaPart()] }),
+  });
+  return { adapter, fetchMock, message };
+}
+
+describe("inbound attachment bytes", () => {
+  it("fetches the bytes of an inbound media part", async () => {
+    const { fetchMock, message } = mediaHarness();
+    const attachment = message.attachments[0];
+
+    expect(attachment?.fetchMetadata).toEqual({
+      attachmentId: IDS.attachment,
+      url: ATTACHMENT_URL,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const data = await attachment?.fetchData?.();
+    expect(data).toBeInstanceOf(ArrayBuffer);
+    expect(new Uint8Array(data as ArrayBuffer)).toEqual(
+      ATTACHMENT_BYTES,
+    );
+    expect(fetchMock).toHaveBeenCalledWith(ATTACHMENT_URL);
+  });
+
+  it("names the attachment and the status when the download fails", async () => {
+    const { message } = mediaHarness(
+      () => new Response("", { status: 503 }),
+    );
+    const attachment = message.attachments[0];
+
+    await expect(attachment?.fetchData?.()).rejects.toThrow(
+      `Failed to download Relay attachment ${IDS.attachment}: HTTP 503`,
+    );
+  });
+
+  it("rebuilds fetchData on a serialized attachment", async () => {
+    const { adapter, message } = mediaHarness();
+    const roundTripped = JSON.parse(
+      JSON.stringify(message.toJSON()),
+    ) as { attachments: Attachment[] };
+    const serialized = roundTripped.attachments[0];
+
+    expect(serialized?.fetchData).toBeUndefined();
+    expect(serialized?.fetchMetadata).toEqual({
+      attachmentId: IDS.attachment,
+      url: ATTACHMENT_URL,
+    });
+
+    const rehydrated = adapter.rehydrateAttachment(
+      serialized as Attachment,
+    );
+    const data = await rehydrated.fetchData?.();
+    expect(new Uint8Array(data as ArrayBuffer)).toEqual(
+      ATTACHMENT_BYTES,
+    );
+  });
 });

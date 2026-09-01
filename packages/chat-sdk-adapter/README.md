@@ -131,13 +131,38 @@ contract tests and is excluded from the npm package.
 | `stream` | Buffered, then one canonical Message; never partial bubbles |
 | outbound public-URL media | Message `media` part |
 | outbound bytes/files | Explicitly allocate/upload with `@relaymessenger/sdk`, then post a stable public HTTPS URL |
-| inbound media | Chat SDK `Attachment` |
+| inbound media | Chat SDK `Attachment` with `fetchData()` |
 | `addReaction`, `removeReaction` | `POST /v1/messages/{messageId}/reactions` |
 | `startTyping`, `endTyping` | `POST`/`DELETE /v1/chats/{chatId}/typing` |
 | `markAsRead` | `POST /v1/chats/{chatId}/read` |
 | `fetchMessages({ direction: "forward" })` | `GET /v1/chats/{chatId}/messages` |
 | `fetchMessage` | `GET /v1/messages/{messageId}` |
 | `fetchThread`, `fetchChannelInfo` | `GET /v1/chats/{chatId}` |
+
+### Inbound attachments
+
+An inbound Relay media part becomes a Chat SDK `Attachment` carrying
+`url`, `mimeType`, `name`, `size`, `type`, `width`, `height`, and a
+`fetchData()` that resolves to the bytes as an `ArrayBuffer`. Nothing is
+downloaded until you call it.
+
+```ts
+for (const attachment of message.attachments) {
+  const bytes = await attachment.fetchData?.();
+}
+```
+
+**A Relay media URL expires 15 minutes after Relay minted it.** The URL is a
+sealed, unauthenticated download capability, so `fetchData()` sends no Agent
+Token; after that window the download fails with `RelayApiError` HTTP 404.
+Fetch the bytes during the webhook turn, or persist them yourself. Relay has no
+agent-facing route that re-mints a URL from an attachment id.
+
+`Message.toJSON()` drops `fetchData`, so queue and debounce strategies call
+`rehydrateAttachment()` to rebuild it. The adapter keeps both the URL and the
+attachment id in `fetchMetadata` and rebuilds from the stored URL — a message
+that waits longer than 15 minutes in a queue rehydrates an attachment whose
+download is already expired.
 
 Relay text parts are plain text and are limited to 10,000 UTF-16 code units.
 Long Chat SDK text is split without breaking surrogate pairs. A Relay Message

@@ -364,4 +364,42 @@ export class RelayClient {
     }
     return allocation;
   }
+
+  /**
+   * Download the bytes of an inbound Relay media part.
+   *
+   * A Relay media URL is a sealed download capability: the transfer route is
+   * unauthenticated, so no Agent Token is sent, and the capability expires 15
+   * minutes after Relay minted it. A download after that window fails with
+   * HTTP 404, and Relay exposes no agent-facing route that re-mints a URL from
+   * an attachment id.
+   */
+  async downloadAttachment(options: {
+    attachmentId?: string;
+    url: string;
+  }): Promise<ArrayBuffer> {
+    const label = options.attachmentId ?? options.url;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(options.url);
+    } catch (error) {
+      throw new NetworkError(
+        "relay",
+        `Network error downloading Relay attachment ${label}`,
+        error instanceof Error ? error : undefined,
+      );
+    }
+    if (!response.ok) {
+      const body = await parseResponseBody(response);
+      const details = errorDetails(body, response.status);
+      throw new RelayApiError(
+        response.status,
+        details.code,
+        `Failed to download Relay attachment ${label}: `
+          + `HTTP ${response.status}`,
+        body,
+      );
+    }
+    return await response.arrayBuffer();
+  }
 }
