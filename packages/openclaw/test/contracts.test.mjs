@@ -73,7 +73,7 @@ test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
   });
   assert.equal(
     contractLock.relaySdk.source.commit,
-    "8570546ce30ab39d702409893006dbccd351f2b4",
+    "776a9a7873f41c0c9947439c44444674a7d55c5d",
   );
   assert.equal(
     contractLock.relaySdk.source.carriedOpenapiSha256,

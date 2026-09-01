@@ -1482,7 +1482,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "test/contracts.test.mjs",
       "source_sha256": "7f34f5cc839cb8be852fe69c3c692b14d4de99e84122472f6ddedd0d06f9642d",
-      "destination_sha256": "1097a51755445edc9e326be185a1e76da051d440aeb8b6125a12d2fa8b875d3b",
+      "destination_sha256": "81b49d8dcfa38ded13675b55611d505b530d1715636a1121b8b461eddac25820",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
