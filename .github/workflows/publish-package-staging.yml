@@ -86,8 +86,27 @@ jobs:
           cache: npm
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
       - run: npm ci
+      - name: Build the canonical SDK workspace
+        run: npm run build --workspace @relaymessenger/sdk
       - id: resolve
         run: node scripts/release-catalog.mjs --key "$RELEASE_PACKAGE"
+      - name: Validate selected package
+        run: npm run '${{ steps.resolve.outputs.validate }}'
+      - name: Verify validation kept the tracked tree clean
+        run: test -z "$(git status --porcelain)"
+      - id: pack
+        name: Pack one retained tarball
+        run: |
+          mkdir -p .release-tmp/package-staging
+          npm pack \
+            --workspace '${{ steps.resolve.outputs.workspace }}' \
+            --ignore-scripts \
+            --pack-destination .release-tmp/package-staging
+          mapfile -t TARBALLS < <(
+            find .release-tmp/package-staging -name '*.tgz' -print
+          )
+          test "${#TARBALLS[@]}" -eq 1
+          echo "tarball=$(realpath "${TARBALLS[0]}")" >> "$GITHUB_OUTPUT"
       - name: Verify OpenClaw staging release identity
         if: env.RELEASE_PACKAGE == 'openclaw'
         working-directory: packages/openclaw
@@ -101,21 +120,15 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.resolve.outputs.version }}
           RELEASE_TAG: staging
+          RELEASE_TARBALL: ${{ steps.pack.outputs.tarball }}
         run: node scripts/staging-release-guard.mjs
-      - name: Validate selected package
-        run: npm run '${{ steps.resolve.outputs.validate }}'
-      - name: Pack one retained tarball
+      - name: Retain the release identity
         run: |
-          mkdir -p .release-tmp/package-staging
           IDENTITY='${{ steps.resolve.outputs.directory }}/.release/npm-staging/release-identity.json'
           if [ -f "$IDENTITY" ]; then
             cp "$IDENTITY" .release-tmp/package-staging/release-identity.json
           fi
-          npm pack \
-            --workspace '${{ steps.resolve.outputs.workspace }}' \
-            --ignore-scripts \
-            --pack-destination .release-tmp/package-staging
-          test "$(find .release-tmp/package-staging -name '*.tgz' | wc -l)" -eq 1
+          test -z "$(git status --porcelain)"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: relay-${{ env.RELEASE_PACKAGE }}-${{ github.sha }}

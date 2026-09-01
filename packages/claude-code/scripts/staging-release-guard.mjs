@@ -22,6 +22,7 @@ const workflowSha = process.env.GITHUB_SHA ?? "";
 const workflowRef = process.env.GITHUB_REF ?? "";
 const workflowRepository = process.env.GITHUB_REPOSITORY ?? "";
 const workflowWorkspace = process.env.GITHUB_WORKSPACE ?? "";
+const releaseTarball = process.env.RELEASE_TARBALL ?? "";
 const expectedRepository = "RelayMessenger/Relay-SDK";
 const packagePath = "packages/claude-code";
 
@@ -77,6 +78,36 @@ const runtime = readFileSync(join(root, "runtime/server.mjs"));
 const packagedRuntime = readFileSync(join(root, "plugin/runtime/server.mjs"));
 assert.deepEqual(runtime, packagedRuntime);
 assert.ok(runtime.includes(Buffer.from(JSON.stringify(releaseVersion))));
+const runtimeSha256 = createHash("sha256").update(runtime).digest("hex");
+
+assert.equal(
+  releaseTarball,
+  resolve(releaseTarball),
+  "RELEASE_TARBALL must be one absolute path",
+);
+assert.equal(
+  dirname(releaseTarball),
+  resolve(workflowWorkspace, ".release-tmp", "package-staging"),
+  "RELEASE_TARBALL must be the retained package artifact",
+);
+const tarballRuntime = execFileSync(
+  "tar",
+  ["-xOzf", releaseTarball, "package/runtime/server.mjs"],
+);
+const tarballPluginRuntime = execFileSync(
+  "tar",
+  ["-xOzf", releaseTarball, "package/plugin/runtime/server.mjs"],
+);
+assert.deepEqual(
+  tarballRuntime,
+  runtime,
+  "packed runtime differs from the validated workspace runtime",
+);
+assert.deepEqual(
+  tarballPluginRuntime,
+  runtime,
+  "packed plugin runtime differs from the validated workspace runtime",
+);
 
 const receipt = {
   schema: "relay-claude-channel-staging-release-identity/v1",
@@ -86,7 +117,10 @@ const receipt = {
   version: releaseVersion,
   tag: releaseTag,
   ref: workflowRef,
-  runtime_sha256: createHash("sha256").update(runtime).digest("hex"),
+  runtime_sha256: runtimeSha256,
+  tarball_runtime_sha256: createHash("sha256")
+    .update(tarballRuntime)
+    .digest("hex"),
 };
 const receiptDirectory = join(root, ".release", "npm-staging");
 mkdirSync(receiptDirectory, { recursive: true });

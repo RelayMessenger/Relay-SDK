@@ -1801,7 +1801,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "scripts/staging-release-guard.mjs",
       "source_sha256": "c9a61b3af294a56240430907b2923b7283d184a6df8147164c89d73f76b0ab81",
-      "destination_sha256": "5aae540af7dc7ee51af90ea59ab8300a56c1cb1098c5c4248b10d73e1c048a39",
+      "destination_sha256": "9483b3667adb405d626478b10de3b4b070560ea091b8e9c7e47218b632e56ee8",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1933,7 +1933,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "test/contracts.test.ts",
       "source_sha256": "bd7f32fbaab18d8529688b87c73664e583b77aabc9fcee15dbcd67c35ecaed14",
-      "destination_sha256": "4f83345681f2ba99389137fb4ecae0b0d4ca4c34ac51187fae43ed2d8971c152",
+      "destination_sha256": "079f7f71ea19afa506e3c8f00adfa57b768632816159f342079ea24a260b8b17",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

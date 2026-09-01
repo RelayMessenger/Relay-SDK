@@ -100,6 +100,9 @@ describe("published artifact contracts", () => {
     expect(guard).toMatch(/releaseSha,\s*\/\^\[0-9a-f\]\{40\}\$\/u/u);
     expect(guard).toMatch(/workflowSha,\s*releaseSha/u);
     expect(guard).toMatch(/execFileSync\("git", \["rev-parse", "HEAD"\]/u);
+    expect(guard).toContain("RELEASE_TARBALL");
+    expect(guard).toContain("package/runtime/server.mjs");
+    expect(guard).toContain("package/plugin/runtime/server.mjs");
     expect(guard).not.toMatch(/execSync|shell:\s*true/u);
     const rejected = spawnSync(process.execPath, ["scripts/staging-release-guard.mjs"], {
       cwd: root,

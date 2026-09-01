@@ -47,13 +47,60 @@ assert.match(
 );
 assert.match(
   publish,
-  /github\.event_name == 'push' && 'claude-code' \|\| inputs\.package/u,
+  /RELEASE_PACKAGE:\s*\$\{\{\s*github\.event_name == 'push' && 'claude-code' \|\| inputs\.package\s*\}\}/u,
   "a staging push may automatically select only the missing Claude package",
 );
 assert.match(
   publish,
+  /RELEASE_SHA:\s*\$\{\{\s*github\.event_name == 'push' && github\.sha \|\| inputs\.commit_sha\s*\}\}/u,
+  "a staging push must publish its exact event SHA",
+);
+const pushTrigger = publish.slice(
+  publish.indexOf("  push:"),
+  publish.indexOf("  workflow_dispatch:"),
+);
+assert.match(
+  pushTrigger,
   /paths:[\s\S]*packages\/claude-code\/\*\*/u,
   "automatic Claude publication must be path-scoped",
+);
+assert.doesNotMatch(
+  pushTrigger,
+  /packages\/(?:chat-sdk-adapter|cli|mcp|openclaw)\/\*\*/u,
+  "automatic publication must not select another package path",
+);
+const releaseOrder = [
+  "Build the canonical SDK workspace",
+  'id: resolve',
+  "Validate selected package",
+  "Verify validation kept the tracked tree clean",
+  "Pack one retained tarball",
+  "Verify Claude Code staging release identity",
+  "Retain the release identity",
+].map((marker) => publish.indexOf(marker));
+assert.ok(
+  releaseOrder.every((position) => position >= 0),
+  "staging package workflow is missing a release gate",
+);
+assert.deepEqual(
+  [...releaseOrder].sort((left, right) => left - right),
+  releaseOrder,
+  "build, validation, clean-tree, pack, identity, and retention gates drifted",
+);
+assert.match(
+  publish,
+  /RELEASE_TARBALL:\s*\$\{\{\s*steps\.pack\.outputs\.tarball\s*\}\}/u,
+  "Claude release identity must bind the retained tarball",
+);
+assert.match(
+  publish,
+  /name:\s*relay-\$\{\{\s*env\.RELEASE_PACKAGE\s*\}\}-\$\{\{\s*github\.sha\s*\}\}/u,
+  "package artifacts must use the resolved package and event SHA",
+);
+assert.ok(
+  [...publish.matchAll(/test -z "\$\(git status --porcelain\)"/gu)]
+    .length >= 3,
+  "staging publication must prove clean tracked state before and after build",
 );
 assert.doesNotMatch(publish, /--tag\s+(?:latest|next)\b/u);
 
