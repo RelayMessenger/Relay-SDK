@@ -170,6 +170,23 @@ metadata predates this behavior.
 read the Message, so an agent reads the attachments of messages sent to it
 without owning them.
 
+### Attachment content types
+
+Relay accepts any syntactically valid `type/subtype` content type, at most 255
+characters, and stores and returns the original bytes unchanged. There is no
+allowlist. A declared type is lower-cased and its parameters are dropped; a
+malformed one is refused before the request leaves your process. When nothing
+is declared and the filename extension is unknown, the type is
+`application/octet-stream`.
+
+An inbound part becomes a Chat SDK attachment of type `image`, `video` or
+`audio` from its type prefix, and `file` for everything else, so an unfamiliar
+type arrives as a `file` rather than being dropped.
+
+Only pictures and group icons must be images. Those are set with
+`@relaymessenger/sdk`, never through this adapter. The current attachment
+rules are at <https://docs.relayapp.im>.
+
 Relay text parts are plain text and are limited to 10,000 UTF-16 code units.
 Long Chat SDK text is split without breaking surrogate pairs. A Relay Message
 is limited to 100 parts. A public HTTPS attachment URL is sent directly.

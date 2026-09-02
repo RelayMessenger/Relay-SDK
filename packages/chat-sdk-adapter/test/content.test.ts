@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   contentTypeFor,
   postableText,
+  RELAY_FALLBACK_CONTENT_TYPE,
+  RELAY_MAX_CONTENT_TYPE_LENGTH,
   textParts,
 } from "../src/content.js";
 import { RELAY_MAX_TEXT_PART_LENGTH } from "../src/index.js";
@@ -34,10 +36,41 @@ describe("Relay message content", () => {
     ).toBe(value);
   });
 
-  it("infers only content types accepted by the contract", () => {
+  it("infers a known content type from the filename extension", () => {
     expect(contentTypeFor("report.pdf")).toBe("application/pdf");
-    expect(() => contentTypeFor("binary.bin")).toThrow(
-      ValidationError,
+  });
+
+  it("passes any well-formed content type through unchanged", () => {
+    expect(contentTypeFor("payload.custom", "application/x-custom")).toBe(
+      "application/x-custom",
     );
+    expect(
+      contentTypeFor("Model.USDZ", "Model/VND.USDZ+ZIP; charset=binary"),
+    ).toBe("model/vnd.usdz+zip");
+  });
+
+  it("falls back to application/octet-stream for an unknown extension", () => {
+    expect(contentTypeFor("binary.bin")).toBe(
+      RELAY_FALLBACK_CONTENT_TYPE,
+    );
+    expect(RELAY_FALLBACK_CONTENT_TYPE).toBe("application/octet-stream");
+  });
+
+  it("rejects a malformed content type with the Relay ValidationError", () => {
+    for (
+      const declared of [
+        "application",
+        "application/",
+        "/x-custom",
+        "application/x custom",
+        "application/x/custom",
+        "application/x\u0000custom",
+        `application/${"x".repeat(RELAY_MAX_CONTENT_TYPE_LENGTH)}`,
+      ]
+    ) {
+      expect(() => contentTypeFor("payload.bin", declared)).toThrow(
+        ValidationError,
+      );
+    }
   });
 });

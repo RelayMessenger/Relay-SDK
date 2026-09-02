@@ -126,6 +126,12 @@ await relay.attachments.upload(allocation, bytes);
 The upload helper sends the bytes as a raw `PUT` body with the exact returned
 headers.
 
+`content_type` accepts any `type/subtype` media type, not a fixed list. Relay
+stores and returns the original bytes unchanged and falls back to
+`application/octet-stream`. The types named in `SupportedContentType` stay for
+editor completion. Only pictures and group icons must be images; the current
+attachment rules are at <https://docs.relayapp.im>.
+
 ## Webhooks
 
 ```ts
