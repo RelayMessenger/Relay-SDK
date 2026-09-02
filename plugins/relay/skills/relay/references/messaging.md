@@ -54,8 +54,9 @@ Adjacent text parts are invalid. Replies use `reply_to.message_id` and optional
 
 Allocate with `POST /v1/attachments`, upload raw bytes with the returned method
 and required headers, then send the returned Attachment ID as a media part.
-The allocation and upload byte length and content type must match. WebP is an
-image type; SVG is rejected.
+The allocation and upload byte length and content type must match. Relay
+accepts any `type/subtype` media type and stores the bytes unchanged. Only
+pictures and group icons must be images.
 
 Voice memos use the dedicated Chat voice-memo operation after uploading audio.
 

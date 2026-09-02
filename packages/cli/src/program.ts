@@ -321,7 +321,7 @@ export const createProgram = (
     .command("update")
     .argument("<chat-id>")
     .option("--display-name <name>")
-    .option("--group-icon <attachment-id>")
+    .option("--group-icon <attachment-id-or-https-url>")
     .option("--clear-group-icon")
     .action(async (
       chatID: string,

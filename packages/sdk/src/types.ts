@@ -210,7 +210,14 @@ export interface ChatCreateResponse {
 
 export interface ChatUpdateParams {
   display_name?: string;
-  group_chat_icon?: UUID | null;
+  /**
+   * Group photo for the chat, in either of two forms. A completed image
+   * Attachment ID uses an image you already uploaded. Any publicly reachable
+   * HTTPS image address also works: Relay downloads it and serves a permanent
+   * copy of its own, so the address you supply does not have to stay up. Send
+   * null to clear the photo.
+   */
+  group_chat_icon?: string | null;
 }
 
 export interface AcceptedResponse {
