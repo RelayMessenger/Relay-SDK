@@ -28,7 +28,7 @@ Relay packages own webhook verification and API calls.
 5. Think runs the model in a recoverable fiber. The model must call the native
    `reply` Action once.
 6. The Action commits one complete Message through
-   `@relaymessenger/sdk@0.3.0-staging.6`. Its stable idempotency key is derived
+   `@relaymessenger/sdk@0.3.0-staging.7`. Its stable idempotency key is derived
    from the inbound Relay Message ID.
 
 Think's streamed response surface is intentionally limited to zero visible
@@ -47,9 +47,9 @@ Message instead of creating a duplicate.
 - a staging agent and Agent Token from Relay Console
 
 The adapter release used by this staging branch is
-`@relaymessenger/chat-sdk-adapter@0.3.0-staging.2`, published to npm with
+`@relaymessenger/chat-sdk-adapter@0.3.0-staging.3`, published to npm with
 provenance from Relay-SDK commit
-`d3a8ae02143120868e304e3a1213148e53eac80b`. Its imported adapter source is
+`ddb78e385800d82b041441698985fafab3d9aba9`. Its imported adapter source is
 Relay Chat SDK commit `eecf94a4d38bc021917e54dfed57e268657c17af`.
 
 ## Local setup
@@ -285,8 +285,8 @@ This revision is tested against:
 
 - Relay Server `ddcbccb44b9f85e8c2e3e63fead9b81d52f2bd15`
 - Relay Chat SDK `eecf94a4d38bc021917e54dfed57e268657c17af`
-- `@relaymessenger/chat-sdk-adapter@0.3.0-staging.2` npm integrity
-  `sha512-n07DNFpZBLlrHS5oUm9Q9ZS02fz9tO46ZUFBK/xNk+PvLcYZa7KK9Q6BZXfYsL7cNd2jGljhqgKetjvocSfHng==`
+- `@relaymessenger/chat-sdk-adapter@0.3.0-staging.3` npm integrity
+  `sha512-VqZV8cht9qbKbG/lCOc+6TCyLFB1DiTmG8VlOaJOSa8ttg8uszU7us+OzTLtu95lzwz1pfMOZzNuXJ7SVKxHjw==`
 - OpenAPI SHA-256
   `26a6bc047286e09df6ef95f3c6b09f0437260ecc94e12c5fb3ce1704910f8ba1`
 - public `ChatHandle.image_url` and `ChatHandle.about` fields, with no legacy

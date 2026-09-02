@@ -165,8 +165,8 @@ release: Relay Server
 `26a6bc047286e09df6ef95f3c6b09f0437260ecc94e12c5fb3ce1704910f8ba1`,
 public `ChatHandle.image_url` and `ChatHandle.about` fields with no legacy
 aliases,
-and the exact `@relaymessenger/sdk@0.3.0-staging.6` registry integrity, source
-commit `d3a8ae02143120868e304e3a1213148e53eac80b`, REST operations, and WebSocket
+and the exact `@relaymessenger/sdk@0.3.0-staging.7` registry integrity, source
+commit `ddb78e385800d82b041441698985fafab3d9aba9`, REST operations, and WebSocket
 frames consumed by the plugin.
 
 Public CI hashes the checked-in `contracts/relay-openapi.yaml` fixture and
@@ -176,10 +176,10 @@ and proves that the fixture bytes exactly match the locked Server commit before
 packaging. The public Relay-SDK monorepo does not require credentials for the
 private Server source and does not overstate what npm metadata can attest.
 
-`contracts/relay-sdk-0.3.0-staging.6.registry.json` records immutable npm
+`contracts/relay-sdk-0.3.0-staging.7.registry.json` records immutable npm
 publication metadata and tarball digests. Validation downloads the registry
 tarball, verifies SHA-1, SHA-256, and SHA-512 integrity, checks the installed
-SDK, and compares its package metadata with exact SDK commit `d3a8ae0`. The
+SDK, and compares its package metadata with exact SDK commit `ddb78e3`. The
 npm SLSA statement binds the published tarball digest to that commit through
 the trusted staging publish workflow. These are artifact compatibility and
 source-provenance checks, not a claim of a hosted Relay deployment test.
