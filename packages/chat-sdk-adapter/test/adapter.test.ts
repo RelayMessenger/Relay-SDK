@@ -165,19 +165,28 @@ describe("RelayAdapter interface", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects local bytes before allocation so retries cannot change the body", async () => {
-    const { adapter, fetchMock } = adapterHarness();
-    await expect(
-      adapter.postMessage(THREAD_ID, {
-        files: [{
-          data: new Uint8Array([1, 2, 3]).buffer,
-          filename: "photo.png",
+  it("posts a public HTTPS attachment by reference without spending an upload", async () => {
+    const { adapter, calls } = adapterHarness();
+    await adapter.postMessage(THREAD_ID, {
+      attachments: [
+        {
           mimeType: "image/png",
-        }],
-        raw: "",
-      }),
-    ).rejects.toThrow(/public HTTPS URL/);
-    expect(fetchMock).not.toHaveBeenCalled();
+          name: "photo.png",
+          type: "image" as const,
+          url: "https://cdn.example.test/photo.png",
+        },
+      ],
+      raw: "look",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body).toMatchObject({
+      message: {
+        parts: [
+          { type: "text", value: "look" },
+          { type: "media", url: "https://cdn.example.test/photo.png" },
+        ],
+      },
+    });
   });
 
   it("buffers streams into one canonical message and no-ops empty streams", async () => {
@@ -841,6 +850,229 @@ describe("Relay webhook handling", () => {
     );
     expect(sends[1]?.key).toBe(sends[0]?.key);
     expect(sends[1]?.body).not.toBe(sends[0]?.body);
+  });
+});
+
+describe("outbound local bytes and files", () => {
+  interface UploadCall {
+    body: unknown;
+    headers: Headers;
+    method: string;
+    url: string;
+  }
+
+  function uploadHarness() {
+    const calls: UploadCall[] = [];
+    let allocations = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        calls.push({
+          body:
+            typeof init?.body === "string"
+              ? (JSON.parse(init.body) as unknown)
+              : init?.body,
+          headers: new Headers(init?.headers),
+          method: init?.method ?? "GET",
+          url,
+        });
+        if (url.endsWith("/v1/attachments")) {
+          allocations += 1;
+          return jsonResponse(
+            {
+              attachment_id: `00000000-0000-4000-8000-00000000000${allocations}`,
+              download_url: "https://cdn.relay.test/download",
+              expires_at: "2026-08-30T13:00:00.000Z",
+              http_method: "PUT",
+              required_headers: { "x-upload-token": "opaque" },
+              upload_url: `https://storage.relay.test/upload/${allocations}`,
+            },
+            201,
+          );
+        }
+        if (url.startsWith("https://storage.relay.test/")) {
+          return new Response(null, { status: 200 });
+        }
+        return jsonResponse(sentMessage(), 202);
+      },
+    );
+    const adapter = createRelayAdapter({
+      fetch: fetchMock as unknown as typeof fetch,
+      idempotencyKeyResolver: () => "test-upload",
+      token: "agent-token",
+      webhookSecret: WEBHOOK_SECRET,
+    });
+    return { adapter, calls };
+  }
+
+  it("allocates, uploads, then posts a media part referencing the attachment", async () => {
+    const { adapter, calls } = uploadHarness();
+    await adapter.postMessage(THREAD_ID, {
+      files: [
+        {
+          data: new Uint8Array([1, 2, 3]).buffer,
+          filename: "photo.png",
+          mimeType: "image/png",
+        },
+      ],
+      raw: "here it is",
+    });
+
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      "POST https://api.relayapp.im/v1/attachments",
+      "PUT https://storage.relay.test/upload/1",
+      `POST https://api.relayapp.im/v1/chats/${IDS.chat}/messages`,
+    ]);
+    expect(calls[0]?.body).toEqual({
+      content_type: "image/png",
+      filename: "photo.png",
+      size_bytes: 3,
+    });
+    // Storage takes only the headers Relay handed back; never the Agent Token.
+    expect(
+      Object.fromEntries(calls[1]!.headers.entries()),
+    ).toEqual({ "x-upload-token": "opaque" });
+    expect(calls[2]?.body).toMatchObject({
+      message: {
+        parts: [
+          { type: "text", value: "here it is" },
+          {
+            attachment_id: "00000000-0000-4000-8000-000000000001",
+            type: "media",
+          },
+        ],
+      },
+    });
+  });
+
+  it("sends the file's own bytes, not the pool its Buffer sits in", async () => {
+    const { adapter, calls } = uploadHarness();
+    // A Node Buffer from a small allocation is a window onto a shared pool.
+    const pooled = Buffer.from([7, 8, 9]);
+    await adapter.postMessage(THREAD_ID, {
+      files: [{ data: pooled, filename: "three.bin" }],
+      raw: "",
+    });
+    const uploaded = calls[1]?.body as Uint8Array;
+    expect(uploaded.byteLength).toBe(3);
+    expect([...uploaded]).toEqual([7, 8, 9]);
+    expect(calls[0]?.body).toMatchObject({ size_bytes: 3 });
+  });
+
+  it("infers the content type from the filename when none is declared", async () => {
+    const { adapter, calls } = uploadHarness();
+    await adapter.postMessage(THREAD_ID, {
+      files: [
+        { data: new Uint8Array([1]).buffer, filename: "notes.pdf" },
+      ],
+      raw: "",
+    });
+    expect(calls[0]?.body).toMatchObject({
+      content_type: "application/pdf",
+    });
+  });
+
+  it("uploads an attachment that carries bytes instead of a URL", async () => {
+    const { adapter, calls } = uploadHarness();
+    await adapter.postMessage(THREAD_ID, {
+      attachments: [
+        {
+          data: Buffer.from([4, 5]),
+          height: 20,
+          mimeType: "image/png",
+          name: "shot.png",
+          type: "image" as const,
+          width: 10,
+        },
+      ],
+      raw: "",
+    });
+    expect(calls[0]?.body).toEqual({
+      content_type: "image/png",
+      filename: "shot.png",
+      height: 20,
+      size_bytes: 2,
+      width: 10,
+    });
+    expect(calls[2]?.body).toMatchObject({
+      message: {
+        parts: [
+          {
+            attachment_id: "00000000-0000-4000-8000-000000000001",
+            type: "media",
+          },
+        ],
+      },
+    });
+  });
+
+  it("uploads an attachment that can only fetch its bytes", async () => {
+    const { adapter, calls } = uploadHarness();
+    await adapter.postMessage(THREAD_ID, {
+      attachments: [
+        {
+          fetchData: async () => new Uint8Array([9, 9, 9, 9]).buffer,
+          mimeType: "application/octet-stream",
+          name: "blob.bin",
+          type: "file" as const,
+        },
+      ],
+      raw: "",
+    });
+    expect(calls[0]?.body).toMatchObject({ size_bytes: 4 });
+  });
+
+  it("uploads every file in the message, one attachment each", async () => {
+    const { adapter, calls } = uploadHarness();
+    await adapter.postMessage(THREAD_ID, {
+      files: [
+        { data: new Uint8Array([1]).buffer, filename: "a.txt" },
+        { data: new Uint8Array([2, 2]).buffer, filename: "b.txt" },
+      ],
+      raw: "",
+    });
+    const sent = calls.at(-1)?.body as {
+      message: { parts: Array<Record<string, unknown>> };
+    };
+    expect(sent.message.parts).toEqual([
+      {
+        attachment_id: "00000000-0000-4000-8000-000000000001",
+        type: "media",
+      },
+      {
+        attachment_id: "00000000-0000-4000-8000-000000000002",
+        type: "media",
+      },
+    ]);
+  });
+
+  it("refuses a body it cannot read, before allocating anything", async () => {
+    const { adapter, calls } = uploadHarness();
+    await expect(
+      adapter.postMessage(THREAD_ID, {
+        files: [
+          {
+            data: "not bytes" as unknown as ArrayBuffer,
+            filename: "bad.txt",
+          },
+        ],
+        raw: "",
+      }),
+    ).rejects.toThrow(/cannot read the bytes of file "bad\.txt"/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("refuses an attachment carrying neither bytes nor a public URL", async () => {
+    const { adapter, calls } = uploadHarness();
+    await expect(
+      adapter.postMessage(THREAD_ID, {
+        attachments: [
+          { name: "ghost.png", type: "image" as const },
+        ],
+        raw: "",
+      }),
+    ).rejects.toThrow(/neither bytes nor a public HTTPS URL/);
+    expect(calls).toHaveLength(0);
   });
 });
 

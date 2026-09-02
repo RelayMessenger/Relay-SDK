@@ -503,7 +503,9 @@ export class RelayAdapter
         "Relay posts outside an inbound webhook require idempotencyKeyResolver",
       );
     }
-    const parts = await buildRelayParts(message);
+    const parts = await buildRelayParts(message, (upload) =>
+      this.client.uploadAttachment(upload),
+    );
     if (parts.length === 0) {
       return this.noopResult(chatId, threadId);
     }

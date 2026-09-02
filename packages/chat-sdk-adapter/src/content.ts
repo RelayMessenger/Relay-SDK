@@ -3,6 +3,8 @@ import {
   extractCard,
   extractFiles,
   extractPostableAttachments,
+  toBuffer,
+  type PlatformName,
   ValidationError,
 } from "@chat-adapter/shared";
 import {
@@ -10,8 +12,32 @@ import {
   toPlainText,
   type AdapterPostableMessage,
   type Attachment,
+  type FileUpload,
 } from "chat";
 import type { RelayOutgoingPart } from "./types.js";
+
+/**
+ * Allocate a Relay Attachment and put the bytes behind it, returning the ID a
+ * media part references. `RelayClient.uploadAttachment` satisfies this.
+ */
+export type RelayMediaUploader = (upload: {
+  body: Uint8Array<ArrayBuffer>;
+  contentType: string;
+  filename: string;
+  height?: number;
+  width?: number;
+}) => Promise<{ attachment_id: string }>;
+
+/**
+ * `toBuffer`'s `platform` only names the four adapters that shipped with the
+ * helper and is used for nothing but an error string. `throwOnUnsupported` is
+ * off here so that string never reaches a caller: an unusable body is refused
+ * below with Relay's own message and the file's name in it.
+ */
+const TO_BUFFER_OPTIONS = {
+  platform: "relay" as PlatformName,
+  throwOnUnsupported: false,
+} as const;
 
 export const RELAY_MAX_TEXT_PART_LENGTH = 10_000;
 export const RELAY_MAX_MESSAGE_PARTS = 100;
@@ -165,35 +191,111 @@ export function textParts(value: string): RelayOutgoingPart[] {
   return result;
 }
 
-async function attachmentPart(
-  attachment: Attachment,
-): Promise<RelayOutgoingPart> {
-  if (attachment.url?.startsWith("https://")) {
-    return { type: "media", url: attachment.url };
+/**
+ * Read a postable body into bytes Relay can store.
+ *
+ * A Node `Buffer` is a view into a pooled `ArrayBuffer` that it usually does
+ * not own outright, so the bytes are copied out of the pool. Handing
+ * `buffer.buffer` straight to the uploader would post whatever else the pool
+ * happened to be holding.
+ */
+async function uploadBody(
+  data: unknown,
+  label: string,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const buffer = await toBuffer(data, TO_BUFFER_OPTIONS);
+  if (!buffer) {
+    throw new ValidationError(
+      "relay",
+      `Relay cannot read the bytes of ${label}; pass a Buffer, an `
+        + "ArrayBuffer, or a Blob.",
+    );
   }
-  throw new ValidationError(
-    "relay",
-    `Attachment ${JSON.stringify(
-      attachment.name ?? "(unnamed)",
-    )} needs a public HTTPS URL. Allocate and upload retryable bytes with `
-      + "@relaymessenger/sdk before posting through Chat SDK.",
+  return new Uint8Array(
+    buffer.buffer.slice(
+      buffer.byteOffset,
+      buffer.byteOffset + buffer.byteLength,
+    ) as ArrayBuffer,
   );
 }
 
+async function uploadedMediaPart(
+  upload: RelayMediaUploader,
+  options: {
+    body: Uint8Array<ArrayBuffer>;
+    contentType: string;
+    filename: string;
+    height?: number;
+    width?: number;
+  },
+): Promise<RelayOutgoingPart> {
+  const allocation = await upload(options);
+  return { attachment_id: allocation.attachment_id, type: "media" };
+}
+
+async function attachmentPart(
+  attachment: Attachment,
+  upload: RelayMediaUploader,
+): Promise<RelayOutgoingPart> {
+  // A public URL is already storable by reference, so it costs no upload.
+  if (attachment.url?.startsWith("https://")) {
+    return { type: "media", url: attachment.url };
+  }
+  const filename = attachment.name ?? "attachment";
+  const data = attachment.data ?? (await attachment.fetchData?.());
+  if (data === undefined) {
+    throw new ValidationError(
+      "relay",
+      `Attachment ${JSON.stringify(filename)} carries neither bytes nor a `
+        + "public HTTPS URL.",
+    );
+  }
+  return uploadedMediaPart(upload, {
+    body: await uploadBody(data, `attachment ${JSON.stringify(filename)}`),
+    contentType: contentTypeFor(filename, attachment.mimeType),
+    filename,
+    ...(attachment.height !== undefined
+      ? { height: attachment.height }
+      : {}),
+    ...(attachment.width !== undefined ? { width: attachment.width } : {}),
+  });
+}
+
+async function filePart(
+  file: FileUpload,
+  upload: RelayMediaUploader,
+): Promise<RelayOutgoingPart> {
+  return uploadedMediaPart(upload, {
+    body: await uploadBody(
+      file.data,
+      `file ${JSON.stringify(file.filename)}`,
+    ),
+    contentType: contentTypeFor(file.filename, file.mimeType),
+    filename: file.filename,
+  });
+}
+
+/**
+ * Turn a Chat SDK postable message into Relay message parts, allocating and
+ * uploading any local bytes it carries.
+ *
+ * Uploads run before the send, so the send body names attachment IDs that
+ * already exist. Inside an inbound webhook turn the send is keyed on the
+ * event ID: a redelivery re-uploads, producing new attachment IDs and so a
+ * different body under the same Idempotency-Key, which Relay refuses with
+ * HTTP 409 rather than posting the message twice. A loud refusal on
+ * redelivery is the safe end of that trade; a silent duplicate is not.
+ */
 export async function buildRelayParts(
   message: AdapterPostableMessage,
+  upload: RelayMediaUploader,
 ): Promise<RelayOutgoingPart[]> {
   const parts = textParts(postableText(message));
   for (const attachment of extractPostableAttachments(message)) {
-    parts.push(await attachmentPart(attachment));
+    parts.push(await attachmentPart(attachment, upload));
   }
   for (const file of extractFiles(message)) {
-    throw new ValidationError(
-      "relay",
-      `File ${JSON.stringify(file.filename)} needs a public HTTPS URL. `
-        + "Allocate and upload retryable bytes with @relaymessenger/sdk before "
-        + "posting through Chat SDK.",
-    );
+    parts.push(await filePart(file, upload));
   }
   if (parts.length > RELAY_MAX_MESSAGE_PARTS) {
     throw new ValidationError(
