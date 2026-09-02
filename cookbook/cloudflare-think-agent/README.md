@@ -47,7 +47,7 @@ Message instead of creating a duplicate.
 - a staging agent and Agent Token from Relay Console
 
 The adapter release used by this staging branch is
-`@relaymessenger/chat-sdk-adapter@0.3.0-staging.3`, published to npm with
+`@relaymessenger/chat-sdk-adapter@0.3.0-staging.4`, published to npm with
 provenance from Relay-SDK commit
 `ddb78e385800d82b041441698985fafab3d9aba9`. Its imported adapter source is
 Relay Chat SDK commit `eecf94a4d38bc021917e54dfed57e268657c17af`.
@@ -285,7 +285,7 @@ This revision is tested against:
 
 - Relay Server `4506b8cb6f41da0b39f3e23a285daf3805fcf3a3`
 - Relay Chat SDK `eecf94a4d38bc021917e54dfed57e268657c17af`
-- `@relaymessenger/chat-sdk-adapter@0.3.0-staging.3` npm integrity
+- `@relaymessenger/chat-sdk-adapter@0.3.0-staging.4` npm integrity
   `sha512-VqZV8cht9qbKbG/lCOc+6TCyLFB1DiTmG8VlOaJOSa8ttg8uszU7us+OzTLtu95lzwz1pfMOZzNuXJ7SVKxHjw==`
 - OpenAPI SHA-256
   `e58ffd5de05250a7a218735cb6bffd854d2d1198134f3f8876b2be109f606fde`
