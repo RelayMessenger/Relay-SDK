@@ -853,6 +853,160 @@ describe("Relay webhook handling", () => {
   });
 });
 
+describe("burst concurrency", () => {
+  /**
+   * The owner's target flow debounces bursts by 2 s. Burst and debounce do not
+   * run the handler inside the webhook call that carried the message: the
+   * message is serialized, revived, and handled after that request returned.
+   * A reply posted from there must still get a stable idempotency key.
+   */
+  it("lets the handler post after a 2s burst window with two webhooks 100ms apart", async () => {
+    const sends: Array<{ body: unknown; key: string | null }> = [];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/messages")) {
+          sends.push({
+            body:
+              typeof init?.body === "string"
+                ? (JSON.parse(init.body) as unknown)
+                : init?.body,
+            key: new Headers(init?.headers).get("idempotency-key"),
+          });
+          return jsonResponse(sentMessage(), 202);
+        }
+        return new Response(null, { status: 204 });
+      },
+    );
+    const adapter = createRelayAdapter({
+      fetch: fetchMock as unknown as typeof fetch,
+      token: "agent-token",
+      webhookSecret: WEBHOOK_SECRET,
+    });
+
+    let settle: (error: unknown) => void = () => undefined;
+    const handled = new Promise<unknown>((resolve) => {
+      settle = resolve;
+    });
+    const chat = new Chat({
+      adapters: { relay: adapter },
+      concurrency: { debounceMs: 2_000, strategy: "burst" },
+      logger: "error",
+      state: createMockState(),
+      userName: "Relay Agent",
+    });
+    chat.onDirectMessage(async (thread) => {
+      try {
+        await thread.post("burst reply");
+        settle(null);
+      } catch (error) {
+        settle(error);
+      }
+    });
+
+    const SECOND_EVENT = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    // Both deliveries must be in flight together: awaiting the first would let
+    // its burst window close and give the second a window of its own.
+    const first = chat.webhooks.relay(
+      await signedRequest(
+        envelope(
+          "message.received",
+          webhookMessage() as unknown as Record<string, unknown>,
+        ),
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const second = chat.webhooks.relay(
+      await signedRequest(
+        envelope(
+          "message.received",
+          webhookMessage({ id: IDS.reply }) as unknown as Record<
+            string,
+            unknown
+          >,
+          { event_id: SECOND_EVENT },
+        ),
+      ),
+    );
+    const [firstResponse, secondResponse] = await Promise.all([
+      first,
+      second,
+    ]);
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+
+    const failure = await handled;
+    // The whole point: the post inside a burst handler must not throw.
+    expect(failure).toBeNull();
+    // Burst collapses the pair into one handler run, so one reply.
+    expect(sends).toHaveLength(1);
+    // The key is derived from a real inbound event, never invented, so a
+    // redelivery of that event collides rather than double-posting.
+    expect([
+      `relay-chat-sdk:${IDS.event}:0`,
+      `relay-chat-sdk:${SECOND_EVENT}:0`,
+    ]).toContain(sends[0]?.key);
+  }, 20_000);
+
+  /**
+   * The turn context lives in `AsyncLocalStorage`, so a handler that ran
+   * after its webhook call returned would post without a key and be refused.
+   * It does not: every deferring strategy awaits the handler inside the
+   * webhook call, so the store is still in scope. This asserts that for the
+   * strategies that defer, because the day one of them resumes out of band is
+   * the day replies start failing.
+   */
+  it.each(["burst", "debounce", "queue"] as const)(
+    "derives the idempotency key from a real inbound event under %s",
+    async (strategy) => {
+      const keys: Array<string | null> = [];
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (String(input).endsWith("/messages")) {
+            keys.push(new Headers(init?.headers).get("idempotency-key"));
+            return jsonResponse(sentMessage(), 202);
+          }
+          return new Response(null, { status: 204 });
+        },
+      );
+      const adapter = createRelayAdapter({
+        fetch: fetchMock as unknown as typeof fetch,
+        token: "agent-token",
+        webhookSecret: WEBHOOK_SECRET,
+      });
+      let settle: (error: unknown) => void = () => undefined;
+      const handled = new Promise<unknown>((resolve) => {
+        settle = resolve;
+      });
+      const chat = new Chat({
+        adapters: { relay: adapter },
+        concurrency: { debounceMs: 200, strategy },
+        logger: "error",
+        state: createMockState(),
+        userName: "Relay Agent",
+      });
+      chat.onDirectMessage(async (thread) => {
+        try {
+          await thread.post("reply");
+          settle(null);
+        } catch (error) {
+          settle(error);
+        }
+      });
+      await chat.webhooks.relay(
+        await signedRequest(
+          envelope(
+            "message.received",
+            webhookMessage() as unknown as Record<string, unknown>,
+          ),
+        ),
+      );
+      expect(await handled).toBeNull();
+      expect(keys).toEqual([`relay-chat-sdk:${IDS.event}:0`]);
+    },
+    20_000,
+  );
+});
+
 describe("outbound local bytes and files", () => {
   interface UploadCall {
     body: unknown;

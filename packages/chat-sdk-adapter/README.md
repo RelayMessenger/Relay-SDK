@@ -91,6 +91,12 @@ therefore requires `idempotencyKeyResolver` for those non-empty posts rather
 than manufacturing a random key that changes on recovery. Think integrations
 should return their stable Action/delivery identity from this resolver.
 
+Concurrency strategies do not change this. `burst`, `debounce` and `queue`
+defer the handler, but they await it inside the webhook call that carried the
+message, so the turn is still in scope and `thread.post()` gets its key. The
+test suite asserts that for all three, because the day a strategy resumes a
+handler out of band is the day replies would start being refused.
+
 ### Think runtime typing
 
 For a runtime that owns typing timing, disable Chat SDK surface typing:
