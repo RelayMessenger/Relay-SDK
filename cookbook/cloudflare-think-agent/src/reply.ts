@@ -1,9 +1,7 @@
 import { action, type Action } from "@cloudflare/think";
-import Relay, { type RequestOptions } from "@relaymessenger/sdk";
+import type { RelayAdapter } from "@relaymessenger/chat-sdk-adapter";
+import { encodeRelayThreadId } from "@relaymessenger/chat-sdk-adapter";
 import { z } from "zod";
-
-import type { Bindings, RelayConfiguration } from "./env";
-import { requireRelayToken } from "./env";
 
 const replySchema = z.object({
   text: z.string().trim().min(1).max(10_000),
@@ -15,59 +13,39 @@ export interface RelayTurnIdentity {
 }
 
 interface ReplyDependencies {
-  env: Bindings;
+  adapter(): RelayAdapter;
   turn(): RelayTurnIdentity;
-}
-
-type RelaySdkEnvironment = Required<
-  Pick<RelayConfiguration, "RELAY_AGENT_TOKEN" | "RELAY_API_ORIGIN">
->;
-
-function relayClient(env: RelaySdkEnvironment): Relay {
-  return new Relay({
-    apiKey: requireRelayToken(env),
-    baseURL: env.RELAY_API_ORIGIN,
-    maxRetries: 2,
-    timeout: 30_000,
-  });
-}
-
-function requestOptions(signal?: AbortSignal): RequestOptions {
-  return signal ? { signal } : {};
 }
 
 export function relayReplyIdempotencyKey(messageId: string): string {
   return `relay-agent-starter:${messageId}`;
 }
 
-export async function markRelayChatRead(
-  env: RelaySdkEnvironment,
-  chatId: string,
-): Promise<void> {
-  await relayClient(env).chats.markAsRead(chatId);
-}
+export type RelayReplyResult =
+  | { messageId: string; status: "sent" }
+  | { status: "aborted" };
 
+/**
+ * Commit the answer as one Relay Message through the adapter's own client.
+ *
+ * The adapter is the only Relay client in the Worker, so this send shares its
+ * `fetch` override, its credential resolver and its idempotency key with every
+ * other Relay call the agent makes.
+ */
 export async function sendRelayReply(
-  env: RelaySdkEnvironment,
+  adapter: RelayAdapter,
   turn: RelayTurnIdentity,
   text: string,
   signal?: AbortSignal,
-): Promise<{ messageId: string; status: "sent" }> {
-  const idempotencyKey = relayReplyIdempotencyKey(turn.messageId);
-  const result = await relayClient(env).chats.messages.send(
-    turn.chatId,
-    {
-      message: {
-        idempotency_key: idempotencyKey,
-        parts: [{ type: "text", value: text }],
-      },
-    },
-    requestOptions(signal),
+): Promise<RelayReplyResult> {
+  // A superseded turn must not commit its answer. Relay has no unsend, so the
+  // signal is checked at the last moment before the message becomes real.
+  if (signal?.aborted) return { status: "aborted" };
+  const sent = await adapter.postMessage(
+    encodeRelayThreadId({ chatId: turn.chatId }),
+    { markdown: text },
   );
-  return {
-    messageId: result.message.id,
-    status: "sent",
-  };
+  return { messageId: sent.id, status: "sent" };
 }
 
 export function createReplyAction(deps: ReplyDependencies): Action {
@@ -78,6 +56,11 @@ export function createReplyAction(deps: ReplyDependencies): Action {
     inputSchema: replySchema,
     idempotencyKey: () => `message:${deps.turn().messageId}`,
     execute: ({ text }, context) =>
-      sendRelayReply(deps.env, deps.turn(), text, context.signal),
+      sendRelayReply(
+        deps.adapter(),
+        deps.turn(),
+        text,
+        context.signal,
+      ),
   });
 }

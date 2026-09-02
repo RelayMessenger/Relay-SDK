@@ -21,15 +21,28 @@ Relay packages own webhook verification and API calls.
 
 1. Relay sends a signed `message.received` webhook.
 2. `@relaymessenger/chat-sdk-adapter` verifies the exact raw body before parsing.
-3. After verification, the Worker routes the Chat UUID to one durable root
-   Think conversation. The adapter verifies the forwarded raw body again.
-4. Direct Messages start turns. Group Messages start turns only when a text
+3. The Worker hands the delivery to the Chat's durable root Think conversation
+   and answers `202 Accepted` immediately, without waiting for the turn.
+   Thinking outlives any webhook timeout, so holding the response open would
+   make Relay redeliver the same event and buy a second turn saying the same
+   thing.
+4. Inside the Durable Object the adapter verifies the forwarded raw body again
+   and marks the Chat read, before Chat SDK dispatch. The read states that the
+   message arrived, so no debounce window and no model turn can delay it.
+5. Direct Messages start turns. Group Messages start turns only when a text
    part's structured `mention` matches the receiving Chat's `owner_handle`.
-5. Think runs the model in a recoverable fiber. The model must call the native
+   Every inbound Message is read, whether or not it starts a turn.
+6. Think runs the model in a recoverable fiber. The model must call the native
    `reply` Action once.
-6. The Action commits one complete Message through
-   `@relaymessenger/sdk@0.3.0-staging.7`. Its stable idempotency key is derived
-   from the inbound Relay Message ID.
+7. The Action commits one complete Message through the same adapter, so the
+   Worker holds one Relay client. Its idempotency key is the adapter's own
+   `relay-chat-sdk:<event_id>:<ordinal>`, derived from the event that caused
+   the send.
+
+A burst of Messages produces one answer. Think fixes the Chat SDK concurrency
+strategy to `burst` with a 600 ms window and exposes no option to change it
+(`@cloudflare/think` 0.17.0, `dist/chat-sdk-C8BvREXn.js:421-424`), so Messages
+arriving inside that window collapse into a single turn on the newest one.
 
 Think's streamed response surface is intentionally limited to zero visible
 characters. Relay therefore never receives a draft or a second fallback

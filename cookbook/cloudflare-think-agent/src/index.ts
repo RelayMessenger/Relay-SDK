@@ -72,6 +72,7 @@ export function relayChatIdFromSignedPayload(payload: string): string | null {
 async function routeRelayWebhook(
   request: Request,
   env: Bindings,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   if (request.method !== "POST") {
     return Response.json({
@@ -107,15 +108,41 @@ async function routeRelayWebhook(
   const name =
     relayChatIdFromSignedPayload(payload) ?? RELAY_EVENT_AGENT_NAME;
   const agent = await getAgentByName(env.RelayChat, name);
-  return agent.fetch(new Request(request.url, {
+  const delivered = agent.fetch(new Request(request.url, {
     body: payload,
     headers: request.headers,
     method: request.method,
   }));
+
+  // Acknowledge now, answer later.
+  //
+  // The agent marks the chat read and then thinks, and thinking outlives any
+  // sane webhook timeout. Holding this response open until the reply is sent
+  // makes Relay time the delivery out and redeliver the same event, so the
+  // agent pays for a second turn to say the same thing. The signature is
+  // already verified above, the Durable Object request is already in flight,
+  // and every Relay send the agent makes is idempotent, so nothing is lost by
+  // answering here.
+  ctx.waitUntil(delivered.then(
+    () => undefined,
+    (error: unknown) => {
+      console.warn(JSON.stringify({
+        event: "relay_delivery_failed",
+        error: error instanceof Error ? error.message : String(error),
+        name,
+      }));
+    },
+  ));
+
+  return Response.json({ accepted: true }, { status: 202 });
 }
 
 export default {
-  async fetch(request: Request, env: Bindings): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Bindings,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/healthz" && request.method === "GET") {
@@ -129,7 +156,7 @@ export default {
     }
 
     if (url.pathname === RELAY_WEBHOOK_PATH) {
-      return routeRelayWebhook(request, env);
+      return routeRelayWebhook(request, env, ctx);
     }
 
     return new Response("Not found", { status: 404 });

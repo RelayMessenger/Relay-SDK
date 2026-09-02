@@ -184,7 +184,11 @@ export class RelayChatAgent extends StarterRelayChatAgent {
 const TEST_LEDGER_PATH = "/__test/action-ledger";
 
 export default {
-  async fetch(request: Request, env: Bindings): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Bindings,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === TEST_LEDGER_PATH) {
       if (request.method === "POST") {
@@ -222,6 +226,6 @@ export default {
       }
       return new Response("Method not allowed", { status: 405 });
     }
-    return worker.fetch(request, env);
+    return worker.fetch(request, env, ctx);
   },
 } satisfies ExportedHandler<Bindings>;
