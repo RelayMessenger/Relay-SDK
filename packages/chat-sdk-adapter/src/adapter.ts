@@ -75,6 +75,15 @@ import {
 
 export const RELAY_ADAPTER_NAME = "relay";
 
+/**
+ * Bounds on the forward walk that serves a backward `fetchMessages`. The page
+ * size is the contract's maximum (`contracts/relay-openapi.yaml`, `getMessages`
+ * `limit` maximum 100), so the walk reaches the tail in the fewest requests
+ * Relay allows.
+ */
+export const RELAY_BACKWARD_WALK_PAGE_SIZE = 100;
+export const RELAY_BACKWARD_WALK_MAX_PAGES = 10;
+
 export interface RelayIdempotencyKeyContext {
   chatId: string;
   parts: ReadonlyArray<import("./types.js").RelayOutgoingPart>;
@@ -727,37 +736,87 @@ export class RelayAdapter
   }
 
   /**
-   * Relay's public chat cursor advances oldest-to-newest. Chat SDK's backward
-   * cursor contract cannot be represented, so only explicit forward reads are
-   * supported rather than faking backward pagination.
+   * Fetch messages from a Relay chat.
+   *
+   * `forward` is Relay's native shape: one `GET /v1/chats/{id}/messages` per
+   * call, and `nextCursor` is Relay's own cursor pointing at newer messages.
+   *
+   * `backward` — the Chat SDK default, and what `thread.fetchMessages()` asks
+   * for when loading a chat view — has no native Relay equivalent, because
+   * the public contract publishes exactly one opaque cursor and it advances
+   * oldest-to-newest. It is served by walking forward to the tail and keeping
+   * the newest `limit` messages seen.
+   *
+   * **The cost is real and worth knowing before you call it.** One backward
+   * call issues up to {@link RELAY_BACKWARD_WALK_MAX_PAGES} requests of
+   * {@link RELAY_BACKWARD_WALK_PAGE_SIZE} messages each — up to 10 round
+   * trips covering 1000 messages — rather than the single request `forward`
+   * costs. Chats shorter than one page cost exactly one request, which is the
+   * common case.
+   *
+   * If the walk reaches the end of the chat, the result is exactly the most
+   * recent `limit` messages and there is no `nextCursor`: Relay cannot
+   * address older messages, so there is no further backward page to offer.
+   *
+   * If the walk is cut short by the page cap, the messages are the newest the
+   * bounded walk could reach and `nextCursor` carries Relay's live forward
+   * cursor. Passing it back as `cursor` resumes the walk from that point
+   * rather than moving to older messages, so repeated calls converge on the
+   * true tail. That is the opposite of the generic backward contract, and it
+   * is the only meaning Relay's single forward cursor can carry.
+   *
+   * Messages are returned oldest-first within the page in every direction, as
+   * the interface requires.
    */
   async fetchMessages(
     threadId: string,
     options?: FetchOptions,
   ): Promise<FetchResult<RelayRawMessage>> {
-    if (options?.direction !== "forward") {
-      return this.unsupported(
-        "fetchMessages(backward)",
-        "Relay chat history exposes only an opaque forward cursor.",
-      );
-    }
     const { chatId } = this.decodeThreadId(threadId);
     const limit = Math.min(
       100,
-      Math.max(1, Math.trunc(options.limit ?? 50)),
+      Math.max(1, Math.trunc(options?.limit ?? 50)),
     );
-    const result = await this.client.getMessages({
-      chatId,
-      limit,
-      ...(options.cursor ? { cursor: options.cursor } : {}),
-    });
+    if (options?.direction === "forward") {
+      const result = await this.client.getMessages({
+        chatId,
+        limit,
+        ...(options.cursor ? { cursor: options.cursor } : {}),
+      });
+      return {
+        messages: result.messages.map((message) =>
+          this.parseMessage({ chatId, message }),
+        ),
+        ...(result.next_cursor
+          ? { nextCursor: result.next_cursor }
+          : {}),
+      };
+    }
+
+    let cursor = options?.cursor;
+    let newest: RelayMessage[] = [];
+    let truncated = false;
+    for (
+      let page = 0;
+      page < RELAY_BACKWARD_WALK_MAX_PAGES;
+      page += 1
+    ) {
+      const result = await this.client.getMessages({
+        chatId,
+        limit: RELAY_BACKWARD_WALK_PAGE_SIZE,
+        ...(cursor ? { cursor } : {}),
+      });
+      // Keep only the newest `limit` seen so a deep chat costs bounded memory.
+      newest = newest.concat(result.messages).slice(-limit);
+      cursor = result.next_cursor ?? undefined;
+      if (!cursor) break;
+      truncated = page === RELAY_BACKWARD_WALK_MAX_PAGES - 1;
+    }
     return {
-      messages: result.messages.map((message) =>
+      messages: newest.map((message) =>
         this.parseMessage({ chatId, message }),
       ),
-      ...(result.next_cursor
-        ? { nextCursor: result.next_cursor }
-        : {}),
+      ...(truncated && cursor ? { nextCursor: cursor } : {}),
     };
   }
 

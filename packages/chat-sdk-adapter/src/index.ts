@@ -1,6 +1,8 @@
 export {
   createRelayAdapter,
   RELAY_ADAPTER_NAME,
+  RELAY_BACKWARD_WALK_MAX_PAGES,
+  RELAY_BACKWARD_WALK_PAGE_SIZE,
   RelayAdapter,
 } from "./adapter.js";
 export type { RelayAdapterOptions } from "./adapter.js";

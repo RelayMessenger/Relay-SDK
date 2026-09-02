@@ -12,6 +12,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import {
   createRelayAdapter,
+  RELAY_BACKWARD_WALK_MAX_PAGES,
   RELAY_WEBHOOK_EVENT_TYPES,
   type RelayWebhookEventType,
 } from "../src/index.js";
@@ -268,8 +269,8 @@ describe("RelayAdapter interface", () => {
     });
   });
 
-  it("supports explicit forward fetch and refuses false backward semantics", async () => {
-    const { adapter } = adapterHarness();
+  it("serves an explicit forward fetch with one request and Relay's own cursor", async () => {
+    const { adapter, calls } = adapterHarness();
     const result = await adapter.fetchMessages(THREAD_ID, {
       direction: "forward",
       limit: 10,
@@ -280,9 +281,8 @@ describe("RelayAdapter interface", () => {
       threadId: THREAD_ID,
     });
     expect(result.nextCursor).toBe("next-page");
-    await expect(adapter.fetchMessages(THREAD_ID)).rejects.toMatchObject({
-      feature: "fetchMessages(backward)",
-    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toContain("limit=10");
   });
 
   it("reads a single message and answers null for one Relay does not have", async () => {
@@ -332,6 +332,121 @@ describe("RelayAdapter interface", () => {
       NotImplementedError,
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("backward fetchMessages over Relay's forward-only cursor", () => {
+  const PER_PAGE = 3;
+
+  /**
+   * Serve `pageCount` pages of history. Each page carries a `next_cursor`
+   * except the last, which ends the walk exactly as Relay's contract says
+   * ("Null if there are no more results to fetch").
+   */
+  function historyHarness(pageCount: number) {
+    const urls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      urls.push(url.toString());
+      const cursor = url.searchParams.get("cursor");
+      const page = cursor ? Number(cursor.replace("page-", "")) : 0;
+      const isLast = page >= pageCount - 1;
+      return jsonResponse({
+        messages: Array.from({ length: PER_PAGE }, (_, index) => {
+          const ordinal = page * PER_PAGE + index;
+          return {
+            chat_id: IDS.chat,
+            created_at: "2026-08-30T12:00:00.000Z",
+            delivery_status: "sent",
+            from_handle: USER_HANDLE,
+            id: `00000000-0000-4000-8000-${String(ordinal).padStart(12, "0")}`,
+            is_from_me: false,
+            parts: [
+              { reactions: null, type: "text", value: `m${ordinal}` },
+            ],
+            reply_to: null,
+          };
+        }),
+        next_cursor: isLast ? null : `page-${page + 1}`,
+      });
+    });
+    const adapter = createRelayAdapter({
+      fetch: fetchMock as unknown as typeof fetch,
+      token: "agent-token",
+      webhookSecret: WEBHOOK_SECRET,
+    });
+    return { adapter, urls };
+  }
+
+  it("serves the default call shape with no options at all", async () => {
+    const { adapter, urls } = historyHarness(3);
+    const result = await adapter.fetchMessages(THREAD_ID);
+    // Three pages of three, walked to the tail: the whole chat is the answer.
+    expect(result.messages.map((message) => message.text)).toEqual([
+      "m0",
+      "m1",
+      "m2",
+      "m3",
+      "m4",
+      "m5",
+      "m6",
+      "m7",
+      "m8",
+    ]);
+    expect(urls).toHaveLength(3);
+    // The tail was reached, so Relay has no older page left to offer.
+    expect(result.nextCursor).toBeUndefined();
+  });
+
+  it("returns the newest limit messages oldest-first for an explicit backward read", async () => {
+    const { adapter, urls } = historyHarness(3);
+    const result = await adapter.fetchMessages(THREAD_ID, {
+      direction: "backward",
+      limit: 4,
+    });
+    expect(result.messages.map((message) => message.text)).toEqual([
+      "m5",
+      "m6",
+      "m7",
+      "m8",
+    ]);
+    expect(result.messages[0]?.threadId).toBe(THREAD_ID);
+    expect(urls).toHaveLength(3);
+    // Every request asks for the contract's maximum page, not the caller's limit.
+    expect(urls.every((url) => url.includes("limit=100"))).toBe(true);
+  });
+
+  it("asks for one page when the chat fits in one page", async () => {
+    const { adapter, urls } = historyHarness(1);
+    const result = await adapter.fetchMessages(THREAD_ID);
+    expect(result.messages).toHaveLength(PER_PAGE);
+    expect(urls).toHaveLength(1);
+  });
+
+  it("stops at the page cap and hands back the cursor that resumes the walk", async () => {
+    const { adapter, urls } = historyHarness(
+      RELAY_BACKWARD_WALK_MAX_PAGES + 5,
+    );
+    const result = await adapter.fetchMessages(THREAD_ID, { limit: 2 });
+    expect(urls).toHaveLength(RELAY_BACKWARD_WALK_MAX_PAGES);
+    expect(result.nextCursor).toBe(`page-${RELAY_BACKWARD_WALK_MAX_PAGES}`);
+    const resumed = await adapter.fetchMessages(THREAD_ID, {
+      cursor: result.nextCursor!,
+      limit: 2,
+    });
+    // Resuming converges on the true tail rather than repeating the same page.
+    expect(resumed.messages.map((message) => message.text)).toEqual([
+      "m43",
+      "m44",
+    ]);
+    expect(resumed.nextCursor).toBeUndefined();
+  });
+
+  it("routes fetchChannelMessages through the same walk", async () => {
+    const { adapter, urls } = historyHarness(2);
+    const result = await adapter.fetchChannelMessages(THREAD_ID);
+    expect(result.messages).toHaveLength(PER_PAGE * 2);
+    expect(urls).toHaveLength(2);
   });
 });
 
