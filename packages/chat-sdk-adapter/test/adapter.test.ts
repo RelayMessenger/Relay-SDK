@@ -107,6 +107,12 @@ describe("RelayAdapter interface", () => {
     expect(typed.name).toBe("relay");
   });
 
+  it("publishes active turns for cross-process cancellation", () => {
+    const { adapter } = adapterHarness();
+    const typed: Adapter = adapter;
+    expect(typed.supportsTurnCancellation).toBe(true);
+  });
+
   it("posts and replies through the locked message route", async () => {
     const { adapter, calls } = adapterHarness();
     const posted = await adapter.postMessage(THREAD_ID, {

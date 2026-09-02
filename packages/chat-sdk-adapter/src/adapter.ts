@@ -209,6 +209,13 @@ export class RelayAdapter
   readonly botUserId?: string;
   readonly lockScope = "thread" as const;
   readonly persistThreadHistory = false;
+  /**
+   * Publish active turns so `ChatInstance.abortTurn(threadId)` cancels work
+   * running in another process that shares the configured state adapter. A
+   * Relay send is one idempotent HTTP request, so an aborted turn leaves no
+   * partial bubble to reconcile.
+   */
+  readonly supportsTurnCancellation = true;
   readonly typing: boolean;
   readonly client: RelayClient;
 
