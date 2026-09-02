@@ -11,6 +11,9 @@
     "check": "npm run check --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "discovery:sync": "node scripts/sync-root-discovery.mjs --write",
+    "discovery:check": "node scripts/sync-root-discovery.mjs --check",
+    "discovery:validate": "scripts/validate-root-discovery.sh",
     "sources:check": "node scripts/validate-sources.mjs && node scripts/verify-import-provenance.mjs",
     "workflows:check": "node scripts/validate-workflows.mjs",
     "proof:clean": "node scripts/verify-clean-tracked.mjs",
@@ -27,7 +30,7 @@
     "validate:claude-code": "npm run verify --workspace relay-claude-channel && npm run pack:smoke --workspace relay-claude-channel",
     "validate:skills": "python3 tooling/skills-distributions/scripts/validate.py && tooling/skills-distributions/scripts/validate-host-manifests.sh",
     "validate:cookbook": "npm run test:all --workspace @relaymessenger/cookbook-cloudflare-think-agent && npm run check --workspace @relaymessenger/cookbook-webhook-receiver && npm run build --workspace @relaymessenger/cookbook-webhook-receiver && npm test --workspace @relaymessenger/cookbook-webhook-receiver && npm run check --workspace @relaymessenger/cookbook-websocket-agent && npm run build --workspace @relaymessenger/cookbook-websocket-agent && npm test --workspace @relaymessenger/cookbook-websocket-agent && npm run check --workspace @relaymessenger/cookbook-send-a-message && npm run build --workspace @relaymessenger/cookbook-send-a-message && npm test --workspace @relaymessenger/cookbook-send-a-message && npm run check --workspace @relaymessenger/cookbook-send-an-image && npm run build --workspace @relaymessenger/cookbook-send-an-image && npm test --workspace @relaymessenger/cookbook-send-an-image && npm run check --workspace @relaymessenger/cookbook-send-a-voice-memo && npm run build --workspace @relaymessenger/cookbook-send-a-voice-memo && npm test --workspace @relaymessenger/cookbook-send-a-voice-memo",
-    "validate": "npm run sources:check && npm run workflows:check && npm run validate:sdk && npm run contract:check && npm run validate:chat-sdk && npm run validate:cli && npm run validate:mcp && npm run validate:openclaw && npm run validate:claude-code && npm run validate:skills && npm run validate:cookbook && npm run proof:clean"
+    "validate": "npm run discovery:validate && npm run sources:check && npm run workflows:check && npm run validate:sdk && npm run contract:check && npm run validate:chat-sdk && npm run validate:cli && npm run validate:mcp && npm run validate:openclaw && npm run validate:claude-code && npm run validate:skills && npm run validate:cookbook && npm run proof:clean"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",

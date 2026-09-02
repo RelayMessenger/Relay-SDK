@@ -19,6 +19,9 @@ skills/
 tooling/
   skills-distributions/   Codex and Cursor mirror generator
 
+plugins/
+  relay/                  generated portable and Codex plugin
+
 cookbook/
   webhook-receiver/
   websocket-agent/
@@ -37,6 +40,46 @@ Relay-Hermes remains separate because it is a Python plugin installed directly
 by Hermes. Relay Docs and private product repositories also remain separate.
 Relay-Codex and Relay-Cursor are generated installation mirrors; their editable
 source lives here.
+
+## Agent plugin discovery
+
+The repository root is a marketplace for Codex, Cursor, and Claude Code. The
+Codex and Cursor entries use [`plugins/relay`](plugins/relay), which is generated
+from the canonical [`skills/relay`](skills/relay) and
+[`tooling/skills-distributions`](tooling/skills-distributions) sources. The
+Claude marketplace points directly at the packaged plugin in
+[`packages/claude-code/plugin`](packages/claude-code/plugin).
+
+After cloning Relay-SDK, install the Codex plugin from the repository root:
+
+```bash
+codex plugin marketplace add /absolute/path/to/Relay-SDK
+codex plugin add relay@relay-plugin-marketplace
+```
+
+For local Cursor discovery, link the same generated plugin package and reload
+Cursor. The root `.cursor-plugin/marketplace.json` is also available for a
+Cursor team marketplace import.
+
+```bash
+mkdir -p ~/.cursor/plugins/local
+ln -s /absolute/path/to/Relay-SDK/plugins/relay \
+  ~/.cursor/plugins/local/relay
+```
+
+Install the Relay channel for Claude Code from the root marketplace:
+
+```bash
+claude plugin marketplace add /absolute/path/to/Relay-SDK
+claude plugin install relay@relay-messenger --scope user
+```
+
+Do not edit `plugins/relay` directly. Refresh and validate root discovery with:
+
+```bash
+npm run discovery:sync
+npm run discovery:validate
+```
 
 ## Development
 

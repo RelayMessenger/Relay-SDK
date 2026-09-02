@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "locked_on": "2026-09-01",
+  "api": {
+    "repository": "https://github.com/RelayMessenger/Relay-Docs",
+    "commit": "7067d0a734febad683f724ec9386e68e33a25f3d",
+    "openapi_path": "api-reference/openapi.yaml",
+    "openapi_sha256": "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5",
+    "skill_path": "skill.md",
+    "skill_sha256": "e3b7387fec44803f73f0f352215bbab81bd2af6dddf49c26e715af0b9e7b55d9"
+  },
+  "sdk": {
+    "repository": "https://github.com/RelayMessenger/Relay-SDK",
+    "commit": "776a9a7873f41c0c9947439c44444674a7d55c5d",
+    "package_path": "packages/sdk/package.json",
+    "package_sha256": "2cd3b01e65725ab55d5b520ded6c1235e1f4c74af0ff07478d3ba029d67eda1a",
+    "package": "@relaymessenger/sdk",
+    "version": "0.3.0-staging.5",
+    "dist_tag": "staging"
+  },
+  "docs_mcp": {
+    "url": "https://docs.relayapp.im/mcp",
+    "role": "discovery",
+    "authority": "Every result must agree with the locked OpenAPI before use."
+  }
+}
