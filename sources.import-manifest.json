@@ -712,7 +712,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "package.json",
       "source_sha256": "271918f460e07d8f61106da4bfbda7e2190a6b61214c809bd880c3fc51cb6bcd",
-      "destination_sha256": "13301b2204bec42c7a08f8454d745713a773229b7ba6060ee0dbecc063dde99d",
+      "destination_sha256": "d65a5f05eaeb82b2cea1b39e6e3474422b9139c33197b9193a5576b34847b83c",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -745,7 +745,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "scripts/tarball-smoke.mjs",
       "source_sha256": "b3ac7e97b05aebfcafc403e8dd300bd5c0ebed5be2b1c5c482ca4c8e416e31be",
-      "destination_sha256": "6e71a8a17f4fe2f27e869493ab24b46ab0d3757ebf907f34204d12f1e2027227",
+      "destination_sha256": "f5104e44acf308ff011d81655952dd1f8098de99db69aae7db898c37bd0bdf47",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -866,7 +866,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/program.ts",
       "source_sha256": "518b2a0b33539c4599832e0de3e62902e558879b1a7f5ed4ceac9877e3caed91",
-      "destination_sha256": "e69e7776cba54409300d95b3146f8848ba998f1280277848aa1d24bb3edaf762",
+      "destination_sha256": "2cb09fbb12f77c0cc3c344095cdad56e3c8c971ee3464cca349bc36291c9850e",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -943,7 +943,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "package.json",
       "source_sha256": "5d526432c2b28b9f79b11a6e3231c7b4e0e772b731ac1aae1514ee88bb41f2cf",
-      "destination_sha256": "0b4489b522eb4b155251b37f08fd27614af3480c03a21231acfc1b50a9baacbc",
+      "destination_sha256": "e862d8a08d7698c08075eb0a8df8dbef5b6829ea69944cb741db6bd33d2548e4",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -998,7 +998,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "scripts/tarball-smoke.mjs",
       "source_sha256": "f267c240da6f25c731d832ffdc0038655ea23476ed048d0e84d81ba0f59ccc8f",
-      "destination_sha256": "ecb229520fe5eb3d8f8a708608fc929adede973a7cb1dda7f7a3e289e94d3b09",
+      "destination_sha256": "10796aae12c5627462e02f244aefbb46fc1b590fed4c56d20a8b97eeadae25be",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1031,7 +1031,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/cli.ts",
       "source_sha256": "1465aa62567df341079003ec6b5564538bafc2f77e5c8d31b0467de27886dc18",
-      "destination_sha256": "7d2d767b079b06b92d677cac196b1eb8e2344668fa598f72d50582b307ee0678",
+      "destination_sha256": "b2d2706f5cbfc080eabe657b06d09d07ff7fd2bbe3c94c7b03c189ba32c05f18",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1075,7 +1075,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/server.ts",
       "source_sha256": "6040d775b0546cbabe46206f2a87b4b3d67f624163ce2de4c0ec0428dff49156",
-      "destination_sha256": "2e28b1e1643d5f85b4f1b86c36989b2526a3049d291db1d016645ca2565a1b42",
+      "destination_sha256": "ee35c4b9fbb2f1a7c2c1704777b915e6c9c6173bbd547678b28291e445efc50b",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
