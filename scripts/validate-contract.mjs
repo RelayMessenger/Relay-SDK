@@ -93,7 +93,7 @@ assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 34);
 assert.equal(manifest.path_count, 21);
 assert.equal(manifest.source_path_count, 22);
-assert.equal(manifest.source_schema_count, 106);
+assert.equal(manifest.source_schema_count, 105);
 assert.equal(manifest.callback_count, 15);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 21);
 assert.equal(operationJSON.length, 34);
