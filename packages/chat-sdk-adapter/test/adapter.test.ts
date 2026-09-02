@@ -1614,3 +1614,219 @@ describe("inbound attachment bytes", () => {
     ]);
   });
 });
+
+const READ_URL = `/v1/chats/${IDS.chat}/read`;
+
+/**
+ * Records the order of Relay HTTP calls and Chat SDK dispatch in one
+ * sequence, so a test can assert that the read is stamped before the
+ * handler rather than merely that both happened.
+ */
+function receiptHarness(
+  options: {
+    abortActiveTurnOnReceipt?: boolean;
+    abortFails?: boolean;
+    markReadOnReceipt?: boolean;
+    readFails?: boolean;
+  } = {},
+) {
+  const sequence: string[] = [];
+  const fetchMock = vi.fn(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (init?.method === "POST" && url.pathname === READ_URL) {
+        sequence.push("read");
+        if (options.readFails) {
+          return jsonResponse({ error: { code: "server_error" } }, 500);
+        }
+        return new Response(null, { status: 204 });
+      }
+      sequence.push(`${init?.method ?? "GET"} ${url.pathname}`);
+      return new Response(null, { status: 204 });
+    },
+  );
+  const adapter = createRelayAdapter({
+    fetch: fetchMock as typeof fetch,
+    token: "agent-token",
+    webhookSecret: WEBHOOK_SECRET,
+    ...(options.abortActiveTurnOnReceipt === undefined
+      ? {}
+      : { abortActiveTurnOnReceipt: options.abortActiveTurnOnReceipt }),
+    ...(options.markReadOnReceipt === undefined
+      ? {}
+      : { markReadOnReceipt: options.markReadOnReceipt }),
+  });
+  const chat = createMockChatInstance();
+  vi.mocked(chat.processMessage).mockImplementation(async () => {
+    sequence.push("processMessage");
+  });
+  vi.mocked(chat.abortTurn).mockImplementation(async () => {
+    sequence.push("abortTurn");
+    if (options.abortFails) throw new Error("state unavailable");
+  });
+  return { adapter, chat, sequence };
+}
+
+describe("Relay read-on-receipt", () => {
+  it("stamps the read before Chat SDK dispatch when enabled", async () => {
+    const { adapter, chat, sequence } = receiptHarness({
+      markReadOnReceipt: true,
+    });
+    await adapter.initialize(chat);
+
+    const response = await adapter.handleWebhook(
+      await signedRequest(envelope()),
+    );
+
+    expect(response.status).toBe(200);
+    expect(sequence).toEqual(["read", "processMessage"]);
+    expect(sequence.filter((step) => step === "read")).toHaveLength(1);
+  });
+
+  it("stamps no read when the option is absent", async () => {
+    const { adapter, chat, sequence } = receiptHarness();
+    await adapter.initialize(chat);
+
+    const response = await adapter.handleWebhook(
+      await signedRequest(envelope()),
+    );
+
+    expect(response.status).toBe(200);
+    expect(sequence).toEqual(["processMessage"]);
+  });
+
+  it("acknowledges the delivery when the read fails", async () => {
+    const { adapter, chat, sequence } = receiptHarness({
+      markReadOnReceipt: true,
+      readFails: true,
+    });
+    await adapter.initialize(chat);
+
+    const response = await adapter.handleWebhook(
+      await signedRequest(envelope()),
+    );
+
+    expect(response.status).toBe(200);
+    expect(sequence).toEqual(["read", "processMessage"]);
+    expect(vi.mocked(chat.getLogger("relay").warn)).toHaveBeenCalledWith(
+      "relay_read_on_receipt_failed",
+      expect.objectContaining({ chatId: IDS.chat }),
+    );
+  });
+
+  it("stamps no read for the agent's own outbound message", async () => {
+    const { adapter, chat, sequence } = receiptHarness({
+      markReadOnReceipt: true,
+    });
+    await adapter.initialize(chat);
+
+    const response = await adapter.handleWebhook(
+      await signedRequest(
+        envelope(
+          "message.received",
+          webhookMessage({
+            direction: "outbound",
+          }) as unknown as Record<string, unknown>,
+        ),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(sequence).toEqual([]);
+  });
+
+  it("stamps no read for a receipt or lifecycle event", async () => {
+    const { adapter, chat, sequence } = receiptHarness({
+      markReadOnReceipt: true,
+    });
+    await adapter.initialize(chat);
+
+    for (const eventType of [
+      "message.read",
+      "message.delivered",
+      "message.sent",
+    ] as const) {
+      await adapter.handleWebhook(
+        await signedRequest(
+          envelope(
+            eventType,
+            webhookMessage() as unknown as Record<string, unknown>,
+          ),
+        ),
+      );
+    }
+
+    expect(sequence).toEqual([]);
+  });
+});
+
+describe("Relay abort-on-receipt", () => {
+  it("cancels the running turn before the newer message is dispatched", async () => {
+    const { adapter, chat, sequence } = receiptHarness({
+      abortActiveTurnOnReceipt: true,
+      markReadOnReceipt: true,
+    });
+    await adapter.initialize(chat);
+
+    const response = await adapter.handleWebhook(
+      await signedRequest(envelope()),
+    );
+
+    expect(response.status).toBe(200);
+    // Abort first: the read is an HTTP round trip, and the superseded turn
+    // must stop spending model time as early as possible.
+    expect(sequence).toEqual(["abortTurn", "read", "processMessage"]);
+    expect(vi.mocked(chat.abortTurn)).toHaveBeenCalledWith(
+      `relay:${IDS.chat}`,
+    );
+  });
+
+  it("cancels nothing when the option is absent", async () => {
+    const { adapter, chat, sequence } = receiptHarness();
+    await adapter.initialize(chat);
+
+    await adapter.handleWebhook(await signedRequest(envelope()));
+
+    expect(sequence).toEqual(["processMessage"]);
+    expect(vi.mocked(chat.abortTurn)).not.toHaveBeenCalled();
+  });
+
+  it("dispatches the newer message when cancellation fails", async () => {
+    const { adapter, chat, sequence } = receiptHarness({
+      abortActiveTurnOnReceipt: true,
+      abortFails: true,
+    });
+    await adapter.initialize(chat);
+
+    const response = await adapter.handleWebhook(
+      await signedRequest(envelope()),
+    );
+
+    expect(response.status).toBe(200);
+    expect(sequence).toEqual(["abortTurn", "processMessage"]);
+    expect(vi.mocked(chat.getLogger("relay").warn)).toHaveBeenCalledWith(
+      "relay_abort_on_receipt_failed",
+      expect.objectContaining({ threadId: `relay:${IDS.chat}` }),
+    );
+  });
+
+  it("cancels nothing for the agent's own outbound message", async () => {
+    const { adapter, chat, sequence } = receiptHarness({
+      abortActiveTurnOnReceipt: true,
+    });
+    await adapter.initialize(chat);
+
+    await adapter.handleWebhook(
+      await signedRequest(
+        envelope(
+          "message.received",
+          webhookMessage({
+            direction: "outbound",
+          }) as unknown as Record<string, unknown>,
+        ),
+      ),
+    );
+
+    expect(sequence).toEqual([]);
+  });
+});

@@ -70,6 +70,8 @@ interface RelayAdapterOptions {
   fetch?: typeof fetch;
   client?: RelayClient;
   signatureToleranceSeconds?: number; // default 300
+  markReadOnReceipt?: boolean;        // default false
+  abortActiveTurnOnReceipt?: boolean; // default false
   idempotencyKeyResolver?: (context: {
     chatId: string;
     threadId: string;
@@ -97,6 +99,40 @@ Posts made outside an inbound webhook have no Relay `event_id`. The adapter
 therefore requires `idempotencyKeyResolver` for those non-empty posts rather
 than manufacturing a random key that changes on recovery. Think integrations
 should return their stable Action/delivery identity from this resolver.
+
+### Read on receipt
+
+`markReadOnReceipt: true` stamps `POST /v1/chats/{id}/read` for an inbound
+`message.received` as soon as its signature verifies, before the event reaches
+Chat SDK dispatch. A read receipt states that the message arrived, not that the
+answer is ready, so it must not wait behind a debounce window or a model turn.
+Turn it on whenever `concurrency` defers the handler.
+
+Only a real inbound message stamps a read. The agent's own outbound messages
+and the `message.sent`, `message.delivered` and `message.read` receipts do not.
+A failed read is logged and never blocks the delivery's 2xx, because holding
+the response open to retry a receipt costs a redelivery of the whole event.
+
+Group messages are read too, including ones the agent stays silent on, and
+there is no flag to change that. Two reasons. Mention detection happens in Chat
+SDK dispatch, which is the very thing read-on-receipt gets ahead of, so at
+receipt the adapter cannot yet know whether it will answer. And it costs a
+human nothing: Relay renders only Delivered in a group and never a member's
+Read, so an agent's read in a group is not visible to anyone.
+
+### Abort on receipt
+
+`abortActiveTurnOnReceipt: true` calls `ChatInstance.abortTurn(threadId)` when
+a newer inbound message arrives, before the new event reaches dispatch. A
+person who sends again while the agent is answering has changed the question,
+so the running turn's `context.signal` fires and the deferring `concurrency`
+strategy hands the newer message to a fresh turn.
+
+Cancellation crosses processes: this adapter sets `supportsTurnCancellation`,
+so Chat publishes the active turn to the state adapter and a turn running in
+another isolate stops when it next polls. A failed abort is logged and the
+newer message is still dispatched; the running turn then finishes normally,
+which is the behaviour of an agent without the option.
 
 Concurrency strategies do not change this. `burst`, `debounce` and `queue`
 defer the handler, but they await it inside the webhook call that carried the

@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/chat-sdk-adapter",
-  "version": "0.3.0-staging.4",
+  "version": "0.3.0-staging.5",
   "description": "Vendor-official Relay adapter for Vercel Chat SDK.",
   "keywords": [
     "relay",
