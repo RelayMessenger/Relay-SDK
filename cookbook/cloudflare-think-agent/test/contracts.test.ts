@@ -8,11 +8,11 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const RELAY_SERVER_SHA =
-  "ddcbccb44b9f85e8c2e3e63fead9b81d52f2bd15";
+  "4506b8cb6f41da0b39f3e23a285daf3805fcf3a3";
 const RELAY_CHAT_SDK_SHA =
   "eecf94a4d38bc021917e54dfed57e268657c17af";
 const RELAY_OPENAPI_SHA256 =
-  "26a6bc047286e09df6ef95f3c6b09f0437260ecc94e12c5fb3ce1704910f8ba1";
+  "e58ffd5de05250a7a218735cb6bffd854d2d1198134f3f8876b2be109f606fde";
 const RELAY_ADAPTER_INTEGRITY =
   "sha512-VqZV8cht9qbKbG/lCOc+6TCyLFB1DiTmG8VlOaJOSa8ttg8uszU7us+OzTLtu95lzwz1pfMOZzNuXJ7SVKxHjw==";
 
