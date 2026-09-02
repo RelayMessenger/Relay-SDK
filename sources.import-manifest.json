@@ -2505,7 +2505,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "README.md",
       "source_sha256": "79d7016a436a9388e3f4044f106132fe9232c225eabcc956c8a737f0f39d37aa",
-      "destination_sha256": "6d3664dcfadd52be8820a7e28f0f4faeb1f05df119dd3911fa55434fc40c5c40",
+      "destination_sha256": "3907bbee982b052cdc06bf5e08ec8af6c553a27d4404981a4c0f09190bc117a4",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2538,7 +2538,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "package-lock.json",
       "source_sha256": "a8b26b0bff63c93112cadc0d399298f81ecbcc81470da5bf3f4ebb31469bce7e",
-      "destination_sha256": "bc039cf70bc045e3b17ba30ec7d07850c080d69a9c1981c9078c79fb188440a7",
+      "destination_sha256": "846d6293901724b0d2eb0df4975a03db52721740386f46968ac441e23565ed73",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2582,10 +2582,10 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "src/agent.ts",
       "source_sha256": "2604f1ae7ce06b321732ef4a635d6ee5cc8677f5f8f252c9e875272c0a632a5c",
-      "destination_sha256": "2604f1ae7ce06b321732ef4a635d6ee5cc8677f5f8f252c9e875272c0a632a5c",
+      "destination_sha256": "280d64ff845dde474c02ce6bb21462b8effd4df7090d9db35839e397f55f3b83",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "cookbook/cloudflare-think-agent/src/env.ts",
@@ -2604,10 +2604,10 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "src/index.ts",
       "source_sha256": "da9b5e3a5f2babe444accb7ee124931a90b6faa3cc971862a17fd47e45d5b587",
-      "destination_sha256": "da9b5e3a5f2babe444accb7ee124931a90b6faa3cc971862a17fd47e45d5b587",
+      "destination_sha256": "0b9e3779862ddc74d1046849266208339ac21008950ab176a8785b3708bfd461",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "cookbook/cloudflare-think-agent/src/model.ts",
@@ -2626,10 +2626,10 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "src/reply.ts",
       "source_sha256": "cfd1475086eb204b365cab1dde0586095cbfced5fb293be1e5e66a22ab31119d",
-      "destination_sha256": "cfd1475086eb204b365cab1dde0586095cbfced5fb293be1e5e66a22ab31119d",
+      "destination_sha256": "e51730f598fe662be98747d0674971c83e82060316713cb0c0300a98690b83df",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "cookbook/cloudflare-think-agent/test/contracts.test.ts",
@@ -2637,7 +2637,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "test/contracts.test.ts",
       "source_sha256": "df01e9d14ea13e0779e8a820a40111eb057f68c2bd355dc5a29030e33a95e01f",
-      "destination_sha256": "31b7cfa1a807f676fee894c3b6ed1f57c9238fc756884b451030939fdf6409fd",
+      "destination_sha256": "944b5e64ba7d86ccbae6f655a4fb524b78bd401b5458e22eaed6d92d3043175b",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2692,10 +2692,10 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "test/workerd/harness.ts",
       "source_sha256": "fc9400a83f8743cec425098179525de8de9b685e5c993ee110ece0f848e239b0",
-      "destination_sha256": "fc9400a83f8743cec425098179525de8de9b685e5c993ee110ece0f848e239b0",
+      "destination_sha256": "56fb7d7d35ac0206470572ffd020b78047dba1634a38da10c16adfcfecec00fd",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "cookbook/cloudflare-think-agent/test/workerd/worker.test.ts",
@@ -2703,7 +2703,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "test/workerd/worker.test.ts",
       "source_sha256": "d336ad240a8a2d71a7740f82bab8bd5b463566fdd64dab61a4d78fab93246230",
-      "destination_sha256": "c8fc3531dcf2bbaedc8c60a127916105fb0693ac69e11a6a19d973a69aae0422",
+      "destination_sha256": "af5b5cd65c890f81478e0f04a1f5ed10c775ae63a6ce77f5ac38e3b4e45fa933",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

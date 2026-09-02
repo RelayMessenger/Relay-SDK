@@ -12,6 +12,7 @@ import {
 import {
   createRelayAdapter,
   decodeRelayThreadId,
+  type RelayAdapter,
 } from "@relaymessenger/chat-sdk-adapter";
 
 import type { Bindings } from "./env";
@@ -23,7 +24,6 @@ import {
 import { starterModel } from "./model";
 import {
   createReplyAction,
-  markRelayChatRead,
   type RelayTurnIdentity,
 } from "./reply";
 
@@ -35,16 +35,37 @@ const ACTION_RETRY_LEASE_MS = 0;
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
-export function createRelayMessenger(env: Bindings) {
+/**
+ * The Worker's single Relay client.
+ *
+ * Inbound and outbound both go through this one adapter, so there is one
+ * credential resolver, one `fetch` override and one retry policy for every
+ * Relay call the agent makes.
+ */
+export function createRelayAdapterFor(env: Bindings): RelayAdapter {
+  const handle = requireRelayAgentHandle(env);
+  return createRelayAdapter({
+    // `abortActiveTurnOnReceipt` is deliberately left off. It cancels the Chat
+    // SDK's turn, and Think never reads that signal, so under Think the Worker
+    // cancels through `cancelAllChats()` in src/index.ts instead.
+    baseUrl: env.RELAY_API_ORIGIN,
+    // The read states that the message arrived. It is stamped on receipt so
+    // no debounce window and no model turn can delay it.
+    markReadOnReceipt: true,
+    token: requireRelayToken(env),
+    typing: false,
+    userName: handle,
+    webhookSecret: requireRelayWebhookSecret(env),
+  });
+}
+
+export function createRelayMessenger(
+  env: Bindings,
+  adapter: RelayAdapter,
+) {
   const handle = requireRelayAgentHandle(env);
   return chatSdkMessenger({
-    adapter: createRelayAdapter({
-      baseUrl: env.RELAY_API_ORIGIN,
-      token: requireRelayToken(env),
-      typing: false,
-      userName: handle,
-      webhookSecret: requireRelayWebhookSecret(env),
-    }),
+    adapter,
     adapterName: "relay",
     capabilities: {
       canEditMessages: false,
@@ -66,6 +87,11 @@ export function createRelayMessenger(env: Bindings) {
     path: RELAY_WEBHOOK_PATH,
     provider: "relay",
     respondTo: ["direct-message", "mention"],
+    // Concurrency is not a messenger option. Think constructs the Chat SDK
+    // instance itself and fixes `{ strategy: "burst", debounceMs: 600 }`
+    // (@cloudflare/think 0.17.0, dist/chat-sdk-C8BvREXn.js:421-424), so a
+    // burst of messages already collapses into one reply — but the window is
+    // Think's 600 ms, not a value this Worker can choose.
     // The Relay adapter verifies Standard Webhooks over the exact raw body.
     verifyWebhook: false,
     userName: handle,
@@ -73,6 +99,8 @@ export function createRelayMessenger(env: Bindings) {
 }
 
 export class RelayChatAgent extends Think<Bindings> {
+  private relayAdapter?: RelayAdapter;
+
   override actionLedgerPendingRetryLeaseMs = ACTION_RETRY_LEASE_MS;
   override chatRecovery = {
     maxAttempts: 6,
@@ -98,30 +126,28 @@ export class RelayChatAgent extends Think<Bindings> {
   override getActions(): Record<string, Action> {
     return {
       reply: createReplyAction({
-        env: this.env,
+        adapter: () => this.adapter(),
         turn: () => this.relayTurn(),
       }),
     };
   }
 
   override getMessengers(): ThinkMessengers {
-    return { relay: createRelayMessenger(this.env) };
+    return {
+      relay: createRelayMessenger(this.env, this.adapter()),
+    };
   }
 
-  override async beforeTurn(context: TurnContext): Promise<TurnConfig> {
-    const turn = this.relayTurn();
-    try {
-      await markRelayChatRead(this.env, turn.chatId);
-    } catch (error) {
-      console.warn(JSON.stringify({
-        event: "relay_read_failed",
-        chat_id: turn.chatId,
-        error: error instanceof Error ? error.message : String(error),
-      }));
-    }
+  private adapter(): RelayAdapter {
+    this.relayAdapter ??= createRelayAdapterFor(this.env);
+    return this.relayAdapter;
+  }
 
+  override async beforeTurn(_context: TurnContext): Promise<TurnConfig> {
+    // The chat was marked read on webhook receipt, by the adapter, before
+    // this turn was ever scheduled. Nothing to do here but shape the turn.
     return {
-      activeTools: context.tools.reply ? ["reply"] : [],
+      activeTools: _context.tools.reply ? ["reply"] : [],
       maxSteps: 1,
       sendReasoning: false,
       toolChoice: "required",

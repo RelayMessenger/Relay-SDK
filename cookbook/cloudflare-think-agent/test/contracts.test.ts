@@ -14,7 +14,7 @@ const RELAY_CHAT_SDK_SHA =
 const RELAY_OPENAPI_SHA256 =
   "e58ffd5de05250a7a218735cb6bffd854d2d1198134f3f8876b2be109f606fde";
 const RELAY_ADAPTER_INTEGRITY =
-  "sha512-VqZV8cht9qbKbG/lCOc+6TCyLFB1DiTmG8VlOaJOSa8ttg8uszU7us+OzTLtu95lzwz1pfMOZzNuXJ7SVKxHjw==";
+  "sha512-RdAAbdgxUogIfOY4/AUw4t6Okn57VIig3+VkBcFfwwR1s2mH/cjdIrjOz7uKz1h23Cwp87LyUVKSK7GrXYGRZA==";
 
 function packageVersion(name: string): string {
   let directory = process.cwd();

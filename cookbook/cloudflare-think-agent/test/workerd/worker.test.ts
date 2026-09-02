@@ -8,16 +8,13 @@ import {
 } from "vitest";
 
 import {
+  createRelayAdapterFor,
   createRelayMessenger,
   type RelayChatAgent,
 } from "../../src/agent";
 import type { Bindings } from "../../src/env";
 import { starterModel } from "../../src/model";
-import {
-  markRelayChatRead,
-  relayReplyIdempotencyKey,
-  sendRelayReply,
-} from "../../src/reply";
+import { sendRelayReply } from "../../src/reply";
 import { TEST_REPLY_TEXT } from "./harness";
 
 const WEBHOOK_SECRET = "test-secret";
@@ -154,11 +151,19 @@ interface CommittedRelayMessage {
   messageId: string;
 }
 
-function expectedReplyBody(messageId: string) {
-  const key = relayReplyIdempotencyKey(messageId);
+/**
+ * The adapter derives every inbound send key from the Relay event that caused
+ * it, so a redelivery replays under the same key instead of double-posting.
+ */
+function relaySendKey(eventId: string): string {
+  return `relay-chat-sdk:${eventId}:0`;
+}
+
+function expectedReplyBody(_eventId: string) {
+  // The adapter carries the key in the Idempotency-Key header, so the body is
+  // just the message. `expectCanonicalTurn` asserts the header separately.
   return {
     message: {
-      idempotency_key: key,
       parts: [{ type: "text", value: TEST_REPLY_TEXT }],
     },
   };
@@ -242,17 +247,33 @@ function installRelayBackend(input: {
 function expectCanonicalTurn(
   calls: RelayRequest[],
   chatId: string,
-  messageId: string,
+  eventId: string,
 ): void {
   expect(calls.map(({ method, pathname }) => [method, pathname])).toEqual([
     ["POST", `/v1/chats/${chatId}/read`],
     ["POST", `/v1/chats/${chatId}/messages`],
   ]);
   const send = calls[1]!;
-  const key = relayReplyIdempotencyKey(messageId);
+  const key = relaySendKey(eventId);
   expect(send.headers.get("authorization")).toBe("Bearer relay-test-token");
   expect(send.headers.get("idempotency-key")).toBe(key);
-  expect(JSON.parse(send.body)).toEqual(expectedReplyBody(messageId));
+  expect(JSON.parse(send.body)).toEqual(expectedReplyBody(eventId));
+}
+
+/**
+ * The Worker acknowledges before the turn runs, so a test that asserts on the
+ * turn has to wait for it rather than for the response.
+ */
+async function waitForRelayCalls(
+  relay: { calls: RelayRequest[] },
+  count: number,
+  timeoutMs = 15_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (relay.calls.length < count && Date.now() < deadline) {
+    await scheduler.wait(25);
+  }
+  expect(relay.calls.length).toBeGreaterThanOrEqual(count);
 }
 
 function bindings(): Bindings {
@@ -267,14 +288,21 @@ function bindings(): Bindings {
   };
 }
 
-afterEach(() => {
+afterEach(async () => {
+  // Deliveries now outlive the response that started them. Let the in-flight
+  // ones finish against their own stubbed backend, or they would run on the
+  // next test's stub and be counted as its calls.
+  await scheduler.wait(500);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe("Relay Think messenger", () => {
   it("uses the Worker-routed root Think conversation", () => {
-    const messenger = createRelayMessenger(bindings());
+    const messenger = createRelayMessenger(
+      bindings(),
+      createRelayAdapterFor(bindings()),
+    );
     expect(messenger).toMatchObject({
       adapterName: "relay",
       conversation: "self",
@@ -286,7 +314,10 @@ describe("Relay Think messenger", () => {
   });
 
   it("buffers visible output and leaves one canonical send to the reply Action", () => {
-    const delivery = createRelayMessenger(bindings()).delivery;
+    const delivery = createRelayMessenger(
+      bindings(),
+      createRelayAdapterFor(bindings()),
+    ).delivery;
     expect(delivery).toMatchObject({
       emptyResponseText: "",
       errorResponseText: "",
@@ -302,66 +333,47 @@ describe("Relay Think messenger", () => {
 });
 
 describe("canonical Relay delivery", () => {
-  it("marks the Relay Chat Read through the current SDK route", async () => {
-    const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
-    const fetchMock = vi.fn(async (
-      input: RequestInfo | URL,
-      init?: RequestInit,
-    ) => {
-      calls.push([input, init]);
-      return new Response(null, { status: 204 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    await markRelayChatRead(bindings(), CHAT_ID);
-
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, init] = calls[0]!;
-    expect(String(url)).toBe(
-      `https://api.staging.relayapp.im/v1/chats/${CHAT_ID}/read`,
-    );
-    expect(init?.method).toBe("POST");
+  it("stamps read and cancels a superseded turn on receipt", () => {
+    const adapter = createRelayAdapterFor(bindings());
+    // Both receipts belong to the adapter now, so there is one Relay client
+    // in the Worker and the read cannot wait behind a turn.
+    expect(adapter.supportsTurnCancellation).toBe(true);
+    expect(adapter.typing).toBe(false);
+    expect(adapter.userName).toBe("your_agent_handle");
   });
 
-  it("commits one Message with a recovery-stable idempotency key", async () => {
-    const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
-    const fetchMock = vi.fn(async (
-      input: RequestInfo | URL,
-      init?: RequestInit,
-    ) => {
-      calls.push([input, init]);
-      return Response.json({
-        chat_id: CHAT_ID,
-        message: { id: REPLY_ID },
-      });
+  it("refuses a send outside an inbound turn rather than inventing a key", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("A keyless Relay send reached the network");
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    // Relay's idempotency key is derived from the event that caused the send.
+    // Outside a webhook turn there is no such event, so the adapter refuses
+    // instead of minting a key that would change on recovery.
     await expect(sendRelayReply(
-      bindings(),
+      createRelayAdapterFor(bindings()),
       { chatId: CHAT_ID, messageId: MESSAGE_ID },
       "one complete answer",
-    )).resolves.toEqual({
-      messageId: REPLY_ID,
-      status: "sent",
-    });
+    )).rejects.toThrow(/idempotencyKeyResolver/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, init] = calls[0]!;
-    const key = relayReplyIdempotencyKey(MESSAGE_ID);
-    expect(String(url)).toBe(
-      `https://api.staging.relayapp.im/v1/chats/${CHAT_ID}/messages`,
-    );
-    expect(init?.method).toBe("POST");
-    expect(new Headers(init?.headers).get("authorization"))
-      .toBe("Bearer relay-test-token");
-    expect(new Headers(init?.headers).get("idempotency-key")).toBe(key);
-    expect(JSON.parse(String(init?.body))).toEqual({
-      message: {
-        idempotency_key: key,
-        parts: [{ type: "text", value: "one complete answer" }],
-      },
+  it("does not send when the turn was already cancelled", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("A cancelled turn committed its answer");
     });
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(sendRelayReply(
+      createRelayAdapterFor(bindings()),
+      { chatId: CHAT_ID, messageId: MESSAGE_ID },
+      "superseded answer",
+      controller.signal,
+    )).resolves.toEqual({ status: "aborted" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
@@ -381,13 +393,11 @@ describe("signed messenger turns", () => {
       })),
     );
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      acknowledged: true,
-      event_id: DIRECT_EVENT_ID,
-      event_type: "message.received",
-    });
-    expectCanonicalTurn(relay.calls, DIRECT_CHAT_ID, DIRECT_MESSAGE_ID);
+    // Acknowledged before the turn, so Relay never times the delivery out.
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ accepted: true });
+    await waitForRelayCalls(relay, 2);
+    expectCanonicalTurn(relay.calls, DIRECT_CHAT_ID, DIRECT_EVENT_ID);
     expect(relay.committed.size).toBe(1);
     expect(relay.newCommits()).toBe(1);
   });
@@ -407,24 +417,21 @@ describe("signed messenger turns", () => {
       })),
     );
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      acknowledged: true,
-      event_id: GROUP_EVENT_ID,
-      event_type: "message.received",
-    });
-    expectCanonicalTurn(relay.calls, GROUP_CHAT_ID, GROUP_MESSAGE_ID);
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ accepted: true });
+    await waitForRelayCalls(relay, 2);
+    expectCanonicalTurn(relay.calls, GROUP_CHAT_ID, GROUP_EVENT_ID);
     expect(relay.committed.size).toBe(1);
     expect(relay.newCommits()).toBe(1);
   });
 
   it("reclaims a stale Action claim and replays the committed Message", async () => {
     const threadId = `relay:${RECOVERY_CHAT_ID}`;
-    const key = relayReplyIdempotencyKey(RECOVERY_MESSAGE_ID);
+    const key = relaySendKey(RECOVERY_EVENT_ID);
     const relay = installRelayBackend({
       chatId: RECOVERY_CHAT_ID,
       precommitted: {
-        body: expectedReplyBody(RECOVERY_MESSAGE_ID),
+        body: expectedReplyBody(RECOVERY_EVENT_ID),
         key,
         messageId: RECOVERY_REPLY_ID,
       },
@@ -452,12 +459,13 @@ describe("signed messenger turns", () => {
         messageId: RECOVERY_MESSAGE_ID,
       })),
     );
-    expect(response.status).toBe(200);
-    expectCanonicalTurn(relay.calls, RECOVERY_CHAT_ID, RECOVERY_MESSAGE_ID);
+    expect(response.status).toBe(202);
+    await waitForRelayCalls(relay, 2);
+    expectCanonicalTurn(relay.calls, RECOVERY_CHAT_ID, RECOVERY_EVENT_ID);
     expect(relay.newCommits()).toBe(0);
     expect(relay.committed).toEqual(new Map([
       [key, {
-        body: JSON.stringify(expectedReplyBody(RECOVERY_MESSAGE_ID)),
+        body: JSON.stringify(expectedReplyBody(RECOVERY_EVENT_ID)),
         messageId: RECOVERY_REPLY_ID,
       }],
     ]));
@@ -495,17 +503,15 @@ describe("installed Worker", () => {
     const response = await SELF.fetch(
       await signedRequest(envelope(EVENT_ID, "chat.created", {})),
     );
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      acknowledged: true,
-      event_id: EVENT_ID,
-      event_type: "chat.created",
-    });
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ accepted: true });
   });
 
-  it("acknowledges but does not invoke an unmentioned group Message", async () => {
-    const fetchMock = vi.fn(async () => {
-      throw new Error("Unmentioned group Message started a turn");
+  it("acknowledges and reads but starts no turn for an unmentioned group Message", async () => {
+    const paths: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      paths.push(new URL(String(input)).pathname);
+      return new Response(null, { status: 204 });
     });
     vi.stubGlobal("fetch", fetchMock);
     const response = await SELF.fetch(
@@ -517,11 +523,13 @@ describe("installed Worker", () => {
         messageId: QUIET_MESSAGE_ID,
       })),
     );
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      acknowledged: true,
-      event_type: "message.received",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ accepted: true });
+    // The acknowledgement is immediate, so give the background delivery real
+    // time to reach Relay before asserting what it did.
+    await scheduler.wait(2_000);
+    // Read is a receipt about delivery and is stamped for every inbound
+    // message. Answering is what a mention gates, and no Message was sent.
+    expect(paths).toEqual([`/v1/chats/${QUIET_CHAT_ID}/read`]);
   });
 });

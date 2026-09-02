@@ -21,15 +21,50 @@ Relay packages own webhook verification and API calls.
 
 1. Relay sends a signed `message.received` webhook.
 2. `@relaymessenger/chat-sdk-adapter` verifies the exact raw body before parsing.
-3. After verification, the Worker routes the Chat UUID to one durable root
-   Think conversation. The adapter verifies the forwarded raw body again.
-4. Direct Messages start turns. Group Messages start turns only when a text
+3. The Worker hands the delivery to the Chat's durable root Think conversation
+   and answers `202 Accepted` immediately, without waiting for the turn.
+   Thinking outlives any webhook timeout, so holding the response open would
+   make Relay redeliver the same event and buy a second turn saying the same
+   thing.
+4. Inside the Durable Object the adapter verifies the forwarded raw body again
+   and marks the Chat read, before Chat SDK dispatch. The read states that the
+   message arrived, so no debounce window and no model turn can delay it.
+5. Direct Messages start turns. Group Messages start turns only when a text
    part's structured `mention` matches the receiving Chat's `owner_handle`.
-5. Think runs the model in a recoverable fiber. The model must call the native
+   Every inbound Message is read, whether or not it starts a turn: at receipt
+   the adapter has not run mention detection yet, and a read in a group is
+   invisible anyway, because Relay renders only Delivered there and never a
+   member's Read.
+6. Think runs the model in a recoverable fiber. The model must call the native
    `reply` Action once.
-6. The Action commits one complete Message through
-   `@relaymessenger/sdk@0.3.0-staging.7`. Its stable idempotency key is derived
-   from the inbound Relay Message ID.
+7. The Action commits one complete Message through the same adapter, so the
+   Worker holds one Relay client. Its idempotency key is the adapter's own
+   `relay-chat-sdk:<event_id>:<ordinal>`, derived from the event that caused
+   the send.
+
+## Known limits in Think 0.17.0
+
+Two behaviours a Relay agent wants are not expressible through
+`@cloudflare/think` 0.17.0. Both were read from the shipped bundle. Raise them
+upstream rather than working around them here.
+
+**The burst window is fixed at 600 ms.** A burst of Messages does produce one
+answer: `chatSdkMessenger` is a pure spread (`dist/chat-sdk-C8BvREXn.js:354-359`)
+and Think builds the Chat SDK instance itself with
+`concurrency: { debounceMs: 600, strategy: "burst" }` hardcoded
+(`dist/chat-sdk-C8BvREXn.js:421-424`). The strategy is the one we want, but no
+option reaches the window, so Messages collapse on Think's 600 ms rather than a
+window this Worker chooses.
+
+**A newer Message cannot cancel the running turn.** Think's messenger handlers
+take only `(thread, message)` and never the Chat SDK's third `context` argument
+(`dist/chat-sdk-C8BvREXn.js:433-459`); `signal` and `abort` appear nowhere in
+that bridge. So `ChatInstance.abortTurn(threadId)` fires a signal Think never
+reads, and the superseded turn finishes and posts its answer anyway. Think's own
+`cancelAllChats()` does stop the running turn, but it also leaves the newer
+Message unanswered, so it is not used. The adapter's
+`abortActiveTurnOnReceipt` is therefore deliberately left off here; it is
+correct for Chat SDK consumers whose handlers do read `context.signal`.
 
 Think's streamed response surface is intentionally limited to zero visible
 characters. Relay therefore never receives a draft or a second fallback
@@ -286,7 +321,7 @@ This revision is tested against:
 - Relay Server `4506b8cb6f41da0b39f3e23a285daf3805fcf3a3`
 - Relay Chat SDK `eecf94a4d38bc021917e54dfed57e268657c17af`
 - `@relaymessenger/chat-sdk-adapter@0.3.0-staging.5` npm integrity
-  `sha512-VqZV8cht9qbKbG/lCOc+6TCyLFB1DiTmG8VlOaJOSa8ttg8uszU7us+OzTLtu95lzwz1pfMOZzNuXJ7SVKxHjw==`
+  `sha512-RdAAbdgxUogIfOY4/AUw4t6Okn57VIig3+VkBcFfwwR1s2mH/cjdIrjOz7uKz1h23Cwp87LyUVKSK7GrXYGRZA==`
 - OpenAPI SHA-256
   `e58ffd5de05250a7a218735cb6bffd854d2d1198134f3f8876b2be109f606fde`
 - public `ChatHandle.image_url` and `ChatHandle.about` fields, with no legacy
