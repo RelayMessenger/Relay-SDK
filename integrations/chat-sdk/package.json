@@ -46,10 +46,10 @@
     "chat": "^4.38.0"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
-    "chat": "^4.38.1",
+    "@types/node": "^26.4.0",
+    "chat": "^4.39.0",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "repository": {
     "type": "git",
