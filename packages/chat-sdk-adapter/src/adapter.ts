@@ -84,6 +84,14 @@ export const RELAY_ADAPTER_NAME = "relay";
 export const RELAY_BACKWARD_WALK_PAGE_SIZE = 100;
 export const RELAY_BACKWARD_WALK_MAX_PAGES = 10;
 
+/**
+ * How many Chat kinds one adapter remembers for {@link RelayAdapter.isDM}.
+ * A Chat is created direct or group and never changes, so an entry never goes
+ * stale; the bound exists only so a long-lived agent cannot grow the memo
+ * without limit.
+ */
+export const RELAY_CHAT_KIND_CACHE_LIMIT = 1_000;
+
 export interface RelayIdempotencyKeyContext {
   chatId: string;
   parts: ReadonlyArray<import("./types.js").RelayOutgoingPart>;
@@ -238,14 +246,20 @@ export class RelayAdapter
     | undefined;
   private readonly turns = new RelayTurnContext();
   /**
-   * Request-scoped Chat kind hints. Entries exist only while an inbound
-   * dispatch is active; this is not persistence or a delivery-idempotency
-   * store.
+   * Chat UUID to `is_group`, as Relay reported it.
+   *
+   * `isDM` must answer synchronously, and Relay's stable thread ID carries
+   * only the Chat UUID by design, so the answer has to come from somewhere
+   * the adapter already learned it. Every path that reads a Chat from Relay
+   * records the flag here: inbound webhook dispatch, `fetchThread`, and
+   * `onThreadSubscribe`.
+   *
+   * This is a memo of an immutable Relay fact — a Chat is created direct or
+   * group and never changes — not a delivery record and not persistence. It
+   * is bounded so a long-lived agent in many chats cannot grow it without
+   * limit.
    */
-  private readonly activeChatKinds = new Map<
-    string,
-    { direct: number; group: number }
-  >();
+  private readonly chatIsGroup = new Map<string, boolean>();
   private chat?: ChatInstance;
 
   constructor(options: RelayAdapterOptions = {}) {
@@ -599,34 +613,58 @@ export class RelayAdapter
     );
   }
 
-  private enterChatKind(chatId: string, isGroup: boolean): () => void {
-    const counts = this.activeChatKinds.get(chatId) ?? {
-      direct: 0,
-      group: 0,
-    };
-    if (isGroup) counts.group += 1;
-    else counts.direct += 1;
-    this.activeChatKinds.set(chatId, counts);
-    return () => {
-      const current = this.activeChatKinds.get(chatId);
-      if (!current) return;
-      if (isGroup) current.group -= 1;
-      else current.direct -= 1;
-      if (current.direct === 0 && current.group === 0) {
-        this.activeChatKinds.delete(chatId);
-      }
-    };
+  /**
+   * Record what Relay said about a Chat's kind. Re-recording a known chat
+   * refreshes its position so the bound evicts the least recently learned.
+   */
+  private rememberChatKind(chatId: string, isGroup: boolean): void {
+    this.chatIsGroup.delete(chatId);
+    this.chatIsGroup.set(chatId, isGroup);
+    while (this.chatIsGroup.size > RELAY_CHAT_KIND_CACHE_LIMIT) {
+      const oldest = this.chatIsGroup.keys().next();
+      if (oldest.done) break;
+      this.chatIsGroup.delete(oldest.value);
+    }
   }
 
   /**
-   * Chat SDK asks synchronously while dispatching. Relay's stable thread ID
-   * intentionally contains only the Chat UUID, so the direct/group hint is
-   * scoped to the active webhook dispatch and never persisted.
+   * Whether a thread is a direct conversation rather than a group.
+   *
+   * Chat SDK asks synchronously, and Relay's stable thread ID carries only
+   * the Chat UUID, so this answers from what the adapter has already learned:
+   * an inbound webhook dispatch, a `fetchThread`, or `onThreadSubscribe`.
+   *
+   * A chat this adapter has never seen answers `false` and says so on the
+   * debug log. `false` is the safe direction — it is the group answer, so a
+   * handler gates on mentions rather than replying to everything — and
+   * `fetchThread(threadId)` settles the question for good.
    */
   isDM(threadId: string): boolean {
     const { chatId } = this.decodeThreadId(threadId);
-    const counts = this.activeChatKinds.get(chatId);
-    return Boolean(counts && counts.direct > 0 && counts.group === 0);
+    const isGroup = this.chatIsGroup.get(chatId);
+    if (isGroup === undefined) {
+      this.chat
+        ?.getLogger(RELAY_ADAPTER_NAME)
+        .debug(
+          `isDM("${threadId}") answered false: this adapter has not seen `
+            + "chat "
+            + chatId
+            + " yet. Call fetchThread(threadId) to settle it.",
+        );
+      return false;
+    }
+    return !isGroup;
+  }
+
+  /**
+   * Learn a thread's kind when Chat SDK subscribes to it, so `isDM` answers
+   * correctly from the first handler call rather than after the first fetch.
+   */
+  async onThreadSubscribe(threadId: string): Promise<void> {
+    const { chatId } = this.decodeThreadId(threadId);
+    if (this.chatIsGroup.has(chatId)) return;
+    const chat = await this.client.getChat(chatId);
+    this.rememberChatKind(chatId, chat.is_group);
   }
 
   async postMessage(
@@ -855,6 +893,7 @@ export class RelayAdapter
   async fetchThread(threadId: string): Promise<ThreadInfo> {
     const { chatId } = this.decodeThreadId(threadId);
     const chat = await this.client.getChat(chatId);
+    this.rememberChatKind(chatId, chat.is_group);
     return {
       channelId: threadId,
       ...(chat.display_name
@@ -1037,20 +1076,18 @@ export class RelayAdapter
         const threadId = this.encodeThreadId({
           chatId: data.chat.id,
         });
-        const leaveChatKind = this.enterChatKind(
+        // The event already carries the Chat's kind, so an inbound dispatch
+        // settles isDM for this chat without spending a request on it.
+        this.rememberChatKind(
           data.chat.id,
           data.chat.is_group === true,
         );
-        try {
-          await this.initializedChat().processMessage(
-            this,
-            threadId,
-            this.parseMessage(raw),
-            options,
-          );
-        } finally {
-          leaveChatKind();
-        }
+        await this.initializedChat().processMessage(
+          this,
+          threadId,
+          this.parseMessage(raw),
+          options,
+        );
         return;
       }
       case "message.sent":

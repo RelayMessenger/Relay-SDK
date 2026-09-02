@@ -844,6 +844,77 @@ describe("Relay webhook handling", () => {
   });
 });
 
+describe("isDM outside a webhook dispatch", () => {
+  function chatHarness(isGroup: boolean) {
+    const urls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return jsonResponse({
+        created_at: "2026-08-30T12:00:00.000Z",
+        display_name: isGroup ? "Team" : null,
+        handles: [USER_HANDLE, AGENT_HANDLE],
+        id: IDS.chat,
+        is_group: isGroup,
+        updated_at: "2026-08-30T12:00:00.000Z",
+      });
+    });
+    const adapter = createRelayAdapter({
+      fetch: fetchMock as unknown as typeof fetch,
+      token: "agent-token",
+      webhookSecret: WEBHOOK_SECRET,
+    });
+    return { adapter, urls };
+  }
+
+  it("answers true for a direct chat after fetchThread, with no dispatch active", async () => {
+    const { adapter } = chatHarness(false);
+    await adapter.fetchThread(THREAD_ID);
+    expect(adapter.isDM(THREAD_ID)).toBe(true);
+  });
+
+  it("answers false for a group chat after fetchThread", async () => {
+    const { adapter } = chatHarness(true);
+    await adapter.fetchThread(THREAD_ID);
+    expect(adapter.isDM(THREAD_ID)).toBe(false);
+  });
+
+  it("answers false for a chat it has never seen", () => {
+    const { adapter, urls } = chatHarness(false);
+    expect(adapter.isDM(THREAD_ID)).toBe(false);
+    // Answering must stay synchronous: no request may be spent on it.
+    expect(urls).toHaveLength(0);
+  });
+
+  it("learns the kind from onThreadSubscribe and spends one request doing it", async () => {
+    const { adapter, urls } = chatHarness(false);
+    await adapter.onThreadSubscribe(THREAD_ID);
+    expect(adapter.isDM(THREAD_ID)).toBe(true);
+    expect(urls).toEqual([
+      `https://api.relayapp.im/v1/chats/${IDS.chat}`,
+    ]);
+    // A second subscribe re-reads nothing: a Chat's kind never changes.
+    await adapter.onThreadSubscribe(THREAD_ID);
+    expect(urls).toHaveLength(1);
+  });
+
+  it("still answers correctly after the webhook dispatch that taught it has ended", async () => {
+    const { adapter } = chatHarness(false);
+    const chat = createMockChatInstance();
+    await adapter.initialize(chat);
+    const response = await adapter.handleWebhook(
+      await signedRequest(
+        envelope(
+          "message.received",
+          webhookMessage() as unknown as Record<string, unknown>,
+        ),
+      ),
+    );
+    expect(response.status).toBe(200);
+    // The dispatch has returned; the old request-scoped hint would be gone.
+    expect(adapter.isDM(THREAD_ID)).toBe(true);
+  });
+});
+
 describe("direct and group routing", () => {
   function routingHarness() {
     const adapter = createRelayAdapter({
