@@ -1284,7 +1284,10 @@ components:
           type: string
           description: Original filename of the attachment
         content_type:
-          $ref: "#/components/schemas/SupportedContentType"
+          type: string
+          maxLength: 255
+          pattern: "^[A-Za-z0-9!#$%&'*+.^_`|~-]+/[A-Za-z0-9!#$%&'*+.^_`|~-]+$"
+          description: Declared MIME type, lowercased. Relay stores and returns the original bytes unchanged.
         size_bytes:
           type: integer
           format: int64
@@ -2023,7 +2026,8 @@ components:
           type: string
           format: uri
           description: Public HTTPS media URL. Relay blocks non-public networks and validates every redirect, response status,
-            declared and actual size, and supported Content-Type.
+            and declared and actual size. Any file type is accepted; a host that declares no usable Content-Type
+            is stored as application/octet-stream.
           pattern: ^https://
         attachment_id:
           type: string
@@ -2544,7 +2548,13 @@ components:
           minLength: 1
           maxLength: 255
         content_type:
-          $ref: "#/components/schemas/SupportedContentType"
+          type: string
+          maxLength: 255
+          pattern: "^[A-Za-z0-9!#$%&'*+.^_`|~-]+/[A-Za-z0-9!#$%&'*+.^_`|~-]+$"
+          description: >-
+            MIME type of the file, as `type/subtype`. Relay accepts any file
+            type and stores the bytes unchanged; the declared type is lowercased
+            and returned to the reader as sent.
         size_bytes:
           type: integer
           format: int64
@@ -2879,61 +2889,6 @@ components:
             - user
             - agent
           description: Whether the Contact is a user or an agent.
-    SupportedContentType:
-      type: string
-      description: Supported declared MIME types for uploaded Attachments and media URLs. Relay stores and returns the
-        original bytes unchanged. Relay accepts WebP and rejects SVG as an explicit content-safety decision.
-      enum:
-        - image/jpeg
-        - image/png
-        - image/gif
-        - image/heic
-        - image/heif
-        - image/tiff
-        - image/bmp
-        - image/webp
-        - image/x-icon
-        - video/mp4
-        - video/quicktime
-        - video/mpeg
-        - video/mpeg2
-        - video/x-m4v
-        - video/x-msvideo
-        - video/3gpp
-        - audio/mpeg
-        - audio/mp3
-        - audio/x-m4a
-        - audio/mp4
-        - audio/x-caf
-        - audio/x-wav
-        - audio/x-aiff
-        - audio/aiff
-        - audio/aac
-        - audio/midi
-        - audio/amr
-        - application/pdf
-        - application/vnd.apple.pkpass
-        - text/plain
-        - text/markdown
-        - text/vcard
-        - text/rtf
-        - text/csv
-        - text/html
-        - text/calendar
-        - application/msword
-        - application/vnd.openxmlformats-officedocument.wordprocessingml.document
-        - application/vnd.ms-excel
-        - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
-        - application/vnd.ms-powerpoint
-        - application/vnd.openxmlformats-officedocument.presentationml.presentation
-        - application/x-iwork-pages-sffpages
-        - application/x-iwork-numbers-sffnumbers
-        - application/x-iwork-keynote-sffkey
-        - application/epub+zip
-        - text/xml
-        - application/json
-        - application/zip
-        - application/x-gzip
     SystemEvent:
       type: object
       additionalProperties: false
