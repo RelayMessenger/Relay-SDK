@@ -1,4 +1,7 @@
-import { ValidationError } from "@chat-adapter/shared";
+import {
+  ResourceNotFoundError,
+  ValidationError,
+} from "@chat-adapter/shared";
 import {
   Message,
   NotImplementedError,
@@ -71,6 +74,23 @@ import {
 } from "./webhook.js";
 
 export const RELAY_ADAPTER_NAME = "relay";
+
+/**
+ * Bounds on the forward walk that serves a backward `fetchMessages`. The page
+ * size is the contract's maximum (`contracts/relay-openapi.yaml`, `getMessages`
+ * `limit` maximum 100), so the walk reaches the tail in the fewest requests
+ * Relay allows.
+ */
+export const RELAY_BACKWARD_WALK_PAGE_SIZE = 100;
+export const RELAY_BACKWARD_WALK_MAX_PAGES = 10;
+
+/**
+ * How many Chat kinds one adapter remembers for {@link RelayAdapter.isDM}.
+ * A Chat is created direct or group and never changes, so an entry never goes
+ * stale; the bound exists only so a long-lived agent cannot grow the memo
+ * without limit.
+ */
+export const RELAY_CHAT_KIND_CACHE_LIMIT = 1_000;
 
 export interface RelayIdempotencyKeyContext {
   chatId: string;
@@ -209,6 +229,13 @@ export class RelayAdapter
   readonly botUserId?: string;
   readonly lockScope = "thread" as const;
   readonly persistThreadHistory = false;
+  /**
+   * Publish active turns so `ChatInstance.abortTurn(threadId)` cancels work
+   * running in another process that shares the configured state adapter. A
+   * Relay send is one idempotent HTTP request, so an aborted turn leaves no
+   * partial bubble to reconcile.
+   */
+  readonly supportsTurnCancellation = true;
   readonly typing: boolean;
   readonly client: RelayClient;
 
@@ -219,14 +246,20 @@ export class RelayAdapter
     | undefined;
   private readonly turns = new RelayTurnContext();
   /**
-   * Request-scoped Chat kind hints. Entries exist only while an inbound
-   * dispatch is active; this is not persistence or a delivery-idempotency
-   * store.
+   * Chat UUID to `is_group`, as Relay reported it.
+   *
+   * `isDM` must answer synchronously, and Relay's stable thread ID carries
+   * only the Chat UUID by design, so the answer has to come from somewhere
+   * the adapter already learned it. Every path that reads a Chat from Relay
+   * records the flag here: inbound webhook dispatch, `fetchThread`, and
+   * `onThreadSubscribe`.
+   *
+   * This is a memo of an immutable Relay fact — a Chat is created direct or
+   * group and never changes — not a delivery record and not persistence. It
+   * is bounded so a long-lived agent in many chats cannot grow it without
+   * limit.
    */
-  private readonly activeChatKinds = new Map<
-    string,
-    { direct: number; group: number }
-  >();
+  private readonly chatIsGroup = new Map<string, boolean>();
   private chat?: ChatInstance;
 
   constructor(options: RelayAdapterOptions = {}) {
@@ -470,7 +503,9 @@ export class RelayAdapter
         "Relay posts outside an inbound webhook require idempotencyKeyResolver",
       );
     }
-    const parts = await buildRelayParts(message);
+    const parts = await buildRelayParts(message, (upload) =>
+      this.client.uploadAttachment(upload),
+    );
     if (parts.length === 0) {
       return this.noopResult(chatId, threadId);
     }
@@ -580,34 +615,58 @@ export class RelayAdapter
     );
   }
 
-  private enterChatKind(chatId: string, isGroup: boolean): () => void {
-    const counts = this.activeChatKinds.get(chatId) ?? {
-      direct: 0,
-      group: 0,
-    };
-    if (isGroup) counts.group += 1;
-    else counts.direct += 1;
-    this.activeChatKinds.set(chatId, counts);
-    return () => {
-      const current = this.activeChatKinds.get(chatId);
-      if (!current) return;
-      if (isGroup) current.group -= 1;
-      else current.direct -= 1;
-      if (current.direct === 0 && current.group === 0) {
-        this.activeChatKinds.delete(chatId);
-      }
-    };
+  /**
+   * Record what Relay said about a Chat's kind. Re-recording a known chat
+   * refreshes its position so the bound evicts the least recently learned.
+   */
+  private rememberChatKind(chatId: string, isGroup: boolean): void {
+    this.chatIsGroup.delete(chatId);
+    this.chatIsGroup.set(chatId, isGroup);
+    while (this.chatIsGroup.size > RELAY_CHAT_KIND_CACHE_LIMIT) {
+      const oldest = this.chatIsGroup.keys().next();
+      if (oldest.done) break;
+      this.chatIsGroup.delete(oldest.value);
+    }
   }
 
   /**
-   * Chat SDK asks synchronously while dispatching. Relay's stable thread ID
-   * intentionally contains only the Chat UUID, so the direct/group hint is
-   * scoped to the active webhook dispatch and never persisted.
+   * Whether a thread is a direct conversation rather than a group.
+   *
+   * Chat SDK asks synchronously, and Relay's stable thread ID carries only
+   * the Chat UUID, so this answers from what the adapter has already learned:
+   * an inbound webhook dispatch, a `fetchThread`, or `onThreadSubscribe`.
+   *
+   * A chat this adapter has never seen answers `false` and says so on the
+   * debug log. `false` is the safe direction — it is the group answer, so a
+   * handler gates on mentions rather than replying to everything — and
+   * `fetchThread(threadId)` settles the question for good.
    */
   isDM(threadId: string): boolean {
     const { chatId } = this.decodeThreadId(threadId);
-    const counts = this.activeChatKinds.get(chatId);
-    return Boolean(counts && counts.direct > 0 && counts.group === 0);
+    const isGroup = this.chatIsGroup.get(chatId);
+    if (isGroup === undefined) {
+      this.chat
+        ?.getLogger(RELAY_ADAPTER_NAME)
+        .debug(
+          `isDM("${threadId}") answered false: this adapter has not seen `
+            + "chat "
+            + chatId
+            + " yet. Call fetchThread(threadId) to settle it.",
+        );
+      return false;
+    }
+    return !isGroup;
+  }
+
+  /**
+   * Learn a thread's kind when Chat SDK subscribes to it, so `isDM` answers
+   * correctly from the first handler call rather than after the first fetch.
+   */
+  async onThreadSubscribe(threadId: string): Promise<void> {
+    const { chatId } = this.decodeThreadId(threadId);
+    if (this.chatIsGroup.has(chatId)) return;
+    const chat = await this.client.getChat(chatId);
+    this.rememberChatKind(chatId, chat.is_group);
   }
 
   async postMessage(
@@ -717,37 +776,87 @@ export class RelayAdapter
   }
 
   /**
-   * Relay's public chat cursor advances oldest-to-newest. Chat SDK's backward
-   * cursor contract cannot be represented, so only explicit forward reads are
-   * supported rather than faking backward pagination.
+   * Fetch messages from a Relay chat.
+   *
+   * `forward` is Relay's native shape: one `GET /v1/chats/{id}/messages` per
+   * call, and `nextCursor` is Relay's own cursor pointing at newer messages.
+   *
+   * `backward` — the Chat SDK default, and what `thread.fetchMessages()` asks
+   * for when loading a chat view — has no native Relay equivalent, because
+   * the public contract publishes exactly one opaque cursor and it advances
+   * oldest-to-newest. It is served by walking forward to the tail and keeping
+   * the newest `limit` messages seen.
+   *
+   * **The cost is real and worth knowing before you call it.** One backward
+   * call issues up to {@link RELAY_BACKWARD_WALK_MAX_PAGES} requests of
+   * {@link RELAY_BACKWARD_WALK_PAGE_SIZE} messages each — up to 10 round
+   * trips covering 1000 messages — rather than the single request `forward`
+   * costs. Chats shorter than one page cost exactly one request, which is the
+   * common case.
+   *
+   * If the walk reaches the end of the chat, the result is exactly the most
+   * recent `limit` messages and there is no `nextCursor`: Relay cannot
+   * address older messages, so there is no further backward page to offer.
+   *
+   * If the walk is cut short by the page cap, the messages are the newest the
+   * bounded walk could reach and `nextCursor` carries Relay's live forward
+   * cursor. Passing it back as `cursor` resumes the walk from that point
+   * rather than moving to older messages, so repeated calls converge on the
+   * true tail. That is the opposite of the generic backward contract, and it
+   * is the only meaning Relay's single forward cursor can carry.
+   *
+   * Messages are returned oldest-first within the page in every direction, as
+   * the interface requires.
    */
   async fetchMessages(
     threadId: string,
     options?: FetchOptions,
   ): Promise<FetchResult<RelayRawMessage>> {
-    if (options?.direction !== "forward") {
-      return this.unsupported(
-        "fetchMessages(backward)",
-        "Relay chat history exposes only an opaque forward cursor.",
-      );
-    }
     const { chatId } = this.decodeThreadId(threadId);
     const limit = Math.min(
       100,
-      Math.max(1, Math.trunc(options.limit ?? 50)),
+      Math.max(1, Math.trunc(options?.limit ?? 50)),
     );
-    const result = await this.client.getMessages({
-      chatId,
-      limit,
-      ...(options.cursor ? { cursor: options.cursor } : {}),
-    });
+    if (options?.direction === "forward") {
+      const result = await this.client.getMessages({
+        chatId,
+        limit,
+        ...(options.cursor ? { cursor: options.cursor } : {}),
+      });
+      return {
+        messages: result.messages.map((message) =>
+          this.parseMessage({ chatId, message }),
+        ),
+        ...(result.next_cursor
+          ? { nextCursor: result.next_cursor }
+          : {}),
+      };
+    }
+
+    let cursor = options?.cursor;
+    let newest: RelayMessage[] = [];
+    let truncated = false;
+    for (
+      let page = 0;
+      page < RELAY_BACKWARD_WALK_MAX_PAGES;
+      page += 1
+    ) {
+      const result = await this.client.getMessages({
+        chatId,
+        limit: RELAY_BACKWARD_WALK_PAGE_SIZE,
+        ...(cursor ? { cursor } : {}),
+      });
+      // Keep only the newest `limit` seen so a deep chat costs bounded memory.
+      newest = newest.concat(result.messages).slice(-limit);
+      cursor = result.next_cursor ?? undefined;
+      if (!cursor) break;
+      truncated = page === RELAY_BACKWARD_WALK_MAX_PAGES - 1;
+    }
     return {
-      messages: result.messages.map((message) =>
+      messages: newest.map((message) =>
         this.parseMessage({ chatId, message }),
       ),
-      ...(result.next_cursor
-        ? { nextCursor: result.next_cursor }
-        : {}),
+      ...(truncated && cursor ? { nextCursor: cursor } : {}),
     };
   }
 
@@ -776,12 +885,9 @@ export class RelayAdapter
       }
       return this.parseMessage({ chatId, message });
     } catch (error) {
-      if (
-        error instanceof RelayApiError &&
-        error.status === 404
-      ) {
-        return null;
-      }
+      // The client maps a Relay 404 onto the shared class, so the absent
+      // message is recognised by meaning rather than by HTTP status.
+      if (error instanceof ResourceNotFoundError) return null;
       throw error;
     }
   }
@@ -789,6 +895,7 @@ export class RelayAdapter
   async fetchThread(threadId: string): Promise<ThreadInfo> {
     const { chatId } = this.decodeThreadId(threadId);
     const chat = await this.client.getChat(chatId);
+    this.rememberChatKind(chatId, chat.is_group);
     return {
       channelId: threadId,
       ...(chat.display_name
@@ -971,20 +1078,18 @@ export class RelayAdapter
         const threadId = this.encodeThreadId({
           chatId: data.chat.id,
         });
-        const leaveChatKind = this.enterChatKind(
+        // The event already carries the Chat's kind, so an inbound dispatch
+        // settles isDM for this chat without spending a request on it.
+        this.rememberChatKind(
           data.chat.id,
           data.chat.is_group === true,
         );
-        try {
-          await this.initializedChat().processMessage(
-            this,
-            threadId,
-            this.parseMessage(raw),
-            options,
-          );
-        } finally {
-          leaveChatKind();
-        }
+        await this.initializedChat().processMessage(
+          this,
+          threadId,
+          this.parseMessage(raw),
+          options,
+        );
         return;
       }
       case "message.sent":

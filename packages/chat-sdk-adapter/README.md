@@ -4,8 +4,15 @@ Vendor-official Relay adapter for
 [Vercel Chat SDK](https://chat-sdk.dev), targeting `chat@4.39.0`.
 
 Source is maintained in
-[`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/main/packages/chat-sdk-adapter)
-under `packages/chat-sdk-adapter`.
+[`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/9180450baf5691f8172514b7117cd92ba5879674/packages/chat-sdk-adapter)
+under `packages/chat-sdk-adapter`. That link is pinned to a commit rather than
+a branch, as the Chat SDK listing guide requires, so it keeps showing the tree
+a listing was reviewed against. Re-pin it whenever the listing is updated.
+
+`SOURCE.json` in this directory records where the code was imported from, not
+which repository owns it. Every package in this monorepo carries the same
+record, and its `canonical` field names `Relay-SDK` -- the same repository
+`package.json` points at.
 
 Relay Chats map one-to-one to Chat SDK threads. Provider thread IDs are stable
 `relay:<chat UUID>` values; provider message IDs are bare Relay Message UUIDs.
@@ -91,6 +98,12 @@ therefore requires `idempotencyKeyResolver` for those non-empty posts rather
 than manufacturing a random key that changes on recovery. Think integrations
 should return their stable Action/delivery identity from this resolver.
 
+Concurrency strategies do not change this. `burst`, `debounce` and `queue`
+defer the handler, but they await it inside the webhook call that carried the
+message, so the turn is still in scope and `thread.post()` gets its key. The
+test suite asserts that for all three, because the day a strategy resumes a
+handler out of band is the day replies would start being refused.
+
 ### Think runtime typing
 
 For a runtime that owns typing timing, disable Chat SDK surface typing:
@@ -132,12 +145,13 @@ reproducible contract tests and is excluded from the npm package.
 | `reply` | Same route with `message.reply_to` |
 | `stream` | Buffered, then one canonical Message; never partial bubbles |
 | outbound public-URL media | Message `media` part |
-| outbound bytes/files | Explicitly allocate/upload with `@relaymessenger/sdk`, then post a stable public HTTPS URL |
+| outbound bytes/files | `POST /v1/attachments` allocate, upload, then a Message `media` part |
 | inbound media | Chat SDK `Attachment` with `fetchData()` |
 | `addReaction`, `removeReaction` | `POST /v1/messages/{messageId}/reactions` |
 | `startTyping`, `endTyping` | `POST`/`DELETE /v1/chats/{chatId}/typing` |
 | `markAsRead` | `POST /v1/chats/{chatId}/read` |
-| `fetchMessages({ direction: "forward" })` | `GET /v1/chats/{chatId}/messages` |
+| `fetchMessages()` (backward, the default) | Forward walk to the tail over `GET /v1/chats/{chatId}/messages` |
+| `fetchMessages({ direction: "forward" })` | One `GET /v1/chats/{chatId}/messages` |
 | `fetchMessage` | `GET /v1/messages/{messageId}` |
 | `fetchThread`, `fetchChannelInfo` | `GET /v1/chats/{chatId}` |
 
@@ -189,11 +203,22 @@ rules are at <https://docs.relayapp.im>.
 
 Relay text parts are plain text and are limited to 10,000 UTF-16 code units.
 Long Chat SDK text is split without breaking surrogate pairs. A Relay Message
-is limited to 100 parts. A public HTTPS attachment URL is sent directly.
-Automatic byte/file uploads are rejected because a fresh Attachment allocation
-would change the Message body after an ambiguous send. Allocate and upload with
-`@relaymessenger/sdk`, retain that prepared identity durably, then give this
-adapter the stable HTTPS URL.
+is limited to 100 parts.
+
+A public HTTPS attachment URL is sent by reference and costs no upload. Local
+bytes -- `files`, or an `attachment` carrying `data` or `fetchData` -- are
+allocated through `POST /v1/attachments`, uploaded, and then referenced by
+`attachment_id`. Uploads finish before the send, so the Message body names
+attachments that already exist.
+
+One consequence is worth knowing. Inside an inbound webhook turn the send is
+keyed on the event ID, so a webhook redelivery re-uploads the bytes, mints new
+attachment IDs, and presents a different body under the same `Idempotency-Key`.
+Relay answers HTTP 409 rather than posting the Message twice. A loud refusal on
+redelivery is the safe end of that trade; a silent duplicate is not. To make a
+file post survive redelivery unchanged, allocate and upload once with
+`@relaymessenger/sdk`, retain that identity durably, and give this adapter the
+stable HTTPS URL instead.
 
 Think's `thread.post(callback.stream())` path is safe when the stream is empty:
 the adapter returns a local no-op result so Chat SDK does not enter its

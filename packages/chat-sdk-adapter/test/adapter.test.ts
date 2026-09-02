@@ -12,6 +12,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import {
   createRelayAdapter,
+  RELAY_BACKWARD_WALK_MAX_PAGES,
   RELAY_WEBHOOK_EVENT_TYPES,
   type RelayWebhookEventType,
 } from "../src/index.js";
@@ -107,6 +108,12 @@ describe("RelayAdapter interface", () => {
     expect(typed.name).toBe("relay");
   });
 
+  it("publishes active turns for cross-process cancellation", () => {
+    const { adapter } = adapterHarness();
+    const typed: Adapter = adapter;
+    expect(typed.supportsTurnCancellation).toBe(true);
+  });
+
   it("posts and replies through the locked message route", async () => {
     const { adapter, calls } = adapterHarness();
     const posted = await adapter.postMessage(THREAD_ID, {
@@ -158,19 +165,28 @@ describe("RelayAdapter interface", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects local bytes before allocation so retries cannot change the body", async () => {
-    const { adapter, fetchMock } = adapterHarness();
-    await expect(
-      adapter.postMessage(THREAD_ID, {
-        files: [{
-          data: new Uint8Array([1, 2, 3]).buffer,
-          filename: "photo.png",
+  it("posts a public HTTPS attachment by reference without spending an upload", async () => {
+    const { adapter, calls } = adapterHarness();
+    await adapter.postMessage(THREAD_ID, {
+      attachments: [
+        {
           mimeType: "image/png",
-        }],
-        raw: "",
-      }),
-    ).rejects.toThrow(/public HTTPS URL/);
-    expect(fetchMock).not.toHaveBeenCalled();
+          name: "photo.png",
+          type: "image" as const,
+          url: "https://cdn.example.test/photo.png",
+        },
+      ],
+      raw: "look",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body).toMatchObject({
+      message: {
+        parts: [
+          { type: "text", value: "look" },
+          { type: "media", url: "https://cdn.example.test/photo.png" },
+        ],
+      },
+    });
   });
 
   it("buffers streams into one canonical message and no-ops empty streams", async () => {
@@ -262,8 +278,8 @@ describe("RelayAdapter interface", () => {
     });
   });
 
-  it("supports explicit forward fetch and refuses false backward semantics", async () => {
-    const { adapter } = adapterHarness();
+  it("serves an explicit forward fetch with one request and Relay's own cursor", async () => {
+    const { adapter, calls } = adapterHarness();
     const result = await adapter.fetchMessages(THREAD_ID, {
       direction: "forward",
       limit: 10,
@@ -274,9 +290,40 @@ describe("RelayAdapter interface", () => {
       threadId: THREAD_ID,
     });
     expect(result.nextCursor).toBe("next-page");
-    await expect(adapter.fetchMessages(THREAD_ID)).rejects.toMatchObject({
-      feature: "fetchMessages(backward)",
-    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toContain("limit=10");
+  });
+
+  it("reads a single message and answers null for one Relay does not have", async () => {
+    function messageHarness(responder: () => Response) {
+      const adapter = createRelayAdapter({
+        fetch: vi.fn(async () => responder()) as unknown as typeof fetch,
+        token: "agent-token",
+        webhookSecret: WEBHOOK_SECRET,
+      });
+      return adapter;
+    }
+    const found = await messageHarness(() =>
+      jsonResponse({
+        chat_id: IDS.chat,
+        created_at: "2026-08-30T12:00:00.000Z",
+        delivery_status: "sent",
+        from_handle: USER_HANDLE,
+        id: IDS.message,
+        is_from_me: false,
+        parts: [{ reactions: null, type: "text", value: "found" }],
+        reply_to: null,
+      }),
+    ).fetchMessage(THREAD_ID, IDS.message);
+    expect(found).toMatchObject({ id: IDS.message, text: "found" });
+
+    const absent = await messageHarness(() =>
+      jsonResponse(
+        { error: { code: "not_found", message: "No such Message." } },
+        404,
+      ),
+    ).fetchMessage(THREAD_ID, IDS.message);
+    expect(absent).toBeNull();
   });
 
   it("throws explicit unsupported errors instead of calling undocumented APIs", async () => {
@@ -294,6 +341,121 @@ describe("RelayAdapter interface", () => {
       NotImplementedError,
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("backward fetchMessages over Relay's forward-only cursor", () => {
+  const PER_PAGE = 3;
+
+  /**
+   * Serve `pageCount` pages of history. Each page carries a `next_cursor`
+   * except the last, which ends the walk exactly as Relay's contract says
+   * ("Null if there are no more results to fetch").
+   */
+  function historyHarness(pageCount: number) {
+    const urls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      urls.push(url.toString());
+      const cursor = url.searchParams.get("cursor");
+      const page = cursor ? Number(cursor.replace("page-", "")) : 0;
+      const isLast = page >= pageCount - 1;
+      return jsonResponse({
+        messages: Array.from({ length: PER_PAGE }, (_, index) => {
+          const ordinal = page * PER_PAGE + index;
+          return {
+            chat_id: IDS.chat,
+            created_at: "2026-08-30T12:00:00.000Z",
+            delivery_status: "sent",
+            from_handle: USER_HANDLE,
+            id: `00000000-0000-4000-8000-${String(ordinal).padStart(12, "0")}`,
+            is_from_me: false,
+            parts: [
+              { reactions: null, type: "text", value: `m${ordinal}` },
+            ],
+            reply_to: null,
+          };
+        }),
+        next_cursor: isLast ? null : `page-${page + 1}`,
+      });
+    });
+    const adapter = createRelayAdapter({
+      fetch: fetchMock as unknown as typeof fetch,
+      token: "agent-token",
+      webhookSecret: WEBHOOK_SECRET,
+    });
+    return { adapter, urls };
+  }
+
+  it("serves the default call shape with no options at all", async () => {
+    const { adapter, urls } = historyHarness(3);
+    const result = await adapter.fetchMessages(THREAD_ID);
+    // Three pages of three, walked to the tail: the whole chat is the answer.
+    expect(result.messages.map((message) => message.text)).toEqual([
+      "m0",
+      "m1",
+      "m2",
+      "m3",
+      "m4",
+      "m5",
+      "m6",
+      "m7",
+      "m8",
+    ]);
+    expect(urls).toHaveLength(3);
+    // The tail was reached, so Relay has no older page left to offer.
+    expect(result.nextCursor).toBeUndefined();
+  });
+
+  it("returns the newest limit messages oldest-first for an explicit backward read", async () => {
+    const { adapter, urls } = historyHarness(3);
+    const result = await adapter.fetchMessages(THREAD_ID, {
+      direction: "backward",
+      limit: 4,
+    });
+    expect(result.messages.map((message) => message.text)).toEqual([
+      "m5",
+      "m6",
+      "m7",
+      "m8",
+    ]);
+    expect(result.messages[0]?.threadId).toBe(THREAD_ID);
+    expect(urls).toHaveLength(3);
+    // Every request asks for the contract's maximum page, not the caller's limit.
+    expect(urls.every((url) => url.includes("limit=100"))).toBe(true);
+  });
+
+  it("asks for one page when the chat fits in one page", async () => {
+    const { adapter, urls } = historyHarness(1);
+    const result = await adapter.fetchMessages(THREAD_ID);
+    expect(result.messages).toHaveLength(PER_PAGE);
+    expect(urls).toHaveLength(1);
+  });
+
+  it("stops at the page cap and hands back the cursor that resumes the walk", async () => {
+    const { adapter, urls } = historyHarness(
+      RELAY_BACKWARD_WALK_MAX_PAGES + 5,
+    );
+    const result = await adapter.fetchMessages(THREAD_ID, { limit: 2 });
+    expect(urls).toHaveLength(RELAY_BACKWARD_WALK_MAX_PAGES);
+    expect(result.nextCursor).toBe(`page-${RELAY_BACKWARD_WALK_MAX_PAGES}`);
+    const resumed = await adapter.fetchMessages(THREAD_ID, {
+      cursor: result.nextCursor!,
+      limit: 2,
+    });
+    // Resuming converges on the true tail rather than repeating the same page.
+    expect(resumed.messages.map((message) => message.text)).toEqual([
+      "m43",
+      "m44",
+    ]);
+    expect(resumed.nextCursor).toBeUndefined();
+  });
+
+  it("routes fetchChannelMessages through the same walk", async () => {
+    const { adapter, urls } = historyHarness(2);
+    const result = await adapter.fetchChannelMessages(THREAD_ID);
+    expect(result.messages).toHaveLength(PER_PAGE * 2);
+    expect(urls).toHaveLength(2);
   });
 });
 
@@ -688,6 +850,454 @@ describe("Relay webhook handling", () => {
     );
     expect(sends[1]?.key).toBe(sends[0]?.key);
     expect(sends[1]?.body).not.toBe(sends[0]?.body);
+  });
+});
+
+describe("burst concurrency", () => {
+  /**
+   * The owner's target flow debounces bursts by 2 s. Burst and debounce do not
+   * run the handler inside the webhook call that carried the message: the
+   * message is serialized, revived, and handled after that request returned.
+   * A reply posted from there must still get a stable idempotency key.
+   */
+  it("lets the handler post after a 2s burst window with two webhooks 100ms apart", async () => {
+    const sends: Array<{ body: unknown; key: string | null }> = [];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/messages")) {
+          sends.push({
+            body:
+              typeof init?.body === "string"
+                ? (JSON.parse(init.body) as unknown)
+                : init?.body,
+            key: new Headers(init?.headers).get("idempotency-key"),
+          });
+          return jsonResponse(sentMessage(), 202);
+        }
+        return new Response(null, { status: 204 });
+      },
+    );
+    const adapter = createRelayAdapter({
+      fetch: fetchMock as unknown as typeof fetch,
+      token: "agent-token",
+      webhookSecret: WEBHOOK_SECRET,
+    });
+
+    let settle: (error: unknown) => void = () => undefined;
+    const handled = new Promise<unknown>((resolve) => {
+      settle = resolve;
+    });
+    const chat = new Chat({
+      adapters: { relay: adapter },
+      concurrency: { debounceMs: 2_000, strategy: "burst" },
+      logger: "error",
+      state: createMockState(),
+      userName: "Relay Agent",
+    });
+    chat.onDirectMessage(async (thread) => {
+      try {
+        await thread.post("burst reply");
+        settle(null);
+      } catch (error) {
+        settle(error);
+      }
+    });
+
+    const SECOND_EVENT = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    // Both deliveries must be in flight together: awaiting the first would let
+    // its burst window close and give the second a window of its own.
+    const first = chat.webhooks.relay(
+      await signedRequest(
+        envelope(
+          "message.received",
+          webhookMessage() as unknown as Record<string, unknown>,
+        ),
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const second = chat.webhooks.relay(
+      await signedRequest(
+        envelope(
+          "message.received",
+          webhookMessage({ id: IDS.reply }) as unknown as Record<
+            string,
+            unknown
+          >,
+          { event_id: SECOND_EVENT },
+        ),
+      ),
+    );
+    const [firstResponse, secondResponse] = await Promise.all([
+      first,
+      second,
+    ]);
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+
+    const failure = await handled;
+    // The whole point: the post inside a burst handler must not throw.
+    expect(failure).toBeNull();
+    // Burst collapses the pair into one handler run, so one reply.
+    expect(sends).toHaveLength(1);
+    // The key is derived from a real inbound event, never invented, so a
+    // redelivery of that event collides rather than double-posting.
+    expect([
+      `relay-chat-sdk:${IDS.event}:0`,
+      `relay-chat-sdk:${SECOND_EVENT}:0`,
+    ]).toContain(sends[0]?.key);
+  }, 20_000);
+
+  /**
+   * The turn context lives in `AsyncLocalStorage`, so a handler that ran
+   * after its webhook call returned would post without a key and be refused.
+   * It does not: every deferring strategy awaits the handler inside the
+   * webhook call, so the store is still in scope. This asserts that for the
+   * strategies that defer, because the day one of them resumes out of band is
+   * the day replies start failing.
+   */
+  it.each(["burst", "debounce", "queue"] as const)(
+    "derives the idempotency key from a real inbound event under %s",
+    async (strategy) => {
+      const keys: Array<string | null> = [];
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (String(input).endsWith("/messages")) {
+            keys.push(new Headers(init?.headers).get("idempotency-key"));
+            return jsonResponse(sentMessage(), 202);
+          }
+          return new Response(null, { status: 204 });
+        },
+      );
+      const adapter = createRelayAdapter({
+        fetch: fetchMock as unknown as typeof fetch,
+        token: "agent-token",
+        webhookSecret: WEBHOOK_SECRET,
+      });
+      let settle: (error: unknown) => void = () => undefined;
+      const handled = new Promise<unknown>((resolve) => {
+        settle = resolve;
+      });
+      const chat = new Chat({
+        adapters: { relay: adapter },
+        concurrency: { debounceMs: 200, strategy },
+        logger: "error",
+        state: createMockState(),
+        userName: "Relay Agent",
+      });
+      chat.onDirectMessage(async (thread) => {
+        try {
+          await thread.post("reply");
+          settle(null);
+        } catch (error) {
+          settle(error);
+        }
+      });
+      await chat.webhooks.relay(
+        await signedRequest(
+          envelope(
+            "message.received",
+            webhookMessage() as unknown as Record<string, unknown>,
+          ),
+        ),
+      );
+      expect(await handled).toBeNull();
+      expect(keys).toEqual([`relay-chat-sdk:${IDS.event}:0`]);
+    },
+    20_000,
+  );
+});
+
+describe("outbound local bytes and files", () => {
+  interface UploadCall {
+    body: unknown;
+    headers: Headers;
+    method: string;
+    url: string;
+  }
+
+  function uploadHarness() {
+    const calls: UploadCall[] = [];
+    let allocations = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        calls.push({
+          body:
+            typeof init?.body === "string"
+              ? (JSON.parse(init.body) as unknown)
+              : init?.body,
+          headers: new Headers(init?.headers),
+          method: init?.method ?? "GET",
+          url,
+        });
+        if (url.endsWith("/v1/attachments")) {
+          allocations += 1;
+          return jsonResponse(
+            {
+              attachment_id: `00000000-0000-4000-8000-00000000000${allocations}`,
+              download_url: "https://cdn.relay.test/download",
+              expires_at: "2026-08-30T13:00:00.000Z",
+              http_method: "PUT",
+              required_headers: { "x-upload-token": "opaque" },
+              upload_url: `https://storage.relay.test/upload/${allocations}`,
+            },
+            201,
+          );
+        }
+        if (url.startsWith("https://storage.relay.test/")) {
+          return new Response(null, { status: 200 });
+        }
+        return jsonResponse(sentMessage(), 202);
+      },
+    );
+    const adapter = createRelayAdapter({
+      fetch: fetchMock as unknown as typeof fetch,
+      idempotencyKeyResolver: () => "test-upload",
+      token: "agent-token",
+      webhookSecret: WEBHOOK_SECRET,
+    });
+    return { adapter, calls };
+  }
+
+  it("allocates, uploads, then posts a media part referencing the attachment", async () => {
+    const { adapter, calls } = uploadHarness();
+    await adapter.postMessage(THREAD_ID, {
+      files: [
+        {
+          data: new Uint8Array([1, 2, 3]).buffer,
+          filename: "photo.png",
+          mimeType: "image/png",
+        },
+      ],
+      raw: "here it is",
+    });
+
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      "POST https://api.relayapp.im/v1/attachments",
+      "PUT https://storage.relay.test/upload/1",
+      `POST https://api.relayapp.im/v1/chats/${IDS.chat}/messages`,
+    ]);
+    expect(calls[0]?.body).toEqual({
+      content_type: "image/png",
+      filename: "photo.png",
+      size_bytes: 3,
+    });
+    // Storage takes only the headers Relay handed back; never the Agent Token.
+    expect(
+      Object.fromEntries(calls[1]!.headers.entries()),
+    ).toEqual({ "x-upload-token": "opaque" });
+    expect(calls[2]?.body).toMatchObject({
+      message: {
+        parts: [
+          { type: "text", value: "here it is" },
+          {
+            attachment_id: "00000000-0000-4000-8000-000000000001",
+            type: "media",
+          },
+        ],
+      },
+    });
+  });
+
+  it("sends the file's own bytes, not the pool its Buffer sits in", async () => {
+    const { adapter, calls } = uploadHarness();
+    // A Node Buffer from a small allocation is a window onto a shared pool.
+    const pooled = Buffer.from([7, 8, 9]);
+    await adapter.postMessage(THREAD_ID, {
+      files: [{ data: pooled, filename: "three.bin" }],
+      raw: "",
+    });
+    const uploaded = calls[1]?.body as Uint8Array;
+    expect(uploaded.byteLength).toBe(3);
+    expect([...uploaded]).toEqual([7, 8, 9]);
+    expect(calls[0]?.body).toMatchObject({ size_bytes: 3 });
+  });
+
+  it("infers the content type from the filename when none is declared", async () => {
+    const { adapter, calls } = uploadHarness();
+    await adapter.postMessage(THREAD_ID, {
+      files: [
+        { data: new Uint8Array([1]).buffer, filename: "notes.pdf" },
+      ],
+      raw: "",
+    });
+    expect(calls[0]?.body).toMatchObject({
+      content_type: "application/pdf",
+    });
+  });
+
+  it("uploads an attachment that carries bytes instead of a URL", async () => {
+    const { adapter, calls } = uploadHarness();
+    await adapter.postMessage(THREAD_ID, {
+      attachments: [
+        {
+          data: Buffer.from([4, 5]),
+          height: 20,
+          mimeType: "image/png",
+          name: "shot.png",
+          type: "image" as const,
+          width: 10,
+        },
+      ],
+      raw: "",
+    });
+    expect(calls[0]?.body).toEqual({
+      content_type: "image/png",
+      filename: "shot.png",
+      height: 20,
+      size_bytes: 2,
+      width: 10,
+    });
+    expect(calls[2]?.body).toMatchObject({
+      message: {
+        parts: [
+          {
+            attachment_id: "00000000-0000-4000-8000-000000000001",
+            type: "media",
+          },
+        ],
+      },
+    });
+  });
+
+  it("uploads an attachment that can only fetch its bytes", async () => {
+    const { adapter, calls } = uploadHarness();
+    await adapter.postMessage(THREAD_ID, {
+      attachments: [
+        {
+          fetchData: async () => new Uint8Array([9, 9, 9, 9]).buffer,
+          mimeType: "application/octet-stream",
+          name: "blob.bin",
+          type: "file" as const,
+        },
+      ],
+      raw: "",
+    });
+    expect(calls[0]?.body).toMatchObject({ size_bytes: 4 });
+  });
+
+  it("uploads every file in the message, one attachment each", async () => {
+    const { adapter, calls } = uploadHarness();
+    await adapter.postMessage(THREAD_ID, {
+      files: [
+        { data: new Uint8Array([1]).buffer, filename: "a.txt" },
+        { data: new Uint8Array([2, 2]).buffer, filename: "b.txt" },
+      ],
+      raw: "",
+    });
+    const sent = calls.at(-1)?.body as {
+      message: { parts: Array<Record<string, unknown>> };
+    };
+    expect(sent.message.parts).toEqual([
+      {
+        attachment_id: "00000000-0000-4000-8000-000000000001",
+        type: "media",
+      },
+      {
+        attachment_id: "00000000-0000-4000-8000-000000000002",
+        type: "media",
+      },
+    ]);
+  });
+
+  it("refuses a body it cannot read, before allocating anything", async () => {
+    const { adapter, calls } = uploadHarness();
+    await expect(
+      adapter.postMessage(THREAD_ID, {
+        files: [
+          {
+            data: "not bytes" as unknown as ArrayBuffer,
+            filename: "bad.txt",
+          },
+        ],
+        raw: "",
+      }),
+    ).rejects.toThrow(/cannot read the bytes of file "bad\.txt"/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("refuses an attachment carrying neither bytes nor a public URL", async () => {
+    const { adapter, calls } = uploadHarness();
+    await expect(
+      adapter.postMessage(THREAD_ID, {
+        attachments: [
+          { name: "ghost.png", type: "image" as const },
+        ],
+        raw: "",
+      }),
+    ).rejects.toThrow(/neither bytes nor a public HTTPS URL/);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe("isDM outside a webhook dispatch", () => {
+  function chatHarness(isGroup: boolean) {
+    const urls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return jsonResponse({
+        created_at: "2026-08-30T12:00:00.000Z",
+        display_name: isGroup ? "Team" : null,
+        handles: [USER_HANDLE, AGENT_HANDLE],
+        id: IDS.chat,
+        is_group: isGroup,
+        updated_at: "2026-08-30T12:00:00.000Z",
+      });
+    });
+    const adapter = createRelayAdapter({
+      fetch: fetchMock as unknown as typeof fetch,
+      token: "agent-token",
+      webhookSecret: WEBHOOK_SECRET,
+    });
+    return { adapter, urls };
+  }
+
+  it("answers true for a direct chat after fetchThread, with no dispatch active", async () => {
+    const { adapter } = chatHarness(false);
+    await adapter.fetchThread(THREAD_ID);
+    expect(adapter.isDM(THREAD_ID)).toBe(true);
+  });
+
+  it("answers false for a group chat after fetchThread", async () => {
+    const { adapter } = chatHarness(true);
+    await adapter.fetchThread(THREAD_ID);
+    expect(adapter.isDM(THREAD_ID)).toBe(false);
+  });
+
+  it("answers false for a chat it has never seen", () => {
+    const { adapter, urls } = chatHarness(false);
+    expect(adapter.isDM(THREAD_ID)).toBe(false);
+    // Answering must stay synchronous: no request may be spent on it.
+    expect(urls).toHaveLength(0);
+  });
+
+  it("learns the kind from onThreadSubscribe and spends one request doing it", async () => {
+    const { adapter, urls } = chatHarness(false);
+    await adapter.onThreadSubscribe(THREAD_ID);
+    expect(adapter.isDM(THREAD_ID)).toBe(true);
+    expect(urls).toEqual([
+      `https://api.relayapp.im/v1/chats/${IDS.chat}`,
+    ]);
+    // A second subscribe re-reads nothing: a Chat's kind never changes.
+    await adapter.onThreadSubscribe(THREAD_ID);
+    expect(urls).toHaveLength(1);
+  });
+
+  it("still answers correctly after the webhook dispatch that taught it has ended", async () => {
+    const { adapter } = chatHarness(false);
+    const chat = createMockChatInstance();
+    await adapter.initialize(chat);
+    const response = await adapter.handleWebhook(
+      await signedRequest(
+        envelope(
+          "message.received",
+          webhookMessage() as unknown as Record<string, unknown>,
+        ),
+      ),
+    );
+    expect(response.status).toBe(200);
+    // The dispatch has returned; the old request-scoped hint would be gone.
+    expect(adapter.isDM(THREAD_ID)).toBe(true);
   });
 });
 
