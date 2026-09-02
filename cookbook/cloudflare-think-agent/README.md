@@ -28,7 +28,7 @@ Relay packages own webhook verification and API calls.
 5. Think runs the model in a recoverable fiber. The model must call the native
    `reply` Action once.
 6. The Action commits one complete Message through
-   `@relaymessenger/sdk@0.3.0-staging.5`. Its stable idempotency key is derived
+   `@relaymessenger/sdk@0.3.0-staging.6`. Its stable idempotency key is derived
    from the inbound Relay Message ID.
 
 Think's streamed response surface is intentionally limited to zero visible
@@ -47,10 +47,10 @@ Message instead of creating a duplicate.
 - a staging agent and Agent Token from Relay Console
 
 The adapter release used by this staging branch is
-`@relaymessenger/chat-sdk-adapter@0.3.0-staging.1`, published to npm with
-provenance from `Relay-Chat-SDK`
-`469a9c1aafed7e31cdc4e8581df4dd6a34c94e17`. Its runtime implementation was
-independently audited at `f90e312aeecefa9c929398a56be77441e8c2137c`.
+`@relaymessenger/chat-sdk-adapter@0.3.0-staging.2`, published to npm with
+provenance from Relay-SDK commit
+`d3a8ae02143120868e304e3a1213148e53eac80b`. Its imported adapter source is
+Relay Chat SDK commit `eecf94a4d38bc021917e54dfed57e268657c17af`.
 
 ## Local setup
 
@@ -283,12 +283,12 @@ Run neither guarded command without your own review and credentials.
 
 This revision is tested against:
 
-- Relay Server `f6e96c7520c301f04ab2182a85a961cf05c4ed07`
-- Relay Chat SDK `f90e312aeecefa9c929398a56be77441e8c2137c`
-- `@relaymessenger/chat-sdk-adapter@0.3.0-staging.1` npm integrity
-  `sha512-IuWa2VVv3hKArnQPO6SV4Ntq+/9pp7eEIzWgVSBgg6E5pWpVV+hxTFCwfwwBJvmhYjzVgOFxrrk6haL05ANquw==`
+- Relay Server `13c92e5a131c8d34ab4615e097a91b3426e730ed`
+- Relay Chat SDK `eecf94a4d38bc021917e54dfed57e268657c17af`
+- `@relaymessenger/chat-sdk-adapter@0.3.0-staging.2` npm integrity
+  `sha512-n07DNFpZBLlrHS5oUm9Q9ZS02fz9tO46ZUFBK/xNk+PvLcYZa7KK9Q6BZXfYsL7cNd2jGljhqgKetjvocSfHng==`
 - OpenAPI SHA-256
-  `86163217bb7273d7d438d9861fb4456978df587d941e5803c97e43eb1ee00682`
+  `622095a7990cfb43576f0d6b76f5ab4a358f0fd23483ce11e1f02a909d957abd`
 - public `ChatHandle.image_url` and `ChatHandle.about` fields, with no legacy
   aliases
 - Relay API `v1`

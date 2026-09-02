@@ -8,13 +8,13 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const RELAY_SERVER_SHA =
-  "f6e96c7520c301f04ab2182a85a961cf05c4ed07";
+  "13c92e5a131c8d34ab4615e097a91b3426e730ed";
 const RELAY_CHAT_SDK_SHA =
   "eecf94a4d38bc021917e54dfed57e268657c17af";
 const RELAY_OPENAPI_SHA256 =
-  "86163217bb7273d7d438d9861fb4456978df587d941e5803c97e43eb1ee00682";
+  "622095a7990cfb43576f0d6b76f5ab4a358f0fd23483ce11e1f02a909d957abd";
 const RELAY_ADAPTER_INTEGRITY =
-  "sha512-arAKw/xxsPeQYVHtu5K3B0ADnCmuzKk279Chc5hJ4DCG5Ez2RYuvfj727G2crBax9efemRo5BcCwt2yCBXmfgQ==";
+  "sha512-n07DNFpZBLlrHS5oUm9Q9ZS02fz9tO46ZUFBK/xNk+PvLcYZa7KK9Q6BZXfYsL7cNd2jGljhqgKetjvocSfHng==";
 
 function packageVersion(name: string): string {
   let directory = process.cwd();
@@ -52,8 +52,8 @@ describe("locked runtime contracts", () => {
   it("pins the coordinated Think and Relay packages", () => {
     expect(packageVersion("@cloudflare/think")).toBe("0.17.0");
     expect(packageVersion("@relaymessenger/chat-sdk-adapter"))
-      .toBe("0.3.0-staging.1");
-    expect(packageVersion("@relaymessenger/sdk")).toBe("0.3.0-staging.5");
+      .toBe("0.3.0-staging.2");
+    expect(packageVersion("@relaymessenger/sdk")).toBe("0.3.0-staging.6");
   });
 
   it(`locks the adapter tarball built from Relay Chat SDK ${RELAY_CHAT_SDK_SHA.slice(0, 7)}`, () => {
@@ -71,8 +71,8 @@ describe("locked runtime contracts", () => {
     expect(adapter).toMatchObject({
       integrity: RELAY_ADAPTER_INTEGRITY,
       resolved:
-        "https://registry.npmjs.org/@relaymessenger/chat-sdk-adapter/-/chat-sdk-adapter-0.3.0-staging.1.tgz",
-      version: "0.3.0-staging.1",
+        "https://registry.npmjs.org/@relaymessenger/chat-sdk-adapter/-/chat-sdk-adapter-0.3.0-staging.2.tgz",
+      version: "0.3.0-staging.2",
     });
   });
 

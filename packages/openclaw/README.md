@@ -161,26 +161,25 @@ durable ACK and idempotent REST reply.
 
 `contracts/relay-v1.lock.json` records the compatibility boundary used by this
 release: Relay Server
-`f6e96c7520c301f04ab2182a85a961cf05c4ed07`, OpenAPI SHA-256
-`86163217bb7273d7d438d9861fb4456978df587d941e5803c97e43eb1ee00682`,
+`13c92e5a131c8d34ab4615e097a91b3426e730ed`, OpenAPI SHA-256
+`622095a7990cfb43576f0d6b76f5ab4a358f0fd23483ce11e1f02a909d957abd`,
 public `ChatHandle.image_url` and `ChatHandle.about` fields with no legacy
 aliases,
-and the exact `@relaymessenger/sdk@0.3.0-staging.5` registry integrity, source
-commit `8570546ce30ab39d702409893006dbccd351f2b4`, REST operations, and WebSocket
+and the exact `@relaymessenger/sdk@0.3.0-staging.6` registry integrity, source
+commit `d3a8ae02143120868e304e3a1213148e53eac80b`, REST operations, and WebSocket
 frames consumed by the plugin.
 
 Public CI hashes the checked-in `contracts/relay-openapi.yaml` fixture and
 requires the locked digest above. The retained private release receipt also
-sets `RELAY_SERVER_SOURCE_DIR` to an exact checkout of Server `f6e96c7520c3`
+sets `RELAY_SERVER_SOURCE_DIR` to an exact checkout of Server `13c92e5a131c`
 and proves that the fixture bytes exactly match the locked Server commit before
 packaging. The public Relay-SDK monorepo does not require credentials for the
 private Server source and does not overstate what npm metadata can attest.
 
-`contracts/relay-sdk-0.3.0-staging.5.registry.json` records immutable npm
+`contracts/relay-sdk-0.3.0-staging.6.registry.json` records immutable npm
 publication metadata and tarball digests. Validation downloads the registry
 tarball, verifies SHA-1, SHA-256, and SHA-512 integrity, checks the installed
-SDK, and compares its package metadata with exact SDK commit `8570546`.
-The npm metadata has no `gitHead` or attestation for this version, so the
-receipt deliberately does not claim cryptographic source-to-tarball
-provenance. These are local artifact compatibility checks, not a claim of a
-hosted Relay deployment test.
+SDK, and compares its package metadata with exact SDK commit `d3a8ae0`. The
+npm SLSA statement binds the published tarball digest to that commit through
+the trusted staging publish workflow. These are artifact compatibility and
+source-provenance checks, not a claim of a hosted Relay deployment test.

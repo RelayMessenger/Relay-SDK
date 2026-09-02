@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const expected =
-  "86163217bb7273d7d438d9861fb4456978df587d941e5803c97e43eb1ee00682";
+  "622095a7990cfb43576f0d6b76f5ab4a358f0fd23483ce11e1f02a909d957abd";
 const copies = [
   "contracts/relay-v1-openapi.yaml",
   "packages/chat-sdk-adapter/contracts/relay-openapi.yaml",
@@ -28,8 +28,8 @@ const skillLock = JSON.parse(
   ),
 );
 assert.equal(skillLock.api.openapi_sha256, expected);
-assert.equal(skillLock.api.commit, "f6e96c7520c301f04ab2182a85a961cf05c4ed07");
-assert.equal(skillLock.sdk.commit, "776a9a7873f41c0c9947439c44444674a7d55c5d");
-assert.equal(skillLock.sdk.version, "0.3.0-staging.5");
+assert.equal(skillLock.api.commit, "13c92e5a131c8d34ab4615e097a91b3426e730ed");
+assert.equal(skillLock.sdk.commit, "d3a8ae02143120868e304e3a1213148e53eac80b");
+assert.equal(skillLock.sdk.version, "0.3.0-staging.6");
 
 console.log(`validated ${copies.length} byte-exact Relay v1 OpenAPI copies`);

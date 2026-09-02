@@ -43,10 +43,10 @@ const openapiPath =
 
 test("pins the requested OpenClaw and current Relay SDK contracts", () => {
   assert.equal(packageJson.name, "@relaymessenger/openclaw-plugin");
-  assert.equal(packageJson.version, "0.4.0-staging.1");
+  assert.equal(packageJson.version, "0.4.0-staging.2");
   assert.equal(packageJson.devDependencies.openclaw, "2026.8.1");
   assert.equal(packageJson.openclaw.build.openclawVersion, "2026.8.1");
-  assert.equal(packageJson.dependencies["@relaymessenger/sdk"], "0.3.0-staging.5");
+  assert.equal(packageJson.dependencies["@relaymessenger/sdk"], "0.3.0-staging.6");
   assert.equal(packageJson.publishConfig.tag, "staging");
   assert.match(packageJson.openclaw.compat.pluginApi, /^>=2026\.8\.1/);
   assert.deepEqual(packageJson.repository, {
@@ -67,13 +67,13 @@ test("pins the requested OpenClaw and current Relay SDK contracts", () => {
 test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
   assert.deepEqual(contractLock.relayServer, {
     repository: "RelayMessenger/Relay-Server",
-    commit: "f6e96c7520c301f04ab2182a85a961cf05c4ed07",
+    commit: "13c92e5a131c8d34ab4615e097a91b3426e730ed",
     openapiPath: "contracts/developer/openapi.yaml",
-    sha256: "86163217bb7273d7d438d9861fb4456978df587d941e5803c97e43eb1ee00682",
+    sha256: "622095a7990cfb43576f0d6b76f5ab4a358f0fd23483ce11e1f02a909d957abd",
   });
   assert.equal(
     contractLock.relaySdk.source.commit,
-    "776a9a7873f41c0c9947439c44444674a7d55c5d",
+    "d3a8ae02143120868e304e3a1213148e53eac80b",
   );
   assert.equal(
     contractLock.relaySdk.workspaceOpenapiSha256,
@@ -109,15 +109,23 @@ test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
   assert.deepEqual(
     sdkRegistryReceipt.provenanceBoundary.registryAttestations,
     {
-      url: "https://registry.npmjs.org/-/npm/v1/attestations/@relaymessenger%2fsdk@0.3.0-staging.5",
+      url: "https://registry.npmjs.org/-/npm/v1/attestations/@relaymessenger%2fsdk@0.3.0-staging.6",
       provenance: {
         predicateType: "https://slsa.dev/provenance/v1",
       },
     },
   );
+  assert.equal(
+    sdkRegistryReceipt.provenanceBoundary.attestationJsonSha256,
+    "9e1700a87f6707deb401e648a67afd03032e6d9ba61c49a73d14cb56176a5746",
+  );
+  assert.equal(
+    sdkRegistryReceipt.provenanceBoundary.slsa.resolvedDependency.digest.gitCommit,
+    contractLock.relaySdk.source.commit,
+  );
   assert.match(
     sdkRegistryReceipt.provenanceBoundary.claim,
-    /does not claim that the registry attestation independently proves the source commit/u,
+    /SLSA statement binds the published tarball digest/u,
   );
   assert.equal(
     createHash("sha256")

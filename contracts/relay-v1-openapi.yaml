@@ -3120,8 +3120,12 @@ components:
           type:
             - string
             - "null"
-          format: uuid
-          description: Completed image Attachment ID to use as the group photo, or null to clear it.
+          description: >-
+            Group photo for the chat, in either of two forms. A completed image
+            Attachment ID uses an image you already uploaded. Any publicly
+            reachable HTTPS image address also works: Relay downloads it and
+            serves a permanent copy of its own, so the address you supply does
+            not have to stay up. Send null to clear the photo.
     UpdateContactCardRequest:
       type: object
       properties:

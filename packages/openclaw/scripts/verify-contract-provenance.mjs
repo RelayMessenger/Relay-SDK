@@ -113,6 +113,11 @@ assert.equal(
 assert.equal(receipt.registry.package, lock.relaySdk.package);
 assert.equal(receipt.registry.version, lock.relaySdk.version);
 assert.equal(receipt.registry.dist.integrity, lock.relaySdk.integrity);
+assert.equal(
+  receipt.provenanceBoundary.slsa.resolvedDependency.digest.gitCommit,
+  receipt.source.commit,
+  "SLSA source commit must match the release source commit",
+);
 
 const sdkSourceBase =
   `https://raw.githubusercontent.com/${receipt.source.repository}` +
@@ -210,6 +215,41 @@ assert.equal(
   receipt.provenanceBoundary.attestationEndpointObservedStatus,
   "npm attestation availability changed; review the provenance boundary",
 );
+const attestationDocument = await attestationResponse.json();
+assert.equal(
+  digest("sha256", Buffer.from(JSON.stringify(attestationDocument))),
+  receipt.provenanceBoundary.attestationJsonSha256,
+  "npm attestation document changed",
+);
+const slsaAttestation = attestationDocument.attestations?.find(
+  (attestation) =>
+    attestation.predicateType === receipt.provenanceBoundary.slsa.predicateType,
+);
+assert.ok(slsaAttestation, "npm SLSA provenance attestation is missing");
+const slsaStatement = JSON.parse(
+  Buffer.from(
+    slsaAttestation.bundle.dsseEnvelope.payload,
+    "base64",
+  ).toString("utf8"),
+);
+assert.equal(slsaStatement.predicateType, receipt.provenanceBoundary.slsa.predicateType);
+assert.deepEqual(slsaStatement.subject, [receipt.provenanceBoundary.slsa.subject]);
+assert.deepEqual(
+  slsaStatement.predicate.buildDefinition.externalParameters.workflow,
+  receipt.provenanceBoundary.slsa.workflow,
+);
+assert.deepEqual(
+  slsaStatement.predicate.buildDefinition.resolvedDependencies,
+  [receipt.provenanceBoundary.slsa.resolvedDependency],
+);
+assert.equal(
+  slsaStatement.predicate.runDetails.builder.id,
+  receipt.provenanceBoundary.slsa.builder,
+);
+assert.equal(
+  slsaStatement.predicate.runDetails.metadata.invocationId,
+  receipt.provenanceBoundary.slsa.invocationId,
+);
 
 const registryTarball = await fetchOk(
   receipt.registry.dist.tarball,
@@ -224,6 +264,11 @@ assert.equal(digest("sha1", registryTarball), receipt.registry.dist.shasum);
 assert.equal(
   `sha512-${digest("sha512", registryTarball, "base64")}`,
   receipt.registry.dist.integrity,
+);
+assert.equal(
+  digest("sha512", registryTarball),
+  receipt.provenanceBoundary.slsa.subject.digest.sha512,
+  "SLSA subject digest must match the registry tarball",
 );
 const temp = mkdtempSync(join(tmpdir(), "relay-sdk-registry-"));
 try {
@@ -307,7 +352,9 @@ console.log(
       gitHead: receipt.provenanceBoundary.registryGitHead,
       attestations: receipt.provenanceBoundary.registryAttestations,
       attestationEndpointStatus: attestationResponse.status,
-      claim: "registry integrity and metadata match; no source attestation claimed",
+      attestationJsonSha256: receipt.provenanceBoundary.attestationJsonSha256,
+      sourceCommit: receipt.provenanceBoundary.slsa.resolvedDependency.digest.gitCommit,
+      claim: "registry integrity, metadata, and SLSA source provenance match",
     },
   }),
 );
