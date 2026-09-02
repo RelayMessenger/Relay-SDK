@@ -1,3 +1,11 @@
+import {
+  AdapterRateLimitError,
+  AuthenticationError,
+  NetworkError,
+  PermissionError,
+  ResourceNotFoundError,
+  ValidationError,
+} from "@chat-adapter/shared";
 import { describe, expect, it, vi } from "vitest";
 import {
   RelayApiError,
@@ -210,16 +218,16 @@ describe("RelayClient", () => {
     expect(calls[1]?.headers.has("authorization")).toBe(false);
   });
 
-  it("surfaces Relay status and error code", async () => {
+  it("surfaces Relay status and error code for a status the shared vocabulary does not name", async () => {
     const { fetchMock } = harness(() =>
       jsonResponse(
         {
           error: {
-            code: "not_found",
-            message: "Message was not found.",
+            code: "idempotency_conflict",
+            message: "That key was used with a different body.",
           },
         },
-        404,
+        409,
       ),
     );
     const client = new RelayClient({
@@ -227,8 +235,148 @@ describe("RelayClient", () => {
       token: "token",
     });
     await expect(client.getMessage(IDS.message)).rejects.toMatchObject({
-      relayCode: "not_found",
-      status: 404,
+      relayCode: "idempotency_conflict",
+      status: 409,
     } satisfies Partial<RelayApiError>);
+  });
+});
+
+describe("RelayClient error mapping", () => {
+  function clientThatFails(status: number, body: unknown) {
+    const { fetchMock } = harness(() => jsonResponse(body, status));
+    return new RelayClient({
+      fetch: fetchMock as typeof fetch,
+      token: "token",
+    });
+  }
+
+  function relayError(code: string, message: string, extra = {}) {
+    return { error: { code, message, ...extra } };
+  }
+
+  it("maps 401 to AuthenticationError", async () => {
+    const client = clientThatFails(
+      401,
+      relayError("unauthorized", "Agent Token is invalid."),
+    );
+    const error = await client
+      .getMessage(IDS.message)
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(AuthenticationError);
+    expect((error as AuthenticationError).message).toBe(
+      "Agent Token is invalid.",
+    );
+    expect((error as AuthenticationError).adapter).toBe("relay");
+  });
+
+  it("maps 403 to PermissionError", async () => {
+    const client = clientThatFails(
+      403,
+      relayError("forbidden", "reach this Chat"),
+    );
+    const error = await client
+      .getChat(IDS.chat)
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(PermissionError);
+    expect((error as PermissionError).action).toBe("reach this Chat");
+    expect((error as PermissionError).requiredScope).toBe("forbidden");
+  });
+
+  it("maps 404 to ResourceNotFoundError naming the resource from the route", async () => {
+    const client = clientThatFails(
+      404,
+      relayError("not_found", "Message was not found."),
+    );
+    const error = await client
+      .getMessage(IDS.message)
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(ResourceNotFoundError);
+    expect((error as ResourceNotFoundError).resourceType).toBe("message");
+    expect((error as ResourceNotFoundError).resourceId).toBe(IDS.message);
+  });
+
+  it("maps 404 on a chat route to the chat resource", async () => {
+    const client = clientThatFails(
+      404,
+      relayError("not_found", "Chat was not found."),
+    );
+    const error = await client
+      .getChat(IDS.chat)
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(ResourceNotFoundError);
+    expect((error as ResourceNotFoundError).resourceType).toBe("chat");
+    expect((error as ResourceNotFoundError).resourceId).toBe(IDS.chat);
+  });
+
+  it("maps 429 to AdapterRateLimitError carrying the contract's retry_after", async () => {
+    const client = clientThatFails(
+      429,
+      relayError("rate_limited", "Slow down.", { retry_after: 30 }),
+    );
+    const error = await client
+      .getMessage(IDS.message)
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(AdapterRateLimitError);
+    expect((error as AdapterRateLimitError).retryAfter).toBe(30);
+    expect((error as AdapterRateLimitError).message).toContain(
+      "retry after 30s",
+    );
+  });
+
+  it("maps 429 without retry_after to AdapterRateLimitError with no wait", async () => {
+    const client = clientThatFails(
+      429,
+      relayError("rate_limited", "Slow down."),
+    );
+    const error = await client
+      .getMessage(IDS.message)
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(AdapterRateLimitError);
+    expect((error as AdapterRateLimitError).retryAfter).toBeUndefined();
+  });
+
+  it("maps 400 and 422 to ValidationError", async () => {
+    for (const status of [400, 422]) {
+      const client = clientThatFails(
+        status,
+        relayError("invalid_request", `Rejected with ${status}.`),
+      );
+      const error = await client
+        .getMessage(IDS.message)
+        .catch((thrown: unknown) => thrown);
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).message).toBe(
+        `Rejected with ${status}.`,
+      );
+    }
+  });
+
+  it("maps every 5xx to NetworkError", async () => {
+    for (const status of [500, 502, 503]) {
+      const client = clientThatFails(
+        status,
+        relayError("server_error", `Relay is unwell (${status}).`),
+      );
+      const error = await client
+        .getMessage(IDS.message)
+        .catch((thrown: unknown) => thrown);
+      expect(error).toBeInstanceOf(NetworkError);
+      expect((error as NetworkError).message).toBe(
+        `Relay is unwell (${status}).`,
+      );
+    }
+  });
+
+  it("leaves an unmapped 4xx as RelayApiError", async () => {
+    const client = clientThatFails(
+      418,
+      relayError("teapot", "Relay declines to brew."),
+    );
+    const error = await client
+      .getMessage(IDS.message)
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(RelayApiError);
+    expect((error as RelayApiError).status).toBe(418);
+    expect((error as RelayApiError).relayCode).toBe("teapot");
   });
 });

@@ -1,6 +1,10 @@
 import {
   AdapterError,
+  AdapterRateLimitError,
+  AuthenticationError,
   NetworkError,
+  PermissionError,
+  ResourceNotFoundError,
   ValidationError,
 } from "@chat-adapter/shared";
 import type { RelayCredential } from "./credentials.js";
@@ -94,6 +98,96 @@ function errorDetails(
 }
 
 /**
+ * `retry_after` is published by the Relay error contract as an integer number
+ * of seconds and is "Only present on 429 rate limit errors"
+ * (`contracts/relay-openapi.yaml`, `ErrorDetail.retry_after`).
+ */
+function retryAfterSeconds(body: unknown): number | undefined {
+  if (typeof body !== "object" || body === null) return undefined;
+  const record = body as Record<string, unknown>;
+  const error =
+    typeof record.error === "object" && record.error !== null
+      ? (record.error as Record<string, unknown>)
+      : record;
+  const value = error.retry_after;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+const RESOURCE_BY_COLLECTION: Record<string, string> = {
+  attachments: "attachment",
+  chats: "chat",
+  messages: "message",
+};
+
+/**
+ * Name the resource a 404 is about from the path this client itself built.
+ * Every Relay route is `/v1/{collection}/{id}/...`, so the owning resource is
+ * the first collection segment and its ID is the segment after it.
+ */
+function resourceFromPath(path: string): {
+  id?: string;
+  type: string;
+} {
+  const segments = path.split("?")[0]!.split("/").filter(Boolean);
+  const collection = segments[1];
+  const type =
+    (collection ? RESOURCE_BY_COLLECTION[collection] : undefined) ??
+    "resource";
+  const id = segments[2];
+  return id ? { id: decodeURIComponent(id), type } : { type };
+}
+
+/**
+ * Map a Relay API status onto the Chat SDK's shared error classes so a
+ * consumer can catch `AdapterRateLimitError` and read `retryAfter`, or catch
+ * `AuthenticationError`, without knowing Relay's HTTP vocabulary.
+ *
+ * `RelayApiError` stays the default: a status Relay defines but the shared
+ * vocabulary has no class for — 409 idempotency conflict, for instance —
+ * must keep its Relay status and code rather than be flattened into a
+ * near-miss.
+ */
+export function relayHttpError(options: {
+  body: unknown;
+  path: string;
+  status: number;
+}): AdapterError {
+  const { body, path, status } = options;
+  const details = errorDetails(body, status);
+  switch (status) {
+    case 400:
+    case 422:
+      return new ValidationError("relay", details.message);
+    case 401:
+      return new AuthenticationError("relay", details.message);
+    case 403:
+      return new PermissionError("relay", details.message, details.code);
+    case 404: {
+      const resource = resourceFromPath(path);
+      return new ResourceNotFoundError(
+        "relay",
+        resource.type,
+        resource.id,
+      );
+    }
+    case 429:
+      return new AdapterRateLimitError("relay", retryAfterSeconds(body));
+    default:
+      if (status >= 500) {
+        return new NetworkError("relay", details.message);
+      }
+      return new RelayApiError(
+        status,
+        details.code,
+        details.message,
+        body,
+      );
+  }
+}
+
+/**
  * Minimal client for only the locked Relay v1 operations used by the adapter.
  */
 export class RelayClient {
@@ -151,13 +245,7 @@ export class RelayClient {
     }
     const body = await parseResponseBody(response);
     if (!response.ok) {
-      const details = errorDetails(body, response.status);
-      throw new RelayApiError(
-        response.status,
-        details.code,
-        details.message,
-        body,
-      );
+      throw relayHttpError({ body, path, status: response.status });
     }
     return body as T;
   }

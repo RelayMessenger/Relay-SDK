@@ -1,4 +1,7 @@
-import { ValidationError } from "@chat-adapter/shared";
+import {
+  ResourceNotFoundError,
+  ValidationError,
+} from "@chat-adapter/shared";
 import {
   Message,
   NotImplementedError,
@@ -783,12 +786,9 @@ export class RelayAdapter
       }
       return this.parseMessage({ chatId, message });
     } catch (error) {
-      if (
-        error instanceof RelayApiError &&
-        error.status === 404
-      ) {
-        return null;
-      }
+      // The client maps a Relay 404 onto the shared class, so the absent
+      // message is recognised by meaning rather than by HTTP status.
+      if (error instanceof ResourceNotFoundError) return null;
       throw error;
     }
   }

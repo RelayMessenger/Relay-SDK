@@ -10,6 +10,7 @@ export type {
 } from "./adapter.js";
 export {
   RELAY_DEFAULT_BASE_URL,
+  relayHttpError,
   RelayApiError,
   RelayClient,
 } from "./client.js";
