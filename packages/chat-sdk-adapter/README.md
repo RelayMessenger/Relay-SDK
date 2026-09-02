@@ -4,8 +4,15 @@ Vendor-official Relay adapter for
 [Vercel Chat SDK](https://chat-sdk.dev), targeting `chat@4.39.0`.
 
 Source is maintained in
-[`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/main/packages/chat-sdk-adapter)
-under `packages/chat-sdk-adapter`.
+[`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/9180450baf5691f8172514b7117cd92ba5879674/packages/chat-sdk-adapter)
+under `packages/chat-sdk-adapter`. That link is pinned to a commit rather than
+a branch, as the Chat SDK listing guide requires, so it keeps showing the tree
+a listing was reviewed against. Re-pin it whenever the listing is updated.
+
+`SOURCE.json` in this directory records where the code was imported from, not
+which repository owns it. Every package in this monorepo carries the same
+record, and its `canonical` field names `Relay-SDK` -- the same repository
+`package.json` points at.
 
 Relay Chats map one-to-one to Chat SDK threads. Provider thread IDs are stable
 `relay:<chat UUID>` values; provider message IDs are bare Relay Message UUIDs.
