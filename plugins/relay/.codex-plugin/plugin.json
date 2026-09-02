@@ -1,0 +1,41 @@
+{
+  "name": "relay",
+  "version": "1.0.0",
+  "description": "Build and review Relay v1 agent messaging integrations.",
+  "author": {
+    "name": "Relay",
+    "url": "https://relayapp.im"
+  },
+  "homepage": "https://docs.relayapp.im",
+  "repository": "https://github.com/RelayMessenger/Relay-SDK",
+  "license": "MIT",
+  "keywords": [
+    "relay",
+    "messaging",
+    "agents",
+    "webhooks",
+    "websocket"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Relay",
+    "shortDescription": "Build Relay v1 messaging integrations.",
+    "longDescription": "Teach Codex to implement and review Relay v1 Agent Token, Webhook, WebSocket, Chat, Message, Attachment, receipt, and Add request integrations from the locked public contract.",
+    "developerName": "Relay",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://relayapp.im",
+    "privacyPolicyURL": "https://relayapp.im/privacy",
+    "termsOfServiceURL": "https://relayapp.im/terms",
+    "defaultPrompt": [
+      "Add Relay messaging to this agent backend",
+      "Audit this Relay integration against v1",
+      "Implement a durable Relay Webhook receiver"
+    ],
+    "brandColor": "#111111"
+  }
+}
