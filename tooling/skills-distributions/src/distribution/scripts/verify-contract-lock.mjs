@@ -13,18 +13,21 @@ const raw = (repository, commit, path) => {
   return `https://raw.githubusercontent.com${parsed.pathname}/${commit}/${path}`;
 };
 
+const openapiResponse = await fetch(raw(
+  lock.api.repository,
+  lock.api.commit,
+  lock.api.openapi_path,
+), { signal: AbortSignal.timeout(30_000) });
+assert.equal(openapiResponse.status, 200, `${lock.api.openapi_path} could not be fetched`);
+const openapi = Buffer.from(await openapiResponse.arrayBuffer());
+assert.equal(digest(openapi), lock.api.openapi_sha256, lock.api.openapi_path);
+
 for (const [repository, commit, path, expected] of [
   [
-    lock.api.repository,
-    lock.api.commit,
-    lock.api.openapi_path,
-    lock.api.openapi_sha256,
-  ],
-  [
-    lock.api.repository,
-    lock.api.commit,
-    lock.api.skill_path,
-    lock.api.skill_sha256,
+    lock.docs.repository,
+    lock.docs.commit,
+    lock.docs.skill_path,
+    lock.docs.skill_sha256,
   ],
   [
     lock.sdk.repository,
@@ -50,5 +53,5 @@ assert.equal(metadata["dist-tags"][lock.sdk.dist_tag], lock.sdk.version);
 assert.ok(metadata.versions[lock.sdk.version]);
 
 console.log(
-  `verified Relay v1 lock at Docs ${lock.api.commit} and SDK ${lock.sdk.version}`,
+  `verified Relay v1 lock at Server ${lock.api.commit}, Docs ${lock.docs.commit}, and SDK ${lock.sdk.version}`,
 );

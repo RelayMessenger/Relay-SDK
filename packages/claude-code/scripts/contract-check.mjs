@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(import.meta.url);
 const readJSON = (path) => JSON.parse(readFileSync(join(root, path), "utf8"));
 const packageJSON = readJSON("package.json");
 const plugin = readJSON(".claude-plugin/plugin.json");
@@ -13,6 +15,17 @@ const source = readJSON("SOURCE.json");
 const sourceLock = JSON.parse(
   readFileSync(join(root, "../..", "sources.lock.json"), "utf8"),
 );
+const sdkPackagePath = require.resolve("@relaymessenger/sdk/package.json");
+const sdkTypes = readFileSync(
+  join(dirname(sdkPackagePath), "dist", "types.d.ts"),
+  "utf8",
+);
+const workspaceOpenapi = readFileSync(
+  join(root, "..", "..", "contracts", "relay-v1-openapi.yaml"),
+);
+const workspaceOpenapiSha256 = createHash("sha256")
+  .update(workspaceOpenapi)
+  .digest("hex");
 const repository = "https://github.com/RelayMessenger/Relay-SDK";
 const homepage =
   `${repository}/tree/main/packages/claude-code#readme`;
@@ -97,11 +110,25 @@ if (!readFileSync(join(root, "README.md"), "utf8").includes(
 if (packageJSON.dependencies?.[lock.relaySdk.package] !== lock.relaySdk.version) {
   throw new Error("Relay SDK dependency does not match the contract lock");
 }
-if (lock.relayServer.commit !== "9b4d5bb32cc749c6fd271969948c385300d404d6") {
+if (
+  !/\bimage_url: string \| null;/u.test(sdkTypes)
+  || !/\babout: string \| null;/u.test(sdkTypes)
+  || /\bavatar_url\b/u.test(sdkTypes)
+  || /\btagline\b/u.test(sdkTypes)
+) {
+  throw new Error("Relay SDK Contact declarations must expose image_url and about only");
+}
+if (lock.relayServer.commit !== "f6e96c7520c301f04ab2182a85a961cf05c4ed07") {
   throw new Error("Relay Server commit lock drifted");
 }
-if (lock.relayServer.sha256 !== "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5") {
+if (lock.relayServer.sha256 !== "86163217bb7273d7d438d9861fb4456978df587d941e5803c97e43eb1ee00682") {
   throw new Error("Relay OpenAPI hash lock drifted");
+}
+if (
+  workspaceOpenapiSha256 !== lock.relaySdk.workspaceOpenapiSha256
+  || workspaceOpenapiSha256 !== lock.relayServer.sha256
+) {
+  throw new Error("Relay workspace OpenAPI hash drifted");
 }
 
 const implementation = [join(root, "server.ts"), ...sourceFiles(join(root, "src"))]

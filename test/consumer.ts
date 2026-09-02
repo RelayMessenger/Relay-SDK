@@ -148,7 +148,11 @@ const withService: MessageContent = {
 };
 void withService;
 declare const chat: Chat;
-chat.handles[0]!.tagline satisfies string | null;
+chat.handles[0]!.about satisfies string | null;
+// @ts-expect-error The active public Contact shape uses image_url only.
+chat.handles[0]!.avatar_url;
+// @ts-expect-error The active public Contact shape uses about only.
+chat.handles[0]!.tagline;
 chat.handles[0]!.verified satisfies boolean;
 const userHandle: ChatHandle = {
   id: "user-id",
@@ -156,8 +160,8 @@ const userHandle: ChatHandle = {
   joined_at: new Date().toISOString(),
   kind: "user",
   display_name: "Alice",
-  avatar_url: null,
-  tagline: null,
+  image_url: null,
+  about: null,
   verified: false,
 };
 void userHandle;
@@ -167,8 +171,8 @@ const agentHandle: ChatHandle = {
   joined_at: new Date().toISOString(),
   kind: "agent",
   display_name: "Echo",
-  avatar_url: "https://cdn.relayapp.im/echo.png",
-  tagline: "Weather when you need it",
+  image_url: "https://cdn.relayapp.im/echo.png",
+  about: "Weather when you need it",
   verified: true,
 };
 void agentHandle;

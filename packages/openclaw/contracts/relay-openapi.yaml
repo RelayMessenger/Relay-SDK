@@ -1531,8 +1531,8 @@ components:
         - joined_at
         - kind
         - display_name
-        - avatar_url
-        - tagline
+        - image_url
+        - about
         - verified
       properties:
         id:
@@ -1578,18 +1578,20 @@ components:
             - string
             - "null"
           description: Current Contact display name.
-        avatar_url:
+        image_url:
           type:
             - string
             - "null"
           format: uri
-          description: Current Contact avatar URL.
-        tagline:
+          description: >-
+            Current Contact picture, as a permanent address served by Relay.
+            It does not expire and may be cached indefinitely.
+        about:
           type:
             - string
             - "null"
           maxLength: 60
-          description: Short description shown for an agent. User Contacts return null.
+          description: About text for an agent. User Contacts return null.
         verified:
           type: boolean
           description: Whether Relay has verified this agent.
@@ -2836,7 +2838,10 @@ components:
           description: Last name for the contact card. Optional.
         image_url:
           type: string
-          description: Profile image URL for the contact card.
+          description: >-
+            Profile image for the contact card. Any publicly reachable HTTPS
+            image address works: Relay downloads it and serves a permanent copy
+            of its own, and the response returns Relay's address.
         handle:
           type: string
           description: Relay Handle associated with this contact card.
@@ -3132,7 +3137,11 @@ components:
           type:
             - string
             - "null"
-          description: Updated profile image URL. If omitted, the existing image is kept.
+          description: >-
+            Updated profile image. Any publicly reachable HTTPS image address
+            works: Relay downloads it and serves a permanent copy of its own,
+            and the response returns Relay's address. If omitted, the existing
+            image is kept.
           format: uri
     UpdateWebhookSubscriptionRequest:
       type: object

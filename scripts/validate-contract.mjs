@@ -30,10 +30,11 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "886d97e127c31492f06c87cf3e7a90ae35153d8d",
+    commit: "f6e96c7520c301f04ab2182a85a961cf05c4ed07",
     path: "contracts/developer/openapi.yaml",
+    sha256: "86163217bb7273d7d438d9861fb4456978df587d941e5803c97e43eb1ee00682",
   },
-  "SDK contract provenance must identify the exact Server source",
+  "SDK contract provenance must identify the exact canonical Server source",
 );
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
@@ -406,8 +407,8 @@ const validateOpenAPI = () => {
       "joined_at",
       "kind",
       "display_name",
-      "avatar_url",
-      "tagline",
+      "image_url",
+      "about",
       "verified",
     ],
   );
@@ -422,14 +423,32 @@ const validateOpenAPI = () => {
       "is_me",
       "kind",
       "display_name",
-      "avatar_url",
-      "tagline",
+      "image_url",
+      "about",
       "verified",
     ],
   );
   assert.equal(
-    document.components.schemas.ChatHandle.properties.tagline.maxLength,
+    document.components.schemas.ChatHandle.properties.about.maxLength,
     60,
+  );
+  assert.equal(
+    document.components.schemas.ChatHandle.properties.image_url.description,
+    "Current Contact picture, as a permanent address served by Relay. It does not expire and may be cached indefinitely.",
+  );
+  assert.equal(
+    document.components.schemas.ChatHandle.properties.about.description,
+    "About text for an agent. User Contacts return null.",
+  );
+  assert.equal(
+    "avatar_url" in document.components.schemas.ChatHandle.properties,
+    false,
+    "ChatHandle.avatar_url must not remain as a compatibility alias",
+  );
+  assert.equal(
+    "tagline" in document.components.schemas.ChatHandle.properties,
+    false,
+    "ChatHandle.tagline must not remain as a compatibility alias",
   );
   assert.equal(
     document.components.schemas.ChatHandle.properties.verified.type,

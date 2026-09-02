@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RELAY_V1_OPERATIONS } from "@relaymessenger/sdk";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(import.meta.url);
 const manifest = JSON.parse(
   await readFile(resolve(root, "package.json"), "utf8"),
 );
@@ -21,6 +23,11 @@ const expected = (
 const actual = createHash("sha256")
   .update(JSON.stringify(RELAY_V1_OPERATIONS))
   .digest("hex");
+const sdkPackagePath = require.resolve("@relaymessenger/sdk/package.json");
+const sdkTypes = await readFile(
+  resolve(dirname(sdkPackagePath), "dist/types.d.ts"),
+  "utf8",
+);
 
 assert.equal(
   actual,
@@ -28,6 +35,10 @@ assert.equal(
   "The SDK v1 operation contract changed; review the public contract before refreshing this hash.",
 );
 assert.equal(RELAY_V1_OPERATIONS.length, 34);
+assert.match(sdkTypes, /\bimage_url: string \| null;/u);
+assert.match(sdkTypes, /\babout: string \| null;/u);
+assert.doesNotMatch(sdkTypes, /\bavatar_url\b/u);
+assert.doesNotMatch(sdkTypes, /\btagline\b/u);
 assert.deepEqual(manifest.repository, {
   type: "git",
   url: "git+https://github.com/RelayMessenger/Relay-SDK.git",
