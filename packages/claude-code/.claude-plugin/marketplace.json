@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "relay",
-      "version": "0.3.0-staging.4",
+      "version": "0.3.0-staging.5",
       "source": "./plugin",
       "description": "Relay Messenger channel for Claude Code with durable acknowledged delivery and retry-safe replies.",
       "category": "productivity",
