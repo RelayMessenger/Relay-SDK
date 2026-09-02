@@ -30,9 +30,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "f6e96c7520c301f04ab2182a85a961cf05c4ed07",
+    commit: "ddcbccb44b9f85e8c2e3e63fead9b81d52f2bd15",
     path: "contracts/developer/openapi.yaml",
-    sha256: "86163217bb7273d7d438d9861fb4456978df587d941e5803c97e43eb1ee00682",
+    sha256: "26a6bc047286e09df6ef95f3c6b09f0437260ecc94e12c5fb3ce1704910f8ba1",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -93,7 +93,7 @@ assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 34);
 assert.equal(manifest.path_count, 21);
 assert.equal(manifest.source_path_count, 22);
-assert.equal(manifest.source_schema_count, 106);
+assert.equal(manifest.source_schema_count, 105);
 assert.equal(manifest.callback_count, 15);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 21);
 assert.equal(operationJSON.length, 34);
@@ -577,14 +577,15 @@ const validateOpenAPI = () => {
       "#/components/schemas/TypingContact",
     );
   }
-  assert.equal(
-    document.components.schemas.SupportedContentType.enum.includes("image/webp"),
-    true,
-  );
-  assert.equal(
-    document.components.schemas.SupportedContentType.enum.includes("image/svg+xml"),
-    false,
-  );
+  assert.equal(document.components.schemas.SupportedContentType, undefined);
+  const mimeTypePattern = "^[A-Za-z0-9!#$%&'*+.^_`|~-]+/[A-Za-z0-9!#$%&'*+.^_`|~-]+$";
+  for (const schemaName of ["Attachment", "RequestUploadRequest"]) {
+    const contentType = document.components.schemas[schemaName]
+      .properties.content_type;
+    assert.equal(contentType.type, "string");
+    assert.equal(contentType.maxLength, 255);
+    assert.equal(contentType.pattern, mimeTypePattern);
+  }
 };
 validateOpenAPI();
 
