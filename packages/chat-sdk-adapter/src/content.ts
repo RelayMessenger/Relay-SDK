@@ -17,58 +17,25 @@ export const RELAY_MAX_TEXT_PART_LENGTH = 10_000;
 export const RELAY_MAX_MESSAGE_PARTS = 100;
 export const RELAY_MAX_ATTACHMENT_BYTES = 104_857_600;
 
-const SUPPORTED_CONTENT_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/heic",
-  "image/heif",
-  "image/tiff",
-  "image/bmp",
-  "image/webp",
-  "image/x-icon",
-  "video/mp4",
-  "video/quicktime",
-  "video/mpeg",
-  "video/mpeg2",
-  "video/x-m4v",
-  "video/x-msvideo",
-  "video/3gpp",
-  "audio/mpeg",
-  "audio/mp3",
-  "audio/x-m4a",
-  "audio/mp4",
-  "audio/x-caf",
-  "audio/x-wav",
-  "audio/x-aiff",
-  "audio/aiff",
-  "audio/aac",
-  "audio/midi",
-  "audio/amr",
-  "application/pdf",
-  "application/vnd.apple.pkpass",
-  "text/plain",
-  "text/markdown",
-  "text/vcard",
-  "text/rtf",
-  "text/csv",
-  "text/html",
-  "text/calendar",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/x-iwork-pages-sffpages",
-  "application/x-iwork-numbers-sffnumbers",
-  "application/x-iwork-keynote-sffkey",
-  "application/epub+zip",
-  "text/xml",
-  "application/json",
-  "application/zip",
-  "application/x-gzip",
-]);
+/**
+ * Relay accepts any syntactically valid media type for an Attachment and
+ * stores the original bytes unchanged, so this adapter validates the shape of
+ * a declared content type instead of matching it against a list. Only
+ * pictures and group icons must be images, and those are set through
+ * `@relaymessenger/sdk`, never here.
+ */
+export const RELAY_MAX_CONTENT_TYPE_LENGTH = 255;
+export const RELAY_FALLBACK_CONTENT_TYPE = "application/octet-stream";
+
+/**
+ * RFC 2045 `token`: printable US-ASCII without SPACE, CTLs, or tspecials
+ * (`(` `)` `<` `>` `@` `,` `;` `:` `\` `"` `/` `[` `]` `?` `=`).
+ */
+const RFC_2045_TOKEN = "[!#$%&'*+.^_`|~{}0-9A-Za-z-]+";
+const MEDIA_TYPE = new RegExp(
+  `^${RFC_2045_TOKEN}/${RFC_2045_TOKEN}$`,
+  "u",
+);
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   aac: "audio/aac",
@@ -118,18 +85,25 @@ export function contentTypeFor(
   declared?: string,
 ): string {
   const normalized = declared?.split(";", 1)[0]?.trim().toLowerCase();
-  const extension = filename.split(".").at(-1)?.toLowerCase();
-  const contentType =
-    normalized || (extension ? MIME_BY_EXTENSION[extension] : undefined);
-  if (!contentType || !SUPPORTED_CONTENT_TYPES.has(contentType)) {
-    throw new ValidationError(
-      "relay",
-      `Relay does not accept the content type for ${JSON.stringify(
-        filename,
-      )}; pass one of the content types in the v1 SupportedContentType contract`,
-    );
+  if (normalized) {
+    if (
+      normalized.length > RELAY_MAX_CONTENT_TYPE_LENGTH
+      || !MEDIA_TYPE.test(normalized)
+    ) {
+      throw new ValidationError(
+        "relay",
+        `Relay cannot use ${JSON.stringify(
+          declared,
+        )} as the content type for ${JSON.stringify(filename)}; pass a `
+          + `"type/subtype" media type of at most `
+          + `${RELAY_MAX_CONTENT_TYPE_LENGTH} characters`,
+      );
+    }
+    return normalized;
   }
-  return contentType;
+  const extension = filename.split(".").at(-1)?.toLowerCase();
+  return (extension ? MIME_BY_EXTENSION[extension] : undefined)
+    ?? RELAY_FALLBACK_CONTENT_TYPE;
 }
 
 export function postableText(message: AdapterPostableMessage): string {

@@ -908,6 +908,32 @@ describe("inbound attachment bytes", () => {
     expect(fetchMock).toHaveBeenCalledWith(ATTACHMENT_URL);
   });
 
+  it("passes an unknown inbound content type through as a file", () => {
+    const adapter = createRelayAdapter({
+      fetch: vi.fn() as unknown as typeof fetch,
+      token: "agent-token",
+      webhookSecret: WEBHOOK_SECRET,
+    });
+    const message = adapter.parseMessage({
+      chatId: IDS.chat,
+      createdAt: "2026-08-30T12:00:00.000Z",
+      eventType: "message.received",
+      message: webhookMessage({
+        parts: [{
+          ...mediaPart(),
+          filename: "trace.custom",
+          height: null,
+          mime_type: "application/x-custom",
+          width: null,
+        }],
+      }),
+    });
+    const attachment = message.attachments[0];
+
+    expect(attachment?.mimeType).toBe("application/x-custom");
+    expect(attachment?.type).toBe("file");
+  });
+
   it("names the attachment and the status when the download fails", async () => {
     const { message } = mediaHarness({
       download: () => new Response("", { status: 503 }),

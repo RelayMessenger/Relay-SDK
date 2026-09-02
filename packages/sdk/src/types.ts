@@ -306,6 +306,14 @@ export interface ChatSendVoicememoResponse {
   };
 }
 
+/**
+ * Relay accepts any RFC 2045 `type/subtype` media type for an Attachment and
+ * stores and returns the original bytes unchanged. The literals below are the
+ * types Relay names in the v1 contract; they stay for editor completion, and
+ * `(string & {})` keeps any other valid media type assignable. Relay falls
+ * back to `application/octet-stream`. Only pictures and group icons must be
+ * images.
+ */
 export type SupportedContentType =
   | "image/jpeg"
   | "image/png"
@@ -356,7 +364,8 @@ export type SupportedContentType =
   | "text/xml"
   | "application/json"
   | "application/zip"
-  | "application/x-gzip";
+  | "application/x-gzip"
+  | (string & {});
 
 export interface AttachmentCreateParams {
   filename: string;
