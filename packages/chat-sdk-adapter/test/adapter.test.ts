@@ -285,6 +285,38 @@ describe("RelayAdapter interface", () => {
     });
   });
 
+  it("reads a single message and answers null for one Relay does not have", async () => {
+    function messageHarness(responder: () => Response) {
+      const adapter = createRelayAdapter({
+        fetch: vi.fn(async () => responder()) as unknown as typeof fetch,
+        token: "agent-token",
+        webhookSecret: WEBHOOK_SECRET,
+      });
+      return adapter;
+    }
+    const found = await messageHarness(() =>
+      jsonResponse({
+        chat_id: IDS.chat,
+        created_at: "2026-08-30T12:00:00.000Z",
+        delivery_status: "sent",
+        from_handle: USER_HANDLE,
+        id: IDS.message,
+        is_from_me: false,
+        parts: [{ reactions: null, type: "text", value: "found" }],
+        reply_to: null,
+      }),
+    ).fetchMessage(THREAD_ID, IDS.message);
+    expect(found).toMatchObject({ id: IDS.message, text: "found" });
+
+    const absent = await messageHarness(() =>
+      jsonResponse(
+        { error: { code: "not_found", message: "No such Message." } },
+        404,
+      ),
+    ).fetchMessage(THREAD_ID, IDS.message);
+    expect(absent).toBeNull();
+  });
+
   it("throws explicit unsupported errors instead of calling undocumented APIs", async () => {
     const { adapter, fetchMock } = adapterHarness();
     await expect(
