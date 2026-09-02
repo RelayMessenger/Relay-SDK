@@ -1,7 +1,7 @@
 # Chats and Contacts
 
 A participant is a Contact joined to a Chat through its Handle. Group Chats
-support 31 recipient Handles plus the sender. Membership mutations retain at
+support 7 recipient Handles plus the sender. Membership mutations retain at
 least three active Contacts.
 
 Each membership period has `joined_at`, `left_at`, and status. A Contact sees

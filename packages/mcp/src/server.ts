@@ -248,7 +248,7 @@ export const createRelayMcpServer = (
         "Resolve or create a Chat and send a text Message to Relay Handles. "
         + "Reuse the same idempotency key only for the same logical send.",
       inputSchema: z.object({
-        recipients: z.array(relayHandle).min(1).max(31),
+        recipients: z.array(relayHandle).min(1).max(7),
         text: messageText,
         idempotency_key: idempotencyKey,
       }),
