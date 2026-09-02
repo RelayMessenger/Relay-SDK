@@ -20,8 +20,8 @@ const ownerHandle: ChatHandle = {
   is_me: true,
   joined_at: "2026-09-01T00:00:00.000Z",
   display_name: "Relay Agent",
-  avatar_url: null,
-  tagline: null,
+  image_url: null,
+  about: null,
   verified: false,
 };
 
@@ -79,8 +79,8 @@ function unmentionedGroupEvent(): RelayWebhookEvent {
         kind: "user",
         joined_at: "2026-09-01T00:00:00.000Z",
         display_name: "Alice",
-        avatar_url: null,
-        tagline: null,
+        image_url: null,
+        about: null,
         verified: false,
       },
       parts: [

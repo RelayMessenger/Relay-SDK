@@ -86,8 +86,8 @@ try {
     "left_at",
     "is_me",
     "display_name",
-    "avatar_url",
-    "tagline",
+    "image_url",
+    "about",
     "verified",
   ]);
   assert.deepEqual(interfaceFields("UserChatHandle"), [
@@ -96,6 +96,8 @@ try {
   assert.deepEqual(interfaceFields("AgentChatHandle"), [
     "kind",
   ]);
+  assert.doesNotMatch(packedTypes, /\bavatar_url\b/u);
+  assert.doesNotMatch(packedTypes, /\btagline\b/u);
   assert.deepEqual(interfaceFields("ContactRequestCreateParams"), [
     "handle",
   ]);

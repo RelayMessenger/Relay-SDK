@@ -33,8 +33,8 @@ const EVENT: RelayWebhookEnvelope<
       kind: "user",
       joined_at: "2026-09-01T12:00:00Z",
       display_name: null,
-      avatar_url: null,
-      tagline: null,
+      image_url: null,
+      about: null,
       verified: false,
     },
     parts: [

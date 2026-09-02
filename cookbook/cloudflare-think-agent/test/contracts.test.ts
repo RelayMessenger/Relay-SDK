@@ -8,11 +8,11 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const RELAY_SERVER_SHA =
-  "9b4d5bb32cc749c6fd271969948c385300d404d6";
+  "f6e96c7520c301f04ab2182a85a961cf05c4ed07";
 const RELAY_CHAT_SDK_SHA =
   "eecf94a4d38bc021917e54dfed57e268657c17af";
 const RELAY_OPENAPI_SHA256 =
-  "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5";
+  "86163217bb7273d7d438d9861fb4456978df587d941e5803c97e43eb1ee00682";
 const RELAY_ADAPTER_INTEGRITY =
   "sha512-arAKw/xxsPeQYVHtu5K3B0ADnCmuzKk279Chc5hJ4DCG5Ez2RYuvfj727G2crBax9efemRo5BcCwt2yCBXmfgQ==";
 
@@ -36,10 +36,17 @@ function packageVersion(name: string): string {
 }
 
 describe("locked runtime contracts", () => {
-  it(`uses the unchanged OpenAPI from Relay Server ${RELAY_SERVER_SHA.slice(0, 12)}`, () => {
+  it(`uses the exact OpenAPI from Relay Server ${RELAY_SERVER_SHA.slice(0, 12)}`, () => {
     const openapi = readFileSync("contracts/relay-openapi.yaml");
+    const openapiText = openapi.toString("utf8");
     expect(createHash("sha256").update(openapi).digest("hex"))
       .toBe(RELAY_OPENAPI_SHA256);
+    expect(openapiText).toContain("\n        - image_url\n");
+    expect(openapiText).toContain("\n        - about\n");
+    expect(openapiText).toContain("\n        image_url:\n");
+    expect(openapiText).toContain("\n        about:\n");
+    expect(openapiText).not.toMatch(/\bavatar_url\b/u);
+    expect(openapiText).not.toMatch(/\btagline\b/u);
   });
 
   it("pins the coordinated Think and Relay packages", () => {

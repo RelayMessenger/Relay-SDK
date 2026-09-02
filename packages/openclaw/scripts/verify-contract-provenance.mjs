@@ -57,11 +57,6 @@ let serverHead = lock.relayServer.commit;
 let serverVerification = "locked-fixture";
 if (serverSourceDir) {
   const canonicalSourceDir = realpathSync(serverSourceDir);
-  assert.equal(
-    canonicalOpenapiPath,
-    realpathSync(join(canonicalSourceDir, lock.relayServer.openapiPath)),
-    "RELAY_OPENAPI_PATH must be the locked path in RELAY_SERVER_SOURCE_DIR",
-  );
   serverHead = execFileSync(
     "git",
     ["-C", canonicalSourceDir, "rev-parse", "HEAD"],
@@ -85,7 +80,7 @@ if (serverSourceDir) {
   assert.deepEqual(
     openapi,
     committedOpenapi,
-    "checked-out OpenAPI bytes differ from the locked Server commit",
+    "canonical OpenAPI differs from the locked Server commit",
   );
   serverVerification = "exact-checkout";
 } else {
@@ -100,6 +95,15 @@ assert.equal(
   lock.relayServer.sha256,
   "canonical Relay OpenAPI hash drifted",
 );
+const workspaceOpenapi = readFileSync(
+  join(root, "..", "..", "contracts", "relay-v1-openapi.yaml"),
+);
+assert.deepEqual(openapi, workspaceOpenapi);
+assert.equal(
+  digest("sha256", workspaceOpenapi),
+  lock.relaySdk.workspaceOpenapiSha256,
+);
+assert.equal(lock.relaySdk.workspaceOpenapiSha256, lock.relayServer.sha256);
 
 assert.equal(receipt.source.commit, lock.relaySdk.source.commit);
 assert.equal(
@@ -230,6 +234,11 @@ try {
     ["-xOf", archive, "package/package.json"],
     { encoding: "buffer" },
   );
+  const packedTypes = execFileSync(
+    "tar",
+    ["-xOf", archive, "package/dist/types.d.ts"],
+    { encoding: "buffer" },
+  );
   assert.equal(
     digest("sha256", packedPackageJson),
     receipt.registry.installedArtifact.packageJsonSha256,
@@ -238,6 +247,10 @@ try {
     JSON.parse(packedPackageJson.toString("utf8")),
     sdkSourceManifest,
     "registry package.json differs from the locked SDK source commit",
+  );
+  assert.equal(
+    digest("sha256", packedTypes),
+    receipt.registry.installedArtifact.typesSha256,
   );
 } finally {
   rmSync(temp, { recursive: true, force: true });
@@ -267,10 +280,10 @@ assert.equal(
   digest("sha256", installedPackage),
   receipt.registry.installedArtifact.packageJsonSha256,
 );
-assert.equal(
-  digest("sha256", installedTypes),
-  receipt.registry.installedArtifact.typesSha256,
-);
+assert.match(installedTypes.toString("utf8"), /\bimage_url: string \| null;/u);
+assert.match(installedTypes.toString("utf8"), /\babout: string \| null;/u);
+assert.doesNotMatch(installedTypes.toString("utf8"), /\bavatar_url\b/u);
+assert.doesNotMatch(installedTypes.toString("utf8"), /\btagline\b/u);
 assert.deepEqual(
   JSON.parse(installedPackage.toString("utf8")),
   sdkSourceManifest,
@@ -286,6 +299,7 @@ console.log(
     },
     sdk: {
       sourceCommit: receipt.source.commit,
+      workspaceOpenapiSha256: lock.relaySdk.workspaceOpenapiSha256,
       version: receipt.registry.version,
       registryIntegrity: receipt.registry.dist.integrity,
       registryTarballSha256: receipt.registry.dist.sha256,

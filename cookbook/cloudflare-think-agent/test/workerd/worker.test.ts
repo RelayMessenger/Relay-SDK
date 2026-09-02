@@ -100,13 +100,13 @@ function envelope(
 
 function handle(id: string, handleName: string) {
   return {
-    avatar_url: null,
+    image_url: null,
     display_name: handleName,
     handle: handleName,
     id,
     joined_at: "2026-09-01T12:00:00.000Z",
     kind: "user",
-    tagline: null,
+    about: null,
     verified: false,
   };
 }

@@ -9,7 +9,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5";
+  "86163217bb7273d7d438d9861fb4456978df587d941e5803c97e43eb1ee00682";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -65,7 +65,7 @@ describe("locked Relay Server contract", () => {
     });
   });
 
-  it("uses the unchanged OpenAPI from Server 9b4d5bb32cc7", async () => {
+  it("uses the exact canonical Server OpenAPI", async () => {
     const source = await readFile(
       new URL("../contracts/relay-openapi.yaml", import.meta.url),
     );
@@ -112,6 +112,20 @@ describe("locked Relay Server contract", () => {
     expect(document.paths["/v1/messages/{messageId}"]).not.toHaveProperty(
       "delete",
     );
+    const chatHandle = document.components.schemas.ChatHandle as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+    expect(chatHandle.required).toEqual(expect.arrayContaining([
+      "image_url",
+      "about",
+    ]));
+    expect(chatHandle.required).not.toContain("avatar_url");
+    expect(chatHandle.required).not.toContain("tagline");
+    expect(chatHandle.properties).toHaveProperty("image_url");
+    expect(chatHandle.properties).toHaveProperty("about");
+    expect(chatHandle.properties).not.toHaveProperty("avatar_url");
+    expect(chatHandle.properties).not.toHaveProperty("tagline");
   });
 
   it("keeps API/webhook versions and every event synchronized", async () => {

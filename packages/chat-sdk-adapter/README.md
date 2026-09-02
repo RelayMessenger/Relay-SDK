@@ -112,15 +112,17 @@ normal `POST`/`DELETE /v1/chats/{chatId}/typing` support.
 
 This package was rewritten against:
 
-- Relay Server `9b4d5bb32cc749c6fd271969948c385300d404d6`
+- Relay Server `f6e96c7520c301f04ab2182a85a961cf05c4ed07`
 - OpenAPI SHA-256
-  `f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5`
+  `86163217bb7273d7d438d9861fb4456978df587d941e5803c97e43eb1ee00682`
+- public `ChatHandle.image_url` and `ChatHandle.about` fields, with no legacy
+  aliases
 - Relay API `v1`
 - Relay webhook payload version `2026-08-30`
 - `chat@4.39.0`
 
-The exact OpenAPI snapshot is retained under `contracts/` for reproducible
-contract tests and is excluded from the npm package.
+The byte-identical Server OpenAPI copy is retained under `contracts/` for
+reproducible contract tests and is excluded from the npm package.
 
 ## Supported surface
 

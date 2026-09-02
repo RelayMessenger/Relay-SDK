@@ -31,8 +31,8 @@ interface ChatHandleBase {
   left_at?: string | null;
   is_me?: boolean | null;
   display_name: string | null;
-  avatar_url: string | null;
-  tagline: string | null;
+  image_url: string | null;
+  about: string | null;
   verified: boolean;
 }
 

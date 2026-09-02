@@ -67,17 +67,21 @@ test("pins the requested OpenClaw and current Relay SDK contracts", () => {
 test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
   assert.deepEqual(contractLock.relayServer, {
     repository: "RelayMessenger/Relay-Server",
-    commit: "9b4d5bb32cc749c6fd271969948c385300d404d6",
+    commit: "f6e96c7520c301f04ab2182a85a961cf05c4ed07",
     openapiPath: "contracts/developer/openapi.yaml",
-    sha256: "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5",
+    sha256: "86163217bb7273d7d438d9861fb4456978df587d941e5803c97e43eb1ee00682",
   });
   assert.equal(
     contractLock.relaySdk.source.commit,
     "776a9a7873f41c0c9947439c44444674a7d55c5d",
   );
   assert.equal(
-    contractLock.relaySdk.source.carriedOpenapiSha256,
+    contractLock.relaySdk.workspaceOpenapiSha256,
     contractLock.relayServer.sha256,
+  );
+  assert.equal(
+    contractLock.relaySdk.source.carriedOpenapiSha256,
+    sdkRegistryReceipt.source.contractSha256,
   );
   const installedSdk = JSON.parse(
     readFileSync(sdkPackagePath, "utf8"),
@@ -164,6 +168,10 @@ test("binds every used REST operation and WebSocket frame to the packed SDK", ()
   }
   assert.match(sdkTypes, /mention\?: string \| null/u);
   assert.match(sdkTypes, /owner_handle\?: ChatHandle \| null/u);
+  assert.match(sdkTypes, /\bimage_url: string \| null;/u);
+  assert.match(sdkTypes, /\babout: string \| null;/u);
+  assert.doesNotMatch(sdkTypes, /\bavatar_url\b/u);
+  assert.doesNotMatch(sdkTypes, /\btagline\b/u);
 });
 
 test("hashes the mandatory canonical OpenAPI bytes against the lock", () => {
@@ -180,6 +188,16 @@ test("hashes the mandatory canonical OpenAPI bytes against the lock", () => {
       { encoding: "utf8" },
     ).trim();
     assert.equal(serverHead, contractLock.relayServer.commit);
+    const committedOpenapi = execFileSync(
+      "git",
+      [
+        "-C",
+        process.env.RELAY_SERVER_SOURCE_DIR,
+        "show",
+        `${contractLock.relayServer.commit}:${contractLock.relayServer.openapiPath}`,
+      ],
+    );
+    assert.deepEqual(readFileSync(openapiPath), committedOpenapi);
   } else {
     assert.equal(
       resolve(openapiPath),

@@ -283,16 +283,19 @@ Run neither guarded command without your own review and credentials.
 
 This revision is tested against:
 
-- Relay Server `9b4d5bb32cc749c6fd271969948c385300d404d6`
+- Relay Server `f6e96c7520c301f04ab2182a85a961cf05c4ed07`
 - Relay Chat SDK `f90e312aeecefa9c929398a56be77441e8c2137c`
 - `@relaymessenger/chat-sdk-adapter@0.3.0-staging.1` npm integrity
   `sha512-IuWa2VVv3hKArnQPO6SV4Ntq+/9pp7eEIzWgVSBgg6E5pWpVV+hxTFCwfwwBJvmhYjzVgOFxrrk6haL05ANquw==`
 - OpenAPI SHA-256
-  `f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5`
+  `86163217bb7273d7d438d9861fb4456978df587d941e5803c97e43eb1ee00682`
+- public `ChatHandle.image_url` and `ChatHandle.about` fields, with no legacy
+  aliases
 - Relay API `v1`
 - Relay webhook payload version `2026-08-30`
 
-The unchanged OpenAPI fixture is under [`contracts/`](contracts/).
+The byte-identical Server OpenAPI fixture is under
+[`contracts/`](contracts/).
 
 ## Documentation
 
