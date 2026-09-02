@@ -52,7 +52,7 @@ describe("locked runtime contracts", () => {
   it("pins the coordinated Think and Relay packages", () => {
     expect(packageVersion("@cloudflare/think")).toBe("0.17.0");
     expect(packageVersion("@relaymessenger/chat-sdk-adapter"))
-      .toBe("0.3.0-staging.4");
+      .toBe("0.3.0-staging.5");
     expect(packageVersion("@relaymessenger/sdk")).toBe("0.3.0-staging.7");
   });
 
@@ -71,8 +71,8 @@ describe("locked runtime contracts", () => {
     expect(adapter).toMatchObject({
       integrity: RELAY_ADAPTER_INTEGRITY,
       resolved:
-        "https://registry.npmjs.org/@relaymessenger/chat-sdk-adapter/-/chat-sdk-adapter-0.3.0-staging.4.tgz",
-      version: "0.3.0-staging.4",
+        "https://registry.npmjs.org/@relaymessenger/chat-sdk-adapter/-/chat-sdk-adapter-0.3.0-staging.5.tgz",
+      version: "0.3.0-staging.5",
     });
   });
 

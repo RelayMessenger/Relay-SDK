@@ -127,6 +127,33 @@ export interface RelayAdapterOptions
   /** Standard Webhooks timestamp tolerance in seconds. */
   signatureToleranceSeconds?: number;
   /**
+   * Mark the Relay chat read as soon as an inbound message is verified,
+   * before the event reaches Chat SDK dispatch.
+   *
+   * A read receipt is a statement about delivery, not about the answer, so a
+   * debounce window, a queue or a model turn must never delay it. Turn this on
+   * whenever the agent uses a `concurrency` strategy that defers the handler,
+   * or whenever the read should land within a second of the send.
+   *
+   * Defaults to false, which leaves the read to the handler.
+   */
+  markReadOnReceipt?: boolean;
+  /**
+   * Cancel the chat's running turn when a newer inbound message arrives,
+   * before the new event reaches Chat SDK dispatch.
+   *
+   * A person who sends again while the agent is answering has changed the
+   * question. Finishing the old answer spends a model turn on a question that
+   * no longer stands and posts a reply to nothing. This calls
+   * `ChatInstance.abortTurn(threadId)`, so the running turn's `context.signal`
+   * fires and the deferring `concurrency` strategy hands the newer message to
+   * a fresh turn.
+   *
+   * Requires `supportsTurnCancellation`, which this adapter sets. Defaults to
+   * false, which lets the running turn finish.
+   */
+  abortActiveTurnOnReceipt?: boolean;
+  /**
    * Stable key source for posts made outside an inbound webhook turn.
    * Inbound turns always derive keys from event_id plus send ordinal.
    */
@@ -239,6 +266,8 @@ export class RelayAdapter
   readonly typing: boolean;
   readonly client: RelayClient;
 
+  private readonly abortActiveTurnOnReceipt: boolean;
+  private readonly markReadOnReceipt: boolean;
   private readonly signatureToleranceSeconds?: number;
   private readonly webhookSecret: RelayCredential | undefined;
   private readonly idempotencyKeyResolver:
@@ -289,12 +318,26 @@ export class RelayAdapter
     this.userName = options.userName ?? "Relay Agent";
     this.typing = options.typing ?? true;
     this.idempotencyKeyResolver = options.idempotencyKeyResolver;
+    this.abortActiveTurnOnReceipt =
+      options.abortActiveTurnOnReceipt ?? false;
+    this.markReadOnReceipt = options.markReadOnReceipt ?? false;
     this.signatureToleranceSeconds =
       options.signatureToleranceSeconds;
   }
 
   async initialize(chat: ChatInstance): Promise<void> {
     this.chat = chat;
+  }
+
+  /**
+   * Report a non-fatal condition through Chat's logger once initialized, and
+   * through the console before that, so a warning is never lost to whichever
+   * side of `initialize` it happens on.
+   */
+  private warn(event: string, fields: Record<string, unknown>): void {
+    const logger = this.chat?.getLogger("relay");
+    if (logger) logger.warn(event, fields);
+    else console.warn(JSON.stringify({ event, ...fields }));
   }
 
   encodeThreadId(data: RelayThreadId): string {
@@ -1046,6 +1089,43 @@ export class RelayAdapter
     });
   }
 
+  /**
+   * Stamp the Relay read receipt for one inbound chat.
+   *
+   * A failed read never blocks the webhook's 2xx. Holding the response open
+   * for it would make Relay time the delivery out and redeliver, which costs
+   * the agent a retry to buy a receipt that Relay will re-request anyway.
+   */
+  private async readOnReceipt(chatId: string): Promise<void> {
+    try {
+      await this.client.markChatRead(chatId);
+    } catch (error) {
+      this.warn("relay_read_on_receipt_failed", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Cancel the chat's running turn, if there is one.
+   *
+   * `abortTurn` is a no-op when nothing is active, so a burst's first message
+   * costs one state read. A failure is logged and never blocks the delivery:
+   * the worst case is that the superseded turn finishes and posts, which is
+   * the behaviour of an agent without this option.
+   */
+  private async abortOnReceipt(threadId: string): Promise<void> {
+    try {
+      await this.initializedChat().abortTurn(threadId);
+    } catch (error) {
+      this.warn("relay_abort_on_receipt_failed", {
+        error: error instanceof Error ? error.message : String(error),
+        threadId,
+      });
+    }
+  }
+
   private initializedChat(): ChatInstance {
     if (!this.chat) {
       throw new Error(
@@ -1084,6 +1164,20 @@ export class RelayAdapter
           data.chat.id,
           data.chat.is_group === true,
         );
+        // A newer message supersedes the question the running turn is
+        // answering, so it is cancelled before the new event is queued.
+        // This runs first: the read is an HTTP round trip to Relay, and the
+        // sooner the old turn stops, the less model time is spent on a
+        // question that no longer stands.
+        if (this.abortActiveTurnOnReceipt) {
+          await this.abortOnReceipt(threadId);
+        }
+        // Read is a receipt about delivery, so it is stamped here — after the
+        // signature proved the event, and before Chat SDK dispatch, which a
+        // debounce, queue or burst window may defer for seconds.
+        if (this.markReadOnReceipt) {
+          await this.readOnReceipt(data.chat.id);
+        }
         await this.initializedChat().processMessage(
           this,
           threadId,
