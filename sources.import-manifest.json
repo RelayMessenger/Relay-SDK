@@ -734,7 +734,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "scripts/check-contract.mjs",
       "source_sha256": "cd9961f8f6f19fdaafcf0b3cfb47fdf0f6f21426741f91bb3f0e3ca57170cb5b",
-      "destination_sha256": "f4993d0af75ae668e10c5ee0e49b9fecaa6bb63e85687f3c788c177868d58e54",
+      "destination_sha256": "29688f11614afb0f982d782624b8a7fbfbdbd74d33d8540d78d0bc82e99341b5",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

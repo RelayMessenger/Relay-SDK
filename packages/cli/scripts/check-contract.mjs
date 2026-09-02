@@ -37,12 +37,6 @@ assert.equal(
 assert.equal(RELAY_V1_OPERATIONS.length, 34);
 assert.match(sdkTypes, /\bimage_url: string \| null;/u);
 assert.match(sdkTypes, /\babout: string \| null;/u);
-assert.match(
-  sdkTypes,
-  /HTTPS image address also works[\s\S]{0,200}?group_chat_icon\?: string \| null;/u,
-  "A group photo takes an Attachment ID or a public HTTPS image address; "
-    + "ChatUpdateParams must publish both forms.",
-);
 assert.doesNotMatch(sdkTypes, /\bavatar_url\b/u);
 assert.doesNotMatch(sdkTypes, /\btagline\b/u);
 assert.deepEqual(manifest.repository, {

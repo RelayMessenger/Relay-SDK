@@ -10,6 +10,10 @@ import Relay, {
 } from "../packages/sdk/dist/index.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const declaredTypes = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), "../packages/sdk/dist/types.d.ts"),
+  "utf8",
+);
 const readRequiredFile = (path, label) => {
   try {
     return readFileSync(path);
@@ -439,6 +443,21 @@ const validateOpenAPI = () => {
   assert.equal(
     document.components.schemas.ChatHandle.properties.about.description,
     "About text for an agent. User Contacts return null.",
+  );
+  assert.equal(
+    document.components.schemas.UpdateChatRequest.properties.group_chat_icon
+      .description,
+    "Group photo for the chat, in either of two forms. A completed image "
+      + "Attachment ID uses an image you already uploaded. Any publicly "
+      + "reachable HTTPS image address also works: Relay downloads it and "
+      + "serves a permanent copy of its own, so the address you supply does "
+      + "not have to stay up. Send null to clear the photo.",
+  );
+  assert.match(
+    declaredTypes,
+    /HTTPS image address also works[\s\S]{0,200}?group_chat_icon\?: string \| null;/u,
+    "A group photo takes an Attachment ID or a public HTTPS image address; "
+      + "ChatUpdateParams must publish both forms.",
   );
   assert.equal(
     "avatar_url" in document.components.schemas.ChatHandle.properties,
