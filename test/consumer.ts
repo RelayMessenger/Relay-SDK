@@ -32,6 +32,17 @@ await relay.chats.shareContactCard("chat-id");
 await relay.chats.startTyping("chat-id");
 await relay.chats.stopTyping("chat-id");
 await relay.chats.markAsRead("chat-id");
+// A group photo is set from either form the contract accepts, and cleared with
+// null. Neither form is a distinct type: both are plain strings.
+await relay.chats.update("chat-id", {
+  group_chat_icon: "https://example.com/icon.png",
+});
+await relay.chats.update("chat-id", {
+  group_chat_icon: "018f4b3c-1d2e-7a90-8c5f-6b1d2e3f4a5b",
+});
+await relay.chats.update("chat-id", { group_chat_icon: null });
+// @ts-expect-error A group photo is addressed by ID or HTTPS address, never by bytes.
+await relay.chats.update("chat-id", { group_chat_icon: new Uint8Array() });
 void relay.websocket.run({
   onEvent: async (_event, context) => {
     context.sequence satisfies string;

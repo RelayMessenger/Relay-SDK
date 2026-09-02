@@ -11,6 +11,7 @@ const makeClient = () => {
   const methods = {
     listChats: vi.fn(async () => ({ chats: [{ id: "chat-1" }], nextCursor: null })),
     retrieveChat: vi.fn(async () => ({ id: "chat-1" })),
+    updateChat: vi.fn(async () => ({ status: "accepted", chat_id: "chat-1" })),
     startTyping: vi.fn(async () => undefined),
     sendMessage: vi.fn(async () => ({ chat_id: "chat-1" })),
     react: vi.fn(async () => ({ status: "accepted" })),
@@ -22,6 +23,7 @@ const makeClient = () => {
     chats: {
       listChats: methods.listChats,
       retrieve: methods.retrieveChat,
+      update: methods.updateChat,
       startTyping: methods.startTyping,
       messages: { send: methods.sendMessage },
     },
@@ -116,6 +118,31 @@ describe("CLI command routing", () => {
     expect(fake.methods.createRequest).toHaveBeenCalledWith({ handle: "advait" });
     expect(await run(["webhooks", "events"])).toBe(0);
     expect(fake.methods.webhookEvents).toHaveBeenCalledOnce();
+  });
+
+  it("sends either group icon form and names both in the help", async () => {
+    expect(await run([
+      "chats",
+      "update",
+      "chat-1",
+      "--group-icon",
+      "https://example.com/icon.png",
+    ])).toBe(0);
+    expect(fake.methods.updateChat).toHaveBeenLastCalledWith("chat-1", {
+      group_chat_icon: "https://example.com/icon.png",
+    });
+    expect(await run([
+      "chats",
+      "update",
+      "chat-1",
+      "--group-icon",
+      "018f4b3c-1d2e-7a90-8c5f-6b1d2e3f4a5b",
+    ])).toBe(0);
+    expect(fake.methods.updateChat).toHaveBeenLastCalledWith("chat-1", {
+      group_chat_icon: "018f4b3c-1d2e-7a90-8c5f-6b1d2e3f4a5b",
+    });
+    expect(await run(["chats", "update", "--help"])).toBe(0);
+    expect(stdout.join("")).toContain("--group-icon <attachment-id-or-https-url>");
   });
 
   it("rejects malformed reactions before an SDK mutation", async () => {
