@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/openclaw-plugin",
-  "version": "0.4.0-staging.2",
+  "version": "0.4.0-staging.3",
   "description": "Native Relay channel plugin for OpenClaw",
   "license": "MIT",
   "type": "module",
@@ -15,7 +15,7 @@
     "LICENSE",
     "README.md",
     "contracts/relay-v1.lock.json",
-    "contracts/relay-sdk-0.3.0-staging.6.registry.json",
+    "contracts/relay-sdk-0.3.0-staging.7.registry.json",
     "openclaw.plugin.json",
     "index.ts",
     "setup-entry.ts",
@@ -38,7 +38,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@relaymessenger/sdk": "0.3.0-staging.6"
+    "@relaymessenger/sdk": "0.3.0-staging.7"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",

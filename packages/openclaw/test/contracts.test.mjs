@@ -43,10 +43,10 @@ const openapiPath =
 
 test("pins the requested OpenClaw and current Relay SDK contracts", () => {
   assert.equal(packageJson.name, "@relaymessenger/openclaw-plugin");
-  assert.equal(packageJson.version, "0.4.0-staging.2");
+  assert.equal(packageJson.version, "0.4.0-staging.3");
   assert.equal(packageJson.devDependencies.openclaw, "2026.8.1");
   assert.equal(packageJson.openclaw.build.openclawVersion, "2026.8.1");
-  assert.equal(packageJson.dependencies["@relaymessenger/sdk"], "0.3.0-staging.6");
+  assert.equal(packageJson.dependencies["@relaymessenger/sdk"], "0.3.0-staging.7");
   assert.equal(packageJson.publishConfig.tag, "staging");
   assert.match(packageJson.openclaw.compat.pluginApi, /^>=2026\.8\.1/);
   assert.deepEqual(packageJson.repository, {
@@ -73,7 +73,7 @@ test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
   });
   assert.equal(
     contractLock.relaySdk.source.commit,
-    "d3a8ae02143120868e304e3a1213148e53eac80b",
+    "ddb78e385800d82b041441698985fafab3d9aba9",
   );
   assert.equal(
     contractLock.relaySdk.workspaceOpenapiSha256,
@@ -109,7 +109,7 @@ test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
   assert.deepEqual(
     sdkRegistryReceipt.provenanceBoundary.registryAttestations,
     {
-      url: "https://registry.npmjs.org/-/npm/v1/attestations/@relaymessenger%2fsdk@0.3.0-staging.6",
+      url: "https://registry.npmjs.org/-/npm/v1/attestations/@relaymessenger%2fsdk@0.3.0-staging.7",
       provenance: {
         predicateType: "https://slsa.dev/provenance/v1",
       },
@@ -117,7 +117,7 @@ test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
   );
   assert.equal(
     sdkRegistryReceipt.provenanceBoundary.attestationJsonSha256,
-    "9e1700a87f6707deb401e648a67afd03032e6d9ba61c49a73d14cb56176a5746",
+    "b74a2b6125fd1a23353c850ab1f0cb58ad00cdc3308b511100009a44d099faed",
   );
   assert.equal(
     sdkRegistryReceipt.provenanceBoundary.slsa.resolvedDependency.digest.gitCommit,

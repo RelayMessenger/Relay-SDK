@@ -1,0 +1,92 @@
+{
+  "schema": "relay-sdk-registry-receipt/v1",
+  "source": {
+    "repository": "RelayMessenger/Relay-SDK",
+    "commit": "ddb78e385800d82b041441698985fafab3d9aba9",
+    "packageJsonPath": "packages/sdk/package.json",
+    "packageJsonSha256": "f57b019076ba12d6637a60674c9271fbd0bc688b16eceb5b8a101bb9c3c1fb07",
+    "contractPath": "contracts/relay-v1-openapi.yaml",
+    "contractSha256": "26a6bc047286e09df6ef95f3c6b09f0437260ecc94e12c5fb3ce1704910f8ba1"
+  },
+  "registry": {
+    "packumentUrl": "https://registry.npmjs.org/@relaymessenger%2fsdk",
+    "package": "@relaymessenger/sdk",
+    "version": "0.3.0-staging.7",
+    "publishedAt": "2026-09-02T05:02:18.813Z",
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/RelayMessenger/Relay-SDK.git",
+      "directory": "packages/sdk"
+    },
+    "publishConfig": {
+      "access": "public",
+      "registry": "https://registry.npmjs.org/",
+      "tag": "staging"
+    },
+    "distTagsObserved": {
+      "latest": "0.3.0-staging.4",
+      "staging": "0.3.0-staging.7",
+      "mutable": true
+    },
+    "dist": {
+      "tarball": "https://registry.npmjs.org/@relaymessenger/sdk/-/sdk-0.3.0-staging.7.tgz",
+      "integrity": "sha512-ACbl5sKw/Y1A8AjZgs/Nicao7RntN7HgpRblcnqVP8Fpe8yHINqhJ8Um4XBBvzp8nk9xGapKbsxuflrHyaPGrw==",
+      "shasum": "90d8048226d912b8d590f11cab1c62c7471aea0f",
+      "sha256": "68bc18811c838fd7cf401612cf4e0df7906911374661ac3a8e40961c807fe137",
+      "bytes": 36876,
+      "fileCount": 37,
+      "unpackedSize": 168634,
+      "signatureMetadata": [
+        {
+          "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
+          "sig": "MEQCIDtotaGcmq/gkaMNE1L2ScHmJJk9FPN3HgvUprlNq96VAiBFVK7VxltJvu+g5eeZYEOHLLvnNmyUbe3JVFbkMZNrMA=="
+        }
+      ],
+      "attestations": {
+        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@relaymessenger%2fsdk@0.3.0-staging.7",
+        "provenance": {
+          "predicateType": "https://slsa.dev/provenance/v1"
+        }
+      }
+    },
+    "installedArtifact": {
+      "packageJsonSha256": "f57b019076ba12d6637a60674c9271fbd0bc688b16eceb5b8a101bb9c3c1fb07",
+      "typesSha256": "a755aaf89415fde85b73678b1966ac909f3ed0ce42b886d1fc8c0a47a8b39604"
+    }
+  },
+  "provenanceBoundary": {
+    "registryGitHead": null,
+    "registryAttestations": {
+      "url": "https://registry.npmjs.org/-/npm/v1/attestations/@relaymessenger%2fsdk@0.3.0-staging.7",
+      "provenance": {
+        "predicateType": "https://slsa.dev/provenance/v1"
+      }
+    },
+    "attestationEndpoint": "https://registry.npmjs.org/-/npm/v1/attestations/@relaymessenger%2fsdk@0.3.0-staging.7",
+    "attestationEndpointObservedStatus": 200,
+    "attestationJsonSha256": "b74a2b6125fd1a23353c850ab1f0cb58ad00cdc3308b511100009a44d099faed",
+    "slsa": {
+      "predicateType": "https://slsa.dev/provenance/v1",
+      "subject": {
+        "name": "pkg:npm/%40relaymessenger/sdk@0.3.0-staging.7",
+        "digest": {
+          "sha512": "0026e5e6c2b0fd8d40f008d982cfcd89c6a8ed19ed37b1e0a516e5727a953fc1697bcc8720daa127c526e17041bf3a7c9e4f7119aa4a6ecc6e7e5ac7c9a3c6af"
+        }
+      },
+      "workflow": {
+        "ref": "refs/heads/staging",
+        "repository": "https://github.com/RelayMessenger/Relay-SDK",
+        "path": ".github/workflows/publish-package-staging.yml"
+      },
+      "resolvedDependency": {
+        "uri": "git+https://github.com/RelayMessenger/Relay-SDK@refs/heads/staging",
+        "digest": {
+          "gitCommit": "ddb78e385800d82b041441698985fafab3d9aba9"
+        }
+      },
+      "builder": "https://github.com/actions/runner/github-hosted",
+      "invocationId": "https://github.com/RelayMessenger/Relay-SDK/actions/runs/33592991619/attempts/1"
+    },
+    "claim": "The exact registry tarball, npm signature, and SLSA provenance are recorded. The SLSA statement binds the published tarball digest to Relay-SDK staging commit ddb78e385800d82b041441698985fafab3d9aba9 through the trusted staging publish workflow, and the package.json bytes match that commit."
+  }
+}

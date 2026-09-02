@@ -3,7 +3,7 @@ Relay Claude Code Channel
 This repository selectively migrated reusable foundations from
 RelayMessenger/Relay-SDK commit 0ff1fb1, path integrations/claude-code, under
 the accompanying MIT license. The Relay v1 implementation was rebuilt against
-@relaymessenger/sdk 0.3.0-staging.6 and the contract lock recorded in
+@relaymessenger/sdk 0.3.0-staging.7 and the contract lock recorded in
 contracts/relay-v1.lock.json.
 
 Claude Code channel and plugin behavior follows Anthropic's public Channels,
