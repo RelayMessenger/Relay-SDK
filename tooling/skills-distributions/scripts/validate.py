@@ -74,7 +74,7 @@ required_markers = [
     "does not create Delivered or Read",
     "POST /v1/contact_requests",
     "contactRequests.create",
-    "@relaymessenger/sdk@0.3.0-staging.7",
+    "@relaymessenger/sdk@0.3.0-staging.8",
     "relay.chats.messages.send",
     "relay.chats.markAsRead",
     "relayApiOrigin(process.env.RELAY_API_URL)",
@@ -134,7 +134,7 @@ if lock.get("docs", {}).get("commit") != (
     "7067d0a734febad683f724ec9386e68e33a25f3d"
 ):
     fail("Relay Docs lock commit drifted")
-if lock.get("sdk", {}).get("version") != "0.3.0-staging.7":
+if lock.get("sdk", {}).get("version") != "0.3.0-staging.8":
     fail("Relay SDK lock version drifted")
 
 for host in ("codex", "cursor"):

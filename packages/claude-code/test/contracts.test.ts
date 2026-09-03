@@ -56,7 +56,7 @@ describe("published artifact contracts", () => {
     expect(read("README.md")).toContain(
       "/absolute/path/to/Relay-SDK/packages/claude-code",
     );
-    expect(pkg.dependencies["@relaymessenger/sdk"]).toBe("0.3.0-staging.7");
+    expect(pkg.dependencies["@relaymessenger/sdk"]).toBe("0.3.0-staging.8");
     expect(lock.relayServer.commit).toBe(
       "f14c368b3954397af414ef6d4d2f9e62db93351f",
     );

@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/cli",
-  "version": "0.5.0-staging.3",
+  "version": "0.5.0-staging.4",
   "description": "Official command-line client for Relay v1 resources.",
   "type": "module",
   "bin": {
@@ -28,7 +28,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@relaymessenger/sdk": "0.3.0-staging.7",
+    "@relaymessenger/sdk": "0.3.0-staging.8",
     "commander": "^15.0.0"
   },
   "devDependencies": {

@@ -15,11 +15,11 @@
   },
   "sdk": {
     "repository": "https://github.com/RelayMessenger/Relay-SDK",
-    "commit": "ddb78e385800d82b041441698985fafab3d9aba9",
+    "commit": "1bbcb486b4a91860ee3527ce95d015883e4cc1ae",
     "package_path": "packages/sdk/package.json",
-    "package_sha256": "f57b019076ba12d6637a60674c9271fbd0bc688b16eceb5b8a101bb9c3c1fb07",
+    "package_sha256": "f14819a908e4a8e52dd37b33bb4eca9dabc4557e2404861f639aa5b857c8a252",
     "package": "@relaymessenger/sdk",
-    "version": "0.3.0-staging.7",
+    "version": "0.3.0-staging.8",
     "dist_tag": "staging"
   },
   "docs_mcp": {

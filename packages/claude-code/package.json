@@ -40,7 +40,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
-    "@relaymessenger/sdk": "0.3.0-staging.7"
+    "@relaymessenger/sdk": "0.3.0-staging.8"
   },
   "devDependencies": {
     "@types/node": "26.0.0",
