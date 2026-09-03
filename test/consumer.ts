@@ -10,8 +10,12 @@ import Relay, {
   type MessageContent,
   type MessageCreateResponse,
   type MessageDelivery,
+  type MessageEditedWebhook,
+  type MessageFailedWebhook,
+  type MessageUnsentWebhook,
   type Reaction,
   type RelayWebhookEnvelope,
+  type RelayWebhookEvent,
   type SentMessage,
   type TypingIndicatorWebhookData,
   type WebSocketDisconnectFrame,
@@ -32,6 +36,15 @@ await relay.chats.shareContactCard("chat-id");
 await relay.chats.startTyping("chat-id");
 await relay.chats.stopTyping("chat-id");
 await relay.chats.markAsRead("chat-id");
+(await relay.messages.edit("message-id", { text: "Corrected" })) satisfies
+  Message;
+(await relay.messages.edit("message-id", {
+  part_index: 1,
+  text: "Corrected",
+})) satisfies Message;
+// @ts-expect-error An edit replaces the text of a part; there is nothing else to send.
+await relay.messages.edit("message-id", { parts: [] });
+(await relay.messages.unsend("message-id")) satisfies void;
 // A group photo is set from either form the contract accepts, and cleared with
 // null. Neither form is a distinct type: both are plain strings.
 await relay.chats.update("chat-id", {
@@ -101,6 +114,9 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "message.received",
   "message.read",
   "message.delivered",
+  "message.edited",
+  "message.unsent",
+  "message.failed",
   "reaction.added",
   "reaction.removed",
   "participant.added",
@@ -232,3 +248,48 @@ removed.event_type satisfies "contact.removed";
 removed.data.contact.handle satisfies string;
 // @ts-expect-error contact.removed does not disclose a Chat ID.
 removed.data.chat_id;
+
+declare const edited: MessageEditedWebhook;
+edited.event_type satisfies "message.edited";
+edited.data.edited_at satisfies string;
+edited.data.part.index satisfies number;
+edited.data.part.text satisfies string;
+edited.data.direction satisfies "inbound" | "outbound";
+edited.data.sender_handle satisfies ChatHandle | null;
+edited.data.chat.id satisfies string;
+
+declare const unsent: MessageUnsentWebhook;
+unsent.event_type satisfies "message.unsent";
+unsent.data.unsent_at satisfies string;
+unsent.data.direction satisfies "inbound" | "outbound";
+unsent.data.chat.id satisfies string;
+// @ts-expect-error An unsend takes the whole Message, not one part of it.
+unsent.data.part;
+// @ts-expect-error An unsend carries unsent_at where an edit carries edited_at.
+unsent.data.edited_at;
+
+declare const failed: MessageFailedWebhook;
+failed.event_type satisfies "message.failed";
+failed.data.code satisfies number;
+failed.data.failed_at satisfies string;
+failed.data.detail_code satisfies number | null | undefined;
+
+// Narrowing on event_type must reach the payload of each new event. Drop a
+// branch from RelayWebhookEvent and this stops compiling.
+const summarize = (event: RelayWebhookEvent): string => {
+  switch (event.event_type) {
+    case "message.edited":
+      return `${event.data.id} ${event.data.part.text}`;
+    case "message.unsent":
+      return `${event.data.id} ${event.data.unsent_at}`;
+    case "message.failed":
+      return `${event.data.code} ${event.data.failed_at}`;
+    default:
+      return event.event_type;
+  }
+};
+void summarize;
+
+declare const message2: Message;
+message2.edited_at satisfies string | null | undefined;
+message2.unsent_at satisfies string | null | undefined;

@@ -23,7 +23,7 @@ const structuralOnly = process.argv.includes("--structural");
 const manifest = JSON.parse(
   readFileSync(resolve(root, "contracts/relay-v1-operations.json"), "utf8"),
 );
-assert.equal(manifest.operation_count, 34);
+assert.equal(manifest.operation_count, 36);
 assert.equal(manifest.operations.length, manifest.operation_count);
 
 const baseURL = process.env.RELAY_BASE_URL?.trim();

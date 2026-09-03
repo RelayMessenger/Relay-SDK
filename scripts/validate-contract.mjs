@@ -34,9 +34,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "4506b8cb6f41da0b39f3e23a285daf3805fcf3a3",
+    commit: "f14c368b3954397af414ef6d4d2f9e62db93351f",
     path: "contracts/developer/openapi.yaml",
-    sha256: "e58ffd5de05250a7a218735cb6bffd854d2d1198134f3f8876b2be109f606fde",
+    sha256: "067370af16135965ece42796ca81c7141071c8ab8b7926a3a506b35111e10b9a",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -67,6 +67,8 @@ const allowedOperationSignatures = [
   "GET /v1/messages/{messageId}/thread",
   "POST /v1/chats/{chatId}/voicememo",
   "GET /v1/messages/{messageId}",
+  "PATCH /v1/messages/{messageId}",
+  "DELETE /v1/messages/{messageId}",
   "POST /v1/messages/{messageId}/reactions",
   "POST /v1/attachments",
   "GET /v1/attachments/{attachmentId}",
@@ -94,14 +96,14 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 34);
+assert.equal(manifest.operation_count, 36);
 assert.equal(manifest.path_count, 21);
 assert.equal(manifest.source_path_count, 22);
-assert.equal(manifest.source_schema_count, 105);
-assert.equal(manifest.callback_count, 15);
+assert.equal(manifest.source_schema_count, 112);
+assert.equal(manifest.callback_count, 18);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 21);
-assert.equal(operationJSON.length, 34);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 15);
+assert.equal(operationJSON.length, 36);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 18);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
@@ -224,8 +226,10 @@ assert.deepEqual(publicMethods(client.chats), [
 assert.deepEqual(publicMethods(client.messages), [
   "addReaction",
   "create",
+  "edit",
   "listMessagesThread",
   "retrieve",
+  "unsend",
 ]);
 assert.deepEqual(publicMethods(client.chats.messages), ["list", "send"]);
 assert.deepEqual(publicMethods(client.chats.participants), ["add", "remove"]);

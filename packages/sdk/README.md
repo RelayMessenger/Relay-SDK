@@ -62,7 +62,8 @@ Available resource methods:
 - `chats.messages.list`, `chats.messages.send`
 - `chats.participants.add`, `chats.participants.remove`
 - `chats.sendVoicememo`
-- `messages.create`, `retrieve`, `addReaction`, `listMessagesThread`
+- `messages.create`, `retrieve`, `edit`, `unsend`, `addReaction`,
+  `listMessagesThread`
 - `attachments.create`, `retrieve`, `delete`
 - `webhookEvents.list`
 - `webhookSubscriptions.create`, `retrieve`, `update`, `list`, `delete`

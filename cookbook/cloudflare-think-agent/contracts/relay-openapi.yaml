@@ -740,6 +740,85 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalServerError"
+    patch:
+      operationId: editMessage
+      summary: Edit the content of a message part
+      description: |-
+        Edit the text of one part of a Message you sent.
+
+        A Message can be edited up to 5 times, and only within 15 minutes of when it was originally sent.
+        Only the sender can edit, and only text parts can be edited.
+      tags:
+        - Messages
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          description: Unique identifier of the message to edit
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditMessageRequest"
+      responses:
+        "200":
+          description: Message updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    delete:
+      operationId: unsendMessage
+      summary: Unsend a message
+      description: |-
+        Unsend a Message you sent, for up to 2 minutes after you sent it.
+
+        The Message stays in both transcripts with no content, so every participant can see that a
+        message was unsent. Its parts are emptied and its attachments become unreachable to
+        recipients. `unsent_at` on the Message is when it happened.
+      tags:
+        - Messages
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          description: Unique identifier of the message to unsend
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Message unsent successfully (no content returned)
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
   /v1/messages/{messageId}/reactions:
     post:
       operationId: sendReaction
@@ -1847,6 +1926,20 @@ components:
         - sent
         - delivered
         - read
+    EditMessageRequest:
+      type: object
+      required:
+        - text
+      properties:
+        part_index:
+          type: integer
+          description: Index of the message part to edit. Defaults to 0.
+          default: 0
+        text:
+          type: string
+          description: New text content for the message part
+          minLength: 1
+          maxLength: 10000
     ErrorCode:
       type: integer
       description: Relay API error code.
@@ -2167,6 +2260,19 @@ components:
             - "null"
           format: date-time
           description: When the message was read
+        edited_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: When the message was last edited, or null if it was never edited.
+        unsent_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: When the sender unsent the message, or null. An unsent Message keeps its place in the transcript
+            and carries no parts.
         deliveries:
           type: array
           items:
@@ -2367,6 +2473,184 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/MessageEvent"
+    MessageEditedEvent:
+      type: object
+      description: Payload for message.edited webhook events. Only text parts can be edited. direction is relative to
+        the receiving agent.
+      required:
+        - chat
+        - direction
+        - edited_at
+        - id
+        - part
+        - sender_handle
+      properties:
+        chat:
+          type: object
+          description: Chat information
+          required:
+            - id
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: Chat identifier
+            is_group:
+              type:
+                - boolean
+                - "null"
+              description: Whether this is a group chat
+            owner_handle:
+              oneOf:
+                - $ref: "#/components/schemas/ChatHandle"
+                - type: "null"
+        direction:
+          type: string
+          description: '"outbound" if you sent the original message, "inbound" if you received it'
+          enum:
+            - inbound
+            - outbound
+        edited_at:
+          type: string
+          format: date-time
+          description: When the edit occurred
+        id:
+          type: string
+          format: uuid
+          description: Message identifier
+        part:
+          type: object
+          description: The edited part
+          required:
+            - index
+            - text
+          properties:
+            index:
+              type: integer
+              description: Zero-based index of the edited part within the message
+            text:
+              type: string
+              description: New text content of the part
+        sender_handle:
+          description: The handle that sent (and edited) this message
+          oneOf:
+            - $ref: "#/components/schemas/ChatHandle"
+            - type: "null"
+    MessageEditedWebhook:
+      description: Complete webhook payload for message.edited events (2026-08-30 format)
+      allOf:
+        - $ref: "#/components/schemas/WebhookEnvelopeBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/MessageEditedEvent"
+    MessageUnsentEvent:
+      type: object
+      description: |-
+        Payload for message.unsent webhook events.
+
+        The `message.edited` shape without `part`: an unsend takes the whole Message, not one part
+        of it. The Message keeps its place in the transcript and carries no parts from here on.
+        direction is relative to the receiving agent.
+      required:
+        - chat
+        - direction
+        - id
+        - sender_handle
+        - unsent_at
+      properties:
+        chat:
+          type: object
+          description: Chat information
+          required:
+            - id
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: Chat identifier
+            is_group:
+              type:
+                - boolean
+                - "null"
+              description: Whether this is a group chat
+            owner_handle:
+              oneOf:
+                - $ref: "#/components/schemas/ChatHandle"
+                - type: "null"
+        direction:
+          type: string
+          description: '"outbound" if you sent the original message, "inbound" if you received it'
+          enum:
+            - inbound
+            - outbound
+        id:
+          type: string
+          format: uuid
+          description: Message identifier
+        sender_handle:
+          description: The handle that sent (and unsent) this message
+          oneOf:
+            - $ref: "#/components/schemas/ChatHandle"
+            - type: "null"
+        unsent_at:
+          type: string
+          format: date-time
+          description: When the sender unsent the message
+    MessageUnsentWebhook:
+      description: Complete webhook payload for message.unsent events (2026-08-30 format)
+      allOf:
+        - $ref: "#/components/schemas/WebhookEnvelopeBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/MessageUnsentEvent"
+    MessageFailedEvent:
+      type: object
+      description: |-
+        Error details for message.failed webhook events.
+
+        Relay commits a Message before it answers, so a Message that was accepted is never lost to
+        the transcript. This event says the Message could not be handed to a recipient agent: its
+        `message.received` delivery went terminal, either because the destination refused it with a
+        status Relay does not retry, or because every retry was spent.
+      required:
+        - code
+        - failed_at
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+          description: Chat identifier
+        message_id:
+          type: string
+          format: uuid
+          description: Message identifier
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        reason:
+          type: string
+          description: Human-readable description of the failure
+        detail_code:
+          type:
+            - integer
+            - "null"
+          description: |-
+            Opaque diagnostic identifying the specific failure class within `code` - the last HTTP
+            status the destination answered with, or null when it never answered. Log it and
+            include it in support requests, but do not branch on it.
+        failed_at:
+          type: string
+          format: date-time
+          description: When the failure was detected
+    MessageFailedWebhook:
+      description: Complete webhook payload for message.failed events (2026-08-30 format)
+      allOf:
+        - $ref: "#/components/schemas/WebhookEnvelopeBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/MessageFailedEvent"
     ParticipantAddedEvent:
       type: object
       description: Payload for participant.added webhook events
@@ -3383,6 +3667,9 @@ components:
         - message.received
         - message.read
         - message.delivered
+        - message.edited
+        - message.unsent
+        - message.failed
         - reaction.added
         - reaction.removed
         - participant.added
@@ -3720,6 +4007,54 @@ x-relay-webhooks:
           application/json:
             schema:
               $ref: "#/components/schemas/MessageDeliveredWebhook"
+      responses:
+        "200":
+          description: Webhook received successfully
+  message.edited.v2026-08-30:
+    post:
+      tags:
+        - 2026-08-30
+      operationId: webhookMessageEditedV20260830
+      summary: Message edited
+      description: The sender edited the text of one part of a message.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageEditedWebhook"
+      responses:
+        "200":
+          description: Webhook received successfully
+  message.unsent.v2026-08-30:
+    post:
+      tags:
+        - 2026-08-30
+      operationId: webhookMessageUnsentV20260830
+      summary: Message unsent
+      description: The sender unsent a message, and it now carries no parts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageUnsentWebhook"
+      responses:
+        "200":
+          description: Webhook received successfully
+  message.failed.v2026-08-30:
+    post:
+      tags:
+        - 2026-08-30
+      operationId: webhookMessageFailedV20260830
+      summary: Message failed
+      description: A committed message could not be handed to a recipient agent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageFailedWebhook"
       responses:
         "200":
           description: Webhook received successfully
