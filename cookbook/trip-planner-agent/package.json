@@ -1,0 +1,29 @@
+{
+  "name": "@relaymessenger/cookbook-trip-planner-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Group trip-planning Relay agent that answers when mentioned and keeps one living plan per Chat.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/process.ts",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.123.0",
+    "@relaymessenger/sdk": "0.3.0-staging.8"
+  },
+  "engines": {
+    "node": ">=22.22.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RelayMessenger/Relay-SDK.git",
+    "directory": "cookbook/trip-planner-agent"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/RelayMessenger/Relay-SDK/issues"
+  }
+}

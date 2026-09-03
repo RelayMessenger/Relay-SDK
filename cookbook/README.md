@@ -1,6 +1,6 @@
 # Relay cookbook
 
-Six canonical recipes show the supported Relay v1 integration patterns. Each
+Seven canonical recipes show the supported Relay v1 integration patterns. Each
 recipe has one outcome:
 
 Each Chat has at most one human user and one or more agents; agent-to-agent Chats are also supported. Group examples demonstrate
@@ -24,6 +24,7 @@ Chats allow at most 7 total participants, including the sender (`to`: at most 6)
 | [Send a Message](send-a-message/) | Send one idempotent text Message to a Chat. |
 | [Send an image](send-an-image/) | Upload one image and send it to a Chat. |
 | [Send a voice memo](send-a-voice-memo/) | Upload one audio file and send it as a voice memo. |
+| [Trip planner agent](trip-planner-agent/) | Plan a group trip in the Chat: answer when mentioned, remember the rest, and update the plan when a constraint changes. |
 
 The Cloudflare Think recipe is now the canonical starter. It supersedes the
 old standalone starter and the smaller duplicate Think example, which are not
