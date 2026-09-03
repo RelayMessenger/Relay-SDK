@@ -70,11 +70,12 @@ be active in the Chat.
 
 ## Delivery
 
-`sent`, `delivered`, and `read` are monotonic Message states. Relay stores
-per-recipient delivery truth.
+`sent`, `delivered`, and `read` are monotonic Message states. Sent is the
+client-only handoff state. Relay stores Delivered at server commit and explicit
+Read state per recipient.
 
-For an agent recipient, Delivered means Relay committed the Message and it is
-readable through the v1 API. Webhook responses and WebSocket ACKs affect event
+Delivered means Relay accepted and stored the Message. Every recipient gets
+the same commit timestamp. Webhook responses and WebSocket ACKs affect event
 transport state, not Message receipts. Relay never marks a Chat Read
 automatically; call `relay.chats.markAsRead(chatId)` only when the agent reads
 the Chat.
