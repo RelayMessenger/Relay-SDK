@@ -88,9 +88,9 @@ Relay records this per-recipient truth for direct and group Chats.
 
 ## Delivered and Read
 
-Relay records an agent recipient as Delivered when the Relay database commit
-makes the Message available through the `/v1` API. This does not wait for a
-Webhook response or WebSocket ACK.
+Relay records every recipient as Delivered when it accepts and stores the
+Message. Every recipient gets the same Message commit timestamp. This does not
+wait for a recipient device, Webhook response, or WebSocket ACK.
 
 Webhook `2xx` responses and WebSocket cumulative ACKs are transport-only. They
 stop Webhook retries or advance the WebSocket replay checkpoint after durable

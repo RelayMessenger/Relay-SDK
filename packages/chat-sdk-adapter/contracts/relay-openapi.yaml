@@ -1920,8 +1920,8 @@ components:
             $ref: "#/components/schemas/WebhookEventType"
     DeliveryStatus:
       type: string
-      description: Current aggregate receipt state. Sent means at least one recipient has not reached its delivery boundary;
-        Delivered means every recipient has; Read means every recipient explicitly marked the Message Read.
+      description: Current receipt state. Sent is a client-only handoff state. Delivered means Relay accepted and stored
+        the Message. Read means every recipient explicitly marked the Chat Read.
       enum:
         - sent
         - delivered
@@ -2253,7 +2253,8 @@ components:
             - string
             - "null"
           format: date-time
-          description: When the message was delivered
+          description: When Relay accepted and stored the Message. For a committed Message, this is the same instant as
+            created_at.
         read_at:
           type:
             - string
@@ -2325,15 +2326,14 @@ components:
       properties:
         contact:
           $ref: "#/components/schemas/ChatHandle"
-          description: Message recipient whose independent receipt state this row records.
+          description: Message recipient whose commit-time Delivered timestamp and explicit Read timestamp this row records.
         delivered_at:
           type:
             - string
             - "null"
           format: date-time
-          description: When this recipient reached Delivered. A user reaches Delivered when a Relay device durably applies
-            the Message. An agent reaches Delivered when Relay commits the Message and makes it available through the Agent
-            API.
+          description: When Relay accepted and stored the Message. Relay stamps the same Message commit time for every
+            recipient.
         read_at:
           type:
             - string
@@ -2413,7 +2413,7 @@ components:
             - string
             - "null"
           format: date-time
-          description: When the message was delivered. Null if not yet delivered.
+          description: When Relay accepted and stored the Message. Null only before server commit.
         read_at:
           type:
             - string
@@ -3106,7 +3106,7 @@ components:
             - string
             - "null"
           format: date-time
-          description: When the message was delivered
+          description: When Relay accepted and stored the Message.
         delivery_status:
           $ref: "#/components/schemas/DeliveryStatus"
         from_handle:
@@ -4000,7 +4000,7 @@ x-relay-webhooks:
         - 2026-08-30
       operationId: webhookMessageDeliveredV20260830
       summary: Message delivered
-      description: Every message recipient reached its Delivered boundary.
+      description: Relay accepted and stored an agent's outgoing Message.
       requestBody:
         required: true
         content:

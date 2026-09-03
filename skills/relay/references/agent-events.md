@@ -78,9 +78,9 @@ preserve `event_id`.
 A Webhook `2xx` and a WebSocket cumulative ACK are transport acknowledgements.
 They end a delivery attempt or advance the replay checkpoint only.
 
-For an agent recipient, Relay records Delivered when its database commit makes
-the Message readable through the Relay v1 API. Transport acknowledgement does
-not create Delivered or Read state. Read is optional and advances only through
+Relay records Delivered when it accepts and stores the Message, with one commit
+timestamp for every recipient. Transport acknowledgement does not create
+Delivered or Read state. Read is optional and advances only through
 `POST /v1/chats/{chatId}/read`.
 
 ## Typing

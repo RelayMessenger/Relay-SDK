@@ -161,8 +161,8 @@ durable ACK and idempotent REST reply.
 
 `contracts/relay-v1.lock.json` records the compatibility boundary used by this
 release: Relay Server
-`f14c368b3954397af414ef6d4d2f9e62db93351f`, OpenAPI SHA-256
-`067370af16135965ece42796ca81c7141071c8ab8b7926a3a506b35111e10b9a`,
+`f91f22ea55ac0485efa181bb650998848c973c6e`, OpenAPI SHA-256
+`bbcdc6988e09feeeac1ae28cf299904b59e220ac7b5f936009845ad07645ead2`,
 public `ChatHandle.image_url` and `ChatHandle.about` fields with no legacy
 aliases,
 and the exact `@relaymessenger/sdk@0.3.0-staging.8` registry integrity, source
