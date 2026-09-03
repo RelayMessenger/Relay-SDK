@@ -47,7 +47,7 @@ try {
   if (parsed === "help") {
     process.stdout.write(usage);
   } else if (parsed === "version") {
-    process.stdout.write("0.1.0-staging.4\n");
+    process.stdout.write("0.1.0-staging.5\n");
   } else {
     serveStdio(
       () => createRelayMcpServer({ authContext: parsed }),

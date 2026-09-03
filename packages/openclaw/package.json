@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/openclaw-plugin",
-  "version": "0.4.0-staging.3",
+  "version": "0.4.0-staging.4",
   "description": "Native Relay channel plugin for OpenClaw",
   "license": "MIT",
   "type": "module",

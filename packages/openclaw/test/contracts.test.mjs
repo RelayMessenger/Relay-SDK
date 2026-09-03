@@ -43,7 +43,7 @@ const openapiPath =
 
 test("pins the requested OpenClaw and current Relay SDK contracts", () => {
   assert.equal(packageJson.name, "@relaymessenger/openclaw-plugin");
-  assert.equal(packageJson.version, "0.4.0-staging.3");
+  assert.equal(packageJson.version, "0.4.0-staging.4");
   assert.equal(packageJson.devDependencies.openclaw, "2026.8.1");
   assert.equal(packageJson.openclaw.build.openclawVersion, "2026.8.1");
   assert.equal(packageJson.dependencies["@relaymessenger/sdk"], "0.3.0-staging.8");
