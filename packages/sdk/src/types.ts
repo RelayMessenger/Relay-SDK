@@ -176,6 +176,13 @@ export interface Message {
   sent_at?: string | null;
   delivered_at?: string | null;
   read_at?: string | null;
+  /** When the Message was last edited, or null if it was never edited. */
+  edited_at?: string | null;
+  /**
+   * When the sender unsent the Message, or null. An unsent Message keeps its
+   * place in the transcript and carries no parts.
+   */
+  unsent_at?: string | null;
   deliveries?: MessageDelivery[];
 }
 
@@ -273,6 +280,16 @@ export interface MessageListParams {
 
 export interface MessageThreadParams extends MessageListParams {
   order?: "asc" | "desc";
+}
+
+/**
+ * `PATCH /v1/messages/{messageId}`. Only text parts can be edited, up to five
+ * times, and only within 15 minutes of the original send.
+ */
+export interface MessageEditParams {
+  /** Index of the Message part to edit. Defaults to 0. */
+  part_index?: number;
+  text: string;
 }
 
 export interface MessageAddReactionParams {
@@ -572,12 +589,15 @@ export interface WebSocketDisconnectFrame {
     | "webhook_configured";
 }
 
+/** The Chat object every Message event carries. */
+export interface MessageEventChat {
+  id: UUID;
+  is_group?: boolean | null;
+  owner_handle?: ChatHandle | null;
+}
+
 export interface MessageWebhookData {
-  chat: {
-    id: UUID;
-    is_group?: boolean | null;
-    owner_handle?: ChatHandle | null;
-  };
+  chat: MessageEventChat;
   id: UUID;
   idempotency_key?: string | null;
   direction: "inbound" | "outbound";
@@ -587,6 +607,54 @@ export interface MessageWebhookData {
   delivered_at?: string | null;
   read_at?: string | null;
   reply_to?: ReplyTo | null;
+}
+
+/** The part an edit replaced, and its zero-based index in the Message. */
+export interface MessageEditedPart {
+  index: number;
+  text: string;
+}
+
+/**
+ * `message.edited`. `direction` is relative to the receiving Agent:
+ * `outbound` if the Agent sent the original Message, `inbound` otherwise.
+ */
+export interface MessageEditedEvent {
+  chat: MessageEventChat;
+  direction: "inbound" | "outbound";
+  edited_at: string;
+  id: UUID;
+  part: MessageEditedPart;
+  sender_handle: ChatHandle | null;
+}
+
+/**
+ * `message.unsent`. The `message.edited` shape without `part` -- an unsend
+ * takes the whole Message, not one part of it -- carrying `unsent_at` where
+ * the edit carries `edited_at`. Deriving it here keeps the two shapes from
+ * drifting apart.
+ */
+export interface MessageUnsentEvent
+  extends Omit<MessageEditedEvent, "edited_at" | "part"> {
+  unsent_at: string;
+}
+
+/**
+ * `message.failed`. Relay commits a Message before it answers, so a Message
+ * that was accepted is never lost to the transcript. This event says the
+ * Message could not be handed to a recipient Agent.
+ */
+export interface MessageFailedEvent {
+  chat_id?: UUID;
+  message_id?: UUID;
+  code: number;
+  reason?: string;
+  /**
+   * Opaque diagnostic identifying the specific failure class within `code`.
+   * Log it and include it in support requests, but do not branch on it.
+   */
+  detail_code?: number | null;
+  failed_at: string;
 }
 
 export interface ContactEventContact {
@@ -628,6 +696,21 @@ export type ContactRemovedWebhook = RelayWebhookEnvelope<
   "contact.removed"
 >;
 
+export type MessageEditedWebhook = RelayWebhookEnvelope<
+  MessageEditedEvent,
+  "message.edited"
+>;
+
+export type MessageUnsentWebhook = RelayWebhookEnvelope<
+  MessageUnsentEvent,
+  "message.unsent"
+>;
+
+export type MessageFailedWebhook = RelayWebhookEnvelope<
+  MessageFailedEvent,
+  "message.failed"
+>;
+
 export type ContactAddedWebhookData = ContactAddedEvent;
 export type ContactRemovedWebhookData = ContactRemovedEvent;
 export type ContactAddedWebhookEvent = ContactAddedWebhook;
@@ -649,6 +732,9 @@ type OtherWebhookEventType = Exclude<
   | TypingIndicatorWebhookEventType
   | "contact.added"
   | "contact.removed"
+  | "message.edited"
+  | "message.unsent"
+  | "message.failed"
 >;
 
 export type RelayWebhookEvent =
@@ -657,6 +743,9 @@ export type RelayWebhookEvent =
     TypingIndicatorWebhookData,
     TypingIndicatorWebhookEventType
   >
+  | MessageEditedWebhook
+  | MessageUnsentWebhook
+  | MessageFailedWebhook
   | ContactAddedWebhookEvent
   | ContactRemovedWebhookEvent
   | RelayWebhookEnvelope<Record<string, unknown>, OtherWebhookEventType>;

@@ -76,9 +76,17 @@ export const runDoctor = async (
     });
   }
 
+  // `doctor` runs against whatever `@relaymessenger/sdk` the user installed,
+  // so it reports what that SDK carries and fails only when the contract is
+  // not Relay v1. An exact operation count cannot live here: it would have to
+  // be the published SDK's number, which the workspace SDK contradicts the
+  // moment the contract grows. `scripts/check-contract.mjs` holds the exact
+  // count, against the workspace, where a change is meant to be reviewed.
   checks.push({
     name: "sdk_contract",
-    ok: RELAY_V1_OPERATIONS.length === 34,
+    ok: RELAY_V1_OPERATIONS.length > 0
+      && RELAY_V1_OPERATIONS.every((operation) =>
+        operation.path.startsWith("/v1/")),
     detail: `${RELAY_V1_OPERATIONS.length} v1 operations`,
   });
 

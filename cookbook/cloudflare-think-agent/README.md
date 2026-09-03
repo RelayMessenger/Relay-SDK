@@ -318,12 +318,12 @@ Run neither guarded command without your own review and credentials.
 
 This revision is tested against:
 
-- Relay Server `4506b8cb6f41da0b39f3e23a285daf3805fcf3a3`
+- Relay Server `f14c368b3954397af414ef6d4d2f9e62db93351f`
 - Relay Chat SDK `eecf94a4d38bc021917e54dfed57e268657c17af`
 - `@relaymessenger/chat-sdk-adapter@0.3.0-staging.5` npm integrity
   `sha512-RdAAbdgxUogIfOY4/AUw4t6Okn57VIig3+VkBcFfwwR1s2mH/cjdIrjOz7uKz1h23Cwp87LyUVKSK7GrXYGRZA==`
 - OpenAPI SHA-256
-  `e58ffd5de05250a7a218735cb6bffd854d2d1198134f3f8876b2be109f606fde`
+  `067370af16135965ece42796ca81c7141071c8ab8b7926a3a506b35111e10b9a`
 - public `ChatHandle.image_url` and `ChatHandle.about` fields, with no legacy
   aliases
 - Relay API `v1`

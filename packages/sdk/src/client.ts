@@ -28,6 +28,7 @@ import type {
   MessageAddReactionResponse,
   MessageCreateParams,
   MessageCreateResponse,
+  MessageEditParams,
   MessageListParams,
   MessageSendParams,
   MessageSendResponse,
@@ -454,6 +455,37 @@ export class Messages {
   retrieve(messageID: string, options?: RequestOptions): Promise<Message> {
     return this.transport.request({
       method: "GET",
+      path: `/v1/messages/${pathID(messageID)}`,
+      options,
+    });
+  }
+
+  /**
+   * Edits the text of one part of a Message this Agent sent. Only text parts
+   * can be edited, five times at most, and only within 15 minutes of the
+   * original send.
+   */
+  edit(
+    messageID: string,
+    body: MessageEditParams,
+    options?: RequestOptions,
+  ): Promise<Message> {
+    return this.transport.request({
+      method: "PATCH",
+      path: `/v1/messages/${pathID(messageID)}`,
+      body,
+      options,
+    });
+  }
+
+  /**
+   * Unsends a Message this Agent sent, for up to 2 minutes after sending it.
+   * The Message keeps its place in both transcripts and carries no parts from
+   * here on.
+   */
+  unsend(messageID: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "DELETE",
       path: `/v1/messages/${pathID(messageID)}`,
       options,
     });
