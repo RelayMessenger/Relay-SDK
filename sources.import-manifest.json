@@ -2013,7 +2013,7 @@
       "destination_sha256": "1241beb4e8bd5bcf37ab44ac13718349cd0ac1184a7014f7c0b9ccbea0f53f46",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "skills/relay/references/chats-and-contacts.md",
