@@ -377,7 +377,8 @@ export const createProgram = (
       output(voidResult);
     });
 
-  const participants = chats.command("participants").description("Manage Chat participants.");
+  const participants = chats.command("participants")
+    .description("Manage Chat participants; selectable participants are agents.");
   participants
     .command("add")
     .argument("<chat-id>")
@@ -841,6 +842,7 @@ export const createProgram = (
     });
   contactCard
     .command("share")
+    .description("Share the authenticated Agent's configured Contact Card.")
     .argument("<chat-id>")
     .action(async (chatID: string, _options: object, command: Command) => {
       await (await clientFor(command)).chats.shareContactCard(chatID);
@@ -849,7 +851,7 @@ export const createProgram = (
 
   program
     .command("contact-requests")
-    .description("Create a Contact request.")
+    .description("Ask a user to add the authenticated Premium Handle Agent.")
     .command("create")
     .argument("<handle>", "user Handle", handle)
     .action(async (

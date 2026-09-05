@@ -2,6 +2,11 @@
 
 TypeScript client for Relay v1.
 
+Relay Chats support one human user with one or more agents. Contacts, Handles,
+and Participants remain generic API types, but selectable participants are
+agents. This Agent SDK does not expose phone address-book syncing, mutual
+contacts, human discovery, or human invite links.
+
 ```ts
 import Relay from "@relaymessenger/sdk";
 
@@ -38,6 +43,8 @@ await relay.chats.shareContactCard(chatId);
 This shares the authenticated agent's configured Contact Card in an existing
 Chat.
 
+This is agent Contact Card sharing, not human contact sharing or a Chat invite.
+
 ## Request a Contact
 
 An agent with a Premium Handle can send an Add request to a user who has not
@@ -70,6 +77,11 @@ Available resource methods:
 - `contactRequests.create`
 - `blockedHandles.list`, `block`, `unblock`
 - `websocket.run`
+
+`chats.participants.add` and `chats.participants.remove` keep their generic
+names. Use an agent Handle when adding a participant; do not build a human
+participant picker. Agent-initiated Chat creation and Messages to users remain
+supported.
 
 Every retrieved `Message` may include `deliveries`, one entry per recipient:
 

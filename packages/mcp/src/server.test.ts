@@ -18,13 +18,16 @@ const fakeRelay = () => {
     })),
     react: vi.fn(async () => ({ status: "accepted" })),
     requestContact: vi.fn(async () => ({ state: "pending" })),
+    shareCard: vi.fn(async () => undefined),
+    sendToUser: vi.fn(async () => ({ chat_id: CHAT_ID })),
   };
   const client = {
     chats: {
       listChats: calls.listChats,
       messages: { send: calls.send },
+      shareContactCard: calls.shareCard,
     },
-    messages: { addReaction: calls.react },
+    messages: { addReaction: calls.react, create: calls.sendToUser },
     contactRequests: { create: calls.requestContact },
   } as unknown as Relay;
   return { client, calls };
@@ -61,11 +64,24 @@ describe("explicit Relay MCP tools", () => {
     const fake = fakeRelay();
     const client = await connect(fake.client);
     const tools = (await client.listTools()).tools;
-    expect(tools).toHaveLength(16);
-    expect(tools.map((tool) => tool.name)).toContain("relay_send_message");
-    expect(tools.map((tool) => tool.name)).toContain(
+    expect(tools.map((tool) => tool.name).sort()).toEqual([
       "relay_create_contact_request",
-    );
+      "relay_get_chat",
+      "relay_get_contact_card",
+      "relay_get_message",
+      "relay_get_message_thread",
+      "relay_list_chats",
+      "relay_list_messages",
+      "relay_mark_chat_read",
+      "relay_react_to_message",
+      "relay_send_message",
+      "relay_send_message_to_chat",
+      "relay_set_contact_card",
+      "relay_share_contact_card",
+      "relay_start_typing",
+      "relay_stop_typing",
+      "relay_update_contact_card",
+    ]);
     expect(JSON.stringify(tools).toLowerCase()).not.toContain("agent_token");
     expect(JSON.stringify(tools).toLowerCase()).not.toContain("authorization");
   });
@@ -111,6 +127,37 @@ describe("explicit Relay MCP tools", () => {
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result)).toMatch(/invalid/i);
     expect(fake.calls.react).not.toHaveBeenCalled();
+  });
+
+  it("preserves agent card sharing, add requests, and Messages to a user", async () => {
+    const fake = fakeRelay();
+    const client = await connect(fake.client);
+    const shared = await client.callTool({
+      name: "relay_share_contact_card",
+      arguments: { chat_id: CHAT_ID },
+    });
+    expect(shared.isError).not.toBe(true);
+    expect(fake.calls.shareCard).toHaveBeenCalledWith(CHAT_ID);
+
+    const requested = await client.callTool({
+      name: "relay_create_contact_request",
+      arguments: { handle: "advait" },
+    });
+    expect(requested.isError).not.toBe(true);
+    expect(fake.calls.requestContact).toHaveBeenCalledWith({ handle: "advait" });
+
+    const sent = await client.callTool({
+      name: "relay_send_message",
+      arguments: { recipients: ["advait"], text: "Hello", idempotency_key: "agent-send-1" },
+    });
+    expect(sent.isError).not.toBe(true);
+    expect(fake.calls.sendToUser).toHaveBeenCalledWith({
+      to: ["advait"],
+      message: {
+        parts: [{ type: "text", value: "Hello" }],
+        idempotency_key: "agent-send-1",
+      },
+    });
   });
 
   it("redacts Agent Tokens from tool failures", async () => {

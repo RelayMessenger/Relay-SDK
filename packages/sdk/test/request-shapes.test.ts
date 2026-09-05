@@ -90,7 +90,7 @@ describe("Relay v1 request shapes", () => {
     });
 
     await client.chats.create({
-      from: "alice",
+      from: "echo.agent",
       to: ["bob"],
       message: {
         parts: [{ type: "text", value: "hello" }],
@@ -100,8 +100,8 @@ describe("Relay v1 request shapes", () => {
     await client.chats.listChats({ cursor: "chat-cursor", limit: 20 });
     await client.chats.retrieve("chat-id");
     await client.chats.update("chat-id", { display_name: "Team" });
-    await client.chats.participants.add("chat-id", { handle: "carol" });
-    await client.chats.participants.remove("chat-id", { handle: "carol" });
+    await client.chats.participants.add("chat-id", { handle: "research.agent" });
+    await client.chats.participants.remove("chat-id", { handle: "research.agent" });
     await client.chats.leaveChat("chat-id");
     await client.chats.startTyping("chat-id");
     await client.chats.stopTyping("chat-id");
@@ -186,7 +186,7 @@ describe("Relay v1 request shapes", () => {
     const createChat = calls[0]!;
     expect(createChat.headers.get("idempotency-key")).toBe("chat-create-key");
     expect(JSON.parse(String(createChat.body))).toEqual({
-      from: "alice",
+      from: "echo.agent",
       to: ["bob"],
       message: {
         parts: [{ type: "text", value: "hello" }],
@@ -215,7 +215,7 @@ describe("Relay v1 request shapes", () => {
 
     const removeParticipant = calls[5]!;
     expect(JSON.parse(String(removeParticipant.body))).toEqual({
-      handle: "carol",
+      handle: "research.agent",
     });
 
     const contactUpdate = calls.find((call) =>
@@ -233,6 +233,30 @@ describe("Relay v1 request shapes", () => {
 
     expect(calls.some((call) =>
       call.url.pathname === "/v1/websocket")).toBe(false);
+  });
+
+  it.each([
+    { name: "one-agent direct Chat", to: ["bob"] },
+    { name: "multi-agent group Chat", to: ["bob", "research.agent"] },
+  ])("preserves agent-initiated creation of a $name", async ({ to }) => {
+    const calls: Captured[] = [];
+    const client = new Relay({
+      apiKey: "agent-token",
+      baseURL: "https://api.example.test",
+      maxRetries: 0,
+      fetch: responder(calls),
+    });
+    // The authenticated sender is an agent; Bob is the single human user.
+    const body = {
+      from: "echo.agent",
+      to,
+      message: { parts: [{ type: "text" as const, value: "hello" }] },
+    };
+    await client.chats.create(body);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url.pathname).toBe("/v1/chats");
+    expect(calls[0]!.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]!.body))).toEqual(body);
   });
 
   it("exposes only the approved resource surface", () => {

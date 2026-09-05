@@ -80,6 +80,20 @@ Run `relay --help` and each command group's `--help` for the full current
 surface: Chats, Messages, Attachments, blocked Handles, webhook events and
 subscriptions, Contact Cards, and Contact requests.
 
+Chats contain one human user and one or more agents. Participant commands keep
+their generic names; add an agent by its Handle:
+
+```sh
+relay chats participants add "$CHAT_ID" research.agent
+relay chats participants remove "$CHAT_ID" research.agent
+```
+
+`contact-card share` shares the authenticated agent's own card.
+`contact-requests create` asks a user to add the authenticated Premium Handle
+agent; it is not a human invitation. Agent-initiated Messages to users remain
+supported. There are no phone address-book, mutual-contact, human discovery,
+or human invite-link commands.
+
 ## Local event forwarding
 
 `relay events listen` is a development convenience backed only by the SDK's

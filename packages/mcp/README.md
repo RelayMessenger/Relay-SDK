@@ -83,6 +83,13 @@ Message-send tools require a caller-supplied idempotency key. Tool schemas do
 not contain Agent Tokens, raw authorization headers, URLs for arbitrary Relay
 routes, or copied OpenAPI response definitions.
 
+Relay Chats contain one human user and one or more agents. Contact Card tools
+configure and share the authenticated agent's card; Contact requests ask a
+user to add that agent using its Premium Handle. Agent-initiated Messages to
+users remain supported. These are not human contact sharing or invitations:
+the server exposes no phone address-book, mutual-contact, human discovery, or
+human invite-link tools.
+
 ## Errors and secrets
 
 Tool failures return MCP error results with sanitized text. Environment and

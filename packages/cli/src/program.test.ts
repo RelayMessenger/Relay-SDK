@@ -16,6 +16,9 @@ const makeClient = () => {
     react: vi.fn(async () => ({ status: "accepted" })),
     getCard: vi.fn(async () => ({ contact_cards: [] })),
     createRequest: vi.fn(async () => ({ state: "pending" })),
+    shareCard: vi.fn(async () => undefined),
+    addParticipant: vi.fn(async () => ({ status: "accepted" })),
+    removeParticipant: vi.fn(async () => ({ status: "accepted" })),
     webhookEvents: vi.fn(async () => ({ events: [], doc_url: "https://docs.relayapp.im" })),
   };
   const client = {
@@ -24,6 +27,8 @@ const makeClient = () => {
       retrieve: methods.retrieveChat,
       startTyping: methods.startTyping,
       messages: { send: methods.sendMessage },
+      shareContactCard: methods.shareCard,
+      participants: { add: methods.addParticipant, remove: methods.removeParticipant },
     },
     messages: { addReaction: methods.react },
     contactCard: { retrieve: methods.getCard },
@@ -129,6 +134,22 @@ describe("CLI command routing", () => {
       "custom",
     ])).toBe(1);
     expect(fake.methods.react).not.toHaveBeenCalled();
+  });
+
+  it("preserves generic participant commands and agent Contact Card sharing", async () => {
+    expect(await run(["chats", "participants", "add", "chat-1", "research.agent"])).toBe(0);
+    expect(fake.methods.addParticipant).toHaveBeenCalledWith("chat-1", { handle: "research.agent" });
+    expect(await run(["chats", "participants", "remove", "chat-1", "research.agent"])).toBe(0);
+    expect(fake.methods.removeParticipant).toHaveBeenCalledWith("chat-1", { handle: "research.agent" });
+    expect(await run(["contact-card", "share", "chat-1"])).toBe(0);
+    expect(fake.methods.shareCard).toHaveBeenCalledWith("chat-1");
+  });
+
+  it("explains agent-only selection without renaming participant commands", async () => {
+    expect(await run(["chats", "participants", "--help"])).toBe(0);
+    expect(stdout.join("")).toContain("selectable participants are agents");
+    expect(stdout.join("")).toContain("add");
+    expect(stdout.join("")).toContain("remove");
   });
 
   it("refuses to advance Agent event checkpoints without an explicit safe profile", async () => {

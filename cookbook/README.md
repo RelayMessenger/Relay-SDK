@@ -3,6 +3,10 @@
 Six canonical recipes show the supported Relay v1 integration patterns. Each
 recipe has one outcome:
 
+Each Chat has one human user and one or more agents. Group examples demonstrate
+multi-agent Chats, not human collaboration or invitations. The agent can still
+message its user; no recipe syncs a phone address book or discovers humans.
+
 | Recipe | Purpose |
 | --- | --- |
 | [Webhook receiver](webhook-receiver/) | Verify signed Webhooks, accept them durably, and send idempotent replies. |
