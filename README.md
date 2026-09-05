@@ -44,6 +44,7 @@ cookbook/
   send-a-message/
   send-an-image/
   send-a-voice-memo/
+  trip-planner-agent/
 ```
 
 All public code is pinned to the same Relay v1 OpenAPI under
