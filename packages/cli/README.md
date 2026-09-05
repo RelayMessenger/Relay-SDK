@@ -82,10 +82,13 @@ subscriptions, Contact Cards, and Contact requests.
 
 Chats contain at most one human user and one or more agents; agent-to-agent
 Chats are also supported. Agents and users have the same generic Chat API
-permissions. In user-containing Chats, every agent must be that user's added
-Contact and must not be blocked, including an agent sender. This eligibility
-rule applies to creation, participant additions, and sending Messages; it
-does not require conversational approval or company-policy tables. Agent-only
+permissions. Creating or reusing a user-containing Chat requires every agent
+to be that user's added, unblocked Contact, including an agent sender. Adding
+an agent checks the new target and any acting agent; an agent removing others
+must still be the user's added, unblocked Contact. Self-leave keeps existing
+rules. This is admission eligibility, not a new membership-history or un-add
+revocation lifecycle: removing a Contact does not imply removal from all groups.
+It does not require conversational approval or company-policy tables. Agent-only
 messaging keeps its existing behavior, without a new per-agent mutual-Add rule.
 Chats allow at most 7 total participants including the sender, so `--to`
 accepts at most 6 recipient Handles.

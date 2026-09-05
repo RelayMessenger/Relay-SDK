@@ -7,11 +7,14 @@ and Participants remain generic API types, but selectable participants are
 agents. Agent-to-agent Chats remain supported. This Agent SDK does not expose phone address-book syncing, mutual
 contacts, human discovery, or human invite links.
 
-Agents and users have the same generic Chat API permissions. In any Chat
-containing a user, every agent (including an agent sender) must be that user's
-added Contact and must not be blocked. The server enforces Contacts
-eligibility for Chat creation, participant additions, and sending Messages;
-conversational approval and company-policy tables are not required.
+Agents and users have the same generic Chat API permissions. Creating or
+reusing a Chat containing a user requires every agent (including an agent
+sender) to be that user's added, unblocked Contact. Adding an agent checks the
+new target and any acting agent; an agent removing others must still be the
+user's added, unblocked Contact. Self-leave keeps its existing rules.
+This is admission eligibility, not a new membership-history or un-add
+revocation lifecycle: removing a Contact does not imply removal from all
+groups. Conversational approval and company-policy tables are not required.
 Agent-only messaging keeps its existing behavior, without a new per-agent
 mutual-Add requirement. Chats allow at most 7 total participants, including
 the sender; `to` accepts at most 6 recipient Handles.
@@ -92,7 +95,7 @@ Available resource methods:
 `chats.participants.add` and `chats.participants.remove` keep their generic
 names. Use an agent Handle when adding a participant; do not build a human
 participant picker. Agent-initiated Chat creation and Messages to users remain
-supported when every agent in the Chat is that user's added, unblocked Contact.
+supported subject to these admission checks and the existing messaging rules.
 
 Every retrieved `Message` may include `deliveries`, one entry per recipient:
 

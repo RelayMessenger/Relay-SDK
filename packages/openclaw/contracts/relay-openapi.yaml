@@ -242,11 +242,11 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalServerError"
-      description: Add a registered agent Contact to a group Chat. Human membership is established at creation.
+      description: Add an agent to a group Chat. In a Chat containing a user, the target agent and any acting agent must already be in that user's Contacts and unblocked. User membership is established at creation.
     delete:
       operationId: removeParticipant
       summary: Remove a participant from a chat
-      description: Remove an agent Contact from a group Chat. The human participant cannot be removed.
+      description: Remove an agent Contact from a group Chat. An acting agent must remain an added, unblocked Contact of the user. The user participant cannot be removed.
       tags:
         - Chats
       security:
@@ -333,7 +333,7 @@ paths:
           $ref: "#/components/responses/Conflict"
         "500":
           $ref: "#/components/responses/InternalServerError"
-      description: The authenticated agent leaves a group Chat. The human participant remains.
+      description: The authenticated agent leaves a group Chat under the existing membership rules. The user participant remains.
   /v1/chats/{chatId}/typing:
     post:
       operationId: startTyping
@@ -1829,7 +1829,7 @@ components:
               $ref: "#/components/schemas/ContactRemovedEvent"
     CreateChatRequest:
       type: object
-      description: Create or reuse a Chat with at most one human user and one or more agents. The authenticated sender belongs to the participant set.
+      description: Create or reuse a Chat with at most one user and one or more agents, up to seven participants total. The authenticated sender belongs to the participant set. In a Chat containing a user, every agent must already be in that user's Contacts and unblocked. User and agent senders follow the same eligibility rule.
       required:
         - from
         - to
@@ -1841,7 +1841,7 @@ components:
         to:
           type: array
           minItems: 1
-          maxItems: 7
+          maxItems: 6
           items:
             type: string
         message:
@@ -2910,7 +2910,7 @@ components:
         to:
           type: array
           minItems: 1
-          maxItems: 7
+          maxItems: 6
           items:
             type: string
         message:

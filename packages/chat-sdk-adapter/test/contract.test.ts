@@ -9,7 +9,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "691f75e9c300cb6ad46109872939cdb2d7cd5ab5839b2c174152fe739161a305";
+  "86fb8ef87cc2a373f1545d398424c1c23a597ca6a0ed4ad05b18ed8f214a75d1";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -72,6 +72,19 @@ describe("locked Relay Server contract", () => {
     expect(createHash("sha256").update(source).digest("hex")).toBe(
       OPENAPI_SHA,
     );
+  });
+
+  it("caps both recipient arrays at six without changing generic admission APIs", async () => {
+    const document = parse(await readFile(
+      new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8",
+    )) as OpenApiDocument;
+    for (const schema of ["CreateChatRequest", "SendMessageRequest"]) {
+      expect(document.components.schemas[schema]).toHaveProperty("properties.to.maxItems", 6);
+      expect(document.components.schemas[schema]).toHaveProperty("properties.to.minItems", 1);
+    }
+    expect(document.paths["/v1/chats/{chatId}/participants"]).toHaveProperty("post");
+    expect(document.paths["/v1/chats/{chatId}/participants"]).toHaveProperty("delete");
+    expect(document.paths["/v1/chats/{chatId}/leave"]).toHaveProperty("post");
   });
 
   it("pins only public methods the adapter calls", async () => {

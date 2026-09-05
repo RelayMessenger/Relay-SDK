@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const expected =
-  "691f75e9c300cb6ad46109872939cdb2d7cd5ab5839b2c174152fe739161a305";
+  "86fb8ef87cc2a373f1545d398424c1c23a597ca6a0ed4ad05b18ed8f214a75d1";
 const copies = [
   "contracts/relay-v1-openapi.yaml",
   "packages/chat-sdk-adapter/contracts/relay-openapi.yaml",
@@ -28,7 +28,7 @@ const skillLock = JSON.parse(
   ),
 );
 assert.equal(skillLock.api.openapi_sha256, expected);
-assert.equal(skillLock.api.commit, "6aa2ab418dcabef5f1f50f70ca81a09a72a9779c");
+assert.equal(skillLock.api.commit, "working-tree:3b396153663ff77725a45b3978fc085ddff77306");
 assert.equal(skillLock.sdk.commit, "1bbcb486b4a91860ee3527ce95d015883e4cc1ae");
 assert.equal(skillLock.sdk.version, "0.3.0-staging.8");
 

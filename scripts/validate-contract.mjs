@@ -34,9 +34,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "6aa2ab418dcabef5f1f50f70ca81a09a72a9779c",
+    commit: "working-tree:3b396153663ff77725a45b3978fc085ddff77306",
     path: "contracts/developer/openapi.yaml",
-    sha256: "691f75e9c300cb6ad46109872939cdb2d7cd5ab5839b2c174152fe739161a305",
+    sha256: "86fb8ef87cc2a373f1545d398424c1c23a597ca6a0ed4ad05b18ed8f214a75d1",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -295,6 +295,30 @@ const validateOpenAPI = () => {
     "Relay OpenAPI changed; refresh SDK contract",
   );
   const document = YAML.parse(bytes.toString("utf8"));
+  for (const schema of ["CreateChatRequest", "SendMessageRequest"]) {
+    assert.equal(document.components.schemas[schema].properties.to.minItems, 1);
+    assert.equal(
+      document.components.schemas[schema].properties.to.maxItems,
+      6,
+      `${schema}: at most six recipients plus the sender (seven total)`,
+    );
+  }
+  assert.match(
+    document.components.schemas.CreateChatRequest.description,
+    /every agent must already be in that user's Contacts and unblocked/u,
+  );
+  assert.match(
+    document.paths["/v1/chats/{chatId}/participants"].post.description,
+    /target agent and any acting agent/u,
+  );
+  assert.match(
+    document.paths["/v1/chats/{chatId}/participants"].delete.description,
+    /acting agent must remain an added, unblocked Contact/u,
+  );
+  assert.match(
+    document.paths["/v1/chats/{chatId}/leave"].post.description,
+    /existing membership rules/u,
+  );
   assert.equal(document.openapi, "3.1.0");
   const sourceOperations = [];
   for (const [path, item] of Object.entries(document.paths)) {

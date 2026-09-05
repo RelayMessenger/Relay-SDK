@@ -165,11 +165,14 @@ describe("explicit Relay MCP tools", () => {
     const tools = (await client.listTools()).tools;
     for (const name of ["relay_send_message", "relay_send_message_to_chat"]) {
       const tool = tools.find((entry) => entry.name === name)!;
-      expect(tool.description).toContain("every agent must be that user's added Contact and not blocked");
       expect(tool.description).toContain("Agent-only messaging keeps its existing behavior");
     }
     expect(tools.find((entry) => entry.name === "relay_send_message")!.description)
       .toContain("Agents and users have the same generic Chat API permissions");
+    expect(tools.find((entry) => entry.name === "relay_send_message")!.description)
+      .toContain("Creating or reusing a user-containing Chat requires every agent to be that user's added, unblocked Contact");
+    expect(tools.find((entry) => entry.name === "relay_send_message_to_chat")!.description)
+      .toContain("Existing membership and messaging rules apply");
     expect(tools.find((entry) => entry.name === "relay_create_contact_request")!.description)
       .toContain("A pending Add request does not grant messaging eligibility");
     expect(tools.some((entry) => /approval|mutual|policy/i.test(entry.name))).toBe(false);
@@ -191,6 +194,39 @@ describe("explicit Relay MCP tools", () => {
         idempotency_key: "agent-only-1",
       },
     });
+    expect(fake.calls.requestContact).not.toHaveBeenCalled();
+  });
+
+  it("accepts six recipients and rejects seven before sending", async () => {
+    const fake = fakeRelay();
+    const client = await connect(fake.client);
+    const recipients = Array.from({ length: 6 }, (_, i) => `agent${i}`);
+    const tools = (await client.listTools()).tools;
+    const send = tools.find((entry) => entry.name === "relay_send_message")!;
+    expect(send.inputSchema.properties?.recipients).toMatchObject({ minItems: 1, maxItems: 6 });
+    const accepted = await client.callTool({
+      name: "relay_send_message",
+      arguments: { recipients, text: "Seven total", idempotency_key: "cap-six" },
+    });
+    expect(accepted.isError).not.toBe(true);
+    expect(fake.calls.sendToUser).toHaveBeenCalledOnce();
+    expect(fake.calls.sendToUser).toHaveBeenCalledWith({
+      to: recipients,
+      message: {
+        parts: [{ type: "text", value: "Seven total" }],
+        idempotency_key: "cap-six",
+      },
+    });
+    const rejected = await client.callTool({
+      name: "relay_send_message",
+      arguments: {
+        recipients: [...recipients, "agent6"],
+        text: "Eight total",
+        idempotency_key: "cap-seven",
+      },
+    });
+    expect(rejected.isError).toBe(true);
+    expect(fake.calls.sendToUser).toHaveBeenCalledOnce();
     expect(fake.calls.requestContact).not.toHaveBeenCalled();
   });
 

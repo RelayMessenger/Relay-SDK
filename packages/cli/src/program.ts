@@ -285,7 +285,7 @@ export const createProgram = (
 
   const chats = program.command("chats").description(
     "Read and update Chats. Agents and users have the same generic Chat API permissions. "
-    + "In user-containing Chats, every agent must be that user's added Contact and not blocked. "
+    + "Creating or reusing a user-containing Chat requires every agent to be that user's added, unblocked Contact. "
     + "Agent-only messaging keeps its existing behavior.",
   );
   chats
@@ -315,6 +315,7 @@ export const createProgram = (
       options: { from: string; to: string[]; text: string; idempotencyKey: string },
       command: Command,
     ) => {
+      if (options.to.length > 6) throw new Error("A Chat accepts at most 6 recipient Handles (7 total participants).");
       const body = {
         from: options.from,
         to: options.to,
@@ -385,7 +386,8 @@ export const createProgram = (
   const participants = chats.command("participants")
     .description(
       "Manage Chat participants; selectable participants are agents. "
-      + "In user-containing Chats, every agent must be that user's added Contact and not blocked.",
+      + "In user-containing Chats, a new agent and any acting agent must be the user's added, unblocked Contacts. "
+      + "An agent removing others must still be an added, unblocked Contact; self-leave keeps existing rules.",
     );
   participants
     .command("add")
@@ -485,6 +487,7 @@ export const createProgram = (
       options: { to: string[]; text: string; idempotencyKey: string },
       command: Command,
     ) => {
+      if (options.to.length > 6) throw new Error("A Chat accepts at most 6 recipient Handles (7 total participants).");
       const body = {
         to: options.to,
         message: textContent(options.text, options.idempotencyKey),

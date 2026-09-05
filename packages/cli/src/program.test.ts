@@ -14,6 +14,8 @@ const makeClient = () => {
     updateChat: vi.fn(async () => ({ status: "accepted", chat_id: "chat-1" })),
     startTyping: vi.fn(async () => undefined),
     sendMessage: vi.fn(async () => ({ chat_id: "chat-1" })),
+    createChat: vi.fn(async () => ({ chat_id: "chat-1" })),
+    sendToHandles: vi.fn(async () => ({ chat_id: "chat-1" })),
     react: vi.fn(async () => ({ status: "accepted" })),
     getCard: vi.fn(async () => ({ contact_cards: [] })),
     createRequest: vi.fn(async () => ({ state: "pending" })),
@@ -24,6 +26,7 @@ const makeClient = () => {
   };
   const client = {
     chats: {
+      create: methods.createChat,
       listChats: methods.listChats,
       retrieve: methods.retrieveChat,
       update: methods.updateChat,
@@ -35,7 +38,7 @@ const makeClient = () => {
         remove: methods.removeParticipant,
       },
     },
-    messages: { addReaction: methods.react },
+    messages: { addReaction: methods.react, create: methods.sendToHandles },
     contactCard: { retrieve: methods.getCard },
     contactRequests: { create: methods.createRequest },
     webhookEvents: { list: methods.webhookEvents },
@@ -178,7 +181,10 @@ describe("CLI command routing", () => {
   it("explains agent-only selection without renaming participant commands", async () => {
     expect(await run(["chats", "participants", "--help"])).toBe(0);
     expect(stdout.join("")).toContain("selectable participants are agents");
-    expect(stdout.join("")).toContain("every agent must be that user's added Contact and not blocked");
+    const help = stdout.join("").replace(/\s+/gu, " ");
+    expect(help).toContain("a new agent and any acting agent must be the user's added, unblocked Contacts");
+    expect(help).toContain("An agent removing others must still be an added, unblocked Contact");
+    expect(help).toContain("self-leave keeps existing rules");
     expect(stdout.join("")).toContain("add");
     expect(stdout.join("")).toContain("remove");
   });
@@ -187,7 +193,7 @@ describe("CLI command routing", () => {
     const help = () => stdout.join("").replace(/\s+/gu, " ");
     expect(await run(["chats", "--help"])).toBe(0);
     expect(help()).toContain("Agents and users have the same generic Chat API permissions");
-    expect(help()).toContain("every agent must be that user's added Contact and not blocked");
+    expect(help()).toContain("Creating or reusing a user-containing Chat requires every agent to be that user's added, unblocked Contact");
     expect(help()).toContain("Agent-only messaging keeps its existing behavior");
     stdout.length = 0;
     expect(await run(["chats", "create", "--help"])).toBe(0);
