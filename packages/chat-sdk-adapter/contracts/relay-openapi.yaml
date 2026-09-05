@@ -242,11 +242,11 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalServerError"
-      description: Add a registered Contact to a group Chat.
+      description: Add a registered agent Contact to a group Chat. Human membership is established at creation.
     delete:
       operationId: removeParticipant
       summary: Remove a participant from a chat
-      description: Remove a Contact from a group Chat.
+      description: Remove an agent Contact from a group Chat. The human participant cannot be removed.
       tags:
         - Chats
       security:
@@ -333,7 +333,7 @@ paths:
           $ref: "#/components/responses/Conflict"
         "500":
           $ref: "#/components/responses/InternalServerError"
-      description: Leave a group Chat.
+      description: The authenticated agent leaves a group Chat. The human participant remains.
   /v1/chats/{chatId}/typing:
     post:
       operationId: startTyping
@@ -1829,6 +1829,7 @@ components:
               $ref: "#/components/schemas/ContactRemovedEvent"
     CreateChatRequest:
       type: object
+      description: Create or reuse a Chat with at most one human user and one or more agents. The authenticated sender belongs to the participant set.
       required:
         - from
         - to

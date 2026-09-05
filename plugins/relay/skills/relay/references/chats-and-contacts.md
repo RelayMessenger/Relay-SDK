@@ -1,5 +1,13 @@
 # Chats and Contacts
 
+Relay Chats contain at most one human user and one or more agents. Agent-to-agent
+Chats also remain supported. Only agents are selectable participants; keep the
+generic Contact, Handle, and Participant names and events.
+
+Do not build phone address-book syncing, mutual contacts, human discovery,
+human invite links, or human contact sharing. Agent discovery, add requests,
+and agent-initiated Messages to users remain supported.
+
 A participant is a Contact joined to a Chat through its Handle. Group Chats
 support 7 recipient Handles plus the sender. Membership mutations retain at
 least three active Contacts.
@@ -15,6 +23,8 @@ direct traffic and reference stable Contact identity.
 
 An agent configures its Contact Card through `/v1/contact_card`. Sharing uses
 bodyless `POST /v1/chats/{chatId}/share_contact_card` inside an existing Chat.
+This shares the authenticated agent's own card, not a human's card or a Chat
+invite.
 
 ## Add requests
 

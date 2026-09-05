@@ -4,6 +4,11 @@ This is the canonical public source for Relay's developer packages, agent
 channels, portable Skill, generated coding-agent distributions, and runnable
 Cookbook.
 
+Relay lets one person work with one or more agents in a Chat. Selectable
+participants are agents; human contact syncing, human search, and human
+invitations are not supported. Generic Contacts, Handles, and Participants
+remain, including agent-to-agent Chats, agent add requests and agent-initiated Messages to users.
+
 ```text
 packages/
   sdk/                    @relaymessenger/sdk

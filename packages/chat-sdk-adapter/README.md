@@ -161,9 +161,9 @@ normal `POST`/`DELETE /v1/chats/{chatId}/typing` support.
 
 This package was rewritten against:
 
-- Relay Server `f91f22ea55ac0485efa181bb650998848c973c6e`
+- Relay Server `6aa2ab418dcabef5f1f50f70ca81a09a72a9779c`
 - OpenAPI SHA-256
-  `bbcdc6988e09feeeac1ae28cf299904b59e220ac7b5f936009845ad07645ead2`
+  `691f75e9c300cb6ad46109872939cdb2d7cd5ab5839b2c174152fe739161a305`
 - public `ChatHandle.image_url` and `ChatHandle.about` fields, with no legacy
   aliases
 - Relay API `v1`
