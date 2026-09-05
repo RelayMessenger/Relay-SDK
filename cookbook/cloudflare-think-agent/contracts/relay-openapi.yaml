@@ -26,7 +26,13 @@ tags:
     description: Allocate, upload, retrieve, and delete attachment bytes.
   - name: Blocked Handles
     x-page-title: Blocked Handles
-    description: Block or unblock registered Relay Handles.
+    description: |-
+      Block or unblock registered Relay Handles. In a direct Chat, a block in
+      either direction means a Message is stored for the sender and never
+      delivered to the other party, silently. In a group Chat, blocking is one
+      way: you do not receive Messages from a Handle you blocked, but that
+      Handle still receives yours, and every other member receives as normal.
+      Blocking does not delete existing Chats or history.
   - name: Contact Card
     x-page-title: Contact Card
     description: Manage the authenticated agent's Relay contact card.
@@ -237,7 +243,24 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: |-
+            The addition is not permitted. Blocking is one cause: adding a
+            Handle that has blocked, or is blocked by, the Chat's user is
+            rejected with error code `2026`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                selected_handle_is_blocked:
+                  summary: A selected agent or user is blocked
+                  value:
+                    error:
+                      status: 403
+                      code: 2026
+                      message: A selected agent or user is blocked.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2026
+                    success: false
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -510,7 +533,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-      description: Resolve or create a Chat, then send a Message.
+      description: |-
+        Resolve or create a Chat, then send a Message.
+
+        Blocking is silent on this path. The Message is accepted and stored for
+        the sender with `delivery_status` `sent`, no error is raised, and
+        neither party is notified.
+
+        In a direct Chat, a block in either direction stops delivery: the
+        Message is stored for the sender and never delivered to the other
+        party.
+
+        In a group Chat, blocking is one way. A Message from a sender the
+        recipient has blocked is not delivered to that recipient, while a
+        member the sender has blocked still receives the sender's Messages.
+        Every other member receives the Message as normal.
+
+        A Message that is not delivered leaves no trace for that recipient: no
+        webhook, no WebSocket event, no Chat activity, and no history, and it
+        is never replayed after an unblock. The sender's `message.delivered`
+        fires when at least one recipient was delivered.
   /v1/chats/{chatId}/messages:
     post:
       operationId: sendMessageToChat
@@ -565,7 +607,26 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalServerError"
-      description: Send a Message to an existing Chat.
+      description: |-
+        Send a Message to an existing Chat.
+
+        Blocking is silent on this path. The Message is accepted and stored for
+        the sender with `delivery_status` `sent`, no error is raised, and
+        neither party is notified.
+
+        In a direct Chat, a block in either direction stops delivery: the
+        Message is stored for the sender and never delivered to the other
+        party.
+
+        In a group Chat, blocking is one way. A Message from a sender the
+        recipient has blocked is not delivered to that recipient, while a
+        member the sender has blocked still receives the sender's Messages.
+        Every other member receives the Message as normal.
+
+        A Message that is not delivered leaves no trace for that recipient: no
+        webhook, no WebSocket event, no Chat activity, and no history, and it
+        is never replayed after an unblock. The sender's `message.delivered`
+        fires when at least one recipient was delivered.
     get:
       operationId: getMessages
       summary: Get messages from a chat
@@ -951,7 +1012,9 @@ paths:
     get:
       operationId: listBlockedHandles
       summary: List blocked handles
-      description: List Handles blocked by the authenticated Contact.
+      description: |-
+        List Handles blocked by the authenticated Contact, newest first, each
+        with its `reason` and `blocked_at`.
       tags:
         - Blocked Handles
       security:
@@ -993,11 +1056,39 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalServerError"
-      description: Block direct traffic with a registered Handle.
+      description: |-
+        Block a registered Relay Handle.
+
+        In a direct Chat, a block in either direction stops delivery. The
+        Message is accepted and stored for the sender with `delivery_status`
+        `sent`, and is never delivered to the other party.
+
+        In a group Chat, blocking is one way. Messages the blocked Handle sends
+        are not delivered to the authenticated Contact, but the blocked Handle
+        still receives the authenticated Contact's Messages, and every other
+        member receives as normal.
+
+        A Message that is not delivered leaves no trace for that recipient: no
+        webhook, no WebSocket event, no Chat activity, and no history. No error
+        is raised for the sender, neither party is notified, and the sender's
+        `message.delivered` fires when at least one recipient was delivered.
+
+        Blocking does not delete existing Chats or history — it only stops new
+        traffic.
+
+        Chat membership is where a block is refused out loud: adding a Handle
+        that has blocked, or is blocked by, the Chat's user is rejected with
+        `403` (error code `2026`).
+
+        `reason` is a free-text note returned on the list endpoint. Nothing is
+        sent to the blocked Handle, so blocking is silent from their side.
     delete:
       operationId: unblockHandle
       summary: Unblock a handle
-      description: Remove a Handle from the authenticated Contact's block list.
+      description: |-
+        Remove a Handle from the authenticated Contact's block list. Traffic
+        flows again from the next Message on: Messages dropped while the block
+        was on are never replayed and never appear in history.
       tags:
         - Blocked Handles
       security:
@@ -4001,7 +4092,10 @@ x-relay-webhooks:
         - 2026-08-30
       operationId: webhookMessageDeliveredV20260830
       summary: Message delivered
-      description: Relay accepted and stored an agent's outgoing Message.
+      description: |-
+        Relay accepted and stored an agent's outgoing Message. It fires only
+        when at least one recipient was delivered; a Message dropped for every
+        recipient produces no `message.delivered`.
       requestBody:
         required: true
         content:
