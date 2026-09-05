@@ -122,6 +122,13 @@ jobs:
           RELEASE_TAG: staging
           RELEASE_TARBALL: ${{ steps.pack.outputs.tarball }}
         run: node scripts/staging-release-guard.mjs
+      - name: Check immutable registry identity before publication
+        run: |
+          node scripts/publish-package-staging.mjs \
+            --check-only \
+            --tarball '${{ steps.pack.outputs.tarball }}' \
+            --package '${{ steps.resolve.outputs.workspace }}' \
+            --receipt .release-tmp/package-staging/preflight.json
       - name: Retain the release identity
         run: |
           IDENTITY='${{ steps.resolve.outputs.directory }}/.release/npm-staging/release-identity.json'

@@ -12,14 +12,16 @@ const valueAfter = (name) => {
   const index = process.argv.indexOf(name);
   return index === -1 ? undefined : process.argv[index + 1];
 };
-const tarball = resolve(valueAfter("--tarball") ?? "");
+const tarballArgument = valueAfter("--tarball");
+const checkOnly = process.argv.includes("--check-only");
+const tarball = tarballArgument ? resolve(tarballArgument) : undefined;
 const expectedName = valueAfter("--package");
 const receipt = resolve(
   valueAfter("--receipt") ?? ".release-tmp/package-publish.json",
 );
 if (!tarball || !expectedName) {
   throw new Error(
-    "Usage: publish-package-staging --tarball <tgz> --package <name>",
+    "Usage: publish-package-staging --tarball <tgz> --package <name> [--check-only]",
   );
 }
 assert.equal(process.env.GITHUB_ACTIONS, "true");
@@ -83,6 +85,32 @@ const view = (target, field) => {
 const before = view(manifest.name, "dist-tags");
 const latestBefore = before.found ? before.value.latest ?? null : null;
 let existing = view(spec, "dist.integrity");
+const verifyIntegrity = () => {
+  const observedIntegrities = Array.isArray(existing.value)
+    ? existing.value
+    : [existing.value];
+  assert.deepEqual(
+    observedIntegrities,
+    [integrity],
+    `${spec} is already published with different bytes. `
+      + "Prepare a new release version; do not retry or bypass integrity verification.",
+  );
+};
+if (existing.found) verifyIntegrity();
+if (checkOnly) {
+  const result = {
+    schema: "relay-monorepo-package-staging-preflight/v1",
+    ok: true,
+    package: spec,
+    integrity,
+    registry_state: existing.found ? "exact-match" : "version-absent",
+    publish_attempted: false,
+  };
+  mkdirSync(resolve(receipt, ".."), { recursive: true });
+  writeFileSync(receipt, `${JSON.stringify(result, null, 2)}\n`);
+  console.log(JSON.stringify(result));
+  process.exit(0);
+}
 let publishAttempted = false;
 if (!existing.found) {
   publishAttempted = true;
@@ -108,14 +136,7 @@ if (!existing.found) {
     );
   }
 }
-const observedIntegrities = Array.isArray(existing.value)
-  ? existing.value
-  : [existing.value];
-assert.deepEqual(
-  observedIntegrities,
-  [integrity],
-  `${spec} integrity differs`,
-);
+verifyIntegrity();
 const after = view(manifest.name, "dist-tags");
 assert.equal(after.found, true);
 assert.equal(after.value.staging, manifest.version);

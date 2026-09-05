@@ -76,6 +76,7 @@ const releaseOrder = [
   "Verify validation kept the tracked tree clean",
   "Pack one retained tarball",
   "Verify Claude Code staging release identity",
+  "Check immutable registry identity before publication",
   "Retain the release identity",
 ].map((marker) => publish.indexOf(marker));
 assert.ok(
@@ -103,6 +104,11 @@ assert.ok(
   "staging publication must prove clean tracked state before and after build",
 );
 assert.doesNotMatch(publish, /--tag\s+(?:latest|next)\b/u);
+assert.match(
+  publish.slice(publish.indexOf("  package:"), publish.indexOf("  publish:")),
+  /--check-only/u,
+  "registry identity must be checked before the credentialed publish job",
+);
 
 const publishProgram = readFileSync(
   "scripts/publish-package-staging.mjs",

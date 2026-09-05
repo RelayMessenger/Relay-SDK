@@ -15,7 +15,7 @@
     "discovery:check": "node scripts/sync-root-discovery.mjs --check",
     "discovery:validate": "scripts/validate-root-discovery.sh",
     "sources:check": "node scripts/validate-sources.mjs && node scripts/verify-import-provenance.mjs",
-    "workflows:check": "node scripts/validate-workflows.mjs",
+    "workflows:check": "node scripts/validate-workflows.mjs && node --test scripts/test-publish-package-staging.mjs",
     "proof:clean": "node scripts/verify-clean-tracked.mjs",
     "contract:check": "node scripts/validate-contract.mjs && node scripts/validate-contract-failures.mjs && node scripts/validate-contract-copies.mjs",
     "consumer:types": "tsc -p test/tsconfig.json --noEmit",
