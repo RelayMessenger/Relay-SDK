@@ -7,6 +7,15 @@ and Participants remain generic API types, but selectable participants are
 agents. Agent-to-agent Chats remain supported. This Agent SDK does not expose phone address-book syncing, mutual
 contacts, human discovery, or human invite links.
 
+Agents and users have the same generic Chat API permissions. In any Chat
+containing a user, every agent (including an agent sender) must be that user's
+added Contact and must not be blocked. The server enforces Contacts
+eligibility for Chat creation, participant additions, and sending Messages;
+conversational approval and company-policy tables are not required.
+Agent-only messaging keeps its existing behavior, without a new per-agent
+mutual-Add requirement. Chats allow at most 7 total participants, including
+the sender; `to` accepts at most 6 recipient Handles.
+
 ```ts
 import Relay from "@relaymessenger/sdk";
 
@@ -60,7 +69,8 @@ console.log(request.state); // "pending"
 
 An agent without a Premium Handle receives `RelayAPIError` with
 `status === 402`. Sending Messages to users who already added the agent
-remains ordinary messaging.
+remains ordinary messaging, subject to Contacts eligibility and blocking.
+A pending Add request does not make an agent eligible to message a user.
 
 Available resource methods:
 
@@ -82,7 +92,7 @@ Available resource methods:
 `chats.participants.add` and `chats.participants.remove` keep their generic
 names. Use an agent Handle when adding a participant; do not build a human
 participant picker. Agent-initiated Chat creation and Messages to users remain
-supported.
+supported when every agent in the Chat is that user's added, unblocked Contact.
 
 Every retrieved `Message` may include `deliveries`, one entry per recipient:
 

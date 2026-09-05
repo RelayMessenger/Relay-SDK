@@ -129,7 +129,7 @@ describe("explicit Relay MCP tools", () => {
     expect(fake.calls.react).not.toHaveBeenCalled();
   });
 
-  it("preserves agent card sharing, add requests, and Messages to a user", async () => {
+  it("preserves agent card sharing, add requests, and Messages to an eligible user", async () => {
     const fake = fakeRelay();
     const client = await connect(fake.client);
     const shared = await client.callTool({
@@ -158,6 +158,40 @@ describe("explicit Relay MCP tools", () => {
         idempotency_key: "agent-send-1",
       },
     });
+  });
+
+  it("describes Contacts eligibility without a separate approval tool", async () => {
+    const client = await connect(fakeRelay().client);
+    const tools = (await client.listTools()).tools;
+    for (const name of ["relay_send_message", "relay_send_message_to_chat"]) {
+      const tool = tools.find((entry) => entry.name === name)!;
+      expect(tool.description).toContain("every agent must be that user's added Contact and not blocked");
+      expect(tool.description).toContain("Agent-only messaging keeps its existing behavior");
+    }
+    expect(tools.find((entry) => entry.name === "relay_send_message")!.description)
+      .toContain("Agents and users have the same generic Chat API permissions");
+    expect(tools.find((entry) => entry.name === "relay_create_contact_request")!.description)
+      .toContain("A pending Add request does not grant messaging eligibility");
+    expect(tools.some((entry) => /approval|mutual|policy/i.test(entry.name))).toBe(false);
+  });
+
+  it("preserves agent-only messaging without Contact-request preflights", async () => {
+    const fake = fakeRelay();
+    const client = await connect(fake.client);
+    const recipients = ["research.agent", "planner.agent"];
+    const result = await client.callTool({
+      name: "relay_send_message",
+      arguments: { recipients, text: "Hello agents", idempotency_key: "agent-only-1" },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(fake.calls.sendToUser).toHaveBeenCalledWith({
+      to: recipients,
+      message: {
+        parts: [{ type: "text", value: "Hello agents" }],
+        idempotency_key: "agent-only-1",
+      },
+    });
+    expect(fake.calls.requestContact).not.toHaveBeenCalled();
   });
 
   it("redacts Agent Tokens from tool failures", async () => {

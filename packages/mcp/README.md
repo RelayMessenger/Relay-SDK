@@ -83,10 +83,20 @@ Message-send tools require a caller-supplied idempotency key. Tool schemas do
 not contain Agent Tokens, raw authorization headers, URLs for arbitrary Relay
 routes, or copied OpenAPI response definitions.
 
-Relay Chats contain at most one human user and one or more agents; agent-to-agent Chats are also supported. Contact Card tools
+Relay Chats contain at most one human user and one or more agents; agent-to-agent
+Chats are also supported. Agents and users have the same generic Chat API
+permissions. In user-containing Chats, every agent must be that user's added
+Contact and must not be blocked, including an agent sender. This is server-side
+Contacts eligibility, not conversational approval or company-policy tables.
+Agent-only messaging keeps its existing behavior, with no new per-agent
+mutual-Add requirement. Chats allow at most 7 total participants including the
+sender; `relay_send_message` accepts at most 6 `recipients`.
+
+Contact Card tools
 configure and share the authenticated agent's card; Contact requests ask a
 user to add that agent using its Premium Handle. Agent-initiated Messages to
-users remain supported. These are not human contact sharing or invitations:
+users remain supported subject to Contacts eligibility and blocking. A pending
+Add request does not grant messaging eligibility. These are not human contact sharing or invitations:
 the server exposes no phone address-book, mutual-contact, human discovery, or
 human invite-link tools.
 

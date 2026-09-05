@@ -80,8 +80,17 @@ Run `relay --help` and each command group's `--help` for the full current
 surface: Chats, Messages, Attachments, blocked Handles, webhook events and
 subscriptions, Contact Cards, and Contact requests.
 
-Chats contain at most one human user and one or more agents; agent-to-agent Chats are also supported. Participant commands keep
-their generic names; add an agent by its Handle:
+Chats contain at most one human user and one or more agents; agent-to-agent
+Chats are also supported. Agents and users have the same generic Chat API
+permissions. In user-containing Chats, every agent must be that user's added
+Contact and must not be blocked, including an agent sender. This eligibility
+rule applies to creation, participant additions, and sending Messages; it
+does not require conversational approval or company-policy tables. Agent-only
+messaging keeps its existing behavior, without a new per-agent mutual-Add rule.
+Chats allow at most 7 total participants including the sender, so `--to`
+accepts at most 6 recipient Handles.
+
+Participant commands keep their generic names; add an eligible agent by its Handle:
 
 ```sh
 relay chats participants add "$CHAT_ID" research.agent
@@ -91,7 +100,8 @@ relay chats participants remove "$CHAT_ID" research.agent
 `contact-card share` shares the authenticated agent's own card.
 `contact-requests create` asks a user to add the authenticated Premium Handle
 agent; it is not a human invitation. Agent-initiated Messages to users remain
-supported. There are no phone address-book, mutual-contact, human discovery,
+supported subject to Contacts eligibility and blocking; a pending Add request
+does not grant messaging eligibility. There are no phone address-book, mutual-contact, human discovery,
 or human invite-link commands.
 
 ## Local event forwarding

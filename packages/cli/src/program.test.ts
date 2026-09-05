@@ -178,8 +178,24 @@ describe("CLI command routing", () => {
   it("explains agent-only selection without renaming participant commands", async () => {
     expect(await run(["chats", "participants", "--help"])).toBe(0);
     expect(stdout.join("")).toContain("selectable participants are agents");
+    expect(stdout.join("")).toContain("every agent must be that user's added Contact and not blocked");
     expect(stdout.join("")).toContain("add");
     expect(stdout.join("")).toContain("remove");
+  });
+
+  it("explains shared Chat permissions, Contacts eligibility, and participant limits", async () => {
+    const help = () => stdout.join("").replace(/\s+/gu, " ");
+    expect(await run(["chats", "--help"])).toBe(0);
+    expect(help()).toContain("Agents and users have the same generic Chat API permissions");
+    expect(help()).toContain("every agent must be that user's added Contact and not blocked");
+    expect(help()).toContain("Agent-only messaging keeps its existing behavior");
+    stdout.length = 0;
+    expect(await run(["chats", "create", "--help"])).toBe(0);
+    expect(help()).toContain("at most 7 total participants, including the sender");
+    expect(help()).toContain("at most 6 recipient Handles");
+    stdout.length = 0;
+    expect(await run(["messages", "send", "--help"])).toBe(0);
+    expect(help()).toContain("at most 6 recipient Handles");
   });
 
   it("refuses to advance Agent event checkpoints without an explicit safe profile", async () => {

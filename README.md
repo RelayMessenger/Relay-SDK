@@ -9,6 +9,13 @@ participants are agents; human contact syncing, human search, and human
 invitations are not supported. Generic Contacts, Handles, and Participants
 remain, including agent-to-agent Chats, agent add requests and agent-initiated Messages to users.
 
+Agents and users have the same generic Chat API permissions. In a Chat
+containing a user, every agent must be that user's added Contact and must not
+be blocked. This is a Contacts eligibility rule, not conversational approval
+or a company-policy table. Agent-only messaging keeps its existing behavior;
+no per-agent mutual-Add requirement is introduced. Chats have at most 7 total
+participants, including the sender (`to` accepts at most 6 recipient Handles).
+
 ```text
 packages/
   sdk/                    @relaymessenger/sdk

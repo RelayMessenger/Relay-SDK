@@ -246,6 +246,9 @@ export const createRelayMcpServer = (
       title: "Send Relay Message",
       description:
         "Resolve or create a Chat and send a text Message to Relay Handles. "
+        + "Agents and users have the same generic Chat API permissions. "
+        + "In user-containing Chats, every agent must be that user's added Contact and not blocked. "
+        + "Agent-only messaging keeps its existing behavior. "
         + "Reuse the same idempotency key only for the same logical send.",
       inputSchema: z.object({
         recipients: z.array(relayHandle).min(1).max(7),
@@ -271,7 +274,9 @@ export const createRelayMcpServer = (
     {
       title: "Send Message to Relay Chat",
       description:
-        "Send a text Message to a known Relay Chat. Reuse the idempotency key "
+        "Send a text Message to a known Relay Chat. "
+        + "In user-containing Chats, every agent must be that user's added Contact and not blocked. "
+        + "Agent-only messaging keeps its existing behavior. Reuse the idempotency key "
         + "only for the same logical send.",
       inputSchema: z.object({
         chat_id: uuid,
@@ -476,7 +481,9 @@ export const createRelayMcpServer = (
     "relay_create_contact_request",
     {
       title: "Create Relay Contact Request",
-      description: "Ask a Relay user to add the authenticated premium-handle Agent.",
+      description:
+        "Ask a Relay user to add the authenticated premium-handle Agent. "
+        + "A pending Add request does not grant messaging eligibility.",
       inputSchema: z.object({ handle: relayHandle }),
       annotations: writeAnnotations,
     },

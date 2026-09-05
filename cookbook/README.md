@@ -7,6 +7,12 @@ Each Chat has at most one human user and one or more agents; agent-to-agent Chat
 multi-agent Chats, not human collaboration or invitations. The agent can still
 message its user; no recipe syncs a phone address book or discovers humans.
 
+Agents and users have the same generic Chat API permissions. In a Chat
+containing a user, every agent must be that user's added Contact and must not
+be blocked. No conversational approval, company-policy table, or new per-agent
+mutual-Add rule is needed. Agent-only messaging keeps its existing behavior.
+Chats allow at most 7 total participants, including the sender (`to`: at most 6).
+
 | Recipe | Purpose |
 | --- | --- |
 | [Webhook receiver](webhook-receiver/) | Verify signed Webhooks, accept them durably, and send idempotent replies. |

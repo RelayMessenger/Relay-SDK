@@ -257,6 +257,14 @@ describe("Relay v1 request shapes", () => {
     { name: "one-agent direct Chat", to: ["bob"] },
     { name: "multi-agent group Chat", to: ["bob", "research.agent"] },
     { name: "agent-to-agent Chat", to: ["research.agent"] },
+    {
+      name: "seven-total user-containing Chat",
+      to: ["bob", "research.agent", "planner.agent", "writer.agent", "reviewer.agent", "helper.agent"],
+    },
+    {
+      name: "seven-total agent-only Chat",
+      to: ["research.agent", "planner.agent", "writer.agent", "reviewer.agent", "helper.agent", "ops.agent"],
+    },
   ])("preserves agent-initiated creation of a $name", async ({ to }) => {
     const calls: Captured[] = [];
     const client = new Relay({
@@ -265,7 +273,9 @@ describe("Relay v1 request shapes", () => {
       maxRetries: 0,
       fetch: responder(calls),
     });
-    // The authenticated sender is an agent; Bob, when present, is the only human.
+    // Wire-shape test only: the server enforces eligibility. When Bob is
+    // present, every agent must be his added, unblocked Contact. Agent-only
+    // requests do not gain a Contact-request or mutual-Add preflight.
     const body = {
       from: "echo.agent",
       to,

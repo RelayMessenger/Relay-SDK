@@ -283,7 +283,11 @@ export const createProgram = (
       if (!report.ok) throw new Error("Relay doctor found failing checks.");
     });
 
-  const chats = program.command("chats").description("Read and update Chats.");
+  const chats = program.command("chats").description(
+    "Read and update Chats. Agents and users have the same generic Chat API permissions. "
+    + "In user-containing Chats, every agent must be that user's added Contact and not blocked. "
+    + "Agent-only messaging keeps its existing behavior.",
+  );
   chats
     .command("list")
     .option("--cursor <cursor>")
@@ -302,8 +306,9 @@ export const createProgram = (
       output(await (await clientFor(command)).chats.retrieve(chatID)));
   chats
     .command("create")
+    .description("Create a Chat with at most 7 total participants, including the sender.")
     .requiredOption("--from <handle>", "sender Handle", handle)
-    .requiredOption("--to <handles...>", "recipient Handles", (value) => handle(value))
+    .requiredOption("--to <handles...>", "at most 6 recipient Handles", (value) => handle(value))
     .requiredOption("--text <text>")
     .requiredOption("--idempotency-key <key>")
     .action(async (
@@ -378,7 +383,10 @@ export const createProgram = (
     });
 
   const participants = chats.command("participants")
-    .description("Manage Chat participants; selectable participants are agents.");
+    .description(
+      "Manage Chat participants; selectable participants are agents. "
+      + "In user-containing Chats, every agent must be that user's added Contact and not blocked.",
+    );
   participants
     .command("add")
     .argument("<chat-id>")
@@ -470,7 +478,7 @@ export const createProgram = (
   const messages = program.command("messages").description("Read, send, and react to Messages.");
   messages
     .command("send")
-    .requiredOption("--to <handles...>", "recipient Handles", (value) => handle(value))
+    .requiredOption("--to <handles...>", "at most 6 recipient Handles", (value) => handle(value))
     .requiredOption("--text <text>")
     .requiredOption("--idempotency-key <key>")
     .action(async (
