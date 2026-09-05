@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const RELAY_SERVER_SHA =
-  "working-tree:3b396153663ff77725a45b3978fc085ddff77306";
+  "21942cbbb44101cfa1a52d24590eca1e7fb8697d";
 const RELAY_CHAT_SDK_SHA =
   "eecf94a4d38bc021917e54dfed57e268657c17af";
 const RELAY_OPENAPI_SHA256 =
