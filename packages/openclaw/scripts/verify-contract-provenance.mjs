@@ -234,6 +234,8 @@ try {
     digest("sha256", packedPackageJson),
     receipt.registry.installedArtifact.packageJsonSha256,
   );
+  const packedTypes = execFileSync("tar", ["-xOf", archive, "package/dist/types.d.ts"]);
+  assert.equal(digest("sha256", packedTypes), receipt.registry.installedArtifact.typesSha256);
   assert.deepEqual(
     JSON.parse(packedPackageJson.toString("utf8")),
     sdkSourceManifest,
@@ -269,7 +271,8 @@ assert.equal(
 );
 assert.equal(
   digest("sha256", installedTypes),
-  receipt.registry.installedArtifact.typesSha256,
+  lock.relaySdk.workspaceTypesSha256,
+  "current workspace declarations differ from the reviewed canonical type hash",
 );
 assert.deepEqual(
   JSON.parse(installedPackage.toString("utf8")),

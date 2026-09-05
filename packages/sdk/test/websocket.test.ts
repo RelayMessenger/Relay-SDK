@@ -114,7 +114,7 @@ const envelope = (
       joined_at: "2026-08-29T06:20:00.000Z",
       kind: "user",
       display_name: "Advait",
-      avatar_url: null,
+      image_url: null,
       tagline: null,
       verified: false,
     },

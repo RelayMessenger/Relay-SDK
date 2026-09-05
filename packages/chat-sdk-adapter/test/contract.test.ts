@@ -9,7 +9,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5";
+  "fe9fb79d522063bb79f70e41e1e8bb42f765d469579183b8d7df0619a03ae279";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -65,7 +65,7 @@ describe("locked Relay Server contract", () => {
     });
   });
 
-  it("uses the unchanged OpenAPI from Server 9b4d5bb32cc7", async () => {
+  it("uses the byte-exact canonical Server OpenAPI snapshot", async () => {
     const source = await readFile(
       new URL("../contracts/relay-openapi.yaml", import.meta.url),
     );

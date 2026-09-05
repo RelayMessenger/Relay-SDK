@@ -86,7 +86,7 @@ try {
     "left_at",
     "is_me",
     "display_name",
-    "avatar_url",
+    "image_url",
     "tagline",
     "verified",
   ]);

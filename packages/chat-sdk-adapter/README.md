@@ -112,9 +112,9 @@ normal `POST`/`DELETE /v1/chats/{chatId}/typing` support.
 
 This package was rewritten against:
 
-- Relay Server `9b4d5bb32cc749c6fd271969948c385300d404d6`
+- Relay Server commit `ae1d65546458151e67633ff183690387e10eca51`
 - OpenAPI SHA-256
-  `f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5`
+  `fe9fb79d522063bb79f70e41e1e8bb42f765d469579183b8d7df0619a03ae279`
 - Relay API `v1`
 - Relay webhook payload version `2026-08-30`
 - `chat@4.39.0`

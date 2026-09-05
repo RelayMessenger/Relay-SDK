@@ -1,13 +1,18 @@
 {
   "schema_version": 1,
-  "locked_on": "2026-09-01",
+  "locked_on": "2026-09-05",
   "api": {
     "repository": "https://github.com/RelayMessenger/Relay-Docs",
-    "commit": "7067d0a734febad683f724ec9386e68e33a25f3d",
+    "commit": "7eb5144676b670768b3eca2840387527294168a8",
     "openapi_path": "api-reference/openapi.yaml",
-    "openapi_sha256": "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5",
+    "openapi_sha256": "fe9fb79d522063bb79f70e41e1e8bb42f765d469579183b8d7df0619a03ae279",
     "skill_path": "skill.md",
-    "skill_sha256": "e3b7387fec44803f73f0f352215bbab81bd2af6dddf49c26e715af0b9e7b55d9"
+    "skill_sha256": "f44b31baf1dce53b7e69285125aa84e00f414b9439008d8ca5734b7e3c381441",
+    "openapi_source": {
+      "repository": "https://github.com/RelayMessenger/Relay-Server",
+      "commit": "ae1d65546458151e67633ff183690387e10eca51",
+      "path": "contracts/developer/openapi.yaml"
+    }
   },
   "sdk": {
     "repository": "https://github.com/RelayMessenger/Relay-SDK",
@@ -16,7 +21,9 @@
     "package_sha256": "2cd3b01e65725ab55d5b520ded6c1235e1f4c74af0ff07478d3ba029d67eda1a",
     "package": "@relaymessenger/sdk",
     "version": "0.3.0-staging.5",
-    "dist_tag": "staging"
+    "dist_tag": "staging",
+    "role": "published_distribution_baseline",
+    "scope": "Pinned published package metadata, not current workspace source or declarations. dist_tag records the publication baseline, not the current mutable registry tag."
   },
   "docs_mcp": {
     "url": "https://docs.relayapp.im/mcp",

@@ -36,7 +36,7 @@ const inboundEvent = {
       kind: "user",
       joined_at: new Date().toISOString(),
       display_name: "Harness",
-      avatar_url: null,
+      image_url: null,
       tagline: null,
       verified: false,
     },

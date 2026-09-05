@@ -30,7 +30,7 @@ function bytesToBase64(bytes: Uint8Array): string {
 export const WEBHOOK_SECRET = `whsec_${bytesToBase64(secretBytes)}`;
 
 export const USER_HANDLE: RelayChatHandle = {
-  avatar_url: null,
+  image_url: null,
   display_name: "Ada",
   handle: "ada",
   id: IDS.user,
@@ -43,7 +43,7 @@ export const USER_HANDLE: RelayChatHandle = {
 };
 
 export const AGENT_HANDLE: RelayChatHandle = {
-  avatar_url: null,
+  image_url: null,
   display_name: "Relay Agent",
   handle: "relay-agent",
   id: IDS.agent,

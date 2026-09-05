@@ -100,7 +100,7 @@ function envelope(
 
 function handle(id: string, handleName: string) {
   return {
-    avatar_url: null,
+    image_url: null,
     display_name: handleName,
     handle: handleName,
     id,

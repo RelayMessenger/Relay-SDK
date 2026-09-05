@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 9b4d5bb32cc749c6fd271969948c385300d404d6
- * OpenAPI f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5
+ * Relay Server commit ae1d65546458151e67633ff183690387e10eca51
+ * OpenAPI fe9fb79d522063bb79f70e41e1e8bb42f765d469579183b8d7df0619a03ae279
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -42,7 +42,7 @@ export interface RelayWebhookEnvelope<TData = Record<string, unknown>> {
 }
 
 export interface RelayChatHandle {
-  avatar_url: string | null;
+  image_url: string | null;
   display_name: string | null;
   handle: string;
   id: string;

@@ -160,24 +160,22 @@ durable ACK and idempotent REST reply.
 ## Contract lock
 
 `contracts/relay-v1.lock.json` records the compatibility boundary used by this
-release: Relay Server
-`9b4d5bb32cc749c6fd271969948c385300d404d6`, OpenAPI SHA-256
-`f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5`,
+release: the Relay Server commit
+`ae1d65546458151e67633ff183690387e10eca51`, OpenAPI SHA-256
+`fe9fb79d522063bb79f70e41e1e8bb42f765d469579183b8d7df0619a03ae279`,
 and the exact `@relaymessenger/sdk@0.3.0-staging.5` registry integrity, source
-commit `8570546ce30ab39d702409893006dbccd351f2b4`, REST operations, and WebSocket
+commit `776a9a7873f41c0c9947439c44444674a7d55c5d` (published distribution baseline), REST operations, and WebSocket
 frames consumed by the plugin.
 
 Public CI hashes the checked-in `contracts/relay-openapi.yaml` fixture and
-requires the locked digest above. The retained private release receipt also
-sets `RELAY_SERVER_SOURCE_DIR` to an exact checkout of Server `9b4d5bb32cc7`
-and proves that the fixture bytes match that commit before packaging. The
-public Relay-SDK monorepo does not require credentials for the private Server
-source and does not overstate what npm metadata can attest.
+requires the locked digest above. `RELAY_SERVER_SOURCE_DIR` additionally
+verifies the exact Server commit and its OpenAPI bytes. Historical registry
+provenance remains separate from the current workspace declaration hash.
 
 `contracts/relay-sdk-0.3.0-staging.5.registry.json` records immutable npm
 publication metadata and tarball digests. Validation downloads the registry
 tarball, verifies SHA-1, SHA-256, and SHA-512 integrity, checks the installed
-SDK, and compares its package metadata with exact SDK commit `8570546`.
+SDK, and compares its package metadata with the published SDK baseline commit `776a9a7`.
 The npm metadata has no `gitHead` or attestation for this version, so the
 receipt deliberately does not claim cryptographic source-to-tarball
 provenance. These are local artifact compatibility checks, not a claim of a

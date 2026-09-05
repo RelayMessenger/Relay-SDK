@@ -67,9 +67,9 @@ test("pins the requested OpenClaw and current Relay SDK contracts", () => {
 test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
   assert.deepEqual(contractLock.relayServer, {
     repository: "RelayMessenger/Relay-Server",
-    commit: "9b4d5bb32cc749c6fd271969948c385300d404d6",
+    commit: "ae1d65546458151e67633ff183690387e10eca51",
     openapiPath: "contracts/developer/openapi.yaml",
-    sha256: "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5",
+    sha256: "fe9fb79d522063bb79f70e41e1e8bb42f765d469579183b8d7df0619a03ae279",
   });
   assert.equal(
     contractLock.relaySdk.source.commit,
@@ -77,7 +77,11 @@ test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
   );
   assert.equal(
     contractLock.relaySdk.source.carriedOpenapiSha256,
-    contractLock.relayServer.sha256,
+    sdkRegistryReceipt.source.contractSha256,
+  );
+  assert.equal(
+    createHash("sha256").update(readFileSync(join(root, "..", "sdk", "dist", "types.d.ts"))).digest("hex"),
+    contractLock.relaySdk.workspaceTypesSha256,
   );
   const installedSdk = JSON.parse(
     readFileSync(sdkPackagePath, "utf8"),

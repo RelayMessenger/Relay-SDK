@@ -8,11 +8,11 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const RELAY_SERVER_SHA =
-  "9b4d5bb32cc749c6fd271969948c385300d404d6";
+  "ae1d65546458151e67633ff183690387e10eca51";
 const RELAY_CHAT_SDK_SHA =
   "eecf94a4d38bc021917e54dfed57e268657c17af";
 const RELAY_OPENAPI_SHA256 =
-  "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5";
+  "fe9fb79d522063bb79f70e41e1e8bb42f765d469579183b8d7df0619a03ae279";
 const RELAY_ADAPTER_INTEGRITY =
   "sha512-arAKw/xxsPeQYVHtu5K3B0ADnCmuzKk279Chc5hJ4DCG5Ez2RYuvfj727G2crBax9efemRo5BcCwt2yCBXmfgQ==";
 
@@ -36,7 +36,7 @@ function packageVersion(name: string): string {
 }
 
 describe("locked runtime contracts", () => {
-  it(`uses the unchanged OpenAPI from Relay Server ${RELAY_SERVER_SHA.slice(0, 12)}`, () => {
+  it(`uses the canonical OpenAPI from Server commit ${RELAY_SERVER_SHA.slice(0, 12)}`, () => {
     const openapi = readFileSync("contracts/relay-openapi.yaml");
     expect(createHash("sha256").update(openapi).digest("hex"))
       .toBe(RELAY_OPENAPI_SHA256);

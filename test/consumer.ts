@@ -156,7 +156,7 @@ const userHandle: ChatHandle = {
   joined_at: new Date().toISOString(),
   kind: "user",
   display_name: "Alice",
-  avatar_url: null,
+  image_url: null,
   tagline: null,
   verified: false,
 };
@@ -167,7 +167,7 @@ const agentHandle: ChatHandle = {
   joined_at: new Date().toISOString(),
   kind: "agent",
   display_name: "Echo",
-  avatar_url: "https://cdn.relayapp.im/echo.png",
+  image_url: "https://cdn.relayapp.im/echo.png",
   tagline: "Weather when you need it",
   verified: true,
 };

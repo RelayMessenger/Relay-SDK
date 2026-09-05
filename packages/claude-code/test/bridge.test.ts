@@ -20,7 +20,7 @@ const sender: ChatHandle = {
   kind: "user",
   joined_at: "2026-09-01T00:00:00.000Z",
   display_name: "Owner",
-  avatar_url: null,
+  image_url: null,
   tagline: null,
   verified: false,
 };
@@ -32,7 +32,7 @@ const agent: ChatHandle = {
   joined_at: "2026-09-01T00:00:00.000Z",
   is_me: true,
   display_name: "Relay Agent",
-  avatar_url: null,
+  image_url: null,
   tagline: null,
   verified: false,
 };

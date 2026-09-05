@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const expected =
-  "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5";
+  "fe9fb79d522063bb79f70e41e1e8bb42f765d469579183b8d7df0619a03ae279";
 const copies = [
   "contracts/relay-v1-openapi.yaml",
   "packages/chat-sdk-adapter/contracts/relay-openapi.yaml",

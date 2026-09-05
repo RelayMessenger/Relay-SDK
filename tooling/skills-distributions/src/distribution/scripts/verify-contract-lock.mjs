@@ -13,19 +13,28 @@ const raw = (repository, commit, path) => {
   return `https://raw.githubusercontent.com${parsed.pathname}/${commit}/${path}`;
 };
 
+const openapiSource = lock.api.openapi_source;
+if (process.env.RELAY_OPENAPI_PATH) {
+  assert.equal(digest(await readFile(process.env.RELAY_OPENAPI_PATH)), lock.api.openapi_sha256);
+}
+// A committed Docs snapshot may not be pushed yet. Explicit local bytes
+// remain checked against the exact skill digest; absence is never ignored.
+if (process.env.RELAY_SKILL_PATH) {
+  assert.equal(digest(await readFile(process.env.RELAY_SKILL_PATH)), lock.api.skill_sha256);
+}
 for (const [repository, commit, path, expected] of [
-  [
-    lock.api.repository,
-    lock.api.commit,
-    lock.api.openapi_path,
+  ...(!process.env.RELAY_OPENAPI_PATH ? [[
+    openapiSource?.repository ?? lock.api.repository,
+    openapiSource?.commit ?? lock.api.commit,
+    openapiSource?.path ?? lock.api.openapi_path,
     lock.api.openapi_sha256,
-  ],
-  [
+  ]] : []),
+  ...(!process.env.RELAY_SKILL_PATH ? [[
     lock.api.repository,
     lock.api.commit,
     lock.api.skill_path,
     lock.api.skill_sha256,
-  ],
+  ]] : []),
   [
     lock.sdk.repository,
     lock.sdk.commit,
@@ -46,9 +55,15 @@ const registry = await fetch(
 );
 assert.equal(registry.status, 200);
 const metadata = await registry.json();
-assert.equal(metadata["dist-tags"][lock.sdk.dist_tag], lock.sdk.version);
-assert.ok(metadata.versions[lock.sdk.version]);
+const published = metadata.versions[lock.sdk.version];
+assert.ok(published, "Pinned SDK distribution is missing from the registry");
+assert.equal(published.name, lock.sdk.package);
+assert.equal(published.version, lock.sdk.version);
+// A publication baseline pins an immutable version, not today's mutable tag.
+if (lock.sdk.role !== "published_distribution_baseline") {
+  assert.equal(metadata["dist-tags"][lock.sdk.dist_tag], lock.sdk.version);
+}
 
 console.log(
-  `verified Relay v1 lock at Docs ${lock.api.commit} and SDK ${lock.sdk.version}`,
+  `verified Relay v1 OpenAPI ${lock.api.openapi_sha256} and SDK ${lock.sdk.version}`,
 );
