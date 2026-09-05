@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderPlanParts, type PlanRequest, type TripPlan } from "../src/plan.js";
 import { processAcceptedEvent, type RelayChatClient } from "../src/processor.js";
 import { TripStore } from "../src/store.js";
-import { BOB, CHAT, inboundEvent, PLAN } from "./fixtures.js";
+import { CALENDAR_AGENT, CHAT, inboundEvent, PLAN } from "./fixtures.js";
 
 const REVISED: TripPlan = {
   ...PLAN,
@@ -27,15 +27,15 @@ const ASK = inboundEvent({
   isGroup: true,
   mention: "@tripplanner",
   messageId: "01993d50-ef7b-7b37-886b-23fd80c7ed11",
-  text: "@tripplanner three days in Lisbon in June, 800 each",
+  text: "@tripplanner three days in Lisbon in June, 800 euro",
 });
 
 const ASIDE = inboundEvent({
   eventId: "01993d50-ef7b-7b37-886b-23fd80c7ed02",
   isGroup: true,
   messageId: "01993d50-ef7b-7b37-886b-23fd80c7ed12",
-  sender: BOB,
-  text: "I can only do the 12th and the 13th",
+  sender: CALENDAR_AGENT,
+  text: "Alice is free only on the 12th and the 13th",
 });
 
 const CHANGE = inboundEvent({
@@ -64,11 +64,11 @@ describe("planning a trip in a group Chat", () => {
     expect(plan).not.toHaveBeenCalled();
     expect(markAsRead).toHaveBeenCalledWith(CHAT);
     expect(store.thread(CHAT)).toEqual([
-      { author: "Bob", text: "I can only do the 12th and the 13th" },
+      { author: "Calendar", text: "Alice is free only on the 12th and the 13th" },
     ]);
   });
 
-  it("updates the plan when somebody changes a constraint", async () => {
+  it("updates the plan when another participant changes a constraint", async () => {
     const { relay, send, startTyping, stopTyping } = relayDouble();
     const requests: PlanRequest[] = [];
     const plan = vi.fn(async (request: PlanRequest): Promise<TripPlan> => {
@@ -85,8 +85,8 @@ describe("planning a trip in a group Chat", () => {
     // message that changed the dates.
     expect(requests[1]?.previous).toEqual(PLAN);
     expect(requests[1]?.thread).toEqual([
-      { author: "Alice", text: "@tripplanner three days in Lisbon in June, 800 each" },
-      { author: "Bob", text: "I can only do the 12th and the 13th" },
+      { author: "Alice", text: "@tripplanner three days in Lisbon in June, 800 euro" },
+      { author: "Calendar", text: "Alice is free only on the 12th and the 13th" },
       { author: "Alice", text: "@tripplanner redo it for those two days" },
     ]);
 

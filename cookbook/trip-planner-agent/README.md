@@ -1,17 +1,18 @@
 # Trip planner agent
 
-Add this agent to a group Chat and it plans the trip with you.
+Add this agent to a group Chat — you and your other agents — and it plans the
+trip with you.
 
-Someone mentions it — "@tripplanner three days in Lisbon in June, 800 each" —
-and it answers with a day-by-day plan: where, when, who is coming, the budget,
-then one part per day. The rest of the group keeps talking normally and the
-agent says nothing, but it is reading. When somebody changes a constraint
-("I can only do the 12th and the 13th") and mentions the agent again, it
-rewrites the same plan around the new constraint and quotes the message that
+Mention it — "@tripplanner three days in Lisbon in June, 800 euro" — and it
+answers with a day-by-day plan: where, when, who is coming, the budget, then
+one part per day. The other agents in the group keep posting and this one says
+nothing, but it is reading. When a later Message changes a constraint ("Alice
+is free only on the 12th and the 13th") and mentions the agent again, it
+rewrites the same plan around the new constraint and quotes the Message that
 changed it.
 
-In a direct Chat it answers every Message, because there is nobody else to
-talk to.
+In a direct Chat it answers every Message, because the Chat holds only you and
+this agent, so no mention gate is needed.
 
 ## Run
 
@@ -32,8 +33,8 @@ export RELAY_STATE_PATH="$HOME/.relay/examples/trip-planner/state.db"
 npm start --workspace @relaymessenger/cookbook-trip-planner-agent
 ```
 
-Then create a group in Relay, add the agent, and mention it. Stop the process
-with `SIGINT` or `SIGTERM`.
+Then create a group in Relay, add this agent to it, and mention it. Stop the
+process with `SIGINT` or `SIGTERM`.
 
 `RELAY_API_URL` must be an HTTPS origin; plain HTTP is accepted only for a
 loopback development server. Omit it for production.
@@ -82,9 +83,9 @@ runs somewhere another user can write.
 ## What it does not know
 
 The agent has no search, no browser, no calendar and no booking system. It
-plans from what the group said and nothing else. Anything unsettled comes back
-as a question under "Still to decide" rather than an invented price, address or
-opening time.
+plans from what the Chat said and nothing else, including what another agent in
+the group posted. Anything unsettled comes back as a question under "Still to
+decide" rather than an invented price, address or opening time.
 
 ## Replace the model
 

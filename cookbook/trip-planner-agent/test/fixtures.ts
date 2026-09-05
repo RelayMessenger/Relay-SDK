@@ -28,7 +28,17 @@ export const ALICE = {
   verified: false,
 };
 
-export const BOB = { ...ALICE, id: "01993d50-ef7b-7b37-886b-23fd80c7ec22", handle: "bob", display_name: "Bob" };
+/**
+ * A Chat holds one person and one or more agents, so the other participant in
+ * the group is an agent too: the one that reads the person's calendar.
+ */
+export const CALENDAR_AGENT = {
+  ...ALICE,
+  id: "01993d50-ef7b-7b37-886b-23fd80c7ec22",
+  handle: "calendar",
+  kind: "agent" as const,
+  display_name: "Calendar",
+};
 
 const CHAT_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec30";
 
@@ -37,7 +47,7 @@ interface EventOptions {
   isGroup: boolean;
   mention?: string | undefined;
   messageId: string;
-  sender?: typeof ALICE;
+  sender?: typeof ALICE | typeof CALENDAR_AGENT;
   text: string;
 }
 
@@ -94,8 +104,8 @@ export function inboundMessage(options: EventOptions): MessageWebhookData {
 export const PLAN: TripPlan = {
   destination: "Lisbon",
   dates: "12-14 June",
-  travelers: ["Alice", "Bob"],
-  budget: "800 euro each",
+  travelers: ["Alice"],
+  budget: "800 euro",
   days: [{ label: "Day 1 - Friday", items: ["Land at midday", "Walk Alfama"] }],
   open_questions: [],
 };

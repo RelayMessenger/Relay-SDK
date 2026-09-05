@@ -43,13 +43,13 @@ describe("who the agent answers", () => {
     }))).toBe(false);
   });
 
-  it("ignores a mention of somebody else", () => {
+  it("ignores a mention of another participant", () => {
     expect(isAddressedToAgent(inboundMessage({
       eventId: id(),
       isGroup: true,
-      mention: "@bob",
+      mention: "@calendar",
       messageId: id(),
-      text: "@bob are you in",
+      text: "@calendar when is Alice free",
     }))).toBe(false);
   });
 
