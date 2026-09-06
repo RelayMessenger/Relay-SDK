@@ -161,7 +161,7 @@ durable ACK and idempotent REST reply.
 
 `contracts/relay-v1.lock.json` records the compatibility boundary used by this
 candidate: Relay Server commit
-`529db629aa679eefb12788dbf496d8058561ac18`, OpenAPI SHA-256
+`f2f36e5284dcfb365af9759f5ee5bfa7954b6521`, OpenAPI SHA-256
 `df402b9bebcce58be2f7fa2e0a193e68896d7d34a6e4581dc4e5446a7854ab84`,
 public `ChatHandle.image_url` and `ChatHandle.about` fields with no legacy
 aliases,
@@ -171,7 +171,7 @@ frames consumed by the plugin.
 
 Public CI hashes the checked-in `contracts/relay-openapi.yaml` fixture and
 requires the locked digest above. Set `RELAY_SERVER_SOURCE_DIR` to an exact
-checkout of Server `529db629aa679eefb12788dbf496d8058561ac18` to additionally prove
+checkout of Server `f2f36e5284dcfb365af9759f5ee5bfa7954b6521` to additionally prove
 that the fixture bytes match the committed source before packaging. The public Relay-SDK monorepo does not require credentials for the
 private Server source and does not overstate what npm metadata can attest.
 
