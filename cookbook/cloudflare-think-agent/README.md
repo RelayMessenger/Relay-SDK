@@ -323,7 +323,7 @@ This revision is tested against:
 - `@relaymessenger/chat-sdk-adapter@0.3.0-staging.6` npm integrity
   `sha512-fwzha9KWu3oZax92vdYjxuPZ8HDLXCVF+rrL0ToxEryod06P5cbietmNU5U6sUntUX7ONIYfu43cvkyEem+Ykg==`
 - OpenAPI SHA-256
-  `f9919ed4c63efd32197ea8861b3b879f6a9594645308e65ade25f6447b479bd9`
+  `df402b9bebcce58be2f7fa2e0a193e68896d7d34a6e4581dc4e5446a7854ab84`
 - public `ChatHandle.image_url` and `ChatHandle.about` fields, with no legacy
   aliases
 - Relay API `v1`

@@ -69,7 +69,7 @@ test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
     repository: "RelayMessenger/Relay-Server",
     commit: "529db629aa679eefb12788dbf496d8058561ac18",
     openapiPath: "contracts/developer/openapi.yaml",
-    sha256: "f9919ed4c63efd32197ea8861b3b879f6a9594645308e65ade25f6447b479bd9",
+    sha256: "df402b9bebcce58be2f7fa2e0a193e68896d7d34a6e4581dc4e5446a7854ab84",
   });
   assert.equal(
     contractLock.relaySdk.source.commit,

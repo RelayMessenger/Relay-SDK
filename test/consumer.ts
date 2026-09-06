@@ -36,6 +36,17 @@ await relay.chats.shareContactCard("chat-id");
 await relay.chats.startTyping("chat-id");
 await relay.chats.stopTyping("chat-id");
 await relay.chats.markAsRead("chat-id");
+await relay.chats.participants.add("chat-id", { handle: "research.agent" });
+await relay.chats.participants.add("chat-id", { handle: "research.agent", hide_history: true });
+await relay.chats.participants.add("chat-id", { handle: "research.agent", hide_history: false });
+// @ts-expect-error History selection is a boolean, not a string.
+await relay.chats.participants.add("chat-id", { handle: "research.agent", hide_history: "false" });
+// @ts-expect-error History selection belongs only to addition.
+await relay.chats.participants.remove("chat-id", { handle: "research.agent", hide_history: false });
+// @ts-expect-error Private chat visibility is not a public API parameter.
+await relay.chats.participants.add("chat-id", { handle: "research.agent", is_hidden: true });
+// @ts-expect-error Private history boundaries are not public API parameters.
+await relay.chats.participants.add("chat-id", { handle: "research.agent", truncated_at: 123 });
 (await relay.messages.edit("message-id", { text: "Corrected" })) satisfies
   Message;
 (await relay.messages.edit("message-id", {

@@ -245,9 +245,13 @@ export interface ChatListChatsParams {
 
 export interface ParticipantAddParams {
   handle: string;
+  /** Hide history before the new membership. Omission uses the server default: true. */
+  hide_history?: boolean;
 }
 
-export type ParticipantRemoveParams = ParticipantAddParams;
+export interface ParticipantRemoveParams {
+  handle: string;
+}
 
 export interface MessageSendParams {
   message: MessageContent;

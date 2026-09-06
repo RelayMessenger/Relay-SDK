@@ -393,15 +393,20 @@ export const createProgram = (
     .command("add")
     .argument("<chat-id>")
     .argument("<handle>", "participant Handle", handle)
+    .option("--hide-history", "hide history before the new membership (server default)")
+    .option("--no-hide-history", "share earlier retained history")
     .action(async (
       chatID: string,
       participantHandle: string,
-      _options: object,
+      options: { hideHistory?: boolean },
       command: Command,
     ) => output(
       await (await clientFor(command)).chats.participants.add(
         chatID,
-        { handle: participantHandle },
+        {
+          handle: participantHandle,
+          ...(options.hideHistory === undefined ? {} : { hide_history: options.hideHistory }),
+        },
       ),
     ));
   participants

@@ -81,6 +81,26 @@ describe("Relay v1 request shapes", () => {
     expect(readCalls[0]!.url.pathname).toBe("/v1/chats/chat%2Fid/read");
   });
 
+  it.each([undefined, true, false])("serializes participant hide_history=%s exactly", async (hideHistory) => {
+    const calls: Captured[] = [];
+    const client = new Relay({
+      apiKey: "agent-token",
+      baseURL: "https://api.example.test/",
+      maxRetries: 0,
+      fetch: responder(calls),
+    });
+    const body = {
+      handle: "research.agent",
+      ...(hideHistory === undefined ? {} : { hide_history: hideHistory }),
+    };
+    await client.chats.participants.add("chat/id", body);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url.pathname).toBe("/v1/chats/chat%2Fid/participants");
+    expect(calls[0]!.method).toBe("POST");
+    expect(calls[0]!.body).toBe(JSON.stringify(body));
+    expect(Object.hasOwn(JSON.parse(String(calls[0]!.body)), "hide_history")).toBe(hideHistory !== undefined);
+  });
+
   it("exposes every current operation and no extra HTTP route", async () => {
     const calls: Captured[] = [];
     const client = new Relay({

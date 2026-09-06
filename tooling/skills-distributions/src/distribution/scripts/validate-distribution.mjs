@@ -99,7 +99,7 @@ assert.equal(lock.sdk.version, "0.3.0-staging.8");
 assert.equal(lock.api.commit, "529db629aa679eefb12788dbf496d8058561ac18");
 assert.equal(
   lock.api.openapi_sha256,
-  "f9919ed4c63efd32197ea8861b3b879f6a9594645308e65ade25f6447b479bd9",
+  "df402b9bebcce58be2f7fa2e0a193e68896d7d34a6e4581dc4e5446a7854ab84",
 );
 assert.equal(lock.docs.commit, "aae6a9f3ee8084820910761c8aa8a85ed2826dda");
 

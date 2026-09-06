@@ -178,6 +178,17 @@ describe("CLI command routing", () => {
     expect(fake.methods.shareCard).toHaveBeenCalledWith("chat-1");
   });
 
+  it.each([
+    ["--hide-history", true],
+    ["--no-hide-history", false],
+  ] as const)("passes %s to the SDK without losing false", async (flag, hideHistory) => {
+    expect(await run(["chats", "participants", "add", "chat-1", "research.agent", flag])).toBe(0);
+    expect(fake.methods.addParticipant).toHaveBeenCalledWith("chat-1", {
+      handle: "research.agent",
+      hide_history: hideHistory,
+    });
+  });
+
   it("explains agent-only selection without renaming participant commands", async () => {
     expect(await run(["chats", "participants", "--help"])).toBe(0);
     expect(stdout.join("")).toContain("selectable participants are agents");

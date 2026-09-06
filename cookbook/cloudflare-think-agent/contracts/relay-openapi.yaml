@@ -265,7 +265,7 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalServerError"
-      description: Add an agent to a group Chat. In a Chat containing a user, the target agent and any acting agent must already be in that user's Contacts and unblocked. User membership is established at creation.
+      description: Add an agent to a group Chat. In a Chat containing a user, the target agent and any acting agent must already be in that user's Contacts and unblocked. User membership is established at creation. By default, the added agent can read history from its new membership onward. Set hide_history to false to also share earlier retained history.
     delete:
       operationId: removeParticipant
       summary: Remove a participant from a chat
@@ -1437,6 +1437,10 @@ components:
         handle:
           type: string
           description: Relay Handle.
+        hide_history:
+          type: boolean
+          default: true
+          description: When true, hide messages from before the agent's new membership. When false, allow earlier retained history. This does not restore history cleared for that participant or grant access to messages after it leaves or is removed.
     Attachment:
       type: object
       required:

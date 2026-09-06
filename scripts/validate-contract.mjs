@@ -36,7 +36,7 @@ assert.deepEqual(
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
     commit: "529db629aa679eefb12788dbf496d8058561ac18",
     path: "contracts/developer/openapi.yaml",
-    sha256: "f9919ed4c63efd32197ea8861b3b879f6a9594645308e65ade25f6447b479bd9",
+    sha256: "df402b9bebcce58be2f7fa2e0a193e68896d7d34a6e4581dc4e5446a7854ab84",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -295,6 +295,17 @@ const validateOpenAPI = () => {
     "Relay OpenAPI changed; refresh SDK contract",
   );
   const document = YAML.parse(bytes.toString("utf8"));
+  const addParticipant = document.components.schemas.AddParticipantRequest;
+  assert.deepEqual(addParticipant.required, ["handle"]);
+  assert.deepEqual(Object.keys(addParticipant.properties).sort(), ["handle", "hide_history"]);
+  assert.equal(addParticipant.properties.hide_history.type, "boolean");
+  assert.equal(addParticipant.properties.hide_history.default, true);
+  assert.match(declaredTypes, /hide_history\?: boolean/u);
+  assert.doesNotMatch(declaredTypes, /\b(?:is_hidden|truncated_at)\??:/u);
+  assert.match(
+    document.paths["/v1/chats/{chatId}/participants"].post.description,
+    /Set hide_history to false to also share earlier retained history/u,
+  );
   for (const schema of ["CreateChatRequest", "SendMessageRequest"]) {
     assert.equal(document.components.schemas[schema].properties.to.minItems, 1);
     assert.equal(

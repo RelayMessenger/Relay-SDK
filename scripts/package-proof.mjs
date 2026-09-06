@@ -249,6 +249,21 @@ try {
       },
     ]);
 
+    for (const hideHistory of [undefined, true, false]) {
+      const body = {
+        handle: "research.agent",
+        ...(hideHistory === undefined ? {} : { hide_history: hideHistory }),
+      };
+      await relay.chats.participants.add("chat/id", body);
+      assert.deepEqual(requests.at(-1), {
+        url: "https://api.staging.relayapp.im/v1/chats/chat%2Fid/participants",
+        method: "POST",
+        authorization: "Bearer package-proof-token",
+        idempotencyKey: null,
+        body,
+      });
+    }
+
     const webhookSecretBytes = Buffer.alloc(32, 7);
     const webhookSecret = "whsec_" + webhookSecretBytes.toString("base64");
     const webhookID = "01993d50-b4ce-71e6-8e65-35d325d95ddb";
@@ -326,6 +341,17 @@ try {
     declare const removed: ContactRemovedWebhookEvent;
     removed.data.contact.handle satisfies string;
     void relay.contactRequests.create({ handle: "advait" });
+    void relay.chats.participants.add("chat", { handle: "research.agent" });
+    void relay.chats.participants.add("chat", { handle: "research.agent", hide_history: true });
+    void relay.chats.participants.add("chat", { handle: "research.agent", hide_history: false });
+    // @ts-expect-error History selection is a boolean.
+    void relay.chats.participants.add("chat", { handle: "research.agent", hide_history: "false" });
+    // @ts-expect-error Removal has no history selector.
+    void relay.chats.participants.remove("chat", { handle: "research.agent", hide_history: false });
+    // @ts-expect-error Chat visibility is private.
+    void relay.chats.participants.add("chat", { handle: "research.agent", is_hidden: true });
+    // @ts-expect-error History boundaries are private.
+    void relay.chats.participants.add("chat", { handle: "research.agent", truncated_at: 123 });
     relay.contactRequests.create({
       handle: "advait",
       // @ts-expect-error Contact requests accept only a handle.
