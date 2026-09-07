@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { readFile, stat } from "node:fs/promises";
 import Relay, {
   RELAY_WEBHOOK_EVENT_TYPES,
@@ -36,6 +37,10 @@ import {
 import { runDoctor } from "./doctor.js";
 import { errorText, jsonText } from "./output.js";
 import { listenForAgentEvents } from "./event-listen.js";
+
+// The shipped version is the manifest's; the release job derives it, so no
+// source file may carry its own copy.
+const PACKAGE_VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
 export interface ProgramDependencies {
   configContext?: ConfigContext;
@@ -119,7 +124,7 @@ export const createProgram = (
   const program = new Command()
     .name("relay")
     .description("Official CLI for Relay v1 Agent resources.")
-    .version("0.5.0-staging.5")
+    .version(PACKAGE_VERSION)
     .option("--profile <name>", "local Relay profile", process.env.RELAY_PROFILE);
   program.exitOverride();
   program.configureOutput({

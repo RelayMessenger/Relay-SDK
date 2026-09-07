@@ -97,6 +97,9 @@ const installedManifest = JSON.parse(
   await readFile(join(consumer, "node_modules", "@relaymessenger", "cli", "package.json")),
 );
 assert.equal(installedManifest.name, "@relaymessenger/cli");
-assert.equal(installedManifest.dependencies["@relaymessenger/sdk"], "0.3.0-staging.8");
+assert.equal(
+  installedManifest.dependencies["@relaymessenger/sdk"],
+  sourceManifest.dependencies["@relaymessenger/sdk"],
+);
 
 console.log(`CLI tarball install smoke OK: ${tarball}`);

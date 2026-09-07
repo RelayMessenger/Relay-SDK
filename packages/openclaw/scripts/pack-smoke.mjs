@@ -123,7 +123,6 @@ try {
     "LICENSE",
     "README.md",
     "contracts/relay-v1.lock.json",
-    "contracts/relay-sdk-0.3.0-staging.8.registry.json",
     "openclaw.plugin.json",
     "dist/index.js",
     "dist/setup-entry.js",
