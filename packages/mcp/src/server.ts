@@ -12,6 +12,12 @@ import type { AuthContext } from "./auth.js";
 import { collectLocalTokens, resolveAgentAuth } from "./auth.js";
 import { safeErrorMessage } from "./redact.js";
 
+import { createRequire } from "node:module";
+
+// The shipped version is the manifest's; the release job derives it, so no
+// source file may carry its own copy.
+export const PACKAGE_VERSION: string = createRequire(import.meta.url)("../package.json").version;
+
 export interface ResolvedRelayClient {
   client: Relay;
   secrets?: string[];
@@ -139,7 +145,7 @@ export const createRelayMcpServer = (
   const server = new McpServer(
     {
       name: "relay",
-      version: "0.1.0-staging.6",
+      version: PACKAGE_VERSION,
     },
     {
       capabilities: { tools: {} },

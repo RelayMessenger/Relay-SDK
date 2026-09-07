@@ -26,6 +26,14 @@ const workspaceOpenapi = readFileSync(
 const workspaceOpenapiSha256 = createHash("sha256")
   .update(workspaceOpenapi)
   .digest("hex");
+// A staging build is `X.Y.Z-staging.N`. The release job on main derives the
+// plain `X.Y.Z` from it and says so with RELAY_RELEASE=1; a plain version
+// without that flag is a hand edit and fails here.
+const releaseVersionShape = /^\d+\.\d+\.\d+$/u;
+const stagingVersionShape = /^\d+\.\d+\.\d+-staging\.\d+$/u;
+const versionIsAllowed = (version) =>
+  stagingVersionShape.test(version)
+  || (process.env.RELAY_RELEASE === "1" && releaseVersionShape.test(version));
 const repository = "https://github.com/RelayMessenger/Relay-SDK";
 const homepage =
   `${repository}/tree/main/packages/claude-code#readme`;
@@ -43,8 +51,10 @@ function sourceFiles(directory) {
 if (packageJSON.name !== "relay-claude-channel") throw new Error("npm package identity drifted");
 if (packageJSON.packageManager !== "npm@12.0.2") throw new Error("npm toolchain lock drifted");
 if (packageJSON.version !== plugin.version) throw new Error("package and plugin versions differ");
-if (!/^\d+\.\d+\.\d+-staging\.\d+$/u.test(packageJSON.version)) {
-  throw new Error("package version is not an explicit staging prerelease");
+if (!versionIsAllowed(packageJSON.version)) {
+  throw new Error(
+    "package version is neither a staging prerelease nor a RELAY_RELEASE=1 plain release version",
+  );
 }
 if (marketplace.plugins?.[0]?.version !== packageJSON.version) {
   throw new Error("marketplace release version differs");

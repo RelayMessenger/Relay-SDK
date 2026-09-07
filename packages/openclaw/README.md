@@ -175,10 +175,10 @@ checkout of Server `f2f36e5284dcfb365af9759f5ee5bfa7954b6521` to additionally pr
 that the fixture bytes match the committed source before packaging. The public Relay-SDK monorepo does not require credentials for the
 private Server source and does not overstate what npm metadata can attest.
 
-`contracts/relay-sdk-0.3.0-staging.8.registry.json` records immutable npm
-publication metadata and tarball digests. Validation downloads the registry
-tarball, verifies SHA-1, SHA-256, and SHA-512 integrity, checks the installed
-SDK, and compares its package metadata with exact SDK commit `1bbcb48`. The
-npm SLSA statement binds the published tarball digest to that commit through
-the trusted staging publish workflow. These are artifact compatibility and
-source-provenance checks, not a claim of a hosted Relay deployment test.
+`contracts/relay-v1.lock.json` records the exact `@relaymessenger/sdk`
+version this plugin ships against and the sha512 npm stores as that tarball's
+`dist.integrity`. Validation reads the packument, downloads the registry
+tarball, hashes it against the lock, and checks the installed SDK's version and
+types. Production publishes carry no npm attestation (Blacksmith runners), so
+the tarball bytes are the receipt. These are artifact compatibility checks,
+not a claim of a hosted Relay deployment test.

@@ -234,21 +234,46 @@ for (const [source, text] of workflowFiles) {
   }
 }
 
-// The six release workflows and scripts/release-packages.mjs are one record.
-// A package added to the catalog without its workflow, renamed without its
-// manifest, or given a tag series the workflow does not listen for, fails here
-// rather than at the tag push that was meant to ship it.
-assert.deepEqual(
-  workflowFiles
-    .map(([source]) => basename(source))
-    .filter((name) => name.startsWith("release-"))
-    .sort(),
-  Object.values(releasePackages).map((entry) => entry.workflow).sort(),
-  "every catalogued package needs exactly one release workflow, and vice versa",
+// The one production release workflow. Tags record a publish and never
+// trigger one, so no workflow may listen for a tag push.
+const release = readFileSync(".github/workflows/release.yml", "utf8");
+assert.match(
+  release,
+  /^on:\n\s*push:\n\s*branches:\n\s*-\s*main$/mu,
+  "the production release runs on a push to main",
 );
-
-const literal = (value) => value.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-
+assert.match(release, /^\s*dry_run:$/mu, "release.yml has no dry_run input");
+assert.match(
+  release,
+  /^\s*environment: npm-release$/mu,
+  "release.yml does not publish through the npm-release environment",
+);
+assert.match(
+  release,
+  /NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_PUBLISH_TOKEN \}\}/u,
+  "release.yml does not authenticate with NPM_PUBLISH_TOKEN",
+);
+assert.doesNotMatch(release, /secrets\.NPM_TOKEN\b/u);
+assert.match(
+  release,
+  /^\s*if: github\.event_name == 'push'\n\s*env:\n(?:.*\n){1,3}\s*run: node scripts\/release-run\.mjs$/mu,
+  "only a push to main may run the publishing release",
+);
+assert.match(release, /run: node scripts\/release-run\.mjs --dry-run$/mu);
+assert.match(release, /run: node --test scripts\/release-derive\.test\.mjs$/mu);
+for (const [source, text] of workflowFiles) {
+  assert.doesNotMatch(
+    text,
+    /^\s*tags:\s*$/mu,
+    `${source} triggers on a tag; tags record a release and never start one`,
+  );
+}
+const releaseRun = readFileSync("scripts/release-run.mjs", "utf8");
+assert.match(
+  releaseRun,
+  /"publish", tarball\.path,\n\s*"--access", "public",\n\s*"--tag", "latest",\n\s*"--no-provenance",/u,
+  "the release publish must be public, latest, and unattested at the call site",
+);
 for (const [key, entry] of Object.entries(releasePackages)) {
   const manifest = JSON.parse(
     readFileSync(join(entry.directory, "package.json"), "utf8"),
@@ -263,59 +288,11 @@ for (const [key, entry] of Object.entries(releasePackages)) {
     rootManifest.scripts?.[entry.validate],
     `the root package has no ${entry.validate} script for ${key}`,
   );
-
-  const source = join(".github/workflows", entry.workflow);
-  const workflow = readFileSync(source, "utf8");
-  assert.match(
-    workflow,
-    new RegExp(`^name: Release ${literal(entry.workspace)} to npm$`, "mu"),
-    `${source} does not name ${entry.workspace}`,
-  );
-  assert.match(
-    workflow,
-    new RegExp(`^\\s*- "${literal(entry.tagPrefix)}\\*"$`, "mu"),
-    `${source} does not trigger on ${entry.tagPrefix}* tags`,
-  );
-  assert.match(
-    workflow,
-    new RegExp(`^\\s*RELEASE_KEY: ${literal(key)}$`, "mu"),
-    `${source} does not select the ${key} catalog entry`,
-  );
-  // A manual run may only ever reach the dry run.
-  assert.match(
-    workflow,
-    /^\s*dry_run:$/mu,
-    `${source} has no dry_run input`,
-  );
-  assert.match(
-    workflow,
-    /npm publish[^\n]*\n[^\n]*--access public\n[^\n]*--no-provenance\n[^\n]*--dry-run/u,
-    `${source} does not dry-run the publish it would perform`,
-  );
-  assert.match(
-    workflow,
-    /^\s*if: github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/'\)$/mu,
-    `${source} lets something other than a pushed tag publish`,
-  );
-  assert.match(
-    workflow,
-    /^\s*environment: npm-release$/mu,
-    `${source} does not publish through the npm-release environment`,
-  );
-  assert.match(
-    workflow,
-    /NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_PUBLISH_TOKEN \}\}/u,
-    `${source} does not authenticate with NPM_PUBLISH_TOKEN`,
-  );
-  assert.doesNotMatch(
-    workflow,
-    /secrets\.NPM_TOKEN\b/u,
-    `${source} uses the repository-wide NPM_TOKEN instead of the environment secret`,
-  );
+  assert.match(entry.tagPrefix, /^[a-z-]+-v$/u, `${key} has no record tag series`);
 }
 
 console.log(
-  `validated immutable CI, staging-only package publication, and ${
+  `validated immutable CI, staging-only package publication, and the ${
     Object.keys(releasePackages).length
-  } tag-triggered release workflows`,
+  }-package release on main`,
 );

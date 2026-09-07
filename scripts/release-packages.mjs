@@ -3,14 +3,14 @@
 // Both release paths read this file, so a package is described exactly once:
 //   - scripts/release-catalog.mjs resolves the staging publish
 //     (.github/workflows/publish-package-staging.yml)
-//   - scripts/release-package.mjs drives the six tag-triggered release
-//     workflows (.github/workflows/release-*.yml)
+//   - scripts/release-derive.mjs and scripts/release-run.mjs drive the one
+//     production release on main (.github/workflows/release.yml), in this
+//     object's order: every Relay dependency before its dependents
 //
 // `scripts/validate-workflows.mjs` asserts this catalog against the tree on
 // every CI run: each entry's package.json must carry the declared name and
-// repository directory, and each entry's workflow file must exist and name the
-// entry's package and tag series. A package added here without its workflow,
-// or renamed without its manifest, fails CI rather than a release.
+// repository directory. `tagPrefix` names the git tag that records a publish
+// (`<prefix><version>`); the tag is a record, never a trigger.
 //
 // `smoke` is what proves a *registry-installed* copy of the package works. It
 // is deliberately per-package data rather than per-package code: the six
@@ -18,13 +18,15 @@
 // file plus six near-identical release scripts, and their smoke assertions
 // drifted away from the packages they guard. Every value below was read from
 // this tree on 2026-09-07, not carried over from those copies.
+//
+// Order matters: scripts/release-derive.mjs refuses a catalog where a package
+// precedes a Relay package it depends on.
 export const releasePackages = {
   sdk: {
     directory: "packages/sdk",
     workspace: "@relaymessenger/sdk",
     validate: "validate:sdk",
     tagPrefix: "sdk-v",
-    workflow: "release-sdk.yml",
     smoke: {
       imports: [
         {
@@ -51,7 +53,6 @@ export const releasePackages = {
     workspace: "@relaymessenger/chat-sdk-adapter",
     validate: "validate:chat-sdk",
     tagPrefix: "chat-sdk-v",
-    workflow: "release-chat-sdk.yml",
     smoke: {
       imports: [
         {
@@ -78,7 +79,6 @@ export const releasePackages = {
     // names a release series that already exists in git history and is also
     // the name of the binary this package installs.
     tagPrefix: "relaymessenger-v",
-    workflow: "release-cli.yml",
     smoke: {
       files: ["dist/cli.js"],
       run: {
@@ -93,7 +93,6 @@ export const releasePackages = {
     workspace: "@relaymessenger/mcp",
     validate: "validate:mcp",
     tagPrefix: "mcp-v",
-    workflow: "release-mcp.yml",
     smoke: {
       files: ["dist/cli.js"],
       parse: ["dist/cli.js"],
@@ -111,7 +110,6 @@ export const releasePackages = {
     workspace: "@relaymessenger/openclaw-plugin",
     validate: "validate:openclaw",
     tagPrefix: "openclaw-v",
-    workflow: "release-openclaw.yml",
     smoke: {
       files: [
         "openclaw.plugin.json",
@@ -128,7 +126,6 @@ export const releasePackages = {
     workspace: "relay-claude-channel",
     validate: "validate:claude-code",
     tagPrefix: "claude-channel-v",
-    workflow: "release-claude-channel.yml",
     smoke: {
       files: [".claude-plugin/plugin.json", "runtime/server.mjs"],
       parse: ["runtime/server.mjs"],
