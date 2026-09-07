@@ -148,6 +148,8 @@ jobs:
         with:
           name: relay-${{ env.RELEASE_PACKAGE }}-${{ env.RELEASE_SHA }}
           path: .release-tmp/package-staging
+      - name: Verify publish checkout matches release artifact
+        run: test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
       - name: Publish or reconcile exactly once
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}

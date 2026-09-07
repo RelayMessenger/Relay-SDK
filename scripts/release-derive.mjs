@@ -187,3 +187,8 @@ export function filesCarryingVersion(directory, version) {
   walk(directory, "");
   return found.sort();
 }
+
+/** Derive even skipped workspaces before resolving dependents against them. */
+export function rewriteReleaseWorkspace(root, plan, options = {}) {
+  return plan.flatMap((row) => rewritePackage(root, row.key, plan, options));
+}

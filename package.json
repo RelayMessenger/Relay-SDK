@@ -7,6 +7,7 @@
     "cookbook/*"
   ],
   "scripts": {
+    "postinstall": "node scripts/link-cookbook-workspaces.mjs",
     "clean": "npm run clean --workspaces --if-present",
     "check": "npm run check --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
@@ -14,8 +15,10 @@
     "discovery:sync": "node scripts/sync-root-discovery.mjs --write",
     "discovery:check": "node scripts/sync-root-discovery.mjs --check",
     "discovery:validate": "scripts/validate-root-discovery.sh",
+    "metadata:sync": "npm run discovery:sync && node scripts/sync-import-metadata.mjs --write",
+    "metadata:check": "npm run discovery:check && node scripts/sync-import-metadata.mjs --check",
     "sources:check": "node scripts/validate-sources.mjs && node scripts/verify-import-provenance.mjs",
-    "workflows:check": "node scripts/validate-workflows.mjs && node --test scripts/release-derive.test.mjs scripts/staging-bump.test.mjs scripts/verify-npm-registry-integrity.test.mjs",
+    "workflows:check": "node scripts/validate-workflows.mjs && node --test scripts/release-derive.test.mjs scripts/staging-bump.test.mjs scripts/verify-npm-registry-integrity.test.mjs scripts/publish-package-staging.test.mjs scripts/release-metadata.test.mjs",
     "proof:clean": "node scripts/verify-clean-tracked.mjs",
     "contract:check": "node scripts/validate-contract.mjs && node scripts/validate-contract-failures.mjs && node scripts/validate-contract-copies.mjs",
     "consumer:types": "tsc -p test/tsconfig.json --noEmit",
