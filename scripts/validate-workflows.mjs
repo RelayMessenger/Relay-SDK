@@ -5,6 +5,19 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
+const rootManifest = JSON.parse(readFileSync("package.json", "utf8"));
+const pinnedNode = readFileSync(".nvmrc", "utf8").trim();
+assert.match(
+  pinnedNode,
+  /^\d+\.\d+\.\d+$/u,
+  ".nvmrc must pin one exact Node version",
+);
+assert.equal(
+  rootManifest.engines?.node,
+  `>=${pinnedNode}`,
+  ".nvmrc and engines.node must name the same Node version",
+);
+
 for (const name of readdirSync(".github/workflows").filter((value) =>
   value.endsWith(".yml") || value.endsWith(".yaml")
 )) {
@@ -18,6 +31,30 @@ for (const name of readdirSync(".github/workflows").filter((value) =>
       action,
       /@[0-9a-f]{40}$/u,
       `${name} does not pin ${action} to an exact commit`,
+    );
+  }
+  const setupNodeSteps = uses.filter((action) =>
+    action.startsWith("actions/setup-node@")
+  ).length;
+  assert.doesNotMatch(
+    workflow,
+    /node-version:\s*\S/u,
+    `${name} pins Node inline instead of reading .nvmrc`,
+  );
+  assert.equal(
+    [...workflow.matchAll(/node-version-file:\s*\.nvmrc\s*$/gmu)].length,
+    setupNodeSteps,
+    `${name} must read every Node version from .nvmrc`,
+  );
+  for (
+    const [, pinnedNpm] of workflow.matchAll(
+      /npm\s+(?:install|i)\s+(?:--global|-g)\s+npm@(\S+)/gu,
+    )
+  ) {
+    assert.match(
+      pinnedNpm,
+      /^\d+\.\d+\.\d+$/u,
+      `${name} installs npm@${pinnedNpm} instead of an exact version`,
     );
   }
   for (const checkout of workflow.matchAll(
