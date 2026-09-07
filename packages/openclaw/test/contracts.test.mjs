@@ -43,7 +43,7 @@ const openapiPath =
 
 test("pins the requested OpenClaw and current Relay SDK contracts", () => {
   assert.equal(packageJson.name, "@relaymessenger/openclaw-plugin");
-  assert.equal(packageJson.version, "0.4.0-staging.4");
+  assert.equal(packageJson.version, "0.4.0-staging.5");
   assert.equal(packageJson.devDependencies.openclaw, "2026.8.1");
   assert.equal(packageJson.openclaw.build.openclawVersion, "2026.8.1");
   assert.equal(packageJson.dependencies["@relaymessenger/sdk"], "0.3.0-staging.8");
@@ -90,6 +90,16 @@ test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
     readFileSync(join(root, "..", "sdk", "SOURCE.json"), "utf8"),
   );
   assert.equal(installedSdk.version, contractLock.relaySdk.version);
+  assert.equal(
+    createHash("sha256").update(readFileSync(sdkPackagePath)).digest("hex"),
+    sdkRegistryReceipt.registry.installedArtifact.packageJsonSha256,
+    "resolved dependency manifest must match the registry receipt",
+  );
+  assert.equal(
+    createHash("sha256").update(sdkTypes).digest("hex"),
+    sdkRegistryReceipt.registry.installedArtifact.typesSha256,
+    "resolved dependency types must match even when installed beside a newer workspace",
+  );
   assert.equal(
     installedSdkSource.commit,
     sourceLock.imports["packages/sdk"].commit,
