@@ -1,84 +1,64 @@
 name: Publish package staging
 
+# The staging release, automatic end to end (owner ruling, 2026-09-07:
+# releases are automatic, nothing manual, ever). On every push to staging:
+#
+#   bump      scripts/staging-bump.mjs decides, for each package in catalog
+#             order, whether its packed content differs from what npm holds and
+#             which X.Y.Z-staging.N comes next; rewrites versions, pins, and
+#             contract locks; commits the result to staging as
+#             github-actions[bot]. A push made with GITHUB_TOKEN starts no new
+#             workflow run (GitHub: "events triggered by the GITHUB_TOKEN will
+#             not create a new workflow run"), which is why the publish is the
+#             rest of this run and not a second one.
+#   sdk ... claude-code
+#             staging-package.yml once per changed package, each after its
+#             Relay dependency has published, from the bump commit.
+#
+# A newer push to staging cancels a run in flight; the newer run re-derives
+# everything from the tip. A bump commit that published nothing is harmless:
+# the next run finds an unpublished prerelease and publishes it as named.
+#
+# The main release (release.yml) then derives the plain X.Y.Z from these
+# manifests and publishes as latest whatever npm lacks.
+
 on:
   push:
     branches:
       - staging
-    paths:
-      - .github/workflows/publish-package-staging.yml
-      - package.json
-      - package-lock.json
-      - packages/claude-code/**
-      - packages/sdk/**
-      - scripts/publish-package-staging.mjs
-      - scripts/release-catalog.mjs
-  workflow_dispatch:
-    inputs:
-      package:
-        description: Canonical package workspace
-        required: true
-        type: choice
-        options:
-          - sdk
-          - chat-sdk-adapter
-          - cli
-          - mcp
-          - openclaw
-          - claude-code
-      commit_sha:
-        description: Exact 40-character staging commit
-        required: true
-        type: string
 
 permissions:
   contents: read
 
-env:
-  RELEASE_PACKAGE: ${{ github.event_name == 'push' && 'claude-code' || inputs.package }}
-  RELEASE_SHA: ${{ github.event_name == 'push' && github.sha || inputs.commit_sha }}
-
 concurrency:
-  group: relay-monorepo-package-staging-${{ github.event_name == 'push' && 'claude-code' || inputs.package }}
-  cancel-in-progress: false
+  group: relay-staging-release
+  cancel-in-progress: true
 
 jobs:
-  preflight:
+  bump:
     if: >-
       github.repository == 'RelayMessenger/Relay-SDK' &&
       github.ref == 'refs/heads/staging'
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - name: Verify exact staging input
-        env:
-          EXPECTED_SHA: ${{ github.event_name == 'push' && github.sha || inputs.commit_sha }}
-          EVENT_SHA: ${{ github.sha }}
-        run: |
-          case "$EXPECTED_SHA" in
-            (""|*[!0-9a-f]*) exit 2 ;;
-          esac
-          test "${#EXPECTED_SHA}" -eq 40
-          test "$EXPECTED_SHA" = "$EVENT_SHA"
-
-  package:
-    needs: preflight
-    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 45
+    permissions:
+      contents: write
     outputs:
-      workspace: ${{ steps.resolve.outputs.workspace }}
-      version: ${{ steps.resolve.outputs.version }}
+      sha: ${{ steps.commit.outputs.sha }}
+      changed: ${{ steps.plan.outputs.changed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ env.RELEASE_SHA }}
+          ref: staging
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify canonical staging SHA
+      - name: Verify this run starts from staging's tip
         env:
-          EXPECTED_SHA: ${{ env.RELEASE_SHA }}
+          EVENT_SHA: ${{ github.sha }}
         run: |
           git fetch origin staging
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$EXPECTED_SHA" = "$(git rev-parse origin/staging)"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/staging)"
+          git merge-base --is-ancestor "$EVENT_SHA" HEAD
           test -z "$(git status --porcelain)"
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -86,93 +66,106 @@ jobs:
           cache: npm
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
       - run: npm ci
-      - name: Build the canonical SDK workspace
-        run: npm run build --workspace @relaymessenger/sdk
-      - id: resolve
-        run: node scripts/release-catalog.mjs --key "$RELEASE_PACKAGE"
-      - name: Validate selected package
-        run: npm run '${{ steps.resolve.outputs.validate }}'
-      - name: Verify validation kept the tracked tree clean
-        run: test -z "$(git status --porcelain)"
-      - id: pack
-        name: Pack one retained tarball
-        run: |
-          mkdir -p .release-tmp/package-staging
-          npm pack \
-            --workspace '${{ steps.resolve.outputs.workspace }}' \
-            --ignore-scripts \
-            --pack-destination .release-tmp/package-staging
-          mapfile -t TARBALLS < <(
-            find .release-tmp/package-staging -name '*.tgz' -print
-          )
-          test "${#TARBALLS[@]}" -eq 1
-          echo "tarball=$(realpath "${TARBALLS[0]}")" >> "$GITHUB_OUTPUT"
-      - name: Verify OpenClaw staging release identity
-        if: env.RELEASE_PACKAGE == 'openclaw'
-        working-directory: packages/openclaw
+      - run: node --test scripts/staging-bump.test.mjs
+      - id: plan
+        name: Decide and write the next staging versions
+        run: node scripts/staging-bump.mjs --write
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-bump-${{ github.sha }}
+          path: .release-tmp/staging-bump/plan.json
+          if-no-files-found: error
+          retention-days: 30
+      - id: commit
+        name: Commit the bump to staging
         env:
-          RELEASE_VERSION: ${{ steps.resolve.outputs.version }}
-          RELEASE_TAG: staging
-        run: node scripts/staging-release-guard.mjs
-      - name: Verify Claude Code staging release identity
-        if: env.RELEASE_PACKAGE == 'claude-code'
-        working-directory: packages/claude-code
-        env:
-          RELEASE_VERSION: ${{ steps.resolve.outputs.version }}
-          RELEASE_TAG: staging
-          RELEASE_TARBALL: ${{ steps.pack.outputs.tarball }}
-        run: node scripts/staging-release-guard.mjs
-      - name: Retain the release identity
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          IDENTITY='${{ steps.resolve.outputs.directory }}/.release/npm-staging/release-identity.json'
-          if [ -f "$IDENTITY" ]; then
-            cp "$IDENTITY" .release-tmp/package-staging/release-identity.json
+          set -euo pipefail
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            echo "nothing to bump"
+            exit 0
           fi
-          test -z "$(git status --porcelain)"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: relay-${{ env.RELEASE_PACKAGE }}-${{ github.sha }}
-          path: .release-tmp/package-staging/
-          if-no-files-found: error
-          retention-days: 30
+          git status --porcelain
+          # Only what a bump may write: manifests, pins, locks, plugin
+          # manifests, the lockfile, and claude-code's generated runtime that
+          # embeds the version. Anything else means a build wrote where it
+          # must not, and the run stops here.
+          git status --porcelain | awk '{print $2}' | grep -Ev \
+            '^(package-lock\.json|packages/[a-z-]+/(package\.json|contracts/relay-v1\.lock\.json|plugin/contracts/relay-v1\.lock\.json|\.claude-plugin/(plugin|marketplace)\.json|plugin/\.claude-plugin/plugin\.json|runtime/server\.mjs|plugin/runtime/server\.mjs))$' \
+            && { echo "unexpected paths changed" >&2; exit 1; } || true
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package-lock.json packages
+          git commit -F - <<'EOF'
+          release: version the changed staging packages automatically
 
-  publish:
-    needs: package
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 15
-    environment: npm-staging
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ env.RELEASE_SHA }}
-          persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version-file: .nvmrc
-          registry-url: https://registry.npmjs.org/
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
-        with:
-          name: relay-${{ env.RELEASE_PACKAGE }}-${{ github.sha }}
-          path: .release-tmp/package-staging
-      - name: Publish or reconcile exactly once
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
-        run: |
-          # npm@12.0.2 supports node ^22.22.2 || ^24.15.0 || >=26.0.0.
-          # Bumping this pin requires re-checking .nvmrc against that range.
-          npm install --global npm@12.0.2 --no-audit --no-fund
-          TARBALL="$(find .release-tmp/package-staging -name '*.tgz' -print -quit)"
-          node scripts/publish-package-staging.mjs \
-            --tarball "$TARBALL" \
-            --package '${{ needs.package.outputs.workspace }}' \
-            --receipt .release-tmp/package-staging/publish.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
-        with:
-          name: relay-${{ env.RELEASE_PACKAGE }}-publish-${{ github.sha }}
-          path: .release-tmp/package-staging/
-          if-no-files-found: error
-          retention-days: 30
+          scripts/staging-bump.mjs compared each package's packed files with
+          the tarball npm holds and moved the version of every package whose
+          content changed, pinning dependents to the versions decided here.
+          The plan is the staging-bump artifact of this run.
+          EOF
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:staging
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git log -1 --format='%H %s'
+
+  sdk:
+    needs: bump
+    if: ${{ !cancelled() && needs.bump.result == 'success' && contains(needs.bump.outputs.changed, ',sdk,') }}
+    uses: ./.github/workflows/staging-package.yml
+    with:
+      package: sdk
+      sha: ${{ needs.bump.outputs.sha }}
+    secrets:
+      NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+
+  chat-sdk-adapter:
+    needs: [bump, sdk]
+    if: ${{ !cancelled() && needs.bump.result == 'success' && needs.sdk.result != 'failure' && contains(needs.bump.outputs.changed, ',chat-sdk-adapter,') }}
+    uses: ./.github/workflows/staging-package.yml
+    with:
+      package: chat-sdk-adapter
+      sha: ${{ needs.bump.outputs.sha }}
+    secrets:
+      NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+
+  cli:
+    needs: [bump, sdk, chat-sdk-adapter]
+    if: ${{ !cancelled() && needs.bump.result == 'success' && needs.sdk.result != 'failure' && needs.chat-sdk-adapter.result != 'failure' && contains(needs.bump.outputs.changed, ',cli,') }}
+    uses: ./.github/workflows/staging-package.yml
+    with:
+      package: cli
+      sha: ${{ needs.bump.outputs.sha }}
+    secrets:
+      NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+
+  mcp:
+    needs: [bump, sdk, cli]
+    if: ${{ !cancelled() && needs.bump.result == 'success' && needs.sdk.result != 'failure' && needs.cli.result != 'failure' && contains(needs.bump.outputs.changed, ',mcp,') }}
+    uses: ./.github/workflows/staging-package.yml
+    with:
+      package: mcp
+      sha: ${{ needs.bump.outputs.sha }}
+    secrets:
+      NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+
+  openclaw:
+    needs: [bump, sdk, mcp]
+    if: ${{ !cancelled() && needs.bump.result == 'success' && needs.sdk.result != 'failure' && needs.mcp.result != 'failure' && contains(needs.bump.outputs.changed, ',openclaw,') }}
+    uses: ./.github/workflows/staging-package.yml
+    with:
+      package: openclaw
+      sha: ${{ needs.bump.outputs.sha }}
+    secrets:
+      NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+
+  claude-code:
+    needs: [bump, sdk, openclaw]
+    if: ${{ !cancelled() && needs.bump.result == 'success' && needs.sdk.result != 'failure' && needs.openclaw.result != 'failure' && contains(needs.bump.outputs.changed, ',claude-code,') }}
+    uses: ./.github/workflows/staging-package.yml
+    with:
+      package: claude-code
+      sha: ${{ needs.bump.outputs.sha }}
+    secrets:
+      NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
