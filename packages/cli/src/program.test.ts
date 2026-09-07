@@ -23,6 +23,7 @@ const makeClient = () => {
     addParticipant: vi.fn(async () => ({ status: "accepted" })),
     removeParticipant: vi.fn(async () => ({ status: "accepted" })),
     webhookEvents: vi.fn(async () => ({ events: [], doc_url: "https://docs.relayapp.im" })),
+    listMessages: vi.fn(async () => ({ messages: [], nextCursor: null })),
   };
   const client = {
     chats: {
@@ -31,7 +32,7 @@ const makeClient = () => {
       retrieve: methods.retrieveChat,
       update: methods.updateChat,
       startTyping: methods.startTyping,
-      messages: { send: methods.sendMessage },
+      messages: { send: methods.sendMessage, list: methods.listMessages },
       shareContactCard: methods.shareCard,
       participants: {
         add: methods.addParticipant,
@@ -80,6 +81,20 @@ describe("CLI command routing", () => {
     expect(fake.methods.listChats).toHaveBeenCalledWith({ limit: 20 });
     expect(await run(["chats", "typing", "start", "chat-1"])).toBe(0);
     expect(fake.methods.startTyping).toHaveBeenCalledWith("chat-1");
+  });
+
+  it("passes --order through to the Chat message list and rejects other values", async () => {
+    expect(await run([
+      "chats", "messages", "list", "chat-1", "--limit", "20", "--order", "desc",
+    ])).toBe(0);
+    expect(fake.methods.listMessages).toHaveBeenCalledWith("chat-1", {
+      limit: 20,
+      order: "desc",
+    });
+    expect(await run([
+      "chats", "messages", "list", "chat-1", "--order", "newest",
+    ])).not.toBe(0);
+    expect(fake.methods.listMessages).toHaveBeenCalledTimes(1);
   });
 
   it("requires stable idempotency for sends", async () => {

@@ -191,15 +191,21 @@ export const createRelayMcpServer = (
     {
       title: "List Relay Messages",
       description: "List Messages in one Relay Chat.",
-      inputSchema: z.object({ chat_id: uuid, cursor, limit }),
+      inputSchema: z.object({
+        chat_id: uuid,
+        cursor,
+        limit,
+        order: z.enum(["asc", "desc"]).optional(),
+      }),
       annotations: readAnnotations,
     },
-    async ({ chat_id, cursor: next, limit: pageSize }) => operation(
+    async ({ chat_id, cursor: next, limit: pageSize, order }) => operation(
       dependencies,
       async (client) => {
         const page = await client.chats.messages.list(chat_id, {
           ...(next ? { cursor: next } : {}),
           ...(pageSize === undefined ? {} : { limit: pageSize }),
+          ...(order ? { order } : {}),
         });
         return { messages: page.messages, next_cursor: page.nextCursor };
       },

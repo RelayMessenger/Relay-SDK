@@ -280,11 +280,15 @@ export interface MessageCreateResponse {
 export interface MessageListParams {
   cursor?: string;
   limit?: number;
-}
-
-export interface MessageThreadParams extends MessageListParams {
+  /**
+   * `asc` (default) lists oldest first; `desc` opens on the newest Messages
+   * and pages toward older ones. A cursor is only valid with the order it
+   * was returned for.
+   */
   order?: "asc" | "desc";
 }
+
+export type MessageThreadParams = MessageListParams;
 
 /**
  * `PATCH /v1/messages/{messageId}`. Only text parts can be edited, up to five
