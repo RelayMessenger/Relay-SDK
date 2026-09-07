@@ -93,7 +93,18 @@ if (!existing.found) {
     "public",
     "--tag",
     "staging",
-    "--provenance",
+    // Staging publishes ship without npm attestation since 2026-09-07. npm's
+    // attestation is verified by Sigstore against GitHub-hosted runner
+    // identity, and every job in publish-package-staging.yml runs on
+    // Blacksmith, so the registry answers
+    // E422 "Unsupported GitHub Actions runner".
+    // The explicit negation is load-bearing, not an omission. It is the one
+    // setting that outranks the "provenance": true still declared in each
+    // package's publishConfig, because npm drops any publishConfig key that
+    // also appears as a CLI flag (npm 12.0.2 lib/commands/publish.js), and it
+    // also stops npm's OIDC helper from re-enabling attestation, which it does
+    // only while the setting sits at its default.
+    "--no-provenance",
     "--registry",
     registry,
   ], true);

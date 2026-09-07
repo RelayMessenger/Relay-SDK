@@ -161,4 +161,41 @@ assert.match(
   "registry integrity reconciliation must still require exactly one match",
 );
 
+// Sigstore verifies an npm attestation against GitHub-hosted runner identity
+// and rejects every other runner with
+// E422 "Unsupported GitHub Actions runner" (measured 2026-09-07 on staging
+// d2e7caf). While any publish job runs on a Blacksmith label, the staging
+// publish must ask npm for no attestation, and must ask for it explicitly:
+// five packages still declare "provenance": true in publishConfig, and only a
+// CLI flag outranks publishConfig (npm 12.0.2 lib/commands/publish.js).
+const blacksmithRunners = [
+  ...publish.matchAll(/runs-on:\s*(blacksmith-[\w.-]+)/gu),
+].map(([, label]) => label);
+if (blacksmithRunners.length > 0) {
+  for (
+    const [source, text] of [
+      ["publish-package-staging.yml", publish],
+      ["publish-package-staging.mjs", publishProgram],
+    ]
+  ) {
+    assert.doesNotMatch(
+      text,
+      /--provenance\b/u,
+      `${source} requests an npm attestation that Sigstore rejects on ${
+        blacksmithRunners[0]
+      }`,
+    );
+    assert.doesNotMatch(
+      text,
+      /NPM_CONFIG_PROVENANCE/u,
+      `${source} sets NPM_CONFIG_PROVENANCE on ${blacksmithRunners[0]}`,
+    );
+  }
+  assert.match(
+    publishProgram,
+    /"--no-provenance"/u,
+    "the staging publish must disable the npm attestation explicitly, so no publishConfig can re-enable it",
+  );
+}
+
 console.log("validated immutable CI and staging-only package publication");
