@@ -101,6 +101,25 @@ describe("Relay v1 request shapes", () => {
     expect(Object.hasOwn(JSON.parse(String(calls[0]!.body)), "hide_history")).toBe(hideHistory !== undefined);
   });
 
+  it("carries order=desc on the Chat message list query", async () => {
+    const calls: Captured[] = [];
+    const client = new Relay({
+      apiKey: "agent-token",
+      baseURL: "https://api.relayapp.im",
+      fetch: responder(calls),
+    });
+    await client.chats.messages.list("chat-id", {
+      cursor: "message-cursor",
+      limit: 50,
+      order: "desc",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url.pathname).toBe("/v1/chats/chat-id/messages");
+    expect(calls[0]!.url.searchParams.get("order")).toBe("desc");
+    expect(calls[0]!.url.searchParams.get("cursor")).toBe("message-cursor");
+    expect(calls[0]!.url.searchParams.get("limit")).toBe("50");
+  });
+
   it("exposes every current operation and no extra HTTP route", async () => {
     const calls: Captured[] = [];
     const client = new Relay({

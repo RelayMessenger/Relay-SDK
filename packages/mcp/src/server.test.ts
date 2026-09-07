@@ -12,6 +12,10 @@ const fakeRelay = () => {
       chats: [{ id: CHAT_ID }],
       nextCursor: null,
     })),
+    listMessages: vi.fn(async () => ({
+      messages: [{ id: MESSAGE_ID }],
+      nextCursor: null,
+    })),
     send: vi.fn(async () => ({
       chat_id: CHAT_ID,
       message: { id: MESSAGE_ID },
@@ -24,7 +28,7 @@ const fakeRelay = () => {
   const client = {
     chats: {
       listChats: calls.listChats,
-      messages: { send: calls.send },
+      messages: { send: calls.send, list: calls.listMessages },
       shareContactCard: calls.shareCard,
     },
     messages: { addReaction: calls.react, create: calls.sendToUser },
@@ -111,6 +115,26 @@ describe("explicit Relay MCP tools", () => {
         idempotency_key: "logical-send-1",
       },
     });
+  });
+
+  it("passes order through relay_list_messages and rejects other values", async () => {
+    const fake = fakeRelay();
+    const client = await connect(fake.client);
+    const listed = await client.callTool({
+      name: "relay_list_messages",
+      arguments: { chat_id: CHAT_ID, limit: 10, order: "desc" },
+    });
+    expect(listed.isError).not.toBe(true);
+    expect(fake.calls.listMessages).toHaveBeenCalledWith(CHAT_ID, {
+      limit: 10,
+      order: "desc",
+    });
+    const rejected = await client.callTool({
+      name: "relay_list_messages",
+      arguments: { chat_id: CHAT_ID, order: "newest" },
+    });
+    expect(rejected.isError).toBe(true);
+    expect(fake.calls.listMessages).toHaveBeenCalledTimes(1);
   });
 
   it("rejects invalid inputs before Relay mutations", async () => {

@@ -436,14 +436,24 @@ export const createProgram = (
     .argument("<chat-id>")
     .option("--cursor <cursor>")
     .option("--limit <number>", "page size", positiveInteger)
+    .option("--order <order>", "asc (default, oldest first) or desc (newest first)")
     .action(async (
       chatID: string,
-      options: { cursor?: string; limit?: number },
+      options: { cursor?: string; limit?: number; order?: string },
       command: Command,
     ) => {
+      if (options.order && options.order !== "asc" && options.order !== "desc") {
+        throw new Error("--order must be asc or desc.");
+      }
       const page = await (await clientFor(command)).chats.messages.list(
         chatID,
-        options,
+        {
+          ...(options.cursor ? { cursor: options.cursor } : {}),
+          ...(options.limit ? { limit: options.limit } : {}),
+          ...(options.order
+            ? { order: options.order as "asc" | "desc" }
+            : {}),
+        },
       );
       output({ messages: page.messages, next_cursor: page.nextCursor });
     });

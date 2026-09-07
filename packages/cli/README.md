@@ -56,7 +56,7 @@ Every command prints JSON.
 ```sh
 relay chats list --limit 20
 relay chats get "$CHAT_ID"
-relay chats messages list "$CHAT_ID" --limit 50
+relay chats messages list "$CHAT_ID" --limit 50 --order desc   # newest first; omit --order for oldest first
 relay chats messages send "$CHAT_ID" --text "Hello" \
   --idempotency-key "$(uuidgen)"
 relay messages send --to advait --text "Hello" \
