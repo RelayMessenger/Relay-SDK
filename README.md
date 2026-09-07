@@ -115,3 +115,44 @@ npm run staging:validate
 Each publishable workspace retains its own README, package manifest, tests, and
 installed-package proof. Cookbook recipes are complete applications, not
 placeholder snippets.
+
+## Production release
+
+Two npm channels, kept apart:
+
+- Staging publishes `X.Y.Z-staging.N` prereleases under the `staging`
+  dist-tag from the `staging` branch
+  ([`publish-package-staging.yml`](.github/workflows/publish-package-staging.yml)).
+- Production publishes plain `X.Y.Z` versions under the `latest` dist-tag,
+  and only from a tag pushed to a commit on `main`
+  ([`release-*.yml`](.github/workflows), driven by
+  [`scripts/release-package.mjs`](scripts/release-package.mjs)). The workflow
+  refuses a `-staging.` version, and `npm install <name>` resolves `latest`.
+
+Each package has its own tag series, `<prefix><version>` from
+[`scripts/release-packages.mjs`](scripts/release-packages.mjs):
+
+| Package | Tag |
+| --- | --- |
+| `@relaymessenger/sdk` | `sdk-v0.3.0` |
+| `@relaymessenger/chat-sdk-adapter` | `chat-sdk-v0.3.0` |
+| `@relaymessenger/cli` | `relaymessenger-v0.5.0` |
+| `@relaymessenger/mcp` | `mcp-v0.1.0` |
+| `@relaymessenger/openclaw-plugin` | `openclaw-v0.4.0` |
+| `relay-claude-channel` | `claude-channel-v0.3.0` |
+
+Order: `sdk-v*` first, then `chat-sdk-v*`. The other four pin an exact
+published `@relaymessenger/sdk` version, and their release validation installs
+that version from npm, so they are tagged only after the SDK they depend on is
+on the registry and their manifests name it.
+
+Cut a release from `main`, one tag per package, and read the registry back:
+
+```bash
+git checkout main && git pull --ff-only
+git tag sdk-v0.3.0 && git push origin sdk-v0.3.0
+npm view @relaymessenger/sdk dist-tags
+```
+
+Dry run first: `workflow_dispatch` on any `release-*.yml` with `dry_run`
+validates, packs, and runs `npm publish --dry-run`, then stops.
