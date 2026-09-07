@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { appendFileSync, readFileSync } from "node:fs";
+import { releaseEntry, releaseKeys } from "./release-packages.mjs";
 
 const valueAfter = (name) => {
   const index = process.argv.indexOf(name);
@@ -8,41 +9,12 @@ const valueAfter = (name) => {
 
 const key = valueAfter("--key");
 const output = process.env.GITHUB_OUTPUT;
-const catalog = {
-  sdk: {
-    directory: "packages/sdk",
-    workspace: "@relaymessenger/sdk",
-    validate: "validate:sdk",
-  },
-  "chat-sdk-adapter": {
-    directory: "packages/chat-sdk-adapter",
-    workspace: "@relaymessenger/chat-sdk-adapter",
-    validate: "validate:chat-sdk",
-  },
-  cli: {
-    directory: "packages/cli",
-    workspace: "@relaymessenger/cli",
-    validate: "validate:cli",
-  },
-  mcp: {
-    directory: "packages/mcp",
-    workspace: "@relaymessenger/mcp",
-    validate: "validate:mcp",
-  },
-  openclaw: {
-    directory: "packages/openclaw",
-    workspace: "@relaymessenger/openclaw-plugin",
-    validate: "validate:openclaw",
-  },
-  "claude-code": {
-    directory: "packages/claude-code",
-    workspace: "relay-claude-channel",
-    validate: "validate:claude-code",
-  },
-};
 
-assert.ok(key && key in catalog, `Unknown release package: ${key}`);
-const selected = catalog[key];
+assert.ok(
+  key && releaseKeys.includes(key),
+  `Unknown release package: ${key}`,
+);
+const selected = releaseEntry(key);
 const manifest = JSON.parse(
   readFileSync(`${selected.directory}/package.json`, "utf8"),
 );
@@ -56,8 +28,13 @@ assert.equal(
 );
 assert.equal(manifest.repository?.directory, selected.directory);
 
+// Only the scalar fields the staging workflow reads. The catalog also carries
+// release-workflow data (tag prefix, workflow file, registry smoke) that must
+// never reach GITHUB_OUTPUT, where a non-scalar would corrupt the file.
 const resolved = {
-  ...selected,
+  directory: selected.directory,
+  workspace: selected.workspace,
+  validate: selected.validate,
   key,
   version: manifest.version,
 };
