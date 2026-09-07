@@ -148,7 +148,17 @@ for (const [position, key] of stagingOrder.entries()) {
 const publish = readFileSync(".github/workflows/staging-package.yml", "utf8");
 assert.match(publish, /environment:\s*npm-staging/u);
 assert.match(publish, /NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_PUBLISH_TOKEN \}\}/u);
-assert.match(publish, /id-token:\s*write/u);
+// A called workflow may only keep or reduce the caller's GITHUB_TOKEN
+// permissions; the staging release grants contents: read, and a callee that
+// asked for id-token: write made GitHub refuse the run at startup
+// (run 34153613220, 2026-09-07). The publish needs no OIDC token: it uses the
+// environment credential and --no-provenance.
+assert.doesNotMatch(
+  publish,
+  /^\s*[a-z-]+:\s*write$/mu,
+  "staging-package.yml asks for a write permission its caller never grants",
+);
+assert.doesNotMatch(staging, /id-token/u, "the staging release needs no OIDC token");
 assert.match(publish, /github\.repository == 'RelayMessenger\/Relay-SDK'/u);
 assert.match(publish, /github\.ref == 'refs\/heads\/staging'/u);
 assert.match(

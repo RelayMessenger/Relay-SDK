@@ -7,7 +7,9 @@ name: Staging package
 #
 # Every job runs on Blacksmith (owner ruling, 2026-09-07), so the publish
 # carries no npm attestation and authenticates with the npm-staging
-# environment's NPM_PUBLISH_TOKEN.
+# environment's NPM_PUBLISH_TOKEN. This file may never ask for a permission
+# publish-package-staging.yml does not grant (GitHub: called workflows can
+# only downgrade the caller's GITHUB_TOKEN permissions).
 
 on:
   workflow_call:
@@ -126,9 +128,13 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
     environment: npm-staging
+    # No write permission of any kind: the caller grants contents: read and
+    # a called workflow may only keep or reduce what it is passed; asking for
+    # id-token: write here made GitHub refuse the whole run at startup
+    # (run 34153613220, 2026-09-07). The publish authenticates with the
+    # environment token and asks for no attestation, so it needs no OIDC token.
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
