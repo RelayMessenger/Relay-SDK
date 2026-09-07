@@ -3,7 +3,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import type { AuthContext } from "./auth.js";
 import { collectLocalTokens, validateApiURL } from "./auth.js";
 import { safeErrorMessage } from "./redact.js";
-import { createRelayMcpServer } from "./server.js";
+import { PACKAGE_VERSION, createRelayMcpServer } from "./server.js";
 
 const usage = `Usage: relay-mcp [options]
 
@@ -47,7 +47,7 @@ try {
   if (parsed === "help") {
     process.stdout.write(usage);
   } else if (parsed === "version") {
-    process.stdout.write("0.1.0-staging.6\n");
+    process.stdout.write(`${PACKAGE_VERSION}\n`);
   } else {
     serveStdio(
       () => createRelayMcpServer({ authContext: parsed }),

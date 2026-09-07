@@ -1,14 +1,12 @@
 // The one driver behind every tag-triggered release workflow.
 //
-// Six packages used to release through six near-identical workflow files and
-// six near-identical scripts. Everything that actually differs between them is
-// data in scripts/release-packages.mjs, so this file holds the logic once and
-// the workflows pass only `--package <key>`.
+// Everything that differs between the six packages is data in
+// scripts/release-packages.mjs, so this file holds the logic once and the
+// callers (scripts/release-run.mjs, the staging publish) pass `--package <key>`.
 //
 // Subcommands:
 //   resolve         write the catalog entry to GITHUB_OUTPUT
 //   check-version   assert the manifest names this package at a sane version
-//   check-tag       also assert HEAD carries exactly this package's tag
 //   pack            pack one tarball, write a release manifest, set outputs
 //   registry-state  set published=true|false so a retry never republishes
 //   verify-registry install the published version clean and exercise it
@@ -42,7 +40,7 @@ const valueAfter = (name) => {
 const entry = releaseEntry(valueAfter("--package") ?? "");
 const manifestPath = resolve(repoRoot, entry.directory, "package.json");
 const pkg = JSON.parse(readFileSync(manifestPath, "utf8"));
-const expectedTag = `${entry.tagPrefix}${pkg.version}`;
+const expectedTag = `${entry.tagPrefix}${pkg.version}`; // the record tag for THIS version
 const spec = `${pkg.name}@${pkg.version}`;
 
 const setOutput = (name, value) => {
@@ -69,37 +67,6 @@ function checkVersion() {
   );
   assert.equal(pkg.repository?.directory, entry.directory);
   say(`release identity: ${spec} from ${entry.directory}`);
-}
-
-function checkTag(tag) {
-  checkVersion();
-  assert.equal(tag, expectedTag, `release tag must be exactly ${expectedTag}`);
-  // npm puts a published version on the `latest` dist-tag unless told
-  // otherwise, and this path deliberately does not pass --tag: a production
-  // release IS latest. Every version in this repository is currently
-  // `X.Y.Z-staging.N`, so a tag cut before those are settled would put a
-  // staging build in front of every `npm install`. The staging channel has its
-  // own workflow, publish-package-staging.yml, which pins --tag staging.
-  assert.doesNotMatch(
-    pkg.version,
-    /-staging\./u,
-    `${spec} is a staging version; a pushed tag publishes to the latest `
-      + `dist-tag. Release a settled version, or publish this one through `
-      + `publish-package-staging.yml.`,
-  );
-  // Several packages can release from one commit, so the check is that OUR tag
-  // points at HEAD, not that it is the only tag here: `git describe
-  // --exact-match` picks a single winner among co-located tags and failed two
-  // of three releases cut from the same merge.
-  const pointing = execFileSync("git", ["tag", "--points-at", "HEAD"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  }).trim().split("\n").filter(Boolean);
-  assert.ok(
-    pointing.includes(tag),
-    `checked-out commit is tagged [${pointing.join(", ")}], not ${tag}`,
-  );
-  say(`release tag/version contract passed (${tag})`);
 }
 
 function resolveEntry() {
@@ -351,14 +318,13 @@ async function verifyRegistry() {
 const command = process.argv[2];
 if (command === "resolve") resolveEntry();
 else if (command === "check-version") checkVersion();
-else if (command === "check-tag") checkTag(valueAfter("--tag") ?? "");
 else if (command === "pack") pack(valueAfter("--destination") ?? ".release-tmp");
 else if (command === "registry-state") registryState();
 else if (command === "verify-registry") await verifyRegistry();
 else {
   throw new Error(
-    "usage: release-package.mjs <resolve|check-version|check-tag|pack|"
-      + "registry-state|verify-registry> --package <key> [--tag <tag>] "
+    "usage: release-package.mjs <resolve|check-version|pack|"
+      + "registry-state|verify-registry> --package <key> "
       + "[--destination <dir>]",
   );
 }

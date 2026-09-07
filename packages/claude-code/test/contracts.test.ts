@@ -20,7 +20,11 @@ describe("published artifact contracts", () => {
     );
     expect(pkg.name).toBe("relay-claude-channel");
     expect(pkg.packageManager).toBe("npm@12.0.2");
-    expect(pkg.version).toBe("0.3.0-staging.6");
+    expect(pkg.version).toMatch(
+      process.env.RELAY_RELEASE === "1"
+        ? /^\d+\.\d+\.\d+$/u
+        : /^\d+\.\d+\.\d+-staging\.\d+$/u,
+    );
     expect(pkg.version).toBe(plugin.version);
     expect(pkg.version).toBe(marketplace.plugins[0].version);
     expect(pkg.publishConfig).toEqual({
@@ -56,7 +60,7 @@ describe("published artifact contracts", () => {
     expect(read("README.md")).toContain(
       "/absolute/path/to/Relay-SDK/packages/claude-code",
     );
-    expect(pkg.dependencies["@relaymessenger/sdk"]).toBe("0.3.0-staging.8");
+    expect(pkg.dependencies["@relaymessenger/sdk"]).toBe(lock.relaySdk.version);
     expect(lock.relayServer.commit).toBe(
       "f2f36e5284dcfb365af9759f5ee5bfa7954b6521",
     );

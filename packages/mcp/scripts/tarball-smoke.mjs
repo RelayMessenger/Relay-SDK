@@ -110,6 +110,9 @@ const installedManifest = JSON.parse(
   ),
 );
 assert.equal(installedManifest.dependencies["@modelcontextprotocol/server"], "2.0.0");
-assert.equal(installedManifest.dependencies["@relaymessenger/sdk"], "0.3.0-staging.8");
+assert.equal(
+  installedManifest.dependencies["@relaymessenger/sdk"],
+  sourceManifest.dependencies["@relaymessenger/sdk"],
+);
 assert.equal(installedManifest.dependencies["@modelcontextprotocol/client"], undefined);
 console.log(`MCP tarball install/protocol smoke OK: ${tarball}`);
