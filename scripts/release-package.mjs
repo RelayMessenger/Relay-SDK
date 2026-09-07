@@ -74,6 +74,19 @@ function checkVersion() {
 function checkTag(tag) {
   checkVersion();
   assert.equal(tag, expectedTag, `release tag must be exactly ${expectedTag}`);
+  // npm puts a published version on the `latest` dist-tag unless told
+  // otherwise, and this path deliberately does not pass --tag: a production
+  // release IS latest. Every version in this repository is currently
+  // `X.Y.Z-staging.N`, so a tag cut before those are settled would put a
+  // staging build in front of every `npm install`. The staging channel has its
+  // own workflow, publish-package-staging.yml, which pins --tag staging.
+  assert.doesNotMatch(
+    pkg.version,
+    /-staging\./u,
+    `${spec} is a staging version; a pushed tag publishes to the latest `
+      + `dist-tag. Release a settled version, or publish this one through `
+      + `publish-package-staging.yml.`,
+  );
   // Several packages can release from one commit, so the check is that OUR tag
   // points at HEAD, not that it is the only tag here: `git describe
   // --exact-match` picks a single winner among co-located tags and failed two
