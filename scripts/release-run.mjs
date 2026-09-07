@@ -4,6 +4,7 @@
 //
 //   node scripts/release-run.mjs            publish (push to main)
 //   node scripts/release-run.mjs --dry-run  derive, pack, `npm publish --dry-run`, stop
+//   node scripts/release-run.mjs --dry-run --plan-only  print the plan, stop
 //
 // Environment:
 //   NODE_AUTH_TOKEN          npm publish credential (publish only)
@@ -21,6 +22,8 @@ import { releasePackages } from "./release-packages.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const dryRun = process.argv.includes("--dry-run");
+const planOnly = process.argv.includes("--plan-only");
+assert.ok(!planOnly || dryRun, "--plan-only is a dry-run option");
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const registry = "https://registry.npmjs.org/";
 const say = (message) => process.stdout.write(`${message}\n`);
@@ -66,6 +69,11 @@ for (const row of plan) {
   say(`  ${row.key.padEnd(16)} ${row.name}@${row.current} -> ${row.version}  ${row.action}${
     assumed.has(`${row.name}@${row.version}`) ? " (assumed published)" : ""
   }  tag ${row.tag}`);
+}
+
+if (planOnly) {
+  say(`release plan only: ${plan.map((row) => `${row.key}=${row.action}`).join(" ")}`);
+  process.exit(0);
 }
 
 const sdkRow = plan.find((row) => row.key === "sdk");

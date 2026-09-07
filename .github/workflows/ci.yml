@@ -30,3 +30,44 @@ jobs:
       - run: npm run validate
       - run: npm audit --omit=dev --audit-level=high
       - run: npm audit signatures
+
+  # The production release proves itself before it can run: the same
+  # derivation, packing, and `npm publish --dry-run` that release.yml performs
+  # on a push to main, here on every change. GitHub only dispatches a
+  # workflow that already exists on the default branch, so this is also the
+  # only way a change to the release itself is rehearsed before it merges.
+  release-dry-run:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - run: npm install --global npm@11.19.1 --no-audit --no-fund
+      - run: npm ci
+      - run: node --test scripts/release-derive.test.mjs
+      - run: npm run build --workspace @relaymessenger/sdk
+      - run: npm install --global npm@12.0.2 --no-audit --no-fund
+      - name: Rehearse a skip for packages npm already has
+        env:
+          NODE_AUTH_TOKEN: dry-run
+          RELAY_ASSUME_PUBLISHED: "@relaymessenger/sdk@0.0.0-assumed"
+        run: |
+          set -euo pipefail
+          # An assumed version that matches nothing leaves the plan at
+          # publish for all six...
+          node scripts/release-run.mjs --dry-run --plan-only | tee plan-a.txt
+          grep -q 'release plan only: sdk=publish chat-sdk-adapter=publish cli=publish mcp=publish openclaw=publish claude-code=publish' plan-a.txt
+          # ...and assuming the derived sdk version is on npm must flip it.
+          sdk_version="$(node -e 'import("./scripts/release-derive.mjs").then(m => console.log(m.deriveVersion(JSON.parse(require("fs").readFileSync("packages/sdk/package.json","utf8")).version)))')"
+          RELAY_ASSUME_PUBLISHED="@relaymessenger/sdk@${sdk_version}" node scripts/release-run.mjs --dry-run --plan-only | tee plan-b.txt
+          grep -q 'release plan only: sdk=skip chat-sdk-adapter=publish' plan-b.txt
+      - name: Dry-run the release
+        env:
+          NODE_AUTH_TOKEN: dry-run
+        run: node scripts/release-run.mjs --dry-run
