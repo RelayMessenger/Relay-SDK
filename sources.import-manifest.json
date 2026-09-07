@@ -1240,7 +1240,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "scripts/staging-release-guard.mjs",
       "source_sha256": "43edc56373a240cbd961942f5160082ac2d189737ab08826c416d2d7afef1cd5",
-      "destination_sha256": "83341d13b91f142f7d6fbbc2745cacd5c6cff09e18469696306d4dd6ed6676c2",
+      "destination_sha256": "1fbefd372f9cb5cf1bb7847a8f6a47db46af102e1190c9bd021e2446df787de6",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1801,7 +1801,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "scripts/staging-release-guard.mjs",
       "source_sha256": "c9a61b3af294a56240430907b2923b7283d184a6df8147164c89d73f76b0ab81",
-      "destination_sha256": "9483b3667adb405d626478b10de3b4b070560ea091b8e9c7e47218b632e56ee8",
+      "destination_sha256": "f8bb400e43bd95ad22a233116e83881d94b9e1689ae0ce7945411b8282f2b913",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
