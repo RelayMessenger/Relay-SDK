@@ -8,6 +8,7 @@ import type { RelayStore } from "./store.js";
 
 export interface RelayMessageSender {
   chats: {
+    markAsRead(chatId: string): Promise<void>;
     messages: {
       send(
         chatId: string,
@@ -23,11 +24,15 @@ function metricsReply(data: MessageWebhookData): string {
     .map((part) => part.value)
     .join("\n");
   const words = text.trim() ? text.trim().split(/\s+/u).length : 0;
+  const characters = Array.from(text).length;
   const attachments = data.parts
     .filter((part) => part.type === "media")
     .length;
-  return `${words} word${words === 1 ? "" : "s"}, `
-    + `${attachments} attachment${attachments === 1 ? "" : "s"}`;
+  return [
+    `${words} word${words === 1 ? "" : "s"}`,
+    `${characters} character${characters === 1 ? "" : "s"}`,
+    `${attachments} attachment${attachments === 1 ? "" : "s"}`,
+  ].join(", ");
 }
 
 export function shouldReply(data: MessageWebhookData): boolean {
@@ -53,6 +58,10 @@ export async function processAcceptedEvent(
   ) {
     return;
   }
+  // Read is a separate claim from the reply and never advances on its own
+  // (docs quickstart, step 6): mark the Chat Read once the inbound Message has
+  // been read, then send the reply independently.
+  await relay.chats.markAsRead(event.data.chat.id);
   await relay.chats.messages.send(event.data.chat.id, {
     message: {
       parts: [{ type: "text", value: metricsReply(event.data) }],

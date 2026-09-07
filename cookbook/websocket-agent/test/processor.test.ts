@@ -40,16 +40,23 @@ const EVENT = {
 } satisfies RelayWebhookEvent;
 
 describe("WebSocket inbox processing", () => {
-  it("uses the event identity for an idempotent reply", async () => {
-    const send = vi.fn().mockResolvedValue({});
+  it("marks the Chat Read, then uses the event identity for an idempotent reply", async () => {
+    const order: string[] = [];
+    const markAsRead = vi.fn(async () => { order.push("read"); });
+    const send = vi.fn(async () => { order.push("send"); return {}; });
 
     await processAcceptedEvent({
-      chats: { messages: { send } },
+      chats: { markAsRead, messages: { send } },
     }, EVENT);
 
+    expect(markAsRead).toHaveBeenCalledWith(EVENT.data.chat.id);
+    expect(order).toEqual(["read", "send"]);
     expect(send).toHaveBeenCalledWith(EVENT.data.chat.id, {
       message: {
-        parts: [{ type: "text", value: "2 words, 0 attachments" }],
+        parts: [{
+          type: "text",
+          value: "2 words, 7 characters, 0 attachments",
+        }],
         idempotency_key: `relay-example:websocket:${EVENT.event_id}`,
       },
     });

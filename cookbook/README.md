@@ -26,6 +26,24 @@ Chats allow at most 7 total participants, including the sender (`to`: at most 6)
 | [Send a voice memo](send-a-voice-memo/) | Upload one audio file and send it as a voice memo. |
 | [Trip planner agent](trip-planner-agent/) | Plan a group trip in the Chat: answer when mentioned, remember the rest, and update the plan when a constraint changes. |
 
+## Run a recipe on its own
+
+Every folder is a complete project. Copy it anywhere, then:
+
+```sh
+npm install
+npm start
+```
+
+Each Node recipe talks to `https://api.relayapp.im` unless `RELAY_API_URL`
+says otherwise, and needs only an Agent Token. Inside this checkout the same
+folders resolve the workspace SDK instead of the published one;
+`scripts/validate-cookbook-standalone.mjs` proves both on every push and
+explains the dependency range that makes it work. The Cloudflare Think recipe
+is the one exception: it pins exact package versions by contract, ships its
+own lockfile, and its `npm run dev` targets the staging Worker environment;
+see its README.
+
 The Cloudflare Think recipe is now the canonical starter. It supersedes the
 old standalone starter and the smaller duplicate Think example, which are not
 copied here.

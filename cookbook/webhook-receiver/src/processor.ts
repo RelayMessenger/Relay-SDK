@@ -8,6 +8,7 @@ import type { DurableInbox } from "./inbox.js";
 
 export interface RelayMessageSender {
   chats: {
+    markAsRead(chatId: string): Promise<void>;
     messages: {
       send(
         chatId: string,
@@ -58,6 +59,10 @@ export async function processAcceptedEvent(
     return;
   }
 
+  // Read is a separate claim from the reply and never advances on its own
+  // (docs quickstart, step 6): mark the Chat Read once the inbound Message has
+  // been read, then send the reply independently.
+  await relay.chats.markAsRead(event.data.chat.id);
   await relay.chats.messages.send(event.data.chat.id, {
     message: {
       parts: [{ type: "text", value: metricsReply(event.data) }],

@@ -29,14 +29,24 @@ Use a dedicated Agent Token and an empty subscription list.
 
 ```sh
 export RELAY_AGENT_TOKEN='<your Agent Token>'
-export RELAY_STATE_PATH=\"$HOME/.relay/examples/websocket/state.db\"
-export RELAY_API_URL='https://api.staging.relayapp.im'
-npm start --workspace @relaymessenger/cookbook-websocket-agent
+export RELAY_STATE_PATH="$HOME/.relay/examples/websocket/state.db"
+
+npm install
+npm start
 ```
 
+Copy this folder anywhere, or run it inside the Relay-SDK checkout with
+`npm start --workspace @relaymessenger/cookbook-websocket-agent`.
+
+`RELAY_API_URL` defaults to `https://api.relayapp.im`. To run against staging
+instead, export `RELAY_API_URL='https://api.staging.relayapp.im'` before
+starting.
+
 Stop with `SIGINT` or `SIGTERM`. The SDK reconnects retryable socket failures
-and refuses protocol gaps. The process makes no automatic Read or typing
-claim.
+and refuses protocol gaps. The SDK never marks a Chat Read on its own; the
+sample handler marks the Chat Read only for the Messages it answers, then
+replies with the word, character and attachment counts
+("2 words, 7 characters, 0 attachments"). It makes no typing claim.
 
 An absent state parent chain is created with owner-only directories. An
 existing immediate parent must be `0700`; higher ancestors must not be group-

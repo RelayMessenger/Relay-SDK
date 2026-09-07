@@ -15,8 +15,9 @@ The durable boundary is deliberate:
 
 A crash after step 3 is recovered from SQLite. A crash around the send repeats
 the same idempotency key, so Relay does not create a second Message. The sample
-handler returns text/attachment counts; replace only `metricsReply()` with
-your application result.
+handler marks the Chat Read, then replies with the word, character and
+attachment counts ("2 words, 7 characters, 1 attachment"); replace only
+`metricsReply()` with your application result.
 
 The example replies only in direct Chats and when the receiving Agent's
 structured Handle is mentioned in a group Chat. Its SQLite directory is mode
@@ -32,10 +33,18 @@ Webhook subscription:
 ```sh
 export RELAY_AGENT_TOKEN='<your Agent Token>'
 export RELAY_WEBHOOK_SECRET='<your signing secret>'
-export RELAY_INBOX_PATH=\"$HOME/.relay/examples/webhook/inbox.db\"
-export RELAY_API_URL='https://api.staging.relayapp.im'
-npm start --workspace @relaymessenger/cookbook-webhook-receiver
+export RELAY_INBOX_PATH="$HOME/.relay/examples/webhook/inbox.db"
+
+npm install
+npm start
 ```
+
+Copy this folder anywhere, or run it inside the Relay-SDK checkout with
+`npm start --workspace @relaymessenger/cookbook-webhook-receiver`.
+
+`RELAY_API_URL` defaults to `https://api.relayapp.im`. To run against staging
+instead, export `RELAY_API_URL='https://api.staging.relayapp.im'` before
+starting.
 
 Expose `POST /webhooks/relay` over HTTPS, then register it with the current v1
 resource:
