@@ -304,11 +304,9 @@ try {
 const installedPackagePath = require.resolve(
   "@relaymessenger/sdk/package.json",
 );
-assert.equal(
-  realpathSync(installedPackagePath),
-  realpathSync(join(root, "..", "sdk", "package.json")),
-  "Relay-SDK monorepo validation must use the canonical SDK workspace",
-);
+// During release preparation the SDK workspace may be a new unpublished
+// version. npm then installs OpenClaw's still-published exact dependency
+// beside it. Verify that installed artifact below, not its workspace location.
 const installedSource = JSON.parse(
   readFileSync(join(root, "..", "sdk", "SOURCE.json"), "utf8"),
 );
@@ -324,6 +322,11 @@ const installedTypes = readFileSync(
 assert.equal(
   digest("sha256", installedPackage),
   receipt.registry.installedArtifact.packageJsonSha256,
+);
+assert.equal(
+  digest("sha256", installedTypes),
+  receipt.registry.installedArtifact.typesSha256,
+  "installed SDK types must match the pinned registry artifact",
 );
 assert.match(installedTypes.toString("utf8"), /\bimage_url: string \| null;/u);
 assert.match(installedTypes.toString("utf8"), /\babout: string \| null;/u);
