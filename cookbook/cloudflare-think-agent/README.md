@@ -82,9 +82,9 @@ Message instead of creating a duplicate.
 - a staging agent and Agent Token from Relay Console
 
 The adapter release used by this staging branch is
-`@relaymessenger/chat-sdk-adapter@0.3.0-staging.6`, published to npm with
+`@relaymessenger/chat-sdk-adapter@0.3.0`, published to npm with
 provenance from Relay-SDK commit
-`1bbcb486b4a91860ee3527ce95d015883e4cc1ae`. Its imported adapter source is
+`4ac9a455b4d6d3703eb62530f55ba136373ae088`. Its imported adapter source is
 Relay Chat SDK commit `eecf94a4d38bc021917e54dfed57e268657c17af`.
 
 ## Local setup
@@ -318,12 +318,12 @@ Run neither guarded command without your own review and credentials.
 
 This revision is tested against:
 
-- Relay Server `f2f36e5284dcfb365af9759f5ee5bfa7954b6521`
+- Relay Server `24c577e9802e07d6c61718ebca12e84d79113727`
 - Relay Chat SDK `eecf94a4d38bc021917e54dfed57e268657c17af`
-- `@relaymessenger/chat-sdk-adapter@0.3.0-staging.6` npm integrity
-  `sha512-fwzha9KWu3oZax92vdYjxuPZ8HDLXCVF+rrL0ToxEryod06P5cbietmNU5U6sUntUX7ONIYfu43cvkyEem+Ykg==`
+- `@relaymessenger/chat-sdk-adapter@0.3.0` npm integrity
+  `sha512-aslkL6r5pj/frh/3QgJ0sqPoxHK2wTSmZ2OeFsfEBfyJGsWiljlhjzTjW+rAcGmy2vy0oE4x94agvnuaMZ/PzA==`
 - OpenAPI SHA-256
-  `df402b9bebcce58be2f7fa2e0a193e68896d7d34a6e4581dc4e5446a7854ab84`
+  `cf83012c6b241e60323543adb7059b49954fbf3d59d4d1fd1817bbfa19d32cdd`
 - public `ChatHandle.image_url` and `ChatHandle.about` fields, with no legacy
   aliases
 - Relay API `v1`

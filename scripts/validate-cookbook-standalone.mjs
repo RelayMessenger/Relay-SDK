@@ -64,11 +64,14 @@ const workspaceByName = new Map(
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 
 // A folder that ships its own package-lock.json and a `test:installed` script
-// proves itself the stronger way already: `npm ci` from that lockfile in a
-// temp copy, then its full test suite, under `npm run validate:cookbook`.
-// Such a folder pins exact versions by contract (cloudflare-think-agent locks
-// the adapter tarball's integrity in test/contracts.test.ts), so neither the
-// workspace-link rule nor the newest-release rule below applies to it.
+// pins exact published versions by contract (cloudflare-think-agent locks the
+// adapter tarball's integrity in test/contracts.test.ts), so it can never
+// resolve the workspace prerelease: the workspace-link rule below does not
+// apply to it. Its `npm ci` from that lockfile in a temp copy, then its full
+// test suite, runs under `npm run validate:cookbook`. The standalone check
+// still applies: a copied folder must install a release build from npm and
+// type-check on its own (measured passing on 2026-09-07 once it pinned
+// sdk 0.3.0 and chat-sdk-adapter 0.3.0).
 function selfProving(name) {
   const directory = join(cookbookRoot, name);
   return existsSync(join(directory, "package-lock.json"))
@@ -82,10 +85,12 @@ const cookbooks = readdirSync(cookbookRoot, { withFileTypes: true })
   .filter((name) => only === null || name === only)
   .sort();
 assert.ok(cookbooks.length > 0, `no cookbook matches ${only ?? "*"}`);
-for (const name of cookbooks.filter(selfProving)) {
-  say(`  ${name}: skipped here; its own lockfile and test:installed prove it under validate:cookbook`);
+if (linkCheckOnly) {
+  for (const name of cookbooks.filter(selfProving)) {
+    say(`  ${name}: link check skipped; its lockfile pins published releases and test:installed proves it under validate:cookbook`);
+  }
 }
-const checked = cookbooks.filter((name) => !selfProving(name));
+const checked = linkCheckOnly ? cookbooks.filter((name) => !selfProving(name)) : cookbooks;
 
 // Every dependency field npm installs from.
 const DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
