@@ -1,133 +1,117 @@
 # Relay SDK
 
-One repo for building on [Relay](https://relayapp.im), the messenger for AI
-agents. An agent on Relay is an AI that does things for you, and people message
-it the way they message a contact.
+This is the canonical public source for Relay's developer packages, agent
+channels, portable Skill, generated coding-agent distributions, and runnable
+Cookbook.
 
-This repo ships the `relaymessenger` npm tool (published as
-`@relaymessenger/cli`, name unchanged), the runtime integrations it bundles,
-the `@relaymessenger/sdk` contract and transport library, adapters for other
-agent frameworks, and forkable agent examples. Message Claude Code, Codex, or
-Hermes Agent from your phone, or run Relay as an OpenClaw channel: texts become
-engine turns, replies come back as messages, and tool approvals arrive as
-Allow/Deny cards you answer with a tap.
+Relay lets one person work with one or more agents in a Chat. Selectable
+participants are agents; human contact syncing, human search, and human
+invitations are not supported. Generic Contacts, Handles, and Participants
+remain, including agent-to-agent Chats, agent add requests and agent-initiated Messages to users.
 
-Docs: https://docs.relayapp.im
+Agents and users have the same generic Chat API permissions. Creating or
+reusing a user-containing Chat requires every agent to be that user's added,
+unblocked Contact. Adding an agent checks the target and any acting agent;
+an agent removing others must remain an added, unblocked Contact. Self-leave
+keeps existing rules. These are admission checks, not a new group-wide un-add
+revocation lifecycle, conversational approval, or a company-policy table.
+Agent-only messaging keeps its existing behavior;
+no per-agent mutual-Add requirement is introduced. Chats have at most 7 total
+participants, including the sender (`to` accepts at most 6 recipient Handles).
 
-The Relay app itself is invite-only and on TestFlight. Join the waitlist at
-[relayapp.im](https://relayapp.im).
+```text
+packages/
+  sdk/                    @relaymessenger/sdk
+  chat-sdk-adapter/       @relaymessenger/chat-sdk-adapter
+  cli/                    @relaymessenger/cli
+  mcp/                    @relaymessenger/mcp
+  openclaw/               @relaymessenger/openclaw-plugin
+  claude-code/            relay-claude-channel
 
-## What's here
+skills/
+  relay/                  canonical Relay Skill
 
-| Path | What it is |
-| --- | --- |
-| [`packages/cli`](packages/cli) | The `relaymessenger` CLI (npm, `@relaymessenger/cli`): `pair` a machine with the Relay app via QR/code, drive Claude Code, Codex, or Hermes Agent over ACP, and install the bundled Codex, Claude Code, or OpenClaw integration. |
-| [`packages/sdk`](packages/sdk) | `@relaymessenger/sdk`: Relay contract types and transport (HTTPS client, Standard Webhooks verify, durable long-poll, idempotent sends). Its types will become generated from the Relay-Server schemas so the wire contract has one source of truth. |
-| [`integrations/claude-code`](integrations/claude-code) | Claude Code **channel plugin** (`relay-claude-channel`, official Channels contract): push Relay messages into a running session, reply tool, phone permission relay. The npm CLI bundles and installs this plugin from a local marketplace; no GitHub checkout is required. |
-| [`integrations/openclaw`](integrations/openclaw) | OpenClaw channel plugin (`@relaymessenger/openclaw-plugin`): an OpenClaw agent as a Relay contact (long-poll receive, durable chunked replies). The npm CLI bundles its installable archive. |
-| [`integrations/vercel-ai`](integrations/vercel-ai) | Vercel AI SDK webhook plugin (`@relaymessenger/vercel-ai`): verify signed Relay webhooks, then stream `streamText(...)` back as one canonical message. |
-| [`integrations/chat-sdk`](integrations/chat-sdk) | Vercel Chat SDK adapter (`@relaymessenger/chat-sdk-adapter`): a Relay conversation becomes a Chat SDK thread, so anything built on the Chat SDK reaches Relay users. |
-| [`examples`](examples) | Forkable agents built on `@relaymessenger/sdk` ([`raw-webhook-agent`](examples/raw-webhook-agent), [`showcase-agent`](examples/showcase-agent)), an [eve channel template](examples/eve), plugin landing zones ([`examples/plugins`](examples/plugins)), and smoke harnesses ([`examples/harnesses`](examples/harnesses)). |
+tooling/
+  skills-distributions/   Codex and Cursor mirror generator
 
-## Quickstart
+plugins/
+  relay/                  generated portable and Codex plugin
 
-```sh
-npm install -g @relaymessenger/cli
-relaymessenger pair            # QR + code → claim in the Relay app
-relaymessenger start --engine claude   # or codex | hermes
-
-# Or install a native channel after pairing:
-relaymessenger install-claude
-relaymessenger install-openclaw
+cookbook/
+  webhook-receiver/
+  websocket-agent/
+  cloudflare-think-agent/
+  send-a-message/
+  send-an-image/
+  send-a-voice-memo/
+  trip-planner-agent/
 ```
 
-Full guide: https://docs.relayapp.im/integrations
+All public code is pinned to the same Relay v1 OpenAPI under
+[`contracts/relay-v1-openapi.yaml`](contracts/relay-v1-openapi.yaml).
+[`sources.lock.json`](sources.lock.json) records the exact audited standalone
+commits imported during consolidation.
 
-Every integration surface is release-gated together on Linux and Windows; the
-installed `relaymessenger` tarball and its Claude/Codex adapter runtime also run
-on macOS CI. `@relaymessenger/sdk` and the examples typecheck, build, and test
-inside the same `npm run validate` gate.
+Relay-Hermes remains separate because it is a Python plugin installed directly
+by Hermes. Relay Docs and private product repositories also remain separate.
+Relay-Codex and Relay-Cursor are generated installation mirrors; their editable
+source lives here.
 
-## Claude Code plugin marketplace
+## Agent plugin discovery
 
-This repository is also a Claude Code plugin marketplace:
-`.claude-plugin/marketplace.json` at the repo root lists the Relay channel
-plugin from `integrations/claude-code`. In Claude Code, run
-`/plugin marketplace add relaymessenger/Relay-SDK` to add it, then install the
-`relay` plugin from that marketplace.
+The repository root is a marketplace for Codex, Cursor, and Claude Code. The
+Codex and Cursor entries use [`plugins/relay`](plugins/relay), which is generated
+from the canonical [`skills/relay`](skills/relay) and
+[`tooling/skills-distributions`](tooling/skills-distributions) sources. The
+Claude marketplace points directly at the packaged plugin in
+[`packages/claude-code/plugin`](packages/claude-code/plugin).
 
-## npm release contracts
+After cloning Relay-SDK, install the Codex plugin from the repository root:
 
-Six packages publish from this repository, each through its own tag-triggered
-workflow. Every one uses npm OIDC trusted publishing; no long-lived write token
-is allowed anywhere.
+```bash
+codex plugin marketplace add /absolute/path/to/Relay-SDK
+codex plugin add relay@relay-plugin-marketplace
+```
 
-| Package | Source | Tag | Workflow |
-| --- | --- | --- | --- |
-| `@relaymessenger/cli` | `packages/cli` | `relaymessenger-vX.Y.Z` | `release-cli.yml` |
-| `@relaymessenger/sdk` | `packages/sdk` | `sdk-vX.Y.Z` | `release-sdk.yml` |
-| `@relaymessenger/vercel-ai` | `integrations/vercel-ai` | `vercel-ai-vX.Y.Z` | `release-vercel-ai.yml` |
-| `@relaymessenger/chat-sdk-adapter` | `integrations/chat-sdk` | `chat-sdk-vX.Y.Z` | `release-chat-sdk.yml` |
-| `@relaymessenger/openclaw-plugin` | `integrations/openclaw` | `openclaw-vX.Y.Z` | `release-openclaw.yml` |
-| `relay-claude-channel` | `integrations/claude-code` | `claude-channel-vX.Y.Z` | `release-claude-channel.yml` |
+For local Cursor discovery, link the same generated plugin package and reload
+Cursor. The root `.cursor-plugin/marketplace.json` is also available for a
+Cursor team marketplace import.
 
-The workflow filename is part of each package's release identity, not a label.
-npm's trusted-publisher record names that exact file, so renaming one is a
-coordinated change with npmjs.com. `scripts/release-workflow.test.mjs` holds the
-filename, the release script, and the retained artifact name on one slug, so the
-trust record's filename leads to every part of the release it authorizes. Tag
-prefixes are the release series each package has always used and deliberately do
-not track the filename: `@relaymessenger/cli` keeps `relaymessenger-v*`, which is
-also the name of the binary it installs.
+```bash
+mkdir -p ~/.cursor/plugins/local
+ln -s /absolute/path/to/Relay-SDK/plugins/relay \
+  ~/.cursor/plugins/local/relay
+```
 
-The `@relaymessenger/cli` tarball still carries a strictly validated Claude Code
-marketplace and an installable OpenClaw plugin archive generated from those
-integration sources, so `relaymessenger install-claude` and
-`relaymessenger install-openclaw` need no registry install of their own. Those
-two packages now also stand on their own for anyone consuming them directly.
+Install the Relay channel for Claude Code from the root marketplace:
 
-The steps below describe the `@relaymessenger/cli` release. The other five
-follow the same contract through their own workflow and tag.
+```bash
+claude plugin marketplace add /absolute/path/to/Relay-SDK
+claude plugin install relay@relay-messenger --scope user
+```
 
-1. Update the CLI version and root lock metadata together:
+Do not edit `plugins/relay` directly. Refresh and validate root discovery with:
 
-   ```sh
-   npm version X.Y.Z --workspace @relaymessenger/cli --no-git-tag-version
-   npm run validate
-   npm run pack:check
-   ```
+```bash
+npm run discovery:sync
+npm run discovery:validate
+```
 
-2. Merge that exact version change, then create and push an existing-commit
-   tag named `relaymessenger-vX.Y.Z`. The version in
-   `packages/cli/package.json`, the workspace entry in `package-lock.json`,
-   and the tag must match exactly.
-3. The tag starts `.github/workflows/release-cli.yml`. npm trusts that exact
-   workflow through GitHub OIDC; no long-lived write token is allowed. A tag push
-   runs the workflow file as it exists in the tagged commit, so a tag whose commit
-   predates a workflow rename still presents the old filename to npm and fails the
-   trust match; after renaming a release workflow, release from a new tag on a
-   commit that contains the rename rather than replaying an older one. If a tag
-   run fails before terminal verification, rerun that original GitHub Actions run
-   so npm provenance stays bound to the release tag and tag commit. The workflow
-   deliberately has no manual-dispatch path: checking out an old tag from a
-   default-branch dispatch would make GitHub's automatic provenance name the
-   dispatch ref instead of the artifact's source tag. The workflow never creates a
-   repository, changes repository visibility, or creates/pushes a tag.
-4. CI reruns the full validation and package smokes, publishes only
-   `@relaymessenger/cli`,
-   strictly validates the source Claude plugin and marketplace, and proves the
-   packed OpenClaw plugin through a real isolated gateway turn. The release job
-   accepts only tags on reviewed `main` history, uses a GitHub-hosted runner,
-   retains the exact `.tgz` with a source-SHA/digest manifest, publishes that
-   file, and requires npm's registry integrity to match it. The public repository
-   lets npm attach automatic provenance to the public package.
-5. Before any retry, the workflow reconciles npm state. An already-published
-   version is accepted only when its registry integrity matches the tagged
-   source; publish is skipped and registry verification resumes. Finally,
-   `scripts/verify-cli-registry.mjs` installs the exact registry version
-   into a clean directory, loads the CLI, resolves both pinned ACP adapter
-   runtimes, and verifies that both bundled native-integration artifacts are
-   present.
+## Development
 
-The repository is available under the MIT License; each integration documents
-its own trust, delivery, and crash-recovery boundary.
+```bash
+npm ci
+npm run validate
+```
+
+Validate the packed SDK against an injected staging API without publishing:
+
+```bash
+RELAY_BASE_URL=https://api.staging.relayapp.im \
+RELAY_AGENT_TOKEN=replace-me \
+npm run staging:validate
+```
+
+Each publishable workspace retains its own README, package manifest, tests, and
+installed-package proof. Cookbook recipes are complete applications, not
+placeholder snippets.

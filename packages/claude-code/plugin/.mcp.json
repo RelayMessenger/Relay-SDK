@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "relay": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/runtime/server.mjs"
+      ],
+      "env": {
+        "RELAY_AGENT_TOKEN": "${user_config.agent_token}",
+        "RELAY_ALLOWED_SENDERS": "${user_config.allowed_senders}",
+        "RELAY_BASE_URL": "${user_config.base_url}"
+      }
+    }
+  }
+}

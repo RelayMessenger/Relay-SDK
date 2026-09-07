@@ -1,7 +1,6 @@
 node_modules/
 dist/
-packages/cli/claude-plugin/
-packages/cli/openclaw-plugin/
 .release-tmp/
+*.tgz
 *.log
 .DS_Store

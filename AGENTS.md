@@ -1,28 +1,20 @@
-# AGENTS.md
+# Relay public developer monorepo
 
-- This repo is Relay-SDK, the single repo for building on Relay: the
-  `@relaymessenger/cli` npm tool (the package name never changes), the runtime
-  integrations it bundles, the `@relaymessenger/sdk` contract and transport
-  library in `packages/sdk`, and the forkable agents in `examples/`.
-- `@relaymessenger/sdk` publishes on `sdk-vX.Y.Z` tags. Its types will become
-  generated from the Relay-Server schemas; do not hand-grow the contract
-  surface.
-- Six packages publish from here, each on its own tag: `@relaymessenger/cli`,
-  `@relaymessenger/sdk`, `@relaymessenger/vercel-ai`,
-  `@relaymessenger/chat-sdk-adapter`, `@relaymessenger/openclaw-plugin`, and
-  `relay-claude-channel`. The CLI tarball still bundles the Claude Code
-  marketplace and the OpenClaw plugin archive.
-- Supported integrations are exactly Claude Code, Codex, and Hermes over ACP,
-  the OpenClaw channel plugin, the Vercel AI SDK webhook plugin
-  (`integrations/vercel-ai`), and the Vercel Chat SDK adapter
-  (`integrations/chat-sdk`). Load `.agents/skills/acp-adapter-authoring/SKILL.md`
-  before adding, changing, or auditing any coding-agent integration.
+- This is the canonical public source for Relay's TypeScript SDK, Chat SDK
+  adapter, CLI, MCP server, OpenClaw and Claude Code channels, portable Skill,
+  generated Codex/Cursor distributions, and runnable Cookbook.
+- `contracts/relay-v1-openapi.yaml` is the sole checked-in API authority.
+  Package fixtures may copy it only when a validator proves byte identity.
+- Preserve each published package's name, version, exports, executable names,
+  and runtime behavior unless a release explicitly changes that contract.
+- Standalone public repositories are generated mirrors or archived redirects,
+  never independent editable sources.
+- Relay receives agent events through signed Webhooks or the acknowledged
+  agent-only WebSocket. Do not add polling or an invented transport.
+- Keep private product code out of this repository. Relay Server, iOS,
+  Console, Admin, Website, and the hosted Relay Agent remain separate.
 - Load `.agents/skills/npm-package-authoring/SKILL.md` before changing package
-  metadata, exports, packaging, or anything that ships in the npm tarball.
-- Load `.agents/skills/oss-release-engineering/SKILL.md` before touching release
-  workflows, tags, CI, or branch topology.
-- The engine catalog in `packages/cli/src/engine/catalog.ts` is the single
-  source of truth for supported engines; docs, CLI help, and tests must match it.
-- Releases are tag-driven (`relaymessenger-vX.Y.Z`) and publish through npm OIDC trusted
-  publishing; the release workflow's registry-state step makes retries idempotent.
-  Never publish with a long-lived token.
+  metadata, exports, tarballs, or publication workflows.
+- Linux builds, package installations, and full validation run in Daytona.
+- Never publish, deploy, archive a repository, or move a dist-tag unless the
+  owner explicitly requests it.

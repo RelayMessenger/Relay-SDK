@@ -1,4 +1,0 @@
-interface:
-  display_name: "OSS Release Engineering"
-  short_description: "Design and operate verifiable OSS releases"
-  default_prompt: "Use $oss-release-engineering to design, audit, or run this exact-SHA, idempotent release workflow."

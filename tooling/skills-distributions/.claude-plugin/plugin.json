@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "relay",
+  "version": "1.0.0",
+  "description": "Build and review Relay v1 agent messaging integrations.",
+  "author": {
+    "name": "Relay"
+  },
+  "homepage": "https://docs.relayapp.im",
+  "repository": "https://github.com/RelayMessenger/Relay-SDK",
+  "license": "MIT",
+  "keywords": [
+    "relay",
+    "messaging",
+    "agents",
+    "webhooks",
+    "websocket"
+  ],
+  "mcpServers": {
+    "relayDocs": {
+      "type": "http",
+      "url": "https://docs.relayapp.im/mcp"
+    }
+  }
+}

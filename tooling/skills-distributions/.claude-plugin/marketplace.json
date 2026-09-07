@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "relay-plugin-marketplace",
+  "owner": {
+    "name": "Relay"
+  },
+  "plugins": [
+    {
+      "name": "relay",
+      "source": "./",
+      "description": "Build and review Relay v1 agent messaging integrations."
+    }
+  ]
+}
