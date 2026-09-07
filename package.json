@@ -1,46 +1,61 @@
 {
-  "name": "relaymessenger-dev",
+  "name": "relay-sdk-workspace",
   "private": true,
+  "type": "module",
   "workspaces": [
-    "packages/cli",
-    "packages/sdk",
-    "integrations/chat-sdk",
-    "integrations/claude-code",
-    "integrations/openclaw",
-    "integrations/vercel-ai",
-    "examples/plugins/hermes",
-    "examples/raw-webhook-agent",
-    "examples/showcase-agent"
+    "packages/*",
+    "cookbook/*"
   ],
   "scripts": {
-    "check": "npm run check --workspaces",
-    "build": "npm run build --workspaces",
-    "test": "npm run test --workspaces",
-    "validate": "npm run build --workspace @relaymessenger/sdk && npm run check && npm run build && npm test",
-    "manifests:check": "node examples/harnesses/validate-manifests.mjs",
-    "sdk:consumer-smoke": "node examples/harnesses/packed-consumer.mjs",
-    "e2e:production": "node examples/harnesses/e2e-production.mjs",
-    "validate:claude-plugin": "npm exec --workspace @relaymessenger/cli -- claude plugin validate ../../integrations/claude-code --strict && npm exec --workspace @relaymessenger/cli -- claude plugin validate ../../ --strict",
-    "test:release": "node --test scripts/*.test.mjs",
-    "runtime:smoke": "node scripts/acp-runtime-smoke.mjs",
-    "gateway:harness": "npm run gateway:harness --workspace @relaymessenger/openclaw-plugin",
-    "pack:check": "node scripts/cli-release.mjs pack-json-smoke && node scripts/pack-smoke.mjs && npm run pack:smoke --workspace relay-claude-channel && npm run pack:smoke --workspace @relaymessenger/openclaw-plugin"
+    "clean": "npm run clean --workspaces --if-present",
+    "check": "npm run check --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "discovery:sync": "node scripts/sync-root-discovery.mjs --write",
+    "discovery:check": "node scripts/sync-root-discovery.mjs --check",
+    "discovery:validate": "scripts/validate-root-discovery.sh",
+    "sources:check": "node scripts/validate-sources.mjs && node scripts/verify-import-provenance.mjs",
+    "workflows:check": "node scripts/validate-workflows.mjs",
+    "proof:clean": "node scripts/verify-clean-tracked.mjs",
+    "contract:check": "node scripts/validate-contract.mjs && node scripts/validate-contract-failures.mjs && node scripts/validate-contract-copies.mjs",
+    "consumer:types": "tsc -p test/tsconfig.json --noEmit",
+    "pack:smoke": "node scripts/consumer-smoke.mjs",
+    "staging:validate": "node scripts/staging-validate.mjs",
+    "staging:validate:structural": "node scripts/staging-validate.mjs --structural",
+    "validate:sdk": "npm run clean --workspace @relaymessenger/sdk && npm run check --workspace @relaymessenger/sdk && npm run build --workspace @relaymessenger/sdk && npm test --workspace @relaymessenger/sdk && npm run consumer:types && npm run pack:smoke && npm run staging:validate:structural",
+    "validate:chat-sdk": "npm run test:all --workspace @relaymessenger/chat-sdk-adapter",
+    "validate:cli": "npm run validate --workspace @relaymessenger/cli",
+    "validate:mcp": "npm run validate --workspace @relaymessenger/mcp",
+    "validate:openclaw": "npm run validate --workspace @relaymessenger/openclaw-plugin && npm run pack:smoke --workspace @relaymessenger/openclaw-plugin && npm run gateway:harness --workspace @relaymessenger/openclaw-plugin",
+    "validate:claude-code": "npm run verify --workspace relay-claude-channel && npm run pack:smoke --workspace relay-claude-channel",
+    "validate:skills": "python3 tooling/skills-distributions/scripts/validate.py && tooling/skills-distributions/scripts/validate-host-manifests.sh",
+    "validate:cookbook": "npm run test:all --workspace @relaymessenger/cookbook-cloudflare-think-agent && npm run check --workspace @relaymessenger/cookbook-webhook-receiver && npm run build --workspace @relaymessenger/cookbook-webhook-receiver && npm test --workspace @relaymessenger/cookbook-webhook-receiver && npm run check --workspace @relaymessenger/cookbook-websocket-agent && npm run build --workspace @relaymessenger/cookbook-websocket-agent && npm test --workspace @relaymessenger/cookbook-websocket-agent && npm run check --workspace @relaymessenger/cookbook-send-a-message && npm run build --workspace @relaymessenger/cookbook-send-a-message && npm test --workspace @relaymessenger/cookbook-send-a-message && npm run check --workspace @relaymessenger/cookbook-send-an-image && npm run build --workspace @relaymessenger/cookbook-send-an-image && npm test --workspace @relaymessenger/cookbook-send-an-image && npm run check --workspace @relaymessenger/cookbook-send-a-voice-memo && npm run build --workspace @relaymessenger/cookbook-send-a-voice-memo && npm test --workspace @relaymessenger/cookbook-send-a-voice-memo && npm run check --workspace @relaymessenger/cookbook-trip-planner-agent && npm run build --workspace @relaymessenger/cookbook-trip-planner-agent && npm test --workspace @relaymessenger/cookbook-trip-planner-agent",
+    "validate": "npm run discovery:validate && npm run sources:check && npm run workflows:check && npm run validate:sdk && npm run contract:check && npm run validate:chat-sdk && npm run validate:cli && npm run validate:mcp && npm run validate:openclaw && npm run validate:claude-code && npm run validate:skills && npm run validate:cookbook && npm run proof:clean"
   },
   "devDependencies": {
-    "@hono/node-server": "^2.1.1",
-    "@types/node": "^26.2.0",
-    "tsx": "^4.23.12",
-    "typescript": "^7.0.2",
-    "undici": "^8.10.0",
-    "vitest": "^4.1.10"
-  },
-  "overrides": {
-    "openclaw": {
-      "undici": "^8.10.0"
-    },
-    "undici": "^8.10.0"
+    "@types/node": "^22.18.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "4.23.12",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0",
+    "yaml": "^2.8.1"
   },
   "engines": {
     "node": ">=22.22.3"
+  },
+  "packageManager": "npm@11.19.1",
+  "allowScripts": {
+    "@google/genai@2.18.0": false,
+    "@modelcontextprotocol/inspector@2.4.0": true,
+    "@mongodb-js/zstd@7.0.0": true,
+    "core-js-pure@3.50.0": false,
+    "esbuild@0.28.1": true,
+    "esbuild@0.28.2": true,
+    "koffi@3.1.6": true,
+    "node-liblzma@2.2.0": true,
+    "openclaw@2026.8.1": true,
+    "protobufjs@7.6.6": true,
+    "tree-sitter-bash@0.25.1": true,
+    "workerd@1.20260828.1": true
   }
 }

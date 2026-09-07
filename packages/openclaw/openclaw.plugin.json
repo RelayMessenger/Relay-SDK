@@ -1,0 +1,98 @@
+{
+  "id": "relay",
+  "name": "Relay",
+  "description": "Native Relay channel plugin for OpenClaw.",
+  "activation": {
+    "onStartup": false
+  },
+  "channels": [
+    "relay"
+  ],
+  "channelConfigs": {
+    "relay": {
+      "label": "Relay",
+      "description": "Connect one or more Relay Contacts to OpenClaw.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string"
+          },
+          "tokenFile": {
+            "type": "string"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "allowFrom": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "defaultAccount": {
+            "type": "string"
+          },
+          "accounts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "token": {
+                  "type": "string"
+                },
+                "tokenFile": {
+                  "type": "string"
+                },
+                "baseUrl": {
+                  "type": "string"
+                },
+                "allowFrom": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "uiHints": {
+        "token": {
+          "label": "Agent Token",
+          "sensitive": true
+        },
+        "tokenFile": {
+          "label": "Agent Token file",
+          "sensitive": true
+        },
+        "baseUrl": {
+          "label": "Relay API origin"
+        },
+        "allowFrom": {
+          "label": "Allowed Contact IDs or Handles"
+        }
+      }
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

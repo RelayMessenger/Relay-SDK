@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible defect in a released Relay developer tool.
+description: Report a reproducible defect in the Relay TypeScript SDK.
 title: "[Bug]: "
 labels:
   - bug
@@ -7,26 +7,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        Do not include Agent Tokens, npm credentials, or private conversation data.
+        Do not include Relay tokens, webhook secrets, or private message data.
         Report security issues through the private advisory link in SECURITY.md.
-  - type: dropdown
-    id: surface
-    attributes:
-      label: Affected surface
-      options:
-        - relaymessenger CLI
-        - Claude Code channel
-        - Codex integration
-        - Hermes ACP bridge
-        - OpenClaw channel
-        - Vercel AI SDK plugin
-    validations:
-      required: true
   - type: input
     id: version
     attributes:
       label: Package and version
-      placeholder: "@relaymessenger/cli@0.3.1"
+      placeholder: "@relaymessenger/sdk@0.1.0"
     validations:
       required: true
   - type: input

@@ -1,0 +1,10 @@
+# Every job in this repository runs on Blacksmith, never on a GitHub-hosted
+# runner (owner ruling, 2026-09-07). actionlint only knows GitHub's own labels,
+# so a Blacksmith label reads to it as an unknown self-hosted label. Declaring
+# the labels here is actionlint's documented way to teach it a runner fleet:
+# https://github.com/rhysd/actionlint/blob/main/docs/config.md
+self-hosted-runner:
+  labels:
+    - blacksmith-2vcpu-ubuntu-2404
+    - blacksmith-4vcpu-ubuntu-2404
+    - blacksmith-8vcpu-ubuntu-2404

@@ -1,12 +1,28 @@
 {
-  "name": "relaymessenger",
-  "description": "Relay channel plugin marketplace for Claude Code",
-  "owner": { "name": "Relay" },
+  "name": "relay-messenger",
+  "owner": {
+    "name": "Relay Messenger",
+    "url": "https://relayapp.im"
+  },
+  "description": "Official Relay Messenger plugins for Claude Code.",
   "plugins": [
     {
       "name": "relay",
-      "source": "./integrations/claude-code",
-      "description": "Text your Claude Code from the Relay app: chat bridge + phone Allow/Deny permission relay"
+      "version": "0.3.0-staging.6",
+      "source": "./packages/claude-code/plugin",
+      "description": "Relay Messenger channel for Claude Code with durable acknowledged delivery and retry-safe replies.",
+      "category": "productivity",
+      "strict": true,
+      "homepage": "https://github.com/RelayMessenger/Relay-SDK/tree/main/packages/claude-code#readme",
+      "repository": "https://github.com/RelayMessenger/Relay-SDK",
+      "license": "MIT",
+      "keywords": [
+        "relay",
+        "messaging",
+        "channel",
+        "mcp",
+        "claude-code"
+      ]
     }
   ]
 }

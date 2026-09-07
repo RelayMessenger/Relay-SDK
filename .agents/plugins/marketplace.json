@@ -1,0 +1,20 @@
+{
+  "name": "relay-plugin-marketplace",
+  "interface": {
+    "displayName": "Relay Plugins"
+  },
+  "plugins": [
+    {
+      "name": "relay",
+      "source": {
+        "source": "local",
+        "path": "./plugins/relay"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

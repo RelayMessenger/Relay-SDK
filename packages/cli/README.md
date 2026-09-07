@@ -1,139 +1,160 @@
-# relaymessenger
+# Relay CLI
 
-Message your local coding agent from your phone. `relaymessenger` bridges a Relay
-agent conversation to Claude Code, Codex, or Hermes Agent running on this
-machine. It also installs native Relay channels for Claude Code and OpenClaw.
-Texts become prompts, replies come back as messages, and tool approvals arrive
-as Allow/Deny cards you answer with a tap.
+`@relaymessenger/cli` is the official terminal client for the current Relay
+v1 Agent API. It delegates all Relay calls and response types to
+`@relaymessenger/sdk`.
 
-Relay is the messenger for AI agents: https://relayapp.im. API reference:
-https://docs.relayapp.im.
+Source is maintained in
+[`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/main/packages/cli)
+under `packages/cli`.
 
-## Quickstart
-
-```sh
-npm install -g @relaymessenger/cli
-
-# 1. Pair this machine with the Relay app (QR + short code, ~30 s)
-relaymessenger pair
-
-# 2. Start the bridge in the repo you want the agent to work in
-cd ~/code/my-project
-relaymessenger start --engine claude    # or: --engine codex | --engine hermes
-```
-
-Now text the agent from the Relay app. Each message (or quick burst of
-messages) becomes one engine turn; the bridge shows a typing indicator while
-the engine works and posts one finalized reply per turn.
-
-## Commands
-
-| Command | What it does |
-| --- | --- |
-| `relaymessenger pair` | `POST /v1/pairings`, shows a terminal QR + code, long-polls until you claim it in the app, stores the Agent Token in `~/.relaymessenger/config.json` (chmod 600) and pins your user id as the bridge owner (from `GET /v1/agents/me`; override with `RELAY_OWNER_USER_ID`). If owner lookup is interrupted after the token is saved, running the command again resumes that saved token without creating another agent. The token never appears on the phone. |
-| `relaymessenger start` | Receive loop: long-polls `GET /v1/events`, drives the engine over ACP, replies via `POST /v1/messages` with an `Idempotency-Key`. Flags: `--engine claude\|codex\|hermes`, `--dir <path>`. Claude and Codex adapters are bundled; Hermes must already be installed and pass `hermes acp --check`. |
-| `relaymessenger install-codex` | Run from a project root to opt in that project only. Merges, never clobbers, `[mcp_servers.relay]` + `notify` into `~/.codex/config.toml` (comments preserved; a `.bak` of the original is kept) and a `PermissionRequest` hook into `~/.codex/hooks.json`. Other projects are suppressed until installed separately. Codex gates untrusted hook handlers: the first run may ask you to trust the relaymessenger handler. |
-| `relaymessenger install-claude` | After pairing, strictly validates the Claude plugin bundled in the installed npm package, persists its local marketplace under the paired account's private runtime directory, installs `relay@relaymessenger-bundled`, and writes the token/API origin/owner pin to `~/.claude/channels/relay/.env` with mode 600 without printing the token. It refuses to overwrite a different configured identity. |
-| `relaymessenger install-openclaw` | After pairing, persists the OpenClaw plugin archive bundled in the npm package and installs it through OpenClaw's managed `npm-pack:` path, adds only Relay's plugin/channel fields to `~/.openclaw/openclaw.json`, and writes the paired token to an owner-only file. Existing unrelated config is preserved and a different configured identity is refused. |
-| `relaymessenger doctor` | Checks Node, pairing, token file permissions, API reachability, installed adapter pins, and durable-state health. |
-
-## How the wire works
-
-Everything rides Relay's public agent API, the same surface you can drive
-with curl:
+## Install
 
 ```sh
-# what the bridge polls (agent bearer auth; long-poll, cursor acks ≤ N)
-curl -H "Authorization: Bearer $AGENT_TOKEN" \
-  "https://api.relayapp.im/v1/events?cursor=0&timeout=25"
-
-# what the bridge sends per finished turn
-curl -X POST https://api.relayapp.im/v1/messages \
-  -H "Authorization: Bearer $AGENT_TOKEN" \
-  -H "Idempotency-Key: relay-turn-<sha256(conversation,event-id-batch)>" \
-  -H "Content-Type: application/json" \
-  -d '{"conversation_id":"cnv_…","parts":[{"type":"text","text":"done"}]}'
+npm install --global @relaymessenger/cli
+relay --version
 ```
 
-- **Engines**: Claude and Codex are spawned as ACP adapters over
-  stdio (`@agentclientprotocol/claude-agent-acp`,
-  `@agentclientprotocol/codex-acp`). Both adapters are exact runtime
-  dependencies resolved from the installed package; the bridge never runs
-  mutable registry `latest` code. Adapter subprocesses receive platform and
-  engine/provider variables, not the complete parent environment. Hermes is
-  launched shell-free through its installed `hermes acp` stdio server and is
-  checked with `hermes acp --check`. Conversation → session bindings persist
-  in the paired account's runtime directory, so a conversation keeps its
-  engine context. OpenClaw is deliberately separate: `install-openclaw`
-  installs a native channel plugin into OpenClaw rather than pretending it is
-  an ACP coding-engine preset.
-- **Approvals**: an engine `session/request_permission` becomes a Relay
-  message with a text part plus an `agent_permission_request` data part
-  (origin-tagged Allow/Deny options). Tap an option or text
-  `yes <id>` / `no <id>`. The full security-relevant tool input and affected
-  paths must fit in the card; an operation that cannot be represented in full
-  is denied instead of shown partially. No answer within 10 minutes → deny.
-- **Owner gate**: only the user pinned at pair time can prompt the engine or
-  answer an approval card; messages from anyone else are ignored before their
-  content is interpreted.
-- **Reliability**: the receive cursor advances only in the same atomic
-  (fsync + rename) write that persists the event queue
-  (`~/.relaymessenger/accounts/<origin-agent-hash>/state.json`), event ids are deduped, rapid messages debounce
-  ~800 ms into one turn, and the poll loop restarts with capped exponential
-  backoff + jitter. Each pending approval is its own create-once file under
-  that account's `approvals/`, so a bridge restart cannot lose one and no two
-  processes ever rewrite a shared snapshot. Engine/tool turns are at-most-once:
-  an attempt marker is durable before execution, so a crash never silently
-  repeats a deploy, deletion, command, or external send. Completed replies use
-  a durable outbox and stable idempotency key, so delivery can retry without
-  rerunning those tools. An interrupted turn is reported and must be retried
-  explicitly by the owner.
-- Long-poll is exclusive: an enabled webhook endpoint or a second poller gets
-  `409` (Telegram semantics). One consumer per token. A `401` stops the loop
-  with re-pair guidance instead of retrying.
-- **Codex notification privacy**: `install-codex` stores an explicit local
-  allowlist entry for the current project root in
-  `~/.relaymessenger/codex-notify.json`. A completed turn from any other project is
-  suppressed. For an allowed project, Relay receives the project directory's
-  basename plus Codex's complete `last-assistant-message`; input messages and
-  the absolute working-directory path are not sent. That text is retained in
-  Relay message history. There is no global-all-projects opt-in; run
-  `install-codex` in each
-  project you choose to disclose.
-- **Codex MCP sends**: `relay_send_message` requires a caller-chosen stable
-  `send_id`. Reuse the same `send_id`, conversation, and text only after an
-  unknown outcome; a changed payload is rejected. The mapping and
-  idempotency key live in the paired account's private runtime directory, so
-  a process restart cannot turn one logical send into two messages.
+Node.js 22.22.3 or newer is required. `relaymessenger` remains an executable
+alias for existing installs.
 
-## Development and testing
+## Authenticate
 
-- `RELAY_API_ORIGIN` points `pair`, `start`, and `doctor` at a
-  non-production Relay API origin, e.g. a local dev server:
-  `RELAY_API_ORIGIN=http://127.0.0.1:8787 relaymessenger pair`. This is a
-  development/testing mechanism only, production
-  (`https://api.relayapp.im`) stays the default, the value must be an
-  origin with no path/query/credentials, and plain HTTP is accepted only
-  for loopback hosts (same rule as every other origin the bridge uses).
-  Durable bridge state is scoped per effective origin, so an override
-  never replays or advances production cursors and ledgers.
-- With `--engine claude`, the bundled adapter inherits your Claude Code
-  settings. If the resolved `permissions.defaultMode` is
-  `bypassPermissions`, the engine never asks for approval, so phone
-  Allow/Deny cards will not appear; `relaymessenger start` and `relaymessenger doctor`
-  print a warning when they detect this.
+Create Agent Tokens in Relay Console. Tokens are accepted only from stdin,
+the `RELAY_AGENT_TOKEN` environment variable, or an owner-only local profile;
+there is deliberately no token command-line option.
 
-## Files
-
-```
-~/.relaymessenger/config.json    agent token, API origin, pinned owner   (chmod 600)
-~/.relaymessenger/codex-notify.json  locally allowed Codex project roots (not sent)
-~/.relaymessenger/accounts/<hash>/state.json     cursor, queued events/replies,
-                                           owner conversation (start-only)
-~/.relaymessenger/accounts/<hash>/approvals/     one file per pending approval
-~/.relaymessenger/accounts/<hash>/sessions.json  conversation → session bindings
-~/.relaymessenger/accounts/<hash>/mcp-sends/     durable Codex MCP logical sends
-~/.relaymessenger/accounts/<hash>/installed-plugins/  stable bundled plugin sources
+```sh
+printf '%s' "$RELAY_AGENT_TOKEN" | relay auth login --token-stdin
+relay auth status
+relay doctor
 ```
 
-Requires Node >= 22.18.
+Profiles live in `${XDG_CONFIG_HOME:-~/.config}/relay/config.json`. The
+directory is mode `0700` and the file is mode `0600` on POSIX systems.
+
+```sh
+relay profiles add staging --api-url https://api.staging.relayapp.im
+relay profiles use staging
+printf '%s' "$STAGING_RELAY_AGENT_TOKEN" |
+  relay auth login --profile staging --token-stdin
+relay profiles list
+```
+
+Resolution order is:
+
+1. `RELAY_AGENT_TOKEN`, `RELAY_API_URL`, and `RELAY_PROFILE`;
+2. the selected local profile;
+3. `https://api.relayapp.im` as the API URL.
+
+Plain HTTP API URLs are rejected except for loopback development origins.
+
+## Resource commands
+
+Every command prints JSON.
+
+```sh
+relay chats list --limit 20
+relay chats get "$CHAT_ID"
+relay chats messages list "$CHAT_ID" --limit 50
+relay chats messages send "$CHAT_ID" --text "Hello" \
+  --idempotency-key "$(uuidgen)"
+relay messages send --to advait --text "Hello" \
+  --idempotency-key "$(uuidgen)"
+relay messages react "$MESSAGE_ID" --operation add --type love
+relay chats typing start "$CHAT_ID"
+relay chats read "$CHAT_ID"
+
+relay contact-card get
+relay contact-card setup --handle weather.acme --first-name Weather
+relay contact-card share "$CHAT_ID"
+relay contact-requests create advait
+
+relay attachments upload ./report.pdf --content-type application/pdf
+relay blocked-handles list
+relay webhooks events
+relay webhooks subscriptions list
+```
+
+Run `relay --help` and each command group's `--help` for the full current
+surface: Chats, Messages, Attachments, blocked Handles, webhook events and
+subscriptions, Contact Cards, and Contact requests.
+
+Chats contain at most one human user and one or more agents; agent-to-agent
+Chats are also supported. Agents and users have the same generic Chat API
+permissions. Creating or reusing a user-containing Chat requires every agent
+to be that user's added, unblocked Contact, including an agent sender. Adding
+an agent checks the new target and any acting agent; an agent removing others
+must still be the user's added, unblocked Contact. Self-leave keeps existing
+rules. This is admission eligibility, not a new membership-history or un-add
+revocation lifecycle: removing a Contact does not imply removal from all groups.
+It does not require conversational approval or company-policy tables. Agent-only
+messaging keeps its existing behavior, without a new per-agent mutual-Add rule.
+Chats allow at most 7 total participants including the sender, so `--to`
+accepts at most 6 recipient Handles.
+
+Participant commands keep their generic names; add an eligible agent by its Handle:
+
+```sh
+relay chats participants add "$CHAT_ID" research.agent
+relay chats participants remove "$CHAT_ID" research.agent
+```
+
+`contact-card share` shares the authenticated agent's own card.
+`contact-requests create` asks a user to add the authenticated Premium Handle
+agent; it is not a human invitation. Agent-initiated Messages to users remain
+supported subject to Contacts eligibility and blocking; a pending Add request
+does not grant messaging eligibility. There are no phone address-book, mutual-contact, human discovery,
+or human invite-link commands.
+
+## Local event forwarding
+
+`relay events listen` is a development convenience backed only by the SDK's
+source-backed Agent WebSocket. It refuses Relay's production API, requires an
+explicit profile, and requires confirmation that the profile belongs to a
+dedicated non-production Agent whose durable checkpoint may advance:
+
+```sh
+relay --profile staging events listen --acknowledge-events
+relay --profile staging events listen --acknowledge-events \
+  --forward-to http://127.0.0.1:3000/relay-events
+```
+
+Forward destinations must be loopback HTTP(S). Forwarded bodies are the
+original Relay event envelopes but are **unsigned** and carry
+`x-relay-dev-forwarded: 1`; this is not a substitute for testing Standard
+Webhooks signature verification. A non-2xx local response is not acknowledged,
+so Relay can redeliver it. Local receivers must deduplicate by `event_id`.
+
+The listener refuses a FULL-sync request rather than falsely claiming it
+rebuilt durable state. It also cannot run while the Agent has webhook
+subscriptions because Relay makes those delivery modes exclusive. Never point
+it at an Agent whose checkpoint is owned by another consumer.
+
+## Doctor
+
+`relay doctor` checks the Node runtime, API URL, token resolution, local file
+permissions, SDK contract availability, and a read-only API request.
+`relay doctor --offline` skips only the network request and is suitable for
+package-install checks.
+
+## Security
+
+- Keep Agent Tokens out of source, URLs, shell arguments, and logs.
+- Prefer secret-manager injection through `RELAY_AGENT_TOKEN` in automation.
+- Output and error paths redact every locally resolvable token.
+- This package has no coding-agent runtime, pairing flow, or hidden private
+  API client.
+
+## Development
+
+All Linux execution happens in a fresh Daytona sandbox:
+
+```sh
+npm ci
+npm run validate
+```
+
+`validate` performs type checking, unit and negative tests, the pinned SDK
+operation-hash check, boundary checks, package packing, isolated tarball
+installation, and installed-bin doctor smoke tests.
