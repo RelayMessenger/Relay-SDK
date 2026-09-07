@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   deriveVersion,
+  filesCarryingVersion,
   readManifests,
   releaseOrder,
   releasePlan,
@@ -82,4 +83,17 @@ test("rewrites a package to its plain version and pins Relay dependencies to the
   // Untouched siblings keep their staging manifest.
   const cli = JSON.parse(readFileSync(join(temp, "packages/cli/package.json"), "utf8"));
   assert.equal(cli.version, "0.9.0-staging.3");
+});
+
+test("lists every shipped file that still carries the pre-rewrite version", () => {
+  const temp = mkdtempSync(join(tmpdir(), "release-carriers-"));
+  mkdirSync(join(temp, "runtime"), { recursive: true });
+  mkdirSync(join(temp, "node_modules/dep"), { recursive: true });
+  writeFileSync(join(temp, "package.json"), JSON.stringify({ version: "0.9.0" }));
+  writeFileSync(join(temp, "runtime/server.mjs"), 'var v = "0.9.0-staging.3";');
+  writeFileSync(join(temp, "README.md"), "pins @relaymessenger/sdk@0.3.0-staging.8");
+  writeFileSync(join(temp, "node_modules/dep/index.js"), '"0.9.0-staging.3"');
+  assert.deepEqual(filesCarryingVersion(temp, "0.9.0-staging.3"), ["runtime/server.mjs"]);
+  writeFileSync(join(temp, "runtime/server.mjs"), 'var v = "0.9.0";');
+  assert.deepEqual(filesCarryingVersion(temp, "0.9.0-staging.3"), []);
 });
