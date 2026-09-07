@@ -91,3 +91,24 @@ jobs:
         env:
           NODE_AUTH_TOKEN: dry-run
         run: node scripts/release-run.mjs --dry-run
+  # The staging release proves itself the same way: the bump decisions
+  # publish-package-staging.yml would write, derived here against the live
+  # registry and written nowhere. Its decision table is unit-tested first.
+  staging-bump-dry-run:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm install --global npm@11.19.1 --no-audit --no-fund
+      - run: npm ci
+      - run: node --test scripts/staging-bump.test.mjs
+      - name: Rehearse the staging bump
+        run: node scripts/staging-bump.mjs --dry-run
+      - name: Verify the rehearsal wrote nothing tracked
+        run: test -z "$(git status --porcelain)"

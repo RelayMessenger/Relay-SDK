@@ -46,11 +46,13 @@ assert.equal(
   "refs/heads/staging",
   "staging publication must be dispatched from the staging branch",
 );
-assert.equal(
-  workflowSha,
-  releaseSha,
-  "the workflow staging-branch SHA must equal RELEASE_SHA",
-);
+// The run starts at the pushed commit and publishes the bump commit the run
+// itself made on top of it (publish-package-staging.yml), so the event SHA is
+// an ancestor of RELEASE_SHA, or RELEASE_SHA itself when nothing was bumped.
+assert.match(workflowSha, /^[0-9a-f]{40}$/u, "GITHUB_SHA must name the pushed commit");
+execFileSync("git", ["merge-base", "--is-ancestor", workflowSha, releaseSha], {
+  cwd: root,
+});
 assert.equal(
   head,
   releaseSha,

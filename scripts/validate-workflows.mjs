@@ -75,10 +75,77 @@ for (const [path, workflow] of workflowFiles) {
   }
 }
 
-const publish = readFileSync(
+// The staging release: every push to staging versions what changed and
+// publishes it (owner ruling, 2026-09-07: releases are automatic, nothing
+// manual, ever). publish-package-staging.yml bumps and commits, then calls
+// staging-package.yml once per changed package in catalog order.
+const staging = readFileSync(
   ".github/workflows/publish-package-staging.yml",
   "utf8",
 );
+assert.match(staging, /github\.repository == 'RelayMessenger\/Relay-SDK'/u);
+assert.match(staging, /github\.ref == 'refs\/heads\/staging'/u);
+assert.match(
+  staging,
+  /^on:\n\s*push:\n\s*branches:\n\s*-\s*staging\n\npermissions:/mu,
+  "the staging release runs on every push to staging and on nothing else",
+);
+assert.doesNotMatch(
+  staging,
+  /workflow_dispatch/u,
+  "the staging release has no manual path",
+);
+assert.match(
+  staging,
+  /^\s*cancel-in-progress: true$/mu,
+  "a newer push to staging must cancel the run in flight",
+);
+assert.match(
+  staging,
+  /run: node --test scripts\/staging-bump\.test\.mjs\n\s*- id: plan\n\s*name: [^\n]*\n\s*run: node scripts\/staging-bump\.mjs --write$/mu,
+  "the bump job proves the decision table before it writes",
+);
+assert.match(
+  staging,
+  /git push "https:\/\/x-access-token:\$\{GITHUB_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git" HEAD:staging/u,
+  "the bump commits to staging with the job token, so its push starts no second run",
+);
+assert.match(staging, /user\.name 'github-actions\[bot\]'/u);
+const stagingOrder = Object.keys(releasePackages);
+const called = [...staging.matchAll(/^\s*package: ([a-z-]+)$/gmu)].map(([, key]) => key);
+assert.deepEqual(
+  called,
+  stagingOrder,
+  "the staging release must call every catalog package once, in catalog order",
+);
+for (const [position, key] of stagingOrder.entries()) {
+  const job = staging.slice(staging.indexOf(`\n  ${key}:\n`));
+  assert.match(
+    job,
+    /^\s*uses: \.\/\.github\/workflows\/staging-package\.yml$/mu,
+    `${key} must publish through staging-package.yml`,
+  );
+  assert.match(
+    job,
+    new RegExp(`contains\\(needs\\.bump\\.outputs\\.changed, ',${key},'\\)`, "u"),
+    `${key} publishes only when the bump changed it`,
+  );
+  assert.match(
+    job,
+    /^\s*sha: \$\{\{ needs\.bump\.outputs\.sha \}\}$/mu,
+    `${key} must publish the bump commit`,
+  );
+  if (position > 0) {
+    const previous = stagingOrder[position - 1];
+    assert.match(
+      job,
+      new RegExp(`needs: \\[bump, (?:sdk, )?${previous}\\]|needs: \\[bump, ${previous}\\]`, "u"),
+      `${key} must wait for ${previous}, the package before it in the catalog`,
+    );
+  }
+}
+
+const publish = readFileSync(".github/workflows/staging-package.yml", "utf8");
 assert.match(publish, /environment:\s*npm-staging/u);
 assert.match(publish, /NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_PUBLISH_TOKEN \}\}/u);
 assert.match(publish, /id-token:\s*write/u);
@@ -86,32 +153,18 @@ assert.match(publish, /github\.repository == 'RelayMessenger\/Relay-SDK'/u);
 assert.match(publish, /github\.ref == 'refs\/heads\/staging'/u);
 assert.match(
   publish,
-  /push:\s*\n\s*branches:\s*\n\s*-\s*staging/u,
-  "automatic publication must be staging-only",
+  /^on:\n\s*workflow_call:/mu,
+  "one package's staging publish runs only when the staging release calls it",
 );
 assert.match(
   publish,
-  /RELEASE_PACKAGE:\s*\$\{\{\s*github\.event_name == 'push' && 'claude-code' \|\| inputs\.package\s*\}\}/u,
-  "a staging push may automatically select only the missing Claude package",
+  /RELEASE_SHA:\s*\$\{\{\s*inputs\.sha\s*\}\}/u,
+  "a package publishes the exact commit the staging release names",
 );
 assert.match(
   publish,
-  /RELEASE_SHA:\s*\$\{\{\s*github\.event_name == 'push' && github\.sha \|\| inputs\.commit_sha\s*\}\}/u,
-  "a staging push must publish its exact event SHA",
-);
-const pushTrigger = publish.slice(
-  publish.indexOf("  push:"),
-  publish.indexOf("  workflow_dispatch:"),
-);
-assert.match(
-  pushTrigger,
-  /paths:[\s\S]*packages\/claude-code\/\*\*/u,
-  "automatic Claude publication must be path-scoped",
-);
-assert.doesNotMatch(
-  pushTrigger,
-  /packages\/(?:chat-sdk-adapter|cli|mcp|openclaw)\/\*\*/u,
-  "automatic publication must not select another package path",
+  /git merge-base --is-ancestor "\$EVENT_SHA" HEAD/u,
+  "the published commit must descend from the pushed commit",
 );
 const releaseOrder = [
   "Build the canonical SDK workspace",
@@ -138,8 +191,8 @@ assert.match(
 );
 assert.match(
   publish,
-  /name:\s*relay-\$\{\{\s*env\.RELEASE_PACKAGE\s*\}\}-\$\{\{\s*github\.sha\s*\}\}/u,
-  "package artifacts must use the resolved package and event SHA",
+  /name:\s*relay-\$\{\{\s*env\.RELEASE_PACKAGE\s*\}\}-\$\{\{\s*env\.RELEASE_SHA\s*\}\}/u,
+  "package artifacts must use the resolved package and published SHA",
 );
 assert.ok(
   [...publish.matchAll(/test -z "\$\(git status --porcelain\)"/gu)]
@@ -261,6 +314,12 @@ assert.match(
 );
 assert.match(release, /run: node scripts\/release-run\.mjs --dry-run$/mu);
 assert.match(release, /run: node --test scripts\/release-derive\.test\.mjs$/mu);
+// The staging bump rehearses on every change the way the release does: the
+// same decisions against the live registry, writing nothing.
+const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+assert.match(ci, /run: node --test scripts\/staging-bump\.test\.mjs$/mu);
+assert.match(ci, /run: node scripts\/staging-bump\.mjs --dry-run$/mu);
+assert.doesNotMatch(ci, /staging-bump\.mjs --write/u, "CI never writes a bump");
 for (const [source, text] of workflowFiles) {
   assert.doesNotMatch(
     text,
