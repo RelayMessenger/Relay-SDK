@@ -26,6 +26,10 @@ import {
   rewritePackage,
 } from "./release-derive.mjs";
 import { releasePackages } from "./release-packages.mjs";
+import {
+  PUBLISH_PROPAGATION,
+  verifyNpmRegistryIntegrity,
+} from "./verify-npm-registry-integrity.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const dryRun = process.argv.includes("--dry-run");
@@ -100,16 +104,15 @@ const tarballFor = (row) => {
   return { path, integrity: `sha512-${createHash("sha512").update(readFileSync(path)).digest("base64")}` };
 };
 
+// npm processes a publish after answering it ("may take a few minutes to
+// become available"); the shared budget is the one place that wait is sized.
 async function waitForRegistry(row, integrity) {
-  for (let attempt = 0; attempt < 24; attempt += 1) {
-    const seen = view(`${row.name}@${row.version}`, "dist.integrity");
-    if (seen.found) {
-      assert.equal(seen.value, integrity, `${row.name}@${row.version} on npm is not the tarball this run packed`);
-      return;
-    }
-    await new Promise((wake) => setTimeout(wake, 5_000));
-  }
-  throw new Error(`${row.name}@${row.version} did not appear on npm`);
+  await verifyNpmRegistryIntegrity({
+    packageSpec: `${row.name}@${row.version}`,
+    expectedIntegrity: integrity,
+    ...PUBLISH_PROPAGATION,
+    log: say,
+  });
 }
 
 async function github(path, body) {

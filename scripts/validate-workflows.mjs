@@ -338,6 +338,24 @@ for (const [source, text] of workflowFiles) {
   );
 }
 const releaseRun = readFileSync("scripts/release-run.mjs", "utf8");
+// Every publish waits through npm's post-publish processing with the one
+// shared budget; a private loop drifted to 90 s and failed a publish that had
+// succeeded (run 34154163996, 2026-09-07).
+for (const [source, text] of [
+  ["scripts/publish-package-staging.mjs", publishProgram],
+  ["scripts/release-run.mjs", releaseRun],
+]) {
+  assert.match(
+    text,
+    /verifyNpmRegistryIntegrity\(\{[\s\S]*?\.\.\.PUBLISH_PROPAGATION,/u,
+    `${source} must wait for propagation through verifyNpmRegistryIntegrity with PUBLISH_PROPAGATION`,
+  );
+  assert.doesNotMatch(
+    text,
+    /setTimeout\([^)]*,\s*\d[\d_]*\)/u,
+    `${source} carries a private registry wait`,
+  );
+}
 assert.match(
   releaseRun,
   /"publish", tarball\.path,\n\s*"--access", "public",\n\s*"--tag", "latest",\n\s*"--no-provenance",/u,

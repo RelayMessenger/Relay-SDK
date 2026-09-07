@@ -7,6 +7,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { resolve } from "node:path";
+import {
+  PUBLISH_PROPAGATION,
+  verifyNpmRegistryIntegrity,
+} from "./verify-npm-registry-integrity.mjs";
 
 const valueAfter = (name) => {
   const index = process.argv.indexOf(name);
@@ -108,16 +112,22 @@ if (!existing.found) {
     "--registry",
     registry,
   ], true);
-  for (let attempt = 0; attempt < 18 && !existing.found; attempt += 1) {
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 5_000));
-    existing = view(spec, "dist.integrity");
-  }
-  if (!existing.found) {
+  if (published.status !== 0) {
     throw new Error(
-      `Single publish attempt exited ${published.status}; registry is absent. `
+      `Single publish attempt exited ${published.status}. `
         + `${published.stderr || published.stdout}`,
     );
   }
+  // npm processes a publish after answering it; wait until the registry
+  // reads back the tarball this run packed, or fail closed on any other
+  // content or on silence past the budget.
+  await verifyNpmRegistryIntegrity({
+    packageSpec: spec,
+    expectedIntegrity: integrity,
+    ...PUBLISH_PROPAGATION,
+  });
+  existing = view(spec, "dist.integrity");
+  assert.equal(existing.found, true, `${spec} vanished after propagation`);
 }
 const observedIntegrities = Array.isArray(existing.value)
   ? existing.value
