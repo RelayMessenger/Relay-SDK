@@ -15,9 +15,15 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { readManifests, releasePlan, rewritePackage } from "./release-derive.mjs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  internalDependencies,
+  readManifests,
+  releasePlan,
+  rewritePackage,
+} from "./release-derive.mjs";
 import { releasePackages } from "./release-packages.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -63,7 +69,8 @@ const assumed = new Set(
 const isPublished = (name, version) =>
   assumed.has(`${name}@${version}`) || view(`${name}@${version}`, "version").found;
 
-const plan = releasePlan(readManifests(root), isPublished);
+const manifests = readManifests(root);
+const plan = releasePlan(manifests, isPublished);
 say(`release plan (${dryRun ? "dry run" : "publish"}):`);
 for (const row of plan) {
   say(`  ${row.key.padEnd(16)} ${row.name}@${row.current} -> ${row.version}  ${row.action}${
@@ -140,8 +147,31 @@ for (const row of plan) {
   const entry = releasePackages[row.key];
   const written = rewritePackage(root, row.key, plan, { sdkIntegrity });
   say(`rewrote ${written.map((path) => path.slice(root.length + 1)).join(", ")}`);
+  // `npm ci` installed each dependent's still-published staging pin as a
+  // nested copy beside the newer workspace. Once the pin is the derived
+  // version, that copy is stale; npm install left it in place on the first
+  // release (openclaw resolved 0.3.0-staging.8 against a 0.3.0 lock,
+  // 2026-09-07), so remove it and prove what resolves before validating.
+  const relayDependencies = internalDependencies(manifests[row.key], manifests);
+  for (const dependency of relayDependencies) {
+    rmSync(join(root, row.directory, "node_modules", ...dependency.name.split("/")), {
+      recursive: true,
+      force: true,
+    });
+  }
   // Reconcile the workspace links and lockfile with the rewritten pins.
   run(npm, ["install", "--no-audit", "--no-fund"]);
+  const resolveFrom = createRequire(pathToFileURL(join(root, row.directory, "package.json")));
+  for (const dependency of relayDependencies) {
+    const resolved = JSON.parse(readFileSync(resolveFrom.resolve(`${dependency.name}/package.json`), "utf8"));
+    const expected = plan.find((entry) => entry.name === dependency.name).version;
+    assert.equal(
+      resolved.version,
+      expected,
+      `${row.name} resolves ${dependency.name}@${resolved.version}, not the derived ${expected}`,
+    );
+    say(`${row.name} resolves ${dependency.name}@${resolved.version}`);
+  }
   const dependsOnRelay = row.key !== "sdk" && row.key !== "chat-sdk-adapter";
   if (dryRun && dependsOnRelay) {
     // A dependent's validation installs its Relay pins from npm; in a dry run
