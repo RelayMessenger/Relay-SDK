@@ -70,7 +70,34 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: |-
+            The Chat is not permitted. Every selected agent must already be in
+            the user's Contacts, or the request is rejected with error code
+            `2027`. A member set with no agent in it is rejected with error code
+            `2028`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                agent_not_in_contacts:
+                  summary: Every agent must already be in the user's Contacts
+                  value:
+                    error:
+                      status: 403
+                      code: 2027
+                      message: Every agent must already be in the user's Contacts.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2027
+                    success: false
+                chat_without_agent:
+                  summary: A chat must include an agent
+                  value:
+                    error:
+                      status: 403
+                      code: 2028
+                      message: A chat must include an agent.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2028
+                    success: false
         "409":
           description: Mentions require a group chat
           content:
@@ -246,7 +273,8 @@ paths:
           description: |-
             The addition is not permitted. Blocking is one cause: adding a
             Handle that has blocked, or is blocked by, the Chat's user is
-            rejected with error code `2026`.
+            rejected with error code `2026`. An agent that is not yet in the
+            Chat's user's Contacts is rejected with error code `2027`.
           content:
             application/json:
               schema:
@@ -260,6 +288,15 @@ paths:
                       code: 2026
                       message: A selected agent or user is blocked.
                       doc_url: https://docs.relayapp.im/error/codes/2xxx/2026
+                    success: false
+                agent_not_in_contacts:
+                  summary: Every agent must already be in the user's Contacts
+                  value:
+                    error:
+                      status: 403
+                      code: 2027
+                      message: Every agent must already be in the user's Contacts.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2027
                     success: false
         "404":
           $ref: "#/components/responses/NotFound"
@@ -513,7 +550,43 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: |-
+            The send is not permitted. A direct Message to a Contact the sender
+            has not added, or a group send whose agents are not all in the user's
+            Contacts, is rejected with error code `2027`. A member set with no
+            agent in it is rejected with error code `2028`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                contact_not_added:
+                  summary: Add this Contact before sending a direct Message
+                  value:
+                    error:
+                      status: 403
+                      code: 2027
+                      message: Add this Contact before sending a direct Message.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2027
+                    success: false
+                agent_not_in_contacts:
+                  summary: Every agent must already be in the user's Contacts
+                  value:
+                    error:
+                      status: 403
+                      code: 2027
+                      message: Every agent must already be in the user's Contacts.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2027
+                    success: false
+                chat_without_agent:
+                  summary: A chat must include an agent
+                  value:
+                    error:
+                      status: 403
+                      code: 2028
+                      message: A chat must include an agent.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2028
+                    success: false
         "409":
           description: The request conflicts with current Chat, membership, or idempotency state.
           content:
@@ -596,7 +669,43 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: |-
+            The send is not permitted. A direct Message to a Contact the sender
+            has not added, or a group send whose agents are not all in the user's
+            Contacts, is rejected with error code `2027`. A member set with no
+            agent in it is rejected with error code `2028`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                contact_not_added:
+                  summary: Add this Contact before sending a direct Message
+                  value:
+                    error:
+                      status: 403
+                      code: 2027
+                      message: Add this Contact before sending a direct Message.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2027
+                    success: false
+                agent_not_in_contacts:
+                  summary: Every agent must already be in the user's Contacts
+                  value:
+                    error:
+                      status: 403
+                      code: 2027
+                      message: Every agent must already be in the user's Contacts.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2027
+                    success: false
+                chat_without_agent:
+                  summary: A chat must include an agent
+                  value:
+                    error:
+                      status: 403
+                      code: 2028
+                      message: A chat must include an agent.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2028
+                    success: false
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -630,7 +739,13 @@ paths:
     get:
       operationId: getMessages
       summary: Get messages from a chat
-      description: List visible Messages and group-history events in a Chat.
+      description: |-
+        List visible Messages and group-history events in a Chat.
+
+        The default order is oldest first. Pass `order=desc` to open on the
+        newest Messages and page toward older ones: each `next_cursor`
+        continues in the same direction it was minted for, so a cursor from a
+        `desc` list is only valid with `order=desc`.
       tags:
         - Messages
       security:
@@ -656,6 +771,15 @@ paths:
             minimum: 1
             maximum: 100
             default: 50
+        - name: order
+          in: query
+          description: Sort order for messages (asc = oldest first, desc = newest first). A cursor is only valid with the order it was returned for.
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+            default: asc
       responses:
         "200":
           description: Messages retrieved successfully
