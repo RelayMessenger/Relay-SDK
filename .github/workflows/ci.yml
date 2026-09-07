@@ -31,6 +31,26 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npm audit signatures
 
+  # Every cookbook folder must work when a developer copies it out of GitHub
+  # and runs `npm install && npm start` with only an Agent Token. This job
+  # never installs the workspace: each folder is copied outside the checkout,
+  # installed from the real registry, and type-checked from its own
+  # devDependencies (scripts/validate-cookbook-standalone.mjs). The
+  # workspace-side half of that proof, that the same folders resolve the
+  # workspace sdk inside the monorepo, runs under `npm run validate` above.
+  cookbook-standalone:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+      - run: npm install --global npm@11.19.1 --no-audit --no-fund
+      - run: node scripts/validate-cookbook-standalone.mjs
+
   # The production release proves itself before it can run: the same
   # derivation, packing, and `npm publish --dry-run` that release.yml performs
   # on a push to main, here on every change. GitHub only dispatches a

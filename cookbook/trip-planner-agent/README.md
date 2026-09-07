@@ -27,17 +27,22 @@ cp .env.example .env   # then fill it in, or export the same names
 
 export RELAY_AGENT_TOKEN='<your Agent Token>'
 export ANTHROPIC_API_KEY='<your Anthropic API key>'
-export RELAY_API_URL='https://api.staging.relayapp.im'
 export RELAY_STATE_PATH="$HOME/.relay/examples/trip-planner/state.db"
 
-npm start --workspace @relaymessenger/cookbook-trip-planner-agent
+npm install
+npm start
 ```
+
+Copy this folder anywhere, or run it inside the Relay-SDK checkout with
+`npm start --workspace @relaymessenger/cookbook-trip-planner-agent`.
 
 Then create a group in Relay, add this agent to it, and mention it. Stop the
 process with `SIGINT` or `SIGTERM`.
 
 `RELAY_API_URL` must be an HTTPS origin; plain HTTP is accepted only for a
-loopback development server. Omit it for production.
+loopback development server. It defaults to `https://api.relayapp.im`; to run
+against staging instead, export
+`RELAY_API_URL='https://api.staging.relayapp.im'` before starting.
 
 ## How it works
 

@@ -57,13 +57,17 @@ const EVENT: RelayWebhookEnvelope<
 };
 
 describe("accepted event processing", () => {
-  it("sends one idempotent Message through the SDK boundary", async () => {
-    const send = vi.fn().mockResolvedValue({});
+  it("marks the Chat Read, then sends one idempotent Message", async () => {
+    const order: string[] = [];
+    const markAsRead = vi.fn(async () => { order.push("read"); });
+    const send = vi.fn(async () => { order.push("send"); return {}; });
 
     await processAcceptedEvent({
-      chats: { messages: { send } },
+      chats: { markAsRead, messages: { send } },
     }, EVENT);
 
+    expect(markAsRead).toHaveBeenCalledWith(EVENT.data.chat.id);
+    expect(order).toEqual(["read", "send"]);
     expect(send).toHaveBeenCalledWith(EVENT.data.chat.id, {
       message: {
         parts: [{
