@@ -8,7 +8,7 @@
 // This file is the pure part: derivation, order, plan, and the manifest
 // rewrite. scripts/release-run.mjs drives npm, git, and GitHub around it.
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { releaseKeys, releasePackages } from "./release-packages.mjs";
 
@@ -161,4 +161,29 @@ export function rewritePackage(root, key, plan, { sdkIntegrity = null } = {}) {
     written.push(marketplacePath);
   }
   return written;
+}
+
+/**
+ * Every file under `directory` (node_modules excluded) whose bytes still
+ * carry `version`, relative to `directory`. The release job runs this over the
+ * unpacked tarball with the pre-rewrite staging version: a file it lists is a
+ * place the version lived that neither the rewrite nor the package's own build
+ * derived. The first release on main published nothing for claude-code because
+ * runtime/server.mjs still embedded `0.3.0-staging.6` (2026-09-07); this is
+ * the closed door for every such file, generated or checked in.
+ */
+export function filesCarryingVersion(directory, version) {
+  const needle = Buffer.from(version);
+  const found = [];
+  const walk = (current, relative) => {
+    for (const name of readdirSync(current)) {
+      if (name === "node_modules") continue;
+      const path = join(current, name);
+      const child = relative ? `${relative}/${name}` : name;
+      if (statSync(path).isDirectory()) walk(path, child);
+      else if (readFileSync(path).includes(needle)) found.push(child);
+    }
+  };
+  walk(directory, "");
+  return found.sort();
 }

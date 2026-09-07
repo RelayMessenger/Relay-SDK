@@ -14,11 +14,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  filesCarryingVersion,
   internalDependencies,
   readManifests,
   releasePlan,
@@ -172,15 +173,35 @@ for (const row of plan) {
     );
     say(`${row.name} resolves ${dependency.name}@${resolved.version}`);
   }
+  // Build before validating. Generated files embed the version at build time
+  // (claude-code bakes package.json's version into runtime/server.mjs), and a
+  // package's own `verify` may test before it builds; on the first release
+  // the checked-in runtime still said 0.3.0-staging.6 and the test failed
+  // against the rewritten 0.3.0 manifest (2026-09-07).
+  run(npm, ["run", "build", "--workspace", row.name]);
   const dependsOnRelay = row.key !== "sdk" && row.key !== "chat-sdk-adapter";
-  if (dryRun && dependsOnRelay) {
+  if (!(dryRun && dependsOnRelay)) {
     // A dependent's validation installs its Relay pins from npm; in a dry run
-    // they are not there yet, so build what the tarball needs and stop there.
-    run(npm, ["run", "build", "--workspace", row.name]);
-  } else {
+    // they are not there yet, so the build above is as far as it can go.
     run(npm, ["run", entry.validate], { env: { RELAY_RELEASE: "1" } });
   }
   const tarball = tarballFor(row);
+  // Fail closed: nothing that ships may still carry the staging version the
+  // tree had before the rewrite, whether checked in or generated.
+  const unpacked = join(root, ".release-tmp", "release", `${row.key}-unpacked`);
+  rmSync(unpacked, { recursive: true, force: true });
+  mkdirSync(unpacked, { recursive: true });
+  run("tar", ["-xzf", tarball.path, "-C", unpacked]);
+  // (A tree whose manifest is already plain has nothing pre-rewrite to find.)
+  if (row.current !== row.version) {
+    const stale = filesCarryingVersion(unpacked, row.current);
+    assert.deepEqual(
+      stale,
+      [],
+      `${row.name}@${row.version} tarball still carries ${row.current} in: ${stale.join(", ")}`,
+    );
+    say(`no shipped file of ${row.name} carries ${row.current}`);
+  }
   run(npm, [
     "publish", tarball.path,
     "--access", "public",
