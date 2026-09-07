@@ -53,20 +53,20 @@ jobs:
       - run: node --test scripts/release-derive.test.mjs
       - run: npm run build --workspace @relaymessenger/sdk
       - run: npm install --global npm@12.0.2 --no-audit --no-fund
-      - name: Rehearse a skip for packages npm already has
+      - name: Rehearse a skip for a package npm already has
         env:
           NODE_AUTH_TOKEN: dry-run
-          RELAY_ASSUME_PUBLISHED: "@relaymessenger/sdk@0.0.0-assumed"
         run: |
           set -euo pipefail
-          # An assumed version that matches nothing leaves the plan at
-          # publish for all six...
+          # The plan against the live registry, whatever it says today...
           node scripts/release-run.mjs --dry-run --plan-only | tee plan-a.txt
-          grep -q 'release plan only: sdk=publish chat-sdk-adapter=publish cli=publish mcp=publish openclaw=publish claude-code=publish' plan-a.txt
-          # ...and assuming the derived sdk version is on npm must flip it.
+          grep -q '^release plan only: ' plan-a.txt
+          # ...and the same plan told the derived sdk version is on npm must
+          # say skip for sdk. (release-derive.test.mjs proves the flip itself
+          # against a mocked registry; this proves the wiring in CI.)
           sdk_version="$(node -e 'import("./scripts/release-derive.mjs").then(m => console.log(m.deriveVersion(JSON.parse(require("fs").readFileSync("packages/sdk/package.json","utf8")).version)))')"
           RELAY_ASSUME_PUBLISHED="@relaymessenger/sdk@${sdk_version}" node scripts/release-run.mjs --dry-run --plan-only | tee plan-b.txt
-          grep -q 'release plan only: sdk=skip chat-sdk-adapter=publish' plan-b.txt
+          grep -q '^release plan only: sdk=skip ' plan-b.txt
       - name: Dry-run the release
         env:
           NODE_AUTH_TOKEN: dry-run
