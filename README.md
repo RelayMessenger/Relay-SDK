@@ -115,3 +115,44 @@ npm run staging:validate
 Each publishable workspace retains its own README, package manifest, tests, and
 installed-package proof. Cookbook recipes are complete applications, not
 placeholder snippets.
+
+## Production release
+
+Nothing is published by hand. Two npm channels, kept apart:
+
+- Staging publishes `X.Y.Z-staging.N` prereleases under the `staging`
+  dist-tag from the `staging` branch
+  ([`publish-package-staging.yml`](.github/workflows/publish-package-staging.yml)).
+- Production publishes plain `X.Y.Z` versions under the `latest` dist-tag.
+  The one deliberate act is merging `staging` into `main`; the push to `main`
+  runs [`release.yml`](.github/workflows/release.yml), which:
+  1. derives each package's version by stripping the `-staging.N` prerelease
+     from the manifest in the tree (`0.3.0-staging.9` becomes `0.3.0`);
+  2. pins every `@relaymessenger/*` dependency between these packages to those
+     derived versions at publish time (the tree itself keeps staging's
+     manifests, so no version-bump PR exists);
+  3. skips any package whose derived version is already on npm;
+  4. publishes the rest in dependency order with `--tag latest
+     --no-provenance` on Blacksmith with the `npm-release` credential;
+  5. creates the git tag `<prefix><version>` after each successful publish, as
+     the record, never as the trigger;
+  6. installs each published version clean from the registry and exercises it.
+
+Order and record tags, from [`scripts/release-packages.mjs`](scripts/release-packages.mjs):
+
+| Order | Package | Record tag |
+| --- | --- | --- |
+| 1 | `@relaymessenger/sdk` | `sdk-v<version>` |
+| 2 | `@relaymessenger/chat-sdk-adapter` | `chat-sdk-v<version>` |
+| 3 | `@relaymessenger/cli` | `relaymessenger-v<version>` |
+| 4 | `@relaymessenger/mcp` | `mcp-v<version>` |
+| 5 | `@relaymessenger/openclaw-plugin` | `openclaw-v<version>` |
+| 6 | `relay-claude-channel` | `claude-channel-v<version>` |
+
+Dry run first: `workflow_dispatch` on `release.yml` derives every version,
+prints the skip-or-publish decision, packs, and runs `npm publish --dry-run`,
+then stops; `assume_published` lets a dry run rehearse a skip. Read the
+registry back with `npm view <name> dist-tags`. The logic lives in
+[`scripts/release-derive.mjs`](scripts/release-derive.mjs) (derivation, order,
+plan, manifest rewrite; tested by `scripts/release-derive.test.mjs`) and
+[`scripts/release-run.mjs`](scripts/release-run.mjs) (npm, registry, tag).

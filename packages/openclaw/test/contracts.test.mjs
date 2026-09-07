@@ -21,9 +21,6 @@ const sourceLock = JSON.parse(
 );
 const manifest = JSON.parse(read("openclaw.plugin.json"));
 const contractLock = JSON.parse(read("contracts/relay-v1.lock.json"));
-const sdkRegistryReceipt = JSON.parse(
-  read(contractLock.relaySdk.registryReceipt),
-);
 const require = createRequire(import.meta.url);
 const sdkPackagePath = require.resolve("@relaymessenger/sdk/package.json");
 const sdkTypes = readFileSync(
@@ -43,10 +40,18 @@ const openapiPath =
 
 test("pins the requested OpenClaw and current Relay SDK contracts", () => {
   assert.equal(packageJson.name, "@relaymessenger/openclaw-plugin");
-  assert.equal(packageJson.version, "0.4.0-staging.5");
+  assert.match(
+    packageJson.version,
+    process.env.RELAY_RELEASE === "1"
+      ? /^\d+\.\d+\.\d+$/u
+      : /^\d+\.\d+\.\d+-staging\.\d+$/u,
+  );
   assert.equal(packageJson.devDependencies.openclaw, "2026.8.1");
   assert.equal(packageJson.openclaw.build.openclawVersion, "2026.8.1");
-  assert.equal(packageJson.dependencies["@relaymessenger/sdk"], "0.3.0-staging.8");
+  assert.equal(
+    packageJson.dependencies["@relaymessenger/sdk"],
+    contractLock.relaySdk.version,
+  );
   assert.equal(packageJson.publishConfig.tag, "staging");
   assert.match(packageJson.openclaw.compat.pluginApi, /^>=2026\.8\.1/);
   assert.deepEqual(packageJson.repository, {
@@ -64,7 +69,7 @@ test("pins the requested OpenClaw and current Relay SDK contracts", () => {
   });
 });
 
-test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
+test("binds Server, OpenAPI, and the exact SDK tarball integrity", () => {
   assert.deepEqual(contractLock.relayServer, {
     repository: "RelayMessenger/Relay-Server",
     commit: "f2f36e5284dcfb365af9759f5ee5bfa7954b6521",
@@ -72,70 +77,24 @@ test("binds Server, OpenAPI, and exact SDK artifact provenance", () => {
     sha256: "df402b9bebcce58be2f7fa2e0a193e68896d7d34a6e4581dc4e5446a7854ab84",
   });
   assert.equal(
-    contractLock.relaySdk.source.commit,
-    "1bbcb486b4a91860ee3527ce95d015883e4cc1ae",
-  );
-  assert.equal(
     contractLock.relaySdk.workspaceOpenapiSha256,
     contractLock.relayServer.sha256,
   );
-  assert.equal(
-    contractLock.relaySdk.source.carriedOpenapiSha256,
-    sdkRegistryReceipt.source.contractSha256,
-  );
-  const installedSdk = JSON.parse(
-    readFileSync(sdkPackagePath, "utf8"),
-  );
+  // Production publishes carry no npm attestation (Blacksmith runners, owner
+  // ruling 2026-09-07), so the binding is the tarball itself: the sha512 npm
+  // records as dist.integrity, verified by scripts/verify-contract-provenance.mjs
+  // downloading and hashing that tarball.
+  assert.equal(contractLock.relaySdk.package, "@relaymessenger/sdk");
+  assert.match(contractLock.relaySdk.version, /^\d+\.\d+\.\d+(?:-staging\.\d+)?$/u);
+  assert.match(contractLock.relaySdk.integrity, /^sha512-[A-Za-z0-9+/]+={0,2}$/u);
+  const installedSdk = JSON.parse(readFileSync(sdkPackagePath, "utf8"));
   const installedSdkSource = JSON.parse(
     readFileSync(join(root, "..", "sdk", "SOURCE.json"), "utf8"),
   );
   assert.equal(installedSdk.version, contractLock.relaySdk.version);
   assert.equal(
-    createHash("sha256").update(readFileSync(sdkPackagePath)).digest("hex"),
-    sdkRegistryReceipt.registry.installedArtifact.packageJsonSha256,
-    "resolved dependency manifest must match the registry receipt",
-  );
-  assert.equal(
-    createHash("sha256").update(sdkTypes).digest("hex"),
-    sdkRegistryReceipt.registry.installedArtifact.typesSha256,
-    "resolved dependency types must match even when installed beside a newer workspace",
-  );
-  assert.equal(
     installedSdkSource.commit,
     sourceLock.imports["packages/sdk"].commit,
-  );
-  assert.equal(
-    sdkRegistryReceipt.registry.dist.integrity,
-    contractLock.relaySdk.integrity,
-  );
-  assert.equal(
-    sdkRegistryReceipt.source.commit,
-    contractLock.relaySdk.source.commit,
-  );
-  assert.equal(
-    sdkRegistryReceipt.provenanceBoundary.registryGitHead,
-    null,
-  );
-  assert.deepEqual(
-    sdkRegistryReceipt.provenanceBoundary.registryAttestations,
-    {
-      url: "https://registry.npmjs.org/-/npm/v1/attestations/@relaymessenger%2fsdk@0.3.0-staging.8",
-      provenance: {
-        predicateType: "https://slsa.dev/provenance/v1",
-      },
-    },
-  );
-  assert.equal(
-    sdkRegistryReceipt.provenanceBoundary.attestationJsonSha256,
-    "6996f583f884a4302487cb3bc8d0d982266f2559275487426d108f03883947fc",
-  );
-  assert.equal(
-    sdkRegistryReceipt.provenanceBoundary.slsa.resolvedDependency.digest.gitCommit,
-    contractLock.relaySdk.source.commit,
-  );
-  assert.match(
-    sdkRegistryReceipt.provenanceBoundary.claim,
-    /SLSA statement binds the published tarball digest/u,
   );
   assert.equal(
     createHash("sha256")
