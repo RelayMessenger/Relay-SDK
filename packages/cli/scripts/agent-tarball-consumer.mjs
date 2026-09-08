@@ -1,6 +1,6 @@
 // Exercises the installed SDK and CLI program, never workspace imports.
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -31,13 +31,29 @@ const deps = {
     return Response.json({ contact_cards: [card] });
   },
 };
-assert.equal(await runCLI(["agents", "create", "--json"], deps), 0);
+const nativeHome = join(home, "native Hermes profile");
+await mkdir(nativeHome, { mode: 0o700 });
+if (process.platform === "win32") {
+  const { protectWindowsPath } = await import(pathToFileURL(join(consumer, "node_modules/@relaymessenger/cli/dist/runtime-connect/windows-acl.js")));
+  await protectWindowsPath(nativeHome, true);
+}
+const nativeYaml = 'gateway:\n  platforms:\n    relayapp:\n      enabled: true\n      extra:\n        allowed_contacts: [alice]\n';
+await writeFile(join(nativeHome, "config.yaml"), nativeYaml, { mode: 0o600 });
+const handoffArgs = ["--connect", "hermes", "--runtime-home", nativeHome, "--runtime-state-dir", join(nativeHome, "relay"), "--confirm-configure", "--runtime-stopped"];
+assert.equal(await runCLI(["agents", "create", "--json", ...handoffArgs], deps), 0);
+assert.equal(JSON.parse(output[0]).handoff.status, "configured");
+assert.equal(JSON.parse(output[0]).handoff.connected, false);
+assert.ok((await readFile(join(nativeHome, ".env"), "utf8")).includes(token));
+assert.equal((await readFile(join(nativeHome, ".env"), "utf8")).includes("unrelated-env-token"), false);
+assert.equal(await readFile(join(nativeHome, "config.yaml"), "utf8"), nativeYaml);
+
 let config = JSON.parse(await readFile(configPath, "utf8"));
 assert.equal(config.profiles[card.handle].agent_token, token);
 assert.equal(config.current_profile, "default");
 assert.equal(await runCLI(["agents", "list", "--json"], deps), 0);
 delete deps.configContext.env.RELAY_AGENT_TOKEN;
 delete deps.configContext.env.RELAY_PROFILE;
+assert.equal(await runCLI(["--profile", card.handle, "agents", "setup", ...handoffArgs], deps), 0);
 assert.equal(await runCLI(["agents", "delete", card.handle], deps), 1);
 config = JSON.parse(await readFile(configPath, "utf8"));
 assert.equal(config.profiles[card.handle].agent_token, token);
