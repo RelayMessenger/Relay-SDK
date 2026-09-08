@@ -2,8 +2,14 @@ import { spawn } from "node:child_process";
 import { access, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { isStagingBuild, packageVersion } from "./config.js";
 
-export const RELAY_SKILL_INSTALL_ARGS = ["--yes", "skills@1.5.24", "add", "https://github.com/RelayMessenger/Relay-SDK/tree/staging/skills/relay", "--skill", "relay"] as const;
+/** The skill ships from the branch the build was cut from: a `-staging` build installs `tree/staging`, a plain release installs `tree/main`. */
+export const relaySkillSourceBranch = (version: string = packageVersion()): "staging" | "main" =>
+  isStagingBuild(version) ? "staging" : "main";
+export const relaySkillInstallArgs = (version: string = packageVersion()): readonly string[] =>
+  ["--yes", "skills@1.5.24", "add", `https://github.com/RelayMessenger/Relay-SDK/tree/${relaySkillSourceBranch(version)}/skills/relay`, "--skill", "relay"];
+export const RELAY_SKILL_INSTALL_ARGS = relaySkillInstallArgs();
 // Actual supported installation paths from the pinned installer README, saved
 // in interactive-reference/skills-README.md:273-340. No guessed runtime paths.
 const projectRoots = [
