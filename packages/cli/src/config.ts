@@ -1,5 +1,7 @@
+import { inspectWindowsAcl, privateWindowsAcl, protectWindowsPath } from "./runtime-connect/windows-acl.js";
 import {
   chmod,
+  lstat,
   mkdir,
   open,
   readFile,
@@ -143,9 +145,26 @@ const writeConfigUnlocked = async (
   const path = configPath(context);
   const directory = dirname(path);
   const normalized = parseConfig(config);
+  const windows = (context.platform ?? process.platform) === "win32";
+  let existingACL: string | undefined;
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  if ((context.platform ?? process.platform) !== "win32") {
+  if (!windows) {
     await chmod(directory, 0o700);
+  } else {
+    const directoryInfo = await lstat(directory);
+    if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()
+      || !privateWindowsAcl(await inspectWindowsAcl(directory), true)) {
+      throw new Error("Relay config directory is not owner-controlled; its permissions were not changed.");
+    }
+    try {
+      const existing = await lstat(path);
+      if (!existing.isFile() || existing.isSymbolicLink() || existing.nlink !== 1) throw new Error("Relay config must be a regular unlinked file.");
+      const acl = await inspectWindowsAcl(path);
+      if (!privateWindowsAcl(acl)) throw new Error("Existing Relay config ACL is not private; correct its permissions before replacing credentials.");
+      existingACL = acl.sddl;
+    } catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+    }
   }
   const temporary = join(
     directory,
@@ -154,12 +173,25 @@ const writeConfigUnlocked = async (
   try {
     const handle = await open(temporary, "wx", 0o600);
     try {
+      if (windows) {
+        // The file is still EMPTY. Protect/clone the ACL before the first secret byte.
+        const acl = await protectWindowsPath(temporary, false, existingACL);
+        if (!privateWindowsAcl(acl) || (existingACL !== undefined && acl.sddl !== existingACL)) {
+          throw new Error("Could not establish the private Relay config ACL before writing credentials.");
+        }
+      }
       await handle.writeFile(`${JSON.stringify(normalized, null, 2)}\n`, "utf8");
       await handle.sync();
     } finally {
       await handle.close();
     }
     await rename(temporary, path);
+    if (windows) {
+      const acl = await inspectWindowsAcl(path);
+      if (!privateWindowsAcl(acl) || (existingACL !== undefined && acl.sddl !== existingACL)) {
+        throw new Error("Relay config was written but its final private ACL could not be verified.");
+      }
+    }
   } finally {
     await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
       if (error.code !== "ENOENT") throw error;
@@ -173,7 +205,9 @@ const withConfigLock = async <T>(context: ConfigContext, action: () => Promise<T
   const directory = dirname(configPath(context));
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const lockPath = `${configPath(context)}.lock`;
-  const deadline = Date.now() + 5_000;
+  // Native ACL operations require subprocesses; keep concurrent writers bounded
+  // without applying the POSIX fast-write deadline to Windows.
+  const deadline = Date.now() + ((context.platform ?? process.platform) === "win32" ? 120_000 : 5_000);
   let lock;
   for (;;) {
     try { lock = await open(lockPath, "wx", 0o600); break; }
@@ -305,12 +339,23 @@ export const resolveAuth = async (
 
 export const inspectConfigPermissions = async (
   context: ConfigContext = {},
-): Promise<{ exists: boolean; secure: boolean; mode?: number }> => {
+): Promise<{ exists: boolean; secure: boolean; mode?: number; aclChecked?: boolean }> => {
   try {
     const info = await stat(configPath(context));
     const mode = info.mode & 0o777;
     if ((context.platform ?? process.platform) === "win32") {
-      return { exists: true, secure: true, mode };
+      try {
+        const path = configPath(context);
+        const file = await lstat(path);
+        const parent = await lstat(dirname(path));
+        const acl = await inspectWindowsAcl(path);
+        const parentACL = await inspectWindowsAcl(dirname(path));
+        return { exists: true, secure: file.isFile() && !file.isSymbolicLink() && file.nlink === 1
+          && parent.isDirectory() && !parent.isSymbolicLink()
+          && privateWindowsAcl(acl) && privateWindowsAcl(parentACL, true), mode, aclChecked: true };
+      } catch {
+        return { exists: true, secure: false, mode, aclChecked: false };
+      }
     }
     return { exists: true, secure: (mode & 0o077) === 0, mode };
   } catch (error) {
