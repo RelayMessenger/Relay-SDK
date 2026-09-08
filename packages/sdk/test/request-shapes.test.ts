@@ -219,7 +219,7 @@ describe("Relay v1 request shapes", () => {
     await Relay.createAgent({}, { baseURL: "https://api.example.test", fetch: responder(calls) });
     await client.agents.delete("agent.dev");
 
-    expect(calls.map((call) => [call.method, call.url.pathname])).toEqual(
+    expect([...calls.slice(-2), ...calls.slice(0, -2)].map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
         operation.method,
         operation.path

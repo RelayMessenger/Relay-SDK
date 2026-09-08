@@ -37,6 +37,7 @@ describe("pure agent command handlers", () => {
     const { deps } = setup();
     await expect(createAgent({ profile: "default" }, deps)).rejects.toThrow("exists");
     await expect(createAgent({ tokenName: "" }, deps)).rejects.toThrow("1–80");
+    await expect(createAgent({ tokenName: "label\ncontrol" }, deps)).rejects.toThrow("control characters");
     expect(deps.bootstrap).not.toHaveBeenCalled();
   });
   it("does not leak bootstrap or persistence errors or retry", async () => {

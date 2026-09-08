@@ -49,8 +49,8 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     validateProfileName(input.profile);
     if (Object.hasOwn(before.profiles, input.profile)) throw new Error("Profile already exists; choose a new profile name.");
   }
-  if (input.tokenName !== undefined && (input.tokenName.length < 1 || input.tokenName.length > 80)) {
-    throw new Error("Token name must be 1–80 characters.");
+  if (input.tokenName !== undefined && (input.tokenName.length < 1 || input.tokenName.length > 80 || /[\u0000-\u001f\u007f]/u.test(input.tokenName))) {
+    throw new Error("Token name must be 1–80 characters without control characters.");
   }
   const apiURL = validateApiURL(input.apiURL ?? deps.env.RELAY_API_URL
     ?? before.profiles[before.current_profile]?.api_url ?? DEFAULT_API_URL);
