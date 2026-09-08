@@ -27,7 +27,7 @@ the `RELAY_AGENT_TOKEN` environment variable, or an owner-only local profile;
 there is deliberately no token command-line option.
 
 ```sh
-printf '%s' "$RELAY_AGENT_TOKEN" | relay token import --token-stdin
+printf '%s' "$RELAY_AGENT_TOKEN" | relay token import --token-stdin --api-url https://api.staging.relayapp.im
 relay token status
 relay doctor
 ```
@@ -43,7 +43,7 @@ printf '%s' "$STAGING_RELAY_AGENT_TOKEN" |
 relay profiles list
 ```
 
-Resolution order is:
+Resource-command token resolution order is:
 
 1. `RELAY_AGENT_TOKEN`, `RELAY_API_URL`, and `RELAY_PROFILE`;
 2. the selected local profile;
