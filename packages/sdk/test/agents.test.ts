@@ -74,3 +74,20 @@ it("strips Authorization from a caller-supplied Headers instance", async () => {
   await Relay.createAgent({}, { headers: new Headers({ Authorization: "Bearer must-never-send" }), fetch });
   expect(fetch).toHaveBeenCalledOnce();
 });
+
+it("forwards optional identity fields and the existing rendered-image recipe pair unchanged", async () => {
+  const body = { token_name: "Relay CLI", handle: "chosen_agent.dev", first_name: "Chosen Agent", image_url: "https://images.example.test/rendered.png", image_recipe: { recipe: { monogram: { initials: "CA" } }, background: { linearGradient: { colors: ["5B9BFA", "0B52C0"] as const } } } };
+  const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+    expect(init?.method).toBe("POST"); expect(new Headers(init?.headers).has("authorization")).toBe(false);
+    expect(JSON.parse(String(init?.body))).toEqual(body);
+    return Response.json(created, { status: 201 });
+  });
+  await Relay.createAgent(body, { fetch });
+  expect(fetch).toHaveBeenCalledOnce();
+});
+
+it("does not fall back to a random handle after a chosen-handle conflict", async () => {
+  const fetch = vi.fn(async () => Response.json({ error: { message: "Handle is already in use.", code: 1005 } }, { status: 409 }));
+  await expect(Relay.createAgent({ handle: "chosen_agent.dev" }, { fetch, maxRetries: 10 })).rejects.toMatchObject({ status: 409, code: 1005 });
+  expect(fetch).toHaveBeenCalledOnce();
+});

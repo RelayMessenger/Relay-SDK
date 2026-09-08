@@ -170,6 +170,25 @@ or `RELAY_API_URL` overrides remain authoritative, and existing profile origins
 are unchanged. Creation is never automatically retried. If creation succeeds but local
 storage fails, the command reports that failure without printing the secret.
 
+### Optional identity and picture
+
+```sh
+relay agents create --api-url https://api.staging.relayapp.im \
+  --handle my_helper.dev --name "My Helper" \
+  --image-url https://images.example.com/helper.png
+```
+
+Omit any option to keep the server's assigned handle/readable bird name/default
+image. Custom handles are full lowercase `.dev` handles; a collision is an error,
+never a request for a random replacement. Interactive creation offers the same
+optional fields; blank answers preserve defaults.
+
+`--image-recipe <json-file>` is advanced, existing Relay avatar metadata and
+requires its rendered `--image-url`. The URL alone is sufficient for a custom
+picture. The CLI does not render recipes or generate images. The server validates
+and copies the HTTPS image into permanent Relay storage; output uses its returned
+URL, not a client-guessed storage address.
+
 ### Optional native runtime handoff
 
 ```sh

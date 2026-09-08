@@ -213,3 +213,32 @@ it("plain interactive login reads a private prompt; --with-token selects stdin o
 });
 
 });
+
+it("maps custom profile flags to canonical create fields and stores the server-returned identity", async () => {
+  const { deps, fetch, home } = await fixture();
+  const recipe = { recipe: { emoji: { emoji: "🦆" } }, background: { linearGradient: { colors: ["2596A6", "116A79"] } } };
+  const path = join(home, "recipe.json"); await writeFile(path, JSON.stringify(recipe));
+  fetch.mockImplementation(async (_input, init) => {
+    expect(JSON.parse(String(init?.body))).toEqual({ handle: "chosen_agent.dev", first_name: "My Agent", image_url: "https://images.example.test/snapshot.png", image_recipe: recipe });
+    return Response.json({ agent: { ...card, handle: "chosen_agent.dev", first_name: "My Agent", image_url: "https://api.staging.relayapp.im/images/copied.png" }, secret: "custom-token", share_url: "https://go.staging.relayapp.im/@chosen_agent.dev" }, { status: 201 });
+  });
+  expect(await runCLI(["agents", "create", "--json", "--handle", "chosen_agent.dev", "--name", "  My Agent  ", "--image-url", "https://images.example.test/snapshot.png", "--image-recipe", path], deps)).toBe(0);
+  expect((await readConfig(deps.configContext)).profiles["chosen_agent.dev"]?.agent_token).toBe("custom-token");
+  expect(fetch).toHaveBeenCalledOnce();
+});
+
+it("rejects invalid options and recipe-without-snapshot before creating", async () => {
+  const { deps, fetch, home } = await fixture();
+  const recipe = join(home, "recipe.json"); await writeFile(recipe, '{"recipe":{"image":{}}}');
+  for (const flags of [["--handle", "Not.dev"], ["--handle", "ab.dev"], ["--name", "   "], ["--image-url", "http://images.example.test/a.png"], ["--image-url", "https://user:password@images.example.test/a.png"], ["--image-recipe", recipe]]) {
+    expect(await runCLI(["agents", "create", "--json", ...flags], deps)).toBe(1);
+  }
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it("a chosen-handle 409 leaves all profiles intact and never retries without the handle", async () => {
+  const { deps, fetch } = await fixture(); const previous = await readConfig(deps.configContext);
+  fetch.mockImplementation(async () => Response.json({ error: { code: 1005, message: "in use" } }, { status: 409 }));
+  expect(await runCLI(["agents", "create", "--json", "--handle", "chosen_agent.dev"], deps)).toBe(1);
+  expect(fetch).toHaveBeenCalledOnce(); expect(await readConfig(deps.configContext)).toEqual(previous);
+});
