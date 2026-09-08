@@ -23,8 +23,8 @@ it("persists QR with a real observer adapter, separates runtime readiness, resto
   } };
   const pending = runTerminalSession({ ...options, observer }, f);
   await turn();
-  expect(f.text()).toContain("██ QR ██"); expect(f.text()).toContain("connected (read-only; no ACK)");
-  expect(f.text()).toContain("connection not verified"); expect(f.text()).toContain("contact.added");
+  expect(f.text()).toContain("██ QR ██"); expect(f.text()).toContain("watching only; your agent still receives every message"); expect(f.text()).not.toMatch(/ACK|listener|retention|Runtime/);
+  expect(f.text()).toContain("Agent: connection not checked"); expect(f.text()).toContain("contact.added");
   expect(stopped).toBe(false); f.input.write("q");
   expect(await pending).toEqual({ reason: "quit", observedEvents: 1, observerStopped: true });
   expect(stopped).toBe(true); expect(f.input.isRaw).toBe(false);
