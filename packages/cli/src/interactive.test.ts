@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runCLI } from "./program.js";
-import { emptyConfig, readConfig, writeConfig } from "./config.js";
+import { STAGING_API_URL, defaultCreationApiURL, emptyConfig, packageVersion, readConfig, writeConfig } from "./config.js";
 import { InteractiveCancelled, interactiveAllowed, type InteractivePrompts } from "./interactive.js";
-import { installerEnvironment, RELAY_SKILL_INSTALL_ARGS, relaySkillPresent } from "./skill-offer.js";
+import { installerEnvironment, RELAY_SKILL_INSTALL_ARGS, relaySkillInstallArgs, relaySkillPresent, relaySkillSourceBranch } from "./skill-offer.js";
 
 const token = `rly_live_${"I".repeat(43)}`;
 const card = { handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
@@ -123,8 +123,12 @@ it("detects only existing source-backed project/global Relay skill files", async
   await writeFile(join(home, ".codex", "skills", "relay", "SKILL.md"), "fixture");
   expect(await relaySkillPresent(cwd, home, {})).toBe(true);
 });
-it("uses fixed installer args without default agent/global flags or credentials", () => {
-  expect(RELAY_SKILL_INSTALL_ARGS).toEqual(["--yes", "skills@1.5.24", "add", "https://github.com/RelayMessenger/Relay-SDK/tree/staging/skills/relay", "--skill", "relay"]);
+it("installer args follow the build's environment without default agent/global flags or credentials", () => {
+  expect(relaySkillInstallArgs("0.1.0-staging.2")).toEqual(["--yes", "skills@1.5.24", "add", "https://github.com/RelayMessenger/Relay-SDK/tree/staging/skills/relay", "--skill", "relay"]);
+  expect(relaySkillInstallArgs("0.1.0")).toEqual(["--yes", "skills@1.5.24", "add", "https://github.com/RelayMessenger/Relay-SDK/tree/main/skills/relay", "--skill", "relay"]);
+  expect(relaySkillSourceBranch("0.1.0-staging")).toBe("staging"); expect(relaySkillSourceBranch("0.1.0-rc.1")).toBe("main");
+  expect(RELAY_SKILL_INSTALL_ARGS).toEqual(relaySkillInstallArgs(packageVersion()));
+  expect(relaySkillSourceBranch(packageVersion())).toBe(defaultCreationApiURL() === STAGING_API_URL ? "staging" : "main");
   const parent = { PATH: "keep", HOME: "/private-home", RELAY_AGENT_TOKEN: token, OPENAI_API_KEY: "other-secret", PSModulePath: "not-needed" };
   expect(installerEnvironment(parent)).toEqual({ PATH: "keep", HOME: "/private-home" });
   expect(parent.RELAY_AGENT_TOKEN).toBe(token);

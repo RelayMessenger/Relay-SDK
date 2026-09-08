@@ -20,9 +20,15 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 export const DEFAULT_API_URL = "https://api.relayapp.im";
 export const DEFAULT_PROFILE = "default";
 export const STAGING_API_URL = "https://api.staging.relayapp.im";
+/** This package's own version as published (`X.Y.Z` or `X.Y.Z-staging.N`). */
+export const packageVersion = (): string =>
+  createRequire(import.meta.url)("../package.json").version;
+/** A `-staging` prerelease build targets the staging environment by itself. */
+export const isStagingBuild = (version: string): boolean =>
+  /-staging(?:\.|$)/u.test(version);
 export const defaultCreationApiURL = (
-  version: string = createRequire(import.meta.url)("../package.json").version,
-): string => /-staging(?:\.|$)/u.test(version) ? STAGING_API_URL : DEFAULT_API_URL;
+  version: string = packageVersion(),
+): string => isStagingBuild(version) ? STAGING_API_URL : DEFAULT_API_URL;
 
 export interface RelayProfile {
   api_url?: string;
