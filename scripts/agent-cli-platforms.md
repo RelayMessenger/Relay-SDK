@@ -63,3 +63,35 @@ harness default receipt directory is unsuitable for that sequence.
   `scripts/validate-workflows.mjs`. Its existing Blacksmith-only assertion
   rejects this workflow; verification does not edit or bypass that validator.
 - Main owns staging landing. This branch never updates staging or npm tags.
+
+## Mac-side Daytona transfer/exec helper
+
+`scripts/agent-cli-platforms-daytona.mjs` uses the already installed SDK under
+`WORKSPACE/_runtime/daytona-tools`; it performs no local Linux builds or installs.
+It fetches `DAYTONA_API_KEY` directly from Infisical `prod:/admin` and only
+allows optional Relay test secrets from explicit `dev`/`staging` folders.
+Use named fixtures; leave unrelated operator data alone.
+
+```sh
+node scripts/agent-cli-platforms-daytona.mjs \
+  --workspace /Users/advaitpaliwal/Code/Relay \
+  --sandbox 21b65902-6e9d-4d91-8857-63cbccebe8f9 \
+  --upload-local /absolute/path/to/source.tar.gz \
+  --upload-remote /home/daytona/server-source.tar.gz \
+  --exec-file /absolute/path/to/server-proof.sh \
+  --cwd /home/daytona/agent-cli-server-proof \
+  --receipt /absolute/path/to/server-proof-receipt.json
+```
+
+Command files must contain **no credential values**. To inject selected test
+credentials into the remote process environment, add `--secret-env staging
+--secret-path /server --secret-name DATABASE_URL` (repeat `--secret-name` for
+other explicitly required names). Receipt output is redacted against fetched,
+selected credential values. No credentials are included in process arguments.
+Downloads via `--download-remote` / `--download-local` are for text receipts
+only, never private configuration, token files, or binary archives.
+
+Initialize the remote shell with `source /usr/local/share/nvm/nvm.sh` and
+`nvm use 22.22.3` before installing/testing. Archive or transfer the intended
+source SHA/patch explicitly; the helper does not guess which shared work to
+copy. Server and CLI use separate directories in the owned sandbox.
