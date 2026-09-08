@@ -57,6 +57,6 @@ describe("development event listener", () => {
       client,
       {},
       { stdout: vi.fn(), stderr: vi.fn() },
-    )).rejects.toThrow(/cannot rebuild durable state/);
+    )).rejects.toThrow(/cannot replay older ones/);
   });
 });

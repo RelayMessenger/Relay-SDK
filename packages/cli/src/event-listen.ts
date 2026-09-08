@@ -49,8 +49,10 @@ export const listenForAgentEvents = async (
     },
     async onFullSync(context): Promise<void> {
       throw new Error(
-        `Relay requested FULL sync through sequence ${context.throughSequence}; `
-        + "the stateless development listener cannot rebuild durable state.",
+        `Relay asked this agent to catch up on every event through number ${context.throughSequence} `
+        + "because it has been away longer than Relay keeps events. This command only shows events as they arrive "
+        + "and cannot replay older ones. Connect the agent's real runtime to catch up, or use a fresh dedicated "
+        + "non-production agent for this command.",
       );
     },
   });
