@@ -56,7 +56,8 @@ try {
   const cli = (...args) => run(process.execPath, [bin, ...args], { cwd: consumer });
   const help = cli('--help');
   assert.match(help, /auth/);
-  report.agentCommands = /^  agent(?:s)?[ \[]/m.test(help) ? 'available: requires feature-specific integration cases' : 'pending feature commits: no agent command in root help';
+  const hasAgentCommands = /^  agent(?:s)?[ \[]/m.test(help);
+  report.agentCommands = hasAgentCommands ? 'available; tests pending below' : 'pending feature commits: no agent command in root help';
   const expectedVersion = JSON.parse(readFileSync(join(root, 'packages/cli/package.json'))).version;
   assert.equal(cli('--version').trim(), expectedVersion);
   for (const executable of ['relay', 'relaymessenger']) {
@@ -77,6 +78,18 @@ try {
   run(process.execPath, [bin, 'chats', 'list'], { cwd: consumer, expectedExit: 1 });
   cli('profiles', 'use', 'default');
   cli('profiles', 'remove', 'verification');
+  if (hasAgentCommands) {
+    assert.match(cli('agents', '--help'), /create/);
+    assert.match(cli('agents', 'create', '--help'), /token-name/);
+    assert.match(cli('agents', 'delete', '--help'), /handle/);
+    const inventory = JSON.parse(cli('agents', 'list', '--json'));
+    assert.ok(inventory.agents.every(item => item.token === 'missing'));
+    run(process.execPath, [bin, 'agents', 'delete', 'verification_bird.dev'], { cwd: consumer, expectedExit: 1 });
+    // The core-owned consumer exercises the installed module with an injected HTTP fixture.
+    // Native process checks above and module fixture checks are recorded separately from live staging.
+    run(process.execPath, [join(root, 'packages/cli/scripts/agent-tarball-consumer.mjs'), consumer, scratch], { cwd: consumer });
+    report.agentCommands = 'passed: native help/list/missing-auth plus installed create/list/delete HTTP-fixture lifecycle; live staging pending';
+  }
   report.packageProof = 'passed';
   report.result = report.validationFailures.length ? 'failed' : 'passed';
   if (report.validationFailures.length) process.exitCode = 1;
