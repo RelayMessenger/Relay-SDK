@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const api = 'https://api.staging.relayapp.im';
 const inputImage = `${api}/assets/relay-agent-default-4b3e4b9358f35c66.png`;
-const serverSha = '04c729e3e3b2249eb9cca93fbb09ee3dd5fd69a6';
+const serverSha = 'e54a48128d29f42b56344218edcac023cf5eb5d0';
 const canonicalHash = '7d46b16f5dc19034cbdcb45bdd79816a9a2f4c9f6febb8520db0517dfe9eae64';
 if (process.platform !== 'linux' || !process.env.RELAY_DAYTONA_SANDBOX_ID || process.env.RELAY_CUSTOM_LIVE_CONFIRMED !== serverSha) throw Error('Explicit confirmed staging deployment in owned Daytona is required');
 const canonicalFile = process.env.RELAY_CUSTOM_CANONICAL_SPEC;
@@ -19,7 +19,8 @@ mkdirSync(dirname(receiptPath),{recursive:true});
 const temp = mkdtempSync(join(tmpdir(),'relay-custom-live-'));
 const config = join(temp,'private-cli-config.json');
 const recipe = join(temp,'recipe.json');writeFileSync(recipe,JSON.stringify({recipe:{image:{}}}),{mode:0o600});
-const runId = new Date().toISOString().replace(/\D/g,'').slice(0,17);
+const runId = '20260908064002697'; // Explicit same-handle reattempt after definitive422 and main-confirmed deployment fix.
+assert.equal(process.env.RELAY_CUSTOM_PREVIOUS_OUTCOME, 'definitive-422-no-identity');
 const handle = `verify_${runId}.dev`;const name = `Verification Custom ${runId}`;
 const manifest = JSON.parse(readFileSync(join(root,'packages/cli/package.json')));assert.equal(manifest.name,'relaymessenger');
 const env={...process.env,RELAY_CONFIG_PATH:config,RELAY_API_URL:api};delete env.RELAY_AGENT_TOKEN;delete env.RELAY_PROFILE;
@@ -52,7 +53,7 @@ try {
  const stored=JSON.parse(readFileSync(config));secret=stored.profiles[created.profile]?.agent_token;
  assert.ok(typeof secret==='string' && /^rly_live_[A-Za-z0-9]{43}$/.test(secret));owned=true;
  assert.equal(created.agent.handle,handle);assert.equal(created.agent.first_name,name);assert.equal(created.token,'stored');assert.equal(created.share_url,`https://go.staging.relayapp.im/@${handle}`);
- const permanent=new URL(created.agent.image_url);assert.equal(permanent.origin,'https://cdn.staging.relayapp.im');assert.ok(permanent.pathname.startsWith('/images/'));assert.equal(permanent.search,'');assert.equal(permanent.username,'');assert.equal(permanent.password,'');
+ const permanent=new URL(created.agent.image_url);assert.equal(permanent.href,inputImage,'Exact trusted immutable bundled asset must be retained without remote ingestion');assert.equal(permanent.search,'');assert.equal(permanent.username,'');assert.equal(permanent.password,'');
  report.created={profile:created.profile,handle,name,shareUrl:created.share_url,imageUrl:permanent.href};report.recipeAccepted=true;save();
  const first=await card('cardBeforeDuplicate');assert.equal(first.response.status,200);const ownCard=first.body.contact_cards.find(x=>x.handle===handle);assert.equal(ownCard.first_name,name);assert.equal(ownCard.image_url,permanent.href);
  const image=await fetch(permanent,{redirect:'error',signal:AbortSignal.timeout(15000)});assert.equal(image.status,200);assert.ok((image.headers.get('content-type')??'').startsWith('image/'));const bytes=Buffer.from(await image.arrayBuffer());assert.ok(bytes.length>0);report.permanentImage={status:image.status,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};
@@ -69,7 +70,8 @@ finally {
    const revoked=await card('revokedToken');assert.equal(revoked.response.status,401);report.cleanup={deleted:true,revoked:true};
   } catch(error) {report.result='failed';report.cleanup={deleted:false,confirmed:false,error:redact(error.message)};process.exitCode=1;}
  }
- report.recoveryRequired=!owned || !report.cleanup?.revoked;
+ report.definitivelyRejectedBeforeIdentity = !owned && report.commands.some(c => /Agent creation was rejected\. HTTP 4\d\d/.test(c.output));
+ report.recoveryRequired = owned ? !report.cleanup?.revoked : !report.definitivelyRejectedBeforeIdentity;
  // Retain private candidate directory for scoped recovery/review; it is never downloaded as an artifact.
  save();console.log(JSON.stringify({result:report.result,handle,createCommandsInvoked:report.createCommandsInvoked,cleanup:report.cleanup,receipt:receiptPath}));
 }
