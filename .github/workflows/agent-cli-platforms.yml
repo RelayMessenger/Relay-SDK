@@ -1,0 +1,45 @@
+name: Agent CLI native platforms
+on:
+  push:
+    branches: [staging, agent-cli-verification-20260908]
+  workflow_dispatch:
+concurrency:
+  group: agent-cli-native-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  native:
+    if: github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/agent-cli-verification-20260908'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Preserve source contract bytes on every OS
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: .nvmrc
+      - run: npm install --global npm@11.19.1 --no-audit --no-fund
+      - run: npm ci
+      - name: Diagnose native Windows PowerShell ACL support
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/agent-cli-platforms-windows-probe.ps1
+      - run: node --test scripts/agent-cli-platforms-policy.test.mjs
+      - run: node --test scripts/agent-cli-platforms-staging.test.mjs
+      - run: node scripts/agent-cli-platforms.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: agent-cli-${{ matrix.os }}-${{ github.sha }}
+          path: .release-tmp/agent-cli-platforms
+          if-no-files-found: error
+# Linux installs/builds/tests run exclusively in the owned Daytona sandbox,
+# using the identical harness and RELAY_DAYTONA_SANDBOX_ID (not a hosted Linux job).

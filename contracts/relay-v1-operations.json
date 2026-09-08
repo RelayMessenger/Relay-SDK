@@ -1,14 +1,14 @@
 {
   "source": "contracts/relay-v1-openapi.yaml",
-  "source_openapi_sha256": "cf83012c6b241e60323543adb7059b49954fbf3d59d4d1fd1817bbfa19d32cdd",
+  "source_openapi_sha256": "7d46b16f5dc19034cbdcb45bdd79816a9a2f4c9f6febb8520db0517dfe9eae64",
   "upstream": {
     "repository": "https://github.com/RelayMessenger/Relay-Server.git",
-    "commit": "24c577e9802e07d6c61718ebca12e84d79113727",
+    "commit": "04c729e3e3b2249eb9cca93fbb09ee3dd5fd69a6",
     "path": "contracts/developer/openapi.yaml",
-    "sha256": "cf83012c6b241e60323543adb7059b49954fbf3d59d4d1fd1817bbfa19d32cdd"
+    "sha256": "7d46b16f5dc19034cbdcb45bdd79816a9a2f4c9f6febb8520db0517dfe9eae64"
   },
-  "source_path_count": 22,
-  "source_schema_count": 112,
+  "source_path_count": 24,
+  "source_schema_count": 119,
   "callback_count": 18,
   "transport_decision": {
     "source": "contracts/agent-transport-decision.md",
@@ -19,9 +19,19 @@
       "path": "research/relay-rebuild-20260828/TRANSPORT-DECISION-20260829.md"
     }
   },
-  "path_count": 21,
-  "operation_count": 36,
+  "path_count": 23,
+  "operation_count": 38,
   "operations": [
+    {
+      "method": "POST",
+      "path": "/v1/agents",
+      "operationId": "createAgent"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/agents/{handle}",
+      "operationId": "deleteAgent"
+    },
     {
       "method": "POST",
       "path": "/v1/chats",

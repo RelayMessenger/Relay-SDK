@@ -1,16 +1,28 @@
+import { inspectWindowsAcl, privateWindowsAcl, protectWindowsPath } from "./runtime-connect/windows-acl.js";
 import {
+  access,
   chmod,
+  lstat,
   mkdir,
   open,
   readFile,
   rename,
   stat,
+  unlink,
 } from "node:fs/promises";
+import { constants } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export const DEFAULT_API_URL = "https://api.relayapp.im";
 export const DEFAULT_PROFILE = "default";
+export const STAGING_API_URL = "https://api.staging.relayapp.im";
+export const defaultCreationApiURL = (
+  version: string = createRequire(import.meta.url)("../package.json").version,
+): string => /-staging(?:\.|$)/u.test(version) ? STAGING_API_URL : DEFAULT_API_URL;
 
 export interface RelayProfile {
   api_url?: string;
@@ -102,19 +114,25 @@ const parseConfig = (value: unknown): RelayConfig => {
   };
 };
 
+const revisions = new WeakMap<RelayConfig, string>();
+const rememberConfig = (config: RelayConfig): RelayConfig => {
+  revisions.set(config, JSON.stringify(config));
+  return config;
+};
+
 export const readConfig = async (
   context: ConfigContext = {},
 ): Promise<RelayConfig> => {
   try {
     const raw = await readFile(configPath(context), "utf8");
-    return parseConfig(JSON.parse(raw) as unknown);
+    return rememberConfig(parseConfig(JSON.parse(raw) as unknown));
   } catch (error) {
     if (
       error instanceof Error
       && "code" in error
       && error.code === "ENOENT"
     ) {
-      return emptyConfig();
+      return rememberConfig(emptyConfig());
     }
     if (error instanceof SyntaxError) {
       throw new Error("Relay config is not valid JSON.", { cause: error });
@@ -123,38 +141,148 @@ export const readConfig = async (
   }
 };
 
-export const writeConfig = async (
-  config: RelayConfig,
-  context: ConfigContext = {},
-): Promise<void> => {
+interface ConfigDestination {
+  path: string;
+  directory: string;
+  windows: boolean;
+  existingACL?: string;
+}
+
+// Shared by preflight and the final write: no credential bytes are changed here.
+const prepareConfigDestination = async (context: ConfigContext): Promise<ConfigDestination> => {
   const path = configPath(context);
   const directory = dirname(path);
-  const normalized = parseConfig(config);
+  const windows = (context.platform ?? process.platform) === "win32";
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  if ((context.platform ?? process.platform) !== "win32") {
-    await chmod(directory, 0o700);
+  const directoryInfo = await lstat(directory);
+  if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()) throw new Error("Relay config directory must be a regular directory.");
+  if ((directoryInfo.mode & 0o222) === 0) throw new Error("Relay config directory is not writable.");
+  await access(directory, constants.W_OK);
+  if (!windows) await chmod(directory, 0o700);
+  else if (!privateWindowsAcl(await inspectWindowsAcl(directory), true)) {
+    throw new Error("Relay config directory is not owner-controlled; its permissions were not changed.");
   }
-  const temporary = join(
-    directory,
-    `.config.${process.pid}.${Date.now()}.tmp`,
-  );
-  const handle = await open(temporary, "wx", 0o600);
+  let existingACL: string | undefined;
   try {
-    await handle.writeFile(`${JSON.stringify(normalized, null, 2)}\n`, "utf8");
-    await handle.sync();
-  } finally {
-    await handle.close();
+    const existing = await lstat(path);
+    if (!existing.isFile() || existing.isSymbolicLink() || existing.nlink !== 1) throw new Error("Relay config must be a regular unlinked file.");
+    if (!windows && (existing.mode & 0o077) !== 0) throw new Error("Existing Relay config permissions are not private.");
+    if ((existing.mode & 0o444) === 0) throw new Error("Relay config is not readable.");
+    if ((existing.mode & 0o222) === 0) throw new Error("Relay config is not writable.");
+    // r+ verifies current OS read/write access without truncating or writing.
+    const probe = await open(path, "r+"); await probe.close();
+    if (windows) {
+      const acl = await inspectWindowsAcl(path);
+      if (!privateWindowsAcl(acl)) throw new Error("Existing Relay config ACL is not private; correct its permissions before replacing credentials.");
+      existingACL = acl.sddl;
+    }
+  } catch (error) {
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
   }
-  await rename(temporary, path);
-  if ((context.platform ?? process.platform) !== "win32") {
-    await chmod(path, 0o600);
-  }
+  return { path, directory, windows, ...(existingACL === undefined ? {} : { existingACL }) };
 };
 
+const privateConfigTemp = async (destination: ConfigDestination): Promise<{ path: string; handle: FileHandle }> => {
+  const path = join(destination.directory, `.config.${process.pid}.${randomUUID()}.tmp`);
+  const handle = await open(path, "wx", 0o600);
+  try {
+    if (destination.windows) {
+      const acl = await protectWindowsPath(path, false, destination.existingACL);
+      if (!privateWindowsAcl(acl) || (destination.existingACL !== undefined && acl.sddl !== destination.existingACL)) {
+        throw new Error("Could not establish the private Relay config ACL before writing credentials.");
+      }
+    } else await handle.chmod(0o600);
+    return { path, handle };
+  } catch (error) {
+    await handle.close(); await unlink(path); throw error;
+  }
+};
+const verifyConfigACL = async (path: string, destination: ConfigDestination): Promise<void> => {
+  if (!destination.windows) return;
+  const acl = await inspectWindowsAcl(path);
+  if (!privateWindowsAcl(acl) || (destination.existingACL !== undefined && acl.sddl !== destination.existingACL)) {
+    throw new Error("Relay config was written but its final private ACL could not be verified.");
+  }
+};
+const removeTemp = async (path: string): Promise<void> => {
+  await unlink(path).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; });
+};
+const writeConfigUnlocked = async (config: RelayConfig, context: ConfigContext = {}): Promise<void> => {
+  const normalized = parseConfig(config);
+  const destination = await prepareConfigDestination(context);
+  const temporary = await privateConfigTemp(destination);
+  try {
+    try { await temporary.handle.writeFile(`${JSON.stringify(normalized, null, 2)}\n`, "utf8"); await temporary.handle.sync(); }
+    finally { await temporary.handle.close(); }
+    await rename(temporary.path, destination.path);
+    await verifyConfigACL(destination.path, destination);
+  } finally { await removeTemp(temporary.path); }
+};
+
+/** Probe private creation, writing, syncing, renaming and ACL inspection without
+ * replacing any existing config. This is not a reservation or recovery journal. */
+export const preflightConfigDestination = async (context: ConfigContext = {}): Promise<void> => {
+  await withConfigLock(context, async () => {
+    await readConfig(context);
+    const destination = await prepareConfigDestination(context);
+    const temporary = await privateConfigTemp(destination);
+    const renamed = `${temporary.path}.probe`;
+    try {
+      try { await temporary.handle.writeFile("Relay private config preflight\n", "utf8"); await temporary.handle.sync(); }
+      finally { await temporary.handle.close(); }
+      await rename(temporary.path, renamed);
+      await verifyConfigACL(renamed, destination);
+    } finally { await removeTemp(temporary.path); await removeTemp(renamed); }
+  });
+};
+
+// Same-directory, exclusive lock serializes profile read/modify/write transactions.
+// Never remove another process's lock or infer that its owner has died.
+const withConfigLock = async <T>(context: ConfigContext, action: () => Promise<T>): Promise<T> => {
+  const directory = dirname(configPath(context));
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const lockPath = `${configPath(context)}.lock`;
+  // Native ACL operations require subprocesses; keep concurrent writers bounded
+  // without applying the POSIX fast-write deadline to Windows.
+  const deadline = Date.now() + ((context.platform ?? process.platform) === "win32" ? 120_000 : 5_000);
+  let lock;
+  for (;;) {
+    try { lock = await open(lockPath, "wx", 0o600); break; }
+    catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
+      if (Date.now() >= deadline) throw new Error("Relay configuration is busy; no local change was made.");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  try { return await action(); }
+  finally { await lock.close(); await unlink(lockPath); }
+};
+
+export const writeConfig = async (config: RelayConfig, context: ConfigContext = {}): Promise<void> =>
+  withConfigLock(context, async () => {
+    const expected = revisions.get(config);
+    if (expected !== undefined && JSON.stringify(await readConfig(context)) !== expected) {
+      throw new Error("Relay configuration changed concurrently; no local change was made. Try the command again.");
+    }
+    await writeConfigUnlocked(config, context);
+    rememberConfig(config);
+  });
+
+export const mutateConfig = async <T>(
+  change: (config: RelayConfig) => T,
+  context: ConfigContext = {},
+): Promise<T> => withConfigLock(context, async () => {
+  const config = await readConfig(context);
+  const before = JSON.stringify(config);
+  const result = change(config);
+  if (JSON.stringify(config) !== before) await writeConfigUnlocked(config, context);
+  return result;
+});
+
 export const validateProfileName = (name: string): string => {
-  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(name)) {
+  if (!/^[a-z0-9][a-z0-9_.-]{0,63}$/i.test(name)) {
     throw new Error(
-      "Profile names must be 1-64 letters, numbers, underscores, or hyphens.",
+      "Profile names must be 1-64 letters, numbers, underscores, dots, or hyphens.",
     );
   }
   return name;
@@ -208,7 +336,7 @@ export const validateForwardURL = (input: string): string => {
 
 export const validateToken = (value: string): string => {
   const token = value.trim();
-  if (!token || /[\r\n\0]/.test(token)) {
+  if (!token || /[\u0000-\u001f\u007f]/u.test(token)) {
     throw new Error("Agent Token is empty or malformed.");
   }
   return token;
@@ -234,7 +362,7 @@ export const resolveAuth = async (
     : validateToken(envToken);
   if (!token) {
     throw new Error(
-      `No Agent Token for profile ${profile}. Run relay auth login --token-stdin.`,
+      `No Agent Token for profile ${profile}. Run relay auth login --with-token.`,
     );
   }
   return {
@@ -248,12 +376,23 @@ export const resolveAuth = async (
 
 export const inspectConfigPermissions = async (
   context: ConfigContext = {},
-): Promise<{ exists: boolean; secure: boolean; mode?: number }> => {
+): Promise<{ exists: boolean; secure: boolean; mode?: number; aclChecked?: boolean }> => {
   try {
     const info = await stat(configPath(context));
     const mode = info.mode & 0o777;
     if ((context.platform ?? process.platform) === "win32") {
-      return { exists: true, secure: true, mode };
+      try {
+        const path = configPath(context);
+        const file = await lstat(path);
+        const parent = await lstat(dirname(path));
+        const acl = await inspectWindowsAcl(path);
+        const parentACL = await inspectWindowsAcl(dirname(path));
+        return { exists: true, secure: file.isFile() && !file.isSymbolicLink() && file.nlink === 1
+          && parent.isDirectory() && !parent.isSymbolicLink()
+          && privateWindowsAcl(acl) && privateWindowsAcl(parentACL, true), mode, aclChecked: true };
+      } catch {
+        return { exists: true, secure: false, mode, aclChecked: false };
+      }
     }
     return { exists: true, secure: (mode & 0o077) === 0, mode };
   } catch (error) {

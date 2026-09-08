@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const expected =
-  "cf83012c6b241e60323543adb7059b49954fbf3d59d4d1fd1817bbfa19d32cdd";
+  "7d46b16f5dc19034cbdcb45bdd79816a9a2f4c9f6febb8520db0517dfe9eae64";
 const copies = [
   "contracts/relay-v1-openapi.yaml",
   "packages/chat-sdk-adapter/contracts/relay-openapi.yaml",
@@ -28,9 +28,9 @@ const skillLock = JSON.parse(
   ),
 );
 assert.equal(skillLock.api.openapi_sha256, expected);
-assert.equal(skillLock.api.commit, "24c577e9802e07d6c61718ebca12e84d79113727");
-assert.equal(skillLock.sdk.commit, "1bbcb486b4a91860ee3527ce95d015883e4cc1ae");
-assert.equal(skillLock.sdk.version, "0.3.0-staging.8");
+assert.equal(skillLock.api.commit, "04c729e3e3b2249eb9cca93fbb09ee3dd5fd69a6");
+assert.equal(skillLock.sdk.commit, "4b6e80013539525c6610df96acd54c45be61d749");
+assert.equal(skillLock.sdk.version, "0.3.1-staging.0");
 
 // The skill lock is historical source provenance, not the moving workspace version.
 const sdkManifest = JSON.parse(await readFile(join(root, "packages/sdk/package.json"), "utf8"));

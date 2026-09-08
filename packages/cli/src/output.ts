@@ -36,3 +36,13 @@ export const errorText = (
 
 export const jsonText = (value: unknown): string =>
   `${JSON.stringify(value, null, 2)}\n`;
+
+/** Redact string metadata without changing JSON booleans, numbers, or structure. */
+export function safeMetadata<T>(value: T, secrets: readonly string[]): T {
+  if (typeof value === "string") return redactText(value, secrets) as T;
+  if (Array.isArray(value)) return value.map((item) => safeMetadata(item, secrets)) as T;
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, safeMetadata(item, secrets)])) as T;
+  }
+  return value;
+}

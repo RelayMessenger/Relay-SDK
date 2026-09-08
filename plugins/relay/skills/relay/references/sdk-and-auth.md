@@ -18,8 +18,10 @@ Install the current locked prerelease through its documented tag:
 npm install @relaymessenger/sdk@staging
 ```
 
-The locked package is `@relaymessenger/sdk@0.3.0-staging.8` and requires Node
-22.22.3 or newer.
+Read the SDK source identity and publication status from
+`relay-v1-lock.json`. It requires Node 22.22.3 or newer. A validated source
+revision does not prove the staging registry has that revision; verify the
+installed exports before using newly added operations.
 
 ```typescript
 import Relay from "@relaymessenger/sdk";
@@ -47,6 +49,8 @@ custom origin but does not enforce HTTPS for you.
 
 Use only the public resources exported by this version:
 
+- `agents` for scoped deletion, and static `Relay.createAgent` for anonymous
+  creation;
 - `chats`, including `messages` and `participants`;
 - `messages`;
 - `attachments`;
@@ -61,6 +65,42 @@ Use only the public resources exported by this version:
 The SDK defaults to a 15-second request timeout and two retries. Message sends
 are retried only when they carry an idempotency key. Reads, idempotent HTTP
 methods, and operations marked safe by the SDK can also be retried.
+
+## Developer-agent lifecycle
+
+Only use creation when a new identity is intended:
+
+```typescript
+const created = await Relay.createAgent(
+  { token_name: "My integration" },
+  { baseURL: "https://api.staging.relayapp.im" },
+);
+// Save created.secret in trusted private storage before continuing.
+// Never log the response, put its secret in a QR, or include it in a URL.
+const agent = new Relay({
+  apiKey: created.secret,
+  baseURL: "https://api.staging.relayapp.im",
+});
+await agent.contactCard.retrieve();
+```
+
+The response contains `agent`, `secret`, and `share_url`. The card has a Handle,
+not a new invented agent ID. Use the returned image and HTTPS share URLs rather
+than reconstructing an asset path. The one-time creation secret has no automatic
+retry/replay recovery mechanism.
+
+Creation also accepts optional `handle`, `first_name`, `image_url`, and
+`image_recipe`. A chosen Handle must be available and end in `.dev`; a conflict
+returns `409` instead of silently assigning another. Omitted fields keep their
+random/default values. A native image recipe requires the rendered `image_url`
+alongside it; the SDK's `AgentImageRecipe` type describes the existing format,
+not a new image-generation endpoint.
+
+For an intentionally deleted developer-managed identity,
+`await agent.agents.delete(created.agent.handle)` uses its own token. Deletion
+is not automatically retried. On `409`, complete normal durable event processing;
+on an uncertain outcome retain the private credential for diagnosis. A Console
+organization's agent is not made deletable by this developer-agent operation.
 
 ## Errors
 

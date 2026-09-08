@@ -21819,8 +21819,6 @@ var Transport = class {
   #timeout;
   #retryBaseDelayMs;
   constructor(options) {
-    if (!options.apiKey?.trim())
-      throw new Error("Relay API key is required.");
     this.baseURL = (options.baseURL ?? "https://api.relayapp.im").replace(/\/+$/, "");
     this.#apiKey = options.apiKey;
     const selectedFetch = options.fetch ?? globalThis.fetch;
@@ -21842,7 +21840,10 @@ var Transport = class {
       const timeoutSignal = AbortSignal.timeout(timeout);
       const signal = request.options?.signal ? AbortSignal.any([request.options.signal, timeoutSignal]) : timeoutSignal;
       const headers = new Headers(request.options?.headers);
-      headers.set("authorization", `Bearer ${this.#apiKey}`);
+      if (this.#apiKey)
+        headers.set("authorization", `Bearer ${this.#apiKey}`);
+      else
+        headers.delete("authorization");
       headers.set("accept", "application/json");
       if (request.body !== void 0)
         headers.set("content-type", "application/json");
@@ -21869,6 +21870,9 @@ var Transport = class {
         continue;
       }
       if (response.ok) {
+        if (request.expectedStatus !== void 0 && response.status !== request.expectedStatus) {
+          throw new RelayAPIError("Unexpected Relay success status.", { status: response.status });
+        }
         if (response.status === 204)
           return void 0;
         const text3 = await response.text();
@@ -21917,6 +21921,8 @@ var Transport = class {
     }
   }
   runWebSocket(options) {
+    if (!this.#apiKey)
+      throw new Error("Relay API key is required.");
     return runWebSocket(this.baseURL, this.#apiKey, options);
   }
 };
@@ -22303,7 +22309,33 @@ var WebSocket2 = class {
     return this.transport.runWebSocket(options);
   }
 };
+var Agents = class {
+  transport;
+  constructor(transport2) {
+    this.transport = transport2;
+  }
+  delete(handle, options) {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/agents/${pathID(handle)}`,
+      expectedStatus: 204,
+      options: { ...options, maxRetries: 0 }
+    });
+  }
+};
 var Relay = class {
+  /** Bootstrap a new identity. The one-time secret is never retried/replayed. */
+  static createAgent(body = {}, options = {}) {
+    const { apiKey: _ignored, ...transportOptions } = options;
+    return new Transport(transportOptions).request({
+      method: "POST",
+      path: "/v1/agents",
+      body,
+      options,
+      expectedStatus: 201
+    });
+  }
+  agents;
   baseURL;
   chats;
   messages;
@@ -22316,8 +22348,11 @@ var Relay = class {
   websocket;
   webhooks;
   constructor(options) {
+    if (!options.apiKey?.trim())
+      throw new Error("Relay API key is required.");
     const transport2 = new Transport(options);
     this.baseURL = transport2.baseURL;
+    this.agents = new Agents(transport2);
     this.chats = new Chats(transport2);
     this.messages = new Messages(transport2);
     this.attachments = new Attachments(transport2);
