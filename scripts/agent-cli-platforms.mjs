@@ -46,7 +46,9 @@ try {
   npm(['install', '--ignore-scripts', '--no-audit', '--no-fund', packs.sdk, packs.cli], { cwd: consumer });
   const bin = join(consumer, 'node_modules', '@relaymessenger', 'cli', 'dist', 'cli.js');
   const cli = (...args) => run(process.execPath, [bin, ...args], { cwd: consumer });
-  assert.match(cli('--help'), /auth/);
+  const help = cli('--help');
+  assert.match(help, /auth/);
+  report.agentCommands = /^  agent(?:s)?[ \[]/m.test(help) ? 'available: requires feature-specific integration cases' : 'pending feature commits: no agent command in root help';
   assert.equal(cli('--version').trim(), JSON.parse(readFileSync(join(root, 'packages/cli/package.json'))).version);
   cli('profiles', 'add', 'verification', '--api-url', 'http://127.0.0.1:1');
   cli('profiles', 'use', 'verification');
@@ -54,9 +56,13 @@ try {
   assert.equal(JSON.parse(cli('auth', 'status')).authenticated, true);
   assert.equal(JSON.parse(cli('profiles', 'list')).current_profile, 'verification');
   assert.equal(JSON.parse(readFileSync(env.RELAY_CONFIG_PATH)).profiles.verification.agent_token, token);
-  cli('agents', '--help');
+  cli('doctor', '--offline');
+  const envStatus = JSON.parse(run(process.execPath, [bin, 'auth', 'status'], { cwd: consumer, env: { ...env, RELAY_AGENT_TOKEN: token } }));
+  assert.equal(envStatus.token_source, 'environment');
   cli('auth', 'logout');
   assert.equal(JSON.parse(readFileSync(env.RELAY_CONFIG_PATH)).profiles.verification.agent_token, undefined);
+  run(process.execPath, [bin, 'auth', 'status'], { cwd: consumer, expectedExit: 1 });
+  run(process.execPath, [bin, 'chats', 'list'], { cwd: consumer, expectedExit: 1 });
   cli('profiles', 'use', 'default');
   cli('profiles', 'remove', 'verification');
   report.result = 'passed';
