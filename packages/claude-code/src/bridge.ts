@@ -185,10 +185,10 @@ export function deliveryFromSnapshotMessage(params: {
   const message = params.message;
   if (message.is_from_me || message.is_system_message) return null;
   const sender = message.from_handle;
-  if (!sender || sender.kind !== "user") {
+  if (!sender || (sender.kind !== "user" && sender.kind !== "agent")) {
     if (snapshotMessageIsUnreadByAgent(message)) {
       throw new Error(
-        `FULL sync cannot authenticate unread inbound Message ${message.id}: from_handle is absent`,
+        `FULL sync cannot authenticate unread inbound Message ${message.id}: from_handle is absent or has an unsupported kind`,
       );
     }
     return null;
