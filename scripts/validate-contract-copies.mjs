@@ -28,7 +28,7 @@ const skillLock = JSON.parse(
   ),
 );
 assert.equal(skillLock.api.openapi_sha256, expected);
-assert.equal(skillLock.api.commit, "f3978b2db5a8560d89045ffcf86946884cc8d100");
+assert.equal(skillLock.api.commit, "04c729e3e3b2249eb9cca93fbb09ee3dd5fd69a6");
 assert.equal(skillLock.sdk.commit, "1bbcb486b4a91860ee3527ce95d015883e4cc1ae");
 assert.equal(skillLock.sdk.version, "0.3.0-staging.8");
 

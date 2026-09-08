@@ -161,7 +161,7 @@ durable ACK and idempotent REST reply.
 
 `contracts/relay-v1.lock.json` records the compatibility boundary used by this
 candidate: Relay Server commit
-`f3978b2db5a8560d89045ffcf86946884cc8d100`, OpenAPI SHA-256
+`04c729e3e3b2249eb9cca93fbb09ee3dd5fd69a6`, OpenAPI SHA-256
 `7d46b16f5dc19034cbdcb45bdd79816a9a2f4c9f6febb8520db0517dfe9eae64`,
 public `ChatHandle.image_url` and `ChatHandle.about` fields with no legacy
 aliases,

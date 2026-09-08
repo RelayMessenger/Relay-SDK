@@ -57,3 +57,21 @@ it("rejects a broad existing credential ACL without altering the file or directo
   await expect(writeConfig(emptyConfig(), ctx)).rejects.toThrow("not private");
   expect(await readFile(configPath(ctx), "utf8")).toBe(bytes); expect(protectWindowsPath).not.toHaveBeenCalled();
 });
+
+it("blocks bootstrap on an insecure existing Windows config before any POST", async () => {
+  const { agentDependencies, createAgent } = await import("./agents.js");
+  const ctx = await context(); const before = JSON.stringify(emptyConfig()); await writeFile(configPath(ctx), before);
+  vi.mocked(inspectWindowsAcl).mockImplementation(async (path) => path === ctx.home ? acl() : unsafe);
+  const fetch = vi.fn();
+  await expect(createAgent({}, agentDependencies(ctx, fetch))).rejects.toThrow("no agent creation request");
+  expect(fetch).not.toHaveBeenCalled(); expect(await readFile(configPath(ctx), "utf8")).toBe(before);
+});
+
+it("blocks bootstrap when private temporary ACL protection is unavailable", async () => {
+  const { agentDependencies, createAgent } = await import("./agents.js");
+  const ctx = await context(); vi.mocked(inspectWindowsAcl).mockResolvedValue(acl());
+  vi.mocked(protectWindowsPath).mockRejectedValue(new Error("ACL unavailable"));
+  const fetch = vi.fn();
+  await expect(createAgent({}, agentDependencies(ctx, fetch))).rejects.toThrow("preflight failed");
+  expect(fetch).not.toHaveBeenCalled(); expect(await readdir(ctx.home)).toEqual([]);
+});

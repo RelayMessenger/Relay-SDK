@@ -168,7 +168,10 @@ removed. New creation defaults to the staging API when this package has a stagin
 version; it never inherits an empty legacy production profile. Explicit `--api-url`
 or `RELAY_API_URL` overrides remain authoritative, and existing profile origins
 are unchanged. Creation is never automatically retried. If creation succeeds but local
-storage fails, the command reports that failure without printing the secret.
+storage fails, the command reports the safely assigned handle and whether local
+storage is present, absent, or unverified, without printing the secret. Private
+config write/ACL preflight runs before the POST and never overwrites existing
+credentials. It is not a reservation or a durable recovery mechanism.
 
 ### Optional identity and picture
 
