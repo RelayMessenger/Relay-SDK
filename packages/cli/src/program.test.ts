@@ -259,13 +259,13 @@ describe("CLI command routing", () => {
   });
 });
 
-describe("token commands", () => {
+describe("auth commands", { timeout: 120_000 }, () => {
   it("stores stdin tokens with owner-only config without printing them", async () => {
     const home = await mkdtemp(join(tmpdir(), "relay-cli-auth-"));
     const configContext = {
       home,
       env: { XDG_CONFIG_HOME: join(home, ".config") },
-      platform: "linux" as const,
+      platform: process.platform,
     };
     const stdout: string[] = [];
     const secret = "rly_stdin_secret_012345";
@@ -282,6 +282,10 @@ describe("token commands", () => {
     expect(code).toBe(0);
     expect(stdout.join("")).not.toContain(secret);
     expect(await readFile(configPath(configContext), "utf8")).toContain(secret);
+    if (process.platform === "win32") {
+      const { inspectConfigPermissions } = await import("./config.js");
+      expect(await inspectConfigPermissions(configContext)).toMatchObject({ secure: true, aclChecked: true });
+    }
   });
 
   it("does not accept a token as an argument", async () => {
