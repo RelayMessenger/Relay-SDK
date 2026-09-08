@@ -34,6 +34,7 @@ interface ChatHandleBase {
   image_url: string | null;
   about: string | null;
   verified: boolean;
+  is_removable?: boolean;
 }
 
 export interface UserChatHandle extends ChatHandleBase {
@@ -757,3 +758,14 @@ export type RelayWebhookEvent =
   | ContactAddedWebhookEvent
   | ContactRemovedWebhookEvent
   | RelayWebhookEnvelope<Record<string, unknown>, OtherWebhookEventType>;
+
+/** POST /v1/agents bootstrap parameters. */
+export interface AgentCreateParams {
+  token_name?: string;
+}
+
+export interface AgentCreateResponse {
+  agent: ContactCardItem;
+  secret: string;
+  share_url: string;
+}

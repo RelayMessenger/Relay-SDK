@@ -1,31 +1,37 @@
 # Relay CLI
 
-`@relaymessenger/cli` is the official terminal client for the current Relay
+`relaymessenger` is the official terminal client for the current Relay
 v1 Agent API. It delegates all Relay calls and response types to
 `@relaymessenger/sdk`.
 
 Source is maintained in
-[`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/main/packages/cli)
+[`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/staging/packages/cli)
 under `packages/cli`.
 
 ## Install
 
 ```sh
-npm install --global @relaymessenger/cli
-relay --version
+npx relaymessenger@staging --version
+# Or install the staging CLI globally:
+npm install --global relaymessenger@staging
 ```
 
-Node.js 22.22.3 or newer is required. `relaymessenger` remains an executable
-alias for existing installs.
+Node.js 22.22.3 or newer is required. `relaymessenger` is
+the canonical executable; `relay` is the shorter command alias.
 
-## Authenticate
+## Agent Token authentication
 
-Create Agent Tokens in Relay Console. Tokens are accepted only from stdin,
-the `RELAY_AGENT_TOKEN` environment variable, or an owner-only local profile;
+Use `agents create` for a new agent, or import an existing Agent Token. Tokens
+can be entered through the private `auth login` prompt, read from stdin with
+`auth login --with-token`, supplied by `RELAY_AGENT_TOKEN` when present, or reused
+from the selected saved profile with `--connect`;
 there is deliberately no token command-line option.
 
 ```sh
-printf '%s' "$RELAY_AGENT_TOKEN" | relay auth login --token-stdin
+# Private prompt when RELAY_AGENT_TOKEN is not set:
+relay auth login --api-url https://api.staging.relayapp.im
+# Headless stdin:
+printf '%s' "$RELAY_AGENT_TOKEN" | relay auth login --with-token --api-url https://api.staging.relayapp.im
 relay auth status
 relay doctor
 ```
@@ -37,11 +43,11 @@ directory is mode `0700` and the file is mode `0600` on POSIX systems.
 relay profiles add staging --api-url https://api.staging.relayapp.im
 relay profiles use staging
 printf '%s' "$STAGING_RELAY_AGENT_TOKEN" |
-  relay auth login --profile staging --token-stdin
+  relay auth login --profile staging --with-token
 relay profiles list
 ```
 
-Resolution order is:
+Resource-command token resolution order is:
 
 1. `RELAY_AGENT_TOKEN`, `RELAY_API_URL`, and `RELAY_PROFILE`;
 2. the selected local profile;
@@ -51,7 +57,8 @@ Plain HTTP API URLs are rejected except for loopback development origins.
 
 ## Resource commands
 
-Every command prints JSON.
+Resource commands below print JSON; agent creation also offers a human-readable
+share link and QR unless `--json` is selected.
 
 ```sh
 relay chats list --limit 20
@@ -106,6 +113,71 @@ agent; it is not a human invitation. Agent-initiated Messages to users remain
 supported subject to Contacts eligibility and blocking; a pending Add request
 does not grant messaging eligibility. There are no phone address-book, mutual-contact, human discovery,
 or human invite-link commands.
+
+## Developer-managed agents
+
+```sh
+relay agents create --api-url https://api.staging.relayapp.im
+relay agents create --api-url https://api.staging.relayapp.im --json
+relay agents list --json
+relay --profile brave_cangoo.dev agents delete brave_cangoo.dev
+```
+
+Creation stores the one-time Agent Token in a new named profile and prints only
+public metadata, a share link, and a terminal QR. JSON output includes
+`token: "stored"`, never the secret. Use an explicit `--profile <new-name>` to
+choose a new profile name; existing profiles and the current profile selection
+are preserved. `--token-name` labels the token, not a machine identity.
+
+Listing is local inventory, not a global account API. Each saved credential reads
+its current Contact Card using its saved API origin; environment token/origin
+overrides are not applied across the inventory. Tokenless profiles remain in `profiles list`, not agent inventory.
+Unavailable Contact Cards are reported without exposing error bodies.
+
+Deletion honors explicit profile/ENV selection. Otherwise it selects one saved
+credential by its authenticated Contact Card, refusing unavailable or ambiguous
+matches (including the same handle on multiple origins). It only clears that
+profile's matching saved credential after confirmed HTTP 204. Errors and uncertain
+responses retain credentials; unrelated environment/profile credentials are not
+removed. New creation defaults to the staging API when this package has a staging prerelease
+version; it never inherits an empty legacy production profile. Explicit `--api-url`
+or `RELAY_API_URL` overrides remain authoritative, and existing profile origins
+are unchanged. Creation is never automatically retried. If creation succeeds but local
+storage fails, the command reports that failure without printing the secret.
+
+### Optional native runtime handoff
+
+```sh
+relay agents create --api-url https://api.staging.relayapp.im --connect hermes \
+  --runtime-home /absolute/hermes-profile \
+  --runtime-state-dir /absolute/hermes-profile/relay \
+  --confirm-configure --runtime-stopped
+
+# Import into a staging profile via private stdin; no creation request.
+relay --profile staging auth login --with-token --api-url https://api.staging.relayapp.im --connect openclaw \
+  --runtime-config /absolute/openclaw.json \
+  --runtime-state-dir /absolute/openclaw-state --runtime-account my-agent \
+  --confirm-configure --runtime-stopped
+```
+
+Stop the selected runtime before passing `--runtime-stopped`. `--confirm-configure`
+authorizes only private configuration writes. `--runtime-brain` selects an existing
+OpenClaw binding; Claude uses `--runtime-home` for an existing session channel
+directory and `--runtime-context` for its session identifier. Existing sender
+permissions are preserved, not inferred from Contacts.
+
+Creation handoff reads the newly saved profile directly, ignoring unrelated ENV
+credentials. `auth login --connect` without token-input flags reuses the selected saved profile
+and its origin, ignoring unrelated ENV credentials. Add `--with-token` to select stdin explicitly. Plain `auth login` uses
+`RELAY_AGENT_TOKEN` in headless environments or a hidden terminal prompt. Handoff validates the credential before saving
+an import and never falls back to creation.
+Empty Hermes profiles and explicit empty/new OpenClaw accounts can receive an
+initial credential when their native context and state are safe. Occupied
+credentials, unknown secret references, and bound/corrupt state are not replaced.
+
+Handoff output reports configuration status and `connected: false`: this command
+does not install, launch, stop, or test-connect a runtime. Start it using its native
+workflow. If handoff fails after creation, the token remains stored; use `auth login --connect` with the existing token rather than creating another identity.
 
 ## Local event forwarding
 

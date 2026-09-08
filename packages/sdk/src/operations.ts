@@ -5,6 +5,8 @@ export interface RelayV1Operation {
 }
 
 export const RELAY_V1_OPERATIONS = [
+  { method: "POST", path: "/v1/agents", operationId: "createAgent" },
+  { method: "DELETE", path: "/v1/agents/{handle}", operationId: "deleteAgent" },
   {
     "method": "POST",
     "path": "/v1/chats",

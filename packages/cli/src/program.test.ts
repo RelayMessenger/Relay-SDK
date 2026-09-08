@@ -53,7 +53,9 @@ describe("CLI command routing", () => {
   let fake: ReturnType<typeof makeClient>;
   let resolveClient: (profile?: string) => Promise<ClientContext>;
 
-  beforeEach(() => {
+  let privatePath: string;
+  beforeEach(async () => {
+    privatePath = join(await mkdtemp(join(tmpdir(), "relay-program-config-")), "config.json");
     stdout = [];
     stderr = [];
     fake = makeClient();
@@ -61,10 +63,10 @@ describe("CLI command routing", () => {
       client: fake.client,
       auth: {
         profile: "default",
-        apiURL: "https://api.relayapp.im",
+        apiURL: "https://api.staging.relayapp.im",
         token: "rly_test_secret",
         tokenSource: "environment",
-        configPath: "/tmp/relay-config",
+        configPath: privatePath,
       },
     }));
   });
@@ -73,7 +75,7 @@ describe("CLI command routing", () => {
     resolveClient,
     stdout: (value) => stdout.push(value),
     stderr: (value) => stderr.push(value),
-    configContext: { env: { RELAY_AGENT_TOKEN: "rly_test_secret" } },
+    configContext: { env: { RELAY_AGENT_TOKEN: "rly_test_secret", RELAY_API_URL: "https://api.staging.relayapp.im", RELAY_CONFIG_PATH: privatePath } },
   });
 
   it("routes reads and typing through SDK resources", async () => {
@@ -257,7 +259,7 @@ describe("CLI command routing", () => {
   });
 });
 
-describe("authentication commands", () => {
+describe("token commands", () => {
   it("stores stdin tokens with owner-only config without printing them", async () => {
     const home = await mkdtemp(join(tmpdir(), "relay-cli-auth-"));
     const configContext = {
@@ -268,10 +270,11 @@ describe("authentication commands", () => {
     const stdout: string[] = [];
     const secret = "rly_stdin_secret_012345";
     const code = await runCLI(
-      ["auth", "login", "--token-stdin"],
+      ["auth", "login", "--with-token", "--api-url", "https://api.staging.relayapp.im"],
       {
         configContext,
         readStdin: async () => secret,
+        fetch: async () => Response.json({ contact_cards: [{ handle: "test_agent.dev", first_name: "Test", last_name: null, image_url: null, kind: "agent", is_active: true }] }),
         stdout: (value) => stdout.push(value),
         stderr: (value) => stdout.push(value),
       },
@@ -285,7 +288,7 @@ describe("authentication commands", () => {
     const output: string[] = [];
     const secret = "rly_argument_secret_012345";
     const code = await runCLI(
-      ["auth", "login", "--token", secret],
+      ["auth", "login", "--with-token", secret],
       {
         stdout: (value) => output.push(value),
         stderr: (value) => output.push(value),

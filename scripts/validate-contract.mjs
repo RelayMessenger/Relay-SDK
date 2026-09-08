@@ -34,9 +34,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "24c577e9802e07d6c61718ebca12e84d79113727",
+    commit: "9f0a023c65dc52515d2916d1d8f90118fd0bf790",
     path: "contracts/developer/openapi.yaml",
-    sha256: "cf83012c6b241e60323543adb7059b49954fbf3d59d4d1fd1817bbfa19d32cdd",
+    sha256: "a2bebc32ab50dd52e6f437ec3ae97b775799e84518b503fba6dda471c007b519",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -50,6 +50,8 @@ const sourceOnlyOperations = [
   },
 ];
 const allowedOperationSignatures = [
+  "POST /v1/agents",
+  "DELETE /v1/agents/{handle}",
   "POST /v1/chats",
   "GET /v1/chats",
   "GET /v1/chats/{chatId}",
@@ -96,13 +98,13 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 36);
-assert.equal(manifest.path_count, 21);
-assert.equal(manifest.source_path_count, 22);
-assert.equal(manifest.source_schema_count, 112);
+assert.equal(manifest.operation_count, 38);
+assert.equal(manifest.path_count, 23);
+assert.equal(manifest.source_path_count, 24);
+assert.equal(manifest.source_schema_count, 114);
 assert.equal(manifest.callback_count, 18);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 21);
-assert.equal(operationJSON.length, 36);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 23);
+assert.equal(operationJSON.length, 38);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 18);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
@@ -199,6 +201,7 @@ const publicMethods = (value) =>
     .filter((name) => name !== "constructor")
     .sort();
 assert.deepEqual(Object.keys(client).sort(), [
+  "agents",
   "attachments",
   "baseURL",
   "blockedHandles",
@@ -211,6 +214,8 @@ assert.deepEqual(Object.keys(client).sort(), [
   "webhooks",
   "websocket",
 ]);
+assert.equal(typeof Relay.createAgent, "function");
+assert.deepEqual(publicMethods(client.agents), ["delete"]);
 assert.deepEqual(publicMethods(client.chats), [
   "create",
   "leaveChat",
@@ -295,6 +300,42 @@ const validateOpenAPI = () => {
     "Relay OpenAPI changed; refresh SDK contract",
   );
   const document = YAML.parse(bytes.toString("utf8"));
+  const bootstrap = document.paths["/v1/agents"].post;
+  assert.deepEqual(Object.keys(document.paths["/v1/agents"]), ["post"]);
+  assert.deepEqual(Object.keys(document.paths["/v1/agents/{handle}"]), ["delete"]);
+  assert.equal(bootstrap.operationId, "createAgent");
+  assert.deepEqual(bootstrap.security, []);
+  assert.equal(bootstrap.requestBody.required, true);
+  assert.equal(bootstrap.requestBody.content["application/json"].schema.$ref, "#/components/schemas/CreateAgentRequest");
+  assert.equal(bootstrap.responses["201"].headers["Cache-Control"].schema.const, "no-store");
+  assert.equal(bootstrap.responses["201"].content["application/json"].schema.$ref, "#/components/schemas/CreateAgentResponse");
+  const createParams = document.components.schemas.CreateAgentRequest;
+  assert.equal(createParams.additionalProperties, false);
+  assert.deepEqual(Object.keys(createParams.properties), ["token_name"]);
+  assert.equal(createParams.required?.length ?? 0, 0);
+  assert.equal(createParams.properties.token_name.minLength, 1);
+  assert.equal(createParams.properties.token_name.maxLength, 80);
+  assert.equal(createParams.properties.token_name.default, "Relay CLI");
+  const created = document.components.schemas.CreateAgentResponse;
+  assert.equal(created.additionalProperties, false);
+  assert.deepEqual(created.required, ["agent", "secret", "share_url"]);
+  assert.deepEqual(Object.keys(created.properties), ["agent", "secret", "share_url"]);
+  assert.equal(created.properties.agent.allOf[0].$ref, "#/components/schemas/ContactCardItem");
+  assert.equal(created.properties.agent.allOf[1].properties.kind.const, "agent");
+  assert.equal(created.properties.secret.readOnly, true);
+  assert.equal(Object.hasOwn(document.components.schemas.ContactCardItem.properties, "id"), false);
+  const deletion = document.paths["/v1/agents/{handle}"].delete;
+  assert.equal(deletion.operationId, "deleteAgent");
+  assert.equal(deletion.requestBody, undefined);
+  assert.equal(deletion.responses["204"].content, undefined);
+  for (const status of ["401", "403", "404", "409"]) assert.ok(deletion.responses[status]);
+  for (const [path, item] of Object.entries(document.paths)) {
+    for (const [method, operation] of Object.entries(item)) {
+      if (!["get", "post", "put", "patch", "delete"].includes(method)) continue;
+      if (path === "/v1/agents" && method === "post") continue;
+      assert.deepEqual(operation.security ?? document.security, [{ BearerAuth: [] }], `${method} ${path} still requires authentication`);
+    }
+  }
   const addParticipant = document.components.schemas.AddParticipantRequest;
   assert.deepEqual(addParticipant.required, ["handle"]);
   assert.deepEqual(Object.keys(addParticipant.properties).sort(), ["handle", "hide_history"]);
@@ -469,6 +510,7 @@ const validateOpenAPI = () => {
       "image_url",
       "about",
       "verified",
+      "is_removable",
     ],
   );
   assert.equal(
@@ -512,6 +554,8 @@ const validateOpenAPI = () => {
     document.components.schemas.ChatHandle.properties.verified.type,
     "boolean",
   );
+  assert.equal(document.components.schemas.ChatHandle.properties.is_removable.type, "boolean");
+  assert.match(declaredTypes, /is_removable\?: boolean;/u);
   for (const privateField of [
     "greeting_message",
     "is_default",
@@ -655,5 +699,6 @@ console.log(JSON.stringify({
   source_schemas: manifest.source_schema_count,
   callbacks: manifest.callback_count,
   openapi_sha256: manifest.source_openapi_sha256,
+  source_commit: manifest.upstream.commit,
   transport_decision_sha256: manifest.transport_decision.sha256,
 }));

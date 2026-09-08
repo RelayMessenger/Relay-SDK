@@ -1,6 +1,6 @@
 # Relay CLI
 
-- This package directory owns only the public `@relaymessenger/cli` package.
+- This package directory owns only the public `relaymessenger` package.
 - Use `@relaymessenger/sdk` resource methods and exported types. Do not copy
   OpenAPI schemas or call Relay HTTP routes directly.
 - Agent Tokens are local server-side secrets. Never accept one as a command

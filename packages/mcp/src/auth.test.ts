@@ -20,24 +20,26 @@ describe("local Agent Token resolver", () => {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify({
       version: 1,
-      current_profile: "staging",
+      current_profile: "brave_cangoo.dev",
       profiles: {
-        staging: {
+        "brave_cangoo.dev": {
           api_url: "https://api.staging.relayapp.im",
           agent_token: "rly_profile_secret",
         },
       },
     }));
     const resolved = await resolveAgentAuth(context);
-    expect(resolved.profile).toBe("staging");
+    expect(resolved.profile).toBe("brave_cangoo.dev");
     expect(resolved.source).toBe("profile");
     expect(resolved.token).toBe("rly_profile_secret");
     expect(await collectLocalTokens(context)).toEqual(["rly_profile_secret"]);
   });
 
   it("prefers environment auth and permits only loopback HTTP", async () => {
+    const home = await mkdtemp(join(tmpdir(), "relay-mcp-env-auth-"));
     const resolved = await resolveAgentAuth({
       env: {
+        RELAY_CONFIG_PATH: join(home, "config.json"),
         RELAY_AGENT_TOKEN: "rly_environment_secret",
         RELAY_API_URL: "http://127.0.0.1:8787",
       },

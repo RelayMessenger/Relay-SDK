@@ -1,3 +1,6 @@
+import { readHiddenToken } from "./secret-input.js";
+import { handoffAgent, handoffOptions, handoffTarget, type HandoffOptions } from "./agent-handoff.js";
+import { agentDependencies, createAgent, deleteAgent, listAgents, type AgentDependencies } from "./agents.js";
 import { createRequire } from "node:module";
 import { readFile, stat } from "node:fs/promises";
 import Relay, {
@@ -25,6 +28,7 @@ import { createClientContext } from "./client.js";
 import type { ConfigContext, RelayProfile } from "./config.js";
 import {
   DEFAULT_API_URL,
+  defaultCreationApiURL,
   collectConfiguredTokens,
   configPath,
   readConfig,
@@ -35,7 +39,7 @@ import {
   writeConfig,
 } from "./config.js";
 import { runDoctor } from "./doctor.js";
-import { errorText, jsonText } from "./output.js";
+import { errorText, jsonText, safeMetadata } from "./output.js";
 import { listenForAgentEvents } from "./event-listen.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
@@ -43,9 +47,12 @@ import { listenForAgentEvents } from "./event-listen.js";
 const PACKAGE_VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
 export interface ProgramDependencies {
+  agents?: AgentDependencies;
   configContext?: ConfigContext;
   resolveClient?: (profile?: string) => Promise<ClientContext>;
   readStdin?: () => Promise<string>;
+  readSecret?: () => Promise<string>;
+  isInteractive?: boolean;
   stdout?: (value: string) => void;
   stderr?: (value: string) => void;
   fetch?: typeof fetch;
@@ -122,74 +129,120 @@ export const createProgram = (
     (await resolveClient(globals(command).profile)).client;
 
   const program = new Command()
-    .name("relay")
+    .name("relaymessenger")
     .description("Official CLI for Relay v1 Agent resources.")
     .version(PACKAGE_VERSION)
-    .option("--profile <name>", "local Relay profile", process.env.RELAY_PROFILE);
+    .option("--profile <name>", "local Relay profile", (configContext.env ?? process.env).RELAY_PROFILE);
   program.exitOverride();
   program.configureOutput({
     writeOut: stdout,
     writeErr: stderr,
   });
 
-  const auth = program.command("auth").description("Manage local Agent Token authentication.");
-  auth
-    .command("login")
-    .description("Store an Agent Token from stdin or RELAY_AGENT_TOKEN.")
-    .option("--token-stdin", "read the token from stdin")
-    .option("--from-env", "read the token from RELAY_AGENT_TOKEN")
+  const agentDeps = dependencies.agents ?? agentDependencies(configContext, dependencies.fetch);
+  const agents = program.command("agents").description("Create, inspect local profiles, and delete developer-managed agents.");
+  handoffOptions(agents.command("create"))
+    .option("--api-url <url>", "Relay API origin", validateApiURL)
+    .option("--token-name <name>", "label for the new Agent Token")
+    .option("--json", "print safe metadata as JSON")
+    .action(async (options: HandoffOptions & { apiUrl?: string; tokenName?: string; json?: boolean }, command: Command) => {
+      const target = await handoffTarget(options);
+      const result = await createAgent({
+        ...(program.getOptionValueSource("profile") === "cli" && globals(command).profile ? { profile: globals(command).profile } : {}),
+        ...(options.apiUrl ? { apiURL: options.apiUrl } : {}),
+        ...(options.tokenName === undefined ? {} : { tokenName: options.tokenName }),
+      }, agentDeps);
+      let handoff;
+      if (target) {
+        try { handoff = await handoffAgent(target, result.profile, agentDeps, { consent: options.confirmConfigure === true, runtimeStopped: options.runtimeStopped === true }, true); }
+        catch { handoff = { status: "required-action", code: "handoff-failed", message: "Agent credential is stored; runtime handoff failed. Use auth login --connect with the stored credential; do not create another agent.", connected: false }; }
+      }
+      if (options.json) output({ ...result, ...(handoff ? { handoff } : {}) });
+      else {
+        stdout(`${result.agent.first_name} (@${result.agent.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken: stored\n`);
+        // Load only for human output; the QR encodes the public share URL, not credentials.
+        const qr = createRequire(import.meta.url)("qrcode") as {
+          toString(text: string, options: { type: "terminal"; small: boolean }): Promise<string>;
+        };
+        try { stdout(await qr.toString(result.share_url, { type: "terminal", small: true })); }
+        catch { stderr("QR rendering unavailable; use the share link above.\n"); }
+        if (handoff) output({ handoff });
+      }
+      if (handoff && handoff.status !== "configured") throw new Error("Agent credential is stored; runtime handoff requires action. Use auth login --connect rather than creating again.");
+    });
+  agents.command("list").option("--json", "print safe metadata as JSON")
+    .action(async () => output(await listAgents(agentDeps)));
+  agents.command("delete").argument("<handle>", "agent handle", handle)
+    .option("--json", "print safe metadata as JSON")
+    .action(async (agentHandle: string, _options: object, command: Command) => {
+      output(await deleteAgent(agentHandle, globals(command).profile, agentDeps));
+    });
+
+  const authCommands = program.command("auth").description("Manage Agent Token authentication.");
+  authCommands.configureOutput({
+    outputError: (_message, write) => write("Invalid auth arguments. Use auth login --with-token with stdin; never put a token in an argument.\n"),
+  });
+  handoffOptions(authCommands.command("login"))
+    .description("Save an Agent Token using a hidden prompt, stdin, environment, or selected handoff profile.")
+    .option("--with-token", "read the token from stdin")
     .option("--api-url <url>", "set the profile API origin")
     .action(async (
-      options: { tokenStdin?: boolean; fromEnv?: boolean; apiUrl?: string },
+      options: HandoffOptions & { withToken?: boolean; apiUrl?: string },
       command: Command,
     ) => {
-      if (options.tokenStdin === options.fromEnv) {
-        throw new Error("Choose exactly one of --token-stdin or --from-env.");
-      }
+      const target = await handoffTarget(options);
       const env = configContext.env ?? process.env;
-      const raw = options.fromEnv
-        ? env.RELAY_AGENT_TOKEN
-        : await (dependencies.readStdin
-          ?? (async () => {
-            const chunks: Buffer[] = [];
-            for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
-            return Buffer.concat(chunks).toString("utf8");
-          }))();
-      if (!raw) throw new Error("RELAY_AGENT_TOKEN is not set.");
-      const token = validateToken(raw);
       const config = await readConfig(configContext);
-      const profile = validateProfileName(
-        globals(command).profile ?? config.current_profile,
-      );
+      const profile = validateProfileName(globals(command).profile ?? config.current_profile);
       const previous = config.profiles[profile] ?? {};
-      config.profiles[profile] = {
-        api_url: validateApiURL(
-          options.apiUrl ?? previous.api_url ?? DEFAULT_API_URL,
-        ),
-        agent_token: token,
-      };
+      // Explicit --connect can reuse a saved profile without substituting an
+      // unrelated environment token. --with-token always selects stdin.
+      const reuseSaved = Boolean(target && previous.agent_token) && !options.withToken;
+      let raw: string | undefined;
+      if (options.withToken && !dependencies.readStdin && process.stdin.isTTY) {
+        raw = await readHiddenToken(process.stdin, stderr);
+      } else if (options.withToken) {
+        raw = await (dependencies.readStdin ?? (async () => {
+          const chunks: Buffer[] = [];
+          for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+          return Buffer.concat(chunks).toString("utf8");
+        }))();
+      } else if (reuseSaved) raw = previous.agent_token;
+      else if (env.RELAY_AGENT_TOKEN !== undefined) raw = env.RELAY_AGENT_TOKEN;
+      else {
+        const interactive = dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stderr.isTTY);
+        if (!interactive) throw new Error("No Agent Token available in non-interactive mode. Use auth login --with-token with stdin or RELAY_AGENT_TOKEN.");
+        raw = await (dependencies.readSecret ?? (() => readHiddenToken(process.stdin, stderr)))();
+      }
+      if (!raw) throw new Error("No Agent Token was supplied; no credentials were changed.");
+      const token = validateToken(raw);
+      const apiURL = validateApiURL(options.apiUrl ?? (reuseSaved ? previous.api_url : env.RELAY_API_URL ?? previous.api_url) ?? defaultCreationApiURL());
+      {
+        try {
+          const cards = await agentDeps.client(token, apiURL).contactCard.retrieve();
+          if (cards.contact_cards.filter((card) => card.kind === "agent" && card.is_active).length !== 1) throw new Error("Agent credential required.");
+        } catch { throw new Error("Agent Token validation failed; existing credentials and runtime configuration were kept."); }
+      }
+      config.profiles[profile] = { api_url: apiURL, agent_token: token };
       await writeConfig(config, configContext);
-      output({
-        ok: true,
-        profile,
-        api_url: config.profiles[profile].api_url,
-        token: "stored",
-      });
+      const handoff = target ? await handoffAgent(target, profile, agentDeps, { consent: options.confirmConfigure === true, runtimeStopped: options.runtimeStopped === true }, true) : undefined;
+      output(safeMetadata({ ok: true, profile, api_url: apiURL, token: "stored", ...(handoff ? { handoff } : {}) }, [token]));
+      if (handoff && handoff.status !== "configured") throw new Error("Token is stored; native runtime configuration requires action.");
     });
-  auth
+  authCommands
     .command("status")
     .description("Show token resolution without revealing the token.")
     .action(async (_options: object, command: Command) => {
       const resolved = await resolveAuth(globals(command).profile, configContext);
       output({
-        authenticated: true,
+        configured: true,
         profile: resolved.profile,
         api_url: resolved.apiURL,
         token_source: resolved.tokenSource,
         config_path: resolved.configPath,
       });
     });
-  auth
+  authCommands
     .command("logout")
     .description("Remove the selected profile's stored token.")
     .action(async (_options: object, command: Command) => {
@@ -266,7 +319,7 @@ export const createProgram = (
 
   program
     .command("doctor")
-    .description("Check runtime, auth, config security, SDK contract, and API.")
+    .description("Check runtime, token configuration, config security, SDK contract, and API.")
     .option("--offline", "skip the read-only API request")
     .action(async (options: { offline?: boolean }, command: Command) => {
       const report = await runDoctor(

@@ -1,9 +1,9 @@
 # Relay API contract lock
 
 `relay-openapi.yaml` is a byte-exact snapshot from the Relay Server commit
-`24c577e9802e07d6c61718ebca12e84d79113727`.
+`9f0a023c65dc52515d2916d1d8f90118fd0bf790`.
 
 SHA-256:
-`cf83012c6b241e60323543adb7059b49954fbf3d59d4d1fd1817bbfa19d32cdd`
+`a2bebc32ab50dd52e6f437ec3ae97b775799e84518b503fba6dda471c007b519`
 
 The snapshot is test input only. It is excluded from the npm package.

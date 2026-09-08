@@ -27,7 +27,7 @@
     "staging:validate:structural": "node scripts/staging-validate.mjs --structural",
     "validate:sdk": "npm run clean --workspace @relaymessenger/sdk && npm run check --workspace @relaymessenger/sdk && npm run build --workspace @relaymessenger/sdk && npm test --workspace @relaymessenger/sdk && npm run consumer:types && npm run pack:smoke && npm run staging:validate:structural",
     "validate:chat-sdk": "npm run test:all --workspace @relaymessenger/chat-sdk-adapter",
-    "validate:cli": "npm run validate --workspace @relaymessenger/cli",
+    "validate:cli": "npm run validate --workspace relaymessenger",
     "validate:mcp": "npm run validate --workspace @relaymessenger/mcp",
     "validate:openclaw": "npm run validate --workspace @relaymessenger/openclaw-plugin && npm run pack:smoke --workspace @relaymessenger/openclaw-plugin && npm run gateway:harness --workspace @relaymessenger/openclaw-plugin",
     "validate:claude-code": "npm run verify --workspace relay-claude-channel && npm run pack:smoke --workspace relay-claude-channel",
