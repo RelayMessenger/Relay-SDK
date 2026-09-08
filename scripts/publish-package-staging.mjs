@@ -121,17 +121,22 @@ export async function publishPackageStaging({
   }
   const observedIntegrities = Array.isArray(existing.value)
     ? existing.value : [existing.value];
-  assert.deepEqual(observedIntegrities, [integrity], `${spec} integrity differs`);
+  assert.deepEqual(
+    observedIntegrities,
+    [integrity],
+    `${spec} integrity differs`,
+  );
   const after = view(manifest.name, "dist-tags");
   assert.equal(after.found, true);
   assert.equal(after.value.staging, manifest.version);
   assert.equal(after.value.latest ?? null, latestBefore, "latest moved");
 
+  const releaseSha = env.RELEASE_SHA;
   const result = {
     schema: "relay-monorepo-package-staging/v1",
     ok: true,
     package: spec,
-    git_sha: env.RELEASE_SHA,
+    git_sha: releaseSha,
     workflow_run_id: env.GITHUB_RUN_ID,
     tarball_sha256: createHash("sha256").update(bytes).digest("hex"),
     integrity,
