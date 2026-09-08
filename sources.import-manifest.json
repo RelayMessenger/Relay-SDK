@@ -1603,7 +1603,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "README.md",
       "source_sha256": "b0cd5bc3680e80ab411715f147b5cd4165158e6e442989e1061d62daf9fa7b36",
-      "destination_sha256": "a7263eac6f625bba94f4a3363531e27b410c53b10fa7e24f1cfa5739b0cdeb5c",
+      "destination_sha256": "931a822554a73bef6448dcaaf9a937b183f329dae8a82ee4944e587c4db3eb7c",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1702,7 +1702,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "plugin/README.md",
       "source_sha256": "b0cd5bc3680e80ab411715f147b5cd4165158e6e442989e1061d62daf9fa7b36",
-      "destination_sha256": "a7263eac6f625bba94f4a3363531e27b410c53b10fa7e24f1cfa5739b0cdeb5c",
+      "destination_sha256": "931a822554a73bef6448dcaaf9a937b183f329dae8a82ee4944e587c4db3eb7c",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1735,7 +1735,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "plugin/runtime/server.mjs",
       "source_sha256": "cf0664163b787715525c91d5907e6ae4de61b7c85ec67a3009ba21e3bcc52025",
-      "destination_sha256": "ee2472f3e7ebd5a87992738aa07e077e61e85656dc29fc29b970b22140a76312",
+      "destination_sha256": "aa5f7bf3715b71246e1dbafef2ed932b5176ae0e7a448af8823fb3ed7f531caa",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -1746,7 +1746,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "runtime/server.mjs",
       "source_sha256": "cf0664163b787715525c91d5907e6ae4de61b7c85ec67a3009ba21e3bcc52025",
-      "destination_sha256": "ee2472f3e7ebd5a87992738aa07e077e61e85656dc29fc29b970b22140a76312",
+      "destination_sha256": "aa5f7bf3715b71246e1dbafef2ed932b5176ae0e7a448af8823fb3ed7f531caa",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -1834,10 +1834,10 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "src/channel.ts",
       "source_sha256": "31807d4569da3d3462b44d49a2fe41204c3002899287b6c1bc7b87b48c28a587",
-      "destination_sha256": "31807d4569da3d3462b44d49a2fe41204c3002899287b6c1bc7b87b48c28a587",
+      "destination_sha256": "521071b4058caf9eef3a108400d1b953a24ac543433756b2fb45d3231a83a762",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/claude-code/src/config.ts",
@@ -1878,10 +1878,10 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "src/state.ts",
       "source_sha256": "ec11fedec181eeb869b978a394d11572551795ab9a37ee4808e43307c93134a6",
-      "destination_sha256": "ec11fedec181eeb869b978a394d11572551795ab9a37ee4808e43307c93134a6",
+      "destination_sha256": "65b0288deeef4445ec6909b6906e9ce18ee33a26af166a41560f3a7e3e26df8f",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/claude-code/src/types.ts",
@@ -1911,7 +1911,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "test/channel.test.ts",
       "source_sha256": "4a4f192569ddf953ffc65aa488f6f13dc7342801f5e6c0ae05655bcda4dea034",
-      "destination_sha256": "685b4f75ab65b2e21aa719b19f844a5045d98bc09be7325f22e608f3d91cfe4b",
+      "destination_sha256": "eb71ea38ba294e4cd7a76e9ca83d5a33eb498b8ad7a3a9efd4732fde2f81b11d",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1966,10 +1966,10 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "test/state.test.ts",
       "source_sha256": "4478a54dca5083dfe90e19a28de34ad5d62f139e73ec31349907aa60eb62c4e8",
-      "destination_sha256": "4478a54dca5083dfe90e19a28de34ad5d62f139e73ec31349907aa60eb62c4e8",
+      "destination_sha256": "b519feeb912aadfa1f4053669220b8087dbdf6a0ad03323aaa842475a2dcde69",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/claude-code/tsconfig.json",
