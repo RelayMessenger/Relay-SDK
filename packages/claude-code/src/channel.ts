@@ -52,7 +52,10 @@ export class RelayChannel {
     this.#config = params.config;
     this.#redactor = params.redactor;
     this.#log = params.log;
-    this.#state.clearActiveTurn("failed");
+    // A lease left by a previous process is not something the model decided:
+    // close it as interrupted so the unanswered delivery returns to the inbox
+    // instead of being sealed as failed.
+    this.#state.clearActiveTurn("interrupted");
     this.relay = params.relay ?? new Relay({
       apiKey: params.config.agentToken,
       baseURL: params.config.baseURL,
@@ -109,7 +112,7 @@ export class RelayChannel {
   }
 
   stop(): void {
-    this.#state.clearActiveTurn("failed");
+    this.#state.clearActiveTurn("interrupted");
     this.#abort.abort();
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = null;

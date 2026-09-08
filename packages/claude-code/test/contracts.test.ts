@@ -152,7 +152,8 @@ describe("published artifact contracts", () => {
     const state = read("src/state.ts");
     expect(server).toContain('name: "complete_processing"');
     expect(channel).toContain('completeDeliveryTurn(origin.deliveryId, "completed")');
-    expect(channel).toContain('clearActiveTurn("failed")');
+    expect(channel).toContain('clearActiveTurn("interrupted")');
+    expect(channel).not.toContain('clearActiveTurn("failed")');
     expect(server).not.toContain('"claude/channel/permission"');
     expect(server).not.toContain("notifications/claude/channel/permission_request");
     expect(server).not.toContain("notifications/claude/channel/permission");

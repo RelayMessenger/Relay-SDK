@@ -159,14 +159,16 @@ const TURN_OUTCOMES: ReadonlySet<string> = new Set<TurnOutcome>([
   "failed",
   "expired",
   "superseded",
+  "interrupted",
 ]);
 
 function isTurnOutcome(value: unknown): value is TurnOutcome {
   return typeof value === "string" && TURN_OUTCOMES.has(value);
 }
 
-/** A final outcome keeps the delivery closed for good; supersession and expiry
- * leave the Message unanswered, so the delivery goes back to the inbox. */
+/** A final outcome is the model's own decision and keeps the delivery closed
+ * for good; supersession, expiry, and interruption (process replacement or
+ * stop) leave the Message unanswered, so the delivery goes back to the inbox. */
 function isFinalTurnOutcome(outcome: TurnOutcome): boolean {
   return outcome === "completed" || outcome === "failed";
 }
@@ -628,8 +630,8 @@ export class RelayStateStore {
     return lease.deliveryId;
   }
 
-  /** Before requeue-on-close existed, a superseded or expired turn left its
-   * delivery stuck at `processing` for good. Repair such rows once per open:
+  /** Before requeue-on-close existed, a superseded, expired, or interrupted
+   * turn left its delivery stuck at `processing` for good. Repair such rows once per open:
    * the same reset the close-time path applies, then the same notification
    * gate. A delivery holding the current lease is live, not stranded. */
   #requeueStrandedDeliveries(): number {
@@ -733,7 +735,9 @@ export class RelayStateStore {
     });
   }
 
-  clearActiveTurn(outcome: TurnOutcome = "failed", now = Date.now()): boolean {
+  /** Close whatever lease this process inherited or still holds. The outcome
+   * is the caller's to name; only the model's own `failed` is final. */
+  clearActiveTurn(outcome: TurnOutcome, now = Date.now()): boolean {
     return transaction(
       this.#db,
       () => this.#closeActiveTurn(outcome, now) !== null,
