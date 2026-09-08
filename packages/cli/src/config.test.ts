@@ -134,6 +134,10 @@ it("doctor checks real native file permissions and updates preserve parent permi
     // Deliberately weaken ONLY this synthetic fixture file, not its parent.
     await protectWindowsPath(path, false, `O:${beforeACL.user}G:${beforeACL.user}D:P(A;;FA;;;${beforeACL.user})(A;;FR;;;WD)`);
     expect((await inspectConfigPermissions(ctx)).secure).toBe(false);
+    const { agentDependencies, createAgent } = await import("./agents.js");
+    let posts = 0;
+    await expect(createAgent({}, agentDependencies(ctx, async () => { posts++; throw new Error("No network expected"); }))).rejects.toThrow("preflight failed");
+    expect(posts).toBe(0);
     expect((await inspectWindowsAcl(parent)).sddl).toBe(parentACL.sddl);
   } else await chmod(path, 0o644);
   const unsafe = await report();

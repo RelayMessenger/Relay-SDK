@@ -18,6 +18,7 @@ function setup(initial: RelayConfig = emptyConfig()) {
   const retrieve = vi.fn(async () => ({ contact_cards: [card] }));
   const deps: AgentDependencies = {
     read: vi.fn(async () => structuredClone(config)),
+    preflight: vi.fn(async () => undefined),
     update: vi.fn(async (change) => { const next = structuredClone(config); const result = change(next); config = next; return result; }),
     bootstrap: vi.fn(async () => response),
     client: vi.fn(() => ({ contactCard: { retrieve }, agents: { delete: remove } }) as unknown as Relay),
@@ -136,4 +137,21 @@ it("never reflects a newly issued credential even inside unexpected response met
   expect(JSON.stringify(result)).not.toContain(secret);
   expect(result.agent.is_active).toBe(true);
   expect(result.token).toBe("stored");
+});
+
+it("storage preflight rejection sends no creation request", async () => {
+  const { deps } = setup(); vi.mocked(deps.preflight).mockRejectedValue(new Error("unwritable"));
+  await expect(createAgent({}, deps)).rejects.toThrow("no agent creation request was sent");
+  expect(deps.bootstrap).not.toHaveBeenCalled(); expect(deps.update).not.toHaveBeenCalled();
+});
+
+it("post-create storage failure reports assigned handle and actual local outcome, never the secret", async () => {
+  const first = setup(); vi.mocked(first.deps.update).mockRejectedValue(new Error(secret));
+  const lost = await createAgent({}, first.deps).catch((error: Error) => error.message);
+  expect(lost).toContain(`@${card.handle}`); expect(lost).toContain("could not be saved"); expect(lost).toContain("no durable recovery"); expect(lost).not.toContain(secret);
+  const second = setup(); const write = second.deps.update;
+  second.deps.update = async (change) => { await write(change); throw new Error("final security verification failed"); };
+  const saved = await createAgent({}, second.deps).catch((error: Error) => error.message);
+  expect(saved).toContain(`@${card.handle}`); expect(saved).toContain("present in local config"); expect(saved).not.toContain(secret);
+  expect(second.deps.bootstrap).toHaveBeenCalledOnce();
 });
