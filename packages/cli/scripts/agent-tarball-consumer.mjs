@@ -34,6 +34,9 @@ const deps = {
     return Response.json({ contact_cards: [card] });
   },
 };
+// The Hermes .env written at creation binds the origin the installed CLI's
+// version selects; a later login must name that same origin or the handoff
+// refuses to rebind the identity.
 const nativeHome = join(home, "native Hermes profile");
 await mkdir(nativeHome, { mode: 0o700 });
 if (process.platform === "win32") {
@@ -63,7 +66,7 @@ assert.equal(config.current_profile, "default");
 assert.equal(await runCLI(["agents", "list", "--json"], deps), 0);
 delete deps.configContext.env.RELAY_AGENT_TOKEN;
 delete deps.configContext.env.RELAY_PROFILE;
-assert.equal(await runCLI(["--profile", card.handle, "auth", "login", "--with-token", "--api-url", "https://api.staging.relayapp.im", ...handoffArgs], { ...deps, readStdin: async () => token }), 0);
+assert.equal(await runCLI(["--profile", card.handle, "auth", "login", "--with-token", "--api-url", configModule.defaultCreationApiURL(), ...handoffArgs], { ...deps, readStdin: async () => token }), 0);
 assert.equal((await configModule.inspectConfigPermissions(deps.configContext)).secure, true);
 assert.equal(await runCLI(["--profile", card.handle, "doctor", "--offline"], deps), 0);
 if (aclModule) assert.equal((await aclModule.inspectWindowsAcl(home)).sddl, originalParentACL);
