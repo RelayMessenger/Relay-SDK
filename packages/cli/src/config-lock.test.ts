@@ -10,8 +10,8 @@ vi.mock("node:fs/promises", async (original) => {
 });
 const realFS = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
 const denied = () => Object.assign(new Error("owned lock fixture permission failure"), { code: "EPERM" });
-beforeEach(() => vi.mocked(open).mockReset().mockImplementation(realFS.open));
-afterEach(() => vi.restoreAllMocks());
+beforeEach(() => { vi.mocked(open).mockReset().mockImplementation(realFS.open); });
+afterEach(() => { vi.restoreAllMocks(); });
 async function fixture(platform: NodeJS.Platform = "win32") {
   const home = await mkdtemp(join(tmpdir(), "relay-lock-regression-"));
   return { home, platform, env: { RELAY_CONFIG_PATH: join(home, "config.json") } };
