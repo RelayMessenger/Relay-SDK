@@ -33,7 +33,9 @@ describe("pure agent command handlers", () => {
   it("creates a named identity while preserving default and existing credentials", async () => {
     const test = setup();
     const result = await createAgent({}, test.deps);
-    expect(result).toEqual({ profile: card.handle, api_url: creationOrigin, agent: card, share_url: response.share_url, token: "stored" });
+    expect(result).toEqual({ profile: card.handle, handle: card.handle, display_name: card.first_name, image_url: card.image_url, share_url: response.share_url, api_url: creationOrigin, token: "stored" });
+    // A CLI record is one active agent: the contact-card fields that only make sense for a person or a list never appear.
+    expect(Object.keys(result)).not.toEqual(expect.arrayContaining(["agent", "kind", "last_name", "is_active", "first_name"]));
     expect(JSON.stringify(result)).not.toContain(secret);
     expect(test.config().profiles[card.handle]?.agent_token).toBe(secret);
     expect(test.config().current_profile).toBe("default");
@@ -137,7 +139,7 @@ it("never reflects a newly issued credential even inside unexpected response met
   vi.mocked(deps.bootstrap).mockResolvedValue({ ...response, agent: { ...card, first_name: secret }, share_url: `https://go.test/?unexpected=${secret}` });
   const result = await createAgent({}, deps);
   expect(JSON.stringify(result)).not.toContain(secret);
-  expect(result.agent.is_active).toBe(true);
+  expect(result.handle).toBe(card.handle);
   expect(result.token).toBe("stored");
 });
 

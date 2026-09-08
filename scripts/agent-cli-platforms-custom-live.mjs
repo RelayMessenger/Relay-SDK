@@ -52,8 +52,8 @@ try {
  const created=JSON.parse(run(shim,args,{cwd:consumer}));
  const stored=JSON.parse(readFileSync(config));secret=stored.profiles[created.profile]?.agent_token;
  assert.ok(typeof secret==='string' && /^rly_live_[A-Za-z0-9]{43}$/.test(secret));owned=true;
- assert.equal(created.agent.handle,handle);assert.equal(created.agent.first_name,name);assert.equal(created.token,'stored');assert.equal(created.share_url,`https://go.staging.relayapp.im/@${handle}`);
- const permanent=new URL(created.agent.image_url);assert.equal(permanent.href,inputImage,'Exact trusted immutable bundled asset must be retained without remote ingestion');assert.equal(permanent.search,'');assert.equal(permanent.username,'');assert.equal(permanent.password,'');
+ assert.equal(created.handle,handle);assert.equal(created.display_name,name);assert.equal(created.token,'stored');assert.equal(created.agent,undefined);assert.equal(created.share_url,`https://go.staging.relayapp.im/@${handle}`);
+ const permanent=new URL(created.image_url);assert.equal(permanent.href,inputImage,'Exact trusted immutable bundled asset must be retained without remote ingestion');assert.equal(permanent.search,'');assert.equal(permanent.username,'');assert.equal(permanent.password,'');
  report.created={profile:created.profile,handle,name,shareUrl:created.share_url,imageUrl:permanent.href};report.recipeAccepted=true;save();
  const first=await card('cardBeforeDuplicate');assert.equal(first.response.status,200);const ownCard=first.body.contact_cards.find(x=>x.handle===handle);assert.equal(ownCard.first_name,name);assert.equal(ownCard.image_url,permanent.href);
  const image=await fetch(permanent,{redirect:'error',signal:AbortSignal.timeout(15000)});assert.equal(image.status,200);assert.ok((image.headers.get('content-type')??'').startsWith('image/'));const bytes=Buffer.from(await image.arrayBuffer());assert.ok(bytes.length>0);report.permanentImage={status:image.status,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};

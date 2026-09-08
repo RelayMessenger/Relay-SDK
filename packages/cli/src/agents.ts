@@ -24,10 +24,16 @@ export const agentDependencies = (context: ConfigContext = {}, fetch?: typeof gl
   env: context.env ?? process.env,
 });
 
-// Whitelist output: never serialize an SDK response containing the one-time secret.
-const cardMetadata = (card: ContactCardItem): ContactCardItem => ({
-  handle: card.handle, first_name: card.first_name, last_name: card.last_name,
-  image_url: card.image_url, is_active: card.is_active, kind: card.kind,
+/**
+ * The developer-facing agent record. The API's ContactCardItem is the shape
+ * every Relay contact shares (a person or an agent), so it carries `kind`,
+ * `last_name` and `is_active`; a CLI record is always one active agent, so it
+ * shows only what a developer uses: the Handle, the display name and the image.
+ * Whitelisted fields only: never serialize an SDK response containing the secret.
+ */
+export interface AgentRecord { handle: string; display_name: string; image_url: string | null }
+export const agentRecord = (card: ContactCardItem): AgentRecord => ({
+  handle: card.handle, display_name: card.first_name, image_url: card.image_url,
 });
 
 export interface CreateAgentInput {
@@ -108,7 +114,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
       config.profiles[profile] = { api_url: apiURL, agent_token: token };
       return profile;
     });
-    return safeMetadata({ profile, api_url: apiURL, agent: cardMetadata(result.agent), share_url: result.share_url, token: "stored" as const }, [token]);
+    return safeMetadata({ profile, ...agentRecord(result.agent), share_url: result.share_url, api_url: apiURL, token: "stored" as const }, [token]);
   } catch {
     const rawHandle = typeof result.agent?.handle === "string" && /^[a-z][a-z0-9_]{2,31}\.dev$/u.test(result.agent.handle) ? result.agent.handle : "(unavailable)";
     const assigned = safeMetadata(rawHandle, typeof result.secret === "string" ? [result.secret] : []);
@@ -132,9 +138,11 @@ export async function listAgents(deps: AgentDependencies) {
     try {
       // Deliberately not resolveAuth: ENV overrides must not impersonate every profile.
       const cards = await deps.client(saved.agent_token, apiURL).contactCard.retrieve();
-      agents.push({ profile, api_url: apiURL, token: "stored", contact_cards: cards.contact_cards.map(cardMetadata) });
+      const own = cards.contact_cards.find((card) => card.kind === "agent" && card.is_active);
+      if (!own) throw new Error("no active agent card");
+      agents.push({ profile, ...agentRecord(own), api_url: apiURL, token: "stored" as const });
     } catch {
-      agents.push({ profile, api_url: apiURL, token: "stored", error: "Contact Card unavailable" });
+      agents.push({ profile, api_url: apiURL, token: "stored" as const, error: "Contact Card unavailable" });
     }
   }
   return safeMetadata({ agents }, [...Object.values(config.profiles).flatMap((saved) => saved.agent_token ? [saved.agent_token] : []), ...(deps.env.RELAY_AGENT_TOKEN ? [deps.env.RELAY_AGENT_TOKEN] : [])]);

@@ -59,7 +59,7 @@ const deps = {
 };
 assert.equal(await runCLI(['agents', 'create', '--image', image, '--json'], deps), 0);
 assert.deepEqual(calls, ['POST /v1/agents', 'GET /v1/contact_card', 'POST /v1/attachments', 'PUT /fixture/upload', `GET /v1/attachments/${attachment}`, 'PATCH /v1/contact_card']);
-assert.equal(JSON.parse(output[0]).agent.image_url, promoted.image_url);
+assert.equal(JSON.parse(output[0]).image_url, promoted.image_url);
 assert.equal(JSON.parse(output[0]).image.status, 'updated');
 assert.ok(!output.join('').includes(secret) && !output.join('').includes('unrelated-env-identity'));
 console.log(JSON.stringify({ result: 'passed', installed: true, scope: 'injected HTTP fixture only', calls, persistedBeforeUpload: true, exactImageBytes: true, noTokenEcho: true }));

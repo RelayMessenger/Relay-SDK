@@ -6,7 +6,7 @@ import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactive
 import { installRelaySkill, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
 import { handoffAgent, handoffOptions, handoffTarget, type HandoffOptions } from "./agent-handoff.js";
-import { agentDependencies, createAgent, deleteAgent, listAgents, type AgentDependencies } from "./agents.js";
+import { agentDependencies, agentRecord, createAgent, deleteAgent, listAgents, type AgentDependencies } from "./agents.js";
 import { createRequire } from "node:module";
 import { readFile, stat } from "node:fs/promises";
 import Relay, {
@@ -238,12 +238,12 @@ export const createProgram = (
           const saved = (await agentDeps.read()).profiles[result.profile];
           if (!saved?.agent_token || validateApiURL(saved.api_url ?? DEFAULT_API_URL) !== result.api_url) throw new Error("Saved identity changed.");
           const client = new Relay({ apiKey: saved.agent_token, baseURL: result.api_url, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) });
-          const outcome = await uploadAgentImage({ handle: result.agent.handle, image: localImage }, client,
-            (attachmentID) => client.contactCard.update({ handle: result.agent.handle, attachment_id: attachmentID,
+          const outcome = await uploadAgentImage({ handle: result.handle, image: localImage }, client,
+            (attachmentID) => client.contactCard.update({ handle: result.handle, attachment_id: attachmentID,
               ...(imageRecipe ? { image_recipe: imageRecipe } : {}),
             }, { maxRetries: 0 }));
           imageUpdate = safeMetadata(outcome, [saved.agent_token]);
-          if (imageUpdate.status === "updated") result.agent = imageUpdate.agent;
+          if (imageUpdate.status === "updated") Object.assign(result, agentRecord(imageUpdate.agent));
         } catch {
           imageUpdate = { status: "incomplete", phase: "identity", message: "Agent was created and its credential was saved. Image update was not confirmed; retry on this existing profile, not agent creation." };
         }
@@ -255,7 +255,7 @@ export const createProgram = (
       }
       if (globals(command).json) output({ ...result, ...(imageUpdate ? { image: imageUpdate } : {}), ...(handoff ? { handoff } : {}) });
       else {
-        stdout(`${result.agent.first_name} (@${result.agent.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken: stored\n`);
+        stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken: stored\n`);
         // Load only for human output; the QR encodes the public share URL, not credentials.
         const qr = createRequire(import.meta.url)("qrcode") as {
           toString(text: string, options: { type: "terminal"; small: boolean }): Promise<string>;
@@ -266,14 +266,14 @@ export const createProgram = (
         if (handoff) output({ handoff });
       }
       if (imageUpdate?.status !== "incomplete" && (!handoff || handoff.status === "configured")) {
-        await showSavedAgent(command, { profile: result.profile, handle: result.agent.handle, apiURL: result.api_url, shareURL: result.share_url,
+        await showSavedAgent(command, { profile: result.profile, handle: result.handle, apiURL: result.api_url, shareURL: result.share_url,
           runtime: target ? { ownership: "external", connection: "unknown", label: target.runtime } : { ownership: "none", connection: "not-started" },
         });
       }
       if (imageUpdate?.status === "incomplete") {
         const retry = imageUpdate.attachment_id && ["completion", "promotion"].includes(imageUpdate.phase)
           ? `--attachment-id ${imageUpdate.attachment_id}` : "--image <local-file>";
-        throw new Error(`Agent @${result.agent.handle} was created; its profile/token remain stored. Image update was not confirmed. Retry on the existing profile: relay --profile ${result.profile} contact-card update --handle ${result.agent.handle} ${retry}${imageRecipe ? " --image-recipe <json-file>" : ""}. Do not create another agent.`);
+        throw new Error(`Agent @${result.handle} was created; its profile/token remain stored. Image update was not confirmed. Retry on the existing profile: relay --profile ${result.profile} contact-card update --handle ${result.handle} ${retry}${imageRecipe ? " --image-recipe <json-file>" : ""}. Do not create another agent.`);
       }
       if (handoff && handoff.status !== "configured") throw new Error("Agent credential is stored; runtime handoff requires action. Use auth login --connect rather than creating again.");
     });
