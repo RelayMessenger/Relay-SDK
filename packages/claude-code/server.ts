@@ -76,7 +76,7 @@ const mcp = new Server(
       tools: {},
     },
     instructions: [
-      "Messages from allowlisted Relay users arrive as <channel source=\"relay\" chat_id=\"...\" message_id=\"...\" delivery_id=\"...\">.",
+      "Messages from allowlisted Relay Contacts (users or agents) arrive as <channel source=\"relay\" chat_id=\"...\" message_id=\"...\" delivery_id=\"...\">.",
       "For every Relay message, call begin_processing with delivery_id before doing any work, invoking any other tool, or replying. Continue only when it confirms the Chat was explicitly marked Read.",
       "Every begin_processing opens one short-lived Relay turn. A successful reply completes it automatically. If the turn ends without a reply or must be abandoned, call complete_processing with the same delivery_id and outcome completed or failed. Never leave a Relay turn open.",
       "Channel notifications are at-least-once until begin_processing succeeds. If a delivery repeats, reconcile any prior external side effect before repeating it.",

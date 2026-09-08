@@ -22473,7 +22473,7 @@ function parseEnvFile(contents) {
 function parseAllowedSenders(value) {
   const configured = [...new Set(value.split(",").map((entry) => entry.trim()).filter(Boolean))];
   if (configured.length === 0) {
-    throw new Error("RELAY_ALLOWED_SENDERS must contain at least one Relay user UUID or exact Handle");
+    throw new Error("RELAY_ALLOWED_SENDERS must contain at least one Relay Contact UUID or exact Handle");
   }
   if (configured.length > 64) {
     throw new Error("RELAY_ALLOWED_SENDERS accepts at most 64 entries");
@@ -22490,7 +22490,7 @@ function parseAllowedSenders(value) {
   return { ids, handles, configured };
 }
 function senderIsAllowed(allowed, sender) {
-  return sender.kind === "user" && (allowed.ids.has(sender.id.toLowerCase()) || allowed.handles.has(sender.handle));
+  return (sender.kind === "user" || sender.kind === "agent") && (allowed.ids.has(sender.id.toLowerCase()) || allowed.handles.has(sender.handle));
 }
 function defaultChannelDir(env = process.env) {
   const configured = actualValue(env.RELAY_CHANNEL_DIR);
@@ -22741,10 +22741,10 @@ function deliveryFromSnapshotMessage(params) {
   const message = params.message;
   if (message.is_from_me || message.is_system_message) return null;
   const sender = message.from_handle;
-  if (!sender || sender.kind !== "user") {
+  if (!sender || sender.kind !== "user" && sender.kind !== "agent") {
     if (snapshotMessageIsUnreadByAgent(message)) {
       throw new Error(
-        `FULL sync cannot authenticate unread inbound Message ${message.id}: from_handle is absent`
+        `FULL sync cannot authenticate unread inbound Message ${message.id}: from_handle is absent or has an unsupported kind`
       );
     }
     return null;
@@ -23853,7 +23853,7 @@ var mcp = new Server(
       tools: {}
     },
     instructions: [
-      'Messages from allowlisted Relay users arrive as <channel source="relay" chat_id="..." message_id="..." delivery_id="...">.',
+      'Messages from allowlisted Relay Contacts (users or agents) arrive as <channel source="relay" chat_id="..." message_id="..." delivery_id="...">.',
       "For every Relay message, call begin_processing with delivery_id before doing any work, invoking any other tool, or replying. Continue only when it confirms the Chat was explicitly marked Read.",
       "Every begin_processing opens one short-lived Relay turn. A successful reply completes it automatically. If the turn ends without a reply or must be abandoned, call complete_processing with the same delivery_id and outcome completed or failed. Never leave a Relay turn open.",
       "Channel notifications are at-least-once until begin_processing succeeds. If a delivery repeats, reconcile any prior external side effect before repeating it.",

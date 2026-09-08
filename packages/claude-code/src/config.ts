@@ -82,7 +82,7 @@ export function parseEnvFile(contents: string): Record<string, string> {
 export function parseAllowedSenders(value: string): AllowedSenders {
   const configured = [...new Set(value.split(",").map((entry) => entry.trim()).filter(Boolean))];
   if (configured.length === 0) {
-    throw new Error("RELAY_ALLOWED_SENDERS must contain at least one Relay user UUID or exact Handle");
+    throw new Error("RELAY_ALLOWED_SENDERS must contain at least one Relay Contact UUID or exact Handle");
   }
   if (configured.length > 64) {
     throw new Error("RELAY_ALLOWED_SENDERS accepts at most 64 entries");
@@ -103,7 +103,7 @@ export function senderIsAllowed(
   allowed: AllowedSenders,
   sender: { id: string; handle: string; kind: string },
 ): boolean {
-  return sender.kind === "user"
+  return (sender.kind === "user" || sender.kind === "agent")
     && (allowed.ids.has(sender.id.toLowerCase()) || allowed.handles.has(sender.handle));
 }
 
