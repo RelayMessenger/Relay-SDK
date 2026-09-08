@@ -103,6 +103,10 @@ try {
     run('python3', [join(root, 'scripts/agent-cli-platforms-pty.py'), '--shim', join(consumer, 'node_modules/.bin/relaymessenger'), '--origin', env.RELAY_API_URL, '--scratch', scratch, '--receipt', join(receipts, 'pty.json')]);
     report.interactivePty = 'passed: real hidden prompt, no echo, cancellation restores terminal';
   } else report.interactivePty = 'not exercised on Windows; .cmd stdin proof is separate';
+  if (process.env.RELAY_TMUX_PROOF === '1') {
+    run('python3', [join(root, 'scripts/agent-cli-platforms-tmux.py'), '--shim', join(consumer, 'node_modules/.bin/relaymessenger'), '--origin', env.RELAY_API_URL, '--workspace', root, '--receipt', join(receipts, 'tmux.json')]);
+    report.tmux = 'owned native server: hidden auth, cancellation, stdin, detach/reattach, post-reattach runtime event/reply';
+  }
   cli('doctor', '--offline');
   const envStatus = JSON.parse(shim(['auth', 'status'], { env: { ...env, RELAY_AGENT_TOKEN: token } }));
   assert.equal(envStatus.token_source, 'environment');

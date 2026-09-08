@@ -244,7 +244,7 @@ try {
   let gatewayOutput = "";
   mock = spawn(process.execPath, [join(workspace, "scripts/agent-cli-platforms-runtime-server.mjs")], {
     cwd: temp,
-    env: { ...env, MOCK_RELAY_PORT: String(relayPort) },
+    env: { ...env, MOCK_RELAY_PORT: String(relayPort), RELAY_TMUX_PROOF: process.env.RELAY_TMUX_PROOF ?? "0" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   mock.stdout.on("data", (chunk) => {
@@ -291,6 +291,7 @@ try {
     env,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  receipt.runtimePid = gateway.pid; receipt.modelPid = mock.pid; receipt.controlOrigin = `http://127.0.0.1:${relayPort}`; receipt.temp = temp;
   gateway.stdout.on("data", (chunk) => {
     gatewayOutput += chunk.toString();
   });
@@ -355,6 +356,22 @@ try {
   console.log(
     "Proof: durable cumulative ACK, replay suppression, heartbeat, one model turn, one idempotent Chat Message.",
   );
+  if (process.env.RELAY_RUNTIME_RELEASE_FILE) {
+    receipt.result = "native-proof-passed-awaiting-tmux-control";
+    const holdDeadline = Date.now() + 180000;
+    while (!existsSync(process.env.RELAY_RUNTIME_RELEASE_FILE)) {
+      if (Date.now() > holdDeadline || gateway.exitCode !== null || mock.exitCode !== null) throw Error("Owned tmux runtime hold failed or timed out");
+      receipt.protocolOutput = redact(mockOutput); writeFileSync(receiptPath, JSON.stringify(receipt, null, 2));
+      await new Promise(done => setTimeout(done, 250));
+    }
+    if (process.env.RELAY_TMUX_PROOF === "1") {
+      assert.ok(mockOutput.includes("cumulative ACK 2 durable="));
+      assert.ok(mockOutput.includes("completion request count=2"));
+      assert.ok(mockOutput.includes("Message send count=2"));
+      assert.ok(!mockOutput.includes("Message send count=3"));
+      receipt.postReattach = "second deliberate event durably ACKed and replied exactly once in observed fixture";
+    }
+  }
   receipt.result = "passed";
   receipt.protocolOutput = redact(mockOutput);
   receipt.gatewayOutput = redact(gatewayOutput);
