@@ -259,7 +259,7 @@ describe("CLI command routing", () => {
   });
 });
 
-describe("authentication commands", () => {
+describe("token commands", () => {
   it("stores stdin tokens with owner-only config without printing them", async () => {
     const home = await mkdtemp(join(tmpdir(), "relay-cli-auth-"));
     const configContext = {
@@ -270,10 +270,11 @@ describe("authentication commands", () => {
     const stdout: string[] = [];
     const secret = "rly_stdin_secret_012345";
     const code = await runCLI(
-      ["auth", "login", "--token-stdin"],
+      ["token", "import", "--token-stdin", "--api-url", "https://api.staging.relayapp.im"],
       {
         configContext,
         readStdin: async () => secret,
+        fetch: async () => Response.json({ contact_cards: [{ handle: "test_agent.dev", first_name: "Test", last_name: null, image_url: null, kind: "agent", is_active: true }] }),
         stdout: (value) => stdout.push(value),
         stderr: (value) => stdout.push(value),
       },
@@ -287,7 +288,7 @@ describe("authentication commands", () => {
     const output: string[] = [];
     const secret = "rly_argument_secret_012345";
     const code = await runCLI(
-      ["auth", "login", "--token", secret],
+      ["token", "import", "--token", secret],
       {
         stdout: (value) => output.push(value),
         stderr: (value) => output.push(value),

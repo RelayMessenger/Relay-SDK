@@ -152,7 +152,7 @@ export const createProgram = (
       let handoff;
       if (target) {
         try { handoff = await handoffAgent(target, result.profile, agentDeps, { consent: options.confirmConfigure === true, runtimeStopped: options.runtimeStopped === true }, true); }
-        catch { handoff = { status: "required-action", code: "handoff-failed", message: "Agent credential is stored; runtime handoff failed. Use auth login --connect with the stored credential; do not create another agent.", connected: false }; }
+        catch { handoff = { status: "required-action", code: "handoff-failed", message: "Agent credential is stored; runtime handoff failed. Use token import --connect with the stored credential; do not create another agent.", connected: false }; }
       }
       if (options.json) output({ ...result, ...(handoff ? { handoff } : {}) });
       else {
@@ -165,7 +165,7 @@ export const createProgram = (
         catch { stderr("QR rendering unavailable; use the share link above.\n"); }
         if (handoff) output({ handoff });
       }
-      if (handoff && handoff.status !== "configured") throw new Error("Agent credential is stored; runtime handoff requires action. Use auth login --connect rather than creating again.");
+      if (handoff && handoff.status !== "configured") throw new Error("Agent credential is stored; runtime handoff requires action. Use token import --connect rather than creating again.");
     });
   agents.command("list").option("--json", "print safe metadata as JSON")
     .action(async () => output(await listAgents(agentDeps)));
@@ -175,8 +175,8 @@ export const createProgram = (
       output(await deleteAgent(agentHandle, globals(command).profile, agentDeps));
     });
 
-  const auth = program.command("auth").description("Manage local Agent Token authentication.");
-  handoffOptions(auth.command("login"))
+  const tokenCommands = program.command("token").description("Manage locally stored Agent Token credentials.");
+  handoffOptions(tokenCommands.command("import"))
     .description("Import an Agent Token privately, or reuse a saved profile with --connect.")
     .option("--token-stdin", "read the token from stdin")
     .option("--from-env", "read the token from RELAY_AGENT_TOKEN")
@@ -204,7 +204,7 @@ export const createProgram = (
       if (!raw) throw new Error(reuseSaved ? "Selected profile has no stored Agent Token; select a saved profile or import privately." : "No Agent Token was supplied.");
       const token = validateToken(raw);
       const apiURL = validateApiURL(options.apiUrl ?? (reuseSaved ? previous.api_url : env.RELAY_API_URL ?? previous.api_url) ?? defaultCreationApiURL());
-      if (target) {
+      {
         try {
           const cards = await agentDeps.client(token, apiURL).contactCard.retrieve();
           if (cards.contact_cards.filter((card) => card.kind === "agent" && card.is_active).length !== 1) throw new Error("Agent credential required.");
@@ -216,21 +216,21 @@ export const createProgram = (
       output({ ok: true, profile, api_url: apiURL, token: "stored", ...(handoff ? { handoff } : {}) });
       if (handoff && handoff.status !== "configured") throw new Error("Token is stored; native runtime configuration requires action.");
     });
-  auth
+  tokenCommands
     .command("status")
     .description("Show token resolution without revealing the token.")
     .action(async (_options: object, command: Command) => {
       const resolved = await resolveAuth(globals(command).profile, configContext);
       output({
-        authenticated: true,
+        configured: true,
         profile: resolved.profile,
         api_url: resolved.apiURL,
         token_source: resolved.tokenSource,
         config_path: resolved.configPath,
       });
     });
-  auth
-    .command("logout")
+  tokenCommands
+    .command("clear")
     .description("Remove the selected profile's stored token.")
     .action(async (_options: object, command: Command) => {
       const config = await readConfig(configContext);
@@ -306,7 +306,7 @@ export const createProgram = (
 
   program
     .command("doctor")
-    .description("Check runtime, auth, config security, SDK contract, and API.")
+    .description("Check runtime, token configuration, config security, SDK contract, and API.")
     .option("--offline", "skip the read-only API request")
     .action(async (options: { offline?: boolean }, command: Command) => {
       const report = await runDoctor(
