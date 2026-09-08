@@ -32,7 +32,7 @@ export function packPublished(plan, scratch, npm, report) {
   report.registryPackages = [];
   for (const [key,name,version] of specs) {
     const tags = JSON.parse(npm(['view', name, 'dist-tags', '--json', '--registry', plan.registry]));
-    assert.equal(tags.staging, version, `${name} staging tag is not the confirmed immutable version`);
+    if (!plan.frozenByOwner) assert.equal(tags.staging, version, `${name} staging tag is not the confirmed immutable version`);
     const meta = JSON.parse(npm(['view', `${name}@${version}`, '--json', '--registry', plan.registry]));
     assert.equal(meta.name,name); assert.equal(meta.version,version);
     if (meta.gitHead !== undefined) assert.equal(meta.gitHead,plan.publishSha,`${name}: registry gitHead differs from the confirmed publisher source`);

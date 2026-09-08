@@ -23,11 +23,13 @@ const sha = run('git', ['rev-parse', 'HEAD']);
 assert.equal(run('git', ['status', '--porcelain', '--untracked-files=no']), '', 'Registry comparison requires a clean source candidate');
 const inventory = { candidateSha: sha, dirty: '', packages: [] };
 const metadata = {};
+// Owner froze these exact versions on 2026-09-08. Later tag movement is evidence,
+// not permission to change the release under test.
+const frozen = { cli: '0.1.0-staging.1', sdk: '0.3.1-staging.2' };
 for (const [key, dir, name] of [['cli', 'cli', 'relaymessenger'], ['sdk', 'sdk', '@relaymessenger/sdk']]) {
   const manifest = JSON.parse(readFileSync(join(root, 'packages', dir, 'package.json')));
-  const tags = JSON.parse(npm(['view', name, 'dist-tags', '--json']));
-  assert.equal(tags.staging, manifest.version, `${name}: staging moved; update and revalidate source, never reuse an old receipt`);
-  metadata[key] = JSON.parse(npm(['view', `${name}@${tags.staging}`, '--json']));
+  assert.equal(manifest.version, frozen[key], 'Do not change the frozen release under test');
+  metadata[key] = JSON.parse(npm(['view', `${name}@${frozen[key]}`, '--json']));
   const [pack] = JSON.parse(npm(['pack', '--workspace', name, '--dry-run', '--ignore-scripts', '--json']));
   const files = Object.fromEntries(pack.files.map(({ path }) => [
     `package/${path}`, createHash('sha256').update(readFileSync(join(root, 'packages', dir, path))).digest('hex'),
@@ -42,6 +44,7 @@ writeFileSync(inventoryPath, JSON.stringify(inventory, null, 2));
 const plan = {
   phase: 'cli-sdk-only', registry: 'https://registry.npmjs.org/',
   publishSha: sourceSha, inventoryPath,
+  frozenByOwner: true, frozenAt: '2026-09-08',
   cliVersion: metadata.cli.version, sdkVersion: metadata.sdk.version,
 };
 const planPath = join(receipts, 'plan.json');

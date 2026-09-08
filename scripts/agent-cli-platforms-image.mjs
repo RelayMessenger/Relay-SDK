@@ -8,6 +8,10 @@ const [consumer, scratch] = process.argv.slice(2);
 const { runCLI } = await import(pathToFileURL(join(consumer, 'node_modules/relaymessenger/dist/program.js')));
 const home = join(scratch, 'installed-image');
 await mkdir(home, { mode: 0o700 });
+if (process.platform === 'win32') {
+  const { protectWindowsPath } = await import(pathToFileURL(join(consumer, 'node_modules/relaymessenger/dist/runtime-connect/windows-acl.js')));
+  await protectWindowsPath(home, true);
+}
 const secret = `rly_live_${'I'.repeat(43)}`;
 const base = 'https://api.staging.relayapp.im';
 const handle = 'installed_image.dev';
