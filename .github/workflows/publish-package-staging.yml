@@ -93,7 +93,7 @@ jobs:
           # generated runtime that embeds the version. Anything else means a build wrote where it
           # must not, and the run stops here.
           if git status --porcelain | awk '{print $2}' | grep -Ev \
-            '^(\.claude-plugin/marketplace\.json|sources\.import-manifest\.json|package-lock\.json|packages/[a-z-]+/(package\.json|contracts/relay-v1\.lock\.json|plugin/contracts/relay-v1\.lock\.json|\.claude-plugin/(plugin|marketplace)\.json|plugin/\.claude-plugin/plugin\.json|runtime/server\.mjs|plugin/runtime/server\.mjs))$' \
+            '^(\.claude-plugin/marketplace\.json|sources\.import-manifest\.json|package-lock\.json|packages/[a-z-]+/(package\.json|contracts/relay-v1\.lock\.json|plugin/contracts/relay-v1\.lock\.json|\.claude-plugin/(plugin|marketplace)\.json|plugin/\.claude-plugin/plugin\.json|runtime/server\.mjs|plugin/runtime/server\.mjs))$'
           then
             echo "unexpected paths changed" >&2
             exit 1
