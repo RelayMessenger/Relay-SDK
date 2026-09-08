@@ -67,8 +67,17 @@ export async function chooseInteractiveCommand(
   if (action === "skill") return "install-skill";
   if (action === "create") {
     const origin = validateApiURL(deps.env.RELAY_API_URL ?? defaultCreationApiURL());
+    const chosenHandle = (await ui.text("Handle including .dev (optional; blank keeps an assigned handle)", "")).trim();
+    const displayName = (await ui.text("Display name (optional; blank keeps the assigned bird name)", "")).trim();
+    const imageURL = (await ui.text("Public HTTPS image URL (optional; blank keeps the default image)", "")).trim();
+    const recipeFile = imageURL ? (await ui.text("Existing Relay image recipe JSON file (optional; image URL must be its rendered snapshot)", "")).trim() : "";
     if (!await ui.confirm(`Create a new agent at ${origin}?`)) return undefined;
-    return [...prefix, "agents", "create"];
+    return [...prefix, "agents", "create",
+      ...(chosenHandle ? ["--handle", chosenHandle] : []),
+      ...(displayName ? ["--name", displayName] : []),
+      ...(imageURL ? ["--image-url", imageURL] : []),
+      ...(recipeFile ? ["--image-recipe", recipeFile] : []),
+    ];
   }
   if (action === "login") {
     const config = await deps.read();

@@ -312,8 +312,12 @@ const bootstrapParams: AgentCreateParams = { token_name: "Relay CLI" };
 const bootstrapOptions: AgentCreateOptions = { baseURL: "https://api.example.test", signal: new AbortController().signal };
 (await Relay.createAgent(bootstrapParams, bootstrapOptions)) satisfies AgentCreateResponse;
 (await relay.agents.delete("brave_cangoo.dev")) satisfies void;
-// @ts-expect-error Bootstrap does not accept caller-chosen handles.
-await Relay.createAgent({ handle: "chosen.dev" });
+await Relay.createAgent({ handle: "chosen.dev", first_name: "Chosen Agent" });
+await Relay.createAgent({ image_url: "https://images.example.test/snapshot.png", image_recipe: { recipe: { monogram: { initials: "CA" } }, background: { linearGradient: { colors: ["5B9BFA", "0B52C0"] } } } });
+// @ts-expect-error A recipe requires the rendered snapshot URL.
+await Relay.createAgent({ image_recipe: { recipe: { image: {} } } });
+// @ts-expect-error Existing palettes do not permit arbitrary gradient pairs.
+await Relay.createAgent({ image_url: "https://images.example.test/snapshot.png", image_recipe: { recipe: { emoji: { emoji: "🦆" } }, background: { linearGradient: { colors: ["FFFFFF", "000000"] } } } });
 // @ts-expect-error Bootstrap does not need or accept a fake API key.
 await Relay.createAgent({}, { apiKey: "fake" });
 // @ts-expect-error Authenticated instances still require an API key.

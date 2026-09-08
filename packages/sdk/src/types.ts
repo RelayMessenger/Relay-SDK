@@ -759,10 +759,46 @@ export type RelayWebhookEvent =
   | ContactRemovedWebhookEvent
   | RelayWebhookEnvelope<Record<string, unknown>, OtherWebhookEventType>;
 
-/** POST /v1/agents bootstrap parameters. */
-export interface AgentCreateParams {
-  token_name?: string;
+/** Existing Relay avatar gradient pairs, ordered top then base. */
+export type AgentImageGradient =
+  | readonly ["EC8A3C", "C85F1C"]
+  | readonly ["E0567A", "AD2A52"]
+  | readonly ["D05FC6", "93217E"]
+  | readonly ["8F6CF2", "5F38CF"]
+  | readonly ["5B9BFA", "0B52C0"]
+  | readonly ["2596A6", "116A79"]
+  | readonly ["2FA46A", "137347"];
+
+export interface AgentImageBackground {
+  linearGradient: { colors: AgentImageGradient };
 }
+export interface AgentMonogramImageRecipe {
+  recipe: { monogram: { initials: string }; emoji?: never; image?: never };
+  background: AgentImageBackground;
+}
+export interface AgentEmojiImageRecipe {
+  recipe: { emoji: { emoji: string }; monogram?: never; image?: never };
+  background: AgentImageBackground;
+}
+export interface AgentPhotoImageRecipe {
+  recipe: { image: Record<string, never>; monogram?: never; emoji?: never };
+  background?: never;
+}
+export type AgentImageRecipe = AgentMonogramImageRecipe | AgentEmojiImageRecipe | AgentPhotoImageRecipe;
+
+/** POST /v1/agents optional identity fields; omissions retain server defaults. */
+export interface AgentCreateProfileParams {
+  token_name?: string;
+  /** Full lowercase developer handle, including .dev. */
+  handle?: string;
+  /** Display name; the server trims surrounding whitespace. */
+  first_name?: string;
+}
+/** A recipe is redraw metadata, not a renderer: supply its HTTPS snapshot URL. */
+export type AgentCreateParams = AgentCreateProfileParams & (
+  | { image_url?: string; image_recipe?: never }
+  | { image_url: string; image_recipe: AgentImageRecipe }
+);
 
 export interface AgentCreateResponse {
   agent: ContactCardItem;
