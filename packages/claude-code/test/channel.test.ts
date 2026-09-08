@@ -281,6 +281,102 @@ describe("multi-user turn isolation", () => {
   });
 });
 
+describe("unanswered deliveries survive supersession and expiry", () => {
+  it("re-notifies a superseded delivery and lets it open a fresh turn", async () => {
+    const { state, notifications, fake, channel } = fixture();
+    try {
+      const first = event({ sequence: 1, text: "first question" });
+      const second = event({ sequence: 2, text: "second question", chatId: CHAT_B, sender: senderB });
+      accept(state, first, 1);
+      accept(state, second, 2);
+      await channel.flush();
+      expect(notifications).toHaveLength(2);
+      await channel.beginProcessing({ delivery_id: first.event_id });
+      // The model starts the second before answering the first.
+      await channel.beginProcessing({ delivery_id: second.event_id });
+      expect(state.activeTurnOrigin()).toMatchObject({ deliveryId: second.event_id });
+      await channel.flush();
+      expect(notifications).toHaveLength(3);
+      expect((notifications[2]?.params as { content: string }).content).toBe("first question");
+      // Re-notification is idempotent inside the retry window.
+      await channel.flush();
+      expect(notifications).toHaveLength(3);
+      expect((await channel.reply({
+        chat_id: CHAT_B,
+        text: "answer two",
+        send_id: "two",
+      })).isError).not.toBe(true);
+      const reopened = await channel.beginProcessing({ delivery_id: first.event_id });
+      expect(reopened.isError).not.toBe(true);
+      expect(reopened.content[0]?.text).toContain("processing started");
+      expect(fake.reads).toEqual([CHAT_A, CHAT_B, CHAT_A]);
+      expect((await channel.reply({
+        chat_id: CHAT_A,
+        text: "answer one",
+        send_id: "one",
+      })).isError).not.toBe(true);
+      expect(fake.sends.map((send) => send.chatId)).toEqual([CHAT_B, CHAT_A]);
+      // Both answered: nothing re-notifies and neither reopens.
+      await channel.flush();
+      expect(notifications).toHaveLength(3);
+      expect((await channel.beginProcessing({ delivery_id: first.event_id })).isError).toBe(true);
+      expect((await channel.beginProcessing({ delivery_id: second.event_id })).isError).toBe(true);
+    } finally {
+      state.close();
+    }
+  });
+
+  it("keeps a replied delivery closed when a later turn is superseded", async () => {
+    const { state, notifications, fake, channel } = fixture();
+    try {
+      const first = event({ sequence: 1, text: "answered" });
+      const second = event({ sequence: 2, text: "left open", chatId: CHAT_B, sender: senderB });
+      const third = event({ sequence: 3, text: "newest" });
+      accept(state, first, 1);
+      await channel.flush();
+      await channel.beginProcessing({ delivery_id: first.event_id });
+      expect((await channel.reply({ chat_id: CHAT_A, text: "done", send_id: "one" })).isError)
+        .not.toBe(true);
+      accept(state, second, 2);
+      accept(state, third, 3);
+      await channel.flush();
+      await channel.beginProcessing({ delivery_id: second.event_id });
+      await channel.beginProcessing({ delivery_id: third.event_id });
+      await channel.flush();
+      const contents = notifications.map((item) => (item.params as { content: string }).content);
+      expect(contents).toEqual(["answered", "left open", "newest", "left open"]);
+      expect((await channel.beginProcessing({ delivery_id: first.event_id })).isError).toBe(true);
+      expect(fake.sends).toHaveLength(1);
+    } finally {
+      state.close();
+    }
+  });
+
+  it("re-notifies a delivery whose turn expired before any reply", async () => {
+    const { state, notifications, channel } = fixture();
+    try {
+      const first = event({ sequence: 1, text: "slow one" });
+      accept(state, first, 1);
+      await channel.flush();
+      expect(notifications).toHaveLength(1);
+      // Open the turn with a lease that is already in the past.
+      state.beginDelivery(first.event_id, 10);
+      state.markDeliveryProcessing(first.event_id, 11, 1);
+      await channel.flush();
+      expect(notifications).toHaveLength(2);
+      expect((notifications[1]?.params as { content: string }).content).toBe("slow one");
+      const reopened = await channel.beginProcessing({ delivery_id: first.event_id });
+      expect(reopened.isError).not.toBe(true);
+      expect((await channel.reply({ chat_id: CHAT_A, text: "late answer", send_id: "late" })).isError)
+        .not.toBe(true);
+      await channel.flush();
+      expect(notifications).toHaveLength(2);
+    } finally {
+      state.close();
+    }
+  });
+});
+
 describe("live group addressing", () => {
   it("creates turns only for canonical mentions or verified replies to this Agent", async () => {
     const { state, notifications, fake, channel } = fixture();

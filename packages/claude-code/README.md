@@ -130,8 +130,12 @@ Required first call for every Relay channel event. Takes `delivery_id` from the
 `<channel>` tag and marks that Chat Read through the public Relay API. Do not
 process the content if the tool returns an error. Success opens one turn-scoped
 reply origin with a ten-minute maximum lease. Starting another turn closes
-the previous one as superseded; a closed or expired delivery cannot be
-reactivated.
+the previous one as superseded. A superseded or expired delivery that was
+never answered goes back to the inbox: the channel notifies it again on the
+next flush and `begin_processing` opens a fresh turn for it (the closed turn
+stays recorded for audit). A delivery that was answered by `reply` or closed
+by `complete_processing` stays closed and cannot be reactivated, so no Message
+is answered twice and none is silently lost.
 
 ### `complete_processing`
 
@@ -188,7 +192,8 @@ State is account-scoped below `~/.claude/channels/relay/state/` and includes:
 - the local accepted-through cursor and event identity hashes;
 - pending channel deliveries and explicit Read-start status;
 - one short-lived, per-session delivery-turn lease used for reply and
-  Chat isolation, plus closed-turn markers that prevent reactivation;
+  Chat isolation, plus closed-turn markers that prevent reactivation of
+  answered deliveries (superseded and expired ones return to pending);
 - the complete last FULL-sync snapshot;
 - observed reply destinations;
 - logical outbound sends.
