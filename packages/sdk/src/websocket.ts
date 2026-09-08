@@ -51,13 +51,25 @@ export interface WebSocketConstructor {
 
 export interface WebSocketRunOptions {
   signal?: AbortSignal;
+  /**
+   * Request the server-confirmed read-only observer on ?observe=true.
+   * Sends no ACK/FULL-sync completion and never falls back to consuming mode.
+   * Best-effort retained event view, not durable recovery or runtime ownership.
+   */
+  observe?: boolean;
+  /** Connection status only, never a model/runtime readiness assertion. */
+  onConnectionState?(state: "connecting" | "ready" | "disconnected"): void;
+  onReady?(frame: WebSocketReadyFrame & { observational?: true }): void;
+  /** Only observation tolerates gaps in retained events. */
+  onObservationGap?(gap: { expectedSequence: string; receivedSequence: string }): void;
   WebSocket?: WebSocketConstructor;
   minReconnectDelayMs?: number;
   maxReconnectDelayMs?: number;
   random?: () => number;
   /**
-   * Commit the event to a durable inbox before resolving. Resolution advances
-   * the transport replay checkpoint only; it does not mark Delivered or Read.
+   * In default consuming mode, commit to a durable inbox before resolving.
+   * Resolution advances only the transport checkpoint, not Delivered or Read.
+   * With observe:true, this is a notification and never authorizes an ACK.
    */
   onEvent(
     event: RelayWebhookEvent,
@@ -155,7 +167,7 @@ class WebSocketProtocolError extends Error {
   readonly stop = true;
 }
 
-const parseReady = (value: unknown): WebSocketReadyFrame => {
+const parseReady = (value: unknown): WebSocketReadyFrame & { observational?: true } => {
   if (
     !isRecord(value)
     || !hasExactKeys(value, [
@@ -166,8 +178,10 @@ const parseReady = (value: unknown): WebSocketReadyFrame => {
       "full_sync_through",
       "heartbeat_interval_ms",
       "max_in_flight",
+      ...(Object.hasOwn(value, "observational") ? ["observational"] : []),
     ])
     || value.type !== "ready"
+    || (Object.hasOwn(value, "observational") && value.observational !== true)
     || !validUUID(value.connection_id)
     || !validSequence(value.acked_through)
     || typeof value.full_sync_required !== "boolean"
@@ -185,7 +199,7 @@ const parseReady = (value: unknown): WebSocketReadyFrame => {
       "Relay WebSocket received an invalid ready frame.",
     );
   }
-  return value as unknown as WebSocketReadyFrame;
+  return value as unknown as WebSocketReadyFrame & { observational?: true };
 };
 
 const parseEvent = (value: unknown): WebSocketEventFrame => {
@@ -363,7 +377,7 @@ const upgradeResponseBody = (
     : new WebSocketStoppedError(errorMessage);
 };
 
-const deriveWebSocketURL = (baseURL: string): string => {
+const deriveWebSocketURL = (baseURL: string, observe = false): string => {
   let url: URL;
   try {
     url = new URL(baseURL);
@@ -380,6 +394,7 @@ const deriveWebSocketURL = (baseURL: string): string => {
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = "/v1/websocket";
   url.search = "";
+  if (observe) url.searchParams.set("observe", "true");
   url.hash = "";
   return url.toString();
 };
@@ -389,7 +404,7 @@ const runConnection = (
   agentToken: string,
   options: WebSocketRunOptions,
   Constructor: WebSocketConstructor,
-  onReady: () => void,
+  onReady: (frame: WebSocketReadyFrame & { observational?: true }) => void,
 ): Promise<void> =>
   new Promise((resolve, reject) => {
     const socket = new Constructor(url, {
@@ -502,6 +517,7 @@ const runConnection = (
     };
     const onMessage = (message: { data: unknown }): void => {
       chain = chain.then(async () => {
+        if (settled || options.signal?.aborted) return;
         let frame: unknown;
         try {
           frame = JSON.parse(await text(message.data)) as unknown;
@@ -519,13 +535,22 @@ const runConnection = (
             );
           }
           const parsed = parseReady(frame);
+          if (options.observe === true && parsed.observational !== true) {
+            throw new WebSocketStoppedError("Server did not confirm read-only observation; no consuming fallback was opened.");
+          }
+          if (options.observe !== true && parsed.observational === true) {
+            throw new WebSocketProtocolError("Unexpected observation mode on a consuming connection.");
+          }
+          if (options.observe === true && (parsed.full_sync_required || parsed.full_sync_through !== null)) {
+            throw new WebSocketProtocolError("Read-only observation must not require FULL sync.");
+          }
           ready = true;
           acceptedThrough = BigInt(parsed.acked_through);
           fullSyncThrough = parsed.full_sync_required
             ? BigInt(parsed.full_sync_through!)
             : null;
           startHeartbeat();
-          onReady();
+          onReady(parsed);
           return;
         }
         if (isRecord(frame) && frame.type === "disconnect") {
@@ -583,6 +608,11 @@ const runConnection = (
               "Relay WebSocket FULL sync did not match the ready checkpoint.",
             );
           }
+          if (options.observe === true) {
+            throw new WebSocketStoppedError(
+              "Observation stopped: a consuming runtime must complete FULL sync; no completion was sent.",
+            );
+          }
           try {
             await options.onFullSync({
               throughSequence: fullSync.through_sequence,
@@ -607,15 +637,28 @@ const runConnection = (
         }
         const event = parseEvent(frame);
         const sequence = BigInt(event.sequence);
+        if (options.observe === true && sequence <= acceptedThrough) {
+          throw new WebSocketProtocolError("Observer event sequences must increase on each connection.");
+        }
         if (sequence > acceptedThrough + 1n) {
-          throw new WebSocketProtocolError(
-            "Relay WebSocket received a non-contiguous event sequence.",
-          );
+          if (options.observe !== true) {
+            throw new WebSocketProtocolError(
+              "Relay WebSocket received a non-contiguous event sequence.",
+            );
+          }
+          options.onObservationGap?.({
+            expectedSequence: (acceptedThrough + 1n).toString(), receivedSequence: event.sequence,
+          });
         }
         try {
           await options.onEvent(event.event, { sequence: event.sequence });
         } catch (cause) {
           throw new DurableApplicationError("event", cause);
+        }
+        if (options.observe === true) {
+          // Local observation progress is NOT the server's cumulative checkpoint.
+          if (sequence > acceptedThrough) acceptedThrough = sequence;
+          return;
         }
         if (sequence === acceptedThrough + 1n) {
           acceptedThrough = sequence;
@@ -722,6 +765,9 @@ export const runWebSocket = async (
   agentToken: string,
   options: WebSocketRunOptions,
 ): Promise<void> => {
+  if (options.observe !== undefined && typeof options.observe !== "boolean") {
+    throw new TypeError("WebSocket observe must be a boolean when provided.");
+  }
   const Constructor = options.WebSocket
     ?? (NodeWebSocket as unknown as WebSocketConstructor);
   const minimum = options.minReconnectDelayMs ?? 500;
@@ -739,19 +785,22 @@ export const runWebSocket = async (
   if (!agentToken.trim()) {
     throw new TypeError("A Relay Agent Token is required for WebSocket delivery.");
   }
-  const url = deriveWebSocketURL(baseURL);
+  const url = deriveWebSocketURL(baseURL, options.observe === true);
   const random = options.random ?? Math.random;
   let attempt = 0;
 
   while (!options.signal?.aborted) {
+    options.onConnectionState?.("connecting");
     try {
       await runConnection(
         url,
         agentToken,
         options,
         Constructor,
-        () => {
+        frame => {
           attempt = 0;
+          options.onConnectionState?.("ready");
+          options.onReady?.(frame);
         },
       );
     } catch (error) {
@@ -763,6 +812,8 @@ export const runWebSocket = async (
         || error instanceof RelayWebhookConfiguredError
       ) throw error;
       attempt += 1;
+    } finally {
+      options.onConnectionState?.("disconnected");
     }
     if (options.signal?.aborted) return;
     const ceiling = Math.min(
