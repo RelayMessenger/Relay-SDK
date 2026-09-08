@@ -2043,7 +2043,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/relay-v1-lock.json",
       "source_sha256": "c18b70f1edfed7cfc6a396ed86c609e667975396d4c3ff57c00a49c0ad7e4ab4",
-      "destination_sha256": "7f8eb0585dd65b7c9b22be802610ca0ae0a3cc6f95fd1ed8851b902765d4bede",
+      "destination_sha256": "2c345c0fbac88d5ea86aee4f134b6ae991bc60de8eced42cb1dd85d6848068cb",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2153,7 +2153,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "scripts/validate.py",
       "source_sha256": "4e04663cf3f31890989d6e12b6a735344d0b10e2ec6791c70d61e72e7bf4180b",
-      "destination_sha256": "22500e0b66b85bfa20f6822121c578f10176918323927cfd01d2213a2657f18c",
+      "destination_sha256": "0150586a7a33c7d03e56025495a13e5738f70d836a6d0a982b9f4e5cd8507e4a",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -2274,7 +2274,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/distribution/scripts/validate-distribution.mjs",
       "source_sha256": "0650184ddae2ef362e2e362c5651ae4bd9208f421f185413e6a55ce52c3771a5",
-      "destination_sha256": "3d4f32dfd852b661b523886649cf23014c0017da05b97421cc248ff3cca5c0e2",
+      "destination_sha256": "0c405965dbf346811ca44e9d6f367aae13850d6b5efb0f348cf5f2be189e3729",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
