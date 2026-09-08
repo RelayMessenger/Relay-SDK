@@ -97,6 +97,12 @@ try {
   shim(['auth', 'login', '--with-token'], { input: `${invalidToken}\n`, expectedExit: 1 });
   assert.equal(readFileSync(env.RELAY_CONFIG_PATH, 'utf8'), beforeInvalidImport, 'Invalid import must preserve the saved identity');
   shim(['auth', 'login'], { env: { ...env, RELAY_AGENT_TOKEN: token } });
+  run(process.execPath, [join(root, 'scripts/agent-cli-platforms-config-acl.mjs'), consumer, env.RELAY_CONFIG_PATH, scratch], { cwd: consumer });
+  report.authConfigAclProof = 'passed: actual private config and intentionally broad fixture';
+  if (platform() !== 'win32') {
+    run('python3', [join(root, 'scripts/agent-cli-platforms-pty.py'), '--shim', join(consumer, 'node_modules/.bin/relaymessenger'), '--origin', env.RELAY_API_URL, '--scratch', scratch, '--receipt', join(receipts, 'pty.json')]);
+    report.interactivePty = 'passed: real hidden prompt, no echo, cancellation restores terminal';
+  } else report.interactivePty = 'not exercised on Windows; .cmd stdin proof is separate';
   cli('doctor', '--offline');
   const envStatus = JSON.parse(shim(['auth', 'status'], { env: { ...env, RELAY_AGENT_TOKEN: token } }));
   assert.equal(envStatus.token_source, 'environment');

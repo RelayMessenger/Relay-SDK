@@ -5,6 +5,8 @@ import {
 } from "node:fs";
 import { basename, join } from "node:path";
 import { releasePackages } from "./release-packages.mjs";
+import { validateRunnerPolicy } from "./agent-cli-platforms-policy.mjs";
+import { verifyPolicyFixtures } from "./agent-cli-platforms-policy-fixtures.mjs";
 
 const rootManifest = JSON.parse(readFileSync("package.json", "utf8"));
 const pinnedNode = readFileSync(".nvmrc", "utf8").trim();
@@ -301,18 +303,10 @@ assert.match(
   "the staging publish must disable the npm attestation explicitly, so no publishConfig can re-enable it",
 );
 
-// Every job in this repository runs on Blacksmith (owner ruling, 2026-09-07).
-for (const [source, text] of workflowFiles) {
-  const labels = [...text.matchAll(/runs-on:\s*(\S+)/gu)].map(([, label]) => label);
-  assert.ok(labels.length > 0, `${source} declares no runner`);
-  for (const label of labels) {
-    assert.match(
-      label,
-      /^blacksmith-/u,
-      `${source} runs on ${label} instead of a Blacksmith runner`,
-    );
-  }
-}
+// Owner-authorized native verification exception; every other workflow stays Blacksmith-only.
+for (const [source, text] of workflowFiles) validateRunnerPolicy(source, text);
+const nativeWorkflow = workflowFiles.find(([source]) => source.endsWith("/agent-cli-platforms.yml"));
+if (nativeWorkflow) verifyPolicyFixtures(nativeWorkflow[1]);
 
 // The one production release workflow. Tags record a publish and never
 // trigger one, so no workflow may listen for a tag push.
