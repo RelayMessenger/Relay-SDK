@@ -1,3 +1,6 @@
+import { homedir } from "node:os";
+import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactiveEntry, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
+import { installRelaySkill, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
 import { handoffAgent, handoffOptions, handoffTarget, type HandoffOptions } from "./agent-handoff.js";
 import { agentDependencies, createAgent, deleteAgent, listAgents, type AgentDependencies } from "./agents.js";
@@ -53,6 +56,12 @@ export interface ProgramDependencies {
   readStdin?: () => Promise<string>;
   readSecret?: () => Promise<string>;
   isInteractive?: boolean;
+  prompts?: InteractivePrompts;
+  skillPresent?: () => Promise<boolean | "unknown">;
+  skillInstaller?: () => Promise<void>;
+  cwd?: string;
+  confirmDelete?: () => Promise<boolean>;
+  confirmLogout?: () => Promise<boolean>;
   stdout?: (value: string) => void;
   stderr?: (value: string) => void;
   fetch?: typeof fetch;
@@ -60,6 +69,8 @@ export interface ProgramDependencies {
 
 interface GlobalOptions {
   profile?: string;
+  json?: boolean;
+  nonInteractive?: boolean;
 }
 
 const integer = (value: string): number => {
@@ -132,6 +143,8 @@ export const createProgram = (
     .name("relaymessenger")
     .description("Official CLI for Relay v1 Agent resources.")
     .version(PACKAGE_VERSION)
+    .option("--json", "machine-readable output; disables optional prompts")
+    .option("--non-interactive", "disable menus and optional prompts")
     .option("--profile <name>", "local Relay profile", (configContext.env ?? process.env).RELAY_PROFILE);
   program.exitOverride();
   program.configureOutput({
@@ -157,7 +170,7 @@ export const createProgram = (
         try { handoff = await handoffAgent(target, result.profile, agentDeps, { consent: options.confirmConfigure === true, runtimeStopped: options.runtimeStopped === true }, true); }
         catch { handoff = { status: "required-action", code: "handoff-failed", message: "Agent credential is stored; runtime handoff failed. Use auth login --connect with the stored credential; do not create another agent.", connected: false }; }
       }
-      if (options.json) output({ ...result, ...(handoff ? { handoff } : {}) });
+      if (globals(command).json) output({ ...result, ...(handoff ? { handoff } : {}) });
       else {
         stdout(`${result.agent.first_name} (@${result.agent.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken: stored\n`);
         // Load only for human output; the QR encodes the public share URL, not credentials.
@@ -175,6 +188,7 @@ export const createProgram = (
   agents.command("delete").argument("<handle>", "agent handle", handle)
     .option("--json", "print safe metadata as JSON")
     .action(async (agentHandle: string, _options: object, command: Command) => {
+      if (!globals(command).nonInteractive && !globals(command).json && dependencies.confirmDelete && !await dependencies.confirmDelete()) throw new InteractiveCancelled();
       output(await deleteAgent(agentHandle, globals(command).profile, agentDeps));
     });
 
@@ -200,7 +214,8 @@ export const createProgram = (
       const reuseSaved = Boolean(target && previous.agent_token) && !options.withToken;
       let raw: string | undefined;
       if (options.withToken && !dependencies.readStdin && process.stdin.isTTY) {
-        raw = await readHiddenToken(process.stdin, stderr);
+        if (globals(command).nonInteractive || globals(command).json || dependencies.isInteractive === false) throw new Error("Use redirected stdin with --with-token in non-interactive mode.");
+        raw = await (dependencies.readSecret ?? (() => readHiddenToken(process.stdin, stderr)))();
       } else if (options.withToken) {
         raw = await (dependencies.readStdin ?? (async () => {
           const chunks: Buffer[] = [];
@@ -210,7 +225,7 @@ export const createProgram = (
       } else if (reuseSaved) raw = previous.agent_token;
       else if (env.RELAY_AGENT_TOKEN !== undefined) raw = env.RELAY_AGENT_TOKEN;
       else {
-        const interactive = dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stderr.isTTY);
+        const interactive = !globals(command).nonInteractive && !globals(command).json && (dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stderr.isTTY));
         if (!interactive) throw new Error("No Agent Token available in non-interactive mode. Use auth login --with-token with stdin or RELAY_AGENT_TOKEN.");
         raw = await (dependencies.readSecret ?? (() => readHiddenToken(process.stdin, stderr)))();
       }
@@ -246,6 +261,7 @@ export const createProgram = (
     .command("logout")
     .description("Remove the selected profile's stored token.")
     .action(async (_options: object, command: Command) => {
+      if (!globals(command).nonInteractive && !globals(command).json && dependencies.confirmLogout && !await dependencies.confirmLogout()) throw new InteractiveCancelled();
       const config = await readConfig(configContext);
       const profile = validateProfileName(
         globals(command).profile ?? config.current_profile,
@@ -956,10 +972,50 @@ export const runCLI = async (
   dependencies: ProgramDependencies = {},
 ): Promise<number> => {
   const stderr = dependencies.stderr ?? ((value: string) => process.stderr.write(value));
+  const env = dependencies.configContext?.env ?? process.env;
+  const interactive = interactiveAllowed(argv, env, dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY && process.stderr.isTTY));
+  const ui = interactive ? dependencies.prompts ?? clackPrompts((message) => stderr(`${message}\n`)) : undefined;
+  const agentDeps = dependencies.agents ?? agentDependencies(dependencies.configContext, dependencies.fetch);
+  let offered = false;
+  const skillOffer = async (force = false): Promise<void> => {
+    if (!ui || offered) return;
+    offered = true;
+    try {
+      const cwd = dependencies.cwd ?? process.cwd();
+      const present = await (dependencies.skillPresent ?? (() => relaySkillPresent(cwd, dependencies.configContext?.home ?? homedir())))();
+      if (!force && present !== false) return;
+      if (!await ui.confirm("Install the Relay skill? The standard installer will ask you to choose agents and project/global scope.")) return;
+      try {
+        await (dependencies.skillInstaller ?? (() => installRelaySkill(cwd, env)))();
+        ui.info("The standard skill installer finished.");
+      } catch { ui.info("Skill installation did not complete. Existing agent and credential results are unchanged."); }
+    } catch {
+      // A declined/cancelled/unavailable optional offer must not turn successful
+      // agent creation into a failure or suggest repeating the creation POST.
+      ui.info("Skill offer dismissed. Existing agent and credential results are unchanged.");
+    }
+  };
   try {
-    await createProgram(dependencies).parseAsync(argv, { from: "user" });
+    let args = argv;
+    const entry = interactiveEntry(argv);
+    if (ui && entry) {
+      const selected = await chooseInteractiveCommand(entry.entry, entry.prefix, agentDeps, ui);
+      if (!selected) return 0;
+      if (selected === "install-skill") { await skillOffer(true); return 0; }
+      args = selected;
+    } else if (entry) args = [...argv, "--help"];
+    await createProgram({
+      ...dependencies, agents: agentDeps, isInteractive: interactive,
+      ...(ui ? {
+        readSecret: dependencies.readSecret ?? (() => ui.password("Agent Token")),
+        confirmDelete: () => ui.confirm("Delete the selected agent? This cannot be undone."),
+        confirmLogout: () => ui.confirm("Remove the selected stored token? The agent identity will not be deleted."),
+      } : {}),
+    }).parseAsync(args, { from: "user" });
+    await skillOffer();
     return 0;
   } catch (error) {
+    if (error instanceof InteractiveCancelled) { stderr("Cancelled.\n"); return 0; }
     if (error instanceof CommanderError) {
       if (
         error.code === "commander.helpDisplayed"

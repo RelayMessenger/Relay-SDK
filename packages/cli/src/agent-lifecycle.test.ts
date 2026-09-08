@@ -18,7 +18,7 @@ async function fixture() {
     if (init?.method === "DELETE") return new Response(null, { status: 204 });
     return Response.json({ contact_cards: [card] });
   });
-  const deps = { configContext: { env }, fetch: async (input: string | URL | Request, init?: RequestInit) => {
+  const deps = { configContext: { env, home }, skillPresent: async () => true, fetch: async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     expect(url.origin === "https://api.staging.relayapp.im" || url.hostname.endsWith(".staging.test")).toBe(true);
     return fetch(input, init);
