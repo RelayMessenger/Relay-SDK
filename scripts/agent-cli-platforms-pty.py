@@ -35,7 +35,7 @@ def exercise(name, menu=False, cancel=False):
             os.write(master,secret.encode());time.sleep(.05);drain();assert secret.encode() not in raw,'Token echoed before submission'
             os.write(master,b'\x03' if cancel else b'\r')
         if not cancel and not menu:
-            wait_for(b'Event view:');os.write(master,b'q') # explicit exit from intended persistent saved-agent view
+            wait_for(b'Live view:');os.write(master,b'q') # explicit exit from intended persistent saved-agent view
         while child.poll() is None and time.monotonic()<deadline:drain()
         if child.poll() is None:raise AssertionError('PTY command hung')
         for _ in range(3):drain(.02)
