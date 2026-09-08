@@ -65,3 +65,12 @@ it("ignores an apiKey supplied by untyped bootstrap callers", async () => {
   });
   expect(headers?.has("authorization")).toBe(false);
 });
+
+it("strips Authorization from a caller-supplied Headers instance", async () => {
+  const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+    expect(new Headers(init?.headers).has("Authorization")).toBe(false);
+    return Response.json(created, { status: 201 });
+  });
+  await Relay.createAgent({}, { headers: new Headers({ Authorization: "Bearer must-never-send" }), fetch });
+  expect(fetch).toHaveBeenCalledOnce();
+});

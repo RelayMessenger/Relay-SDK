@@ -89,10 +89,7 @@ export async function listAgents(deps: AgentDependencies) {
   const agents = [];
   for (const [profile, saved] of Object.entries(config.profiles)) {
     const apiURL = validateApiURL(saved.api_url ?? DEFAULT_API_URL);
-    if (!saved.agent_token) {
-      agents.push({ profile, api_url: apiURL, token: "missing" });
-      continue;
-    }
+    if (!saved.agent_token) continue;
     try {
       // Deliberately not resolveAuth: ENV overrides must not impersonate every profile.
       const cards = await deps.client(saved.agent_token, apiURL).contactCard.retrieve();
@@ -104,8 +101,31 @@ export async function listAgents(deps: AgentDependencies) {
   return { agents };
 }
 
+export async function selectAgentAuth(handle: string, profile: string | undefined, deps: AgentDependencies): Promise<ResolvedAuth> {
+  if (profile !== undefined || deps.env.RELAY_PROFILE !== undefined || deps.env.RELAY_AGENT_TOKEN !== undefined) {
+    return deps.auth(profile);
+  }
+  const config = await deps.read();
+  const requestedOrigin = deps.env.RELAY_API_URL === undefined ? undefined : validateApiURL(deps.env.RELAY_API_URL);
+  const matches: string[] = [];
+  let unavailable = false;
+  for (const [name, saved] of Object.entries(config.profiles)) {
+    if (!saved.agent_token) continue;
+    const apiURL = validateApiURL(saved.api_url ?? DEFAULT_API_URL);
+    if (requestedOrigin !== undefined && apiURL !== requestedOrigin) continue;
+    try {
+      const cards = await deps.client(saved.agent_token, apiURL).contactCard.retrieve();
+      if (cards.contact_cards.some((card) => card.handle === handle && card.kind === "agent")) matches.push(name);
+    } catch { unavailable = true; }
+  }
+  if (unavailable || matches.length !== 1) {
+    throw new Error("Cannot select an unambiguous saved agent. Choose --profile explicitly; credentials were kept.");
+  }
+  return deps.auth(matches[0]);
+}
+
 export async function deleteAgent(handle: string, profile: string | undefined, deps: AgentDependencies) {
-  const auth = await deps.auth(profile);
+  const auth = await selectAgentAuth(handle, profile, deps);
   try {
     await deps.client(auth.token, auth.apiURL).agents.delete(handle, { maxRetries: 0 });
   } catch (error) {
