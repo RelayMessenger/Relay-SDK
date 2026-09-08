@@ -3,7 +3,7 @@
  *
  * Contract source:
  * Relay Server 04c729e3e3b2249eb9cca93fbb09ee3dd5fd69a6
- * OpenAPI 7d46b16f5dc19034cbdcb45bdd79816a9a2f4c9f6febb8520db0517dfe9eae64
+ * OpenAPI 7094178cb01c0ddc05f9254dc91094900a0a7b6273979c0cad6257eec486f0d8
  */
 
 export const RELAY_API_VERSION = "v1" as const;

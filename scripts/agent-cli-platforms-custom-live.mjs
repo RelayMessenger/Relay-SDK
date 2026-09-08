@@ -10,7 +10,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const api = 'https://api.staging.relayapp.im';
 const inputImage = `${api}/assets/relay-agent-default-4b3e4b9358f35c66.png`;
 const serverSha = 'e54a48128d29f42b56344218edcac023cf5eb5d0';
-const canonicalHash = '7d46b16f5dc19034cbdcb45bdd79816a9a2f4c9f6febb8520db0517dfe9eae64';
+const canonicalHash = '7094178cb01c0ddc05f9254dc91094900a0a7b6273979c0cad6257eec486f0d8';
 if (process.platform !== 'linux' || !process.env.RELAY_DAYTONA_SANDBOX_ID || process.env.RELAY_CUSTOM_LIVE_CONFIRMED !== serverSha) throw Error('Explicit confirmed staging deployment in owned Daytona is required');
 const canonicalFile = process.env.RELAY_CUSTOM_CANONICAL_SPEC;
 assert.ok(canonicalFile);assert.equal(createHash('sha256').update(readFileSync(canonicalFile)).digest('hex'),canonicalHash);
