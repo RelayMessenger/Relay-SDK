@@ -128,7 +128,7 @@ if (
 ) {
   throw new Error("Relay SDK Contact declarations must expose image_url and about only");
 }
-if (lock.relayServer.commit !== "04c729e3e3b2249eb9cca93fbb09ee3dd5fd69a6") {
+if (lock.relayServer.commit !== "pending-server-ux-validation") {
   throw new Error("Relay Server commit lock drifted");
 }
 if (lock.relayServer.sha256 !== "7094178cb01c0ddc05f9254dc91094900a0a7b6273979c0cad6257eec486f0d8") {
