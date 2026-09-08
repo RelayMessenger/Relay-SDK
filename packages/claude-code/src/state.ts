@@ -304,6 +304,7 @@ export class RelayStateStore {
       INSERT INTO metadata(key, value) VALUES ('accepted_through', '0')
       ON CONFLICT(key) DO NOTHING
     `).run();
+    transaction(this.#db, () => this.#requeueStrandedDeliveries());
     try {
       chmodSync(this.path, 0o600);
     } catch {
@@ -625,6 +626,36 @@ export class RelayStateStore {
       `).run(lease.deliveryId);
     }
     return lease.deliveryId;
+  }
+
+  /** Before requeue-on-close existed, a superseded or expired turn left its
+   * delivery stuck at `processing` for good. Repair such rows once per open:
+   * the same reset the close-time path applies, then the same notification
+   * gate. A delivery holding the current lease is live, not stranded. */
+  #requeueStrandedDeliveries(): number {
+    const prefix = this.#closedTurnKey("");
+    const heldDeliveryId = this.#activeTurnLease()?.deliveryId ?? null;
+    const markers = this.#db.prepare(`
+      SELECT substr(metadata.key, ?) AS delivery_id, metadata.value AS value
+      FROM metadata
+      JOIN deliveries ON deliveries.delivery_id = substr(metadata.key, ?)
+      WHERE metadata.key LIKE ? AND deliveries.status = 'processing'
+    `).all(prefix.length + 1, prefix.length + 1, `${prefix}%`) as Array<{
+      delivery_id: string;
+      value: string;
+    }>;
+    let repaired = 0;
+    for (const marker of markers) {
+      if (marker.delivery_id === heldDeliveryId) continue;
+      const outcome = this.#closedTurnOutcome(marker.delivery_id);
+      if (outcome === null || isFinalTurnOutcome(outcome)) continue;
+      const result = this.#db.prepare(`
+        UPDATE deliveries SET status = 'pending', last_notified_at = NULL
+        WHERE delivery_id = ? AND status = 'processing'
+      `).run(marker.delivery_id);
+      repaired += Number(result.changes);
+    }
+    return repaired;
   }
 
   #closedTurnOutcome(deliveryId: string): TurnOutcome | null {

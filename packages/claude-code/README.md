@@ -136,7 +136,10 @@ first flush after the active turn closes (never while another turn is
 running, so the two cannot keep superseding each other), and
 `begin_processing` then opens a fresh turn for it (the closed turn stays
 recorded for audit). New deliveries that never had a turn are still notified
-at once. A delivery that was answered by `reply` or closed
+at once. Each time the state store opens it applies the same reset to any
+delivery an older channel version left stuck after a superseded or expired
+turn, so no Message stays lost on an existing install. A delivery that was
+answered by `reply` or closed
 by `complete_processing` stays closed and cannot be reactivated, so no Message
 is answered twice and none is silently lost.
 

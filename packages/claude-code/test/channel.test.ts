@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type {
   ChatHandle,
@@ -398,6 +399,87 @@ describe("unanswered deliveries survive supersession and expiry", () => {
       expect(reopened.isError).not.toBe(true);
       expect(reopened.content[0]?.text).toContain("processing started");
       expect(state.activeTurnOrigin()).toMatchObject({ deliveryId: first.event_id });
+    } finally {
+      state.close();
+    }
+  });
+
+  it("repairs deliveries stranded at processing by a pre-fix supersession on open", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "relay-channel-stranded-"));
+    cleanups.push(stateDir);
+    const stranded = event({ sequence: 1, text: "stranded before the fix" });
+    const answered = event({ sequence: 2, text: "answered before the fix", chatId: CHAT_B, sender: senderB });
+    {
+      // Build the pre-fix shape directly: processing rows with closed-turn
+      // markers and no lease, exactly what an old install carries on disk.
+      const seed = new RelayStateStore({ stateDir, sessionKey: "session" });
+      accept(seed, stranded, 1);
+      accept(seed, answered, 2);
+      seed.close();
+      const db = new DatabaseSync(join(stateDir, "channel.sqlite"));
+      for (const [input, outcome] of [[stranded, "superseded"], [answered, "completed"]] as const) {
+        const data = input.data as { chat: { id: string }; id: string; sender_handle: ChatHandle };
+        db.prepare(`
+          INSERT INTO deliveries(
+            delivery_id, event_id, message_id, chat_id, sender_id, sender_handle,
+            content, meta_json, created_at, status, last_notified_at,
+            processing_started_at, read_marked_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', 5, 6, 7)
+        `).run(
+          input.event_id,
+          input.event_id,
+          data.id,
+          data.chat.id,
+          data.sender_handle.id,
+          data.sender_handle.handle,
+          (input.data as { parts: Array<{ value: string }> }).parts[0]?.value ?? "",
+          JSON.stringify({ chat_id: data.chat.id, delivery_id: input.event_id }),
+          input.created_at,
+        );
+        db.prepare("UPDATE transport_events SET status = 'delivery' WHERE event_id = ?")
+          .run(input.event_id);
+        db.prepare("INSERT INTO metadata(key, value) VALUES (?, ?)").run(
+          `closed_turn:session:${input.event_id}`,
+          JSON.stringify({ version: 1, outcome, closedAt: 8 }),
+        );
+      }
+      db.close();
+    }
+    const state = new RelayStateStore({ stateDir, sessionKey: "session" });
+    const notifications: Array<{ method: string; params?: unknown }> = [];
+    const fake = fakeRelay();
+    const channel = new RelayChannel({
+      mcp: {
+        notification: async (notification: { method: string; params?: unknown }) => {
+          notifications.push(notification);
+        },
+      } as unknown as Server,
+      state,
+      config: {
+        agentToken: TOKEN,
+        baseURL: "http://127.0.0.1:8790",
+        allowedSenders: parseAllowedSenders(`${USER_A},${USER_B}`),
+        channelDir: stateDir,
+        stateDir,
+        accountKey: "account",
+        sessionKey: "session",
+        notificationRetryMs: 60_000,
+      },
+      redactor: createRedactor(TOKEN),
+      log: () => undefined,
+      relay: fake.relay,
+    });
+    try {
+      expect(state.delivery(stranded.event_id)).toMatchObject({ status: "pending", lastNotifiedAt: null });
+      expect(state.delivery(answered.event_id)).toMatchObject({ status: "processing", lastNotifiedAt: 5 });
+      await channel.flush();
+      expect(notifications.map((item) => (item.params as { content: string }).content))
+        .toEqual(["stranded before the fix"]);
+      const reopened = await channel.beginProcessing({ delivery_id: stranded.event_id });
+      expect(reopened.isError).not.toBe(true);
+      expect(state.activeTurnOrigin()).toMatchObject({ deliveryId: stranded.event_id });
+      expect((await channel.beginProcessing({ delivery_id: answered.event_id })).isError).toBe(true);
+      expect(state.delivery(answered.event_id)).toMatchObject({ status: "processing" });
     } finally {
       state.close();
     }
