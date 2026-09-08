@@ -19,6 +19,31 @@ npm install --global relaymessenger@staging
 Node.js 22.22.3 or newer is required. `relaymessenger` is
 the canonical executable; `relay` is the shorter command alias.
 
+## Interactive use
+
+Run `relay` (or `npx relaymessenger@staging`) in a terminal for Create agent,
+Sign in with an existing token, List saved agents, Delete agent, Install Relay
+skill, and Exit. `relay agents` and `relay auth` offer focused menus. Menus and
+passwords use Clack; cancellation before a mutation leaves it unperformed.
+
+Explicit commands still work. `--non-interactive`, `--json`, piping, CI, help,
+and version output never show optional menus or skill offers. Interactive
+agent deletion asks for confirmation; scripted deletion does not gain a
+mandatory `--yes` flag.
+
+After successful interactive use, the CLI may offer the Relay skill once if
+it is absent from the standard install locations. Declining does not fail the
+command. Accepting runs the standard installer, which asks you to choose the
+agents and project/global scope:
+
+```sh
+npx --yes skills@1.5.24 add https://github.com/RelayMessenger/Relay-SDK/tree/staging/skills/relay --skill relay
+```
+
+The CLI does not silently download skills or change every agent's configuration.
+Installer errors do not undo agent creation or suggest creating another agent.
+The install menu remains available when you explicitly want to run the installer.
+
 ## Agent Token authentication
 
 Use `agents create` for a new agent, or import an existing Agent Token. Tokens
