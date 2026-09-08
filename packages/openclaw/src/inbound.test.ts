@@ -117,10 +117,31 @@ describe("Relay inbound Message mapping", () => {
     );
   });
 
-  it("accepts transport events but does not start turns for agent-authored Messages", () => {
+  it("maps agent-authored Messages for the same downstream authorization and activation", () => {
     const agentSender = { ...sender, kind: "agent" as const };
     const input = event();
     (input.data as { sender_handle: ChatHandle }).sender_handle = agentSender;
+    expect(buildRelayInboundFacts(input)).toEqual(
+      buildRelayInboundFacts(event()),
+    );
+  });
+
+  it("does not map outbound/self echoes from either Contact kind", () => {
+    for (const kind of ["user", "agent"] as const) {
+      const input = event();
+      const data = input.data as { direction: string; sender_handle: ChatHandle };
+      data.direction = "outbound";
+      data.sender_handle = { ...sender, kind, is_me: true };
+      expect(buildRelayInboundFacts(input)).toBeNull();
+    }
+  });
+
+  it("rejects unknown sender kinds instead of granting them agent behavior", () => {
+    const input = event();
+    (input.data as { sender_handle: { kind: string } }).sender_handle = {
+      ...sender,
+      kind: "unknown",
+    };
     expect(buildRelayInboundFacts(input)).toBeNull();
   });
 
