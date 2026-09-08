@@ -105,12 +105,9 @@ export async function publishPackageStaging({
       "publish", tarball, "--access", "public", "--tag", "staging",
       "--no-provenance", "--registry", registry,
     ], true);
-    if (published.status !== 0) {
-      throw new Error(
-        `Single publish attempt exited ${published.status}. `
-        + `${published.stderr || published.stdout}`,
-      );
-    }
+    // npm can report a transport/process failure after the registry accepted
+    // the publication. Reconcile the exact tarball before deciding whether
+    // this attempt failed; never blindly publish a second time.
     await verifyNpmRegistryIntegrity({
       packageSpec: spec,
       expectedIntegrity: integrity,
