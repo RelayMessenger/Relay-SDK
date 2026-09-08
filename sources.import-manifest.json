@@ -1988,7 +1988,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/SKILL.md",
       "source_sha256": "b7158ecddc77ce389cb3ae456ae0b1ab82e0a4ac6c5cd10d16f652ecdfacca84",
-      "destination_sha256": "318d0f3981f92b1b0fa19f06705172abe14700afce98fede55baa5d93d78bd0f",
+      "destination_sha256": "d68b6fb174f3683c6e6e9c22b1e97ce4d0ad562e30c9c1a8d31b786a40e9fcff",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1999,10 +1999,10 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/agents/openai.yaml",
       "source_sha256": "059ef94ae2c466941abdafb72c3d572862b61c15d86e12189a0d0b64b94e8773",
-      "destination_sha256": "059ef94ae2c466941abdafb72c3d572862b61c15d86e12189a0d0b64b94e8773",
+      "destination_sha256": "2323b22450356ead9cdcdf5f491a07b231e938c7ab8612bf63ce6ea8cc794a86",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "skills/relay/references/agent-events.md",
@@ -2043,7 +2043,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/relay-v1-lock.json",
       "source_sha256": "c18b70f1edfed7cfc6a396ed86c609e667975396d4c3ff57c00a49c0ad7e4ab4",
-      "destination_sha256": "2da2723219827beffb1e6c5083672e23c4c1060c85e21c1bb92e82e4ba5ce7c1",
+      "destination_sha256": "64de6995bab755e1232c2e75fc81b95a5d30a7c441551bbc5766d5b89fc8a211",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2054,7 +2054,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/sdk-and-auth.md",
       "source_sha256": "cd328a6b4d60f932404ce1a30b88e61cc0cb6e5dbdbcdc485f53ad2e0b3b50c4",
-      "destination_sha256": "14c95b13795df730a457d5a63479c255dd02ef716292d689d059e75926d939e3",
+      "destination_sha256": "fb0a2d8915b4e2a07b782322f3d03663aa2a67e06c3c80319a047a5b0affb6b8",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2076,7 +2076,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": ".claude-plugin/plugin.json",
       "source_sha256": "5fa8d69a3a30216d085ae531bcd45f8812b8bb3c9fa28b3fd4015320c39b0b7d",
-      "destination_sha256": "fbc7f3e5ccc431e1d709b6137b649cad7228c9a8efc59f8a2e924707ca4bb126",
+      "destination_sha256": "52090527d281353e446a1c036397d263d9174dd8add84eb6c18d1a3d499a169a",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2109,10 +2109,10 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "mcp.json",
       "source_sha256": "ba321f8f87988beb94d5c6e3b11f82be0752147af1762748c9771d772cf3a82d",
-      "destination_sha256": "ba321f8f87988beb94d5c6e3b11f82be0752147af1762748c9771d772cf3a82d",
+      "destination_sha256": "092b1fb398115a2c8c78dc0f1d290a11a0d5e70484240f8ee301fe3f4dc28326",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "tooling/skills-distributions/plugin.json",
@@ -2120,7 +2120,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "plugin.json",
       "source_sha256": "db6631dbfc27e09c20dd3843e0fcb0714b85ea6da4844db86093cb7ce9791ce7",
-      "destination_sha256": "212e5d72dcdaf1d2285f522bd96fdade380ff866ba696036ba280648d4627eef",
+      "destination_sha256": "858e6470f7d7b1ecc37ab710b520311d5441e41da23f303fde66887149beda04",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2153,7 +2153,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "scripts/validate.py",
       "source_sha256": "4e04663cf3f31890989d6e12b6a735344d0b10e2ec6791c70d61e72e7bf4180b",
-      "destination_sha256": "ce0b6bfae6cedabebf94f838bfa76618b27ab2a6d2ee6b83ced59df386e81084",
+      "destination_sha256": "10c1c250e6b6e2f710d1de7a03d2b4d528a1bcaab81e1767738785729df56533",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -2197,7 +2197,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/distribution/examples/send-message/package.json",
       "source_sha256": "9c7f0bfbcd50d347fd3fdadd6728d2694b3cb012c19ad6418beaddcb54351525",
-      "destination_sha256": "9b7e9893a13e28a4efec0eb2d3bddb605c0a102dfa89538665246e1a65368822",
+      "destination_sha256": "4717924415eadc54346dbb2ca10875c86529869a5c69bbbd82f99931970db93c",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2219,10 +2219,10 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/distribution/scripts/mcp-client.mjs",
       "source_sha256": "0954ee5084b7837f88ba1bf453aa29ffe04c71b13dfb85389cea270a8895d5dc",
-      "destination_sha256": "0954ee5084b7837f88ba1bf453aa29ffe04c71b13dfb85389cea270a8895d5dc",
+      "destination_sha256": "54bf4f503d58e2a6e444f61590b85e30e6f2002c9c40cc4ef94113deafb1a38a",
       "source_mode": "100755",
       "destination_mode": "100755",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "tooling/skills-distributions/src/distribution/scripts/package-smoke.mjs",
@@ -2274,7 +2274,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/distribution/scripts/validate-distribution.mjs",
       "source_sha256": "0650184ddae2ef362e2e362c5651ae4bd9208f421f185413e6a55ce52c3771a5",
-      "destination_sha256": "01075c67726d17f465a2eb4c1891e586f047f4dff6b8f122d0dc05f2d3c16fa1",
+      "destination_sha256": "0a0fc401fcc9d04c82019444bd46f0a301f29544eddd2bfdf5cd5896b4784569",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -2351,10 +2351,10 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/plugins/codex/mcp.json",
       "source_sha256": "4a13b2e3b420cd34c8ae92812f543bc6faa7d617071b1e745913f54c291cdddf",
-      "destination_sha256": "4a13b2e3b420cd34c8ae92812f543bc6faa7d617071b1e745913f54c291cdddf",
+      "destination_sha256": "f2d9c676008ea8f1336dba6d696afd63d2d450600d4764c608a0f723b94f7604",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "tooling/skills-distributions/src/plugins/codex/plugin.json",
@@ -2362,10 +2362,10 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/plugins/codex/plugin.json",
       "source_sha256": "899d8c48af8ae1942bec696594398f4ae13e7e6455ec1ba98ca650fe00da2308",
-      "destination_sha256": "899d8c48af8ae1942bec696594398f4ae13e7e6455ec1ba98ca650fe00da2308",
+      "destination_sha256": "51bcb009b142e778fb8d8554b633e37fd122f6b184f37ed63798677627708328",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "tooling/skills-distributions/src/plugins/codex/validate.sh",
@@ -2428,10 +2428,10 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/plugins/cursor/mcp.json",
       "source_sha256": "4a13b2e3b420cd34c8ae92812f543bc6faa7d617071b1e745913f54c291cdddf",
-      "destination_sha256": "4a13b2e3b420cd34c8ae92812f543bc6faa7d617071b1e745913f54c291cdddf",
+      "destination_sha256": "f2d9c676008ea8f1336dba6d696afd63d2d450600d4764c608a0f723b94f7604",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "tooling/skills-distributions/src/plugins/cursor/plugin.json",
@@ -2439,10 +2439,10 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/plugins/cursor/plugin.json",
       "source_sha256": "08b5710729dddc25dfb4a936bc26b016127642c4e4ba29efb2aa538c9a11fba0",
-      "destination_sha256": "08b5710729dddc25dfb4a936bc26b016127642c4e4ba29efb2aa538c9a11fba0",
+      "destination_sha256": "bcdf7e019db1c5de1831dcb31034aaf7c6bb12ed2039a69abeb6f1e28fc91f4d",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "tooling/skills-distributions/src/plugins/cursor/validate.sh",

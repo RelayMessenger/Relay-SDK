@@ -15,15 +15,16 @@
   },
   "sdk": {
     "repository": "https://github.com/RelayMessenger/Relay-SDK",
-    "commit": "1bbcb486b4a91860ee3527ce95d015883e4cc1ae",
+    "commit": "7cb21757843e1a9693d2b41343272f8b9f3d771f",
     "package_path": "packages/sdk/package.json",
-    "package_sha256": "f14819a908e4a8e52dd37b33bb4eca9dabc4557e2404861f639aa5b857c8a252",
+    "package_sha256": "2392dd03d7e660d570f8fac00983fc94862a7cd425e3cdc8832e54ebf3b1b9f0",
     "package": "@relaymessenger/sdk",
-    "version": "0.3.0-staging.8",
-    "dist_tag": "staging"
+    "version": "0.3.1-staging.0",
+    "dist_tag": "staging",
+    "publication_status": "Source validated; publication of these changes to the staging tag is pending."
   },
   "docs_mcp": {
-    "url": "https://docs.relayapp.im/mcp",
+    "url": "https://docs.staging.relayapp.im/mcp",
     "role": "discovery",
     "authority": "Every result must agree with the locked OpenAPI before use."
   }

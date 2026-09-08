@@ -74,7 +74,10 @@ required_markers = [
     "does not create Delivered or Read",
     "POST /v1/contact_requests",
     "contactRequests.create",
-    "@relaymessenger/sdk@0.3.0-staging.8",
+    "npx relaymessenger@staging",
+    "auth login --with-token",
+    "Relay.createAgent",
+    "agent.agents.delete",
     "relay.chats.messages.send",
     "relay.chats.markAsRead",
     "relayApiOrigin(process.env.RELAY_API_URL)",
@@ -113,7 +116,7 @@ mcp = json_object(DIST_ROOT / "mcp.json")
 relay_mcp = mcp.get("mcpServers", {}).get("relayDocs", {})
 if relay_mcp != {
     "type": "streamable-http",
-    "url": "https://docs.relayapp.im/mcp",
+    "url": "https://docs.staging.relayapp.im/mcp",
 }:
     fail("portable docs MCP configuration drifted")
 
@@ -121,7 +124,7 @@ claude = json_object(DIST_ROOT / ".claude-plugin" / "plugin.json")
 if claude.get("name") != "relay":
     fail("Claude plugin name must be relay")
 if claude.get("mcpServers", {}).get("relayDocs", {}).get("url") != (
-    "https://docs.relayapp.im/mcp"
+    "https://docs.staging.relayapp.im/mcp"
 ):
     fail("Claude docs MCP configuration drifted")
 
@@ -134,8 +137,16 @@ if lock.get("docs", {}).get("commit") != (
     "aae6a9f3ee8084820910761c8aa8a85ed2826dda"
 ):
     fail("Relay Docs lock commit drifted")
-if lock.get("sdk", {}).get("version") != "0.3.0-staging.8":
+if lock.get("sdk", {}).get("version") != "0.3.1-staging.0":
     fail("Relay SDK lock version drifted")
+if lock.get("sdk", {}).get("commit") != (
+    "7cb21757843e1a9693d2b41343272f8b9f3d771f"
+):
+    fail("Relay SDK source commit drifted")
+if lock.get("sdk", {}).get("package_sha256") != (
+    "2392dd03d7e660d570f8fac00983fc94862a7cd425e3cdc8832e54ebf3b1b9f0"
+):
+    fail("Relay SDK source manifest digest drifted")
 
 for host in ("codex", "cursor"):
     build = DIST_ROOT / "src" / "plugins" / host / "build.sh"

@@ -1,8 +1,8 @@
 interface:
   display_name: "Relay"
-  short_description: "Build and review Relay v1 agent integrations"
+  short_description: "Set up Relay agents and build messaging integrations"
   brand_color: "#111111"
-  default_prompt: "Use $relay to implement this Relay v1 integration from the locked contract."
+  default_prompt: "Use $relay to set up or implement this Relay agent integration from the locked contract."
 
 dependencies:
   tools:
@@ -10,4 +10,4 @@ dependencies:
       value: "relayDocs"
       description: "Relay public documentation search and retrieval"
       transport: "streamable_http"
-      url: "https://docs.relayapp.im/mcp"
+      url: "https://docs.staging.relayapp.im/mcp"

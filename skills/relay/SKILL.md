@@ -1,6 +1,6 @@
 ---
 name: relay
-description: Implement, debug, or review a Relay v1 agent backend, Webhook receiver, WebSocket consumer, messaging flow, or @relaymessenger/sdk integration.
+description: Set up or troubleshoot a Relay agent with relaymessenger, or implement and review a Relay v1 SDK, Webhook, WebSocket, or messaging integration.
 ---
 
 # Relay v1
@@ -19,6 +19,10 @@ Use the locked Relay v1 contract instead of remembered examples.
    stale and do not use its route, field, event, or package.
 5. Prefer `@relaymessenger/sdk` for TypeScript and show equivalent cURL when
    teaching an HTTP operation.
+
+For CLI onboarding, existing Agent Tokens, optional runtime handoff, and skill
+installation, read [CLI and skills](references/cli-and-skills.md). Creating a
+messaging identity and running the code that answers it are separate steps.
 
 **Never invent a route, resource, field, event, package, or migration.** Label
 unproved behavior `unknown`.
@@ -52,7 +56,7 @@ For details, read only the reference needed:
 - [Agent events](references/agent-events.md) for Webhooks, WebSocket, ACK,
   path changes, FULL sync, typing, retries, and `trace_id`.
 - [SDK and authentication](references/sdk-and-auth.md) for Agent Tokens,
-  environments, the public TypeScript surface, retries, and errors.
+  anonymous creation, scoped deletion, environments, retries, and errors.
 
 ## Verification
 

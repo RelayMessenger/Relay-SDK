@@ -6,7 +6,7 @@
   "author": {
     "name": "Relay"
   },
-  "homepage": "https://docs.relayapp.im",
+  "homepage": "https://docs.staging.relayapp.im",
   "repository": "https://github.com/RelayMessenger/Relay-SDK",
   "license": "MIT",
   "keywords": [
@@ -19,7 +19,7 @@
   "mcpServers": {
     "relayDocs": {
       "type": "http",
-      "url": "https://docs.relayapp.im/mcp"
+      "url": "https://docs.staging.relayapp.im/mcp"
     }
   }
 }

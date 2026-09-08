@@ -3,7 +3,7 @@
   "mcpServers": {
     "relayDocs": {
       "type": "streamable-http",
-      "url": "https://docs.relayapp.im/mcp"
+      "url": "https://docs.staging.relayapp.im/mcp"
     }
   }
 }
