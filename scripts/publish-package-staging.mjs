@@ -142,11 +142,12 @@ assert.equal(after.found, true);
 assert.equal(after.value.staging, manifest.version);
 assert.equal(after.value.latest ?? null, latestBefore, "latest moved");
 
+const releaseSha = process.env.RELEASE_SHA ?? process.env.GITHUB_SHA;
 const result = {
   schema: "relay-monorepo-package-staging/v1",
   ok: true,
   package: spec,
-  git_sha: process.env.GITHUB_SHA,
+  git_sha: releaseSha,
   workflow_run_id: process.env.GITHUB_RUN_ID,
   tarball_sha256: createHash("sha256").update(bytes).digest("hex"),
   integrity,
