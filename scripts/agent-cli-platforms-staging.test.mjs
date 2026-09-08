@@ -60,7 +60,7 @@ test('409 cleanup stays red, retains private credentials, and never ACKs/retries
   const { result, calls, privateState } = await proof({ cleanupConflict:true });
   assert.equal(result.result,'failed'); assert.equal(result.recoveryRequired,true);
   assert.ok(privateState.fixtures.every(x=>x.token && !x.deleted));
-  assert.equal(calls.filter(x=>x.method==='DELETE').length,3); // one isolation attempt, two owned cleanups
+  assert.equal(calls.filter(x=>x.method==='DELETE').length,4); // unauthenticated attempt, foreign-token attempt, two owned cleanups
   assert.ok(calls.every(x=>!x.path.includes('ack')));
 });
 test('unexpected cross-agent deletion capability fails the isolation proof', async () => {

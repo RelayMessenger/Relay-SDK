@@ -84,6 +84,8 @@ export async function runOwnedSmoke({ runId, serverSha, fetchImpl = fetch, saveR
     expectStatus(await request('invalid-auth', 'GET', '/v1/contact_card', 'synthetic-invalid-staging-smoke-token'), 401, 'invalid-auth');
     for (const fixture of fixtures) await ownCard(fixture, `inventory-${fixture.handle}`);
     const [a,b] = fixtures;
+    expectStatus(await request('unauthenticated-delete', 'DELETE', `/v1/agents/${encodeURIComponent(a.handle)}`), 401, 'unauthenticated-delete');
+    await ownCard(a, 'unauthenticated-delete-preserved-target');
     expectStatus(await request('foreign-card', 'GET', `/v1/contact_card?handle=${encodeURIComponent(b.handle)}`, a.token), 403, 'foreign-card');
     expectStatus(await request('foreign-delete', 'DELETE', `/v1/agents/${encodeURIComponent(b.handle)}`, a.token), 403, 'foreign-delete');
     await ownCard(b, 'foreign-delete-preserved-target');
