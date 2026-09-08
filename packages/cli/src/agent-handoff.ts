@@ -1,4 +1,4 @@
-import { realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import type { Command } from "commander";
 import type { AgentDependencies } from "./agents.js";
@@ -32,6 +32,11 @@ async function nativePath(value: string | undefined, name: string, file = false)
   // The user selects the context; resolve directory aliases, never linked config files.
   return file ? join(await realpath(dirname(value)), basename(value)) : await realpath(value);
 }
+async function requiredNativeFile(path: string): Promise<string> {
+  const info = await lstat(path);
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error("Select an existing regular native runtime configuration file.");
+  return path;
+}
 export async function handoffTarget(options: HandoffOptions): Promise<RuntimeConnectTarget | undefined> {
   if (!options.connect) {
     if (Object.entries(options).some(([key, value]) => (key.startsWith("runtime") || key === "confirmConfigure") && value !== undefined)) throw new Error("Runtime options require --connect.");
@@ -40,14 +45,18 @@ export async function handoffTarget(options: HandoffOptions): Promise<RuntimeCon
   if (!options.confirmConfigure || !options.runtimeStopped) throw new Error("Handoff requires --confirm-configure and --runtime-stopped after you stop the selected runtime.");
   if (options.connect === "openclaw") {
     if (!options.runtimeAccount) throw new Error("Select --runtime-account explicitly.");
-    return { runtime: "openclaw", configPath: await nativePath(options.runtimeConfig, "--runtime-config", true), stateDir: await nativePath(options.runtimeStateDir, "--runtime-state-dir", true), account: options.runtimeAccount, ...(options.runtimeBrain ? { brain: options.runtimeBrain } : {}) };
+    return { runtime: "openclaw", configPath: await requiredNativeFile(await nativePath(options.runtimeConfig, "--runtime-config", true)), stateDir: await nativePath(options.runtimeStateDir, "--runtime-state-dir", true), account: options.runtimeAccount, ...(options.runtimeBrain ? { brain: options.runtimeBrain } : {}) };
   }
   if (options.connect === "hermes") {
-    return { runtime: "hermes", profileHome: await nativePath(options.runtimeHome, "--runtime-home"), stateDir: await nativePath(options.runtimeStateDir, "--runtime-state-dir", true) };
+    const profileHome = await nativePath(options.runtimeHome, "--runtime-home");
+    await requiredNativeFile(join(profileHome, "config.yaml"));
+    return { runtime: "hermes", profileHome, stateDir: await nativePath(options.runtimeStateDir, "--runtime-state-dir", true) };
   }
   if (options.connect === "claude-code") {
     if (!options.runtimeContext?.trim()) throw new Error("Select --runtime-context explicitly.");
-    return { runtime: "claude-code", channelDir: await nativePath(options.runtimeHome, "--runtime-home"), context: options.runtimeContext };
+    const channelDir = await nativePath(options.runtimeHome, "--runtime-home");
+    await requiredNativeFile(join(channelDir, ".env"));
+    return { runtime: "claude-code", channelDir, context: options.runtimeContext };
   }
   throw new Error("--connect must be openclaw, hermes, or claude-code.");
 }
