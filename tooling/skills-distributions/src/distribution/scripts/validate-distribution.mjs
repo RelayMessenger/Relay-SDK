@@ -101,7 +101,7 @@ assert.equal(
   lock.api.openapi_sha256,
   "7d46b16f5dc19034cbdcb45bdd79816a9a2f4c9f6febb8520db0517dfe9eae64",
 );
-assert.equal(lock.docs.commit, "8304db96bdd29c52b50de912adb2ef27de69930f");
+assert.equal(lock.docs.commit, "7e2b3072ee84ba98df5e1fa0a51c27ac603c495d");
 
 const skillPath = join(root, skillRoot, "SKILL.md");
 assert.ok(existsSync(skillPath));

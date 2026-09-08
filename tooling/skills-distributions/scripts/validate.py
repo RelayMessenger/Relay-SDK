@@ -134,7 +134,7 @@ if lock.get("api", {}).get("commit") != (
 ):
     fail("Relay Server lock commit drifted")
 if lock.get("docs", {}).get("commit") != (
-    "8304db96bdd29c52b50de912adb2ef27de69930f"
+    "7e2b3072ee84ba98df5e1fa0a51c27ac603c495d"
 ):
     fail("Relay Docs lock commit drifted")
 if lock.get("sdk", {}).get("version") != "0.3.1-staging.0":

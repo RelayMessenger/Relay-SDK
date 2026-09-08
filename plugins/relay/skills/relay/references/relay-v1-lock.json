@@ -9,9 +9,9 @@
   },
   "docs": {
     "repository": "https://github.com/RelayMessenger/Relay-Docs",
-    "commit": "8304db96bdd29c52b50de912adb2ef27de69930f",
+    "commit": "7e2b3072ee84ba98df5e1fa0a51c27ac603c495d",
     "skill_path": "skill.md",
-    "skill_sha256": "493e89a61e1a3cb642ba0606eaf5fe39c6b24ca3ee09ac875a3cd9551130caec"
+    "skill_sha256": "c2deb0ff469759ad17dda73dc4eadc39052b70c2f82ec5cd89443874f76a38b2"
   },
   "sdk": {
     "repository": "https://github.com/RelayMessenger/Relay-SDK",
