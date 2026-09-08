@@ -265,7 +265,7 @@ export const validateForwardURL = (input: string): string => {
 
 export const validateToken = (value: string): string => {
   const token = value.trim();
-  if (!token || /[\r\n\0]/.test(token)) {
+  if (!token || /[\u0000-\u001f\u007f]/u.test(token)) {
     throw new Error("Agent Token is empty or malformed.");
   }
   return token;
@@ -291,7 +291,7 @@ export const resolveAuth = async (
     : validateToken(envToken);
   if (!token) {
     throw new Error(
-      `No Agent Token for profile ${profile}. Run relay token import --token-stdin.`,
+      `No Agent Token for profile ${profile}. Run relay auth login --with-token.`,
     );
   }
   return {

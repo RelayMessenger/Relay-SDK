@@ -98,7 +98,7 @@ describe("real program runtime handoff", { timeout: 120_000 }, () => {
     expect(output.join("")).not.toContain("created-private-token");
     expect(output.join("")).not.toContain("unrelated-env-secret");
     env.RELAY_API_URL = "https://unrelated.staging.test";
-    expect(await runCLI(["--profile", handle, "token", "import", "--connect", "hermes", "--runtime-home", home, "--runtime-state-dir", join(home, "state"), ...confirmations], deps)).toBe(0);
+    expect(await runCLI(["--profile", handle, "auth", "login", "--connect", "hermes", "--runtime-home", home, "--runtime-state-dir", join(home, "state"), ...confirmations], deps)).toBe(0);
     expect((await readConfig(deps.configContext)).profiles[handle]?.api_url).toBe("https://api.staging.relayapp.im");
     expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
@@ -107,7 +107,7 @@ describe("real program runtime handoff", { timeout: 120_000 }, () => {
     env.RELAY_AGENT_TOKEN = "existing-env-token";
     const path = join(home, "openclaw.json");
     await writeFile(path, JSON.stringify({ channels: { relay: { allowFrom: ["alice"], accounts: { other: { token: "other-credential", allowFrom: ["bob"] } } } } }), { mode: 0o600 });
-    expect(await runCLI(["token", "import", "--from-env", "--api-url", "https://api.staging.relayapp.im", "--connect", "openclaw", "--runtime-config", path, "--runtime-state-dir", home, "--runtime-account", "new-account", ...confirmations], deps)).toBe(0);
+    expect(await runCLI(["auth", "login", "--api-url", "https://api.staging.relayapp.im", "--connect", "openclaw", "--runtime-config", path, "--runtime-state-dir", home, "--runtime-account", "new-account", ...confirmations], deps)).toBe(0);
     const config = JSON.parse(await readFile(path, "utf8"));
     expect(config.channels.relay.accounts["new-account"].token).toBe("existing-env-token");
     expect(config.channels.relay.accounts.other).toEqual({ token: "other-credential", allowFrom: ["bob"] });
@@ -124,7 +124,7 @@ describe("real program runtime handoff", { timeout: 120_000 }, () => {
     env.RELAY_AGENT_TOKEN = "invalid-env-token";
     env.RELAY_API_URL = "https://api.staging.relayapp.im";
     fetch.mockImplementation(async () => Response.json({ error: { message: "invalid-env-token" } }, { status: 401 }));
-    expect(await runCLI(["token", "import", "--from-env", "--api-url", "https://api.staging.relayapp.im", "--connect", "hermes", "--runtime-home", home, "--runtime-state-dir", home, ...confirmations], deps)).toBe(1);
+    expect(await runCLI(["auth", "login", "--api-url", "https://api.staging.relayapp.im", "--connect", "hermes", "--runtime-home", home, "--runtime-state-dir", home, ...confirmations], deps)).toBe(1);
     expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
     await expect(readFile(join(home, ".env"))).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -169,22 +169,44 @@ it("keeps exactly the three approved agents verbs and a version-aware creation o
   expect(defaultCreationApiURL("0.1.0")).toBe("https://api.relayapp.im");
 });
 
-it("token import validates through the agent API and retains healthy credentials on rejection", async () => {
+it("auth login validates through the agent API and retains healthy credentials on rejection", async () => {
   const { deps, env, fetch } = await fixture();
   const config = emptyConfig();
   config.profiles.saved = { api_url: "https://api.staging.relayapp.im", agent_token: "healthy-existing-token" };
   await writeConfig(config, deps.configContext);
   env.RELAY_AGENT_TOKEN = "invalid-supplied-token";
   fetch.mockImplementation(async () => Response.json({ error: { message: "invalid-supplied-token" } }, { status: 401 }));
-  expect(await runCLI(["--profile", "saved", "token", "import", "--from-env", "--api-url", "https://api.staging.relayapp.im"], deps)).toBe(1);
+  expect(await runCLI(["--profile", "saved", "auth", "login", "--api-url", "https://api.staging.relayapp.im"], deps)).toBe(1);
   expect(await readConfig(deps.configContext)).toEqual(config);
   expect(fetch.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
 });
 
-it("exposes only token import/status/clear, with no auth or login command", async () => {
+it("exposes canonical auth login/status/logout without a token-import command", async () => {
   const { createProgram } = await import("./program.js");
   const { deps } = await fixture();
   const program = createProgram(deps);
-  expect(program.commands.some((command) => command.name() === "auth")).toBe(false);
-  expect(program.commands.find((command) => command.name() === "token")!.commands.map((command) => command.name())).toEqual(["import", "status", "clear"]);
+  expect(program.commands.some((command) => command.name() === "token")).toBe(false);
+  expect(program.commands.find((command) => command.name() === "auth")!.commands.map((command) => command.name())).toEqual(["login", "status", "logout"]);
+});
+
+it("non-TTY login without a token fails without reading stdin, fetching, or changing config", async () => {
+  const { deps, fetch, output } = await fixture();
+  const readStdin = vi.fn(async () => "must-not-read");
+  const readSecret = vi.fn(async () => "must-not-prompt");
+  expect(await runCLI(["auth", "login", "--api-url", "https://api.staging.relayapp.im"], { ...deps, isInteractive: false, readStdin, readSecret })).toBe(1);
+  expect(fetch).not.toHaveBeenCalled(); expect(readStdin).not.toHaveBeenCalled(); expect(readSecret).not.toHaveBeenCalled();
+  expect(output.join("")).toContain("--with-token");
+  expect(await readConfig(deps.configContext)).toEqual(emptyConfig());
+});
+
+it("plain interactive login reads a private prompt; --with-token selects stdin over ENV", async () => {
+  const { deps, env, output } = await fixture();
+  const readSecret = vi.fn(async () => "prompt-private-token");
+  expect(await runCLI(["auth", "login", "--api-url", "https://api.staging.relayapp.im"], { ...deps, isInteractive: true, readSecret })).toBe(0);
+  expect(readSecret).toHaveBeenCalledOnce();
+  expect((await readConfig(deps.configContext)).profiles.default?.agent_token).toBe("prompt-private-token");
+  env.RELAY_AGENT_TOKEN = "other-env-token";
+  expect(await runCLI(["auth", "login", "--with-token", "--api-url", "https://api.staging.relayapp.im"], { ...deps, isInteractive: false, readStdin: async () => "stdin-private-token\n" })).toBe(0);
+  expect((await readConfig(deps.configContext)).profiles.default?.agent_token).toBe("stdin-private-token");
+  expect(output.join("")).not.toMatch(/prompt-private-token|stdin-private-token|other-env-token/);
 });

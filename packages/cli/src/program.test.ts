@@ -270,7 +270,7 @@ describe("token commands", () => {
     const stdout: string[] = [];
     const secret = "rly_stdin_secret_012345";
     const code = await runCLI(
-      ["token", "import", "--token-stdin", "--api-url", "https://api.staging.relayapp.im"],
+      ["auth", "login", "--with-token", "--api-url", "https://api.staging.relayapp.im"],
       {
         configContext,
         readStdin: async () => secret,
@@ -288,7 +288,7 @@ describe("token commands", () => {
     const output: string[] = [];
     const secret = "rly_argument_secret_012345";
     const code = await runCLI(
-      ["token", "import", "--token", secret],
+      ["auth", "login", "--with-token", secret],
       {
         stdout: (value) => output.push(value),
         stderr: (value) => output.push(value),
