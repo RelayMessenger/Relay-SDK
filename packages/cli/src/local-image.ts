@@ -10,6 +10,11 @@ const imageTypes: Record<string, string> = {
   ".tif": "image/tiff", ".tiff": "image/tiff", ".bmp": "image/bmp", ".ico": "image/x-icon",
 };
 export interface LocalAgentImage { path: string; filename: string; contentType: string; data: Uint8Array; size: number }
+/** A rule this command checked itself, as opposed to an unexpected file error.
+ * Marked so the outer catch can pass the exact reason through to the reader. */
+const imageRule = (message: string): Error => Object.assign(new Error(message), { relayImageRule: true });
+const readableSize = (bytes: number): string =>
+  bytes >= 1_048_576 ? `${Math.round(bytes / 1_048_576)} MB` : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} bytes`;
 export type AgentImageInput = { kind: "url"; url: string } | { kind: "file"; file: LocalAgentImage };
 function imageSignature(data: Uint8Array, type: string): boolean {
   const bytes = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
@@ -26,45 +31,51 @@ function imageSignature(data: Uint8Array, type: string): boolean {
   }
   return false;
 }
-/** Preflight is local only: no bootstrap, HTTP, image generation, or promotion.
- * The server owns completed-upload ownership and promotion validation. */
+/** Checks the picture on this computer only. It creates nothing, sends nothing,
+ * draws nothing, and saves nothing on the agent. Relay checks the finished
+ * upload itself. */
 export async function prepareAgentImage(
   input: string,
   options: { cwd?: string; home?: string; maxBytes?: number } = {},
 ): Promise<AgentImageInput> {
   if (/^https?:\/\//iu.test(input)) {
-    let url: URL; try { url = new URL(input); } catch { throw new Error("Image URL is invalid."); }
-    if (url.protocol !== "https:" || url.username || url.password) throw new Error("Image URL must use HTTPS without credentials.");
+    let url: URL; try { url = new URL(input); } catch { throw imageRule("That picture address is not a valid web address."); }
+    if (url.protocol !== "https:" || url.username || url.password) throw imageRule("A picture address must start with https:// and must not contain a user name or password.");
     return { kind: "url", url: input };
   }
-  if (!input || (/^[a-z][a-z0-9+.-]*:/iu.test(input) && !/^[a-z]:[\\/]/iu.test(input))) throw new Error("Image must be a local file or HTTPS URL.");
+  if (!input || (/^[a-z][a-z0-9+.-]*:/iu.test(input) && !/^[a-z]:[\\/]/iu.test(input))) throw imageRule("Give the path to a picture file on this computer, or an address that starts with https://");
   const expanded = input.startsWith("~/") ? join(options.home ?? homedir(), input.slice(2)) : input;
   const path = resolve(options.cwd ?? process.cwd(), expanded);
   const maximum = options.maxBytes ?? MAX_ATTACHMENT_IMAGE_BYTES;
-  if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > MAX_ATTACHMENT_IMAGE_BYTES) throw new Error("Invalid local image size limit.");
+  if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > MAX_ATTACHMENT_IMAGE_BYTES) throw imageRule(`The size limit passed to this command must be between 1 byte and ${readableSize(MAX_ATTACHMENT_IMAGE_BYTES)}.`);
   try {
     const before = await lstat(path);
-    if (!before.isFile() || before.isSymbolicLink()) throw new Error("Image must be a regular file.");
+    if (!before.isFile() || before.isSymbolicLink()) throw imageRule(`${path} must be a regular file, not a link, a folder or a device.`);
     const contentType = imageTypes[extname(path).toLowerCase()];
     const filename = basename(path);
-    if (!contentType || filename.length > 255 || /[\u0000-\u001f\u007f]/u.test(filename)) throw new Error("Unsupported image filename/type.");
-    if (before.size < 1 || before.size > maximum) throw new Error("Image size is out of range.");
+    if (!contentType) throw imageRule(`Relay does not accept ${extname(path) || "a file with no extension"}. Use one of: ${Object.keys(imageTypes).join(", ")}.`);
+    if (filename.length > 255 || /[\u0000-\u001f\u007f]/u.test(filename)) throw imageRule("The file name must be under 256 characters and must not contain control characters.");
+    if (before.size < 1 || before.size > maximum) throw imageRule(`The picture must be between 1 byte and ${readableSize(maximum)}. This one is ${readableSize(before.size)}.`);
     const file = await open(path, "r");
     try {
       const opened = await file.stat();
-      if (!opened.isFile() || opened.ino !== before.ino || opened.dev !== before.dev || opened.size !== before.size) throw new Error("Image changed while opening.");
+      if (!opened.isFile() || opened.ino !== before.ino || opened.dev !== before.dev || opened.size !== before.size) throw imageRule("The picture file changed while Relay was opening it. Run the command again.");
       const data = Buffer.alloc(opened.size);
       let offset = 0;
       while (offset < data.length) {
         const { bytesRead } = await file.read(data, offset, data.length - offset, offset);
-        if (!bytesRead) throw new Error("Image changed while reading.");
+        if (!bytesRead) throw imageRule("The picture file changed while Relay was reading it. Run the command again.");
         offset += bytesRead;
       }
       const after = await file.stat();
-      if (after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || !imageSignature(data, contentType)) throw new Error("Image changed or file signature is invalid.");
+      if (after.size !== opened.size || after.mtimeMs !== opened.mtimeMs) throw imageRule("The picture file changed while Relay was reading it. Run the command again.");
+      if (!imageSignature(data, contentType)) throw imageRule(`The contents of this file are not ${contentType.replace("image/", "").toUpperCase()}, even though its name ends in ${extname(path).toLowerCase()}. Save it in the right format, or rename it.`);
       return { kind: "file", file: { path, filename, contentType, data, size: data.length } };
     } finally { await file.close(); }
-  } catch {
-    throw new Error(`Local image must be a readable supported image file between 1 and ${maximum} bytes. No agent was created.`);
+  } catch (error) {
+    // Pass through the exact rule the reader broke; only an unexpected file
+    // error becomes the general message.
+    if (error instanceof Error && (error as { relayImageRule?: boolean }).relayImageRule === true) throw error;
+    throw new Error(`Relay could not read ${path}. Check the path, and that the file is a picture you can read and no larger than ${readableSize(maximum)}.`);
   }
 }

@@ -92,7 +92,7 @@ describe("Relay v1 request shapes", () => {
       fetch: responder(calls),
     });
     const body = {
-      handle: "research.agent",
+      handle: "research.dev",
       ...(hideHistory === undefined ? {} : { hide_history: hideHistory }),
     };
     await client.chats.participants.add("chat/id", body);
@@ -142,8 +142,8 @@ describe("Relay v1 request shapes", () => {
     await client.chats.listChats({ cursor: "chat-cursor", limit: 20 });
     await client.chats.retrieve("chat-id");
     await client.chats.update("chat-id", { display_name: "Team" });
-    await client.chats.participants.add("chat-id", { handle: "research.agent" });
-    await client.chats.participants.remove("chat-id", { handle: "research.agent" });
+    await client.chats.participants.add("chat-id", { handle: "research.dev" });
+    await client.chats.participants.remove("chat-id", { handle: "research.dev" });
     await client.chats.leaveChat("chat-id");
     await client.chats.startTyping("chat-id");
     await client.chats.stopTyping("chat-id");
@@ -265,7 +265,7 @@ describe("Relay v1 request shapes", () => {
 
     const removeParticipant = calls[5]!;
     expect(JSON.parse(String(removeParticipant.body))).toEqual({
-      handle: "research.agent",
+      handle: "research.dev",
     });
 
     const contactUpdate = calls.find((call) =>
@@ -299,15 +299,15 @@ describe("Relay v1 request shapes", () => {
 
   it.each([
     { name: "one-agent direct Chat", to: ["bob"] },
-    { name: "multi-agent group Chat", to: ["bob", "research.agent"] },
-    { name: "agent-to-agent Chat", to: ["research.agent"] },
+    { name: "multi-agent group Chat", to: ["bob", "research.dev"] },
+    { name: "agent-to-agent Chat", to: ["research.dev"] },
     {
       name: "seven-total user-containing Chat",
-      to: ["bob", "research.agent", "planner.agent", "writer.agent", "reviewer.agent", "helper.agent"],
+      to: ["bob", "research.dev", "planner.dev", "writer.dev", "reviewer.dev", "helper.dev"],
     },
     {
       name: "seven-total agent-only Chat",
-      to: ["research.agent", "planner.agent", "writer.agent", "reviewer.agent", "helper.agent", "ops.agent"],
+      to: ["research.dev", "planner.dev", "writer.dev", "reviewer.dev", "helper.dev", "ops.dev"],
     },
   ])("preserves agent-initiated creation of a $name", async ({ to }) => {
     const calls: Captured[] = [];

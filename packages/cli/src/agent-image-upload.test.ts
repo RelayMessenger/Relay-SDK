@@ -36,5 +36,5 @@ it("resumes promotion of a complete owned attachment without allocating or uploa
 it("does not upload using a credential for another identity", async () => {
   const { methods, client } = fixture();
   const result = await uploadAgentImage({ handle: "other.dev", image }, client, methods.promote);
-  expect(result).toMatchObject({ status: "incomplete", phase: "identity" }); expect(methods.allocate).not.toHaveBeenCalled();
+  expect(result).toMatchObject({ status: "incomplete", phase: "agent" }); expect(methods.allocate).not.toHaveBeenCalled();
 });

@@ -9,10 +9,10 @@ export interface WindowsAcl {
   rules: Array<{ sid: string; rights: number; type: string }>;
 }
 // Fixed script only. Paths/descriptors travel as JSON data, never shell interpolation.
-// The subprocess never reads file contents or receives an Agent Token argument.
+// The subprocess never reads file contents and never receives a token argument.
 const script = String.raw`
 $ErrorActionPreference = 'Stop'
-$inputData = $env:RELAY_HANDOFF_ACL | ConvertFrom-Json
+$inputData = $env:RELAY_CONNECT_ACL | ConvertFrom-Json
 $path = $inputData.path
 $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
 if ($inputData.action -eq 'protect') {
@@ -53,12 +53,12 @@ export function privateWindowsAcl(acl: WindowsAcl, directory = false, metadata =
 export function aclChildEnvironment(parent: NodeJS.ProcessEnv, request: string): NodeJS.ProcessEnv {
   const child = { ...parent };
   for (const key of Object.keys(child)) if (key.toLowerCase() === "psmodulepath") delete child[key];
-  child.RELAY_HANDOFF_ACL = request;
+  child.RELAY_CONNECT_ACL = request;
   return child;
 }
 
 async function run(path: string, action: "inspect" | "protect", directory: boolean, sddl?: string): Promise<WindowsAcl> {
-  if (process.platform !== "win32") throw new Error("Native Windows ACL inspection requires Windows.");
+  if (process.platform !== "win32") throw new Error("Windows file permissions can only be read on Windows.");
   const executable = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   const { stdout } = await promisify(execFile)(executable, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], {
     windowsHide: true, timeout: 15_000, maxBuffer: 1_048_576,

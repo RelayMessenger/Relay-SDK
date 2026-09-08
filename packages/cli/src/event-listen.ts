@@ -42,17 +42,16 @@ export const listenForAgentEvents = async (
       });
       if (!response.ok) {
         throw new Error(
-          `Local forward target returned HTTP ${response.status}; event was not acknowledged.`,
+          `The address you passed to --forward-to answered with error ${response.status}. Relay stopped so this event is not lost.`,
         );
       }
       io.stderr(`forwarded ${event.event_type} ${event.event_id}\n`);
     },
     async onFullSync(context): Promise<void> {
       throw new Error(
-        `Relay asked this agent to catch up on every event through number ${context.throughSequence} `
-        + "because it has been away longer than Relay keeps events. This command only shows events as they arrive "
-        + "and cannot replay older ones. Connect the agent's real runtime to catch up, or use a fresh dedicated "
-        + "non-production agent for this command.",
+        "This agent has been away longer than Relay keeps its events, so Relay wants to send it everything it missed "
+        + `up to number ${context.throughSequence}. This command only shows events as they arrive; it cannot go back. `
+        + "Start the runtime you chose for this agent so it can catch up, or use a fresh test agent here.",
       );
     },
   });

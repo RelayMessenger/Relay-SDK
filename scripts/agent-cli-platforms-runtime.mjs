@@ -265,10 +265,10 @@ try {
   }
 
   const originalConfig = JSON.parse(readFileSync(configPath, "utf8"));
-  assert.equal(gateway, undefined, "selected isolated runtime must really be stopped before handoff");
+  assert.equal(gateway, undefined, "the isolated runtime must really be stopped before Relay writes its configuration");
   const createArgs = [cliBin, "agents", "create", "--api-url", `http://127.0.0.1:${relayPort}`, "--token-name", `verification-runtime-${process.pid}`, "--connect", "openclaw", "--runtime-config", configPath, "--runtime-state-dir", stateDir, "--runtime-account", "work", "--confirm-configure", "--runtime-stopped", "--json"];
   const created = JSON.parse(execFileSync(process.execPath, createArgs, { cwd: consumer, encoding: "utf8", env: { ...env, RELAY_CONFIG_PATH: cliConfig, RELAY_AGENT_TOKEN: "synthetic-wrong-environment-token" } }));
-  assert.equal(created.token, "stored"); assert.equal(created.handoff.status, "configured"); assert.equal(created.handoff.connected, false);
+  assert.equal(created.token, "stored"); assert.equal(created.connect.status, "configured"); assert.equal(created.connect.connected, false);
   const privateProfile = JSON.parse(readFileSync(cliConfig, "utf8")).profiles[created.profile];
   const configured = JSON.parse(readFileSync(configPath, "utf8"));
   assert.match(privateProfile.agent_token, /^rly_live_[A-Za-z0-9]{43}$/);
@@ -276,8 +276,8 @@ try {
   const expectedConfig = structuredClone(originalConfig);
   expectedConfig.channels.relay.accounts.work.token = privateProfile.agent_token;
   expectedConfig.channels.relay.accounts.work.baseUrl = `http://127.0.0.1:${relayPort}`;
-  assert.deepEqual(configured, expectedConfig, "handoff must preserve all unrelated runtime settings/accounts");
-  receipt.handoff = { profile: created.profile, handle: created.agent.handle, status: created.handoff.status, connectedBeforeLaunch: created.handoff.connected, preservedOtherSettings: true };
+  assert.deepEqual(configured, expectedConfig, "connecting must preserve every unrelated runtime setting and account");
+  receipt.connect = { profile: created.profile, handle: created.agent.handle, status: created.connect.status, connectedBeforeLaunch: created.connect.connected, preservedOtherSettings: true };
   console.log("Installed CLI create handed its new credential to selected stopped native account; other settings preserved");
 
   gateway = spawn(process.execPath, [
@@ -351,7 +351,7 @@ try {
   }
 
   console.log(
-    "New installed CLI identity -> native handoff -> actual OpenClaw WebSocket gateway proof passed.",
+    "New installed CLI identity -> native connect -> actual OpenClaw WebSocket gateway proof passed.",
   );
   console.log(
     "Proof: durable cumulative ACK, replay suppression, heartbeat, one model turn, one idempotent Chat Message.",

@@ -145,7 +145,7 @@ try {
     // The core-owned consumer exercises the installed module with an injected HTTP fixture.
     // Native process checks above and module fixture checks are recorded separately from live staging.
     run(process.execPath, [join(root, 'packages/cli/scripts/agent-tarball-consumer.mjs'), consumer, scratch], { cwd: consumer });
-    report.agentCommands = 'passed: native auth login --with-token/status/logout, agent help/list/missing-token, installed create/list/delete and existing-token native handoff fixture; live staging pending';
+    report.agentCommands = 'passed: native auth login --with-token/status/logout, agent help/list/missing-token, installed create/list/delete and existing-token native connect fixture; live staging pending';
   }
   run(process.execPath, [join(root, 'scripts/agent-cli-platforms-image.mjs'), consumer, scratch], { cwd: consumer });
   run(process.execPath, [join(root, 'scripts/agent-cli-platforms-observer.mjs'), consumer], { cwd: consumer });

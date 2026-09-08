@@ -52,12 +52,13 @@ export interface WebSocketConstructor {
 export interface WebSocketRunOptions {
   signal?: AbortSignal;
   /**
-   * Request the server-confirmed read-only observer on ?observe=true.
-   * Sends no ACK/FULL-sync completion and never falls back to consuming mode.
-   * Best-effort retained event view, not durable recovery or runtime ownership.
+   * Ask for the read-only watch mode with ?observe=true.
+   * It sends no `ack` and no FULL-sync completion, and never falls back to the
+   * mode that takes events. It shows the events Relay still holds; it is not a
+   * way to rebuild state, and it does not mean this process runs the agent.
    */
   observe?: boolean;
-  /** Connection status only, never a model/runtime readiness assertion. */
+  /** Connection status only. It never says the agent itself is ready. */
   onConnectionState?(state: "connecting" | "ready" | "disconnected"): void;
   onReady?(frame: WebSocketReadyFrame & { observational?: true }): void;
   /** Only observation tolerates gaps in retained events. */

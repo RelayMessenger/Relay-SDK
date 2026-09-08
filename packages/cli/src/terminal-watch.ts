@@ -5,7 +5,7 @@ import { redactText } from "./output.js";
 export type TerminalWatchStatus = "connecting" | "ready" | "disconnected" | "unavailable" | "gap";
 export type TerminalRuntimeOwnership = "none" | "external" | "unknown";
 
-/** Confirmed server observer capability. Never wrap the ACKing consumer as this. */
+/** The read-only view Relay offers. Never pass off the reading-and-taking connection as this. */
 export interface TerminalObserver {
   readonly semantics: "observational-no-ack";
   run(input: {
@@ -48,7 +48,7 @@ export function terminalEventLine(event: RelayWebhookEvent, secrets: readonly st
   return `${kind}${sender ? ` @${sender}` : ""}${message ? ` — ${message}` : id ? ` · ${id}` : ""}`;
 }
 
-/** Purely observational gate. No SDK client, HTTP route, polling timer, ACK, or runtime control is created here. */
+/** Watch only. Nothing here creates an SDK client, a route, a timer, a reply to Relay, or any control over a runtime. */
 export async function runTerminalWatch(input: TerminalWatchInput): Promise<void> {
   if (input.signal.aborted) return;
   if (!input.observer || input.observer.semantics !== "observational-no-ack") {
@@ -67,12 +67,12 @@ export async function runTerminalWatch(input: TerminalWatchInput): Promise<void>
     });
     if (!input.signal.aborted) emitStatus("disconnected");
   } catch {
-    // Raw adapter exceptions can contain credentials/headers; never stringify them.
+    // Raw errors can hold tokens or headers; never turn them into text.
     emitStatus("unavailable");
   }
 }
 
-/** Uses the confirmed SDK observe wire mode; no consuming fallback. */
+/** Uses the SDK's watch-only mode. It never falls back to the connection that takes events. */
 export function sdkTerminalObserver(client: Pick<import("@relaymessenger/sdk").default, "websocket">): TerminalObserver {
   return {
     semantics: "observational-no-ack",

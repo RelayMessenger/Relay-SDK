@@ -85,25 +85,25 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const parseConfig = (value: unknown): RelayConfig => {
   if (!isRecord(value) || value.version !== 1) {
-    throw new Error("Relay config has an unsupported format.");
+    throw new Error("This Relay config file was written by a newer or older version of this tool. Move it aside and sign in again.");
   }
   if (
     typeof value.current_profile !== "string"
     || !isRecord(value.profiles)
   ) {
-    throw new Error("Relay config is invalid.");
+    throw new Error("This Relay config file is missing the list of profiles. Move it aside and sign in again.");
   }
   const profiles: Record<string, RelayProfile> = {};
   for (const [name, profile] of Object.entries(value.profiles)) {
     validateProfileName(name);
-    if (!isRecord(profile)) throw new Error(`Relay profile ${name} is invalid.`);
+    if (!isRecord(profile)) throw new Error(`Profile ${name} in the Relay config file is not readable. Move the file aside and sign in again.`);
     const apiURL = profile.api_url;
     const token = profile.agent_token;
     if (apiURL !== undefined && typeof apiURL !== "string") {
-      throw new Error(`Relay profile ${name} has an invalid API URL.`);
+      throw new Error(`Profile ${name} has an API address that is not text. Fix it in the Relay config file, or sign in again.`);
     }
     if (token !== undefined && typeof token !== "string") {
-      throw new Error(`Relay profile ${name} has an invalid Agent Token.`);
+      throw new Error(`Profile ${name} has a token that is not text. Fix it in the Relay config file, or sign in again.`);
     }
     profiles[name] = {
       ...(apiURL === undefined ? {} : { api_url: validateApiURL(apiURL) }),
@@ -111,7 +111,7 @@ const parseConfig = (value: unknown): RelayConfig => {
     };
   }
   if (!profiles[value.current_profile]) {
-    throw new Error("Relay config selects a missing profile.");
+    throw new Error("The Relay config file points at a profile it does not contain. Choose one with npx relaymessenger profiles use.");
   }
   return {
     version: 1,
@@ -161,25 +161,26 @@ const prepareConfigDestination = async (context: ConfigContext): Promise<ConfigD
   const windows = (context.platform ?? process.platform) === "win32";
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const directoryInfo = await lstat(directory);
-  if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()) throw new Error("Relay config directory must be a regular directory.");
-  if ((directoryInfo.mode & 0o222) === 0) throw new Error("Relay config directory is not writable.");
+  if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()) throw new Error("The Relay config folder is a link or a file, not a folder. Move it aside and sign in again.");
+  if ((directoryInfo.mode & 0o222) === 0) throw new Error("You do not have permission to write in the Relay config folder.");
   await access(directory, constants.W_OK);
   if (!windows) await chmod(directory, 0o700);
   else if (!privateWindowsAcl(await inspectWindowsAcl(directory), true)) {
-    throw new Error("Relay config directory is not owner-controlled; its permissions were not changed.");
+    throw new Error("Other Windows accounts can write in the Relay config folder. Limit it to your account; Relay changed nothing.");
   }
   let existingACL: string | undefined;
   try {
     const existing = await lstat(path);
-    if (!existing.isFile() || existing.isSymbolicLink() || existing.nlink !== 1) throw new Error("Relay config must be a regular unlinked file.");
-    if (!windows && (existing.mode & 0o077) !== 0) throw new Error("Existing Relay config permissions are not private.");
-    if ((existing.mode & 0o444) === 0) throw new Error("Relay config is not readable.");
-    if ((existing.mode & 0o222) === 0) throw new Error("Relay config is not writable.");
-    // r+ verifies current OS read/write access without truncating or writing.
+    if (!existing.isFile() || existing.isSymbolicLink() || existing.nlink !== 1) throw new Error("The Relay config must be a regular file, not a link, and it must not be hard-linked from anywhere else.");
+    if (!windows && (existing.mode & 0o077) !== 0) throw new Error("Other people on this computer can read the Relay config file. Make it readable by you alone.");
+    if ((existing.mode & 0o444) === 0) throw new Error("You do not have permission to read the Relay config file.");
+    if ((existing.mode & 0o222) === 0) throw new Error("You do not have permission to write the Relay config file.");
+    // Opening with r+ proves the operating system allows reading and writing,
+    // without emptying the file or writing to it.
     const probe = await open(path, "r+"); await probe.close();
     if (windows) {
       const acl = await inspectWindowsAcl(path);
-      if (!privateWindowsAcl(acl)) throw new Error("Existing Relay config ACL is not private; correct its permissions before replacing credentials.");
+      if (!privateWindowsAcl(acl)) throw new Error("Windows permissions on the Relay config file let other accounts read or write it. Limit it to your account before saving a token.");
       existingACL = acl.sddl;
     }
   } catch (error) {
@@ -195,7 +196,7 @@ const privateConfigTemp = async (destination: ConfigDestination): Promise<{ path
     if (destination.windows) {
       const acl = await protectWindowsPath(path, false, destination.existingACL);
       if (!privateWindowsAcl(acl) || (destination.existingACL !== undefined && acl.sddl !== destination.existingACL)) {
-        throw new Error("Could not establish the private Relay config ACL before writing credentials.");
+        throw new Error("Relay could not limit the new config file to your Windows account, so it did not save the token.");
       }
     } else await handle.chmod(0o600);
     return { path, handle };
@@ -207,7 +208,7 @@ const verifyConfigACL = async (path: string, destination: ConfigDestination): Pr
   if (!destination.windows) return;
   const acl = await inspectWindowsAcl(path);
   if (!privateWindowsAcl(acl) || (destination.existingACL !== undefined && acl.sddl !== destination.existingACL)) {
-    throw new Error("Relay config was written but its final private ACL could not be verified.");
+    throw new Error("Relay saved the config file but could not confirm that only your Windows account can read it. Check its permissions.");
   }
 };
 const removeTemp = async (path: string): Promise<void> => {
@@ -258,12 +259,12 @@ const withConfigLock = async <T>(context: ConfigContext, action: () => Promise<T
     try { lock = await open(lockPath, "wx", 0o600); break; }
     catch (error) {
       if (!(error instanceof Error) || !("code" in error)) throw error;
-      // Windows can deny an exclusive open during lock-file deletion. Retry
-      // only this acquisition, briefly; never chmod/unlink someone else's lock
-      // or turn a persistent permission error into the long busy timeout.
+      // Windows can refuse an exclusive open while a lock file is being deleted.
+      // Retry briefly, and only here; never change or delete someone else's lock,
+      // and never turn a lasting permission error into the long wait.
       const transientWindowsPermission = windows && error.code === "EPERM" && permissionRetries++ < 10;
       if (error.code !== "EEXIST" && !transientWindowsPermission) throw error;
-      if (Date.now() >= deadline) throw new Error("Relay configuration is busy; no local change was made.");
+      if (Date.now() >= deadline) throw new Error("Another Relay command is writing the config file. Wait for it to finish, then run this again. Nothing was changed.");
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
   }
@@ -275,7 +276,7 @@ export const writeConfig = async (config: RelayConfig, context: ConfigContext = 
   withConfigLock(context, async () => {
     const expected = revisions.get(config);
     if (expected !== undefined && JSON.stringify(await readConfig(context)) !== expected) {
-      throw new Error("Relay configuration changed concurrently; no local change was made. Try the command again.");
+      throw new Error("Another Relay command changed the config file while this one was running. Nothing was changed. Run this command again.");
     }
     await writeConfigUnlocked(config, context);
     rememberConfig(config);
@@ -295,7 +296,7 @@ export const mutateConfig = async <T>(
 export const validateProfileName = (name: string): string => {
   if (!/^[a-z0-9][a-z0-9_.-]{0,63}$/i.test(name)) {
     throw new Error(
-      "Profile names must be 1-64 letters, numbers, underscores, dots, or hyphens.",
+      "A profile name must be 1 to 64 characters, using only letters, numbers, underscores, dots and hyphens.",
     );
   }
   return name;
@@ -312,19 +313,19 @@ export const validateApiURL = (input: string): string => {
   try {
     url = new URL(input);
   } catch (cause) {
-    throw new Error("Relay API URL must be an absolute URL.", { cause });
+    throw new Error("The Relay API address must be a full web address, for example https://api.relayapp.im", { cause });
   }
   if (url.username || url.password || url.search || url.hash) {
-    throw new Error("Relay API URL cannot contain credentials, query, or hash.");
+    throw new Error("The Relay API address must be just the host, with no user name, password, question mark or # part.");
   }
   if (url.pathname !== "/" && url.pathname !== "") {
-    throw new Error("Relay API URL must be an origin without a path.");
+    throw new Error("The Relay API address must end at the host name, with nothing after it. Use https://api.relayapp.im, not https://api.relayapp.im/v1");
   }
   if (
     url.protocol !== "https:"
     && !(url.protocol === "http:" && isLoopback(url.hostname))
   ) {
-    throw new Error("Relay API URL must use HTTPS (HTTP is loopback-only).");
+    throw new Error("The Relay API address must start with https://. Only an address on this computer, such as http://localhost:8787, may start with http://");
   }
   return url.origin;
 };
@@ -334,7 +335,7 @@ export const validateForwardURL = (input: string): string => {
   try {
     url = new URL(input);
   } catch (cause) {
-    throw new Error("Forward URL must be absolute.", { cause });
+    throw new Error("The address for --forward-to must be a full web address, for example http://localhost:3000/events", { cause });
   }
   if (
     !isLoopback(url.hostname)
@@ -342,7 +343,7 @@ export const validateForwardURL = (input: string): string => {
     || url.username
     || url.password
   ) {
-    throw new Error("Forward URL must be loopback HTTP(S) without credentials.");
+    throw new Error("The address for --forward-to must be on this computer, such as http://localhost:3000, and must not contain a user name or password.");
   }
   return url.toString();
 };
@@ -350,7 +351,7 @@ export const validateForwardURL = (input: string): string => {
 export const validateToken = (value: string): string => {
   const token = value.trim();
   if (!token || /[\u0000-\u001f\u007f]/u.test(token)) {
-    throw new Error("Agent Token is empty or malformed.");
+    throw new Error("That token is empty, or it contains characters a token cannot have.");
   }
   return token;
 };
@@ -375,7 +376,7 @@ export const resolveAuth = async (
     : validateToken(envToken);
   if (!token) {
     throw new Error(
-      `No Agent Token for profile ${profile}. Run relay auth login --with-token.`,
+      `Profile ${profile} has no saved token. Run npx relaymessenger auth login --with-token to save one.`,
     );
   }
   return {

@@ -5,7 +5,7 @@ Agent tools. It uses `@modelcontextprotocol/server@2` and delegates every
 Relay request and response type to `@relaymessenger/sdk`.
 
 Source is maintained in
-[`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/main/packages/mcp)
+[`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/staging/packages/mcp)
 under `packages/mcp`.
 
 ## Transport and security status
@@ -14,7 +14,7 @@ under `packages/mcp`.
 negotiation and legacy client compatibility.
 
 **Not implemented:** remote HTTP transport and remote OAuth. The package does
-not open a port, advertise a remote endpoint, or claim remote authentication.
+not open a port, publish a web address, or claim to sign anyone in remotely.
 Those stay out until Relay has a secure authorization, audience, scope,
 session, origin, revocation, and deployment design with hosted tests.
 

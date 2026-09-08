@@ -12,11 +12,24 @@ it("preflights a local image and retains its exact bytes without HTTP", async ()
 });
 it("accepts HTTPS URL input without fetching it", async () => {
   expect(await prepareAgentImage("https://images.example.test/pic.png")).toEqual({ kind: "url", url: "https://images.example.test/pic.png" });
-  await expect(prepareAgentImage("https://secret@images.example.test/pic.png")).rejects.toThrow("without credentials");
+  await expect(prepareAgentImage("https://secret@images.example.test/pic.png")).rejects.toThrow("must not contain a user name or password");
 });
 it("rejects missing, directory, empty, unsupported, signature-mismatched, and oversized files locally", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "relay-local-image-invalid-"));
   await mkdir(join(cwd, "dir.png")); await writeFile(join(cwd, "empty.png"), ""); await writeFile(join(cwd, "wrong.png"), "not image data"); await writeFile(join(cwd, "wrong.txt"), png);
   await writeFile(join(cwd, "large.png"), png); await truncate(join(cwd, "large.png"), 1000);
-  for (const path of ["absent.png", "dir.png", "empty.png", "wrong.png", "wrong.txt", "large.png"]) await expect(prepareAgentImage(path, { cwd, maxBytes: 100 })).rejects.toThrow("No agent was created");
+  // Each rule names itself: a reader must learn which one they broke, and
+  // "No agent was created" belongs only to `agents create`, never here.
+  const reasons: Array<[string, string | RegExp]> = [
+    ["absent.png", "Relay could not read"],
+    ["dir.png", "must be a regular file"],
+    ["empty.png", "between 1 byte and 100 bytes"],
+    ["wrong.png", "are not PNG"],
+    ["wrong.txt", "Relay does not accept .txt"],
+    ["large.png", "between 1 byte and 100 bytes"],
+  ];
+  for (const [path, reason] of reasons) {
+    await expect(prepareAgentImage(path, { cwd, maxBytes: 100 })).rejects.toThrow(reason);
+    await expect(prepareAgentImage(path, { cwd, maxBytes: 100 })).rejects.not.toThrow("No agent was created");
+  }
 });

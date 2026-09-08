@@ -1,11 +1,12 @@
-/** Optional, offline runtime handoff. This module never installs, launches, or opens a socket. */
+/** Optional, offline: writes the token into the configuration of the runtime you chose.
+ * It never installs anything, never starts anything, and never opens a network connection. */
 export type RuntimeConnectTarget =
   | { runtime: 'openclaw'; configPath: string; stateDir: string; account: string; profile?: string; brain?: string }
   | { runtime: 'hermes'; profileHome: string; stateDir?: string; profile?: string }
   | { runtime: 'claude-code'; channelDir: string; context: string; claudeConfigDir?: string };
 
 export interface RuntimeConnectInput {
-  /** Already authenticated/resolved by the caller using the SDK. Never print this input. */
+  /** Already signed in and resolved by the caller using the SDK. Never print this input. */
   agent: { token: string; origin: string; handle: string };
   target: RuntimeConnectTarget;
 }
@@ -13,19 +14,19 @@ export interface RuntimeConnectPlan {
   readonly status: 'ready' | 'required-action' | 'conflict';
   readonly code: string;
   readonly message: string;
-  /** No paths, user-controlled labels, or credentials are included in diagnostics. */
+  /** No paths, user-controlled labels, or tokens appear in these messages. */
   readonly actions: readonly string[];
 }
 export interface RuntimeConnectConsent {
   consent: true;
-  /** Caller must stop the selected runtime before apply/rollback, not unrelated sessions. */
+  /** The caller must stop the runtime it chose before writing or undoing, not unrelated sessions. */
   runtimeStopped: true;
 }
 export interface RuntimeConnectResult {
   readonly status: 'configured' | 'required-action' | 'conflict';
   readonly code: string;
   readonly message: string;
-  /** In-memory rollback capability: no secret-bearing backup file. */
+  /** The undo lives in memory only: no backup file ever holds the token. */
   readonly rollback?: (consent: RuntimeConnectConsent) => Promise<RuntimeConnectResult>;
 }
 export { planRuntimeConnect, applyRuntimeConnect } from './runtime-connect/implementation.js';

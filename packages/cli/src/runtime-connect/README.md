@@ -1,4 +1,4 @@
-# Optional runtime handoff integration
+# Optional runtime connect integration
 
 This is a bounded offline configuration helper, not a runtime manager. The
 public interface is `../runtime-connect.ts`. The caller owns SDK authentication,
@@ -13,7 +13,7 @@ if (plan.status === 'ready') {
     consent: true,
     runtimeStopped: true,
   });
-  // Retain result.rollback in memory if the user wants to undo this handoff.
+  // Retain result.rollback in memory if the user wants to undo this change.
 }
 ```
 
@@ -79,18 +79,13 @@ Paths below are relative to Relay-SDK unless prefixed with `workspace/`.
   hash and session key.
 - `packages/claude-code/.mcp.json:8-12` and `README.md:40-79`: plugin user config
   and manual environment fallback. No secure-store token replacement is claimed.
-- `workspace/hermes-relay-plugin/adapter.py:137-153,177-215,320-346,395-439`:
-  profile-scope resolution, permission handling, state path and auth failures.
-- `workspace/hermes-relay-plugin/state.py:18-20,29-128,167-235`:
-  sidecar schema, fingerprints and database binding checks.
-- `workspace/_sources/hermes-agent/hermes_cli/profiles.py:1-19` and
-  `workspace/_sources/hermes-agent/agent/secret_scope.py:149-202,244-290`:
-  profile homes and secret isolation. The initially requested
-  `hermes-relay-plugin/_sources/hermes-agent` path was absent; this workspace
-  official source clone was read instead.
-- Installed OpenClaw source:
-  `workspace/_worktrees/agent-cli-verification-20260908/node_modules/openclaw/docs/cli/index.md:44-52`:
-  named profile isolation and explicit custom config/state path handling.
+- The Hermes Relay plugin's own adapter and state modules: profile-scope
+  resolution, permission handling, state paths, auth failures, the sidecar
+  schema, its fingerprints and its database binding checks. Those files live in
+  the Hermes plugin repository, not here.
+- OpenClaw's own CLI documentation, `docs/cli/index.md`, on named profile
+  isolation and explicit config and state paths. Read it from the installed
+  `openclaw` package.
 
 ## Installation and native self-provisioning: separate additive work
 
@@ -98,24 +93,8 @@ No installer runs here, including during detection/planning. Runtime/plugin
 absence means explicit user action, not a hidden install. Sources read for a
 future consented installer action are `packages/openclaw/README.md:14-18`,
 `packages/claude-code/README.md:27-51`,
-`workspace/hermes-relay-plugin/README.md:53-59`, and the upstream Hermes installer
-`workspace/_sources/hermes-agent/hermes_cli/plugins_cmd.py:715,952`. Installer
-execution/version proof is not part of this configuration-only commit.
-
-Agent-made assessment, pending owner review: native provisioning can be a
-separate runtime onboarding action using the same approved create operation;
-it need not invoke this CLI or add a Relay runner. The original saved owner
-messages were read at
-`workspace/_artifacts/dev-connect-independent-20260907/01-original-owner-messages.md`
-(M000, M017, M037), alongside the current `agent-cli-build-20260908/CONTRACT.md`.
-This assessment does not implement or infer new product rules from that earlier
-exploration. Missing credential plus explicit creation consent must remain
-separate from supplied-invalid, revoked, corrupt, or unreadable credentials.
-Do not hook auto-create into adapter reconnect/auth-failure paths. Preserve
-sender grants, report uncertain creation without a blind retry, and save the
-one-time token privately before reporting success. Adapter/plugin changes and
-runtime-native onboarding tests need their own ownership/commit after this
-bounded handoff lands.
+and the Hermes plugin's own README and installer command. Proof that an installer
+runs, and at which version, is not part of this configuration-only module.
 
 ## Verification
 
