@@ -1,4 +1,4 @@
-import os,pty,subprocess,select,time,termios,fcntl,struct,json,tempfile,pathlib,shutil,signal
+import os,pty,subprocess,select,time,termios,fcntl,struct,json,tempfile,pathlib,shutil,signal,shlex
 if os.uname().sysname=='Linux' and not os.environ.get('RELAY_DAYTONA_SANDBOX_ID'): raise SystemExit('Linux PTY proof requires owned Daytona')
 root=pathlib.Path(tempfile.mkdtemp(prefix='relay-installed-terminal-')); dest=pathlib.Path(os.environ.get('RELAY_TERMINAL_EVIDENCE','/home/daytona/terminal-installed-evidence'));dest.mkdir(exist_ok=True,parents=True)
 node=os.environ.get('RELAY_TERMINAL_NODE','/usr/local/share/nvm/versions/node/v22.22.3/bin/node');shim=os.environ.get('RELAY_TERMINAL_SHIM','/home/daytona/terminal-installed/node_modules/.bin/relaymessenger');results=[]
@@ -15,14 +15,14 @@ modes=[('light',80,24),('dark',100,32)]+([('tmux',100,32)] if os.uname().sysname
 for mode,columns,rows in modes:
  home=root/mode;home.mkdir();ready=home/'ready.json';report=home/'server.json';socket=home/'tmux.sock';env={**baseenv,'HOME':str(home),'TERM':'xterm-256color','COLORFGBG':'0;15' if mode=='light' else '15;0','RELAY_CONFIG_PATH':str(home/'config.json')}
  server=subprocess.Popen([node,str(pathlib.Path(__file__).with_name('agent-cli-platforms-terminal-server.mjs')),str(ready),str(report)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
- def tmux(*args,check=True):return subprocess.run(['tmux','-S',str(socket),*args],env=env,capture_output=True,text=True,check=check)
+ def tmux(*args,check=True):return subprocess.run(['tmux','-S',str(socket),'-f','/dev/null',*args],env=env,cwd=home,capture_output=True,text=True,check=check)
  master=slave=None;process=None;output=b''
  try:
   end=time.monotonic()+5
   while not ready.exists() and time.monotonic()<end:time.sleep(.05)
   env['RELAY_API_URL']=json.loads(ready.read_text())['origin'];master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',rows,columns,0,0));before=termios.tcgetattr(slave)
   if mode=='tmux':
-   tmux('new-session','-d','-s','terminal','-x',str(columns),'-y',str(rows),f'{shim}; sleep 10')
+   tmux('new-session','-d','-s','terminal','-c',str(home),'-x',str(columns),'-y',str(rows),f'{shlex.quote(shim)}; sleep 10')
    process=subprocess.Popen(['tmux','-S',str(socket),'attach-session','-t','terminal'],stdin=slave,stdout=slave,stderr=slave,env=env)
   else:process=subprocess.Popen([shim],stdin=slave,stdout=slave,stderr=slave,env=env,cwd=home)
   stage=0;end=time.monotonic()+20
