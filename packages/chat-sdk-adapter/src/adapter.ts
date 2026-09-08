@@ -145,7 +145,7 @@ export interface RelayAdapterOptions
    * A person who sends again while the agent is answering has changed the
    * question. Finishing the old answer spends a model turn on a question that
    * no longer stands and posts a reply to nothing. This calls
-   * `ChatInstance.abortTurn(threadId)`, so the running turn's `context.signal`
+   * `ChatInstance.abortTurn(threadId)`, so the running turn's `thread.signal`
    * fires and the deferring `concurrency` strategy hands the newer message to
    * a fresh turn.
    *

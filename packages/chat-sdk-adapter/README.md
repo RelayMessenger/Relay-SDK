@@ -125,7 +125,7 @@ Read, so an agent's read in a group is not visible to anyone.
 `abortActiveTurnOnReceipt: true` calls `ChatInstance.abortTurn(threadId)` when
 a newer inbound message arrives, before the new event reaches dispatch. A
 person who sends again while the agent is answering has changed the question,
-so the running turn's `context.signal` fires and the deferring `concurrency`
+so the running turn's `thread.signal` fires and the deferring `concurrency`
 strategy hands the newer message to a fresh turn.
 
 Cancellation crosses processes: this adapter sets `supportsTurnCancellation`,

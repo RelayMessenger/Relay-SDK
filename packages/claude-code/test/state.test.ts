@@ -125,7 +125,7 @@ describe("idempotent outbound ledger", () => {
 });
 
 describe("turn origin isolation", () => {
-  it("supersedes prior Chats and prevents closed delivery reactivation", () => {
+  it("supersedes prior Chats, requeues the unanswered one, and keeps answered ones closed", () => {
     const state = open();
     const originA = { ...delivery(), eventId: null };
     const originB = {
@@ -163,26 +163,78 @@ describe("turn origin isolation", () => {
       senderId: originB.senderId,
       senderHandle: originB.senderHandle,
     });
+    // Delivery A was never answered: supersession returns it to the inbox
+    // and it can open a fresh turn once B is done.
+    expect(state.delivery(originA.deliveryId)).toMatchObject({
+      status: "pending",
+      lastNotifiedAt: null,
+    });
+    expect(state.pendingDeliveries(1_000).map((row) => row.deliveryId))
+      .toEqual([originA.deliveryId]);
     expect(() => state.activateDeliveryOrigin(originA.deliveryId, 33))
-      .toThrow(/already has a closed Relay turn/u);
+      .toThrow(/has not started processing/u);
     expect(state.completeDeliveryTurn(originB.deliveryId, "completed", 34)).toBe("closed");
     expect(state.activeTurnOrigin(35)).toBeNull();
+    expect(state.beginDelivery(originA.deliveryId, 40)).toMatchObject({ status: "starting" });
+    state.markDeliveryProcessing(originA.deliveryId, 41);
+    expect(state.activeTurnOrigin(42)).toMatchObject({ deliveryId: originA.deliveryId });
+    expect(state.pendingDeliveries(1_000)).toEqual([]);
+    expect(state.completeDeliveryTurn(originA.deliveryId, "completed", 43)).toBe("closed");
+    expect(state.activeTurnOrigin(44)).toBeNull();
+    // Now both were answered: neither may reopen.
+    expect(state.delivery(originA.deliveryId)).toMatchObject({ status: "processing" });
+    expect(state.pendingDeliveries(1_000)).toEqual([]);
+    expect(() => state.activateDeliveryOrigin(originA.deliveryId, 45))
+      .toThrow(/already has a closed Relay turn/u);
+    expect(() => state.activateDeliveryOrigin(originB.deliveryId, 46))
+      .toThrow(/already has a closed Relay turn/u);
+    expect(state.completeDeliveryTurn(originA.deliveryId, "failed", 47)).toBe("already_closed");
     state.close();
   });
 
-  it("expires turn origins without allowing reactivation", () => {
+  it("keeps a replied delivery closed even when a later turn supersedes another", () => {
+    const state = open();
+    const originA = { ...delivery(), eventId: null };
+    state.recordDelivery(originA);
+    state.beginDelivery(originA.deliveryId, 10);
+    state.markDeliveryProcessing(originA.deliveryId, 11);
+    expect(state.completeDeliveryTurn(originA.deliveryId, "completed", 12)).toBe("closed");
+    expect(state.delivery(originA.deliveryId)).toMatchObject({ status: "processing" });
+    expect(state.pendingDeliveries(1_000)).toEqual([]);
+    expect(state.beginDelivery(originA.deliveryId, 13)).toBeNull();
+    expect(() => state.activateDeliveryOrigin(originA.deliveryId, 14))
+      .toThrow(/already has a closed Relay turn/u);
+    state.close();
+  });
+
+  it("returns an unanswered delivery to the inbox when its turn expires", () => {
     const state = open();
     const candidate = { ...delivery(), eventId: null };
     state.recordDelivery(candidate);
     state.beginDelivery(candidate.deliveryId, 10);
+    state.noteDeliveryNotified(candidate.deliveryId, 10);
     state.markDeliveryProcessing(candidate.deliveryId, 11, 100);
     const active = state.activeTurnOrigin(110);
     if (!active) throw new Error("missing active origin");
     expect(ACTIVE_TURN_TTL_MS).toBeGreaterThan(100);
     expect(state.activeTurnOrigin(111)).toBeNull();
-    expect(() => state.activateDeliveryOrigin(candidate.deliveryId, 113))
-      .toThrow(/already has a closed Relay turn/u);
-    expect(state.completeDeliveryTurn(candidate.deliveryId, "failed", 114))
+    expect(state.delivery(candidate.deliveryId)).toMatchObject({
+      status: "pending",
+      lastNotifiedAt: null,
+    });
+    expect(state.pendingDeliveries(0).map((row) => row.deliveryId))
+      .toEqual([candidate.deliveryId]);
+    // The expired lease is gone; completing it is a no-op, not a second close.
+    expect(state.completeDeliveryTurn(candidate.deliveryId, "failed", 112))
+      .toBe("already_closed");
+    expect(state.delivery(candidate.deliveryId)).toMatchObject({ status: "pending" });
+    // A fresh lease, not a resume of the expired one.
+    expect(state.beginDelivery(candidate.deliveryId, 113)).toMatchObject({ status: "starting" });
+    state.markDeliveryProcessing(candidate.deliveryId, 114, 100);
+    expect(state.activeTurnOrigin(115)).toMatchObject({ deliveryId: candidate.deliveryId });
+    expect(state.pendingDeliveries(1_000)).toEqual([]);
+    expect(state.completeDeliveryTurn(candidate.deliveryId, "completed", 116)).toBe("closed");
+    expect(state.completeDeliveryTurn(candidate.deliveryId, "failed", 117))
       .toBe("already_closed");
     state.close();
   });
