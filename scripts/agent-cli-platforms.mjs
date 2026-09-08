@@ -49,7 +49,11 @@ try {
   const help = cli('--help');
   assert.match(help, /auth/);
   report.agentCommands = /^  agent(?:s)?[ \[]/m.test(help) ? 'available: requires feature-specific integration cases' : 'pending feature commits: no agent command in root help';
-  assert.equal(cli('--version').trim(), JSON.parse(readFileSync(join(root, 'packages/cli/package.json'))).version);
+  const expectedVersion = JSON.parse(readFileSync(join(root, 'packages/cli/package.json'))).version;
+  assert.equal(cli('--version').trim(), expectedVersion);
+  for (const executable of ['relay', 'relaymessenger']) {
+    assert.equal(npm(['exec', '--offline', '--', executable, '--version'], { cwd: consumer }).trim(), expectedVersion);
+  }
   cli('profiles', 'add', 'verification', '--api-url', 'http://127.0.0.1:1');
   cli('profiles', 'use', 'verification');
   run(process.execPath, [bin, 'auth', 'login', '--token-stdin'], { cwd: consumer, input: `${token}\n` });
