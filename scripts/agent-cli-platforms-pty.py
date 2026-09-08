@@ -25,6 +25,8 @@ def exercise(name, menu=False, cancel=False):
             drain()
             if child.poll() is not None or time.monotonic()>deadline:raise AssertionError('Expected actual PTY prompt did not appear')
     try:
+        if not menu:
+            wait_for(b'Install the Relay skill?');offer=True;os.write(master,b'\r') # decline before credential prompt
         wait_for(b'what would you like to do?' if menu else b'Agent Token')
         during=termios.tcgetattr(slave);assert not during[3]&termios.ECHO,'TTY echo was not disabled'
         if menu:
@@ -32,8 +34,8 @@ def exercise(name, menu=False, cancel=False):
         else:
             os.write(master,secret.encode());time.sleep(.05);drain();assert secret.encode() not in raw,'Token echoed before submission'
             os.write(master,b'\x03' if cancel else b'\r')
-        if not cancel:
-            wait_for(b'Install the Relay skill?');offer=True;os.write(master,b'\r') # source default is No; no installer launch
+        if not cancel and not menu:
+            wait_for(b'Event view:');os.write(master,b'q') # explicit exit from intended persistent saved-agent view
         while child.poll() is None and time.monotonic()<deadline:drain()
         if child.poll() is None:raise AssertionError('PTY command hung')
         for _ in range(3):drain(.02)
@@ -45,6 +47,9 @@ def exercise(name, menu=False, cancel=False):
         if menu and not cancel:assert re.search(rb'"agents"\s*:\s*\[\s*\]',ansi.sub(b'',raw)),'Menu did not invoke read-only local inventory'
         assert not any(home.rglob('SKILL.md')) and not any(cwd.rglob('SKILL.md')),'Declined offer installed a skill'
         report['cases'].append({'name':name,'command':command,'exit':child.returncode,'realPty':True,'ciFlagsRemovedOnlyForThisOwnedPty':True,'echoDisabled':True,'noEcho':True,'terminalRestored':True,'persisted':not(cancel or menu),'skillOfferShownAndDeclined':offer,'capture':raw.decode(errors='replace').replace(secret,'[REDACTED]')})
+    except Exception:
+        report['failedCase']={'name':name,'command':command,'capture':raw.decode(errors='replace').replace(secret,'[REDACTED]')}
+        raise
     finally:
         if child.poll() is None:child.kill();child.wait()
         os.close(master);os.close(slave)

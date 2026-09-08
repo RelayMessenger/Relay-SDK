@@ -12,6 +12,10 @@ const eventId = "00000000-0000-7000-8000-000000000011";
 const messageId = "00000000-0000-7000-8000-000000000012";
 const contactId = "00000000-0000-7000-8000-000000000013";
 const agentId = "00000000-0000-7000-8000-000000000014";
+const senderKind = process.env.RELAY_OPENCLAW_HARNESS_SENDER_KIND ?? "user";
+if (senderKind !== "user" && senderKind !== "agent") {
+  throw new Error("RELAY_OPENCLAW_HARNESS_SENDER_KIND must be user or agent");
+}
 const sockets = new WebSocketServer({ noServer: true });
 const sentMessages = new Map();
 let completionCount = 0;
@@ -33,7 +37,7 @@ const inboundEvent = {
     sender_handle: {
       id: contactId,
       handle: "harness",
-      kind: "user",
+      kind: senderKind,
       joined_at: new Date().toISOString(),
       display_name: "Harness",
       image_url: null,
@@ -216,7 +220,7 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 sockets.on("connection", (socket) => {
-  console.log("[mock-relay] WebSocket connected");
+  console.log(`[mock-relay] WebSocket connected senderKind=${senderKind}`);
   socket.send(
     JSON.stringify({
       type: "ready",

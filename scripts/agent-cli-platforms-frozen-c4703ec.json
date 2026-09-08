@@ -1,0 +1,251 @@
+{
+  "candidateSha": "48c46f453b3d16a42a68b612b027837a4866c3c1",
+  "dirty": "",
+  "packages": [
+    {
+      "name": "relaymessenger",
+      "manifest": {
+        "name": "relaymessenger",
+        "version": "0.1.0-staging.1",
+        "description": "Official command-line client for Relay v1 resources.",
+        "type": "module",
+        "bin": {
+          "relay": "./dist/cli.js",
+          "relaymessenger": "./dist/cli.js"
+        },
+        "files": [
+          "dist/",
+          "LICENSE",
+          "README.md"
+        ],
+        "scripts": {
+          "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+          "check": "tsc -p tsconfig.json --noEmit",
+          "build": "tsc -p tsconfig.json",
+          "test": "vitest run",
+          "contract:check": "node scripts/check-contract.mjs",
+          "boundaries:check": "node scripts/check-boundaries.mjs",
+          "pack:smoke": "node scripts/tarball-smoke.mjs",
+          "validate": "npm run clean && npm run check && npm run build && npm test && npm run contract:check && npm run boundaries:check && npm run pack:smoke",
+          "prepack": "npm run validate"
+        },
+        "engines": {
+          "node": ">=22.22.3"
+        },
+        "license": "MIT",
+        "dependencies": {
+          "@clack/prompts": "1.8.0",
+          "@relaymessenger/sdk": "0.3.1-staging.2",
+          "commander": "^15.0.0",
+          "qrcode": "1.5.4",
+          "yaml": "^2.8.1"
+        },
+        "devDependencies": {
+          "@types/node": "^22.18.0",
+          "typescript": "^5.9.3",
+          "vitest": "^4.0.0"
+        },
+        "publishConfig": {
+          "access": "public",
+          "registry": "https://registry.npmjs.org/",
+          "tag": "staging",
+          "provenance": true
+        },
+        "repository": {
+          "type": "git",
+          "url": "git+https://github.com/RelayMessenger/Relay-SDK.git",
+          "directory": "packages/cli"
+        },
+        "bugs": {
+          "url": "https://github.com/RelayMessenger/Relay-SDK/issues"
+        },
+        "homepage": "https://docs.relayapp.im"
+      },
+      "files": {
+        "package/LICENSE": "a48f472870e0958c4a1d41dc1e237b05e3b4ac6fab372a80aba159de32ddb04d",
+        "package/README.md": "30fda15ecc400c6e1953c9a645663e894add0207238d7dd0cf6529ec04d8c3ef",
+        "package/dist/agent-handoff.d.ts": "49447268809241674be2eabeb08612e5433a908ee7019879be83f7f7766a217d",
+        "package/dist/agent-handoff.d.ts.map": "a6671085b7e49983cf0b1cb80da98c1556e76f61870579cf836902d447a35a34",
+        "package/dist/agent-handoff.js": "a7e9a655b635dbdda6f1d68d9af94d0e3cc631ca41b9017ca012936a80485380",
+        "package/dist/agent-handoff.js.map": "86739abb4f084b80441f773814138bea7a88c080f527642428c954281d61df85",
+        "package/dist/agent-image-upload.d.ts": "4fdc91731073ba17007491ad382c7ff7a12406c50889b9c80088c79f41062a1b",
+        "package/dist/agent-image-upload.d.ts.map": "f91088416a64e21062b753a8de7c92886ece29655488140c3a9f43162db2267e",
+        "package/dist/agent-image-upload.js": "34e1e97f5eae84f0907ce89f2ace305b837ea60b3ff9d798dc3f2c6420eac85c",
+        "package/dist/agent-image-upload.js.map": "02bf2a748ea75392be685d7751e16c54b4db39e3b5fa180bbeb60f61c5d08dba",
+        "package/dist/agent-session.d.ts": "251932142a6a9d402e58d8db94b79e7459664a0a1a13e0da23f6b3137da08490",
+        "package/dist/agent-session.d.ts.map": "c0972cc0824c3a6d0c7db4d817aeac3d111bf14f443141ba8e470107f7ad7dd4",
+        "package/dist/agent-session.js": "d60d7db7775d9926f7b80c7482c30f4dd85bf5dd3545abdfc525f3312435a30d",
+        "package/dist/agent-session.js.map": "b19f7a95c153782524bfd5ab4eb2e8ddcefdf88db2cde89b9cca35464efcd7c3",
+        "package/dist/agents.d.ts": "0bf8ef7f1f4f83ea829581e375da159f1ea567f384aaa5209c3e7d3458cf93d9",
+        "package/dist/agents.d.ts.map": "be6ecf517a6caa34a88a3ce7cffd8251c9255a700d930271eb4b0b7b4262f21a",
+        "package/dist/agents.js": "6499be3aa94f5d71db8de69eb18f59557532f2264a1d5c09ea0458162845f67e",
+        "package/dist/agents.js.map": "93d6ff407cb17e3bacd2051e41afebd6e58c416217e8f72d58036f2ee0390614",
+        "package/dist/cli.d.ts": "6f77e82bfb5dd3b1015dd92c63e427d505f9bbbdaa041cad6c704f41c553a536",
+        "package/dist/cli.d.ts.map": "07e1bab322fbea936a00ec149ad924a0d46aa4c8de79147e59c11d25bd0ca9e6",
+        "package/dist/cli.js": "ee2a680af0b6b9c2c0be384c5d4dec446aee056a1e421b85bffe46381b851263",
+        "package/dist/cli.js.map": "a59c66f9198ae842af770136598a95a3a83dd64375ec3a84b3d8c5b8d39c7455",
+        "package/dist/client.d.ts": "b611bb0a81802c2842aef070900804f1042ef1b7a4fb5b8183681bc0856a1c54",
+        "package/dist/client.d.ts.map": "c44a25d97571d94ec81a256b93f67b1669124a1ed3ed56ad07c3a1f073542e96",
+        "package/dist/client.js": "d2fa8d1e5805168de537c9c0faeec5b08bb7d7ef8d4ba56bbe63bcc96c4f61be",
+        "package/dist/client.js.map": "6ed32e0ffd354a273cf7749b8a324f2f5b25eec9995d4a8aa3bca04d5d7489e6",
+        "package/dist/config.d.ts": "ce16f2a9f0db688c003ecba9680e85d01fb62ff9d70f78bf97039df5259546fa",
+        "package/dist/config.d.ts.map": "6dbbab0d7b458bfc23f53279918735f75756f638250e4590f1221a33a8008b1f",
+        "package/dist/config.js": "23e7670fe0b5a0e101496208299d259777737167c8d96295338a7033fbe61025",
+        "package/dist/config.js.map": "e92bf488b612df8256f1b3791b7d71850c5ef2e58df029500b3744f628a7fc23",
+        "package/dist/doctor.d.ts": "f985a0fe4f9b189bf88ccda1241e0ad8a509eb5db1908b5eb9f2a3cb20436c78",
+        "package/dist/doctor.d.ts.map": "f80263c80a80ab988c05287044a7911dec149f23d76b425f210e1ebccc4363d6",
+        "package/dist/doctor.js": "152104b10d7036963b06f882d4dd180483d9a56804f6bde061dea5da00cd4481",
+        "package/dist/doctor.js.map": "a786deadd8aed7289ae459a25638c89ee1899aecdc1f46b64d5848c6dc180a23",
+        "package/dist/event-listen.d.ts": "e83a1d1f537d85d2324095edeba55ac203667dc73196f1fa0e74de1ae76dc70e",
+        "package/dist/event-listen.d.ts.map": "7d5d5ec0f138c5518e491781e6879136b72e412fb7299ffafa49d4500bd47d85",
+        "package/dist/event-listen.js": "f3ab257b298e6eb56568f282fd325ded8d956300db2ea62c06fca93137abdfba",
+        "package/dist/event-listen.js.map": "8b5c6b7aa3f186d619445ab0e390070a0eb6fa2515175a3623c7e0886b0d6683",
+        "package/dist/interactive.d.ts": "cb9cb3e7a69ab419f33b3ff4a9b030438f1232bd19f980a497d286b4407947d6",
+        "package/dist/interactive.d.ts.map": "bebc67515c1bc70969caf70e428d4191794a39e42ab4bbc63a16c9bad0a3da9c",
+        "package/dist/interactive.js": "74a4a52e30f0ac0f26c2c5cffe5c4defe6102dfd77d0f3ba31e6de404f552c44",
+        "package/dist/interactive.js.map": "84d5a5df3e708080918ffb8d92843e214728eebf5b428cf4a8cad118d3ad3f8e",
+        "package/dist/local-image.d.ts": "def498b248c2c28732e1e2860039ad02a9a847467f9e7e6a636fdd8fa3cb7f32",
+        "package/dist/local-image.d.ts.map": "a3cf6755e6ca8493c021e4f009b28053ccd3dd75c5b0b48cce70c4681d10a762",
+        "package/dist/local-image.js": "13a52302cd51194564859cc51420d742f47f5cc4b006dfeae308816f1bf5f220",
+        "package/dist/local-image.js.map": "c897c10243964a74eaa694626f107337197b9f444dcb880a57c760dfa9ef1d61",
+        "package/dist/output.d.ts": "640fc0dc99210c1d877bb795bf2b6bc89c7f772841519b2692bc7fb3c7dea7f2",
+        "package/dist/output.d.ts.map": "3e6ebde8a6b32d4c1b0a33f7aadb1dd85cbdcec6c0e91fd82e96106dfbe2af74",
+        "package/dist/output.js": "a6cdc70a9a43e8bab4f2329cb3f30360773efa0c34645457f300401348d3e9e6",
+        "package/dist/output.js.map": "3af77ce75fa8626124e1d6a2a6fc10965209710dbd6441f9c0e16235480b96eb",
+        "package/dist/program.d.ts": "39283ad6c995c3fd356c793a33aa9ff60b9fe9228d0e0d3147b813db0a684534",
+        "package/dist/program.d.ts.map": "63b9ba34be45da05fbdb2c4b26d45c723b268f58ab5cf394184e3d5c2a9f21ae",
+        "package/dist/program.js": "d2885aa2b8f17391f36c3335f216a005812e76aa02ada6762f54ce9d388ba19d",
+        "package/dist/program.js.map": "2747fb65b8e90d8552fd55d289c2dc63d008d5c39f83fa0c7fa230c2d0e3c1aa",
+        "package/dist/runtime-connect.d.ts": "5aff81d5c7273472171227f25f2f6edfdf9c13aa683f305d034a00190fd154e2",
+        "package/dist/runtime-connect.d.ts.map": "3b38b9b76f29c76990a6bb3006670db61175e7da099f70dcd89ceebbd6850f27",
+        "package/dist/runtime-connect.js": "dc1e2aaf82faca573a267c1736b7bc58d73a29577d7c4a76e5b391075ba2252e",
+        "package/dist/runtime-connect.js.map": "7d410cc469bf4d649ad464ed81296c9a1d3feb8647d63e6d8176c56767ddb5fc",
+        "package/dist/runtime-connect/implementation.d.ts": "d91e18d1096258886ea99fec068daedbfbe2530e311ec2dc9ec64561ea554c6e",
+        "package/dist/runtime-connect/implementation.d.ts.map": "64f3cff814f98d58001f0cef269ae01e1bebe204c33266a341d587193424f64f",
+        "package/dist/runtime-connect/implementation.js": "7cc476fb6d49dd256a9c939eb601170a913d1838f9af37b3143ebd670726c3b3",
+        "package/dist/runtime-connect/implementation.js.map": "d7e63abcddb892835599e5e52607bae144b2689fee1cd943c2691859c3185a8e",
+        "package/dist/runtime-connect/windows-acl.d.ts": "7fa68864b11f0160bc07ef2d605e2035b43cdc57c08975fc8fa9b051a6742da3",
+        "package/dist/runtime-connect/windows-acl.d.ts.map": "67d060f7eeedfbeef65e94eb2809c73c5fb10b5bfbe9eb9636561b7d4e442fdd",
+        "package/dist/runtime-connect/windows-acl.js": "27693ca40aa5604c1b438a04907bd0d72491689b55692a7dbb72cf6ac9ec4d6d",
+        "package/dist/runtime-connect/windows-acl.js.map": "3880bb59909a118ce9e477e3d560cdc797bcf483a022d65bdbb4141db1b46218",
+        "package/dist/secret-input.d.ts": "f98bd294c4c1b49c661e1a6674c4efeb7358b69ede908ab8495c0e93af1a84f2",
+        "package/dist/secret-input.d.ts.map": "f8305a5151cb847694783cdc4f07a7e11b6cf1fb35ad264341f75afc931104f6",
+        "package/dist/secret-input.js": "61835f90ac1a12ab0ee025dbb79c100e96655664719663c76788d5e9faa98628",
+        "package/dist/secret-input.js.map": "1265a1086815e1c1894f627f05e7f0dcefc08dc23a5994dad43b45f2062b3ae2",
+        "package/dist/skill-offer.d.ts": "f2418a206b16400ce5afc9a640629c924331a75e6351a6fc997f882577642d27",
+        "package/dist/skill-offer.d.ts.map": "e5420e5fc5057251eb53db66a080295ae640ca10ea01bc5a4b85558d6cdb1b23",
+        "package/dist/skill-offer.js": "5c1d965247459213f2420aa3131eeb6c8c42d2af10a103c8de8da512ad28b779",
+        "package/dist/skill-offer.js.map": "e3c1f348f0fc012cb7e63e887b015d26dc3e552c24cca00e032f03ccc86f309a",
+        "package/dist/terminal-session.d.ts": "8122fd3ef4e6c8efc8c8ad4b939d251c441959e5e009cb5420cad94a2b85a231",
+        "package/dist/terminal-session.d.ts.map": "c787720f5f0ef9b247ceda23aa417e07f3c008e8b0a5a80cfd94c1da4e9cc436",
+        "package/dist/terminal-session.js": "aab3f52d40c030022e1098a2f755dd9d8b1450f1dd59401fe6a680d5aa050127",
+        "package/dist/terminal-session.js.map": "2db46d82aec4e53de8a060a059470057dfe4bb10c2ca31777a1fe564d981622c",
+        "package/dist/terminal-watch.d.ts": "24dbafb99f0935e82b35688b06640e78650dc85b856d16806a1140e4fd2eab96",
+        "package/dist/terminal-watch.d.ts.map": "6cc8397ac767afc66aa11d5fe940eead3a9b811268103d45668b8020ae3a2fad",
+        "package/dist/terminal-watch.js": "45e06fcc195ffe8bc85c422850c4a6ee7f62995a2a3d3c7739899e968e0fbedc",
+        "package/dist/terminal-watch.js.map": "3b024555d894fe6fc4b3edb846bbdd62ff80e6d9ef63116c7fed6f295b31524c",
+        "package/package.json": "4e334a53c43ddb63a8f92542cc93bd3f79cce374c20760bbe6fa0f0d6d6b339c"
+      }
+    },
+    {
+      "name": "@relaymessenger/sdk",
+      "manifest": {
+        "name": "@relaymessenger/sdk",
+        "version": "0.3.1-staging.2",
+        "description": "TypeScript SDK for the Relay v1 messaging API and signed webhooks.",
+        "type": "module",
+        "main": "./dist/index.js",
+        "types": "./dist/index.d.ts",
+        "exports": {
+          ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "default": "./dist/index.js"
+          },
+          "./package.json": "./package.json"
+        },
+        "files": [
+          "dist/",
+          "LICENSE",
+          "LICENSES/",
+          "NOTICE",
+          "README.md"
+        ],
+        "scripts": {
+          "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+          "build": "tsc -p tsconfig.json",
+          "check": "tsc -p tsconfig.json --noEmit",
+          "test": "vitest run",
+          "prepack": "npm run build"
+        },
+        "engines": {
+          "node": ">=22.22.3"
+        },
+        "license": "MIT",
+        "dependencies": {
+          "standardwebhooks": "^1.0.0",
+          "ws": "^8.21.0"
+        },
+        "publishConfig": {
+          "access": "public",
+          "registry": "https://registry.npmjs.org/",
+          "tag": "staging"
+        },
+        "repository": {
+          "type": "git",
+          "url": "git+https://github.com/RelayMessenger/Relay-SDK.git",
+          "directory": "packages/sdk"
+        },
+        "homepage": "https://docs.relayapp.im",
+        "keywords": [
+          "relay",
+          "messaging",
+          "agents",
+          "webhooks"
+        ]
+      },
+      "files": {
+        "package/LICENSE": "a48f472870e0958c4a1d41dc1e237b05e3b4ac6fab372a80aba159de32ddb04d",
+        "package/LICENSES/Apache-2.0.txt": "ccfe263b9801c2e301271dbeb1559576392549f7af988413ebc25441fbe3cb8d",
+        "package/NOTICE": "8afed87f28d7334556cb3a2dafe9a9c4985611b2a6d15289db8282cfb0f629ed",
+        "package/README.md": "59fd9eb7e64340b07b0b71a7adc2e07c6bb84271e741031e4b4b1291dc963925",
+        "package/dist/client.d.ts": "9c4f0d283836a1ea86c31506853f27c75ac991750d0c9ae1235389427361fe89",
+        "package/dist/client.d.ts.map": "6ed03af2e83229fc095d4749a1d5d94b015ccd0ff7ce67e0186e30e26ca3556e",
+        "package/dist/client.js": "518533fd8fc77cf6040517381adcb7299405bcb0e21c37a20f95075480b1a22b",
+        "package/dist/client.js.map": "d17097e31a23c20463303c1978b888d6e75374f542ed5e95cc7b0248c0b66113",
+        "package/dist/errors.d.ts": "3b792927dce68156aaa7d6c45a9af2a19d93139c7db787d8badde43edbcf3318",
+        "package/dist/errors.d.ts.map": "19a775adaa512bdd60c7b4a69a52d69d17c80201519fa0c3435c89be6ebbef7f",
+        "package/dist/errors.js": "3a211255af58dd37ae437684d0d2e8e48a16cb61c1d9703dfa00ee3b146c7f7b",
+        "package/dist/errors.js.map": "0a5bb373d2a20c3a6bbf983bbb0fec73a25720f8d323820becb8f3725bf2b389",
+        "package/dist/index.d.ts": "615e653387f4c1247fc00ef71bbefa11d18ba78d0b8d077b8d19c29759a33b75",
+        "package/dist/index.d.ts.map": "fd971f15c1f89779d84ee1e097b6630cef7c37da59658de3d3975199883e8340",
+        "package/dist/index.js": "cc529cabab292ed2a898d72d7672d9488fb0a3bf156dd652212b7cd11cdbe163",
+        "package/dist/index.js.map": "38dc4a3491ffb79023014d722fae9c1cfcc1181282e8d655898a128334d872ce",
+        "package/dist/operations.d.ts": "73f54fb9b3182182811cc5c4daed40207f0ca57693e16dbe22a6845a300b7451",
+        "package/dist/operations.d.ts.map": "09dfc5dc43327d184b29e44c451ed67ad7edf0b536feea6c3ea3c3a0a34c098c",
+        "package/dist/operations.js": "2db5267c118e7a1233f60fe919bf3f2f7a9b70f80a868b4f65b220c13684ae71",
+        "package/dist/operations.js.map": "ce2c04eef5933ba5984fd6d4c6f15749016066fbacca4d895e634a47af11e739",
+        "package/dist/pagination.d.ts": "c95c6ddb2d8fb150d95a0d1e40b61238ecfe92d4692196b455a801cc54b41f70",
+        "package/dist/pagination.d.ts.map": "b9999d2e7edca320b2aa74d9ea3e64a4f0c50e8d5a386dc2edb28ae868138109",
+        "package/dist/pagination.js": "757f2dea7fe7bb0a60a3923fb40a3f308670796ccf4e48705156dfe6eec5c6a6",
+        "package/dist/pagination.js.map": "47ec73568bdba622390a96eae78cc20ce3c3fdba81f13554d6fbb1df61662063",
+        "package/dist/types.d.ts": "ddd6790fdda40c8c537f5f27039cf482aec1ed5c1aa11517a81d8ba9b6b1738f",
+        "package/dist/types.d.ts.map": "1a81a124de8f525d2fbad58a45487b20b1161b6c8f1d37f1d813052f79715183",
+        "package/dist/types.js": "01ae2a5b120382f9a648ced7ee8507493a134f216d100fc61600c6c9738235d2",
+        "package/dist/types.js.map": "a7de897b48fe57bf54d6f84169135ff2e89e2fc95ea0a0a815761cc29a41efee",
+        "package/dist/webhooks.d.ts": "f93a9cb8deb31959f67d1c64d6872c770e5b984848ebc809c5d25abf4fa16ea1",
+        "package/dist/webhooks.d.ts.map": "8d65d382e91160bd9374a9f37db61b41daee5488f5dd33ac4dfa019966b61f42",
+        "package/dist/webhooks.js": "6a3caf7b4e21bb157ee4ef8a82c621e019f5a737aab172902509784a9222f3b4",
+        "package/dist/webhooks.js.map": "c521b7f9ce74105c59ab3ddd553b5d7c0d7ee4c58fe18d3e965e1d50decbbdae",
+        "package/dist/websocket.d.ts": "ce0f07834cccac7d18bc44f6dea4daeea4c97e479fdef944f7117fa8d2f6cfe8",
+        "package/dist/websocket.d.ts.map": "fb8b73343859c79bbfd76789993019081805799fe41dafe71dcdcc76b0dc8336",
+        "package/dist/websocket.js": "ce7cb63095c8d8f6c44c68a370fd4e5d54628ca280fd0c39c849ecfe4fd7f50c",
+        "package/dist/websocket.js.map": "5df4a8c2191e47065262da2971cdc8d3842297142bfe96d6aadf188bbfd5a081",
+        "package/package.json": "1682595b76e281f1fb1fb5c9ba0662575ec66e8fa0a1b4abddd3a2fa3fe1b91a"
+      }
+    }
+  ],
+  "publisherSourceSha": "c4703ecf8d4e9fbdf692cf5c04c29c1af79131ef",
+  "publisherRunId": 34215318536,
+  "scope": "Frozen published release, verified byte-identical before the unpublished Windows lock fix"
+}

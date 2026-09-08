@@ -36,7 +36,7 @@
     "allowed_senders": {
       "type": "string",
       "title": "Allowed Relay senders",
-      "description": "Comma-separated Relay user UUIDs or exact Handles allowed to inject messages.",
+      "description": "Comma-separated Relay Contact UUIDs or exact Handles allowed to inject messages.",
       "required": true
     },
     "base_url": {

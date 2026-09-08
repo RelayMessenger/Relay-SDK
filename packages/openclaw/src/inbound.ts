@@ -44,14 +44,17 @@ export function isRelayMessageReceivedEvent(
 }
 
 /**
- * Map the current Relay v1 Message event to OpenClaw facts. Agent-authored
- * Messages are accepted at the transport boundary but do not start turns.
+ * Map inbound Messages from either contract-defined Contact kind. Sender
+ * authorization and direct/group activation remain the dispatcher's concern.
  */
 export function buildRelayInboundFacts(
   event: RelayWebhookEvent,
 ): RelayInboundFacts | null {
   if (!isRelayMessageReceivedEvent(event)) return null;
-  if (event.data.sender_handle.kind !== "user") return null;
+  if (
+    event.data.sender_handle.kind !== "user" &&
+    event.data.sender_handle.kind !== "agent"
+  ) return null;
 
   const text = renderRelayMessageParts(event.data.parts);
   if (!text.trim()) return null;
