@@ -9,19 +9,20 @@
   },
   "docs": {
     "repository": "https://github.com/RelayMessenger/Relay-Docs",
-    "commit": "7e2b3072ee84ba98df5e1fa0a51c27ac603c495d",
+    "commit": "79e5abe98860840a12fc46ae70ad3a42131283aa",
     "skill_path": "skill.md",
-    "skill_sha256": "c2deb0ff469759ad17dda73dc4eadc39052b70c2f82ec5cd89443874f76a38b2"
+    "skill_sha256": "1d453e980dc015484fcf776f831e4b419493a2ecb6b9a5f1ebef13331935e45a"
   },
   "sdk": {
     "repository": "https://github.com/RelayMessenger/Relay-SDK",
-    "commit": "4b6e80013539525c6610df96acd54c45be61d749",
+    "commit": "79517a1c9fcb1c82b474cd72ba8bc10197ff363f",
     "package_path": "packages/sdk/package.json",
-    "package_sha256": "2392dd03d7e660d570f8fac00983fc94862a7cd425e3cdc8832e54ebf3b1b9f0",
+    "package_sha256": "9d5ae725fc4f9195681da434d18470053e69ea1d380e8ce1c0de39be71e845ca",
     "package": "@relaymessenger/sdk",
-    "version": "0.3.1-staging.0",
+    "version": "0.3.1-staging.1",
     "dist_tag": "staging",
-    "publication_status": "Source revision; publication of these changes to the staging tag is pending."
+    "publication_status": "Published and registry-verified on the staging dist-tag.",
+    "integrity": "sha512-wqg+3Cio8rxbRrqagknXKf7MChGwVEhQQJxXwSbl4H9gH42OkzhsAIZHBeCbsid+fB6uVZv5cF+JX5lghYxe2A=="
   },
   "docs_mcp": {
     "url": "https://docs.staging.relayapp.im/mcp",

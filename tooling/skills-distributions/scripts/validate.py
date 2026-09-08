@@ -134,17 +134,17 @@ if lock.get("api", {}).get("commit") != (
 ):
     fail("Relay Server lock commit drifted")
 if lock.get("docs", {}).get("commit") != (
-    "7e2b3072ee84ba98df5e1fa0a51c27ac603c495d"
+    "79e5abe98860840a12fc46ae70ad3a42131283aa"
 ):
     fail("Relay Docs lock commit drifted")
-if lock.get("sdk", {}).get("version") != "0.3.1-staging.0":
+if lock.get("sdk", {}).get("version") != "0.3.1-staging.1":
     fail("Relay SDK lock version drifted")
 if lock.get("sdk", {}).get("commit") != (
-    "4b6e80013539525c6610df96acd54c45be61d749"
+    "79517a1c9fcb1c82b474cd72ba8bc10197ff363f"
 ):
     fail("Relay SDK source commit drifted")
 if lock.get("sdk", {}).get("package_sha256") != (
-    "2392dd03d7e660d570f8fac00983fc94862a7cd425e3cdc8832e54ebf3b1b9f0"
+    "9d5ae725fc4f9195681da434d18470053e69ea1d380e8ce1c0de39be71e845ca"
 ):
     fail("Relay SDK source manifest digest drifted")
 
