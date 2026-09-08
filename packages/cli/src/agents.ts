@@ -1,11 +1,12 @@
 import { safeMetadata } from "./output.js";
 import Relay, { RelayAPIError, type AgentCreateParams, type AgentImageRecipe, type ContactCardItem } from "@relaymessenger/sdk";
 import type { ConfigContext, RelayConfig, ResolvedAuth } from "./config.js";
-import { DEFAULT_API_URL, defaultCreationApiURL, mutateConfig, readConfig, resolveAuth, validateApiURL, validateProfileName, validateToken } from "./config.js";
+import { DEFAULT_API_URL, defaultCreationApiURL, mutateConfig, preflightConfigDestination, readConfig, resolveAuth, validateApiURL, validateProfileName, validateToken } from "./config.js";
 
 /** Injected SDK and persistence boundaries keep command logic independently testable. */
 export interface AgentDependencies {
   read: () => Promise<RelayConfig>;
+  preflight: () => Promise<void>;
   update: <T>(change: (config: RelayConfig) => T) => Promise<T>;
   bootstrap: typeof Relay.createAgent;
   client: (token: string, apiURL: string) => Pick<Relay, "contactCard" | "agents">;
@@ -15,6 +16,7 @@ export interface AgentDependencies {
 
 export const agentDependencies = (context: ConfigContext = {}, fetch?: typeof globalThis.fetch): AgentDependencies => ({
   read: () => readConfig(context),
+  preflight: () => preflightConfigDestination(context),
   update: (change) => mutateConfig(change, context),
   bootstrap: (body, options) => Relay.createAgent(body, { ...options, ...(fetch ? { fetch } : {}) }),
   client: (apiKey, baseURL) => new Relay({ apiKey, baseURL, ...(fetch ? { fetch } : {}) }),
@@ -82,6 +84,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     ...picture,
   };
   if (Buffer.byteLength(JSON.stringify(body), "utf8") > 8192) throw new Error("Agent creation body exceeds 8192 bytes.");
+  try { await deps.preflight(); } catch { throw new Error("Private credential storage preflight failed; no agent creation request was sent."); }
   let result;
   try {
     result = await deps.bootstrap(body, { baseURL: apiURL, maxRetries: 0 });
@@ -107,7 +110,16 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     });
     return safeMetadata({ profile, api_url: apiURL, agent: cardMetadata(result.agent), share_url: result.share_url, token: "stored" as const }, [token]);
   } catch {
-    throw new Error("Agent was created but its credential could not be saved. No retry was made. Check local configuration storage before creating another identity.");
+    const rawHandle = typeof result.agent?.handle === "string" && /^[a-z][a-z0-9_]{2,31}\.dev$/u.test(result.agent.handle) ? result.agent.handle : "(unavailable)";
+    const assigned = safeMetadata(rawHandle, typeof result.secret === "string" ? [result.secret] : []);
+    let outcome = "local credential storage could not be verified";
+    let present = false;
+    try {
+      const saved = await deps.read();
+      present = typeof result.secret === "string" && Object.values(saved.profiles).some((profile) => profile.agent_token === result.secret && validateApiURL(profile.api_url ?? DEFAULT_API_URL) === apiURL);
+      outcome = present ? "its credential is present in local config, but the write/security check failed" : "its credential could not be saved";
+    } catch { /* The outcome remains explicitly unverified. */ }
+    throw new Error(`Agent @${assigned} was created; ${outcome}. ${present ? "No retry was made. Check config permissions before continuing." : "No retry was made and no durable recovery mechanism is available."}`);
   }
 }
 

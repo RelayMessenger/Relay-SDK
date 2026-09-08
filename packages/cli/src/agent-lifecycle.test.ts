@@ -242,3 +242,29 @@ it("a chosen-handle 409 leaves all profiles intact and never retries without the
   expect(await runCLI(["agents", "create", "--json", "--handle", "chosen_agent.dev"], deps)).toBe(1);
   expect(fetch).toHaveBeenCalledOnce(); expect(await readConfig(deps.configContext)).toEqual(previous);
 });
+
+describe("creation storage preflight", { timeout: 120_000 }, () => {
+  it("does zero POSTs for unreadable or unwritable config files", async () => {
+    const { chmod } = await import("node:fs/promises");
+    for (const mode of process.platform === "win32" ? [0o444, 0o000] : [0o444, 0o000, 0o644]) {
+      const { deps, fetch, env } = await fixture();
+      await writeFile(env.RELAY_CONFIG_PATH!, JSON.stringify(emptyConfig()), { mode: 0o600 });
+      await chmod(env.RELAY_CONFIG_PATH!, mode);
+      try {
+        expect(await runCLI(["agents", "create", "--json"], deps)).toBe(1);
+        expect(fetch).not.toHaveBeenCalled();
+      } finally { await chmod(env.RELAY_CONFIG_PATH!, 0o600); }
+    }
+  });
+  it("probes storage without overwriting existing credentials or leaving probe files", async () => {
+    const { preflightConfigDestination } = await import("./config.js");
+    const { readdir } = await import("node:fs/promises");
+    const { deps, env, home } = await fixture();
+    const config = emptyConfig(); config.profiles.saved = { api_url: "https://api.staging.relayapp.im", agent_token: "existing-private-token" };
+    await writeConfig(config, deps.configContext);
+    const before = await readFile(env.RELAY_CONFIG_PATH!);
+    await preflightConfigDestination(deps.configContext);
+    expect(await readFile(env.RELAY_CONFIG_PATH!)).toEqual(before);
+    expect(await readdir(home)).toEqual(["config.json"]);
+  });
+});
