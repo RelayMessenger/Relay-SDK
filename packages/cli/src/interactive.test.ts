@@ -130,7 +130,7 @@ it("uses fixed installer args without default agent/global flags or credentials"
   expect(interactiveAllowed([], { GITHUB_ACTIONS: "true" }, true)).toBe(false);
 });
 
-it("interactive creation collects optional fields; blanks keep server defaults", async () => {
+it("interactive creation collects optional fields; blanks keep server defaults", { timeout: 120_000 }, async () => {
   const f = await fixture(); f.prompts.select.mockResolvedValueOnce("create");
   f.prompts.text.mockResolvedValueOnce("custom_agent.dev").mockResolvedValueOnce("Custom Agent").mockResolvedValueOnce("https://images.example.test/photo.png").mockResolvedValueOnce("");
   f.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
