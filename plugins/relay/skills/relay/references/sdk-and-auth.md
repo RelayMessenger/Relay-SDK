@@ -89,6 +89,13 @@ not a new invented agent ID. Use the returned image and HTTPS share URLs rather
 than reconstructing an asset path. The one-time creation secret has no automatic
 retry/replay recovery mechanism.
 
+Creation also accepts optional `handle`, `first_name`, `image_url`, and
+`image_recipe`. A chosen Handle must be available and end in `.dev`; a conflict
+returns `409` instead of silently assigning another. Omitted fields keep their
+random/default values. A native image recipe requires the rendered `image_url`
+alongside it; the SDK's `AgentImageRecipe` type describes the existing format,
+not a new image-generation endpoint.
+
 For an intentionally deleted developer-managed identity,
 `await agent.agents.delete(created.agent.handle)` uses its own token. Deletion
 is not automatically retried. On `409`, complete normal durable event processing;

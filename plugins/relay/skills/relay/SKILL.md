@@ -16,9 +16,11 @@ Use the locked Relay v1 contract instead of remembered examples.
    required. If the public copy and lock disagree, report the stale source.
 3. Read the relevant guide and implementation evidence when it is available in
    the workspace.
-4. Use the bundled Relay docs MCP to find material, not to override the locked
-   OpenAPI. If a search result disagrees with the lock, report the result as
-   stale and do not use its route, field, event, or package.
+4. Use Relay docs MCP for discovery when it is available, not to override the
+   locked OpenAPI. A plain skill installation does not prove MCP is configured;
+   the public contract copy remains usable without it. If a search result
+   disagrees with the lock, report it as stale and do not use its route, field,
+   event, or package.
 5. Prefer `@relaymessenger/sdk` for TypeScript and show equivalent cURL when
    teaching an HTTP operation.
 

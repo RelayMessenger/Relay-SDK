@@ -1988,7 +1988,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/SKILL.md",
       "source_sha256": "b7158ecddc77ce389cb3ae456ae0b1ab82e0a4ac6c5cd10d16f652ecdfacca84",
-      "destination_sha256": "a48a24ef0b0df5d9c916780a2ac6d54eb533a5a446f84366bcb8abe3a47e0464",
+      "destination_sha256": "ffd4cb175a85392054f285b9dd24b61ab28745253013eaa5ced3d1f396adafdc",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2054,7 +2054,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/sdk-and-auth.md",
       "source_sha256": "cd328a6b4d60f932404ce1a30b88e61cc0cb6e5dbdbcdc485f53ad2e0b3b50c4",
-      "destination_sha256": "fb0a2d8915b4e2a07b782322f3d03663aa2a67e06c3c80319a047a5b0affb6b8",
+      "destination_sha256": "a691b1be190f0af705584d3868d1c5c775e9d5d277ab002cca28587ac58a2977",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

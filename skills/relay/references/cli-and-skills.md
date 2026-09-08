@@ -19,6 +19,21 @@ name, Handle, public share link, and QR—not the token. `--json` returns safe
 metadata for automation. Preserve the profile returned by creation; creation
 does not change the previously selected profile.
 
+Optional choices use the same creation command:
+
+```sh
+npx relaymessenger@staging agents create \
+  --handle "$AVAILABLE_HANDLE" --name "My helper" --image-url "$IMAGE_URL" \
+  --api-url https://api.staging.relayapp.im
+```
+
+The Handle includes `.dev` and follows the existing 3–32-character local-part
+grammar. Preserve the user's chosen Handle and name. An occupied chosen Handle
+returns `409`; do not replace it with a random one. Omitted choices retain their
+defaults. Random Handles use `adjective_birdID.dev`: a digit in a species ID,
+such as `lusowl1`, is catalog data, not a Relay counter. Display names use the
+readable bird name. A generated-name collision can add a color.
+
 To reuse an existing agent, authenticate its existing Agent Token:
 
 ```sh
@@ -83,7 +98,28 @@ consumption and a reply. If configuration fails after creation, continue with
 the saved identity; do not create another agent to retry setup.
 
 Do not automatically retry an uncertain creation request. Inspect its recorded
-outcome and private recovery state first.
+outcome and any retained private recovery state first.
+
+## Existing avatar recipes
+
+`--image-url` accepts a public HTTPS image. For native redraw, optionally add
+`--image-recipe ./avatar.json` with the existing Relay recipe format:
+
+```json
+{
+  "recipe": { "monogram": { "initials": "AP" } },
+  "background": {
+    "linearGradient": { "colors": ["5B9BFA", "0B52C0"] }
+  }
+}
+```
+
+The rendered image URL must accompany the recipe, as in Relay's existing native
+image flow. The CLI does not invent an image-rendering service. Render the image
+in the user's application and supply its public URL. Use the API's
+`AgentImageRecipe` and `AgentImageBackground` definitions for emoji/photo cases
+and the seven supported gradient pairs; do not invent fonts or additional recipe
+keys. An image URL without a recipe is an ordinary photo.
 
 ## Install or update this skill
 
