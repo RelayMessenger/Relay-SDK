@@ -1,4 +1,5 @@
-import { prepareAgentImage } from "./local-image.js";
+import { prepareAgentImage, type LocalAgentImage } from "./local-image.js";
+import { uploadAgentImage, type AgentImageUploadResult } from "./agent-image-upload.js";
 import { homedir } from "node:os";
 import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactiveEntry, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { installRelaySkill, relaySkillPresent } from "./skill-offer.js";
@@ -128,6 +129,18 @@ const textContent = (
     : {}),
 });
 
+async function readImageRecipe(path: string): Promise<AgentImageRecipe> {
+  try {
+    const info = await stat(path);
+    if (!info.isFile() || info.size > 8192) throw new Error("Invalid recipe file.");
+    const raw = await readFile(path, "utf8");
+    if (Buffer.byteLength(raw, "utf8") > 8192) throw new Error("Recipe too large.");
+    const value: unknown = JSON.parse(raw.replace(/^\uFEFF/u, ""));
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Recipe must be an object.");
+    return value as AgentImageRecipe; // Server's existing recipe parser is authoritative.
+  } catch { throw new Error("Image recipe must be a readable JSON object file no larger than 8192 bytes."); }
+}
+
 const voidResult = { ok: true };
 
 export const createProgram = (
@@ -168,31 +181,24 @@ export const createProgram = (
     .option("--name <name>", "optional display name")
     .option("--image <path-or-url>", "local image path or public HTTPS image URL")
     .option("--image-url <url>", "public HTTPS image URL (compatibility option)")
-    .option("--image-recipe <json-file>", "existing Relay recipe JSON; requires its rendered --image-url")
+    .option("--image-recipe <json-file>", "existing Relay recipe JSON; requires a rendered --image or --image-url")
     .option("--json", "print safe metadata as JSON")
     .action(async (options: HandoffOptions & { apiUrl?: string; tokenName?: string; json?: boolean; handle?: string; name?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
       const target = await handoffTarget(options);
+      let localImage: LocalAgentImage | undefined;
       if (options.image !== undefined && options.imageUrl !== undefined) throw new Error("Choose --image or --image-url, not both.");
       if (options.image !== undefined) {
         const image = await prepareAgentImage(options.image, {
           ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}),
           ...(configContext.home ? { home: configContext.home } : {}),
         });
-        if (image.kind === "file") throw new Error("Local image passed preflight; upload wiring is awaiting the staging image contract. No agent was created.");
-        options.imageUrl = image.url;
+        if (image.kind === "file") localImage = image.file;
+        else options.imageUrl = image.url;
       }
       let imageRecipe: AgentImageRecipe | undefined;
       if (options.imageRecipe !== undefined) {
-        if (options.imageUrl === undefined) throw new Error("--image-recipe requires the rendered --image-url.");
-        try {
-          const info = await stat(options.imageRecipe);
-          if (!info.isFile() || info.size > 8192) throw new Error("Invalid recipe file.");
-          const raw = await readFile(options.imageRecipe, "utf8");
-          if (Buffer.byteLength(raw, "utf8") > 8192) throw new Error("Recipe too large.");
-          const value: unknown = JSON.parse(raw.replace(/^\uFEFF/u, ""));
-          if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Recipe must be an object.");
-          imageRecipe = value as AgentImageRecipe; // Server's existing recipe parser remains authoritative.
-        } catch { throw new Error("Image recipe must be a readable JSON object file no larger than 8192 bytes."); }
+        if (options.imageUrl === undefined && !localImage) throw new Error("--image-recipe requires its rendered --image or --image-url.");
+        imageRecipe = await readImageRecipe(options.imageRecipe);
       }
       const result = await createAgent({
         ...(program.getOptionValueSource("profile") === "cli" && globals(command).profile ? { profile: globals(command).profile } : {}),
@@ -201,14 +207,32 @@ export const createProgram = (
         ...(options.handle === undefined ? {} : { handle: options.handle }),
         ...(options.name === undefined ? {} : { firstName: options.name }),
         ...(options.imageUrl === undefined ? {} : { imageURL: options.imageUrl }),
-        ...(imageRecipe === undefined ? {} : { imageRecipe }),
+        ...(imageRecipe === undefined || localImage ? {} : { imageRecipe }),
       }, agentDeps);
+      let imageUpdate: AgentImageUploadResult | undefined;
+      if (localImage) {
+        try {
+          // Identity/token are already persisted. Never apply an ENV token to
+          // a just-created agent's upload or promotion.
+          const saved = (await agentDeps.read()).profiles[result.profile];
+          if (!saved?.agent_token || validateApiURL(saved.api_url ?? DEFAULT_API_URL) !== result.api_url) throw new Error("Saved identity changed.");
+          const client = new Relay({ apiKey: saved.agent_token, baseURL: result.api_url, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) });
+          const outcome = await uploadAgentImage({ handle: result.agent.handle, image: localImage }, client,
+            (attachmentID) => client.contactCard.update({ handle: result.agent.handle, attachment_id: attachmentID,
+              ...(imageRecipe ? { image_recipe: imageRecipe } : {}),
+            }, { maxRetries: 0 }));
+          imageUpdate = safeMetadata(outcome, [saved.agent_token]);
+          if (imageUpdate.status === "updated") result.agent = imageUpdate.agent;
+        } catch {
+          imageUpdate = { status: "incomplete", phase: "identity", message: "Agent was created and its credential was saved. Image update was not confirmed; retry on this existing profile, not agent creation." };
+        }
+      }
       let handoff;
       if (target) {
         try { handoff = await handoffAgent(target, result.profile, agentDeps, { consent: options.confirmConfigure === true, runtimeStopped: options.runtimeStopped === true }, true); }
         catch { handoff = { status: "required-action", code: "handoff-failed", message: "Agent credential is stored; runtime handoff failed. Use auth login --connect with the stored credential; do not create another agent.", connected: false }; }
       }
-      if (globals(command).json) output({ ...result, ...(handoff ? { handoff } : {}) });
+      if (globals(command).json) output({ ...result, ...(imageUpdate ? { image: imageUpdate } : {}), ...(handoff ? { handoff } : {}) });
       else {
         stdout(`${result.agent.first_name} (@${result.agent.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken: stored\n`);
         // Load only for human output; the QR encodes the public share URL, not credentials.
@@ -217,7 +241,13 @@ export const createProgram = (
         };
         try { stdout(await qr.toString(result.share_url, { type: "terminal", small: true })); }
         catch { stderr("QR rendering unavailable; use the share link above.\n"); }
+        if (imageUpdate?.status === "incomplete") output({ image: imageUpdate });
         if (handoff) output({ handoff });
+      }
+      if (imageUpdate?.status === "incomplete") {
+        const retry = imageUpdate.attachment_id && ["completion", "promotion"].includes(imageUpdate.phase)
+          ? `--attachment-id ${imageUpdate.attachment_id}` : "--image <local-file>";
+        throw new Error(`Agent @${result.agent.handle} was created; its profile/token remain stored. Image update was not confirmed. Retry on the existing profile: relay --profile ${result.profile} contact-card update --handle ${result.agent.handle} ${retry}${imageRecipe ? " --image-recipe <json-file>" : ""}. Do not create another agent.`);
       }
       if (handoff && handoff.status !== "configured") throw new Error("Agent credential is stored; runtime handoff requires action. Use auth login --connect rather than creating again.");
     });
@@ -940,7 +970,10 @@ export const createProgram = (
     .option("--first-name <name>")
     .option("--last-name <name>")
     .option("--clear-last-name")
+    .option("--image <path-or-url>", "local image file or public HTTPS image URL")
     .option("--image-url <url>")
+    .option("--attachment-id <id>", "retry promotion of this agent's completed image upload")
+    .option("--image-recipe <json-file>", "existing recipe paired with selected image")
     .option("--clear-image-url")
     .action(async (
       options: {
@@ -948,7 +981,10 @@ export const createProgram = (
         firstName?: string;
         lastName?: string;
         clearLastName?: boolean;
+        image?: string;
         imageUrl?: string;
+        attachmentId?: string;
+        imageRecipe?: string;
         clearImageUrl?: boolean;
       },
       command: Command,
@@ -956,9 +992,13 @@ export const createProgram = (
       if (options.lastName && options.clearLastName) {
         throw new Error("Choose --last-name or --clear-last-name, not both.");
       }
-      if (options.imageUrl && options.clearImageUrl) {
-        throw new Error("Choose --image-url or --clear-image-url, not both.");
-      }
+      if ([options.image, options.imageUrl, options.attachmentId, options.clearImageUrl || undefined].filter((value) => value !== undefined).length > 1) throw new Error("Choose one image input or --clear-image-url.");
+      const image = options.image === undefined ? undefined : await prepareAgentImage(options.image, {
+        ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}), ...(configContext.home ? { home: configContext.home } : {}),
+      });
+      const imageURL = image?.kind === "url" ? image.url : options.imageUrl;
+      if (options.imageRecipe && !image && !options.imageUrl && !options.attachmentId) throw new Error("--image-recipe requires a rendered image URL, file, or completed attachment.");
+      const recipe = options.imageRecipe ? await readImageRecipe(options.imageRecipe) : undefined;
       const body = {
         handle: options.handle,
         ...(options.firstName ? { first_name: options.firstName } : {}),
@@ -967,12 +1007,24 @@ export const createProgram = (
           : options.clearLastName
           ? { last_name: null }
           : {}),
-        ...(options.imageUrl
-          ? { image_url: options.imageUrl }
+        ...(imageURL
+          ? { image_url: imageURL }
           : options.clearImageUrl
           ? { image_url: null }
           : {}),
+        ...(recipe ? { image_recipe: recipe } : {}),
       } satisfies ContactCardUpdateParams;
+      if (image?.kind === "file" || options.attachmentId) {
+        const selected = await resolveClient(globals(command).profile);
+        const client = selected.client;
+        const rawOutcome = await uploadAgentImage({ handle: options.handle,
+          ...(image?.kind === "file" ? { image: image.file } : {}), ...(options.attachmentId ? { attachmentID: options.attachmentId } : {}),
+        }, client, (attachmentID) => client.contactCard.update({ ...body, attachment_id: attachmentID }, { maxRetries: 0 }));
+        const outcome = safeMetadata(rawOutcome, [selected.auth.token]);
+        if (outcome.status === "updated") output(outcome.agent);
+        else { output({ image: outcome }); throw new Error("Image update was not confirmed; keep the existing profile and retry this update, not agent creation."); }
+        return;
+      }
       if (Object.keys(body).length === 1) {
         throw new Error("No Contact Card update was provided.");
       }

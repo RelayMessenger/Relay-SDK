@@ -408,3 +408,18 @@ describe("Relay v1 request shapes", () => {
     expect(methods(client.webhooks)).toEqual(["unwrap", "verify"]);
   });
 });
+
+it("promotes a completed owned image attachment with the existing card routes", async () => {
+  const calls: Array<{ url: URL; init?: RequestInit }> = [];
+  const client = new Relay({ apiKey: "test-agent-token", baseURL: "https://api.staging.relayapp.im", fetch: async (input, init) => {
+    calls.push({ url: new URL(input instanceof Request ? input.url : input), ...(init ? { init } : {}) });
+    return Response.json({ handle: "picture_agent.dev", first_name: "Picture Agent", kind: "agent", image_url: "https://api.staging.relayapp.im/images/picture.png", last_name: null, is_active: true });
+  } });
+  const attachment_id = "019a2123-1234-7890-abcd-123456789abc";
+  await client.contactCard.update({ handle: "picture_agent.dev", attachment_id, image_recipe: { recipe: { image: {} } } }, { maxRetries: 0 });
+  expect(calls[0]?.url.pathname).toBe("/v1/contact_card"); expect(calls[0]?.url.searchParams.get("handle")).toBe("picture_agent.dev");
+  expect(calls[0]?.init?.method).toBe("PATCH");
+  expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ attachment_id, image_recipe: { recipe: { image: {} } } });
+  await client.contactCard.create({ handle: "picture_agent.dev", first_name: "Picture Agent", attachment_id });
+  expect(calls[1]?.init?.method).toBe("POST"); expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({ handle: "picture_agent.dev", first_name: "Picture Agent", attachment_id });
+});

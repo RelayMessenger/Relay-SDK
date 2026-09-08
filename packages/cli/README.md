@@ -191,11 +191,26 @@ never a request for a random replacement. Interactive creation asks `Handle (opt
 Create already expresses intent, so no second create confirmation is shown.
 Recipe files remain an advanced `--image-recipe` flag, not another setup question.
 
-`--image-recipe <json-file>` is advanced, existing Relay avatar metadata and
-requires its rendered `--image-url`. The URL alone is sufficient for a custom
-picture. The CLI does not render recipes or generate images. The server validates
-and copies the HTTPS image into permanent Relay storage; output uses its returned
-URL, not a client-guessed storage address.
+`--image <path-or-url>` accepts a local supported image or public HTTPS URL;
+`--image-url` remains a URL alias. The CLI checks a local file's readability,
+size, and image signature before creation. Once the new token is privately saved,
+it allocates/uploads through the existing Attachments API, checks completion,
+and updates the Contact Card using the completed `attachment_id`.
+
+If image upload/promotion is not confirmed, the new identity and saved profile
+are retained, and the command reports the incomplete image phase. Retry the
+image on that existing identity—do not run `agents create` again:
+
+```sh
+relay --profile my_helper.dev contact-card update --handle my_helper.dev --image ./helper.png
+# If upload completed but promotion failed, reuse the returned attachment ID:
+relay --profile my_helper.dev contact-card update --handle my_helper.dev --attachment-id <completed-id>
+```
+
+`--image-recipe <json-file>` remains an advanced flag for existing Relay avatar
+metadata, paired with its rendered local image/URL/attachment. It is not a default
+interactive question. The CLI does not render recipes or generate images. The
+server's response supplies the permanent public image URL.
 
 ### Optional native runtime handoff
 

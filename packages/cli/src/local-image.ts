@@ -27,7 +27,7 @@ function imageSignature(data: Uint8Array, type: string): boolean {
   return false;
 }
 /** Preflight is local only: no bootstrap, HTTP, image generation, or promotion.
- * The server must still decode/validate the complete image during promotion. */
+ * The server owns completed-upload ownership and promotion validation. */
 export async function prepareAgentImage(
   input: string,
   options: { cwd?: string; home?: string; maxBytes?: number } = {},
