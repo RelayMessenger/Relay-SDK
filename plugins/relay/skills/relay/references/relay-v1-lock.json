@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "locked_on": "2026-09-05",
+  "locked_on": "2026-09-08",
   "api": {
     "repository": "https://github.com/RelayMessenger/Relay-Server",
-    "commit": "pending-server-validation",
+    "commit": "40df3700f143d4421fa522d1bc5bbeb840c2b142",
     "openapi_path": "contracts/developer/openapi.yaml",
     "openapi_sha256": "a2bebc32ab50dd52e6f437ec3ae97b775799e84518b503fba6dda471c007b519"
   },

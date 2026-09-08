@@ -1,3 +1,4 @@
+import { safeMetadata } from "./output.js";
 import { lstat, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import type { Command } from "commander";
@@ -61,21 +62,21 @@ export async function handoffTarget(options: HandoffOptions): Promise<RuntimeCon
   throw new Error("--connect must be openclaw, hermes, or claude-code.");
 }
 
-export async function handoffAgent(target: RuntimeConnectTarget, profile: string | undefined, deps: AgentDependencies, confirmation: { consent: boolean; runtimeStopped: boolean }, newlyCreated = false) {
+export async function handoffAgent(target: RuntimeConnectTarget, profile: string | undefined, deps: AgentDependencies, confirmation: { consent: boolean; runtimeStopped: boolean }, savedProfileOnly = false) {
   if (confirmation.consent !== true || confirmation.runtimeStopped !== true) throw new Error("Explicit handoff consent and runtime stop confirmation are required.");
-  // Creation selected a NEW saved credential: ENV must never substitute another agent.
-  const saved = newlyCreated ? (await deps.read()).profiles[profile!] : undefined;
-  if (newlyCreated && !saved?.agent_token) throw new Error("Created profile credential is unavailable; no runtime config was changed.");
-  const auth = newlyCreated
+  // Read the just-created/imported saved credential; ENV must not substitute another agent.
+  const saved = savedProfileOnly ? (await deps.read()).profiles[profile!] : undefined;
+  if (savedProfileOnly && !saved?.agent_token) throw new Error("Saved profile credential is unavailable; no runtime config was changed.");
+  const auth = savedProfileOnly
     ? { token: validateToken(saved!.agent_token!), apiURL: validateApiURL(saved!.api_url ?? DEFAULT_API_URL), profile: profile! }
     : await deps.auth(profile);
   let cards;
   try { cards = await deps.client(auth.token, auth.apiURL).contactCard.retrieve(); }
-  catch { throw new Error("Existing credential validation failed; no runtime config changed and no agent was created by setup."); }
+  catch { throw new Error("Existing credential validation failed; no runtime config changed and no new agent was created."); }
   const agents = cards.contact_cards.filter((card) => card.kind === "agent" && card.is_active);
   if (agents.length !== 1) throw new Error("Select a credential with exactly one active agent Contact Card before handoff.");
   const plan = await planRuntimeConnect({ agent: { token: auth.token, origin: auth.apiURL, handle: agents[0]!.handle }, target });
   const result = plan.status === "ready" ? await applyRuntimeConnect(plan, { consent: confirmation.consent, runtimeStopped: confirmation.runtimeStopped }) : plan;
   // Do not serialize private input, plan internals, rollback capabilities, or errors.
-  return { profile: auth.profile, handle: agents[0]!.handle, runtime: target.runtime, status: result.status, code: result.code, message: result.message, connected: false };
+  return safeMetadata({ profile: auth.profile, handle: agents[0]!.handle, runtime: target.runtime, status: result.status, code: result.code, message: result.message, connected: false }, [auth.token]);
 }

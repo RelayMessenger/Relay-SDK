@@ -53,7 +53,9 @@ describe("CLI command routing", () => {
   let fake: ReturnType<typeof makeClient>;
   let resolveClient: (profile?: string) => Promise<ClientContext>;
 
-  beforeEach(() => {
+  let privatePath: string;
+  beforeEach(async () => {
+    privatePath = join(await mkdtemp(join(tmpdir(), "relay-program-config-")), "config.json");
     stdout = [];
     stderr = [];
     fake = makeClient();
@@ -61,10 +63,10 @@ describe("CLI command routing", () => {
       client: fake.client,
       auth: {
         profile: "default",
-        apiURL: "https://api.relayapp.im",
+        apiURL: "https://api.staging.relayapp.im",
         token: "rly_test_secret",
         tokenSource: "environment",
-        configPath: "/tmp/relay-config",
+        configPath: privatePath,
       },
     }));
   });
@@ -73,7 +75,7 @@ describe("CLI command routing", () => {
     resolveClient,
     stdout: (value) => stdout.push(value),
     stderr: (value) => stderr.push(value),
-    configContext: { env: { RELAY_AGENT_TOKEN: "rly_test_secret" } },
+    configContext: { env: { RELAY_AGENT_TOKEN: "rly_test_secret", RELAY_API_URL: "https://api.staging.relayapp.im", RELAY_CONFIG_PATH: privatePath } },
   });
 
   it("routes reads and typing through SDK resources", async () => {

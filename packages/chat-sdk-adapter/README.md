@@ -161,7 +161,7 @@ normal `POST`/`DELETE /v1/chats/{chatId}/typing` support.
 
 This package was rewritten against:
 
-- Relay Server `pending-server-validation`
+- Relay Server `40df3700f143d4421fa522d1bc5bbeb840c2b142`
 - OpenAPI SHA-256
   `a2bebc32ab50dd52e6f437ec3ae97b775799e84518b503fba6dda471c007b519`
 - public `ChatHandle.image_url` and `ChatHandle.about` fields, with no legacy

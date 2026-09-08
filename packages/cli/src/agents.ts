@@ -1,6 +1,7 @@
+import { safeMetadata } from "./output.js";
 import Relay, { RelayAPIError, type AgentCreateParams, type ContactCardItem } from "@relaymessenger/sdk";
 import type { ConfigContext, RelayConfig, ResolvedAuth } from "./config.js";
-import { DEFAULT_API_URL, mutateConfig, readConfig, resolveAuth, validateApiURL, validateProfileName, validateToken } from "./config.js";
+import { DEFAULT_API_URL, defaultCreationApiURL, mutateConfig, readConfig, resolveAuth, validateApiURL, validateProfileName, validateToken } from "./config.js";
 
 /** Injected SDK and persistence boundaries keep command logic independently testable. */
 export interface AgentDependencies {
@@ -53,7 +54,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     throw new Error("Token name must be 1–80 characters without control characters.");
   }
   const apiURL = validateApiURL(input.apiURL ?? deps.env.RELAY_API_URL
-    ?? before.profiles[before.current_profile]?.api_url ?? DEFAULT_API_URL);
+    ?? defaultCreationApiURL());
   const body: AgentCreateParams = input.tokenName === undefined ? {} : { token_name: input.tokenName };
   let result;
   try {
@@ -78,7 +79,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
       config.profiles[profile] = { api_url: apiURL, agent_token: token };
       return profile;
     });
-    return { profile, api_url: apiURL, agent: cardMetadata(result.agent), share_url: result.share_url, token: "stored" as const };
+    return safeMetadata({ profile, api_url: apiURL, agent: cardMetadata(result.agent), share_url: result.share_url, token: "stored" as const }, [token]);
   } catch {
     throw new Error("Agent was created but its credential could not be saved. No retry was made. Check local configuration storage before creating another identity.");
   }
@@ -98,7 +99,7 @@ export async function listAgents(deps: AgentDependencies) {
       agents.push({ profile, api_url: apiURL, token: "stored", error: "Contact Card unavailable" });
     }
   }
-  return { agents };
+  return safeMetadata({ agents }, [...Object.values(config.profiles).flatMap((saved) => saved.agent_token ? [saved.agent_token] : []), ...(deps.env.RELAY_AGENT_TOKEN ? [deps.env.RELAY_AGENT_TOKEN] : [])]);
 }
 
 export async function selectAgentAuth(handle: string, profile: string | undefined, deps: AgentDependencies): Promise<ResolvedAuth> {
@@ -107,7 +108,7 @@ export async function selectAgentAuth(handle: string, profile: string | undefine
   }
   const config = await deps.read();
   const requestedOrigin = deps.env.RELAY_API_URL === undefined ? undefined : validateApiURL(deps.env.RELAY_API_URL);
-  const matches: string[] = [];
+  const matches: Array<{ profile: string; token: string; apiURL: string }> = [];
   let unavailable = false;
   for (const [name, saved] of Object.entries(config.profiles)) {
     if (!saved.agent_token) continue;
@@ -115,13 +116,18 @@ export async function selectAgentAuth(handle: string, profile: string | undefine
     if (requestedOrigin !== undefined && apiURL !== requestedOrigin) continue;
     try {
       const cards = await deps.client(saved.agent_token, apiURL).contactCard.retrieve();
-      if (cards.contact_cards.some((card) => card.handle === handle && card.kind === "agent")) matches.push(name);
+      if (cards.contact_cards.some((card) => card.handle === handle && card.kind === "agent")) matches.push({ profile: name, token: saved.agent_token, apiURL });
     } catch { unavailable = true; }
   }
   if (unavailable || matches.length !== 1) {
     throw new Error("Cannot select an unambiguous saved agent. Choose --profile explicitly; credentials were kept.");
   }
-  return deps.auth(matches[0]);
+  const selected = matches[0]!;
+  const auth = await deps.auth(selected.profile);
+  if (auth.token !== selected.token || auth.apiURL !== selected.apiURL) {
+    throw new Error("Selected profile changed during identification; no deletion was sent and credentials were kept.");
+  }
+  return auth;
 }
 
 export async function deleteAgent(handle: string, profile: string | undefined, deps: AgentDependencies) {
@@ -145,5 +151,5 @@ export async function deleteAgent(handle: string, profile: string | undefined, d
   } catch {
     throw new Error("Agent deletion was confirmed, but local credential cleanup failed.");
   }
-  return { ok: true, handle, profile: auth.profile, token: removed ? "removed" : "unchanged" };
+  return safeMetadata({ ok: true, handle, profile: auth.profile, token: removed ? "removed" : "unchanged" }, [auth.token]);
 }

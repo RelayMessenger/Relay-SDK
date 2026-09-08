@@ -73,11 +73,9 @@ export const releasePackages = {
   },
   cli: {
     directory: "packages/cli",
-    workspace: "@relaymessenger/cli",
+    workspace: "relaymessenger",
     validate: "validate:cli",
-    // The tag series is not derived from the package name. `relaymessenger-v*`
-    // names a release series that already exists in git history and is also
-    // the name of the binary this package installs.
+    // Canonical bare CLI only; the former scoped package is not dual-published.
     tagPrefix: "relaymessenger-v",
     smoke: {
       files: ["dist/cli.js"],
@@ -129,10 +127,7 @@ export const releasePackages = {
     smoke: {
       files: [".claude-plugin/plugin.json", "runtime/server.mjs"],
       parse: ["runtime/server.mjs"],
-      // Claude Code reads the plugin version from this manifest, not from
-      // package.json, so the two are one identity and must ship equal. A 0.2.1
-      // publish once carried a 0.2.0 manifest and the stale copy rode into
-      // @relaymessenger/cli, which bundles this directory.
+      // Keep this plugin artifact manifest aligned with its own package version.
       manifestVersion: ".claude-plugin/plugin.json",
     },
   },

@@ -23,7 +23,7 @@ participants, including the sender (`to` accepts at most 6 recipient Handles).
 packages/
   sdk/                    @relaymessenger/sdk
   chat-sdk-adapter/       @relaymessenger/chat-sdk-adapter
-  cli/                    @relaymessenger/cli
+  cli/                    relaymessenger
   mcp/                    @relaymessenger/mcp
   openclaw/               @relaymessenger/openclaw-plugin
   claude-code/            relay-claude-channel
@@ -153,7 +153,7 @@ Order and record tags, from [`scripts/release-packages.mjs`](scripts/release-pac
 | --- | --- | --- |
 | 1 | `@relaymessenger/sdk` | `sdk-v<version>` |
 | 2 | `@relaymessenger/chat-sdk-adapter` | `chat-sdk-v<version>` |
-| 3 | `@relaymessenger/cli` | `relaymessenger-v<version>` |
+| 3 | `relaymessenger` | `relaymessenger-v<version>` |
 | 4 | `@relaymessenger/mcp` | `mcp-v<version>` |
 | 5 | `@relaymessenger/openclaw-plugin` | `openclaw-v<version>` |
 | 6 | `relay-claude-channel` | `claude-channel-v<version>` |

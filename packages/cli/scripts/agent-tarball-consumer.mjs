@@ -10,7 +10,7 @@ const require = createRequire(join(consumer, "package.json"));
 const { default: Relay } = await import(pathToFileURL(require.resolve("@relaymessenger/sdk")));
 assert.equal(typeof Relay.createAgent, "function");
 assert.equal(typeof new Relay({ apiKey: "existing-test-key" }).agents.delete, "function");
-const { runCLI } = await import(pathToFileURL(join(consumer, "node_modules/@relaymessenger/cli/dist/program.js")));
+const { runCLI } = await import(pathToFileURL(join(consumer, "node_modules/relaymessenger/dist/program.js")));
 const token = "tarball-one-time-agent-credential";
 const configPath = join(home, "agent-config.json");
 const card = { handle: "brave_cangoo.dev", first_name: "Brave Canada Goose", last_name: null, image_url: null, is_active: true, kind: "agent" };
@@ -34,7 +34,7 @@ const deps = {
 const nativeHome = join(home, "native Hermes profile");
 await mkdir(nativeHome, { mode: 0o700 });
 if (process.platform === "win32") {
-  const { protectWindowsPath } = await import(pathToFileURL(join(consumer, "node_modules/@relaymessenger/cli/dist/runtime-connect/windows-acl.js")));
+  const { protectWindowsPath } = await import(pathToFileURL(join(consumer, "node_modules/relaymessenger/dist/runtime-connect/windows-acl.js")));
   await protectWindowsPath(nativeHome, true);
 }
 const nativeYaml = 'gateway:\n  platforms:\n    relayapp:\n      enabled: true\n      extra:\n        allowed_contacts: [alice]\n';
@@ -53,7 +53,7 @@ assert.equal(config.current_profile, "default");
 assert.equal(await runCLI(["agents", "list", "--json"], deps), 0);
 delete deps.configContext.env.RELAY_AGENT_TOKEN;
 delete deps.configContext.env.RELAY_PROFILE;
-assert.equal(await runCLI(["--profile", card.handle, "agents", "setup", ...handoffArgs], deps), 0);
+assert.equal(await runCLI(["--profile", card.handle, "auth", "login", "--token-stdin", "--api-url", "https://api.staging.relayapp.im", ...handoffArgs], { ...deps, readStdin: async () => token }), 0);
 assert.equal(await runCLI(["agents", "delete", card.handle], deps), 1);
 config = JSON.parse(await readFile(configPath, "utf8"));
 assert.equal(config.profiles[card.handle].agent_token, token);

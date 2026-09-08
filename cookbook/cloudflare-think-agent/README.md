@@ -318,7 +318,7 @@ Run neither guarded command without your own review and credentials.
 
 This revision is tested against:
 
-- Relay Server `pending-server-validation`
+- Relay Server `40df3700f143d4421fa522d1bc5bbeb840c2b142`
 - Relay Chat SDK `eecf94a4d38bc021917e54dfed57e268657c17af`
 - `@relaymessenger/chat-sdk-adapter@0.3.0` npm integrity
   `sha512-aslkL6r5pj/frh/3QgJ0sqPoxHK2wTSmZ2OeFsfEBfyJGsWiljlhjzTjW+rAcGmy2vy0oE4x94agvnuaMZ/PzA==`

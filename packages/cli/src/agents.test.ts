@@ -1,9 +1,13 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type Relay from "@relaymessenger/sdk";
 import { createAgent, deleteAgent, listAgents, type AgentDependencies } from "./agents.js";
 import { emptyConfig, type RelayConfig, type ResolvedAuth } from "./config.js";
 import { runCLI } from "./program.js";
 
+const privateContext = { env: { RELAY_CONFIG_PATH: join(mkdtempSync(join(tmpdir(), "relay-unit-config-")), "config.json") } };
 const secret = "one-time-secret-not-for-output";
 const card = { handle: "brave_cangoo.dev", first_name: "Brave Canada Goose", last_name: null, image_url: null, is_active: true, kind: "agent" as const };
 const response = { agent: card, secret, share_url: "https://go.test/@brave_cangoo.dev" };
@@ -26,7 +30,7 @@ describe("pure agent command handlers", () => {
   it("creates a named identity while preserving default and existing credentials", async () => {
     const test = setup();
     const result = await createAgent({}, test.deps);
-    expect(result).toEqual({ profile: card.handle, api_url: "https://api.relayapp.im", agent: card, share_url: response.share_url, token: "stored" });
+    expect(result).toEqual({ profile: card.handle, api_url: "https://api.staging.relayapp.im", agent: card, share_url: response.share_url, token: "stored" });
     expect(JSON.stringify(result)).not.toContain(secret);
     expect(test.config().profiles[card.handle]?.agent_token).toBe(secret);
     expect(test.config().current_profile).toBe("default");
@@ -95,9 +99,9 @@ describe("agent CLI program", () => {
   it("routes create/list/delete with JSON output and no secret", async () => {
     const { deps } = setup();
     const stdout: string[] = []; const stderr: string[] = [];
-    const options = { agents: deps, configContext: { env: {} }, stdout: (s: string) => stdout.push(s), stderr: (s: string) => stderr.push(s) };
+    const options = { agents: deps, configContext: privateContext, stdout: (s: string) => stdout.push(s), stderr: (s: string) => stderr.push(s) };
     expect(await runCLI(["--profile", "new-profile", "agents", "create", "--token-name", "Laptop", "--json"], options)).toBe(0);
-    expect(deps.bootstrap).toHaveBeenCalledWith({ token_name: "Laptop" }, { baseURL: "https://api.relayapp.im", maxRetries: 0 });
+    expect(deps.bootstrap).toHaveBeenCalledWith({ token_name: "Laptop" }, { baseURL: "https://api.staging.relayapp.im", maxRetries: 0 });
     expect(await runCLI(["agents", "list", "--json"], options)).toBe(0);
     expect(await runCLI(["--profile", "default", "agents", "delete", card.handle, "--json"], options)).toBe(0);
     expect(stdout.join("")).not.toContain(secret);
@@ -106,7 +110,7 @@ describe("agent CLI program", () => {
   });
   it("prints public link/QR and safe metadata in human mode", async () => {
     const { deps } = setup(); const stdout: string[] = [];
-    expect(await runCLI(["agents", "create"], { agents: deps, configContext: { env: {} }, stdout: (s) => stdout.push(s) })).toBe(0);
+    expect(await runCLI(["agents", "create"], { agents: deps, configContext: privateContext, stdout: (s) => stdout.push(s) })).toBe(0);
     expect(stdout.join("")).toContain(response.share_url);
     expect(stdout.join("")).not.toContain(secret);
     expect(stdout.length).toBeGreaterThan(1);
@@ -123,4 +127,13 @@ it("reports safe rate-limit status/code without reflecting a server message", as
   expect(String(error)).toContain("Retry-After: 60s");
   expect(String(error)).not.toContain(secret);
   expect(deps.bootstrap).toHaveBeenCalledOnce();
+});
+
+it("never reflects a newly issued credential even inside unexpected response metadata", async () => {
+  const { deps } = setup();
+  vi.mocked(deps.bootstrap).mockResolvedValue({ ...response, agent: { ...card, first_name: secret }, share_url: `https://go.test/?unexpected=${secret}` });
+  const result = await createAgent({}, deps);
+  expect(JSON.stringify(result)).not.toContain(secret);
+  expect(result.agent.is_active).toBe(true);
+  expect(result.token).toBe("stored");
 });

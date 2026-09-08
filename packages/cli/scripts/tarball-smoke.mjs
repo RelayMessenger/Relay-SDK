@@ -104,9 +104,9 @@ assert.match(doctor.stdout, /"ok": true/);
 assert.equal(`${doctor.stdout}${doctor.stderr}`.includes(secret), false);
 
 const installedManifest = JSON.parse(
-  await readFile(join(consumer, "node_modules", "@relaymessenger", "cli", "package.json")),
+  await readFile(join(consumer, "node_modules", "relaymessenger", "package.json")),
 );
-assert.equal(installedManifest.name, "@relaymessenger/cli");
+assert.equal(installedManifest.name, "relaymessenger");
 assert.equal(
   installedManifest.dependencies["@relaymessenger/sdk"],
   sourceManifest.dependencies["@relaymessenger/sdk"],
