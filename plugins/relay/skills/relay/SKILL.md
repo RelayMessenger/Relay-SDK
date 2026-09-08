@@ -25,7 +25,7 @@ Use the locked Relay v1 contract instead of remembered examples.
 5. Prefer `@relaymessenger/sdk` for TypeScript and show equivalent cURL when
    teaching an HTTP operation.
 
-For CLI onboarding, existing Agent Tokens, optional runtime handoff, and skill
+For CLI onboarding, existing Agent Tokens, connecting a runtime, and skill
 installation, read [CLI and skills](references/cli-and-skills.md). Creating a
 messaging identity and running the code that answers it are separate steps.
 

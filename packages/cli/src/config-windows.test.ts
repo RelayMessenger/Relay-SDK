@@ -41,7 +41,7 @@ it("preserves a secure existing descriptor and never changes parent ACLs", async
 it("does not write secrets if private ACL creation fails and removes its empty temp", async () => {
   const ctx = await context(); vi.mocked(inspectWindowsAcl).mockResolvedValue(acl());
   vi.mocked(protectWindowsPath).mockResolvedValue(unsafe);
-  await expect(writeConfig(emptyConfig(), ctx)).rejects.toThrow("before writing");
+  await expect(writeConfig(emptyConfig(), ctx)).rejects.toThrow("did not save the token");
   expect(await readdir(ctx.home)).toEqual([]);
 });
 it("reports actual insecure or unavailable ACLs as not secure", async () => {
@@ -54,7 +54,7 @@ it("reports actual insecure or unavailable ACLs as not secure", async () => {
 it("rejects a broad existing credential ACL without altering the file or directory", async () => {
   const ctx = await context(); const bytes = JSON.stringify(emptyConfig()); await writeFile(configPath(ctx), bytes);
   vi.mocked(inspectWindowsAcl).mockImplementation(async (path) => path === ctx.home ? acl() : unsafe);
-  await expect(writeConfig(emptyConfig(), ctx)).rejects.toThrow("not private");
+  await expect(writeConfig(emptyConfig(), ctx)).rejects.toThrow("let other accounts read or write it");
   expect(await readFile(configPath(ctx), "utf8")).toBe(bytes); expect(protectWindowsPath).not.toHaveBeenCalled();
 });
 
@@ -63,7 +63,7 @@ it("blocks bootstrap on an insecure existing Windows config before any POST", as
   const ctx = await context(); const before = JSON.stringify(emptyConfig()); await writeFile(configPath(ctx), before);
   vi.mocked(inspectWindowsAcl).mockImplementation(async (path) => path === ctx.home ? acl() : unsafe);
   const fetch = vi.fn();
-  await expect(createAgent({}, agentDependencies(ctx, fetch))).rejects.toThrow("no agent creation request");
+  await expect(createAgent({}, agentDependencies(ctx, fetch))).rejects.toThrow("it did not create the agent");
   expect(fetch).not.toHaveBeenCalled(); expect(await readFile(configPath(ctx), "utf8")).toBe(before);
 });
 
@@ -72,6 +72,6 @@ it("blocks bootstrap when private temporary ACL protection is unavailable", asyn
   const ctx = await context(); vi.mocked(inspectWindowsAcl).mockResolvedValue(acl());
   vi.mocked(protectWindowsPath).mockRejectedValue(new Error("ACL unavailable"));
   const fetch = vi.fn();
-  await expect(createAgent({}, agentDependencies(ctx, fetch))).rejects.toThrow("preflight failed");
+  await expect(createAgent({}, agentDependencies(ctx, fetch))).rejects.toThrow("could not prepare a private file");
   expect(fetch).not.toHaveBeenCalled(); expect(await readdir(ctx.home)).toEqual([]);
 });

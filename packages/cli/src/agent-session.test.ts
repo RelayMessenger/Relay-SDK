@@ -77,7 +77,7 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
     const f = await fixture(); f.terminalSession.mockRejectedValueOnce(new Error(token));
     expect(await runCLI(["agents", "create"], f.deps)).toBe(0);
     expect((await readConfig(f.configContext)).profiles[card.handle]?.agent_token).toBe(token);
-    expect(f.output.join("")).not.toContain(token); expect(f.output.join("")).toContain("saved agent and token remain unchanged");
+    expect(f.output.join("")).not.toContain(token); expect(f.output.join("")).toContain("The agent and its token are unchanged");
   });
 });
 

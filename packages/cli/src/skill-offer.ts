@@ -8,7 +8,7 @@ import { isStagingBuild, packageVersion } from "./config.js";
 export const relaySkillSourceBranch = (version: string = packageVersion()): "staging" | "main" =>
   isStagingBuild(version) ? "staging" : "main";
 export const relaySkillInstallArgs = (version: string = packageVersion()): readonly string[] =>
-  ["--yes", "skills@1.5.24", "add", `https://github.com/RelayMessenger/Relay-SDK/tree/${relaySkillSourceBranch(version)}/skills/relay`, "--skill", "relay"];
+  ["--yes", "skills@1.5.25", "add", `https://github.com/RelayMessenger/Relay-SDK/tree/${relaySkillSourceBranch(version)}/skills/relay`, "--skill", "relay"];
 export const RELAY_SKILL_INSTALL_ARGS = relaySkillInstallArgs();
 // Actual supported installation paths from the pinned installer README, saved
 // in interactive-reference/skills-README.md:273-340. No guessed runtime paths.
@@ -140,7 +140,7 @@ const globalRoots = [
   ".adal/skills"
 ];
 export async function relaySkillPresent(cwd: string, home: string, env: NodeJS.ProcessEnv = process.env): Promise<boolean | "unknown"> {
-  // skills@1.5.24 cli.mjs:1334–1339,1443–1449,1506–1512,1662–1669.
+  // skills@1.5.25 cli.mjs:1334–1339,1443–1449,1506–1512,1662–1669.
   // Overrides replace, rather than supplement, these agents' default homes.
   const selectedHomes: Record<string, string | undefined> = {
     ".codex/skills": env.CODEX_HOME?.trim(),
@@ -171,7 +171,7 @@ export async function resolveNpx(env: NodeJS.ProcessEnv, platform: NodeJS.Platfo
     const path = join(directory, platform === "win32" ? "npx.cmd" : "npx");
     try { await access(path, platform === "win32" ? constants.F_OK : constants.X_OK); return path; } catch { /* Try next explicit PATH entry. */ }
   }
-  throw new Error("npx is unavailable; use the standard skills installer from an environment with npm.");
+  throw new Error("Relay could not find npx on this computer. Install Node.js, which includes npm and npx, then run this command again.");
 }
 export async function installRelaySkill(cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
   const executable = await resolveNpx(env);
@@ -186,7 +186,7 @@ export async function installRelaySkill(cwd: string, env: NodeJS.ProcessEnv): Pr
     process.on("SIGINT", interrupted);
     const finish = (ok: boolean) => {
       if (finished) return; finished = true; process.removeListener("SIGINT", interrupted);
-      if (ok) resolve(); else reject(new Error("The standard skill installer did not complete. Existing agent and credential results are unchanged."));
+      if (ok) resolve(); else reject(new Error("The Relay skill was not installed. Your agent and your saved token are unchanged."));
     };
     child.once("error", () => finish(false));
     child.once("close", (code) => finish(code === 0));

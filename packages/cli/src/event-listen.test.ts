@@ -43,7 +43,7 @@ describe("development event listener", () => {
         fetch: async () => new Response(null, { status: 503 }),
       },
       { stdout: vi.fn(), stderr: vi.fn() },
-    )).rejects.toThrow(/not acknowledged/);
+    )).rejects.toThrow(/answered with error 503/u);
   });
 
   it("refuses FULL sync rather than acknowledging incomplete state", async () => {
@@ -57,6 +57,6 @@ describe("development event listener", () => {
       client,
       {},
       { stdout: vi.fn(), stderr: vi.fn() },
-    )).rejects.toThrow(/cannot rebuild durable state/);
+    )).rejects.toThrow(/it cannot go back/u);
   });
 });

@@ -68,10 +68,10 @@ describe("local config", { timeout: 120_000 }, () => {
   });
 
   it("rejects insecure API and non-loopback forwarding URLs", () => {
-    expect(() => validateApiURL("http://api.relayapp.im")).toThrow(/HTTPS/);
-    expect(() => validateApiURL("https://api.relayapp.im/path")).toThrow(/path/);
+    expect(() => validateApiURL("http://api.relayapp.im")).toThrow(/must start with https:\/\//u);
+    expect(() => validateApiURL("https://api.relayapp.im/path")).toThrow(/must end at the host name/u);
     expect(() => validateForwardURL("https://example.com/hook")).toThrow(
-      /loopback/,
+      /must be on this computer/u,
     );
     expect(validateForwardURL("http://localhost:3000/hook")).toBe(
       "http://localhost:3000/hook",
@@ -107,7 +107,7 @@ it("rejects stale legacy writes instead of overwriting a newly saved agent", asy
   const stale = await readConfig(testContext);
   await mutateConfig((config) => { config.profiles["new.dev"] = { agent_token: "new-credential" }; }, testContext);
   stale.profiles.default!.agent_token = "old-command-credential";
-  await expect(writeConfig(stale, testContext)).rejects.toThrow("concurrently");
+  await expect(writeConfig(stale, testContext)).rejects.toThrow("Another Relay command changed the config file");
   expect((await readConfig(testContext)).profiles["new.dev"]?.agent_token).toBe("new-credential");
 });
 
@@ -129,20 +129,20 @@ it("doctor checks real native file permissions and updates preserve parent permi
     expect((await inspectWindowsAcl(parent)).sddl).toBe(parentACL.sddl);
   } else expect((await stat(parent)).mode).toBe(parentMode);
   const report = () => runDoctor({ offline: true }, { configContext: ctx, createClient: () => { throw new Error("No network expected"); } });
-  expect((await report()).checks.find((check) => check.name === "config_permissions")?.ok).toBe(true);
+  expect((await report()).checks.find((check) => check.name === "Relay config file")?.ok).toBe(true);
   if (beforeACL && parentACL) {
     // Deliberately weaken ONLY this synthetic fixture file, not its parent.
     await protectWindowsPath(path, false, `O:${beforeACL.user}G:${beforeACL.user}D:P(A;;FA;;;${beforeACL.user})(A;;FR;;;WD)`);
     expect((await inspectConfigPermissions(ctx)).secure).toBe(false);
     const { agentDependencies, createAgent } = await import("./agents.js");
     let posts = 0;
-    await expect(createAgent({}, agentDependencies(ctx, async () => { posts++; throw new Error("No network expected"); }))).rejects.toThrow("preflight failed");
+    await expect(createAgent({}, agentDependencies(ctx, async () => { posts++; throw new Error("No network expected"); }))).rejects.toThrow("could not prepare a private file");
     expect(posts).toBe(0);
     expect((await inspectWindowsAcl(parent)).sddl).toBe(parentACL.sddl);
   } else await chmod(path, 0o644);
   const unsafe = await report();
   expect(unsafe.ok).toBe(false);
-  expect(unsafe.checks.find((check) => check.name === "config_permissions")?.ok).toBe(false);
+  expect(unsafe.checks.find((check) => check.name === "Relay config file")?.ok).toBe(false);
 });
 
 });

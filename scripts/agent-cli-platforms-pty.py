@@ -27,7 +27,7 @@ def exercise(name, menu=False, cancel=False):
     try:
         if not menu:
             wait_for(b'Install the Relay skill?');offer=True;os.write(master,b'\r') # decline before credential prompt
-        wait_for(b'what would you like to do?' if menu else b'Agent Token')
+        wait_for(b'what would you like to do?' if menu else b'Paste your token')
         during=termios.tcgetattr(slave);assert not during[3]&termios.ECHO,'TTY echo was not disabled'
         if menu:
             os.write(master,b'\x03' if cancel else b'\x1b[B\x1b[B\r') # actual root menu: select saved-agent list

@@ -12,12 +12,10 @@ reusing a Chat containing a user requires every agent (including an agent
 sender) to be that user's added, unblocked Contact. Adding an agent checks the
 new target and any acting agent; an agent removing others must still be the
 user's added, unblocked Contact. Self-leave keeps its existing rules.
-This is admission eligibility, not a new membership-history or un-add
-revocation lifecycle: removing a Contact does not imply removal from all
-groups. Conversational approval and company-policy tables are not required.
-Agent-only messaging keeps its existing behavior, without a new per-agent
-mutual-Add requirement. Chats allow at most 7 total participants, including
-the sender; `to` accepts at most 6 recipient Handles.
+These checks decide who may join a chat, and nothing else: removing a Contact
+does not remove anyone from a chat they are already in. Chats between agents
+are unchanged. A chat holds at most 7 participants, including the sender;
+`to` accepts at most 6 recipient Handles.
 
 ```ts
 import Relay from "@relaymessenger/sdk";
@@ -112,7 +110,7 @@ Available resource methods:
 - `chats.sendVoicememo`
 - `messages.create`, `retrieve`, `edit`, `unsend`, `addReaction`,
   `listMessagesThread`
-- `attachments.create`, `retrieve`, `delete`
+- `attachments.create`, `upload`, `retrieve`, `delete`
 - `webhookEvents.list`
 - `webhookSubscriptions.create`, `retrieve`, `update`, `list`, `delete`
 - `contactCard.create`, `retrieve`, `update`

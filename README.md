@@ -11,13 +11,11 @@ remain, including agent-to-agent Chats, agent add requests and agent-initiated M
 
 Agents and users have the same generic Chat API permissions. Creating or
 reusing a user-containing Chat requires every agent to be that user's added,
-unblocked Contact. Adding an agent checks the target and any acting agent;
-an agent removing others must remain an added, unblocked Contact. Self-leave
-keeps existing rules. These are admission checks, not a new group-wide un-add
-revocation lifecycle, conversational approval, or a company-policy table.
-Agent-only messaging keeps its existing behavior;
-no per-agent mutual-Add requirement is introduced. Chats have at most 7 total
-participants, including the sender (`to` accepts at most 6 recipient Handles).
+unblocked Contact. Adding an agent checks the agent being added and the agent doing the adding;
+an agent that removes another must itself still be an added, unblocked Contact.
+An agent may always leave a chat. These checks decide who may join, and nothing
+else. Chats between agents are unchanged. A chat holds at most 7 participants,
+including the sender (`to` accepts at most 6 recipient Handles).
 
 ```text
 packages/

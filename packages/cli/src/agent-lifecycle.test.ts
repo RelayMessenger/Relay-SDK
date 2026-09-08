@@ -86,7 +86,7 @@ describe("real persisted agent selection", { timeout: 120_000 }, () => {
   });
 });
 
-describe("real program runtime handoff", { timeout: 120_000 }, () => {
+describe("real program runtime connect", { timeout: 120_000 }, () => {
   const confirmations = ["--confirm-configure", "--runtime-stopped"];
   it("create -> Hermes binds the newly saved credential, not unrelated ENV auth", async () => {
     const { deps, env, home, output, fetch } = await fixture();
@@ -99,7 +99,7 @@ describe("real program runtime handoff", { timeout: 120_000 }, () => {
     expect(saved).not.toContain("unrelated-env-secret");
     expect(await readFile(join(home, "config.yaml"), "utf8")).toBe(yaml);
     const result = JSON.parse(output[0]!);
-    expect(result.handoff).toMatchObject({ status: "configured", connected: false, handle });
+    expect(result.connect).toMatchObject({ status: "configured", connected: false, handle });
     expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
     expect(output.join("")).not.toContain("created-private-token");
     expect(output.join("")).not.toContain("unrelated-env-secret");
@@ -108,7 +108,7 @@ describe("real program runtime handoff", { timeout: 120_000 }, () => {
     expect((await readConfig(deps.configContext)).profiles[handle]?.api_url).toBe(creationOrigin);
     expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
-  it("existing-token login handoff binds an explicit new OpenClaw account without any POST", async () => {
+  it("existing-token login connect binds an explicit new OpenClaw account without any POST", async () => {
     const { deps, env, home, fetch, output } = await fixture();
     env.RELAY_AGENT_TOKEN = "existing-env-token";
     const path = join(home, "openclaw.json");
@@ -119,10 +119,10 @@ describe("real program runtime handoff", { timeout: 120_000 }, () => {
     expect(config.channels.relay.accounts.other).toEqual({ token: "other-credential", allowFrom: ["bob"] });
     expect(config.channels.relay.allowFrom).toEqual(["alice"]);
     expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
-    expect(JSON.parse(output[0]!).handoff).toMatchObject({ status: "configured", connected: false });
+    expect(JSON.parse(output[0]!).connect).toMatchObject({ status: "configured", connected: false });
     expect(output.join("")).not.toMatch(/existing-env-token|other-credential/);
   });
-  it("validates confirmations before creating and never falls back on invalid login handoff auth", async () => {
+  it("validates confirmations before creating and never falls back on an invalid token when connecting at login", async () => {
     const { deps, env, home, fetch } = await fixture();
     expect(await runCLI(["agents", "create", "--connect", "hermes", "--runtime-home", home], deps)).toBe(1);
     expect(fetch).not.toHaveBeenCalled();

@@ -42,15 +42,16 @@ export const listenForAgentEvents = async (
       });
       if (!response.ok) {
         throw new Error(
-          `Local forward target returned HTTP ${response.status}; event was not acknowledged.`,
+          `The address you passed to --forward-to answered with error ${response.status}. Relay stopped so this event is not lost.`,
         );
       }
       io.stderr(`forwarded ${event.event_type} ${event.event_id}\n`);
     },
     async onFullSync(context): Promise<void> {
       throw new Error(
-        `Relay requested FULL sync through sequence ${context.throughSequence}; `
-        + "the stateless development listener cannot rebuild durable state.",
+        "This agent has been away longer than Relay keeps its events, so Relay wants to send it everything it missed "
+        + `up to number ${context.throughSequence}. This command only shows events as they arrive; it cannot go back. `
+        + "Start the runtime you chose for this agent so it can catch up, or use a fresh test agent here.",
       );
     },
   });

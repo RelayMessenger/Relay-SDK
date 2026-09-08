@@ -8,9 +8,9 @@
   "plugins": [
     {
       "name": "relay",
-      "version": "0.3.2-staging.1",
+      "version": "0.3.3-staging.1",
       "source": "./plugin",
-      "description": "Relay Messenger channel for Claude Code with durable acknowledged delivery and retry-safe replies.",
+      "description": "Send and receive Relay messages from Claude Code. Nothing is lost if a reply is sent twice.",
       "category": "productivity",
       "strict": true,
       "homepage": "https://github.com/RelayMessenger/Relay-SDK/tree/main/packages/claude-code#readme",

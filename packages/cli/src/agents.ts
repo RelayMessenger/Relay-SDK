@@ -49,11 +49,12 @@ export interface CreateAgentInput {
 // Status/code are safe structured diagnostics; server-controlled messages are not.
 const apiFailure = (error: unknown): string => {
   if (!(error instanceof RelayAPIError)) return "";
-  const status = Number.isInteger(error.status) ? ` HTTP ${error.status}.` : "";
-  const code = Number.isInteger(error.code) ? ` Code ${error.code}.` : "";
+  const reference = [Number.isInteger(error.status) ? `error ${error.status}` : "", Number.isInteger(error.code) ? `code ${error.code}` : ""]
+    .filter(Boolean).join(", ");
+  const said = reference ? ` Relay said: ${reference}.` : "";
   const retry = typeof error.retryAfter === "number" && Number.isFinite(error.retryAfter)
-    ? ` Retry-After: ${error.retryAfter}s.` : "";
-  return `${status}${code}${retry}`;
+    ? ` Try again in ${error.retryAfter} seconds.` : "";
+  return `${said}${retry}`;
 };
 
 export async function createAgent(input: CreateAgentInput, deps: AgentDependencies) {
@@ -63,23 +64,23 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     if (Object.hasOwn(before.profiles, input.profile)) throw new Error("Profile already exists; choose a new profile name.");
   }
   if (input.tokenName !== undefined && (input.tokenName.length < 1 || input.tokenName.length > 80 || /[\u0000-\u001f\u007f]/u.test(input.tokenName))) {
-    throw new Error("Token name must be 1–80 characters without control characters.");
+    throw new Error("The token name must be 1 to 80 characters, with no control characters.");
   }
   const apiURL = validateApiURL(input.apiURL ?? deps.env.RELAY_API_URL
     ?? defaultCreationApiURL());
   if (input.handle !== undefined && !/^[a-z][a-z0-9_]{2,31}\.dev$/u.test(input.handle)) {
-    throw new Error("Handle must be a full lowercase .dev handle with a 3–32 character local part beginning with a letter.");
+    throw new Error("A handle looks like name.dev. The part before .dev must be 3 to 32 characters, start with a lowercase letter, and use only lowercase letters, numbers and underscores.");
   }
   const firstName = input.firstName?.trim();
   if (firstName !== undefined && (!firstName || firstName.length > 255 || /[\u0000-\u001f\u007f]/u.test(firstName))) {
-    throw new Error("Display name must be 1–255 characters without ASCII controls.");
+    throw new Error("The name must be 1 to 255 characters, with no control characters.");
   }
   if (input.imageURL !== undefined) {
     let image: URL;
-    try { image = new URL(input.imageURL); } catch { throw new Error("Image URL must be publicly reachable HTTPS."); }
-    if (image.protocol !== "https:" || image.username || image.password) throw new Error("Image URL must be HTTPS without URL credentials.");
+    try { image = new URL(input.imageURL); } catch { throw new Error("Image URL must start with https://"); }
+    if (image.protocol !== "https:" || image.username || image.password) throw new Error("Image URL must start with https:// and must not contain a user name or password.");
   }
-  if (input.imageRecipe !== undefined && input.imageURL === undefined) throw new Error("An image recipe requires its rendered --image-url; the CLI does not render images.");
+  if (input.imageRecipe !== undefined && input.imageURL === undefined) throw new Error("An image recipe also needs the finished picture. Pass --image or --image-url with it; this command does not draw pictures.");
   const picture = input.imageRecipe === undefined
     ? (input.imageURL === undefined ? {} : { image_url: input.imageURL })
     : { image_url: input.imageURL!, image_recipe: input.imageRecipe };
@@ -89,18 +90,18 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     ...(firstName === undefined ? {} : { first_name: firstName }),
     ...picture,
   };
-  if (Buffer.byteLength(JSON.stringify(body), "utf8") > 8192) throw new Error("Agent creation body exceeds 8192 bytes.");
-  try { await deps.preflight(); } catch { throw new Error("Private credential storage preflight failed; no agent creation request was sent."); }
+  if (Buffer.byteLength(JSON.stringify(body), "utf8") > 8192) throw new Error("These agent details are too long. Shorten the name, the handle or the picture address.");
+  try { await deps.preflight(); } catch { throw new Error("Relay could not prepare a private file to save the token in, so it did not create the agent. Check the permissions on your Relay config folder."); }
   let result;
   try {
     result = await deps.bootstrap(body, { baseURL: apiURL, maxRetries: 0 });
   } catch (error) {
-    // The bootstrap error body may contain a secret not yet in our redaction set.
+    // The error body from Relay may hold a secret that is not yet in the redaction set.
     const rejected = error instanceof RelayAPIError && error.status !== undefined
       && error.status >= 400 && error.status < 500;
     throw new Error(rejected
-      ? `Agent creation was rejected.${apiFailure(error)} No automatic retry was made.`
-      : `Agent creation was not confirmed.${apiFailure(error)} No automatic retry was made; the request may have created an identity.`);
+      ? `Relay refused to create this agent.${apiFailure(error)} Relay did not try again.`
+      : `Relay did not answer, so this agent may or may not have been created.${apiFailure(error)} Relay did not try again. Run npx relaymessenger agents list to see what exists before you try once more.`);
   }
   try {
     const token = validateToken(result.secret);
@@ -118,14 +119,14 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
   } catch {
     const rawHandle = typeof result.agent?.handle === "string" && /^[a-z][a-z0-9_]{2,31}\.dev$/u.test(result.agent.handle) ? result.agent.handle : "(unavailable)";
     const assigned = safeMetadata(rawHandle, typeof result.secret === "string" ? [result.secret] : []);
-    let outcome = "local credential storage could not be verified";
+    let outcome = "Relay could not check whether its token was saved on this computer";
     let present = false;
     try {
       const saved = await deps.read();
       present = typeof result.secret === "string" && Object.values(saved.profiles).some((profile) => profile.agent_token === result.secret && validateApiURL(profile.api_url ?? DEFAULT_API_URL) === apiURL);
-      outcome = present ? "its credential is present in local config, but the write/security check failed" : "its credential could not be saved";
+      outcome = present ? "its token is in your Relay config file, but Relay could not confirm the file is private" : "its token could not be saved";
     } catch { /* The outcome remains explicitly unverified. */ }
-    throw new Error(`Agent @${assigned} was created; ${outcome}. ${present ? "No retry was made. Check config permissions before continuing." : "No retry was made and no durable recovery mechanism is available."}`);
+    throw new Error(`Agent @${assigned} was created, but ${outcome}. ${present ? "Relay did not try again. Check the permissions on your Relay config file before you continue." : "Relay did not try again, and it cannot get that token back. Delete this agent and create a new one."}`);
   }
 }
 
@@ -136,13 +137,13 @@ export async function listAgents(deps: AgentDependencies) {
     const apiURL = validateApiURL(saved.api_url ?? DEFAULT_API_URL);
     if (!saved.agent_token) continue;
     try {
-      // Deliberately not resolveAuth: ENV overrides must not impersonate every profile.
+      // Deliberately not resolveAuth: a token in the environment must not stand in for every profile.
       const cards = await deps.client(saved.agent_token, apiURL).contactCard.retrieve();
       const own = cards.contact_cards.find((card) => card.kind === "agent" && card.is_active);
       if (!own) throw new Error("no active agent card");
       agents.push({ profile, ...agentRecord(own), api_url: apiURL, token: "stored" as const });
     } catch {
-      agents.push({ profile, api_url: apiURL, token: "stored" as const, error: "Contact Card unavailable" });
+      agents.push({ profile, api_url: apiURL, token: "stored" as const, error: "Agent details unavailable" });
     }
   }
   return safeMetadata({ agents }, [...Object.values(config.profiles).flatMap((saved) => saved.agent_token ? [saved.agent_token] : []), ...(deps.env.RELAY_AGENT_TOKEN ? [deps.env.RELAY_AGENT_TOKEN] : [])]);
@@ -166,12 +167,12 @@ export async function selectAgentAuth(handle: string, profile: string | undefine
     } catch { unavailable = true; }
   }
   if (unavailable || matches.length !== 1) {
-    throw new Error("Cannot select an unambiguous saved agent. Choose --profile explicitly; credentials were kept.");
+    throw new Error("More than one saved profile matches that handle, or one of them could not be read. Name the one you mean with --profile. Nothing was changed.");
   }
   const selected = matches[0]!;
   const auth = await deps.auth(selected.profile);
   if (auth.token !== selected.token || auth.apiURL !== selected.apiURL) {
-    throw new Error("Selected profile changed during identification; no deletion was sent and credentials were kept.");
+    throw new Error("This profile changed while Relay was checking it. Nothing was deleted and your saved token is unchanged.");
   }
   return auth;
 }
@@ -181,13 +182,13 @@ export async function deleteAgent(handle: string, profile: string | undefined, d
   try {
     await deps.client(auth.token, auth.apiURL).agents.delete(handle, { maxRetries: 0 });
   } catch (error) {
-    throw new Error(`Agent deletion was not confirmed; local credentials were kept.${apiFailure(error)}`);
+    throw new Error(`Relay could not confirm this agent was deleted, so the token saved on this computer is unchanged.${apiFailure(error)}`);
   }
   let removed;
   try {
     removed = await deps.update((config) => {
       const saved = config.profiles[auth.profile];
-      // A selected ENV token may be unrelated to the profile's saved credential.
+      // A token from the environment may have nothing to do with the profile's saved token.
       if (saved?.agent_token === auth.token && validateApiURL(saved.api_url ?? DEFAULT_API_URL) === auth.apiURL) {
         delete saved.agent_token;
         return true;
@@ -195,7 +196,7 @@ export async function deleteAgent(handle: string, profile: string | undefined, d
       return false;
     });
   } catch {
-    throw new Error("Agent deletion was confirmed, but local credential cleanup failed.");
+    throw new Error("The agent was deleted, but Relay could not remove its saved token from this computer. Remove it with npx relaymessenger auth logout.");
   }
   return safeMetadata({ ok: true, handle, profile: auth.profile, token: removed ? "removed" : "unchanged" }, [auth.token]);
 }

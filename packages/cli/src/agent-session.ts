@@ -18,27 +18,27 @@ export interface AgentSessionDependencies {
   io?: TerminalSessionIO;
   client?: (token: string, origin: string) => Pick<Relay, "contactCard" | "websocket">;
 }
-/** New identities use the exact server share URL. For older imported profiles,
- * only known Relay environments have a source-backed public-link mapping. */
+/** A new agent uses the share link Relay returned. For an older imported profile,
+ * only the Relay addresses we know can be turned into a public link. */
 export function savedAgentShareURL(origin: string, handle: string): string {
   const publicOrigin = origin === STAGING_API_URL ? "https://staging.relayapp.im"
     : origin === DEFAULT_API_URL ? "https://go.relayapp.im" : undefined;
   return publicOrigin ? new URL(`/@${encodeURIComponent(handle)}`, publicOrigin).href : "";
 }
 
-/** Uses the actual saved profile, never an unrelated ENV token or origin. */
+/** Uses the saved profile itself, never an unrelated token or address from the environment. */
 export async function openSavedAgentSession(input: AgentSessionInput, dependencies: AgentSessionDependencies): Promise<TerminalSessionResult> {
   const config = await dependencies.agents.read();
   const selected = config.profiles[input.profile];
-  if (!selected?.agent_token) throw new Error("Selected profile has no saved credential for viewing.");
+  if (!selected?.agent_token) throw new Error("This profile has no saved token, so there is nothing to watch. Sign in for this profile first.");
   const origin = validateApiURL(selected.api_url ?? DEFAULT_API_URL);
-  if (input.apiURL && input.apiURL !== origin) throw new Error("Selected profile origin changed; no observer opened.");
+  if (input.apiURL && input.apiURL !== origin) throw new Error("The saved profile now points at a different Relay API, so the view was not opened. Sign in again for this profile.");
   const token = validateToken(selected.agent_token);
   const client = dependencies.client?.(token, origin) ?? new Relay({ apiKey: token, baseURL: origin, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) });
   const cards = await client.contactCard.retrieve({}, { maxRetries: 0 });
-  if (cards.contact_cards.length !== 1 || cards.contact_cards[0]?.kind !== "agent" || !cards.contact_cards[0].is_active) throw new Error("An active saved agent is required for the terminal view.");
+  if (cards.contact_cards.length !== 1 || cards.contact_cards[0]?.kind !== "agent" || !cards.contact_cards[0].is_active) throw new Error("This token does not belong to one active agent, so Relay cannot show its live view.");
   const card = cards.contact_cards[0];
-  if (input.handle && input.handle !== card.handle) throw new Error("Selected profile identity changed; no observer opened.");
+  if (input.handle && input.handle !== card.handle) throw new Error("The saved profile now belongs to a different agent, so the view was not opened. Sign in again for this profile.");
   return (dependencies.session ?? runTerminalSession)({
     interactive: true,
     agent: { handle: card.handle, name: card.first_name, profile: input.profile, shareUrl: input.shareURL ?? savedAgentShareURL(origin, card.handle) },

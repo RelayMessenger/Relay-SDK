@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const expected =
-  "7094178cb01c0ddc05f9254dc91094900a0a7b6273979c0cad6257eec486f0d8";
+  "5458497fe8db4ee7dfe6bef67f2803137575d3ea4d835748290a5c9f8d906791";
 const copies = [
   "contracts/relay-v1-openapi.yaml",
   "packages/chat-sdk-adapter/contracts/relay-openapi.yaml",
@@ -28,9 +28,12 @@ const skillLock = JSON.parse(
   ),
 );
 assert.equal(skillLock.api.openapi_sha256, expected);
-assert.equal(skillLock.api.commit, "5607d9f73d99eef3da6c5dc0b1066f91e602b337");
+assert.equal(skillLock.api.commit, "1a2245dd775f781b57e0d1f6f3146ebd384c90c3");
 assert.equal(skillLock.sdk.commit, "79517a1c9fcb1c82b474cd72ba8bc10197ff363f");
 assert.equal(skillLock.sdk.version, "0.3.1-staging.1");
+// The lock is what a customer's installed skill reads, on every branch, so its
+// docs address is the production one even while this branch targets staging.
+assert.equal(skillLock.docs_mcp.url, "https://docs.relayapp.im/mcp");
 
 // The skill lock is historical source provenance, not the moving workspace version.
 const sdkManifest = JSON.parse(await readFile(join(root, "packages/sdk/package.json"), "utf8"));

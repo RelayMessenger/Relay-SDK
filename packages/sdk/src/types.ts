@@ -148,17 +148,24 @@ export interface MessageContent {
   idempotency_key?: string;
 }
 
+/**
+ * The Message a send returns. A send never produces a system Message, so its
+ * parts are only text, media or link, and it carries no `system_event`.
+ * `is_system_message` is on the wire and is always `false` here; the contract's
+ * `SentMessage` does not declare it yet.
+ * Read paths (`chats.messages.list`, `messages.listMessagesThread`) return
+ * `Message`, which does carry system events and system parts.
+ */
 export interface SentMessage {
   id: UUID;
-  parts: MessagePartResponse[];
+  parts: Array<TextPartResponse | MediaPartResponse | LinkPartResponse>;
   created_at: string;
   sent_at: string | null;
   delivered_at?: string | null;
   delivery_status: DeliveryStatus;
   from_handle?: ChatHandle | null;
   reply_to?: ReplyTo | null;
-  is_system_message: boolean;
-  system_event?: SystemEvent | null;
+  is_system_message: false;
 }
 
 export interface Message {
@@ -321,6 +328,10 @@ export interface VoiceMemoAttachment {
   mime_type: string;
   size_bytes: number;
   duration_ms?: number | null;
+  /** Pixel width when known. Width and height are supplied together. */
+  width?: number | null;
+  /** Pixel height when known. Width and height are supplied together. */
+  height?: number | null;
 }
 
 export interface ChatSendVoicememoResponse {
@@ -516,7 +527,8 @@ export interface ContactRequestCreateResponse {
 
 export interface BlockedHandle {
   handle: string;
-  reason: string | null;
+  /** Optional note recorded when the handle was blocked. */
+  reason?: string | null;
   blocked_at: string;
 }
 

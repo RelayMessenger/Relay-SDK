@@ -77,8 +77,11 @@ These are Agent Token operations, not a browser/OAuth or Console account flow.
 
 ## Inventory and deletion
 
-`agents list` reads saved profiles through each profile's own authenticated
-Contact Card and API origin. It is not a global account inventory.
+`agents list` shows the agents saved on this computer, not every agent on the
+account. Each row is `profile`, `handle`, `display_name`, `image_url`,
+`api_url` and `token: "stored"`, read with that profile's own token and API
+address. A row Relay cannot answer for reads `error: "Agent details
+unavailable"`.
 
 ```sh
 npx relaymessenger@staging agents list --json
@@ -88,8 +91,9 @@ npx relaymessenger@staging agents delete "$AGENT_HANDLE" --profile "$PROFILE" --
 Use the exact Handle and profile returned by creation. Deletion uses that
 agent's token and applies to developer-managed `.dev` identities. An ambiguous
 local selection requires an explicit profile. Keep credentials when deletion
-is unconfirmed. HTTP `409` means pending events must finish normal durable
-processing and acknowledgement; do not manufacture ACKs to force deletion.
+is unconfirmed. HTTP `409` means Relay is still delivering events for this
+agent and must finish first. Wait for it; never fake a reply to Relay to force
+the deletion through.
 
 For isolated staging tests, select an unused `RELAY_CONFIG_PATH` before running
 commands. Merely overriding the API URL does not isolate the inventory of saved
@@ -98,9 +102,9 @@ profiles. Do not replace the user's normal credential file.
 ## Connect existing code
 
 Creation does not start a model. OpenClaw, Hermes, Claude Code, or the user's own
-code supplies behavior. Optional `--connect` on creation or `auth login` hands
-the saved token to an explicitly selected runtime context; use command help for
-that runtime's selectors.
+code supplies behavior. Optional `--connect` on creation or on `auth login`
+writes the saved token into the configuration of the runtime you name. Run the
+command with `--help` for that runtime's own options.
 
 An explicit `auth login --connect ...` without stdin reuses the selected saved
 credential when present, rather than substituting an unrelated environment
@@ -167,18 +171,19 @@ Interactive creation and existing-token login keep a QR/link/event view open.
 saved credential/origin—not an unrelated environment token—is used. Close the
 view with q/Ctrl-C/Ctrl-D; that neither deletes identity nor stops a runtime.
 
-The view requests SDK `observe: true` and requires `observational: true` in ready.
-It never sends event ACK or FULL-sync completion, falls back to a consuming
-socket, or changes a webhook subscription to enable observation. Retention gaps
-are possible. Event-view readiness is not model/runtime readiness; unknown stays
-unknown. Read [Agent events](agent-events.md) before changing observation code.
+The view asks for the SDK's watch-only mode and requires Relay to confirm it.
+It never answers Relay, never takes an event from it, never falls back to the
+connection that does, and never changes a webhook subscription. It shows the
+events Relay still holds, so some earlier ones may be missing. A connected view
+does not mean the agent is running; what is unknown stays unknown on screen.
+Read [Agent events](agent-events.md) before changing this code.
 
 ## Install or update this skill
 
 Use the existing Skills CLI instead of inventing a Relay-specific import format:
 
 ```sh
-npx skills@1.5.24 add \
+npx skills@1.5.25 add \
   https://github.com/RelayMessenger/Relay-SDK/tree/staging/skills/relay \
   --skill relay
 ```

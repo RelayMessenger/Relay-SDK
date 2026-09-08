@@ -187,10 +187,10 @@ describe("CLI command routing", () => {
   });
 
   it("preserves generic participant commands and agent Contact Card sharing", async () => {
-    expect(await run(["chats", "participants", "add", "chat-1", "research.agent"])).toBe(0);
-    expect(fake.methods.addParticipant).toHaveBeenCalledWith("chat-1", { handle: "research.agent" });
-    expect(await run(["chats", "participants", "remove", "chat-1", "research.agent"])).toBe(0);
-    expect(fake.methods.removeParticipant).toHaveBeenCalledWith("chat-1", { handle: "research.agent" });
+    expect(await run(["chats", "participants", "add", "chat-1", "research.dev"])).toBe(0);
+    expect(fake.methods.addParticipant).toHaveBeenCalledWith("chat-1", { handle: "research.dev" });
+    expect(await run(["chats", "participants", "remove", "chat-1", "research.dev"])).toBe(0);
+    expect(fake.methods.removeParticipant).toHaveBeenCalledWith("chat-1", { handle: "research.dev" });
     expect(await run(["contact-card", "share", "chat-1"])).toBe(0);
     expect(fake.methods.shareCard).toHaveBeenCalledWith("chat-1");
   });
@@ -199,20 +199,20 @@ describe("CLI command routing", () => {
     ["--hide-history", true],
     ["--no-hide-history", false],
   ] as const)("passes %s to the SDK without losing false", async (flag, hideHistory) => {
-    expect(await run(["chats", "participants", "add", "chat-1", "research.agent", flag])).toBe(0);
+    expect(await run(["chats", "participants", "add", "chat-1", "research.dev", flag])).toBe(0);
     expect(fake.methods.addParticipant).toHaveBeenCalledWith("chat-1", {
-      handle: "research.agent",
+      handle: "research.dev",
       hide_history: hideHistory,
     });
   });
 
   it("explains agent-only selection without renaming participant commands", async () => {
     expect(await run(["chats", "participants", "--help"])).toBe(0);
-    expect(stdout.join("")).toContain("selectable participants are agents");
+    expect(stdout.join("")).toContain("Add or remove agents in a chat");
     const help = stdout.join("").replace(/\s+/gu, " ");
-    expect(help).toContain("a new agent and any acting agent must be the user's added, unblocked Contacts");
-    expect(help).toContain("An agent removing others must still be an added, unblocked Contact");
-    expect(help).toContain("self-leave keeps existing rules");
+    expect(help).toContain("the agent you add and the agent doing the adding must both be that person's contacts and not blocked");
+    expect(help).toContain("The same holds for an agent that removes another");
+    expect(help).toContain("An agent may always leave a chat itself");
     expect(stdout.join("")).toContain("add");
     expect(stdout.join("")).toContain("remove");
   });
@@ -220,9 +220,8 @@ describe("CLI command routing", () => {
   it("explains shared Chat permissions, Contacts eligibility, and participant limits", async () => {
     const help = () => stdout.join("").replace(/\s+/gu, " ");
     expect(await run(["chats", "--help"])).toBe(0);
-    expect(help()).toContain("Agents and users have the same generic Chat API permissions");
-    expect(help()).toContain("Creating or reusing a user-containing Chat requires every agent to be that user's added, unblocked Contact");
-    expect(help()).toContain("Agent-only messaging keeps its existing behavior");
+    expect(help()).toContain("every agent in it must already be one of that person's contacts and not blocked");
+    expect(help()).toContain("Chats between agents only need no such contact");
     stdout.length = 0;
     expect(await run(["chats", "create", "--help"])).toBe(0);
     expect(help()).toContain("at most 7 total participants, including the sender");
