@@ -244,12 +244,19 @@ const withConfigLock = async <T>(context: ConfigContext, action: () => Promise<T
   const lockPath = `${configPath(context)}.lock`;
   // Native ACL operations require subprocesses; keep concurrent writers bounded
   // without applying the POSIX fast-write deadline to Windows.
-  const deadline = Date.now() + ((context.platform ?? process.platform) === "win32" ? 120_000 : 5_000);
+  const windows = (context.platform ?? process.platform) === "win32";
+  const deadline = Date.now() + (windows ? 120_000 : 5_000);
+  let permissionRetries = 0;
   let lock;
   for (;;) {
     try { lock = await open(lockPath, "wx", 0o600); break; }
     catch (error) {
-      if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
+      if (!(error instanceof Error) || !("code" in error)) throw error;
+      // Windows can deny an exclusive open during lock-file deletion. Retry
+      // only this acquisition, briefly; never chmod/unlink someone else's lock
+      // or turn a persistent permission error into the long busy timeout.
+      const transientWindowsPermission = windows && error.code === "EPERM" && permissionRetries++ < 10;
+      if (error.code !== "EEXIST" && !transientWindowsPermission) throw error;
       if (Date.now() >= deadline) throw new Error("Relay configuration is busy; no local change was made.");
       await new Promise((resolve) => setTimeout(resolve, 20));
     }

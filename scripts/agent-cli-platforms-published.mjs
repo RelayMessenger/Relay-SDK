@@ -39,11 +39,33 @@ for (const [key, dir, name] of [['cli', 'cli', 'relaymessenger'], ['sdk', 'sdk',
 // npm omits gitHead for retained-tarball publication. The release bump is the
 // nearest ancestor that changed this manifest; actual byte parity remains mandatory.
 const sourceSha = run('git', ['log', '-1', '--format=%H', '--', 'packages/cli/package.json']);
-const inventoryPath = join(receipts, 'candidate.json');
-writeFileSync(inventoryPath, JSON.stringify(inventory, null, 2));
+writeFileSync(join(receipts, 'source-candidate.json'), JSON.stringify(inventory, null, 2));
+// The frozen registry release cannot contain an unpublished regression fix.
+// Keep its previously verified inventory immutable, rather than relaxing the
+// published-byte comparison to accept the fixed candidate's different code.
+const inventoryPath = join(root, 'scripts/agent-cli-platforms-frozen-c4703ec.json');
+const frozenInventory = JSON.parse(readFileSync(inventoryPath));
+assert.equal(frozenInventory.publisherSourceSha, sourceSha);
+const changes = [];
+for (const pkg of inventory.packages) {
+  const previous = frozenInventory.packages.find(item => item.name === pkg.name);
+  assert.ok(previous); assert.deepEqual(pkg.manifest, previous.manifest);
+  assert.deepEqual(Object.keys(pkg.files).sort(), Object.keys(previous.files).sort());
+  const changed = Object.keys(pkg.files).filter(file => pkg.files[file] !== previous.files[file]);
+  for (const file of changed) {
+    assert.equal(pkg.name, 'relaymessenger', 'Only the CLI lock regression changed runtime code');
+    assert.ok(['package/dist/config.js', 'package/dist/config.js.map', 'package/dist/config.d.ts.map'].includes(file), `Unreviewed source/registry difference: ${file}`);
+  }
+  changes.push({ name: pkg.name, changedFiles: changed });
+}
+writeFileSync(join(receipts, 'unpublished-source-delta.json'), JSON.stringify({
+  sourceCandidateSha: sha, frozenPublisherSha: sourceSha, changes,
+  limitation: 'Frozen CLI still contains the observed Windows config-lock EPERM race; its fix is unpublished.',
+}, null, 2));
 const plan = {
   phase: 'cli-sdk-only', registry: 'https://registry.npmjs.org/',
   publishSha: sourceSha, inventoryPath,
+  comparisonScope: 'Frozen publisher source, not the unpublished fixed candidate',
   frozenByOwner: true, frozenAt: '2026-09-08',
   cliVersion: metadata.cli.version, sdkVersion: metadata.sdk.version,
 };
