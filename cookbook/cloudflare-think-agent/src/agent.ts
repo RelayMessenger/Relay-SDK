@@ -46,14 +46,18 @@ export function createRelayAdapterFor(env: Bindings): RelayAdapter {
   const handle = requireRelayAgentHandle(env);
   return createRelayAdapter({
     // `abortActiveTurnOnReceipt` is deliberately left off. It aborts the Chat
-    // SDK turn through `context.signal`, and Think's messenger handlers never
+    // SDK turn through `thread.signal` (chat 4.39.0,
+    // dist/types-Bv-_sd-h.d.ts:418), and Think's messenger handlers never
     // read that signal (@cloudflare/think 0.17.0,
     // dist/chat-sdk-C8BvREXn.js:433-459), so a running turn always finishes
-    // and posts its answer. Nothing in this Worker cancels a running turn: a
-    // second Message inside Think's 600 ms burst window joins the running
-    // turn, and a later one waits behind the whole turn
-    // (`waitForCompletion: true`, dist/chat-sdk-C8BvREXn.js:489) and gets its
-    // own reply. Think does expose `cancelAllChats()`, but this Worker does
+    // and posts its answer. Nothing in this Worker cancels a running turn.
+    // Messages inside Think's 600 ms burst window collapse to one turn for
+    // the latest Message: the Chat SDK dispatches only the latest and passes
+    // the earlier ones as `context.skipped` (chat dist/index.js:2436-2454),
+    // which Think's `(thread, message)` handlers never read, so those earlier
+    // Messages never reach the model. A Message that lands after the window
+    // waits behind the whole turn (`waitForCompletion: true`,
+    // dist/chat-sdk-C8BvREXn.js:489) and gets its own reply. Think does expose `cancelAllChats()`, but this Worker does
     // not call it: it would also drop the newer Message unanswered (README,
     // "A newer Message cannot cancel the running turn").
     baseUrl: env.RELAY_API_ORIGIN,
