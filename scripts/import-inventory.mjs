@@ -4,8 +4,14 @@ import { createHash } from "node:crypto";
 // Immutable source-side records from staging 10950ef40bf254beee4a9289eedd9c7fc897c41c.
 // Current destination hashes may change as the monorepo evolves. Newly authored
 // files are not historical imports and must not acquire invented upstream origins.
+//
+// This digest moves only when a record is removed with its file. It last moved
+// on 2026-09-08, when the npm registry receipts for @relaymessenger/sdk
+// 0.3.0-staging.4 and 0.3.0-staging.8 were deleted: they described versions
+// nothing depends on any more, and stale evidence is deleted, never rewritten.
+// No surviving record's repository, commit, source path, bytes or mode changed.
 export const HISTORICAL_IMPORTS_SHA256 =
-  "2925809751da0d9157a312de903467426ec8c6113c62fb9eac3f690bb3c3c50a";
+  "edba75059a7428305706d62955a9b855bde97cc6aa91a179da732329c9957897";
 
 export function historicalImportDigest(entries) {
   const records = entries.map(({
