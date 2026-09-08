@@ -234,8 +234,8 @@ describe("multi-user turn isolation", () => {
     }
   });
 
-  it("clears reply origins on explicit failure and process replacement", async () => {
-    const { state, fake, channel, mcp, config } = fixture();
+  it("keeps an explicit failure closed but requeues a turn cut short by process replacement", async () => {
+    const { state, notifications, fake, channel, mcp, config } = fixture();
     try {
       const originA = event({ sequence: 1, text: "turn A fails" });
       accept(state, originA, 1);
@@ -276,6 +276,29 @@ describe("multi-user turn isolation", () => {
         send_id: "after-restart",
       })).isError).toBe(true);
       expect(fake.sends).toHaveLength(0);
+      // The crash was not the model's decision: B returns to the inbox, is
+      // notified again on the first flush with no live lease, and opens a
+      // fresh turn. A stays sealed because the model itself failed it.
+      expect(state.delivery(originB.event_id)).toMatchObject({ status: "pending" });
+      expect(state.delivery(originA.event_id)).toMatchObject({ status: "processing" });
+      expect(notifications).toHaveLength(2);
+      await replacement.flush();
+      expect(notifications).toHaveLength(3);
+      expect((notifications[2]?.params as { content: string }).content)
+        .toBe("turn B interrupted by restart");
+      const reopened = await replacement.beginProcessing({ delivery_id: originB.event_id });
+      expect(reopened.isError).not.toBe(true);
+      expect(reopened.content[0]?.text).toContain("processing started");
+      expect((await replacement.reply({
+        chat_id: CHAT_B,
+        text: "answered after restart",
+        send_id: "after-restart-2",
+      })).isError).not.toBe(true);
+      expect(fake.sends.map((send) => send.chatId)).toEqual([CHAT_B]);
+      expect((await replacement.beginProcessing({ delivery_id: originA.event_id })).isError)
+        .toBe(true);
+      await replacement.flush();
+      expect(notifications).toHaveLength(3);
     } finally {
       state.close();
     }

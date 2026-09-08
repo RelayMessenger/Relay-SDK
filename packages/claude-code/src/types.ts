@@ -5,7 +5,11 @@ import type {
   WebSocketFullSyncContext,
 } from "@relaymessenger/sdk";
 
-export type TurnOutcome = "completed" | "failed" | "expired" | "superseded";
+/** `completed` and `failed` are the model's own decisions and are final.
+ * `expired`, `superseded`, and `interrupted` (the channel process was
+ * replaced or stopped mid-turn) leave the Message unanswered, so the delivery
+ * returns to the inbox. */
+export type TurnOutcome = "completed" | "failed" | "expired" | "superseded" | "interrupted";
 
 export interface TurnOrigin {
   readonly deliveryId: string;

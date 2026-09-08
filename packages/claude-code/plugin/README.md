@@ -130,18 +130,20 @@ Required first call for every Relay channel event. Takes `delivery_id` from the
 `<channel>` tag and marks that Chat Read through the public Relay API. Do not
 process the content if the tool returns an error. Success opens one turn-scoped
 reply origin with a ten-minute maximum lease. Starting another turn closes
-the previous one as superseded. A superseded or expired delivery that was
-never answered goes back to the inbox: the channel notifies it again on the
-first flush after the active turn closes (never while another turn is
+the previous one as superseded. If the channel process stops or is replaced
+(a crash, a kill, a Claude Code restart) while a turn is open, the inherited
+lease closes as interrupted. A superseded, expired, or interrupted delivery
+that was never answered goes back to the inbox: the channel notifies it again
+on the first flush after the active turn closes (never while another turn is
 running, so the two cannot keep superseding each other), and
 `begin_processing` then opens a fresh turn for it (the closed turn stays
 recorded for audit). New deliveries that never had a turn are still notified
 at once. Each time the state store opens it applies the same reset to any
-delivery an older channel version left stuck after a superseded or expired
-turn, so no Message stays lost on an existing install. A delivery that was
-answered by `reply` or closed
-by `complete_processing` stays closed and cannot be reactivated, so no Message
-is answered twice and none is silently lost.
+delivery an older channel version left stuck after a superseded, expired, or
+interrupted turn, so no Message stays lost on an existing install. Only the
+model's own verdict is final: a delivery that was answered by `reply` or
+closed by `complete_processing` (completed or failed) stays closed and cannot
+be reactivated, so no Message is answered twice and none is silently lost.
 
 ### `complete_processing`
 
@@ -199,7 +201,8 @@ State is account-scoped below `~/.claude/channels/relay/state/` and includes:
 - pending channel deliveries and explicit Read-start status;
 - one short-lived, per-session delivery-turn lease used for reply and
   Chat isolation, plus closed-turn markers that prevent reactivation of
-  answered deliveries (superseded and expired ones return to pending);
+  answered deliveries (superseded, expired, and interrupted ones return to
+  pending);
 - the complete last FULL-sync snapshot;
 - observed reply destinations;
 - logical outbound sends.

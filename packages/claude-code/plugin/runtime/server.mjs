@@ -22884,7 +22884,7 @@ var RelayChannel = class {
     this.#config = params.config;
     this.#redactor = params.redactor;
     this.#log = params.log;
-    this.#state.clearActiveTurn("failed");
+    this.#state.clearActiveTurn("interrupted");
     this.relay = params.relay ?? new Relay({
       apiKey: params.config.agentToken,
       baseURL: params.config.baseURL
@@ -22936,7 +22936,7 @@ var RelayChannel = class {
     });
   }
   stop() {
-    this.#state.clearActiveTurn("failed");
+    this.#state.clearActiveTurn("interrupted");
     this.#abort.abort();
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = null;
@@ -23260,7 +23260,8 @@ var TURN_OUTCOMES = /* @__PURE__ */ new Set([
   "completed",
   "failed",
   "expired",
-  "superseded"
+  "superseded",
+  "interrupted"
 ]);
 function isTurnOutcome(value) {
   return typeof value === "string" && TURN_OUTCOMES.has(value);
@@ -23633,8 +23634,8 @@ var RelayStateStore = class {
     }
     return lease.deliveryId;
   }
-  /** Before requeue-on-close existed, a superseded or expired turn left its
-   * delivery stuck at `processing` for good. Repair such rows once per open:
+  /** Before requeue-on-close existed, a superseded, expired, or interrupted
+   * turn left its delivery stuck at `processing` for good. Repair such rows once per open:
    * the same reset the close-time path applies, then the same notification
    * gate. A delivery holding the current lease is live, not stranded. */
   #requeueStrandedDeliveries() {
@@ -23725,7 +23726,9 @@ var RelayStateStore = class {
       return true;
     });
   }
-  clearActiveTurn(outcome = "failed", now = Date.now()) {
+  /** Close whatever lease this process inherited or still holds. The outcome
+   * is the caller's to name; only the model's own `failed` is final. */
+  clearActiveTurn(outcome, now = Date.now()) {
     return transaction(
       this.#db,
       () => this.#closeActiveTurn(outcome, now) !== null
