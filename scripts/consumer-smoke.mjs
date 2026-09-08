@@ -97,6 +97,7 @@ try {
     "image_url",
     "about",
     "verified",
+    "is_removable",
   ]);
   assert.deepEqual(interfaceFields("UserChatHandle"), [
     "kind",
