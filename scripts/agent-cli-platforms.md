@@ -95,3 +95,39 @@ Initialize the remote shell with `source /usr/local/share/nvm/nvm.sh` and
 `nvm use 22.22.3` before installing/testing. Archive or transfer the intended
 source SHA/patch explicitly; the helper does not guess which shared work to
 copy. Server and CLI use separate directories in the owned sandbox.
+
+## Prepared staging HTTP smoke (run only after main confirms deployment)
+
+`node scripts/agent-cli-platforms-staging.mjs` is plan-only and sends **zero**
+requests. Its six protocol-fixture unit tests do not prove a live deployment.
+The executable fixes the origin to `https://api.staging.relayapp.im`; no origin
+override or production polling exists. It creates at most two identities with
+`verification-agent-cli-<run-id>-a/b` token labels, reads their own cards as the
+local fixture inventory (there is no GET-list route), checks missing/invalid auth
+and cross-fixture card/deletion isolation, then deletes only identities minted
+by that run and checks revocation. No messages, operator profiles, existing
+agents, or event acknowledgements are involved.
+
+After main provides the deployed Server SHA, execute **inside Daytona**:
+
+```sh
+# DEPLOYED_SERVER_SHA must be the real confirmed deployment SHA, not a placeholder.
+: "${DEPLOYED_SERVER_SHA:?main must confirm the deployed SHA}"
+RELAY_DAYTONA_SANDBOX_ID=21b65902-6e9d-4d91-8857-63cbccebe8f9 \
+node scripts/agent-cli-platforms-staging.mjs --execute \
+  --run-id verify-20260908-first \
+  --server-sha "$DEPLOYED_SERVER_SHA" \
+  --receipt /home/daytona/verification-receipts/staging-http-first.json \
+  --private-state /home/daytona/.config/relay-verification/staging-http-first.json
+```
+
+Never download the private-state file into artifacts. It contains only this
+run's one-time credentials, is created exclusively with mode 0600, and is removed
+only when fixture deletion/revocation is confirmed. Uncertain creation, deletion,
+or 409 preserves recovery state for main's review. The script never retries
+creation/deletion or acknowledges pending events. A failed run is not permission
+to rerun blindly (the contract's bootstrap limit still applies).
+
+This HTTP proof does **not** claim final CLI `agents list` environment-isolation,
+installed package behavior, or runtime handoff. Those tests follow the delivered
+feature commands and native matrix against exact feature SHAs.
