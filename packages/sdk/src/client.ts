@@ -750,6 +750,9 @@ export class WebSocket {
    * transport-only cumulative ACK after that promise resolves. The ACK does
    * not change Delivered or Read receipts. `onFullSync` must return only after
    * a complete REST snapshot is durably applied.
+   * Explicit observe:true requests confirmed read-only observation and never
+   * sends ACK/FULL-sync completion. It is best-effort, may have retention gaps,
+   * and is not durable recovery or evidence that a model is running.
    */
   run(options: WebSocketRunOptions): Promise<void> {
     return this.transport.runWebSocket(options);

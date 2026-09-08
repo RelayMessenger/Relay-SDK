@@ -48,6 +48,7 @@ export function interactiveEntry(argv: readonly string[]): { entry: InteractiveE
 }
 export async function chooseInteractiveCommand(
   entry: InteractiveEntry, prefix: string[], deps: AgentDependencies, ui: InteractivePrompts,
+  beforeSetup: () => Promise<void> = async () => undefined,
 ): Promise<string[] | "install-skill" | undefined> {
   const options = entry === "auth" ? [
     { value: "login", label: "Sign in with an existing token" },
@@ -66,20 +67,19 @@ export async function chooseInteractiveCommand(
   if (action === "exit") return undefined;
   if (action === "skill") return "install-skill";
   if (action === "create") {
-    const origin = validateApiURL(deps.env.RELAY_API_URL ?? defaultCreationApiURL());
-    const chosenHandle = (await ui.text("Handle including .dev (optional; blank keeps an assigned handle)", "")).trim();
-    const displayName = (await ui.text("Display name (optional; blank keeps the assigned bird name)", "")).trim();
-    const imageURL = (await ui.text("Public HTTPS image URL (optional; blank keeps the default image)", "")).trim();
-    const recipeFile = imageURL ? (await ui.text("Existing Relay image recipe JSON file (optional; image URL must be its rendered snapshot)", "")).trim() : "";
-    if (!await ui.confirm(`Create a new agent at ${origin}?`)) return undefined;
+    await beforeSetup();
+    ui.info("Leave fields blank to use defaults. Handles include .dev; images can be a local file or HTTPS URL.");
+    const chosenHandle = (await ui.text("Handle (optional)", "")).trim();
+    const displayName = (await ui.text("Name (optional)", "")).trim();
+    const image = (await ui.text("Image (optional)", "")).trim();
     return [...prefix, "agents", "create",
       ...(chosenHandle ? ["--handle", chosenHandle] : []),
       ...(displayName ? ["--name", displayName] : []),
-      ...(imageURL ? ["--image-url", imageURL] : []),
-      ...(recipeFile ? ["--image-recipe", recipeFile] : []),
+      ...(image ? ["--image", image] : []),
     ];
   }
   if (action === "login") {
+    await beforeSetup();
     const config = await deps.read();
     const profileArg = prefix.find((value) => value.startsWith("--profile="))?.slice(10) ?? (prefix[0] === "--profile" ? prefix[1] : undefined);
     const selectedName = profileArg ?? deps.env.RELAY_PROFILE ?? config.current_profile;

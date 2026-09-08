@@ -1645,6 +1645,19 @@ paths:
         - WebSocket
       security:
         - BearerAuth: []
+      parameters:
+        - name: observe
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: >-
+            Read-only diagnostic event view. The ready frame includes
+            observational:true. Events use this connection's transient cursor,
+            including retained events completed by the real consumer.
+            ACK and full_sync_complete frames are rejected. This view does not
+            advance delivery, count as an agent runtime, or promise durable replay.
       responses:
         "101":
           description: WebSocket connection accepted
@@ -1656,8 +1669,12 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
-      description: "Upgrade wss://api.relayapp.im/v1/websocket with Authorization: Bearer <Agent Token>. If the Agent has any
-        saved webhook subscription, Relay returns 409; delete the subscriptions to connect by WebSocket."
+      description: >-
+        Upgrade wss://api.relayapp.im/v1/websocket with Authorization: Bearer
+        <Agent Token>. If the Agent has any saved webhook subscription, Relay
+        returns 409. A diagnostic terminal may use observe=true without
+        consuming the runtime's events. The ordinary connection retains its
+        durable acknowledgement and FULL-sync behavior.
   /v1/contact_requests:
     post:
       operationId: createContactRequest
@@ -3636,6 +3653,14 @@ components:
             - type: "null"
     SetContactCardRequest:
       type: object
+      additionalProperties: false
+      not:
+        required: [image_url, attachment_id]
+      dependentSchemas:
+        image_recipe:
+          anyOf:
+            - required: [attachment_id]
+            - required: [image_url]
       required:
         - handle
         - first_name
@@ -3652,6 +3677,17 @@ components:
             Profile image for the contact card. Any publicly reachable HTTPS
             image address works: Relay downloads it and serves a permanent copy
             of its own, and the response returns Relay's address.
+        attachment_id:
+          type: string
+          format: uuid
+          description: >-
+            An image uploaded through the existing Attachments API by this
+            authenticated agent. Upload must be complete. Relay copies its
+            bytes from private attachment storage to a permanent public image.
+            Choose this or image_url, not both.
+        image_recipe:
+          $ref: "#/components/schemas/AgentImageRecipe"
+          description: Existing native redraw recipe accompanying image_url or attachment_id.
         handle:
           type: string
           description: Relay Handle associated with this contact card.
@@ -3883,6 +3919,17 @@ components:
             not have to stay up. Send null to clear the photo.
     UpdateContactCardRequest:
       type: object
+      additionalProperties: false
+      not:
+        required: [image_url, attachment_id]
+      dependentSchemas:
+        image_recipe:
+          anyOf:
+            - required: [attachment_id]
+            - required: [image_url]
+              properties:
+                image_url:
+                  type: string
       properties:
         first_name:
           type: string
@@ -3902,6 +3949,17 @@ components:
             and the response returns Relay's address. If omitted, the existing
             image is kept.
           format: uri
+        attachment_id:
+          type: string
+          format: uuid
+          description: >-
+            This agent's completed image upload from the Attachments API.
+            Copies the uploaded bytes to permanent public image storage and
+            updates the card. Mutually exclusive with image_url, including null.
+            Omit both to keep the existing image.
+        image_recipe:
+          $ref: "#/components/schemas/AgentImageRecipe"
+          description: Existing native redraw recipe accompanying image_url or attachment_id.
     UpdateWebhookSubscriptionRequest:
       type: object
       properties:

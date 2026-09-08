@@ -922,3 +922,99 @@ it("rejects invalid base URLs and empty Agent Tokens before opening a socket", a
     .rejects.toThrow("Agent Token");
   expect(FakeWebSocket.instances).toHaveLength(0);
 });
+
+it("observes retained sequence gaps with authenticated query, pong, and no ACK", async () => {
+  const abort = new AbortController();
+  const onEvent = vi.fn(async () => {});
+  const onObservationGap = vi.fn();
+  const onReady = vi.fn();
+  const run = client().websocket.run({ observe: true, signal: abort.signal,
+    WebSocket: FakeWebSocket, onEvent, onReady, onObservationGap, onFullSync: vi.fn() });
+  const socket = FakeWebSocket.latest;
+  expect(socket.url).toBe("wss://relay.test/v1/websocket?observe=true");
+  expect(socket.options?.headers?.Authorization).toBe("Bearer relay-agent-token");
+  emitFrame(socket, { ...ready("4"), observational: true });
+  emitFrame(socket, { type: "ping", sent_at: "2026-09-08T00:00:00.000Z" });
+  emitFrame(socket, eventFrame("5")); emitFrame(socket, eventFrame("8"));
+  await waitFor(() => onEvent.mock.calls.length === 2);
+  expect(onReady).toHaveBeenCalledWith(expect.objectContaining({ observational: true, acked_through: "4" }));
+  expect(onObservationGap).toHaveBeenCalledWith({ expectedSequence: "6", receivedSequence: "8" });
+  expect(socket.sent.map(value => JSON.parse(value))).toEqual([{ type: "pong" }]);
+  abort.abort(); await run;
+});
+
+it.each([undefined, false, "true"])("fails closed with observer marker %s", async marker => {
+  const onEvent = vi.fn(async () => {});
+  const run = client().websocket.run({ observe: true, WebSocket: FakeWebSocket, onEvent, onFullSync: vi.fn() });
+  const rejection = expect(run).rejects.toThrow();
+  const socket = FakeWebSocket.latest;
+  emitFrame(socket, { ...ready(), ...(marker === undefined ? {} : { observational: marker }) });
+  await rejection;
+  emitFrame(socket, eventFrame("1")); await turn();
+  expect(onEvent).not.toHaveBeenCalled(); expect(socket.sent).toEqual([]);
+  expect(FakeWebSocket.instances).toHaveLength(1);
+});
+
+it.each(["1", "0"])("rejects observer duplicate/decreasing sequence %s", async sequence => {
+  const run = client().websocket.run({ observe: true, WebSocket: FakeWebSocket, onEvent: async () => {}, onFullSync: vi.fn() });
+  const rejection = expect(run).rejects.toThrow(/increase/);
+  const socket = FakeWebSocket.latest;
+  emitFrame(socket, { ...ready(), observational: true });
+  emitFrame(socket, eventFrame("1")); emitFrame(socket, eventFrame(sequence));
+  await rejection; expect(socket.sent).toEqual([]);
+});
+
+it("refuses observer FULL sync without callback or completion", async () => {
+  const onFullSync = vi.fn();
+  const run = client().websocket.run({ observe: true, WebSocket: FakeWebSocket, onEvent: async () => {}, onFullSync });
+  const rejection = expect(run).rejects.toThrow(/FULL sync/);
+  const socket = FakeWebSocket.latest;
+  emitFrame(socket, { ...ready("0", "8"), observational: true });
+  await rejection; expect(onFullSync).not.toHaveBeenCalled(); expect(socket.sent).toEqual([]);
+});
+
+it("validates observe boolean before creating a connection", async () => {
+  await expect(client().websocket.run({ observe: "true" as unknown as boolean,
+    WebSocket: FakeWebSocket, onEvent: async () => {}, onFullSync: async () => {} })).rejects.toThrow(/boolean/);
+  expect(FakeWebSocket.instances).toHaveLength(0);
+});
+
+it("real WS fixture: fast writer ACK does not starve observer and observer abort leaves writer open", async () => {
+  const server = createServer(); const wss = new WebSocketServer({ server });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  const address = server.address(); if (!address || typeof address === "string") throw Error("No port");
+  const writerAbort = new AbortController(); const observerAbort = new AbortController();
+  const received: string[] = []; const observerFrames: unknown[] = [];
+  let sharedCheckpoint = "0"; let writerSocket: import("ws").WebSocket | undefined;
+  let observerSocket: import("ws").WebSocket | undefined;
+  wss.on("connection", (socket, request) => {
+    const observing = new URL(request.url!, "http://fixture").searchParams.get("observe") === "true";
+    socket.send(JSON.stringify({ ...ready(sharedCheckpoint), ...(observing ? { observational: true } : {}) }));
+    if (observing) observerSocket = socket; else writerSocket = socket;
+    socket.on("message", raw => {
+      const frame = JSON.parse(raw.toString());
+      if (observing) observerFrames.push(frame);
+      else if (frame.type === "ack") sharedCheckpoint = frame.through_sequence;
+    });
+  });
+  const base = `http://127.0.0.1:${address.port}`;
+  const writer = runWebSocket(base, "owned-fixture-token", { signal: writerAbort.signal, onEvent: async () => {}, onFullSync: async () => {} });
+  const observer = runWebSocket(base, "owned-fixture-token", { observe: true, signal: observerAbort.signal,
+    onEvent: async (_event, context) => { received.push(context.sequence); }, onFullSync: async () => { throw Error("Unexpected FULL sync"); } });
+  try {
+    await waitFor(() => !!writerSocket && !!observerSocket);
+    for (const sequence of ["1", "2", "3"]) writerSocket!.send(JSON.stringify(eventFrame(sequence)));
+    await waitFor(() => sharedCheckpoint === "3");
+    // Contract fixture retains rows despite writer ACK; this is not a Server implementation proof.
+    for (const sequence of ["1", "2", "3"]) observerSocket!.send(JSON.stringify(eventFrame(sequence)));
+    await waitFor(() => received.length === 3);
+    expect(received).toEqual(["1", "2", "3"]); expect(observerFrames).toEqual([]);
+    observerAbort.abort(); await observer;
+    expect(writerSocket!.readyState).toBe(1); expect(sharedCheckpoint).toBe("3");
+  } finally {
+    writerAbort.abort(); observerAbort.abort(); await Promise.allSettled([writer, observer]);
+    for (const socket of wss.clients) socket.terminate();
+    await new Promise<void>(resolve => wss.close(() => resolve()));
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});

@@ -481,6 +481,10 @@ export interface ContactCardCreateParams {
   first_name: string;
   last_name?: string;
   image_url?: string;
+  /** Caller-owned completed image upload; mutually exclusive with image_url. */
+  attachment_id?: UUID;
+  /** Existing redraw metadata; requires image_url or attachment_id. */
+  image_recipe?: AgentImageRecipe;
 }
 
 export interface ContactCardRetrieveParams {
@@ -496,6 +500,10 @@ export interface ContactCardUpdateParams {
   first_name?: string;
   last_name?: string | null;
   image_url?: string | null;
+  /** Caller-owned completed image upload; mutually exclusive with image_url, including null. */
+  attachment_id?: UUID;
+  /** Existing redraw metadata; requires an image URL or completed upload. */
+  image_recipe?: AgentImageRecipe;
 }
 
 export interface ContactRequestCreateParams {

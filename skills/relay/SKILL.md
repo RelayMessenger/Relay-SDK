@@ -11,7 +11,8 @@ Use the locked Relay v1 contract instead of remembered examples.
 
 1. Read the [locked source record](references/relay-v1-lock.json).
 2. Read `contracts/relay-v1-openapi.yaml` from the public Relay-SDK repository
-   at the recorded SDK commit, and verify its hash against the API lock. The
+   at `api.public_source.commit` in the lock (or the SDK commit when that field
+   is absent), and verify its hash against the API lock. The
    Server commit records its origin; private Server repository access is not
    required. If the public copy and lock disagree, report the stale source.
 3. Read the relevant guide and implementation evidence when it is available in

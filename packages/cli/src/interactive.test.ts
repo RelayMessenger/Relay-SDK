@@ -45,17 +45,18 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
   });
   it("delegates creation once and declining its one skill offer leaves success intact", async () => {
     const f = await fixture(); f.prompts.select.mockResolvedValueOnce("create");
-    f.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    f.prompts.confirm.mockResolvedValueOnce(false);
     expect(await runCLI([], f.deps)).toBe(0);
     expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
     expect((await readConfig(f.deps.configContext)).profiles[card.handle]?.agent_token).toBe(token);
-    expect(f.skillPresent).toHaveBeenCalledOnce(); expect(f.skillInstaller).not.toHaveBeenCalled(); expect(f.prompts.confirm).toHaveBeenCalledTimes(2);
+    expect(f.skillPresent).toHaveBeenCalledOnce(); expect(f.skillInstaller).not.toHaveBeenCalled(); expect(f.prompts.confirm).toHaveBeenCalledOnce();
     expect(f.stdout.join("")).not.toContain(token);
   });
-  it("cancellation or a declined create confirmation performs no mutation", async () => {
+  it("cancelled root selection or optional field input performs no mutation", async () => {
     const f = await fixture(); f.prompts.select.mockRejectedValueOnce(new InteractiveCancelled());
     expect(await runCLI([], f.deps)).toBe(0);
     f.prompts.select.mockResolvedValueOnce("create");
+    f.prompts.text.mockRejectedValueOnce(new InteractiveCancelled());
     expect(await runCLI(["agents"], f.deps)).toBe(0);
     expect(f.fetch).not.toHaveBeenCalled(); expect(f.skillInstaller).not.toHaveBeenCalled();
     await expect(readFile(f.env.RELAY_CONFIG_PATH!)).rejects.toMatchObject({ code: "ENOENT" });
@@ -71,7 +72,7 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
   it("password cancellation does not persist or call the API", async () => {
     const f = await fixture(); f.prompts.select.mockResolvedValueOnce("login"); f.prompts.password.mockRejectedValueOnce(new InteractiveCancelled());
     expect(await runCLI(["auth"], f.deps)).toBe(0);
-    expect(f.fetch).not.toHaveBeenCalled(); expect(f.skillPresent).not.toHaveBeenCalled();
+    expect(f.fetch).not.toHaveBeenCalled(); expect(f.skillPresent).toHaveBeenCalledOnce();
   });
   it("interactive delete declines safely; non-interactive delete needs no --yes", async () => {
     const f = await fixture(); const config = emptyConfig(); config.profiles.saved = { api_url: "https://api.staging.relayapp.im", agent_token: token };
@@ -82,7 +83,7 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
     expect(await runCLI(["--non-interactive", "--profile", "saved", "agents", "delete", card.handle], f.deps)).toBe(0);
     expect(f.prompts.confirm).not.toHaveBeenCalled(); expect((await readConfig(f.deps.configContext)).profiles.saved?.agent_token).toBeUndefined();
   });
-  it("installer failure after creation does not fail or repeat the successful POST", async () => {
+  it("optional installer failure before creation does not repeat creation", async () => {
     const f = await fixture(); f.prompts.confirm.mockResolvedValueOnce(true); f.skillInstaller.mockRejectedValueOnce(new Error(token));
     expect(await runCLI(["agents", "create"], f.deps)).toBe(0);
     expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
@@ -132,7 +133,7 @@ it("uses fixed installer args without default agent/global flags or credentials"
 
 it("interactive creation collects optional fields; blanks keep server defaults", { timeout: 120_000 }, async () => {
   const f = await fixture(); f.prompts.select.mockResolvedValueOnce("create");
-  f.prompts.text.mockResolvedValueOnce("custom_agent.dev").mockResolvedValueOnce("Custom Agent").mockResolvedValueOnce("https://images.example.test/photo.png").mockResolvedValueOnce("");
+  f.prompts.text.mockResolvedValueOnce("custom_agent.dev").mockResolvedValueOnce("Custom Agent").mockResolvedValueOnce("https://images.example.test/photo.png");
   f.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   expect(await runCLI([], f.deps)).toBe(0);
   const post = f.fetch.mock.calls.find(([, init]) => init?.method === "POST")!;
@@ -170,9 +171,35 @@ it("explicit install-only failure exits nonzero, without API calls or credential
   expect(f.skillInstaller).toHaveBeenCalledOnce(); expect(f.fetch).not.toHaveBeenCalled();
   expect(f.stderr.join("")).not.toContain(token);
 });
-it("cancelled optional post-create offer preserves the completed creation", async () => {
+it("cancelled pre-create skill offer stops before identity creation", async () => {
   const f = await fixture(); f.prompts.confirm.mockRejectedValueOnce(new InteractiveCancelled());
   expect(await runCLI(["agents", "create"], f.deps)).toBe(0);
-  expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
   expect(f.skillInstaller).not.toHaveBeenCalled();
+});
+
+it("Create selection needs no extra confirmation and has exactly three concise optional prompts", async () => {
+  const f = await fixture(); f.skillPresent.mockResolvedValue(true); f.prompts.select.mockResolvedValueOnce("create");
+  expect(await runCLI([], f.deps)).toBe(0);
+  expect(f.prompts.text.mock.calls.map(([message]) => message)).toEqual(["Handle (optional)", "Name (optional)", "Image (optional)"]);
+  expect(f.prompts.confirm).not.toHaveBeenCalled();
+  expect(f.prompts.info).toHaveBeenCalledTimes(1);
+  expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+});
+it("offers skills before optional fields and POST, never after creation", async () => {
+  const f = await fixture(); const order: string[] = [];
+  f.prompts.select.mockResolvedValueOnce("create");
+  f.prompts.confirm.mockImplementation(async () => { order.push("skill offer"); expect(f.fetch).not.toHaveBeenCalled(); return false; });
+  f.prompts.text.mockImplementation(async () => { order.push("field"); expect(f.fetch).not.toHaveBeenCalled(); return ""; });
+  f.fetch.mockImplementation(async () => { order.push("POST"); return Response.json({ agent: card, secret: token, share_url: `https://go.staging.relayapp.im/@${card.handle}` }, { status: 201 }); });
+  expect(await runCLI([], f.deps)).toBe(0);
+  expect(order).toEqual(["skill offer", "field", "field", "field", "POST"]);
+  expect(f.skillInstaller).not.toHaveBeenCalled();
+});
+it("offers skills before sign-in setup and does no authentication after offer cancellation", async () => {
+  const f = await fixture(); f.prompts.select.mockResolvedValueOnce("login");
+  f.prompts.confirm.mockRejectedValueOnce(new InteractiveCancelled());
+  expect(await runCLI(["auth"], f.deps)).toBe(0);
+  expect(f.prompts.text).not.toHaveBeenCalled(); expect(f.prompts.password).not.toHaveBeenCalled();
+  expect(f.fetch).not.toHaveBeenCalled();
 });

@@ -6,6 +6,19 @@ not proof that a package has been published: inspect the selected package's help
 before using a new command. If the installed package lacks it, report the release
 gap instead of substituting a different identity or inventing an API.
 
+## Interactive setup
+
+In a real terminal, `npx relaymessenger@staging` offers the entry menu. Selecting
+Create expresses intent; do not add a second creation confirmation. Optional
+fields are `Handle (optional)`, `Name (optional)`, and `Image (optional)`; blank
+keeps server assignment/defaults. Recipe input stays an advanced flag.
+
+The optional standard skill offer happens before creation/sign-in setup. Decline
+skips installation; cancellation stops before identity creation. Delete retains
+its destructive confirmation. JSON, piping, CI and `--non-interactive` suppress
+optional prompts and persistent views; no extra `--yes` is required for existing
+scripted commands.
+
 ## Choose the entry path
 
 Create only when the user wants a **new** agent:
@@ -100,6 +113,31 @@ the saved identity; do not create another agent to retry setup.
 Do not automatically retry an uncertain creation request. Inspect its recorded
 outcome and any retained private recovery state first.
 
+## Local images and retry
+
+`--image ./avatar.png` accepts a local image; `--image https://...` accepts a public
+HTTPS URL, and `--image-url` remains the URL alias. Before creation, the CLI checks
+local readability, regular-file status, image signature and attachment size bound.
+It first saves the new identity/token, then allocates and uploads through the
+existing Attachments API. PUT completes transfer; verify status before PATCHing
+`contactCard.update({handle, attachment_id})`. The server checks caller ownership
+and completed transfer, then copies bytes to immutable public image storage.
+
+Never put `attachment_id` in anonymous creation. If upload or promotion is not
+confirmed, preserve the new identity/token and report the incomplete image phase.
+Retry only the existing profile:
+
+```sh
+npx relaymessenger@staging --profile "$PROFILE" contact-card update \
+  --handle "$AGENT_HANDLE" --image ./avatar.png
+# Completed upload can be promoted without allocating/uploading another file:
+npx relaymessenger@staging --profile "$PROFILE" contact-card update \
+  --handle "$AGENT_HANDLE" --attachment-id "$ATTACHMENT_ID"
+```
+
+Do not run `agents create` again to retry an image. A Contact Card update accepts
+`attachment_id` OR `image_url`, never both (including a null URL).
+
 ## Existing avatar recipes
 
 `--image-url` accepts a public HTTPS image. For native redraw, optionally add
@@ -114,12 +152,26 @@ outcome and any retained private recovery state first.
 }
 ```
 
-The rendered image URL must accompany the recipe, as in Relay's existing native
-image flow. The CLI does not invent an image-rendering service. Render the image
-in the user's application and supply its public URL. Use the API's
+The rendered picture must accompany the recipe: a URL for anonymous creation,
+or a local image/completed owned attachment for authenticated Contact Card
+updates. A null URL is not a picture. The CLI does not invent an image-rendering service. Omitted Handle/name/image values preserve server defaults. Render the image
+in the user's application and supply its URL or local snapshot. Use the API's
 `AgentImageRecipe` and `AgentImageBackground` definitions for emoji/photo cases
 and the seven supported gradient pairs; do not invent fonts or additional recipe
 keys. An image URL without a recipe is an ordinary photo.
+
+## Persistent view and read-only observation
+
+Interactive creation and existing-token login keep a QR/link/event view open.
+`auth status --profile "$PROFILE"` reopens a saved identity's view. The selected
+saved credential/origin—not an unrelated environment token—is used. Close the
+view with q/Ctrl-C/Ctrl-D; that neither deletes identity nor stops a runtime.
+
+The view requests SDK `observe: true` and requires `observational: true` in ready.
+It never sends event ACK or FULL-sync completion, falls back to a consuming
+socket, or changes a webhook subscription to enable observation. Retention gaps
+are possible. Event-view readiness is not model/runtime readiness; unknown stays
+unknown. Read [Agent events](agent-events.md) before changing observation code.
 
 ## Install or update this skill
 

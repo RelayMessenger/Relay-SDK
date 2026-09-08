@@ -106,3 +106,18 @@ organization's agent is not made deletable by this developer-agent operation.
 
 Catch `RelayAPIError`, branch on its stable `code`, and retain `traceId` for
 debugging. Treat undocumented status, error, or retry behavior as `unknown`.
+
+## Contact Card image promotion and observation
+
+Authenticated Contact Card create/update can use `attachment_id` for a completed
+image uploaded by that same agent. It is mutually exclusive with `image_url`;
+`image_recipe` requires one non-null picture. Use the existing SDK attachment
+create/upload/retrieve methods and Contact Card update, not a new upload route.
+
+SDK `websocket.run({observe: true, ...})` opens the confirmed diagnostic mode,
+requires `observational: true`, and sends no ACK/FULL-sync completion. Default
+consumer behavior remains durable acceptance then ACK. A saved credential,
+successful configuration, or observer-ready frame does not prove a model runs.
+These new source capabilities require a matching published SDK/CLI; the lock's
+`sdk` section records the last verified publication, not an assertion that an
+unpublished source change is already in the registry.

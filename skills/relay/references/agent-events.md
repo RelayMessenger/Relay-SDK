@@ -40,15 +40,17 @@ Connect to `wss://api.relayapp.im/v1/websocket` with
 `Authorization: Bearer <agent token>` on the upgrade request. Relay delivers the
 same event envelope inside sequenced event frames.
 
-WebSocket is the path when the agent has no saved Webhook subscriptions. A
-subscription makes the upgrade return HTTP `409`. There is no mode, toggle, or
-WebSocket setting.
+WebSocket is the path when the agent has no saved Webhook subscriptions. A terminal event view may use the explicit read-only observer query `observe=true`; its ready frame must include `observational:true`. Observer connections send no ACK or FULL-sync completion, use transient cursors, and do not prove a model runtime is connected. A
+subscription makes the upgrade return HTTP `409`. There is no saved transport toggle; the diagnostic observe query does not
+change the delivery path.
 
 Persist the complete event and dedupe `event_id` in one durable transaction.
 Return from the SDK callback so it can send the cumulative ACK through the
 highest consecutive sequence durably accepted. Run model work, tools, and REST
-replies afterward from the durable inbox. Multiple sockets for one agent share
-one checkpoint.
+replies afterward from the durable inbox. Multiple consuming sockets for one agent share
+one checkpoint. Observer connections instead use an independent transient cursor
+and may see retained rows already completed by a consumer. They do not advance
+delivery, count as a runtime, or promise durable replay.
 
 When Relay sends `full_sync`, rebuild canonical state through paginated REST
 Chat and Message reads. Commit the complete snapshot and checkpoint together,
@@ -60,7 +62,7 @@ without a pong. The shared `/v1/websocket` path also serves users;
 authentication determines the Contact kind. Public developer integrations use
 an Agent Token.
 
-Use the SDK's public `websocket.run` method. Do not add a private transport
+Use the SDK's public `websocket.run` method. For read-only terminal observation, use its confirmed observe option only; never wrap the ACKing consumer or invent HTTP event reads. Do not add a private transport
 adapter or a second receive mechanism.
 
 ## Path changes
