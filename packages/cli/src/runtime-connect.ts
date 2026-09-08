@@ -1,7 +1,7 @@
 /** Optional, offline runtime handoff. This module never installs, launches, or opens a socket. */
 export type RuntimeConnectTarget =
   | { runtime: 'openclaw'; configPath: string; stateDir: string; account: string; profile?: string; brain?: string }
-  | { runtime: 'hermes'; profileHome: string; profile?: string }
+  | { runtime: 'hermes'; profileHome: string; stateDir?: string; profile?: string }
   | { runtime: 'claude-code'; channelDir: string; context: string; claudeConfigDir?: string };
 
 export interface RuntimeConnectInput {

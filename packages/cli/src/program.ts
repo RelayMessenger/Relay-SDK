@@ -1,3 +1,4 @@
+import { handoffAgent, handoffOptions, handoffTarget, type HandoffOptions } from "./agent-handoff.js";
 import { agentDependencies, createAgent, deleteAgent, listAgents, type AgentDependencies } from "./agents.js";
 import { createRequire } from "node:module";
 import { readFile, stat } from "node:fs/promises";
@@ -136,17 +137,23 @@ export const createProgram = (
 
   const agentDeps = dependencies.agents ?? agentDependencies(configContext, dependencies.fetch);
   const agents = program.command("agents").description("Create, inspect local profiles, and delete developer-managed agents.");
-  agents.command("create")
+  handoffOptions(agents.command("create"))
     .option("--api-url <url>", "Relay API origin", validateApiURL)
     .option("--token-name <name>", "label for the new Agent Token")
     .option("--json", "print safe metadata as JSON")
-    .action(async (options: { apiUrl?: string; tokenName?: string; json?: boolean }, command: Command) => {
+    .action(async (options: HandoffOptions & { apiUrl?: string; tokenName?: string; json?: boolean }, command: Command) => {
+      const target = await handoffTarget(options);
       const result = await createAgent({
         ...(program.getOptionValueSource("profile") === "cli" && globals(command).profile ? { profile: globals(command).profile } : {}),
         ...(options.apiUrl ? { apiURL: options.apiUrl } : {}),
         ...(options.tokenName === undefined ? {} : { tokenName: options.tokenName }),
       }, agentDeps);
-      if (options.json) output(result);
+      let handoff;
+      if (target) {
+        try { handoff = await handoffAgent(target, result.profile, agentDeps, { consent: options.confirmConfigure === true, runtimeStopped: options.runtimeStopped === true }, true); }
+        catch { handoff = { status: "required-action", code: "handoff-failed", message: "Agent credential is stored; runtime handoff failed. Retry agents setup without creating another agent.", connected: false }; }
+      }
+      if (options.json) output({ ...result, ...(handoff ? { handoff } : {}) });
       else {
         stdout(`${result.agent.first_name} (@${result.agent.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken: stored\n`);
         // Load only for human output; the QR encodes the public share URL, not credentials.
@@ -155,7 +162,19 @@ export const createProgram = (
         };
         try { stdout(await qr.toString(result.share_url, { type: "terminal", small: true })); }
         catch { stderr("QR rendering unavailable; use the share link above.\n"); }
+        if (handoff) output({ handoff });
       }
+      if (handoff && handoff.status !== "configured") throw new Error("Agent credential is stored; runtime handoff requires action. Use agents setup rather than creating again.");
+    });
+  handoffOptions(agents.command("setup"))
+    .description("Configure a selected runtime using an existing Agent Token; never creates an agent.")
+    .option("--json", "print safe handoff metadata as JSON")
+    .action(async (options: HandoffOptions, command: Command) => {
+      const target = await handoffTarget(options);
+      if (!target) throw new Error("Setup requires --connect and an explicit native runtime context.");
+      const handoff = await handoffAgent(target, globals(command).profile, agentDeps, { consent: options.confirmConfigure === true, runtimeStopped: options.runtimeStopped === true });
+      output({ handoff });
+      if (handoff.status !== "configured") throw new Error("Runtime configuration requires action; no new agent was created.");
     });
   agents.command("list").option("--json", "print safe metadata as JSON")
     .action(async () => output(await listAgents(agentDeps)));

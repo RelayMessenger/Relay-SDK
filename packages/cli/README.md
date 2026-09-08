@@ -124,14 +124,48 @@ are preserved. `--token-name` labels the token, not a machine identity.
 
 Listing is local inventory, not a global account API. Each saved credential reads
 its current Contact Card using its saved API origin; environment token/origin
-overrides are not applied across the inventory. Profiles without credentials and
-unavailable Contact Cards remain visible without exposing error bodies.
+overrides are not applied across the inventory. Tokenless profiles remain in `profiles list`, not agent inventory.
+Unavailable Contact Cards are reported without exposing error bodies.
 
-Deletion uses the selected profile's resolved credential. It only clears that
+Deletion honors explicit profile/ENV selection. Otherwise it selects one saved
+credential by its authenticated Contact Card, refusing unavailable or ambiguous
+matches (including the same handle on multiple origins). It only clears that
 profile's matching saved credential after confirmed HTTP 204. Errors and uncertain
 responses retain credentials; unrelated environment/profile credentials are not
 removed. Creation is never automatically retried. If creation succeeds but local
 storage fails, the command reports that failure without printing the secret.
+
+### Optional native runtime handoff
+
+```sh
+relay agents create --connect hermes \
+  --runtime-home /absolute/hermes-profile \
+  --runtime-state-dir /absolute/hermes-profile/relay \
+  --confirm-configure --runtime-stopped
+
+# Existing imported profile or RELAY_AGENT_TOKEN: no creation request.
+relay --profile my-agent agents setup --connect openclaw \
+  --runtime-config /absolute/openclaw.json \
+  --runtime-state-dir /absolute/openclaw-state --runtime-account my-agent \
+  --confirm-configure --runtime-stopped
+```
+
+Stop the selected runtime before passing `--runtime-stopped`. `--confirm-configure`
+authorizes only private configuration writes. `--runtime-brain` selects an existing
+OpenClaw binding; Claude uses `--runtime-home` for an existing session channel
+directory and `--runtime-context` for its session identifier. Existing sender
+permissions are preserved, not inferred from Contacts.
+
+Creation handoff reads the newly saved profile directly, ignoring unrelated ENV
+auth. Setup validates an existing credential and never falls back to creation.
+Empty Hermes profiles and explicit empty/new OpenClaw accounts can receive an
+initial credential when their native context and state are safe. Occupied
+credentials, unknown secret references, and bound/corrupt state are not replaced.
+
+Handoff output reports configuration status and `connected: false`: this command
+does not install, launch, stop, or test-connect a runtime. Start it using its native
+workflow. If handoff fails after creation, the token remains stored; use `agents
+setup` rather than creating another identity.
 
 ## Local event forwarding
 

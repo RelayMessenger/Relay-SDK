@@ -35,23 +35,25 @@ or origin returns `identity-change`. Invalid tokens never cause creation.
   owner-controlled. Writes preserve POSIX mode bits, use a synced same-directory
   temporary file and atomic rename, and retain exact original bytes in memory
   for guarded rollback. This is not a power-loss-recovery journal, nor a claim
-  of ACL/xattr preservation. No persistent secret-bearing backup is created.
-- Windows returns `windows-acl-verification-required` without writing. Native
-  ACL preservation and Windows execution proof remain coordinated follow-up;
-  simulated Windows path/gating tests are NOT native Windows proof.
+  of xattr preservation. Windows ACLs are inspected and cloned before writing secret bytes. No persistent secret-bearing backup is created.
+- Windows uses native PowerShell ACL inspection. Foreign-principal credential
+  reads or directory writes are refused. New files receive a protected ACL before
+  any secret bytes; replacements clone the prior descriptor and compare ACLs as
+  part of the guarded snapshot. Native Windows execution proof is separate from
+  cross-platform unit coverage; no POSIX mode-bit assertion substitutes for it.
 - OpenClaw: strict JSON only; JSON5/comments/includes require the native config
-  workflow. Select an EXISTING named account (or a default with an explicit
-  inline credential). No brain or account is created. A chosen brain needs an
+  workflow. An explicitly named empty/new account can be initialized; a known
+  empty default can be initialized only without an occupied environment source.
+  No brain is created. A chosen brain needs an
   existing exact Relay account binding. Secret references/tokenFile require the
   runtime secret workflow; duplicate inline credentials across slots are refused.
   Allowlist/default permission policy is retained, not expanded or replaced.
-- Hermes: select the actual profile home. The profile `.env` must already
-  contain resolved `RELAY_AGENT_TOKEN`, `RELAY_BASE_URL`, and absolute
-  `RELAY_STATE_DIR`. YAML fallback and managed secret resolution are deliberately
-  returned as `profile-resolution-required`, not inferred. This slice supports
-  preserving/reusing a resolved identity, not replacing an occupied identity or
-  bootstrapping a Hermes profile. Both durable SQLite and sidecar bindings must
-  match; state is never rewritten. Corrupt/legacy/partial bindings fail closed.
+- Hermes: select the actual profile home and explicit absolute state directory.
+  A token-empty profile can be initialized after parsing its YAML fallback and
+  finding no occupied credential or durable account state. YAML bytes and sender
+  permissions are preserved. Existing identity reuse verifies both SQLite and
+  sidecar bindings; corrupt/legacy/partial bindings fail closed. Unknown secret
+  references and YAML-only occupied credentials require native profile resolution.
 - Claude: select a pre-existing session-scoped channel directory with explicit
   `RELAY_ALLOWED_SENDERS`. Global default channel directory is refused. Launch
   only the selected channel with its `RELAY_CHANNEL_DIR` and context, using the

@@ -61,13 +61,13 @@ describe("pure agent command handlers", () => {
     expect(deps.client).toHaveBeenNthCalledWith(2, "token-two", "https://two.test");
     expect(deps.auth).not.toHaveBeenCalled();
     expect(JSON.stringify(result)).not.toMatch(/token-one|token-two|environment-secret/);
-    expect(result.agents).toHaveLength(3);
+    expect(result.agents).toHaveLength(2);
   });
   it("keeps every credential on failed/uncertain deletion", async () => {
     const config = emptyConfig(); config.profiles.default!.agent_token = secret;
     const { deps, remove, config: saved } = setup(config);
     remove.mockRejectedValueOnce(new Error("409 pending events"));
-    await expect(deleteAgent(card.handle, undefined, deps)).rejects.toThrow("kept");
+    await expect(deleteAgent(card.handle, "default", deps)).rejects.toThrow("kept");
     expect(deps.update).not.toHaveBeenCalled();
     expect(saved()).toEqual(config);
   });
@@ -75,7 +75,7 @@ describe("pure agent command handlers", () => {
     const config = emptyConfig(); config.profiles.default!.agent_token = secret;
     config.profiles.other = { agent_token: "keep-me" };
     const { deps, config: saved, remove } = setup(config);
-    await deleteAgent(card.handle, undefined, deps);
+    await deleteAgent(card.handle, "default", deps);
     expect(remove).toHaveBeenCalledWith(card.handle, { maxRetries: 0 });
     expect(saved().profiles.default!.agent_token).toBeUndefined();
     expect(saved().profiles.other!.agent_token).toBe("keep-me");
@@ -85,7 +85,7 @@ describe("pure agent command handlers", () => {
     const { deps, auth, config: saved } = setup(config);
     if (override === "token") auth.token = "different-env-token";
     else auth.apiURL = "https://different.test";
-    await deleteAgent(card.handle, undefined, deps);
+    await deleteAgent(card.handle, "default", deps);
     expect(saved()).toEqual(config);
     expect(deps.update).toHaveBeenCalledOnce();
   });
@@ -99,7 +99,7 @@ describe("agent CLI program", () => {
     expect(await runCLI(["--profile", "new-profile", "agents", "create", "--token-name", "Laptop", "--json"], options)).toBe(0);
     expect(deps.bootstrap).toHaveBeenCalledWith({ token_name: "Laptop" }, { baseURL: "https://api.relayapp.im", maxRetries: 0 });
     expect(await runCLI(["agents", "list", "--json"], options)).toBe(0);
-    expect(await runCLI(["agents", "delete", card.handle, "--json"], options)).toBe(0);
+    expect(await runCLI(["--profile", "default", "agents", "delete", card.handle, "--json"], options)).toBe(0);
     expect(stdout.join("")).not.toContain(secret);
     expect(stdout.join("")).not.toContain('"secret"');
     expect(stderr).toEqual([]);

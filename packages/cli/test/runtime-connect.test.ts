@@ -1,3 +1,4 @@
+import { inspectWindowsAcl, privateWindowsAcl, protectWindowsPath } from "../src/runtime-connect/windows-acl.js";
 import { afterEach, describe, expect, it } from 'vitest';
 import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,8 +13,8 @@ const token = 'rly_private_test_only_not_real';
 const origin = 'https://api.staging.relayapp.im';
 const agent = { token, origin, handle: 'test_bird.dev' };
 const consent = { consent: true, runtimeStopped: true } as const;
-async function root() { const path = await realpath(await mkdtemp(join(tmpdir(), 'relay-handoff-'))); roots.push(path); return path; }
-async function privateFile(path: string, text: string) { await writeFile(path, text, { mode: 0o600 }); }
+async function root() { const path = await realpath(await mkdtemp(join(tmpdir(), 'relay-handoff-'))); roots.push(path); if (process.platform === "win32") await protectWindowsPath(path, true); return path; }
+async function privateFile(path: string, text: string) { await writeFile(path, text, { mode: 0o600 }); if (process.platform === "win32") await protectWindowsPath(path); }
 async function claw(config: unknown = { channels: { relay: { accounts: { work: { allowFrom: ['alice'] }, other: { token: 'other-token', allowFrom: ['bob'] } } } }, unrelated: { x: 42 } }) {
   const home = await root(); const path = join(home, 'openclaw.json'); await privateFile(path, JSON.stringify(config, null, 2) + '\n');
   const input: RuntimeConnectInput = { agent: { ...agent }, target: { runtime: 'openclaw', configPath: path, stateDir: home, account: 'work', profile: 'my-profile' } };
@@ -25,16 +26,19 @@ async function claude(env = 'RELAY_ALLOWED_SENDERS=alice\n') {
   return { home, path, input };
 }
 afterEach(async () => { for (const path of roots.splice(0)) await rm(path, { recursive: true, force: true }); });
-describe('optional runtime handoff', () => {
+describe('optional runtime handoff', { timeout: 120_000 }, () => {
   it('roundtrips JSON, preserves other accounts and permissions, and restores exact bytes', async () => {
     const { path, input } = await claw(); const original = await readFile(path);
+    const originalAcl = process.platform === "win32" ? (await inspectWindowsAcl(path)).sddl : undefined;
     const plan = await planRuntimeConnect(input); expect(plan.status).toBe('ready'); expect(await readFile(path)).toEqual(original);
     const applied = await applyRuntimeConnect(plan, consent); expect(applied.status).toBe('configured');
     const parsed = JSON.parse(await readFile(path, 'utf8'));
     expect(parsed.channels.relay.accounts.work).toEqual({ token, baseUrl: origin, allowFrom: ['alice'] });
     expect(parsed.channels.relay.accounts.other).toEqual({ token: 'other-token', allowFrom: ['bob'] }); expect(parsed.unrelated).toEqual({ x: 42 });
-    expect((await lstat(path)).mode & 0o777).toBe(0o600);
+    if (process.platform === "win32") { const acl = await inspectWindowsAcl(path); expect(privateWindowsAcl(acl)).toBe(true); expect(acl.sddl).toBe(originalAcl); }
+    else expect((await lstat(path)).mode & 0o777).toBe(0o600);
     expect((await applied.rollback!(consent)).code).toBe('rolled-back'); expect(await readFile(path)).toEqual(original);
+    if (process.platform === 'win32') expect((await inspectWindowsAcl(path)).sddl).toBe(originalAcl);
   });
   it('is byte-idempotent and keeps plans one-shot', async () => {
     const { path, input } = await claw(); await applyRuntimeConnect(await planRuntimeConnect(input), consent);
@@ -53,7 +57,7 @@ describe('optional runtime handoff', () => {
   it('does not confuse a profile, brain, and account', async () => {
     const { input } = await claw(); if (input.target.runtime !== 'openclaw') throw Error();
     input.target.brain = 'brain-a'; expect((await planRuntimeConnect(input)).code).toBe('brain-binding-required');
-    input.target.account = 'missing'; expect((await planRuntimeConnect(input)).code).toBe('account-missing');
+    input.target.account = 'missing'; expect((await planRuntimeConnect(input)).code).toBe('brain-binding-required');
   });
   it('accepts an existing exact brain binding without rewriting it', async () => {
     const bindings = [{ agentId: 'brain-a', match: { channel: 'relay', accountId: 'work' } }];
@@ -152,7 +156,9 @@ describe('optional runtime handoff', () => {
   it('does not guess an implicit OpenClaw environment credential', async () => {
     const { input } = await claw({ channels: { relay: {} } });
     if (input.target.runtime !== 'openclaw') throw Error(); input.target.account = 'default';
-    expect((await planRuntimeConnect(input)).code).toBe('default-scope-required');
+    const previous = process.env.RELAY_AGENT_TOKEN;
+    try { process.env.RELAY_AGENT_TOKEN = 'occupied-other-token'; expect((await planRuntimeConnect(input)).code).toBe('default-scope-required'); }
+    finally { if (previous === undefined) delete process.env.RELAY_AGENT_TOKEN; else process.env.RELAY_AGENT_TOKEN = previous; }
   });
   it('rechecks state that appeared after planning', async () => {
     const { input, home, path } = await claw(); const plan = await planRuntimeConnect(input); const bytes = await readFile(path);
@@ -162,16 +168,15 @@ describe('optional runtime handoff', () => {
     await privateFile(join(home, 'relay', name), 'durable-state');
     expect((await applyRuntimeConnect(plan, consent)).code).toBe('durable-state-present'); expect(await readFile(path)).toEqual(bytes);
   });
-  it('fails closed on Windows until native ACL preservation is verified', async () => {
-    const { input } = await claw(); const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
-    try {
-      Object.defineProperty(process, 'platform', { ...original, value: 'win32' });
-      expect((await planRuntimeConnect(input)).code).toBe('windows-acl-verification-required');
-    } finally { Object.defineProperty(process, 'platform', original); }
+  it('checks Windows ACL permissions rather than assuming POSIX modes', () => {
+    const acl = { user: 'S-1-5-21-test', owner: 'S-1-5-21-test', sddl: 'test-descriptor', rules: [{ sid: 'S-1-5-21-test', rights: 2032127, type: 'Allow' }] };
+    expect(privateWindowsAcl(acl)).toBe(true);
+    expect(privateWindowsAcl({ ...acl, rules: [...acl.rules, { sid: 'S-1-1-0', rights: 1, type: 'Allow' }] })).toBe(false);
+    expect(privateWindowsAcl({ ...acl, rules: [...acl.rules, { sid: 'S-1-1-0', rights: 2, type: 'Allow' }] }, true)).toBe(false);
   });
   it('requires Hermes profile resolution rather than guessing YAML or another profile secret', async () => {
     const home = await root(); await privateFile(join(home, 'config.yaml'), 'platforms: {}\n'); await privateFile(join(home, '.env'), 'OTHER=keep\n');
-    expect((await planRuntimeConnect({ agent: { ...agent }, target: { runtime: 'hermes', profileHome: home } })).code).toBe('profile-resolution-required');
+    expect((await planRuntimeConnect({ agent: { ...agent }, target: { runtime: 'hermes', profileHome: home } })).code).toBe('state-path-required');
   });
   it('checks both Hermes sidecar and durable SQLite binding without changing either', async () => {
     const home = await root(); await privateFile(join(home, 'config.yaml'), 'platforms: {}\n'); await privateFile(join(home, '.env'), `RELAY_AGENT_TOKEN=${token}\nRELAY_BASE_URL=${origin}\nRELAY_ALLOWED_CONTACTS=alice\nRELAY_STATE_DIR=${join(home, 'relay')}\n`);
@@ -188,4 +193,61 @@ describe('optional runtime handoff', () => {
     const corrupt = new DatabaseSync(path); corrupt.exec("UPDATE relay_state_account SET api_origin = 'https://wrong.example'"); corrupt.close();
     expect((await planRuntimeConnect(input)).code).toBe('state-binding-mismatch');
   });
+});
+
+describe('native initial binding', { timeout: 120_000 }, () => {
+it('initializes an empty Hermes profile, preserves YAML/permissions, and rolls back', async () => {
+  const home = await root();
+  const yaml = 'gateway:\n  platforms:\n    relayapp:\n      enabled: true\n      extra:\n        allowed_contacts: [alice]\n';
+  await privateFile(join(home, 'config.yaml'), yaml);
+  await privateFile(join(home, '.env'), 'OTHER=keep\n');
+  const input: RuntimeConnectInput = { agent, target: { runtime: 'hermes', profileHome: home, stateDir: home } };
+  const plan = await planRuntimeConnect(input);
+  expect(plan.status).toBe('ready');
+  const applied = await applyRuntimeConnect(plan, consent);
+  expect(applied.status).toBe('configured');
+  const saved = await readFile(join(home, '.env'), 'utf8');
+  expect(saved).toContain(`RELAY_AGENT_TOKEN="${token}"`);
+  expect(saved).toContain('OTHER=keep');
+  expect(await readFile(join(home, 'config.yaml'), 'utf8')).toBe(yaml);
+  expect((await applied.rollback!(consent)).code).toBe('rolled-back');
+  expect(await readFile(join(home, '.env'), 'utf8')).toBe('OTHER=keep\n');
+});
+
+it('never initializes an empty Hermes profile over occupied YAML credentials or state', async () => {
+  const home = await root();
+  const yaml = join(home, 'config.yaml');
+  await privateFile(yaml, 'gateway:\n  platforms:\n    relayapp:\n      extra:\n        token: occupied-secret\n');
+  const input: RuntimeConnectInput = { agent, target: { runtime: 'hermes', profileHome: home, stateDir: home } };
+  expect((await planRuntimeConnect(input)).code).toBe('identity-change');
+  await privateFile(yaml, 'gateway: {}\n');
+  await privateFile(join(home, 'inbox.sqlite3'), 'corrupt database');
+  expect((await planRuntimeConnect(input)).code).toBe('durable-state-present');
+});
+
+it('initializes an explicit new OpenClaw account without altering existing policy or accounts', async () => {
+  const { input, path } = await claw();
+  if (input.target.runtime !== 'openclaw') throw Error();
+  input.target.account = 'new-account';
+  const before = JSON.parse(await readFile(path, 'utf8'));
+  const applied = await applyRuntimeConnect(await planRuntimeConnect(input), consent);
+  expect(applied.status).toBe('configured');
+  const after = JSON.parse(await readFile(path, 'utf8'));
+  expect(after.channels.relay.accounts.work).toEqual(before.channels.relay.accounts.work);
+  expect(after.channels.relay.accounts.other).toEqual(before.channels.relay.accounts.other);
+  expect(after.channels.relay.accounts['new-account']).toEqual({ token, baseUrl: origin });
+});
+
+it('initializes a known empty default OpenClaw context without an occupied environment', async () => {
+  const { input, path } = await claw({ channels: { relay: { allowFrom: ['alice'] } } });
+  if (input.target.runtime !== 'openclaw') throw Error(); input.target.account = 'default';
+  const previous = process.env.RELAY_AGENT_TOKEN;
+  try {
+    delete process.env.RELAY_AGENT_TOKEN;
+    const result = await applyRuntimeConnect(await planRuntimeConnect(input), consent);
+    expect(result.status).toBe('configured');
+    expect(JSON.parse(await readFile(path, 'utf8')).channels.relay).toEqual({ allowFrom: ['alice'], token, baseUrl: origin });
+  } finally { if (previous !== undefined) process.env.RELAY_AGENT_TOKEN = previous; }
+});
+
 });
