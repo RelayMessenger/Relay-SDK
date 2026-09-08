@@ -100,8 +100,10 @@ finally:
     if (root/'runtime.json').exists():
         kept=Path(a.receipt).with_name('tmux-runtime.json');shutil.copyfile(root/'runtime.json',kept)
         if 'runtime' in report:report['runtime']['runtimeReceipt']=str(kept)
-    report['ownedSocketGone']=not sock.exists()
+    report['socketPresentAfterServerExit']=sock.exists()
     if report.get('result')=='passed':
         assert report['ownedServerShutdown'];shutil.rmtree(root);report['ownedPrivateFixturesRemoved']=True
+    report['ownedSocketGone']=not sock.exists()
+    if report.get('result')=='passed':assert report['ownedSocketGone']
     Path(a.receipt).write_text(json.dumps(report,indent=2));print(json.dumps({'result':report['result'],'receipt':a.receipt,'ownedSocket':str(sock)}))
 raise SystemExit(0 if report['result']=='passed' else 1)
