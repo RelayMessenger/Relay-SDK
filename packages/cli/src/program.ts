@@ -1,3 +1,4 @@
+import { prepareAgentImage } from "./local-image.js";
 import { homedir } from "node:os";
 import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactiveEntry, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { installRelaySkill, relaySkillPresent } from "./skill-offer.js";
@@ -63,6 +64,7 @@ export interface ProgramDependencies {
   cwd?: string;
   confirmDelete?: () => Promise<boolean>;
   confirmLogout?: () => Promise<boolean>;
+  beforeSetup?: () => Promise<void>;
   stdout?: (value: string) => void;
   stderr?: (value: string) => void;
   fetch?: typeof fetch;
@@ -153,6 +155,10 @@ export const createProgram = (
     writeErr: stderr,
   });
 
+  program.hook("preAction", async (_root, action) => {
+    if (dependencies.beforeSetup && ((action.parent?.name() === "agents" && action.name() === "create")
+      || (action.parent?.name() === "auth" && action.name() === "login"))) await dependencies.beforeSetup();
+  });
   const agentDeps = dependencies.agents ?? agentDependencies(configContext, dependencies.fetch);
   const agents = program.command("agents").description("Create, inspect local profiles, and delete developer-managed agents.");
   handoffOptions(agents.command("create"))
@@ -160,11 +166,21 @@ export const createProgram = (
     .option("--token-name <name>", "label for the new Agent Token")
     .option("--handle <handle>", "optional full .dev handle; omission keeps server assignment")
     .option("--name <name>", "optional display name")
-    .option("--image-url <url>", "public HTTPS image to copy into Relay storage")
+    .option("--image <path-or-url>", "local image path or public HTTPS image URL")
+    .option("--image-url <url>", "public HTTPS image URL (compatibility option)")
     .option("--image-recipe <json-file>", "existing Relay recipe JSON; requires its rendered --image-url")
     .option("--json", "print safe metadata as JSON")
-    .action(async (options: HandoffOptions & { apiUrl?: string; tokenName?: string; json?: boolean; handle?: string; name?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
+    .action(async (options: HandoffOptions & { apiUrl?: string; tokenName?: string; json?: boolean; handle?: string; name?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
       const target = await handoffTarget(options);
+      if (options.image !== undefined && options.imageUrl !== undefined) throw new Error("Choose --image or --image-url, not both.");
+      if (options.image !== undefined) {
+        const image = await prepareAgentImage(options.image, {
+          ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}),
+          ...(configContext.home ? { home: configContext.home } : {}),
+        });
+        if (image.kind === "file") throw new Error("Local image passed preflight; upload wiring is awaiting the staging image contract. No agent was created.");
+        options.imageUrl = image.url;
+      }
       let imageRecipe: AgentImageRecipe | undefined;
       if (options.imageRecipe !== undefined) {
         if (options.imageUrl === undefined) throw new Error("--image-recipe requires the rendered --image-url.");
@@ -1020,6 +1036,7 @@ export const runCLI = async (
       }
     } catch (error) {
       inform("Skill offer dismissed. Existing agent and credential results are unchanged.");
+      if (error instanceof InteractiveCancelled && !force) throw error;
       return error instanceof InteractiveCancelled ? 0 : force ? 1 : 0;
     }
   };
@@ -1027,7 +1044,7 @@ export const runCLI = async (
     let args = argv;
     const entry = interactiveEntry(argv);
     if (ui && entry) {
-      const selected = await chooseInteractiveCommand(entry.entry, entry.prefix, agentDeps, ui);
+      const selected = await chooseInteractiveCommand(entry.entry, entry.prefix, agentDeps, ui, async () => { await skillOffer(); });
       if (!selected) return 0;
       if (selected === "install-skill") return await skillOffer(true);
       args = selected;
@@ -1035,12 +1052,12 @@ export const runCLI = async (
     await createProgram({
       ...dependencies, agents: agentDeps, isInteractive: interactive,
       ...(ui ? {
+        beforeSetup: async () => { await skillOffer(); },
         readSecret: dependencies.readSecret ?? (() => ui.password("Agent Token")),
         confirmDelete: () => ui.confirm("Delete the selected agent? This cannot be undone."),
         confirmLogout: () => ui.confirm("Remove the selected stored token? The agent identity will not be deleted."),
       } : {}),
     }).parseAsync(args, { from: "user" });
-    await skillOffer();
     return 0;
   } catch (error) {
     if (error instanceof InteractiveCancelled) { stderr("Cancelled.\n"); return 0; }

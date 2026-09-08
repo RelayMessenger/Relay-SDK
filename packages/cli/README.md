@@ -31,9 +31,9 @@ and version output never show optional menus or skill offers. Interactive
 agent deletion asks for confirmation; scripted deletion does not gain a
 mandatory `--yes` flag.
 
-After successful interactive use, the CLI may offer the Relay skill once if
-it is absent from the standard install locations. Declining does not fail the
-command. Accepting runs the standard installer, which asks you to choose the
+Before interactive creation or sign-in setup, the CLI may offer the Relay skill
+once if it is absent from the standard install locations. Declining skips skill
+installation; cancelling stops setup before any identity is created. Accepting runs the standard installer, which asks you to choose the
 agents and project/global scope:
 
 ```sh
@@ -41,8 +41,8 @@ npx --yes skills@1.5.24 add https://github.com/RelayMessenger/Relay-SDK/tree/sta
 ```
 
 The CLI does not silently download skills or change every agent's configuration.
-Optional installer errors do not undo agent creation or suggest creating another
-agent. An explicit install-only failure exits nonzero. Selected `CODEX_HOME`,
+Optional installer errors are reported before setup proceeds and never repeat
+an agent creation. An explicit install-only failure exits nonzero. Selected `CODEX_HOME`,
 `CLAUDE_CONFIG_DIR`, and `HERMES_HOME` locations are preserved and checked; explicit
 `DISABLE_TELEMETRY` and `DO_NOT_TRACK` preferences are passed to the installer.
 The install menu remains available when you explicitly want to run the installer.
@@ -186,8 +186,10 @@ relay agents create --api-url https://api.staging.relayapp.im \
 
 Omit any option to keep the server's assigned handle/readable bird name/default
 image. Custom handles are full lowercase `.dev` handles; a collision is an error,
-never a request for a random replacement. Interactive creation offers the same
-optional fields; blank answers preserve defaults.
+never a request for a random replacement. Interactive creation asks `Handle (optional)`, `Name (optional)`, and `Image
+(optional)` with a single help line; blank answers preserve defaults. Selecting
+Create already expresses intent, so no second create confirmation is shown.
+Recipe files remain an advanced `--image-recipe` flag, not another setup question.
 
 `--image-recipe <json-file>` is advanced, existing Relay avatar metadata and
 requires its rendered `--image-url`. The URL alone is sufficient for a custom

@@ -268,3 +268,13 @@ describe("creation storage preflight", { timeout: 120_000 }, () => {
     expect(await readdir(home)).toEqual(["config.json"]);
   });
 });
+
+it("--image URL aliases existing image_url while invalid local files send no creation request", async () => {
+  const { deps, fetch, home } = await fixture();
+  await writeFile(join(home, "not-image.png"), "not image data");
+  expect(await runCLI(["agents", "create", "--json", "--image", join(home, "missing.png")], deps)).toBe(1);
+  expect(await runCLI(["agents", "create", "--json", "--image", join(home, "not-image.png")], deps)).toBe(1);
+  expect(fetch).not.toHaveBeenCalled();
+  expect(await runCLI(["agents", "create", "--json", "--image", "https://images.example.test/image.png"], deps)).toBe(0);
+  expect(JSON.parse(String(fetch.mock.calls[0]![1]?.body)).image_url).toBe("https://images.example.test/image.png");
+});
