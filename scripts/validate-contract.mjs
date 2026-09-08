@@ -34,9 +34,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "9f0a023c65dc52515d2916d1d8f90118fd0bf790",
+    commit: "04c729e3e3b2249eb9cca93fbb09ee3dd5fd69a6",
     path: "contracts/developer/openapi.yaml",
-    sha256: "a2bebc32ab50dd52e6f437ec3ae97b775799e84518b503fba6dda471c007b519",
+    sha256: "7d46b16f5dc19034cbdcb45bdd79816a9a2f4c9f6febb8520db0517dfe9eae64",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -101,7 +101,7 @@ assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 38);
 assert.equal(manifest.path_count, 23);
 assert.equal(manifest.source_path_count, 24);
-assert.equal(manifest.source_schema_count, 114);
+assert.equal(manifest.source_schema_count, 119);
 assert.equal(manifest.callback_count, 18);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 23);
 assert.equal(operationJSON.length, 38);
@@ -311,7 +311,16 @@ const validateOpenAPI = () => {
   assert.equal(bootstrap.responses["201"].content["application/json"].schema.$ref, "#/components/schemas/CreateAgentResponse");
   const createParams = document.components.schemas.CreateAgentRequest;
   assert.equal(createParams.additionalProperties, false);
-  assert.deepEqual(Object.keys(createParams.properties), ["token_name"]);
+  assert.deepEqual(Object.keys(createParams.properties), ["token_name", "handle", "first_name", "image_url", "image_recipe"]);
+  assert.deepEqual(createParams.dependentRequired, { image_recipe: ["image_url"] });
+  assert.equal(createParams.properties.handle.pattern, "^[a-z][a-z0-9_]{2,31}\\.dev$");
+  assert.equal(createParams.properties.first_name.maxLength, 255);
+  assert.equal(createParams.properties.image_recipe.$ref, "#/components/schemas/AgentImageRecipe");
+  assert.equal(document.components.schemas.AgentImageRecipe.oneOf.length, 3);
+  assert.deepEqual(document.components.schemas.AgentImageBackground.properties.linearGradient.properties.colors.enum, [
+    ["EC8A3C", "C85F1C"], ["E0567A", "AD2A52"], ["D05FC6", "93217E"],
+    ["8F6CF2", "5F38CF"], ["5B9BFA", "0B52C0"], ["2596A6", "116A79"], ["2FA46A", "137347"],
+  ]);
   assert.equal(createParams.required?.length ?? 0, 0);
   assert.equal(createParams.properties.token_name.minLength, 1);
   assert.equal(createParams.properties.token_name.maxLength, 80);

@@ -129,3 +129,15 @@ it("uses fixed installer args without default agent/global flags or credentials"
   expect(parent.RELAY_AGENT_TOKEN).toBe(token);
   expect(interactiveAllowed([], { GITHUB_ACTIONS: "true" }, true)).toBe(false);
 });
+
+it("interactive creation collects optional fields; blanks keep server defaults", async () => {
+  const f = await fixture(); f.prompts.select.mockResolvedValueOnce("create");
+  f.prompts.text.mockResolvedValueOnce("custom_agent.dev").mockResolvedValueOnce("Custom Agent").mockResolvedValueOnce("https://images.example.test/photo.png").mockResolvedValueOnce("");
+  f.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  expect(await runCLI([], f.deps)).toBe(0);
+  const post = f.fetch.mock.calls.find(([, init]) => init?.method === "POST")!;
+  expect(JSON.parse(String(post[1]?.body))).toEqual({ handle: "custom_agent.dev", first_name: "Custom Agent", image_url: "https://images.example.test/photo.png" });
+  const blank = await fixture(); blank.prompts.select.mockResolvedValueOnce("create"); blank.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  expect(await runCLI([], blank.deps)).toBe(0);
+  expect(JSON.parse(String(blank.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body))).toEqual({});
+});

@@ -1,5 +1,5 @@
 import { safeMetadata } from "./output.js";
-import Relay, { RelayAPIError, type AgentCreateParams, type ContactCardItem } from "@relaymessenger/sdk";
+import Relay, { RelayAPIError, type AgentCreateParams, type AgentImageRecipe, type ContactCardItem } from "@relaymessenger/sdk";
 import type { ConfigContext, RelayConfig, ResolvedAuth } from "./config.js";
 import { DEFAULT_API_URL, defaultCreationApiURL, mutateConfig, readConfig, resolveAuth, validateApiURL, validateProfileName, validateToken } from "./config.js";
 
@@ -32,6 +32,10 @@ export interface CreateAgentInput {
   profile?: string;
   apiURL?: string;
   tokenName?: string;
+  handle?: string;
+  firstName?: string;
+  imageURL?: string;
+  imageRecipe?: AgentImageRecipe;
 }
 
 // Status/code are safe structured diagnostics; server-controlled messages are not.
@@ -55,7 +59,29 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
   }
   const apiURL = validateApiURL(input.apiURL ?? deps.env.RELAY_API_URL
     ?? defaultCreationApiURL());
-  const body: AgentCreateParams = input.tokenName === undefined ? {} : { token_name: input.tokenName };
+  if (input.handle !== undefined && !/^[a-z][a-z0-9_]{2,31}\.dev$/u.test(input.handle)) {
+    throw new Error("Handle must be a full lowercase .dev handle with a 3–32 character local part beginning with a letter.");
+  }
+  const firstName = input.firstName?.trim();
+  if (firstName !== undefined && (!firstName || firstName.length > 255 || /[\u0000-\u001f\u007f]/u.test(firstName))) {
+    throw new Error("Display name must be 1–255 characters without ASCII controls.");
+  }
+  if (input.imageURL !== undefined) {
+    let image: URL;
+    try { image = new URL(input.imageURL); } catch { throw new Error("Image URL must be publicly reachable HTTPS."); }
+    if (image.protocol !== "https:" || image.username || image.password) throw new Error("Image URL must be HTTPS without URL credentials.");
+  }
+  if (input.imageRecipe !== undefined && input.imageURL === undefined) throw new Error("An image recipe requires its rendered --image-url; the CLI does not render images.");
+  const picture = input.imageRecipe === undefined
+    ? (input.imageURL === undefined ? {} : { image_url: input.imageURL })
+    : { image_url: input.imageURL!, image_recipe: input.imageRecipe };
+  const body: AgentCreateParams = {
+    ...(input.tokenName === undefined ? {} : { token_name: input.tokenName }),
+    ...(input.handle === undefined ? {} : { handle: input.handle }),
+    ...(firstName === undefined ? {} : { first_name: firstName }),
+    ...picture,
+  };
+  if (Buffer.byteLength(JSON.stringify(body), "utf8") > 8192) throw new Error("Agent creation body exceeds 8192 bytes.");
   let result;
   try {
     result = await deps.bootstrap(body, { baseURL: apiURL, maxRetries: 0 });

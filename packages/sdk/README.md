@@ -50,6 +50,12 @@ const agent = new Relay({
 await agent.agents.delete(created.agent.handle);
 ```
 
+Optional bootstrap fields are `handle` (full `.dev` handle), `first_name`, and
+`image_url`. `image_recipe` uses `AgentImageRecipe` and requires the rendered
+`image_url`; it is redraw metadata, not an image-rendering API. Omitted fields
+retain server defaults. An occupied custom handle returns a conflict without
+retrying or selecting a different handle.
+
 `Relay.createAgent(body?, options?)` is unauthenticated and never retries an
 uncertain POST. It returns `AgentCreateResponse` (`agent: ContactCardItem`,
 `secret`, `share_url`). Options support a custom origin/fetch, timeout, headers,

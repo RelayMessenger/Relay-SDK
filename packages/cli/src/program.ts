@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { readFile, stat } from "node:fs/promises";
 import Relay, {
   RELAY_WEBHOOK_EVENT_TYPES,
+  type AgentImageRecipe,
   type ChatCreateParams,
   type ChatSendVoicememoParams,
   type ChatUpdateParams,
@@ -157,13 +158,34 @@ export const createProgram = (
   handoffOptions(agents.command("create"))
     .option("--api-url <url>", "Relay API origin", validateApiURL)
     .option("--token-name <name>", "label for the new Agent Token")
+    .option("--handle <handle>", "optional full .dev handle; omission keeps server assignment")
+    .option("--name <name>", "optional display name")
+    .option("--image-url <url>", "public HTTPS image to copy into Relay storage")
+    .option("--image-recipe <json-file>", "existing Relay recipe JSON; requires its rendered --image-url")
     .option("--json", "print safe metadata as JSON")
-    .action(async (options: HandoffOptions & { apiUrl?: string; tokenName?: string; json?: boolean }, command: Command) => {
+    .action(async (options: HandoffOptions & { apiUrl?: string; tokenName?: string; json?: boolean; handle?: string; name?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
       const target = await handoffTarget(options);
+      let imageRecipe: AgentImageRecipe | undefined;
+      if (options.imageRecipe !== undefined) {
+        if (options.imageUrl === undefined) throw new Error("--image-recipe requires the rendered --image-url.");
+        try {
+          const info = await stat(options.imageRecipe);
+          if (!info.isFile() || info.size > 8192) throw new Error("Invalid recipe file.");
+          const raw = await readFile(options.imageRecipe, "utf8");
+          if (Buffer.byteLength(raw, "utf8") > 8192) throw new Error("Recipe too large.");
+          const value: unknown = JSON.parse(raw.replace(/^\uFEFF/u, ""));
+          if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Recipe must be an object.");
+          imageRecipe = value as AgentImageRecipe; // Server's existing recipe parser remains authoritative.
+        } catch { throw new Error("Image recipe must be a readable JSON object file no larger than 8192 bytes."); }
+      }
       const result = await createAgent({
         ...(program.getOptionValueSource("profile") === "cli" && globals(command).profile ? { profile: globals(command).profile } : {}),
         ...(options.apiUrl ? { apiURL: options.apiUrl } : {}),
         ...(options.tokenName === undefined ? {} : { tokenName: options.tokenName }),
+        ...(options.handle === undefined ? {} : { handle: options.handle }),
+        ...(options.name === undefined ? {} : { firstName: options.name }),
+        ...(options.imageUrl === undefined ? {} : { imageURL: options.imageUrl }),
+        ...(imageRecipe === undefined ? {} : { imageRecipe }),
       }, agentDeps);
       let handoff;
       if (target) {

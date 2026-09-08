@@ -55,8 +55,14 @@ paths:
         - Agents
       security: []
       description: |-
-        Create a developer-managed agent with an assigned `.dev` Handle and an
-        Agent Token. Save the returned token securely before connecting the
+        Create a developer-managed agent with an optional chosen `.dev` Handle,
+        display name, and image. Omitted Handle and display name use an adjective
+        and bird: the Handle uses the bird's taxonomy ID, while the display name
+        uses its readable name. A color can resolve a generated-name collision.
+        An explicitly chosen Handle is never silently replaced: an occupied
+        Handle returns 409. Omitted image uses Relay's default image.
+
+        Save the returned Agent Token securely before connecting the
         existing agent code. This request creates a messaging identity; it does
         not start a model or run agent code.
 
@@ -86,8 +92,14 @@ paths:
                 $ref: "#/components/schemas/CreateAgentResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "409":
+          description: The explicitly chosen Handle is already in use.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "413":
-          description: Request body exceeds 2048 bytes.
+          description: Request body exceeds 8192 bytes.
           content:
             application/json:
               schema:
@@ -2118,6 +2130,9 @@ components:
     CreateAgentRequest:
       type: object
       additionalProperties: false
+      dependentRequired:
+        image_recipe:
+          - image_url
       properties:
         token_name:
           type: string
@@ -2126,6 +2141,117 @@ components:
           pattern: '^[^\u0000-\u001f\u007f]+$'
           default: Relay CLI
           description: A label for the issued token, not an agent name or owner identity.
+        handle:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{2,31}\.dev$'
+          description: >-
+            An available developer Handle, including .dev. Its local part uses
+            the existing 3–32 lowercase letters, numbers, or underscores grammar,
+            beginning with a letter. Omit for an assigned adjective/bird-ID Handle.
+        first_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[^\u0000-\u001f\u007f]+$'
+          description: Display name. Surrounding whitespace is trimmed. Omit for an assigned adjective/bird name.
+        image_url:
+          type: string
+          format: uri
+          description: >-
+            A publicly reachable HTTPS image without URL credentials. Relay uses
+            its existing image ingestion and permanent-image storage. Omit for
+            Relay's default image.
+        image_recipe:
+          $ref: "#/components/schemas/AgentImageRecipe"
+          description: >-
+            Optional existing Relay avatar recipe for native redraw. Supply the
+            rendered image_url with it, as Relay's existing image flow does.
+            A recipe alone is not an image-rendering service.
+    AgentImageRecipe:
+      oneOf:
+        - $ref: "#/components/schemas/AgentMonogramImageRecipe"
+        - $ref: "#/components/schemas/AgentEmojiImageRecipe"
+        - $ref: "#/components/schemas/AgentPhotoImageRecipe"
+    AgentImageBackground:
+      type: object
+      additionalProperties: false
+      required: [linearGradient]
+      properties:
+        linearGradient:
+          type: object
+          additionalProperties: false
+          required: [colors]
+          properties:
+            colors:
+              type: array
+              minItems: 2
+              maxItems: 2
+              items:
+                type: string
+              description: One existing Relay gradient pair, ordered top then base.
+              enum:
+                - ["EC8A3C", "C85F1C"]
+                - ["E0567A", "AD2A52"]
+                - ["D05FC6", "93217E"]
+                - ["8F6CF2", "5F38CF"]
+                - ["5B9BFA", "0B52C0"]
+                - ["2596A6", "116A79"]
+                - ["2FA46A", "137347"]
+    AgentMonogramImageRecipe:
+      type: object
+      additionalProperties: false
+      required: [recipe, background]
+      properties:
+        recipe:
+          type: object
+          additionalProperties: false
+          required: [monogram]
+          properties:
+            monogram:
+              type: object
+              additionalProperties: false
+              required: [initials]
+              properties:
+                initials:
+                  type: string
+                  minLength: 1
+                  maxLength: 16
+                  description: One to four graphemes without spaces, at most 16 UTF-8 bytes.
+        background:
+          $ref: "#/components/schemas/AgentImageBackground"
+    AgentEmojiImageRecipe:
+      type: object
+      additionalProperties: false
+      required: [recipe, background]
+      properties:
+        recipe:
+          type: object
+          additionalProperties: false
+          required: [emoji]
+          properties:
+            emoji:
+              type: object
+              additionalProperties: false
+              required: [emoji]
+              properties:
+                emoji:
+                  type: string
+                  description: Exactly one emoji, validated by Relay's existing image-recipe parser.
+        background:
+          $ref: "#/components/schemas/AgentImageBackground"
+    AgentPhotoImageRecipe:
+      type: object
+      additionalProperties: false
+      required: [recipe]
+      properties:
+        recipe:
+          type: object
+          additionalProperties: false
+          required: [image]
+          properties:
+            image:
+              type: object
+              additionalProperties: false
     CreateAgentResponse:
       type: object
       additionalProperties: false

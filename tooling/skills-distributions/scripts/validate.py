@@ -130,7 +130,7 @@ if claude.get("mcpServers", {}).get("relayDocs", {}).get("url") != (
 
 lock = json_object(LOCK_PATH)
 if lock.get("api", {}).get("commit") != (
-    "9f0a023c65dc52515d2916d1d8f90118fd0bf790"
+    "04c729e3e3b2249eb9cca93fbb09ee3dd5fd69a6"
 ):
     fail("Relay Server lock commit drifted")
 if lock.get("docs", {}).get("commit") != (
@@ -140,7 +140,7 @@ if lock.get("docs", {}).get("commit") != (
 if lock.get("sdk", {}).get("version") != "0.3.1-staging.0":
     fail("Relay SDK lock version drifted")
 if lock.get("sdk", {}).get("commit") != (
-    "7cb21757843e1a9693d2b41343272f8b9f3d771f"
+    "4b6e80013539525c6610df96acd54c45be61d749"
 ):
     fail("Relay SDK source commit drifted")
 if lock.get("sdk", {}).get("package_sha256") != (
