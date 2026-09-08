@@ -141,3 +141,26 @@ can also accept this flag to validate the declared operations/auth/body and
 record a SHA-256 without making requests. The live receipt preserves this
 canonical hash alongside harness git SHA/dirty state and main's declared
 deployment SHA. No canonical file is authored or edited by verification.
+
+## New-credential native runtime proof (Linux/Daytona)
+
+After SDK/CLI builds, run `node scripts/agent-cli-platforms-runtime.mjs` in the
+owned Daytona CLI checkout with `RELAY_DAYTONA_SANDBOX_ID` and an absolute
+`RELAY_RUNTIME_PROOF_RECEIPT` outside the checkout. This derives its transport
+fixture from the existing OpenClaw gateway harness, but starts with an explicit
+empty named runtime account instead of a preconfigured tokenFile.
+
+It installs local SDK/CLI tarballs plus the local OpenClaw plugin tarball, runs
+the **actual installed CLI executable** with `agents create --connect openclaw`,
+checks that the new credential—not an unrelated environment credential—was
+saved to the selected stopped runtime, verifies all other settings/accounts
+are preserved, then starts the actual installed OpenClaw gateway. The fixture
+requires that newly issued credential for Contact Card and WebSocket auth and
+checks durable acknowledgement, replay suppression, heartbeat, a model turn,
+and an idempotent outbound message. Bootstrap must happen exactly once.
+
+This is native-process proof against loopback Relay/model fixtures, NOT live
+staging API proof. Share links use `go.staging.relayapp.im`; no production Relay
+request is made. All children and private fixtures are owned by this run and
+removed afterward. No unrelated runtime process is stopped. Local candidate
+tarball versions do not authorize publishing or overwriting registry versions.
