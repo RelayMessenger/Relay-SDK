@@ -1,7 +1,7 @@
 name: Agent CLI native platforms
 on:
   push:
-    branches: [agent-cli-verification-20260908]
+    branches: [staging, agent-cli-verification-20260908]
   workflow_dispatch:
 concurrency:
   group: agent-cli-native-${{ github.ref }}
