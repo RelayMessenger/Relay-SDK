@@ -54,7 +54,11 @@ and Think builds the Chat SDK instance itself with
 `concurrency: { debounceMs: 600, strategy: "burst" }` hardcoded
 (`dist/chat-sdk-C8BvREXn.js:421-424`). The strategy is the one we want, but no
 option reaches the window, so Messages collapse on Think's 600 ms rather than a
-window this Worker chooses.
+window this Worker chooses. That one answer is for the latest Message only: the
+Chat SDK dispatches the latest Message and passes the earlier ones as
+`context.skipped` (`chat` 4.39.0, `dist/index.js:2436-2454`), and Think's
+`(thread, message)` handlers never read that argument, so the earlier Messages
+in the window never reach the model.
 
 **A newer Message cannot cancel the running turn.** Think's messenger handlers
 take only `(thread, message)` and never the Chat SDK's third `context` argument
@@ -64,7 +68,8 @@ reads, and the superseded turn finishes and posts its answer anyway. Think's own
 `cancelAllChats()` does stop the running turn, but it also leaves the newer
 Message unanswered, so it is not used. The adapter's
 `abortActiveTurnOnReceipt` is therefore deliberately left off here; it is
-correct for Chat SDK consumers whose handlers do read `context.signal`.
+correct for Chat SDK consumers whose handlers do read `thread.signal`
+(`chat` 4.39.0, `dist/types-Bv-_sd-h.d.ts:418`).
 
 Think's streamed response surface is intentionally limited to zero visible
 characters. Relay therefore never receives a draft or a second fallback
