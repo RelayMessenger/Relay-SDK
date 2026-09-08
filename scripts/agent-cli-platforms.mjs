@@ -36,8 +36,12 @@ const npm = (args, options) => run(process.execPath, [npmCli, ...args], options)
 try {
   report.sha = run('git', ['rev-parse', 'HEAD']).trim();
   report.dirty = run('git', ['status', '--porcelain']).trim();
+  report.validationFailures = [];
   for (const pkg of ['sdk', 'cli']) {
-    for (const task of ['check', 'build', 'test']) npm(['run', task, '--workspace', `@relaymessenger/${pkg}`]);
+    for (const task of ['check', 'build']) npm(['run', task, '--workspace', `@relaymessenger/${pkg}`]);
+    // Keep the overall run red, but still collect independent installed-package evidence.
+    try { npm(['run', 'test', '--workspace', `@relaymessenger/${pkg}`]); }
+    catch (error) { report.validationFailures.push({ package: pkg, failure: error.message }); }
   }
   const packs = {};
   for (const pkg of ['sdk', 'cli']) {
@@ -73,7 +77,9 @@ try {
   run(process.execPath, [bin, 'chats', 'list'], { cwd: consumer, expectedExit: 1 });
   cli('profiles', 'use', 'default');
   cli('profiles', 'remove', 'verification');
-  report.result = 'passed';
+  report.packageProof = 'passed';
+  report.result = report.validationFailures.length ? 'failed' : 'passed';
+  if (report.validationFailures.length) process.exitCode = 1;
 } catch (error) {
   report.result = 'failed'; report.failure = error.message; process.exitCode = 1;
 } finally {
