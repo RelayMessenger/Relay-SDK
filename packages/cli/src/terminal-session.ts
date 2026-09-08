@@ -69,8 +69,11 @@ function publicShareUrl(value: string, secrets: readonly string[]): string | und
 }
 export function terminalRuntimeLabel(runtime: TerminalRuntimeState, secrets: readonly string[] = []): string {
   const name = terminalText(runtime.label, secrets, 40);
-  const labels = { unknown: "connection not verified", "not-started": "not started", connected: "connected (reported by selected runtime)", disconnected: "disconnected (reported by selected runtime)" };
-  return `Runtime${name ? ` ${name}` : ""}: ${labels[runtime.connection] ?? labels.unknown}`;
+  // Plain words for the person at the terminal (owner, 2026-09-08: a label he
+  // has to ask about is a defect). The agent is "running" when a connected
+  // runtime answers for it; until then nothing answers its messages.
+  const labels = { unknown: "connection not checked", "not-started": "not running yet; nothing answers its messages until you connect one", connected: "running", disconnected: "not connected" };
+  return `Agent${name ? ` (${name})` : ""}: ${labels[runtime.connection] ?? labels.unknown}`;
 }
 
 /** Persistent view only. Closing it does not delete the agent or start/stop any runtime. */
@@ -117,10 +120,13 @@ export async function runTerminalSession(options: TerminalSessionOptions, io: Te
     const info = [`${title} · @${handle}`, ...(profile ? [`Profile: ${profile}`] : [])];
     info.push(share ?? "Public share link unavailable.");
     info.push(terminalRuntimeLabel(options.runtime, secrets));
-    const statuses = { connecting: "connecting (no ACK observation)", ready: "connected (read-only; no ACK)", disconnected: "disconnected", unavailable: "unavailable — no consuming listener opened", gap: "connected; retention gap observed (not full history)" };
-    info.push(`Event view: ${statuses[watch]}`);
-    if (options.runtime.ownership !== "none") info.push("Runtime ownership external/unknown; this view does not control it.");
-    if (help) info.push("This view does not run a model, acknowledge events, or change runtime permissions.");
+    // This view only watches: it never answers or claims an event, so a real
+    // runtime still receives every message. Say that in the words of the
+    // person reading it, never in wire vocabulary (ACK, listener, retention).
+    const statuses = { connecting: "connecting", ready: "watching only; your agent still receives every message", disconnected: "disconnected", unavailable: "unavailable", gap: "watching; some earlier events are not shown" };
+    info.push(`Live view: ${statuses[watch]}`);
+    if (options.runtime.ownership !== "none") info.push("This view does not start or stop your agent.");
+    if (help) info.push("This view only watches. It does not answer messages or change anything.");
     const qrLines = qr.trimEnd().split("\n");
     const qrWidth = Math.max(...qrLines.map(line => stripVTControlCharacters(line).length));
     const wrap = (value: string, columns: number): string[] => {
