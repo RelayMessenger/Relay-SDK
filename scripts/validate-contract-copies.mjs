@@ -29,8 +29,8 @@ const skillLock = JSON.parse(
 );
 assert.equal(skillLock.api.openapi_sha256, expected);
 assert.equal(skillLock.api.commit, "9f0a023c65dc52515d2916d1d8f90118fd0bf790");
-assert.equal(skillLock.sdk.commit, "1bbcb486b4a91860ee3527ce95d015883e4cc1ae");
-assert.equal(skillLock.sdk.version, "0.3.0-staging.8");
+assert.equal(skillLock.sdk.commit, "7cb21757843e1a9693d2b41343272f8b9f3d771f");
+assert.equal(skillLock.sdk.version, "0.3.1-staging.0");
 
 // The skill lock is historical source provenance, not the moving workspace version.
 const sdkManifest = JSON.parse(await readFile(join(root, "packages/sdk/package.json"), "utf8"));
