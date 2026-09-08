@@ -45,7 +45,8 @@ try:
         home=root/(name+'-home');home.mkdir(mode=0o700);cwd=root/(name+'-cwd');cwd.mkdir(mode=0o700)
         cfg=root/(name+'.json');before=root/(name+'-before');after=root/(name+'-after');code=root/(name+'-exit')
         body=f'export HOME={shlex.quote(str(home))} USERPROFILE={shlex.quote(str(home))} RELAY_CONFIG_PATH={shlex.quote(str(cfg))} RELAY_API_URL={shlex.quote(a.origin)}\ncd {shlex.quote(str(cwd))}\nstty -g >{shlex.quote(str(before))}\n{shlex.quote(a.shim)} auth login\nprintf "%s" "$?" >{shlex.quote(str(code))}\nstty -g >{shlex.quote(str(after))}\nexec sleep 180\n'
-        session(name,body);wait_for(lambda:'Agent Token' in capture(name))
+        session(name,body);wait_for(lambda:'Install the Relay skill?' in capture(name));tm('send-keys','-t',name,'Enter')
+        wait_for(lambda:'Agent Token' in capture(name))
         tty=tm('display-message','-p','-t',name,'#{pane_tty}').strip();fd=os.open(tty,os.O_RDWR|os.O_NOCTTY)
         try:assert not termios.tcgetattr(fd)[3]&termios.ECHO
         finally:os.close(fd)
@@ -53,7 +54,7 @@ try:
         assert secret not in capture(name)
         tm('send-keys','-t',name,'C-c' if cancel else 'Enter')
         if not cancel:
-            wait_for(lambda:'Install the Relay skill?' in capture(name));tm('send-keys','-t',name,'Enter')
+            wait_for(lambda:'Event view:' in capture(name));tm('send-keys','-t',name,'q')
         wait_for(code.exists);assert code.read_text()=='0';assert before.read_text()==after.read_text();history=capture(name);assert secret not in history
         assert (not cfg.exists()) if cancel else json.loads(cfg.read_text())['profiles']['default']['agent_token']==secret
         assert name+'-secret' not in tm('list-buffers','-F','#{buffer_name}',check=False)

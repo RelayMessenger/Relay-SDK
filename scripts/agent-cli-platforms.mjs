@@ -6,6 +6,7 @@ import { tmpdir, platform, arch, release } from 'node:os';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { publishedPlan, packPublished, verifyPublishedConsumer } from './agent-cli-platforms-registry.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 if (platform() === 'linux' && !process.env.RELAY_DAYTONA_SANDBOX_ID) throw Error('Linux proof requires an owned Daytona sandbox ID.');
 const receipts = resolve(process.env.RELAY_PLATFORM_RECEIPTS ?? join(root, '.release-tmp', 'agent-cli-platforms', `${platform()}-${arch()}`));
@@ -40,27 +41,34 @@ try {
   report.sha = run('git', ['rev-parse', 'HEAD']).trim();
   report.dirty = run('git', ['status', '--porcelain']).trim();
   const packageNames = { sdk: '@relaymessenger/sdk', cli: 'relaymessenger' };
-  const cliManifest = JSON.parse(readFileSync(join(root, 'packages/cli/package.json')));
+  const publication = publishedPlan(root);
+  let cliManifest = JSON.parse(readFileSync(join(root, 'packages/cli/package.json')));
   assert.equal(cliManifest.name, packageNames.cli, 'Final proof requires canonical relaymessenger, not a scoped wrapper');
   assert.ok(cliManifest.bin?.relaymessenger, 'Canonical executable missing');
   report.packageName = cliManifest.name;
   report.packageVersion = cliManifest.version;
   report.validationFailures = [];
-  for (const pkg of ['sdk', 'cli']) {
+  if (!publication) for (const pkg of ['sdk', 'cli']) {
     for (const task of ['check', 'build']) npm(['run', task, '--workspace', packageNames[pkg]]);
     // Keep the overall run red, but still collect independent installed-package evidence.
     try { npm(['run', 'test', '--workspace', packageNames[pkg]]); }
     catch (error) { report.validationFailures.push({ package: pkg, failure: error.message }); }
   }
-  const packs = {};
-  for (const pkg of ['sdk', 'cli']) {
+  const published = publication ? packPublished(publication, scratch, npm, report) : undefined;
+  const packs = published?.packs ?? {};
+  if (publication) report.sourceValidation = 'not run: this is published-consumer proof, not a source validation claim';
+  if (!publication) for (const pkg of ['sdk', 'cli']) {
     const packed = JSON.parse(npm(['pack', '--workspace', packageNames[pkg], '--ignore-scripts', '--json', '--pack-destination', scratch]));
     packs[pkg] = join(scratch, packed[0].filename);
   }
   report.tarballSHA256 = Object.fromEntries(Object.entries(packs).map(([k,v]) => [k,createHash('sha256').update(readFileSync(v)).digest('hex')]));
   const consumer = join(scratch, 'consumer'); mkdirSync(consumer);
   writeFileSync(join(consumer, 'package.json'), JSON.stringify({ private: true }));
-  npm(['install', '--ignore-scripts', '--no-audit', '--no-fund', packs.sdk, packs.cli], { cwd: consumer });
+  npm(['install', '--ignore-scripts', '--no-audit', '--no-fund', ...(publication ? ['--registry', publication.registry, packs.cli] : [packs.sdk, packs.cli])], { cwd: consumer });
+  if (publication) {
+    cliManifest = verifyPublishedConsumer(root, consumer, publication, report);
+    report.packageVersion = cliManifest.version;
+  }
   assert.ok(!existsSync(join(consumer, 'node_modules', '@relaymessenger', 'cli')), 'Retired scoped compatibility package must not be installed');
   const bin = resolve(consumer, 'node_modules', packageNames.cli, cliManifest.bin.relaymessenger);
   const cli = (...args) => run(process.execPath, [bin, ...args], { cwd: consumer });
@@ -138,6 +146,12 @@ try {
     // Native process checks above and module fixture checks are recorded separately from live staging.
     run(process.execPath, [join(root, 'packages/cli/scripts/agent-tarball-consumer.mjs'), consumer, scratch], { cwd: consumer });
     report.agentCommands = 'passed: native auth login --with-token/status/logout, agent help/list/missing-token, installed create/list/delete and existing-token native handoff fixture; live staging pending';
+  }
+  run(process.execPath, [join(root, 'scripts/agent-cli-platforms-image.mjs'), consumer, scratch], { cwd: consumer });
+  run(process.execPath, [join(root, 'scripts/agent-cli-platforms-observer.mjs'), consumer], { cwd: consumer });
+  report.installedObserver = 'passed: real loopback WebSocket, no ACK, fail closed, reconnect';
+  if (platform() !== 'win32') {
+    run('python3', [join(root, 'scripts/agent-cli-platforms-terminal-pty.py')], { env: { ...env, RELAY_TERMINAL_NODE: process.execPath, RELAY_TERMINAL_SHIM: join(consumer, 'node_modules/.bin/relaymessenger'), RELAY_TERMINAL_SOURCE: root, RELAY_TERMINAL_EVIDENCE: join(receipts, 'terminal') } });
   }
   report.packageProof = 'passed';
   report.result = report.validationFailures.length ? 'failed' : 'passed';

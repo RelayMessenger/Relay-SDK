@@ -1,16 +1,16 @@
 name: Agent CLI native platforms
 on:
   push:
-    branches: [staging, agent-cli-verification-20260908]
+    branches: [staging, agent-cli-verification-20260908, test/staging-e2e-cli-20260908]
   workflow_dispatch:
 concurrency:
   group: agent-cli-native-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 permissions:
   contents: read
 jobs:
   native:
-    if: github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/agent-cli-verification-20260908'
+    if: github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/agent-cli-verification-20260908' || github.ref == 'refs/heads/test/staging-e2e-cli-20260908'
     strategy:
       fail-fast: false
       matrix:
@@ -23,6 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version-file: .nvmrc
@@ -32,9 +33,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/agent-cli-platforms-windows-probe.ps1
-      - run: node --test scripts/agent-cli-platforms-policy.test.mjs
+      - run: node --test scripts/agent-cli-platforms-policy.test.mjs scripts/agent-cli-platforms-registry.test.mjs
       - run: node --test scripts/agent-cli-platforms-staging.test.mjs
       - run: node scripts/agent-cli-platforms.mjs
+      - run: node scripts/agent-cli-platforms-published.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
