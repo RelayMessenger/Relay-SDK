@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { access, stat } from "node:fs/promises";
 import { constants } from "node:fs";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 
 export const RELAY_SKILL_INSTALL_ARGS = ["--yes", "skills@1.5.24", "add", "https://github.com/RelayMessenger/Relay-SDK/tree/staging/skills/relay", "--skill", "relay"] as const;
 // Actual supported installation paths from the pinned installer README, saved
@@ -133,9 +133,19 @@ const globalRoots = [
   ".pochi/skills",
   ".adal/skills"
 ];
-export async function relaySkillPresent(cwd: string, home: string): Promise<boolean | "unknown"> {
+export async function relaySkillPresent(cwd: string, home: string, env: NodeJS.ProcessEnv = process.env): Promise<boolean | "unknown"> {
+  // skills@1.5.24 cli.mjs:1334–1339,1443–1449,1506–1512,1662–1669.
+  // Overrides replace, rather than supplement, these agents' default homes.
+  const selectedHomes: Record<string, string | undefined> = {
+    ".codex/skills": env.CODEX_HOME?.trim(),
+    ".claude/skills": env.CLAUDE_CONFIG_DIR?.trim(),
+    ".hermes/skills": env.HERMES_HOME?.trim(),
+  };
+  const globalPaths = globalRoots.map((path) => selectedHomes[path]
+    ? resolve(cwd, selectedHomes[path]!, "skills", "relay", "SKILL.md")
+    : join(home, path, "relay", "SKILL.md"));
   let unknown = false;
-  for (const path of [...projectRoots.map((path) => join(cwd, path, "relay", "SKILL.md")), ...globalRoots.map((path) => join(home, path, "relay", "SKILL.md"))]) {
+  for (const path of [...projectRoots.map((path) => join(cwd, path, "relay", "SKILL.md")), ...globalPaths]) {
     try { if ((await stat(path)).isFile()) return true; }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT" && (error as NodeJS.ErrnoException).code !== "ENOTDIR") unknown = true; }
   }
@@ -143,7 +153,7 @@ export async function relaySkillPresent(cwd: string, home: string): Promise<bool
 }
 export function installerEnvironment(parent: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   // The public installer needs OS/terminal locations, not Relay/provider tokens.
-  const allowed = new Set(["PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "TEMP", "TMP", "TMPDIR", "TERM", "COLORTERM", "TERM_PROGRAM", "LANG", "LC_ALL", "NO_COLOR", "FORCE_COLOR"]);
+  const allowed = new Set(["PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "TEMP", "TMP", "TMPDIR", "TERM", "COLORTERM", "TERM_PROGRAM", "LANG", "LC_ALL", "NO_COLOR", "FORCE_COLOR", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "HERMES_HOME", "DISABLE_TELEMETRY", "DO_NOT_TRACK"]);
   return Object.fromEntries(Object.entries(parent).filter(([name]) => allowed.has(name.toUpperCase())));
 }
 export async function resolveNpx(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): Promise<string> {
