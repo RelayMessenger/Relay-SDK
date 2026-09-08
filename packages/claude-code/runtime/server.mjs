@@ -23510,13 +23510,22 @@ var RelayStateStore = class {
       }
     });
   }
-  pendingDeliveries(retryBefore) {
+  pendingDeliveries(retryBefore, now = Date.now()) {
+    const lease = this.#activeTurnLease();
+    const gateRequeued = lease !== null && lease.expiresAt > now ? 1 : 0;
+    const closedPrefix = this.#closedTurnKey("");
     const rows = this.#db.prepare(`
       SELECT * FROM deliveries
       WHERE status IN ('pending','starting')
         AND (last_notified_at IS NULL OR last_notified_at <= ?)
+        AND (
+          ? = 0
+          OR NOT EXISTS (
+            SELECT 1 FROM metadata WHERE key = ? || deliveries.delivery_id
+          )
+        )
       ORDER BY created_at ASC, delivery_id ASC
-    `).all(retryBefore);
+    `).all(retryBefore, gateRequeued, closedPrefix);
     return rows.map(deliveryFromRow);
   }
   noteDeliveryNotified(deliveryId, now = Date.now()) {

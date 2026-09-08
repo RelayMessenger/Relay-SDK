@@ -464,13 +464,27 @@ export class RelayStateStore {
     });
   }
 
-  pendingDeliveries(retryBefore: number): StoredDelivery[] {
+  pendingDeliveries(retryBefore: number, now = Date.now()): StoredDelivery[] {
+    // A delivery that came back to the inbox after supersession or expiry
+    // (it carries a closed-turn marker) waits until the active turn closes.
+    // Otherwise re-notifying it mid-turn would let it supersede the newer
+    // turn, which would then re-notify, and so on. New deliveries that never
+    // had a turn are notified at once, as before.
+    const lease = this.#activeTurnLease();
+    const gateRequeued = lease !== null && lease.expiresAt > now ? 1 : 0;
+    const closedPrefix = this.#closedTurnKey("");
     const rows = this.#db.prepare(`
       SELECT * FROM deliveries
       WHERE status IN ('pending','starting')
         AND (last_notified_at IS NULL OR last_notified_at <= ?)
+        AND (
+          ? = 0
+          OR NOT EXISTS (
+            SELECT 1 FROM metadata WHERE key = ? || deliveries.delivery_id
+          )
+        )
       ORDER BY created_at ASC, delivery_id ASC
-    `).all(retryBefore) as unknown as DeliveryRow[];
+    `).all(retryBefore, gateRequeued, closedPrefix) as unknown as DeliveryRow[];
     return rows.map(deliveryFromRow);
   }
 

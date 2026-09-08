@@ -295,17 +295,25 @@ describe("unanswered deliveries survive supersession and expiry", () => {
       // The model starts the second before answering the first.
       await channel.beginProcessing({ delivery_id: second.event_id });
       expect(state.activeTurnOrigin()).toMatchObject({ deliveryId: second.event_id });
+      expect(state.delivery(first.event_id)).toMatchObject({ status: "pending" });
+      // While turn 2 is active the requeued first delivery stays quiet, or it
+      // could supersede turn 2 and the two would ping-pong forever.
+      await channel.flush();
+      await channel.flush();
+      expect(notifications).toHaveLength(2);
+      expect((await channel.reply({
+        chat_id: CHAT_B,
+        text: "answer two",
+        send_id: "two",
+      })).isError).not.toBe(true);
+      expect(state.activeTurnOrigin()).toBeNull();
+      // First flush after turn 2 closed: the first delivery is notified again.
       await channel.flush();
       expect(notifications).toHaveLength(3);
       expect((notifications[2]?.params as { content: string }).content).toBe("first question");
       // Re-notification is idempotent inside the retry window.
       await channel.flush();
       expect(notifications).toHaveLength(3);
-      expect((await channel.reply({
-        chat_id: CHAT_B,
-        text: "answer two",
-        send_id: "two",
-      })).isError).not.toBe(true);
       const reopened = await channel.beginProcessing({ delivery_id: first.event_id });
       expect(reopened.isError).not.toBe(true);
       expect(reopened.content[0]?.text).toContain("processing started");
@@ -343,10 +351,53 @@ describe("unanswered deliveries survive supersession and expiry", () => {
       await channel.beginProcessing({ delivery_id: second.event_id });
       await channel.beginProcessing({ delivery_id: third.event_id });
       await channel.flush();
-      const contents = notifications.map((item) => (item.params as { content: string }).content);
-      expect(contents).toEqual(["answered", "left open", "newest", "left open"]);
+      const before = notifications.map((item) => (item.params as { content: string }).content);
+      expect(before).toEqual(["answered", "left open", "newest"]);
+      expect((await channel.completeProcessing({
+        delivery_id: third.event_id,
+        outcome: "completed",
+      })).isError).not.toBe(true);
+      await channel.flush();
+      const after = notifications.map((item) => (item.params as { content: string }).content);
+      expect(after).toEqual(["answered", "left open", "newest", "left open"]);
+      // The answered first delivery never comes back; the requeued second can.
       expect((await channel.beginProcessing({ delivery_id: first.event_id })).isError).toBe(true);
+      expect((await channel.beginProcessing({ delivery_id: second.event_id })).isError)
+        .not.toBe(true);
       expect(fake.sends).toHaveLength(1);
+    } finally {
+      state.close();
+    }
+  });
+
+  it("holds a superseded delivery until the active turn closes, then notifies it", async () => {
+    const { state, notifications, channel } = fixture();
+    try {
+      const first = event({ sequence: 1, text: "held" });
+      const second = event({ sequence: 2, text: "current", chatId: CHAT_B, sender: senderB });
+      const third = event({ sequence: 3, text: "brand new" });
+      accept(state, first, 1);
+      accept(state, second, 2);
+      await channel.flush();
+      await channel.beginProcessing({ delivery_id: first.event_id });
+      await channel.beginProcessing({ delivery_id: second.event_id });
+      expect(state.delivery(first.event_id)).toMatchObject({ status: "pending" });
+      // A never-turned delivery still notifies at once while turn 2 runs.
+      accept(state, third, 3);
+      await channel.flush();
+      expect(notifications.map((item) => (item.params as { content: string }).content))
+        .toEqual(["held", "current", "brand new"]);
+      expect((await channel.completeProcessing({
+        delivery_id: second.event_id,
+        outcome: "completed",
+      })).isError).not.toBe(true);
+      await channel.flush();
+      expect(notifications.map((item) => (item.params as { content: string }).content))
+        .toEqual(["held", "current", "brand new", "held"]);
+      const reopened = await channel.beginProcessing({ delivery_id: first.event_id });
+      expect(reopened.isError).not.toBe(true);
+      expect(reopened.content[0]?.text).toContain("processing started");
+      expect(state.activeTurnOrigin()).toMatchObject({ deliveryId: first.event_id });
     } finally {
       state.close();
     }

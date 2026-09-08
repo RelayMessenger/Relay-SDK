@@ -132,8 +132,11 @@ process the content if the tool returns an error. Success opens one turn-scoped
 reply origin with a ten-minute maximum lease. Starting another turn closes
 the previous one as superseded. A superseded or expired delivery that was
 never answered goes back to the inbox: the channel notifies it again on the
-next flush and `begin_processing` opens a fresh turn for it (the closed turn
-stays recorded for audit). A delivery that was answered by `reply` or closed
+first flush after the active turn closes (never while another turn is
+running, so the two cannot keep superseding each other), and
+`begin_processing` then opens a fresh turn for it (the closed turn stays
+recorded for audit). New deliveries that never had a turn are still notified
+at once. A delivery that was answered by `reply` or closed
 by `complete_processing` stays closed and cannot be reactivated, so no Message
 is answered twice and none is silently lost.
 
