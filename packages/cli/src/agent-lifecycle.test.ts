@@ -26,6 +26,7 @@ async function fixture() {
   return { deps, env, fetch, output, home };
 }
 
+describe("agent CLI persisted workflows", { timeout: 120_000 }, () => {
 describe("real persisted agent selection", { timeout: 120_000 }, () => {
   it("plain create then delete returned handle works from fresh config", async () => {
     const { deps, fetch, output } = await fixture();
@@ -209,4 +210,6 @@ it("plain interactive login reads a private prompt; --with-token selects stdin o
   expect(await runCLI(["auth", "login", "--with-token", "--api-url", "https://api.staging.relayapp.im"], { ...deps, isInteractive: false, readStdin: async () => "stdin-private-token\n" })).toBe(0);
   expect((await readConfig(deps.configContext)).profiles.default?.agent_token).toBe("stdin-private-token");
   expect(output.join("")).not.toMatch(/prompt-private-token|stdin-private-token|other-env-token/);
+});
+
 });

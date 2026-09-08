@@ -13,6 +13,9 @@ assert.equal(typeof new Relay({ apiKey: "existing-test-key" }).agents.delete, "f
 const { runCLI } = await import(pathToFileURL(join(consumer, "node_modules/relaymessenger/dist/program.js")));
 const token = "tarball-one-time-agent-credential";
 const configPath = join(home, "agent-config.json");
+const configModule = await import(pathToFileURL(join(consumer, "node_modules/relaymessenger/dist/config.js")));
+const aclModule = process.platform === "win32" ? await import(pathToFileURL(join(consumer, "node_modules/relaymessenger/dist/runtime-connect/windows-acl.js"))) : undefined;
+const originalParentACL = aclModule ? (await aclModule.inspectWindowsAcl(home)).sddl : undefined;
 const card = { handle: "brave_cangoo.dev", first_name: "Brave Canada Goose", last_name: null, image_url: null, is_active: true, kind: "agent" };
 const output = []; const errors = []; const calls = [];
 let deleteStatus = 409;
@@ -49,11 +52,21 @@ assert.equal(await readFile(join(nativeHome, "config.yaml"), "utf8"), nativeYaml
 
 let config = JSON.parse(await readFile(configPath, "utf8"));
 assert.equal(config.profiles[card.handle].agent_token, token);
+const security = await configModule.inspectConfigPermissions(deps.configContext);
+assert.equal(security.secure, true);
+if (aclModule) {
+  assert.equal(security.aclChecked, true);
+  assert.equal(aclModule.privateWindowsAcl(await aclModule.inspectWindowsAcl(configPath)), true);
+  assert.equal((await aclModule.inspectWindowsAcl(home)).sddl, originalParentACL);
+}
 assert.equal(config.current_profile, "default");
 assert.equal(await runCLI(["agents", "list", "--json"], deps), 0);
 delete deps.configContext.env.RELAY_AGENT_TOKEN;
 delete deps.configContext.env.RELAY_PROFILE;
 assert.equal(await runCLI(["--profile", card.handle, "auth", "login", "--with-token", "--api-url", "https://api.staging.relayapp.im", ...handoffArgs], { ...deps, readStdin: async () => token }), 0);
+assert.equal((await configModule.inspectConfigPermissions(deps.configContext)).secure, true);
+assert.equal(await runCLI(["--profile", card.handle, "doctor", "--offline"], deps), 0);
+if (aclModule) assert.equal((await aclModule.inspectWindowsAcl(home)).sddl, originalParentACL);
 assert.equal(await runCLI(["agents", "delete", card.handle], deps), 1);
 config = JSON.parse(await readFile(configPath, "utf8"));
 assert.equal(config.profiles[card.handle].agent_token, token);
