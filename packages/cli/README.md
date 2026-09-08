@@ -107,6 +107,32 @@ supported subject to Contacts eligibility and blocking; a pending Add request
 does not grant messaging eligibility. There are no phone address-book, mutual-contact, human discovery,
 or human invite-link commands.
 
+## Developer-managed agents
+
+```sh
+relay agents create --api-url https://api.staging.relayapp.im
+relay agents create --api-url https://api.staging.relayapp.im --json
+relay agents list --json
+relay --profile brave_cangoo.dev agents delete brave_cangoo.dev
+```
+
+Creation stores the one-time Agent Token in a new named profile and prints only
+public metadata, a share link, and a terminal QR. JSON output includes
+`token: "stored"`, never the secret. Use an explicit `--profile <new-name>` to
+choose a new profile name; existing profiles and the current profile selection
+are preserved. `--token-name` labels the token, not a machine identity.
+
+Listing is local inventory, not a global account API. Each saved credential reads
+its current Contact Card using its saved API origin; environment token/origin
+overrides are not applied across the inventory. Profiles without credentials and
+unavailable Contact Cards remain visible without exposing error bodies.
+
+Deletion uses the selected profile's resolved credential. It only clears that
+profile's matching saved credential after confirmed HTTP 204. Errors and uncertain
+responses retain credentials; unrelated environment/profile credentials are not
+removed. Creation is never automatically retried. If creation succeeds but local
+storage fails, the command reports that failure without printing the secret.
+
 ## Local event forwarding
 
 `relay events listen` is a development convenience backed only by the SDK's

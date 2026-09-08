@@ -17,7 +17,7 @@ const context = async () => {
   return {
     home,
     env: { XDG_CONFIG_HOME: join(home, ".config") },
-    platform: "linux" as const,
+    platform: process.platform,
   };
 };
 
@@ -31,9 +31,11 @@ describe("local config", () => {
     };
     await writeConfig(config, testContext);
 
+    if (process.platform !== "win32") {
     expect((await stat(configPath(testContext))).mode & 0o777).toBe(0o600);
     expect((await stat(join(configPath(testContext), ".."))).mode & 0o777)
       .toBe(0o700);
+    }
     expect(await readConfig(testContext)).toEqual(config);
     expect(await readFile(configPath(testContext), "utf8")).toContain(
       "stored-secret",
@@ -69,4 +71,35 @@ describe("local config", () => {
       "http://localhost:3000/hook",
     );
   });
+});
+
+it("preserves an existing destination and removes temporary files after rename failure", async () => {
+  const { mkdir, readdir } = await import("node:fs/promises");
+  const { dirname } = await import("node:path");
+  const testContext = await context();
+  await mkdir(configPath(testContext), { recursive: true });
+  await expect(writeConfig(emptyConfig(), testContext)).rejects.toThrow();
+  expect(await readdir(dirname(configPath(testContext)))).toEqual(["config.json"]);
+});
+
+it("serializes concurrent profile mutations without losing either credential", async () => {
+  const { mutateConfig } = await import("./config.js");
+  const testContext = await context();
+  await Promise.all(Array.from({ length: 8 }, (_, index) => mutateConfig((config) => {
+    config.profiles[`agent-${index}.dev`] = { agent_token: `test-credential-${index}` };
+  }, testContext)));
+  const config = await readConfig(testContext);
+  for (let index = 0; index < 8; index++) {
+    expect(config.profiles[`agent-${index}.dev`]?.agent_token).toBe(`test-credential-${index}`);
+  }
+});
+
+it("rejects stale legacy writes instead of overwriting a newly saved agent", async () => {
+  const { mutateConfig } = await import("./config.js");
+  const testContext = await context();
+  const stale = await readConfig(testContext);
+  await mutateConfig((config) => { config.profiles["new.dev"] = { agent_token: "new-credential" }; }, testContext);
+  stale.profiles.default!.agent_token = "old-command-credential";
+  await expect(writeConfig(stale, testContext)).rejects.toThrow("concurrently");
+  expect((await readConfig(testContext)).profiles["new.dev"]?.agent_token).toBe("new-credential");
 });

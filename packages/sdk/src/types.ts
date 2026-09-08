@@ -757,3 +757,14 @@ export type RelayWebhookEvent =
   | ContactAddedWebhookEvent
   | ContactRemovedWebhookEvent
   | RelayWebhookEnvelope<Record<string, unknown>, OtherWebhookEventType>;
+
+/** POST /v1/agents bootstrap parameters. */
+export interface AgentCreateParams {
+  token_name?: string;
+}
+
+export interface AgentCreateResponse {
+  agent: ContactCardItem;
+  secret: string;
+  share_url: string;
+}

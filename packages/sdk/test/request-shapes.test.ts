@@ -28,6 +28,7 @@ const responder = (calls: Captured[]) => async (
     ))
     || (method === "DELETE" && (
       /^\/v1\/messages\/[^/]+$/u.test(url.pathname)
+      || url.pathname.startsWith("/v1/agents/")
       || url.pathname.startsWith("/v1/attachments/")
       || url.pathname.startsWith("/v1/webhook-subscriptions/")
       || url.pathname === "/v1/blocked_handles"
@@ -35,6 +36,7 @@ const responder = (calls: Captured[]) => async (
     ))
   );
   if (noContent) return new Response(null, { status: 204 });
+  if (method === "POST" && url.pathname === "/v1/agents") return Response.json({}, { status: 201 });
   if (method === "GET" && url.pathname === "/v1/chats") {
     return Response.json({ chats: [], next_cursor: null });
   }
@@ -214,11 +216,14 @@ describe("Relay v1 request shapes", () => {
       handle: "advait",
     });
     expect(contactRequest).toEqual({ state: "pending" });
+    await Relay.createAgent({}, { baseURL: "https://api.example.test", fetch: responder(calls) });
+    await client.agents.delete("agent.dev");
 
     expect(calls.map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
         operation.method,
         operation.path
+          .replace("{handle}", "agent.dev")
           .replace("{chatId}", "chat-id")
           .replace("{messageId}", "message-id")
           .replace("{attachmentId}", "attachment-id")
@@ -226,7 +231,7 @@ describe("Relay v1 request shapes", () => {
       ]),
     );
     expect(calls.every((call) =>
-      call.headers.get("authorization") === "Bearer agent-token")).toBe(true);
+      call.headers.get("authorization") === (call.url.pathname === "/v1/agents" ? null : "Bearer agent-token"))).toBe(true);
 
     const createChat = calls[0]!;
     expect(createChat.headers.get("idempotency-key")).toBe("chat-create-key");
@@ -282,7 +287,7 @@ describe("Relay v1 request shapes", () => {
       && call.url.pathname === "/v1/messages/message-id")!;
     expect(unsendMessage.body).toBeUndefined();
 
-    const createContactRequest = calls.at(-1)!;
+    const createContactRequest = calls.find((call) => call.url.pathname === "/v1/contact_requests")!;
     expect(createContactRequest.headers.get("idempotency-key")).toBeNull();
     expect(JSON.parse(String(createContactRequest.body))).toEqual({
       handle: "advait",
@@ -338,6 +343,7 @@ describe("Relay v1 request shapes", () => {
         .sort();
 
     expect(Object.keys(client).sort()).toEqual([
+      "agents",
       "attachments",
       "baseURL",
       "blockedHandles",
@@ -350,6 +356,7 @@ describe("Relay v1 request shapes", () => {
       "webhooks",
       "websocket",
     ]);
+    expect(methods(client.agents)).toEqual(["delete"]);
     expect(methods(client.chats)).toEqual([
       "create",
       "leaveChat",

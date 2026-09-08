@@ -184,7 +184,9 @@ export const RELAY_V1_OPERATIONS = [
     "method": "POST",
     "path": "/v1/contact_requests",
     "operationId": "createContactRequest"
-  }
+  },
+  { method: "POST", path: "/v1/agents", operationId: "createAgent" },
+  { method: "DELETE", path: "/v1/agents/{handle}", operationId: "deleteAgent" },
 ] as const satisfies readonly RelayV1Operation[];
 
 export const RELAY_WEBHOOK_EVENT_TYPES = [
