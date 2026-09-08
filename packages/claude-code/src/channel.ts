@@ -209,7 +209,11 @@ export class RelayChannel {
     const current = this.#state.delivery(deliveryId);
     if (!current) return failure(`delivery ${deliveryId} is not in the durable Relay inbox`);
     if (current.status === "processing") {
-      this.#state.activateDeliveryOrigin(deliveryId);
+      try {
+        this.#state.activateDeliveryOrigin(deliveryId);
+      } catch (error) {
+        return failure(this.#redactor.text(error));
+      }
       return success(`processing already started for ${deliveryId}`);
     }
     const delivery = this.#state.beginDelivery(deliveryId);

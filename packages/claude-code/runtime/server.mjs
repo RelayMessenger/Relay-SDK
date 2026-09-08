@@ -23022,7 +23022,11 @@ var RelayChannel = class {
     const current = this.#state.delivery(deliveryId);
     if (!current) return failure(`delivery ${deliveryId} is not in the durable Relay inbox`);
     if (current.status === "processing") {
-      this.#state.activateDeliveryOrigin(deliveryId);
+      try {
+        this.#state.activateDeliveryOrigin(deliveryId);
+      } catch (error2) {
+        return failure(this.#redactor.text(error2));
+      }
       return success(`processing already started for ${deliveryId}`);
     }
     const delivery = this.#state.beginDelivery(deliveryId);
@@ -23252,6 +23256,18 @@ function transaction(db, operation) {
     throw error2;
   }
 }
+var TURN_OUTCOMES = /* @__PURE__ */ new Set([
+  "completed",
+  "failed",
+  "expired",
+  "superseded"
+]);
+function isTurnOutcome(value) {
+  return typeof value === "string" && TURN_OUTCOMES.has(value);
+}
+function isFinalTurnOutcome(outcome) {
+  return outcome === "completed" || outcome === "failed";
+}
 function rowString(row, key) {
   const value = row?.[key];
   return typeof value === "string" ? value : null;
@@ -23359,6 +23375,7 @@ var RelayStateStore = class {
       INSERT INTO metadata(key, value) VALUES ('accepted_through', '0')
       ON CONFLICT(key) DO NOTHING
     `).run();
+    transaction(this.#db, () => this.#requeueStrandedDeliveries());
     try {
       chmodSync2(this.path, 384);
     } catch {
@@ -23494,13 +23511,22 @@ var RelayStateStore = class {
       }
     });
   }
-  pendingDeliveries(retryBefore) {
+  pendingDeliveries(retryBefore, now = Date.now()) {
+    const lease = this.#activeTurnLease();
+    const gateRequeued = lease !== null && lease.expiresAt > now ? 1 : 0;
+    const closedPrefix = this.#closedTurnKey("");
     const rows = this.#db.prepare(`
       SELECT * FROM deliveries
       WHERE status IN ('pending','starting')
         AND (last_notified_at IS NULL OR last_notified_at <= ?)
+        AND (
+          ? = 0
+          OR NOT EXISTS (
+            SELECT 1 FROM metadata WHERE key = ? || deliveries.delivery_id
+          )
+        )
       ORDER BY created_at ASC, delivery_id ASC
-    `).all(retryBefore);
+    `).all(retryBefore, gateRequeued, closedPrefix);
     return rows.map(deliveryFromRow);
   }
   noteDeliveryNotified(deliveryId, now = Date.now()) {
@@ -23599,7 +23625,54 @@ var RelayStateStore = class {
       outcome,
       closedAt: now
     }));
+    if (!isFinalTurnOutcome(outcome)) {
+      this.#db.prepare(`
+        UPDATE deliveries SET status = 'pending', last_notified_at = NULL
+        WHERE delivery_id = ? AND status = 'processing'
+      `).run(lease.deliveryId);
+    }
     return lease.deliveryId;
+  }
+  /** Before requeue-on-close existed, a superseded or expired turn left its
+   * delivery stuck at `processing` for good. Repair such rows once per open:
+   * the same reset the close-time path applies, then the same notification
+   * gate. A delivery holding the current lease is live, not stranded. */
+  #requeueStrandedDeliveries() {
+    const prefix = this.#closedTurnKey("");
+    const heldDeliveryId = this.#activeTurnLease()?.deliveryId ?? null;
+    const markers = this.#db.prepare(`
+      SELECT substr(metadata.key, ?) AS delivery_id, metadata.value AS value
+      FROM metadata
+      JOIN deliveries ON deliveries.delivery_id = substr(metadata.key, ?)
+      WHERE metadata.key LIKE ? AND deliveries.status = 'processing'
+    `).all(prefix.length + 1, prefix.length + 1, `${prefix}%`);
+    let repaired = 0;
+    for (const marker of markers) {
+      if (marker.delivery_id === heldDeliveryId) continue;
+      const outcome = this.#closedTurnOutcome(marker.delivery_id);
+      if (outcome === null || isFinalTurnOutcome(outcome)) continue;
+      const result = this.#db.prepare(`
+        UPDATE deliveries SET status = 'pending', last_notified_at = NULL
+        WHERE delivery_id = ? AND status = 'processing'
+      `).run(marker.delivery_id);
+      repaired += Number(result.changes);
+    }
+    return repaired;
+  }
+  #closedTurnOutcome(deliveryId) {
+    const row = this.#db.prepare("SELECT value FROM metadata WHERE key = ?").get(this.#closedTurnKey(deliveryId));
+    const value = rowString(row, "value");
+    if (value === null) return null;
+    let marker;
+    try {
+      marker = JSON.parse(value);
+    } catch {
+      throw new Error("durable closed Relay turn marker is corrupt");
+    }
+    if (!isTurnOutcome(marker.outcome)) {
+      throw new Error("durable closed Relay turn marker is corrupt");
+    }
+    return marker.outcome;
   }
   #activateDeliveryOrigin(deliveryId, now, activeTurnTtlMs) {
     if (!Number.isSafeInteger(activeTurnTtlMs) || activeTurnTtlMs <= 0) {
@@ -23615,7 +23688,8 @@ var RelayStateStore = class {
         this.#closeActiveTurn("superseded", now, existing.deliveryId);
       }
     }
-    if (this.#db.prepare("SELECT 1 FROM metadata WHERE key = ?").get(this.#closedTurnKey(deliveryId)) !== void 0) {
+    const closed = this.#closedTurnOutcome(deliveryId);
+    if (closed !== null && isFinalTurnOutcome(closed)) {
       throw new Error(`delivery ${deliveryId} already has a closed Relay turn`);
     }
     const origin = this.#turnOriginForDelivery(deliveryId);
@@ -23659,7 +23733,10 @@ var RelayStateStore = class {
   }
   completeDeliveryTurn(deliveryId, outcome, now = Date.now()) {
     return transaction(this.#db, () => {
-      if (this.#db.prepare("SELECT 1 FROM metadata WHERE key = ?").get(this.#closedTurnKey(deliveryId)) !== void 0) return "already_closed";
+      const previous = this.#closedTurnOutcome(deliveryId);
+      if (previous !== null && isFinalTurnOutcome(previous)) return "already_closed";
+      const lease = this.#activeTurnLease();
+      if (previous !== null && lease?.deliveryId !== deliveryId) return "already_closed";
       const closed = this.#closeActiveTurn(outcome, now, deliveryId);
       if (!closed) throw new Error("there is no active Relay turn to complete");
       return "closed";
