@@ -64,7 +64,7 @@ async function body(req) {
   return raw ? JSON.parse(raw) : undefined;
 }
 
-function assertDurableIngress() {
+function assertDurableIngress(sequence = "1") {
   if (!stateDir) throw new Error("OPENCLAW_STATE_DIR is missing");
   const relayDir = join(stateDir, "relay");
   const databaseName = existsSync(relayDir)
@@ -75,7 +75,7 @@ function assertDurableIngress() {
   try {
     const row = db
       .prepare("SELECT status FROM relay_ingress WHERE event_id = ?")
-      .get(eventId);
+      .get(sequence === "2" ? "00000000-0000-7000-8000-000000000015" : eventId);
     if (!row) throw new Error("Relay ACK arrived before durable ingress");
     return row.status;
   } finally {
@@ -135,6 +135,17 @@ const server = http.createServer(async (req, res) => {
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     });
     return;
+  }
+
+  if (process.env.RELAY_TMUX_PROOF === "1" && req.method === "POST" && url.pathname === "/__verification/next-event") {
+    if (server.secondEventSent) { json(res, 409, {}); return; }
+    server.secondEventSent = true;
+    const event = structuredClone(inboundEvent);
+    event.event_id = "00000000-0000-7000-8000-000000000015";
+    event.data.id = "00000000-0000-7000-8000-000000000016";
+    event.data.parts[0].value = "post-reattach verification event";
+    for (const client of sockets.clients) client.send(JSON.stringify({ type: "event", sequence: "2", event }));
+    console.log("[mock-relay] post-reattach event sent"); json(res, 200, { sockets: sockets.clients.size }); return;
   }
 
   if (req.method === "POST" && url.pathname === "/v1/agents") {
@@ -263,7 +274,7 @@ sockets.on("connection", (socket) => {
       return;
     }
     if (frame.type === "ack") {
-      const status = assertDurableIngress();
+      const status = assertDurableIngress(frame.through_sequence);
       acknowledgementCount += 1;
       console.log(
         `[mock-relay] cumulative ACK ${frame.through_sequence} durable=${status} count=${acknowledgementCount}`,

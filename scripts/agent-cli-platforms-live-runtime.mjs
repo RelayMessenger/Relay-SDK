@@ -1,4 +1,4 @@
-// Derived from packages/openclaw/scripts/gateway-harness.mjs; actual process + newly bootstrapped credential proof.
+// Live staging native process proof using the already-created, explicitly assigned phone fixture. ZERO bootstrap calls.
 import { execFileSync as nativeExecFileSync, spawn } from "node:child_process";
 import {
   existsSync,
@@ -18,12 +18,17 @@ import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 
 if (process.platform !== "linux" || !process.env.RELAY_DAYTONA_SANDBOX_ID) throw Error("Run this Linux process proof inside owned Daytona only");
+const liveFile = process.env.RELAY_LIVE_AGENT_FILE;
+const stopFile = process.env.RELAY_LIVE_STOP_FILE;
+if (!liveFile || !stopFile) throw Error("Explicit private fixture and owned stop-marker paths are required");
+let live; try { live = JSON.parse(readFileSync(liveFile, "utf8")); } catch { throw Error("Private fixture could not be parsed; contents suppressed"); }
+if (live.origin !== "https://api.staging.relayapp.im" || live.server_commit !== "9f0a023c65dc52515d2916d1d8f90118fd0bf790" || !/^rly_live_[A-Za-z0-9]{43}$/.test(live.secret) || live.agent?.handle !== "clear_lusowl1.dev") throw Error("Assigned private fixture validation failed; contents suppressed");
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = join(workspace, "packages/openclaw");
 const receiptPath = resolve(process.env.RELAY_RUNTIME_PROOF_RECEIPT ?? join(workspace, ".release-tmp", "agent-cli-runtime-proof.json"));
 mkdirSync(dirname(receiptPath), { recursive: true });
 const redact = value => String(value).replace(/rly_live_[A-Za-z0-9]{43}/g, "[REDACTED_FIXTURE_TOKEN]");
-const receipt = { platform: process.platform, arch: process.arch, node: process.version, sandbox: process.env.RELAY_DAYTONA_SANDBOX_ID, coverage: "new installed CLI identity -> native config -> actual OpenClaw process against loopback Relay/model fixtures; NOT live staging", commands: [] };
+const receipt = { platform: process.platform, arch: process.arch, node: process.version, sandbox: process.env.RELAY_DAYTONA_SANDBOX_ID, coverage: "LIVE staging Agent Token -> installed canonical auth login -> actual OpenClaw; local deterministic model; phone evidence required", serverCommit: live.server_commit, handle: live.agent.handle, shareUrl: live.share_url, liveBootstrapCalls: 0, commands: [] };
 function execFileSync(command, args, options = {}) {
   const row = { command: [command, ...args], cwd: options.cwd }; receipt.commands.push(row);
   try { const output = nativeExecFileSync(command, args, options); row.output = redact(output); row.exit = 0; return output; }
@@ -32,7 +37,7 @@ function execFileSync(command, args, options = {}) {
 }
 receipt.sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: workspace, encoding: "utf8" }).trim();
 receipt.dirty = execFileSync("git", ["status", "--porcelain"], { cwd: workspace, encoding: "utf8" }).trim();
-const temp = mkdtempSync(join(tmpdir(), "relay-new-agent-runtime-"));
+const temp = mkdtempSync(join(tmpdir(), "relay-live-phone-runtime-"));
 const home = join(temp, "home");
 const pack = join(temp, "pack");
 const require = createRequire(import.meta.url);
@@ -107,6 +112,7 @@ try {
     HOME: home,
     USERPROFILE: home,
     OPENCLAW_STATE_DIR: stateDir,
+    OPENCLAW_NO_AUTO_UPDATE: "1",
     NO_COLOR: "1",
     NODE_OPTIONS: process.env.NODE_OPTIONS ?? "--max-old-space-size=768",
   };
@@ -195,7 +201,7 @@ try {
             // dispatch.ts uses the fixture Contact ID as the stable allowlist identity.
             defaultAccount: "work",
             accounts: {
-              work: { enabled: true, allowFrom: ["00000000-0000-7000-8000-000000000013"] },
+              work: { enabled: true, allowFrom: [live.phone_contact_id] },
               other: { enabled: false, token: "synthetic-unrelated-account", allowFrom: ["other-fixture"] },
             },
           },
@@ -242,9 +248,9 @@ try {
 
   let mockOutput = "";
   let gatewayOutput = "";
-  mock = spawn(process.execPath, [join(workspace, "scripts/agent-cli-platforms-runtime-server.mjs")], {
+  mock = spawn(process.execPath, [join(workspace, "scripts/agent-cli-platforms-model-server.mjs")], {
     cwd: temp,
-    env: { ...env, MOCK_RELAY_PORT: String(relayPort), RELAY_TMUX_PROOF: process.env.RELAY_TMUX_PROOF ?? "0" },
+    env: { ...env, MOCK_RELAY_PORT: String(relayPort), RELAY_FIXTURE_REQUEST: live.requested_message, RELAY_FIXTURE_REPLY: live.expected_reply },
     stdio: ["ignore", "pipe", "pipe"],
   });
   mock.stdout.on("data", (chunk) => {
@@ -266,19 +272,18 @@ try {
 
   const originalConfig = JSON.parse(readFileSync(configPath, "utf8"));
   assert.equal(gateway, undefined, "selected isolated runtime must really be stopped before handoff");
-  const createArgs = [cliBin, "agents", "create", "--api-url", `http://127.0.0.1:${relayPort}`, "--token-name", `verification-runtime-${process.pid}`, "--connect", "openclaw", "--runtime-config", configPath, "--runtime-state-dir", stateDir, "--runtime-account", "work", "--confirm-configure", "--runtime-stopped", "--json"];
-  const created = JSON.parse(execFileSync(process.execPath, createArgs, { cwd: consumer, encoding: "utf8", env: { ...env, RELAY_CONFIG_PATH: cliConfig, RELAY_AGENT_TOKEN: "synthetic-wrong-environment-token" } }));
-  assert.equal(created.token, "stored"); assert.equal(created.handoff.status, "configured"); assert.equal(created.handoff.connected, false);
-  const privateProfile = JSON.parse(readFileSync(cliConfig, "utf8")).profiles[created.profile];
+  const loginArgs = ["--profile", "phone-roundtrip", "auth", "login", "--with-token", "--api-url", live.origin, "--connect", "openclaw", "--runtime-config", configPath, "--runtime-state-dir", stateDir, "--runtime-account", "work", "--confirm-configure", "--runtime-stopped"];
+  const loggedIn = JSON.parse(execFileSync(join(consumer, "node_modules/.bin/relaymessenger"), loginArgs, { cwd: consumer, encoding: "utf8", input: live.secret + "\n", env: { ...env, RELAY_CONFIG_PATH: cliConfig } }));
+  assert.equal(loggedIn.token, "stored"); assert.equal(loggedIn.handoff.status, "configured"); assert.equal(loggedIn.handoff.connected, false);
+  assert.equal(loggedIn.handoff.handle, live.agent.handle);
   const configured = JSON.parse(readFileSync(configPath, "utf8"));
-  assert.match(privateProfile.agent_token, /^rly_live_[A-Za-z0-9]{43}$/);
-  assert.equal(configured.channels.relay.accounts.work.token, privateProfile.agent_token);
   const expectedConfig = structuredClone(originalConfig);
-  expectedConfig.channels.relay.accounts.work.token = privateProfile.agent_token;
-  expectedConfig.channels.relay.accounts.work.baseUrl = `http://127.0.0.1:${relayPort}`;
+  expectedConfig.channels.relay.accounts.work.token = live.secret;
+  expectedConfig.channels.relay.accounts.work.baseUrl = live.origin;
   assert.deepEqual(configured, expectedConfig, "handoff must preserve all unrelated runtime settings/accounts");
-  receipt.handoff = { profile: created.profile, handle: created.agent.handle, status: created.handoff.status, connectedBeforeLaunch: created.handoff.connected, preservedOtherSettings: true };
-  console.log("Installed CLI create handed its new credential to selected stopped native account; other settings preserved");
+  receipt.handoff = { profile: loggedIn.profile, handle: live.agent.handle, status: loggedIn.handoff.status, connectedBeforeLaunch: false, preservedOtherSettings: true };
+  receipt.privatePaths = { cliConfig, runtimeConfig: configPath, consumer, home, temp, originalAgentFile: liveFile };
+  console.log("Existing assigned Agent Token configured in selected stopped native context; zero bootstrap calls");
 
   gateway = spawn(process.execPath, [
     openclaw,
@@ -291,7 +296,6 @@ try {
     env,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  receipt.runtimePid = gateway.pid; receipt.modelPid = mock.pid; receipt.controlOrigin = `http://127.0.0.1:${relayPort}`; receipt.temp = temp;
   gateway.stdout.on("data", (chunk) => {
     gatewayOutput += chunk.toString();
   });
@@ -299,87 +303,45 @@ try {
     gatewayOutput += chunk.toString();
   });
 
-  const deadline = Date.now() + 60_000;
-  while (
-    !/cumulative ACK 1 durable=\w+ count=2/u.test(mockOutput) ||
-    !mockOutput.includes("Message send count=1")
-  ) {
-    if (gateway.exitCode !== null) {
-      throw new Error(
-        `OpenClaw gateway exited before proof\n${gatewayOutput}\n${mockOutput}`,
-      );
-    }
-    if (mock.exitCode !== null) {
-      throw new Error(
-        `mock Relay exited before proof\n${gatewayOutput}\n${mockOutput}`,
-      );
-    }
-    if (Date.now() > deadline) {
-      throw new Error(
-        `OpenClaw gateway harness timed out\n${gatewayOutput}\n${mockOutput}`,
-      );
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  receipt.runtimePid = gateway.pid;
+  receipt.modelPid = mock.pid;
+  const startupDeadline = Date.now() + 45000;
+  while (!gatewayOutput.includes("[gateway] ready")) {
+    if (gateway.exitCode !== null || Date.now() > startupDeadline) throw Error(`Owned native runtime failed startup\n${gatewayOutput}`);
+    await new Promise(done => setTimeout(done, 100));
   }
-
-  for (const proof of [
-    "Bootstrap create count=1",
-    "Created credential Contact Card validated",
-    "GET /v1/webhook-subscriptions",
-    "UPGRADE /v1/websocket",
-    "JSON heartbeat pong",
-    "cumulative ACK 1 durable=",
-    "completion request count=1",
-    `POST /v1/chats/00000000-0000-7000-8000-000000000010/messages`,
-    "Message send count=1",
-  ]) {
-    if (!mockOutput.includes(proof)) {
-      throw new Error(`missing gateway proof "${proof}"\n${mockOutput}`);
+  receipt.result = "running-awaiting-phone";
+  receipt.readyForPhoneActions = true;
+  receipt.connectionProof = "pending actual phone request/reply; gateway ready log alone is not WebSocket proof";
+  receipt.requestedMessage = live.requested_message;
+  receipt.expectedReply = live.expected_reply;
+  writeFileSync(receiptPath, JSON.stringify(receipt, null, 2));
+  console.log("NATIVE_PHONE_READY: configured and actual process running; await matching phone request/reply");
+  const deadline = Date.now() + 60 * 60 * 1000;
+  let last = "";
+  while (!existsSync(stopFile)) {
+    if (gateway.exitCode !== null || mock.exitCode !== null) throw Error(`Owned live process exited unexpectedly\n${gatewayOutput}\n${mockOutput}`);
+    if (Date.now() > deadline) throw Error("Phone coordination timeout; agent and private recovery state retained, no deletion attempted");
+    const current = mockOutput.includes("matched phone request count=");
+    if (String(current) !== last) {
+      last = String(current); receipt.modelSawExactPhoneRequest = current;
+      receipt.modelOutput = redact(mockOutput); receipt.gatewayOutput = redact(gatewayOutput);
+      writeFileSync(receiptPath, JSON.stringify(receipt, null, 2));
     }
+    await new Promise(done => setTimeout(done, 500));
   }
-  if (
-    mockOutput.includes("Bootstrap create count=2") ||
-    mockOutput.includes("completion request count=2") ||
-    mockOutput.includes("Message send count=2")
-  ) {
-    throw new Error(`replayed event repeated work\n${mockOutput}`);
-  }
-  for (const removed of ["/v1/events", "/v1/conversations", "/v1/agents/me"]) {
-    if (mockOutput.includes(removed)) {
-      throw new Error(`gateway used removed Relay path ${removed}\n${mockOutput}`);
-    }
-  }
-
-  console.log(
-    "New installed CLI identity -> native handoff -> actual OpenClaw WebSocket gateway proof passed.",
-  );
-  console.log(
-    "Proof: durable cumulative ACK, replay suppression, heartbeat, one model turn, one idempotent Chat Message.",
-  );
-  if (process.env.RELAY_RUNTIME_RELEASE_FILE) {
-    receipt.result = "native-proof-passed-awaiting-tmux-control";
-    const holdDeadline = Date.now() + 180000;
-    while (!existsSync(process.env.RELAY_RUNTIME_RELEASE_FILE)) {
-      if (Date.now() > holdDeadline || gateway.exitCode !== null || mock.exitCode !== null) throw Error("Owned tmux runtime hold failed or timed out");
-      receipt.protocolOutput = redact(mockOutput); writeFileSync(receiptPath, JSON.stringify(receipt, null, 2));
-      await new Promise(done => setTimeout(done, 250));
-    }
-    if (process.env.RELAY_TMUX_PROOF === "1") {
-      assert.ok(mockOutput.includes("cumulative ACK 2 durable="));
-      assert.ok(mockOutput.includes("completion request count=2"));
-      assert.ok(mockOutput.includes("Message send count=2"));
-      assert.ok(!mockOutput.includes("Message send count=3"));
-      receipt.postReattach = "second deliberate event durably ACKed and replied exactly once in observed fixture";
-    }
-  }
-  receipt.result = "passed";
-  receipt.protocolOutput = redact(mockOutput);
-  receipt.gatewayOutput = redact(gatewayOutput);
+  const signal = JSON.parse(readFileSync(stopFile, "utf8"));
+  assert.equal(signal.handle, live.agent.handle); assert.equal(signal.phoneProofComplete, true);
+  assert.ok(mockOutput.includes("matched phone request count="), "No actual matching phone request reached the native model path");
+  receipt.result = "phone-proof-complete-awaiting-owned-cleanup";
+  receipt.phoneProof = signal;
+  receipt.modelOutput = redact(mockOutput); receipt.gatewayOutput = redact(gatewayOutput);
 } catch (error) {
   receipt.result = "failed"; receipt.failure = redact(error.stack ?? error); process.exitCode = 1;
   console.error(receipt.failure);
 } finally {
   writeFileSync(receiptPath, JSON.stringify(receipt, null, 2));
   await Promise.all([stop(gateway), stop(mock)]);
-  rmSync(temp, { recursive: true, force: true, maxRetries: 10 });
+  // Preserve private native/CLI context until main confirms owned deletion/cleanup. Never delete the live agent here.
+  console.log("Owned processes stopped; agent/private state retained for explicit cleanup");
 }
