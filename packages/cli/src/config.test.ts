@@ -136,7 +136,7 @@ it("doctor checks real native file permissions and updates preserve parent permi
     expect((await inspectConfigPermissions(ctx)).secure).toBe(false);
     const { agentDependencies, createAgent } = await import("./agents.js");
     let posts = 0;
-    await expect(createAgent({}, agentDependencies(ctx, async () => { posts++; throw new Error("No network expected"); }))).rejects.toThrow("preflight failed");
+    await expect(createAgent({}, agentDependencies(ctx, async () => { posts++; throw new Error("No network expected"); }))).rejects.toThrow("could not prepare a private file");
     expect(posts).toBe(0);
     expect((await inspectWindowsAcl(parent)).sddl).toBe(parentACL.sddl);
   } else await chmod(path, 0o644);
