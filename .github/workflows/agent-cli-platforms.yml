@@ -27,6 +27,10 @@ jobs:
           node-version-file: .nvmrc
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
       - run: npm ci
+      - name: Diagnose native Windows PowerShell ACL support
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/agent-cli-platforms-windows-probe.ps1
       - run: node --test scripts/agent-cli-platforms-staging.test.mjs
       - run: node scripts/agent-cli-platforms.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
