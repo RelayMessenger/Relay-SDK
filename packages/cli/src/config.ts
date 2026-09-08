@@ -5,7 +5,9 @@ import {
   readFile,
   rename,
   stat,
+  unlink,
 } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -102,19 +104,25 @@ const parseConfig = (value: unknown): RelayConfig => {
   };
 };
 
+const revisions = new WeakMap<RelayConfig, string>();
+const rememberConfig = (config: RelayConfig): RelayConfig => {
+  revisions.set(config, JSON.stringify(config));
+  return config;
+};
+
 export const readConfig = async (
   context: ConfigContext = {},
 ): Promise<RelayConfig> => {
   try {
     const raw = await readFile(configPath(context), "utf8");
-    return parseConfig(JSON.parse(raw) as unknown);
+    return rememberConfig(parseConfig(JSON.parse(raw) as unknown));
   } catch (error) {
     if (
       error instanceof Error
       && "code" in error
       && error.code === "ENOENT"
     ) {
-      return emptyConfig();
+      return rememberConfig(emptyConfig());
     }
     if (error instanceof SyntaxError) {
       throw new Error("Relay config is not valid JSON.", { cause: error });
@@ -123,7 +131,7 @@ export const readConfig = async (
   }
 };
 
-export const writeConfig = async (
+const writeConfigUnlocked = async (
   config: RelayConfig,
   context: ConfigContext = {},
 ): Promise<void> => {
@@ -136,25 +144,69 @@ export const writeConfig = async (
   }
   const temporary = join(
     directory,
-    `.config.${process.pid}.${Date.now()}.tmp`,
+    `.config.${process.pid}.${randomUUID()}.tmp`,
   );
-  const handle = await open(temporary, "wx", 0o600);
   try {
-    await handle.writeFile(`${JSON.stringify(normalized, null, 2)}\n`, "utf8");
-    await handle.sync();
+    const handle = await open(temporary, "wx", 0o600);
+    try {
+      await handle.writeFile(`${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, path);
   } finally {
-    await handle.close();
-  }
-  await rename(temporary, path);
-  if ((context.platform ?? process.platform) !== "win32") {
-    await chmod(path, 0o600);
+    await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+    });
   }
 };
 
+// Same-directory, exclusive lock serializes profile read/modify/write transactions.
+// Never remove another process's lock or infer that its owner has died.
+const withConfigLock = async <T>(context: ConfigContext, action: () => Promise<T>): Promise<T> => {
+  const directory = dirname(configPath(context));
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const lockPath = `${configPath(context)}.lock`;
+  const deadline = Date.now() + 5_000;
+  let lock;
+  for (;;) {
+    try { lock = await open(lockPath, "wx", 0o600); break; }
+    catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
+      if (Date.now() >= deadline) throw new Error("Relay configuration is busy; no local change was made.");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  try { return await action(); }
+  finally { await lock.close(); await unlink(lockPath); }
+};
+
+export const writeConfig = async (config: RelayConfig, context: ConfigContext = {}): Promise<void> =>
+  withConfigLock(context, async () => {
+    const expected = revisions.get(config);
+    if (expected !== undefined && JSON.stringify(await readConfig(context)) !== expected) {
+      throw new Error("Relay configuration changed concurrently; no local change was made. Try the command again.");
+    }
+    await writeConfigUnlocked(config, context);
+    rememberConfig(config);
+  });
+
+export const mutateConfig = async <T>(
+  change: (config: RelayConfig) => T,
+  context: ConfigContext = {},
+): Promise<T> => withConfigLock(context, async () => {
+  const config = await readConfig(context);
+  const before = JSON.stringify(config);
+  const result = change(config);
+  if (JSON.stringify(config) !== before) await writeConfigUnlocked(config, context);
+  return result;
+});
+
 export const validateProfileName = (name: string): string => {
-  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(name)) {
+  if (!/^[a-z0-9][a-z0-9_.-]{0,63}$/i.test(name)) {
     throw new Error(
-      "Profile names must be 1-64 letters, numbers, underscores, or hyphens.",
+      "Profile names must be 1-64 letters, numbers, underscores, dots, or hyphens.",
     );
   }
   return name;

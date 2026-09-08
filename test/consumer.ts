@@ -1,5 +1,8 @@
 import Relay, {
   RELAY_WEBHOOK_EVENT_TYPES,
+  type AgentCreateParams,
+  type AgentCreateResponse,
+  type AgentCreateOptions,
   type Chat,
   type ChatHandle,
   type ChatSendVoicememoResponse,
@@ -304,3 +307,14 @@ void summarize;
 declare const message2: Message;
 message2.edited_at satisfies string | null | undefined;
 message2.unsent_at satisfies string | null | undefined;
+
+const bootstrapParams: AgentCreateParams = { token_name: "Relay CLI" };
+const bootstrapOptions: AgentCreateOptions = { baseURL: "https://api.example.test", signal: new AbortController().signal };
+(await Relay.createAgent(bootstrapParams, bootstrapOptions)) satisfies AgentCreateResponse;
+(await relay.agents.delete("brave_cangoo.dev")) satisfies void;
+// @ts-expect-error Bootstrap does not accept caller-chosen handles.
+await Relay.createAgent({ handle: "chosen.dev" });
+// @ts-expect-error Bootstrap does not need or accept a fake API key.
+await Relay.createAgent({}, { apiKey: "fake" });
+// @ts-expect-error Authenticated instances still require an API key.
+new Relay({ baseURL: "https://api.example.test" });

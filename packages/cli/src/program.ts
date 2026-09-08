@@ -1,3 +1,4 @@
+import { agentDependencies, createAgent, deleteAgent, listAgents, type AgentDependencies } from "./agents.js";
 import { createRequire } from "node:module";
 import { readFile, stat } from "node:fs/promises";
 import Relay, {
@@ -43,6 +44,7 @@ import { listenForAgentEvents } from "./event-listen.js";
 const PACKAGE_VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
 export interface ProgramDependencies {
+  agents?: AgentDependencies;
   configContext?: ConfigContext;
   resolveClient?: (profile?: string) => Promise<ClientContext>;
   readStdin?: () => Promise<string>;
@@ -125,12 +127,43 @@ export const createProgram = (
     .name("relay")
     .description("Official CLI for Relay v1 Agent resources.")
     .version(PACKAGE_VERSION)
-    .option("--profile <name>", "local Relay profile", process.env.RELAY_PROFILE);
+    .option("--profile <name>", "local Relay profile", (configContext.env ?? process.env).RELAY_PROFILE);
   program.exitOverride();
   program.configureOutput({
     writeOut: stdout,
     writeErr: stderr,
   });
+
+  const agentDeps = dependencies.agents ?? agentDependencies(configContext, dependencies.fetch);
+  const agents = program.command("agents").description("Create, inspect local profiles, and delete developer-managed agents.");
+  agents.command("create")
+    .option("--api-url <url>", "Relay API origin", validateApiURL)
+    .option("--token-name <name>", "label for the new Agent Token")
+    .option("--json", "print safe metadata as JSON")
+    .action(async (options: { apiUrl?: string; tokenName?: string; json?: boolean }, command: Command) => {
+      const result = await createAgent({
+        ...(program.getOptionValueSource("profile") === "cli" && globals(command).profile ? { profile: globals(command).profile } : {}),
+        ...(options.apiUrl ? { apiURL: options.apiUrl } : {}),
+        ...(options.tokenName === undefined ? {} : { tokenName: options.tokenName }),
+      }, agentDeps);
+      if (options.json) output(result);
+      else {
+        stdout(`${result.agent.first_name} (@${result.agent.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken: stored\n`);
+        // Load only for human output; the QR encodes the public share URL, not credentials.
+        const qr = createRequire(import.meta.url)("qrcode") as {
+          toString(text: string, options: { type: "terminal"; small: boolean }): Promise<string>;
+        };
+        try { stdout(await qr.toString(result.share_url, { type: "terminal", small: true })); }
+        catch { stderr("QR rendering unavailable; use the share link above.\n"); }
+      }
+    });
+  agents.command("list").option("--json", "print safe metadata as JSON")
+    .action(async () => output(await listAgents(agentDeps)));
+  agents.command("delete").argument("<handle>", "agent handle", handle)
+    .option("--json", "print safe metadata as JSON")
+    .action(async (agentHandle: string, _options: object, command: Command) => {
+      output(await deleteAgent(agentHandle, globals(command).profile, agentDeps));
+    });
 
   const auth = program.command("auth").description("Manage local Agent Token authentication.");
   auth

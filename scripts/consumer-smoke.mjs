@@ -22,9 +22,17 @@ const pack = resolve(release, "pack");
 rmSync(release, { recursive: true, force: true });
 mkdirSync(pack, { recursive: true });
 
+const runNpm = (args, options) => {
+  const windows = process.platform === "win32";
+  const quote = (value) => `"${value.replaceAll('"', '""')}"`;
+  return execFileSync(windows ? "npm.cmd" : "npm", windows ? args.map(quote) : args, {
+    ...options, shell: windows, windowsHide: true,
+  });
+};
+
 let consumer;
 try {
-  execFileSync("npm", [
+  runNpm([
     "pack",
     "--workspace",
     "@relaymessenger/sdk",
@@ -41,7 +49,7 @@ try {
     private: true,
     type: "module",
   }));
-  execFileSync("npm", [
+  runNpm([
     "install",
     "--ignore-scripts",
     "--no-audit",
@@ -98,6 +106,8 @@ try {
   ]);
   assert.doesNotMatch(packedTypes, /\bavatar_url\b/u);
   assert.doesNotMatch(packedTypes, /\btagline\b/u);
+  assert.deepEqual(interfaceFields("AgentCreateParams"), ["token_name"]);
+  assert.deepEqual(interfaceFields("AgentCreateResponse"), ["agent", "secret", "share_url"]);
   assert.deepEqual(interfaceFields("ContactRequestCreateParams"), [
     "handle",
   ]);
@@ -123,7 +133,7 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 36);
+      assert.equal(RELAY_V1_OPERATIONS.length, 38);
       assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 18);
       const allowedOperations = new Set([
         "POST /v1/chats",
@@ -162,6 +172,8 @@ try {
         "POST /v1/contact_card",
         "PATCH /v1/contact_card",
         "POST /v1/contact_requests",
+        "POST /v1/agents",
+        "DELETE /v1/agents/{handle}",
       ]);
       assert.deepEqual(
         new Set(RELAY_V1_OPERATIONS.map(
@@ -196,6 +208,8 @@ try {
         Object.getOwnPropertyNames(Object.getPrototypeOf(value))
           .filter((name) => name !== "constructor")
           .sort();
+      assert.equal(typeof Relay.createAgent, "function");
+      assert.deepEqual(methods(client.agents), ["delete"]);
       assert.deepEqual(methods(client.chats), [
         "create",
         "leaveChat",
