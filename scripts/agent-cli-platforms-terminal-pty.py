@@ -38,7 +38,7 @@ for mode,columns,rows in modes:
   # Inspect latest alternate-screen frame, not old prompts/history.
   frame=output.split(b'\x1b[H\x1b[2J')[-1]
   assert b'Enlarge terminal' not in frame and ('▄'.encode() in frame or '▀'.encode() in frame),frame
-  assert b'https://staging.relayapp.im/' in output and b'Runtime: not started' in output
+  assert b'https://staging.relayapp.im/' in output and b'Agent: connection not checked' in output
   detail={'mode':mode,'size':[columns,rows],'inputSteps':stage,'installedShim':True,'skillBeforeCreate':True,'noExtraCreateConfirmation':True,'apexURL':True,'QRfits':True,'eventsVisible':True,'noTokenEcho':True}
   if mode=='tmux':
    os.write(master,b'\x02d');output+=drain(master,.3);process.wait(timeout=3)
