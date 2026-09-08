@@ -44,7 +44,9 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
     });
     let finished = false;
     const pending = runCLI(["agents", "create"], f.deps).then((code) => { finished = true; return code; });
-    await vi.waitFor(() => expect(close).toBeDefined()); expect(finished).toBe(false);
+    // Native Windows config protection launches PowerShell before opening the session.
+    // The suite timeout does not extend vi.waitFor's separate one-second default.
+    await vi.waitFor(() => expect(close).toBeDefined(), { timeout: process.platform === "win32" ? 90_000 : 1_000 }); expect(finished).toBe(false);
     close!(); expect(await pending).toBe(0);
     expect(f.calls.filter((call) => call === "POST /v1/agents")).toHaveLength(1);
     expect(f.output.join("")).not.toMatch(/unrelated-env-token|rly_live_[A-Za-z0-9]{43}/u);

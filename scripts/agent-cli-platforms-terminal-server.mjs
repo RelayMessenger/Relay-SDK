@@ -1,0 +1,26 @@
+import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
+import { writeFileSync } from 'node:fs';
+const require = createRequire((process.env.RELAY_TERMINAL_SOURCE ?? '/home/daytona/terminal-session') + '/package.json');
+const { WebSocketServer } = require('ws');
+const [readyPath, receiptPath] = process.argv.slice(2);
+const token = 'rly_live_' + 'P'.repeat(43); const handle = 'terminal_fixture.dev';
+const card = { handle, first_name: 'Terminal Fixture', last_name: null, image_url: 'https://api.staging.relayapp.im/assets/fixture.png', is_active: true, kind: 'agent' };
+const report = { scope: 'real installed CLI + loopback HTTP/WS, not live Server', creates: 0, contactCards: 0, observers: 0, eventsSent: 0, frames: [], queries: [], authConfirmed: true, requestPaths: [] };
+const save = () => writeFileSync(receiptPath, JSON.stringify(report));
+const server = createServer((req, res) => {
+ report.requestPaths.push(`${req.method} ${req.url}`);res.setHeader('content-type', 'application/json');
+ if (req.method === 'POST' && req.url === '/v1/agents') {report.creates++;res.writeHead(201);res.end(JSON.stringify({agent:card,secret:token,share_url:`https://staging.relayapp.im/@${handle}`}));}
+ else if (req.method === 'GET' && req.url === '/v1/contact_card') {report.contactCards++;report.authConfirmed &&= req.headers.authorization===`Bearer ${token}`;res.end(JSON.stringify({contact_cards:[card]}));}
+ else {res.writeHead(404);res.end('{}');}save();
+});
+const wss=new WebSocketServer({server});const timers=[];
+wss.on('connection',(socket,req)=>{
+ report.observers++;report.queries.push(req.url);report.authConfirmed &&= req.headers.authorization===`Bearer ${token}`;
+ socket.on('message',raw=>{report.frames.push(JSON.parse(raw.toString()));save();});
+ socket.send(JSON.stringify({type:'ready',observational:true,connection_id:'01993d50-ef7b-7b37-886b-23fd80c7ec10',acked_through:'0',full_sync_required:false,full_sync_through:null,heartbeat_interval_ms:30000,max_in_flight:2}));
+ let sequence=0;const timer=setInterval(()=>{if(socket.readyState!==1)return;report.eventsSent++;socket.send(JSON.stringify({type:'event',sequence:String(++sequence),event:{api_version:'v1',webhook_version:'2026-08-30',event_type:'message.received',event_id:'01993d50-ef7b-7b37-886b-23fd80c7ec11',created_at:new Date().toISOString(),trace_id:'owned-installed-pty',agent_id:'01993d50-d2a8-7fe2-8b76-9eaf04816377',data:{parts:[{type:'text',value:`owned integrated observer event ${sequence}`}]}}}));save();},250);timers.push(timer);socket.on('close',()=>clearInterval(timer));save();
+});
+server.listen(0,'127.0.0.1',()=>{writeFileSync(readyPath,JSON.stringify({origin:`http://127.0.0.1:${server.address().port}`}));save();});
+function stop(){for(const timer of timers)clearInterval(timer);for(const socket of wss.clients)socket.terminate();wss.close(()=>server.close(()=>{save();process.exit(0);}));}
+process.on('SIGTERM',stop);setTimeout(stop,90000).unref();
