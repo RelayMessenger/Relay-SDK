@@ -51,7 +51,7 @@ if (mode === "manifest") {
     assert.equal(plugin.mcpServers, "./.mcp.json");
     assert.equal(plugin.version, packageJson.version);
     assert.equal(mcp.mcpServers.relayDocs.type, "http");
-    assert.equal(mcp.mcpServers.relayDocs.url, "https://docs.relayapp.im/mcp");
+    assert.equal(mcp.mcpServers.relayDocs.url, "https://docs.staging.relayapp.im/mcp");
     assert.equal(marketplace.plugins[0].source.path, "./plugins/relay");
     assert.equal(marketplace.plugins[0].policy.installation, "AVAILABLE");
     assert.equal(marketplace.plugins[0].policy.authentication, "ON_INSTALL");
@@ -66,7 +66,7 @@ if (mode === "manifest") {
     assert.equal(plugin.mcpServers, "./mcp.json");
     assert.equal(plugin.version, packageJson.version);
     assert.equal(mcp.mcpServers.relayDocs.type, "http");
-    assert.equal(mcp.mcpServers.relayDocs.url, "https://docs.relayapp.im/mcp");
+    assert.equal(mcp.mcpServers.relayDocs.url, "https://docs.staging.relayapp.im/mcp");
     assert.equal(marketplace.plugins[0].source, "./");
   }
 
@@ -95,13 +95,13 @@ for (const [path, digest] of Object.entries(provenance.generated_files)) {
 }
 
 assert.deepEqual(lock, provenance.relay_v1_lock);
-assert.equal(lock.sdk.version, "0.3.0-staging.8");
-assert.equal(lock.api.commit, "24c577e9802e07d6c61718ebca12e84d79113727");
+assert.equal(lock.sdk.version, "0.3.1-staging.1");
+assert.equal(lock.api.commit, "5607d9f73d99eef3da6c5dc0b1066f91e602b337");
 assert.equal(
   lock.api.openapi_sha256,
-  "cf83012c6b241e60323543adb7059b49954fbf3d59d4d1fd1817bbfa19d32cdd",
+  "7094178cb01c0ddc05f9254dc91094900a0a7b6273979c0cad6257eec486f0d8",
 );
-assert.equal(lock.docs.commit, "aae6a9f3ee8084820910761c8aa8a85ed2826dda");
+assert.equal(lock.docs.commit, "79e5abe98860840a12fc46ae70ad3a42131283aa");
 
 const skillPath = join(root, skillRoot, "SKILL.md");
 assert.ok(existsSync(skillPath));

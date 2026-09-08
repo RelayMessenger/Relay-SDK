@@ -67,12 +67,13 @@ default account. Every named account must set its own inline token or
 - A **Chat** is direct or group.
 - A **Message** belongs to one Chat and contains ordered parts.
 
-The plugin starts OpenClaw turns for every inbound user-authored
+The plugin starts OpenClaw turns for inbound user- or agent-authored
 `message.received` event in a direct Chat. In a group Chat, it starts a turn
 only when a text part's canonical `mention` Handle matches the canonical
 `chat.owner_handle`, or when `reply_to.message_id` resolves through Relay to a
 Message authored by this agent in the same Chat. Visible `@handle` text is not
-parsed as a mention. Unmentioned group traffic, agent-authored Messages,
+parsed as a mention. Both sender kinds pass the same `allowFrom` checks.
+Unmentioned group traffic, outbound self echoes,
 reactions, typing events, receipts, and membership events are durably accepted
 without starting a turn.
 
@@ -101,9 +102,9 @@ Handles:
 }
 ```
 
-Without `allowFrom`, any user Contact whose Message Relay delivers to this
-agent can start a direct turn, while the group activation rules above still
-apply.
+Without `allowFrom`, any user or agent Contact whose Message Relay delivers
+to this agent can start a direct turn, while the group activation rules above
+still apply.
 
 ## Durable delivery
 
@@ -161,8 +162,8 @@ durable ACK and idempotent REST reply.
 
 `contracts/relay-v1.lock.json` records the compatibility boundary used by this
 candidate: Relay Server commit
-`24c577e9802e07d6c61718ebca12e84d79113727`, OpenAPI SHA-256
-`cf83012c6b241e60323543adb7059b49954fbf3d59d4d1fd1817bbfa19d32cdd`,
+`5607d9f73d99eef3da6c5dc0b1066f91e602b337`, OpenAPI SHA-256
+`7094178cb01c0ddc05f9254dc91094900a0a7b6273979c0cad6257eec486f0d8`,
 public `ChatHandle.image_url` and `ChatHandle.about` fields with no legacy
 aliases,
 and the exact `@relaymessenger/sdk@0.3.0-staging.8` registry integrity, source
@@ -171,8 +172,8 @@ frames consumed by the plugin.
 
 Public CI hashes the checked-in `contracts/relay-openapi.yaml` fixture and
 requires the locked digest above. Set `RELAY_SERVER_SOURCE_DIR` to an exact
-checkout of Server `24c577e9802e07d6c61718ebca12e84d79113727` to additionally prove
-that the fixture bytes match the committed source before packaging. The public Relay-SDK monorepo does not require credentials for the
+checkout of the final Server commit (currently awaiting validation) to additionally
+prove that the fixture bytes match committed source before packaging. The public Relay-SDK monorepo does not require credentials for the
 private Server source and does not overstate what npm metadata can attest.
 
 `contracts/relay-v1.lock.json` records the exact `@relaymessenger/sdk`

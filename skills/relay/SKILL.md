@@ -1,6 +1,6 @@
 ---
 name: relay
-description: Implement, debug, or review a Relay v1 agent backend, Webhook receiver, WebSocket consumer, messaging flow, or @relaymessenger/sdk integration.
+description: Set up or troubleshoot a Relay agent with relaymessenger, or implement and review a Relay v1 SDK, Webhook, WebSocket, or messaging integration.
 ---
 
 # Relay v1
@@ -10,15 +10,24 @@ Use the locked Relay v1 contract instead of remembered examples.
 ## Ground truth
 
 1. Read the [locked source record](references/relay-v1-lock.json).
-2. Read the OpenAPI at the exact Relay Server commit recorded there and verify
-   its hash.
+2. Read `contracts/relay-v1-openapi.yaml` from the public Relay-SDK repository
+   at `api.public_source.commit` in the lock (or the SDK commit when that field
+   is absent), and verify its hash against the API lock. The
+   Server commit records its origin; private Server repository access is not
+   required. If the public copy and lock disagree, report the stale source.
 3. Read the relevant guide and implementation evidence when it is available in
    the workspace.
-4. Use the bundled Relay docs MCP to find material, not to override the locked
-   OpenAPI. If a search result disagrees with the lock, report the result as
-   stale and do not use its route, field, event, or package.
+4. Use Relay docs MCP for discovery when it is available, not to override the
+   locked OpenAPI. A plain skill installation does not prove MCP is configured;
+   the public contract copy remains usable without it. If a search result
+   disagrees with the lock, report it as stale and do not use its route, field,
+   event, or package.
 5. Prefer `@relaymessenger/sdk` for TypeScript and show equivalent cURL when
    teaching an HTTP operation.
+
+For CLI onboarding, existing Agent Tokens, optional runtime handoff, and skill
+installation, read [CLI and skills](references/cli-and-skills.md). Creating a
+messaging identity and running the code that answers it are separate steps.
 
 **Never invent a route, resource, field, event, package, or migration.** Label
 unproved behavior `unknown`.
@@ -52,7 +61,7 @@ For details, read only the reference needed:
 - [Agent events](references/agent-events.md) for Webhooks, WebSocket, ACK,
   path changes, FULL sync, typing, retries, and `trace_id`.
 - [SDK and authentication](references/sdk-and-auth.md) for Agent Tokens,
-  environments, the public TypeScript surface, retries, and errors.
+  anonymous creation, scoped deletion, environments, retries, and errors.
 
 ## Verification
 

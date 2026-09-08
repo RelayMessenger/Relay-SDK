@@ -132,7 +132,12 @@ export async function dispatchRelayEvent(params: {
     identity: {
       key: "contactId",
       kind: "stable-id",
-      entryIdPrefix: "relay-contact",
+      // OpenClaw expands each allowlist value into primary and alias entries.
+      // A prefix alone reuses one opaque ID across those fields, allowing the
+      // mutable handle entry to shadow the asserted Contact ID authentication.
+      // Keep field-qualified IDs; do not change the allowlist or alias policy.
+      resolveEntryId: ({ entryIndex, fieldKey }) =>
+        `relay-contact-${entryIndex + 1}:${fieldKey}`,
       aliases: [
         {
           key: "handle",

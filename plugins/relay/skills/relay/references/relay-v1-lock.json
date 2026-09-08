@@ -1,29 +1,36 @@
 {
   "schema_version": 1,
-  "locked_on": "2026-09-05",
+  "locked_on": "2026-09-08",
   "api": {
     "repository": "https://github.com/RelayMessenger/Relay-Server",
-    "commit": "24c577e9802e07d6c61718ebca12e84d79113727",
+    "commit": "5607d9f73d99eef3da6c5dc0b1066f91e602b337",
     "openapi_path": "contracts/developer/openapi.yaml",
-    "openapi_sha256": "cf83012c6b241e60323543adb7059b49954fbf3d59d4d1fd1817bbfa19d32cdd"
+    "openapi_sha256": "7094178cb01c0ddc05f9254dc91094900a0a7b6273979c0cad6257eec486f0d8",
+    "public_source": {
+      "repository": "https://github.com/RelayMessenger/Relay-SDK",
+      "commit": "ad25d949c18c22dd048c7db8ced1843c4cd1e31a",
+      "path": "contracts/relay-v1-openapi.yaml"
+    }
   },
   "docs": {
     "repository": "https://github.com/RelayMessenger/Relay-Docs",
-    "commit": "aae6a9f3ee8084820910761c8aa8a85ed2826dda",
+    "commit": "79e5abe98860840a12fc46ae70ad3a42131283aa",
     "skill_path": "skill.md",
-    "skill_sha256": "1363fa699352210d6faf0153c8ef048cbb36b5386477b85444cb2eec7255f67f"
+    "skill_sha256": "1d453e980dc015484fcf776f831e4b419493a2ecb6b9a5f1ebef13331935e45a"
   },
   "sdk": {
     "repository": "https://github.com/RelayMessenger/Relay-SDK",
-    "commit": "1bbcb486b4a91860ee3527ce95d015883e4cc1ae",
+    "commit": "79517a1c9fcb1c82b474cd72ba8bc10197ff363f",
     "package_path": "packages/sdk/package.json",
-    "package_sha256": "f14819a908e4a8e52dd37b33bb4eca9dabc4557e2404861f639aa5b857c8a252",
+    "package_sha256": "9d5ae725fc4f9195681da434d18470053e69ea1d380e8ce1c0de39be71e845ca",
     "package": "@relaymessenger/sdk",
-    "version": "0.3.0-staging.8",
-    "dist_tag": "staging"
+    "version": "0.3.1-staging.1",
+    "dist_tag": "staging",
+    "publication_status": "Published and registry-verified on the staging dist-tag.",
+    "integrity": "sha512-wqg+3Cio8rxbRrqagknXKf7MChGwVEhQQJxXwSbl4H9gH42OkzhsAIZHBeCbsid+fB6uVZv5cF+JX5lghYxe2A=="
   },
   "docs_mcp": {
-    "url": "https://docs.relayapp.im/mcp",
+    "url": "https://docs.staging.relayapp.im/mcp",
     "role": "discovery",
     "authority": "Every result must agree with the locked OpenAPI before use."
   }

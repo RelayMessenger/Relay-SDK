@@ -21414,8 +21414,9 @@ var parseReady = (value) => {
     "full_sync_required",
     "full_sync_through",
     "heartbeat_interval_ms",
-    "max_in_flight"
-  ]) || value.type !== "ready" || !validUUID(value.connection_id) || !validSequence(value.acked_through) || typeof value.full_sync_required !== "boolean" || (value.full_sync_required ? !validSequence(value.full_sync_through) : value.full_sync_through !== null) || !Number.isInteger(value.heartbeat_interval_ms) || value.heartbeat_interval_ms < 1 || !Number.isInteger(value.max_in_flight) || value.max_in_flight < 1) {
+    "max_in_flight",
+    ...Object.hasOwn(value, "observational") ? ["observational"] : []
+  ]) || value.type !== "ready" || Object.hasOwn(value, "observational") && value.observational !== true || !validUUID(value.connection_id) || !validSequence(value.acked_through) || typeof value.full_sync_required !== "boolean" || (value.full_sync_required ? !validSequence(value.full_sync_through) : value.full_sync_through !== null) || !Number.isInteger(value.heartbeat_interval_ms) || value.heartbeat_interval_ms < 1 || !Number.isInteger(value.max_in_flight) || value.max_in_flight < 1) {
     throw new WebSocketProtocolError("Relay WebSocket received an invalid ready frame.");
   }
   return value;
@@ -21508,7 +21509,7 @@ var upgradeResponseBody = (status, statusMessage, textBody) => {
   const errorMessage = message ?? fallback;
   return status === 429 || status >= 500 || status === 0 ? new RetryableWebSocketError(errorMessage) : new WebSocketStoppedError(errorMessage);
 };
-var deriveWebSocketURL = (baseURL) => {
+var deriveWebSocketURL = (baseURL, observe = false) => {
   let url;
   try {
     url = new URL(baseURL);
@@ -21521,6 +21522,8 @@ var deriveWebSocketURL = (baseURL) => {
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = "/v1/websocket";
   url.search = "";
+  if (observe)
+    url.searchParams.set("observe", "true");
   url.hash = "";
   return url.toString();
 };
@@ -21614,6 +21617,8 @@ var runConnection = (url, agentToken, options, Constructor, onReady) => new Prom
   };
   const onMessage = (message) => {
     chain = chain.then(async () => {
+      if (settled || options.signal?.aborted)
+        return;
       let frame;
       try {
         frame = JSON.parse(await text(message.data));
@@ -21625,11 +21630,20 @@ var runConnection = (url, agentToken, options, Constructor, onReady) => new Prom
           throw new WebSocketProtocolError("Relay WebSocket received more than one ready frame.");
         }
         const parsed = parseReady(frame);
+        if (options.observe === true && parsed.observational !== true) {
+          throw new WebSocketStoppedError("Server did not confirm read-only observation; no consuming fallback was opened.");
+        }
+        if (options.observe !== true && parsed.observational === true) {
+          throw new WebSocketProtocolError("Unexpected observation mode on a consuming connection.");
+        }
+        if (options.observe === true && (parsed.full_sync_required || parsed.full_sync_through !== null)) {
+          throw new WebSocketProtocolError("Read-only observation must not require FULL sync.");
+        }
         ready = true;
         acceptedThrough = BigInt(parsed.acked_through);
         fullSyncThrough = parsed.full_sync_required ? BigInt(parsed.full_sync_through) : null;
         startHeartbeat();
-        onReady();
+        onReady(parsed);
         return;
       }
       if (isRecord(frame) && frame.type === "disconnect") {
@@ -21665,6 +21679,9 @@ var runConnection = (url, agentToken, options, Constructor, onReady) => new Prom
         if (fullSyncThrough === null || BigInt(fullSync.through_sequence) !== fullSyncThrough) {
           throw new WebSocketProtocolError("Relay WebSocket FULL sync did not match the ready checkpoint.");
         }
+        if (options.observe === true) {
+          throw new WebSocketStoppedError("Observation stopped: a consuming runtime must complete FULL sync; no completion was sent.");
+        }
         try {
           await options.onFullSync({
             throughSequence: fullSync.through_sequence,
@@ -21688,13 +21705,27 @@ var runConnection = (url, agentToken, options, Constructor, onReady) => new Prom
       }
       const event = parseEvent(frame);
       const sequence = BigInt(event.sequence);
+      if (options.observe === true && sequence <= acceptedThrough) {
+        throw new WebSocketProtocolError("Observer event sequences must increase on each connection.");
+      }
       if (sequence > acceptedThrough + 1n) {
-        throw new WebSocketProtocolError("Relay WebSocket received a non-contiguous event sequence.");
+        if (options.observe !== true) {
+          throw new WebSocketProtocolError("Relay WebSocket received a non-contiguous event sequence.");
+        }
+        options.onObservationGap?.({
+          expectedSequence: (acceptedThrough + 1n).toString(),
+          receivedSequence: event.sequence
+        });
       }
       try {
         await options.onEvent(event.event, { sequence: event.sequence });
       } catch (cause) {
         throw new DurableApplicationError("event", cause);
+      }
+      if (options.observe === true) {
+        if (sequence > acceptedThrough)
+          acceptedThrough = sequence;
+        return;
       }
       if (sequence === acceptedThrough + 1n) {
         acceptedThrough = sequence;
@@ -21766,6 +21797,9 @@ var runConnection = (url, agentToken, options, Constructor, onReady) => new Prom
     options.signal?.addEventListener("abort", onAbort, { once: true });
 });
 var runWebSocket = async (baseURL, agentToken, options) => {
+  if (options.observe !== void 0 && typeof options.observe !== "boolean") {
+    throw new TypeError("WebSocket observe must be a boolean when provided.");
+  }
   const Constructor = options.WebSocket ?? wrapper_default;
   const minimum = options.minReconnectDelayMs ?? 500;
   const maximum = options.maxReconnectDelayMs ?? 3e4;
@@ -21775,13 +21809,16 @@ var runWebSocket = async (baseURL, agentToken, options) => {
   if (!agentToken.trim()) {
     throw new TypeError("A Relay Agent Token is required for WebSocket delivery.");
   }
-  const url = deriveWebSocketURL(baseURL);
+  const url = deriveWebSocketURL(baseURL, options.observe === true);
   const random = options.random ?? Math.random;
   let attempt = 0;
   while (!options.signal?.aborted) {
+    options.onConnectionState?.("connecting");
     try {
-      await runConnection(url, agentToken, options, Constructor, () => {
+      await runConnection(url, agentToken, options, Constructor, (frame) => {
         attempt = 0;
+        options.onConnectionState?.("ready");
+        options.onReady?.(frame);
       });
     } catch (error2) {
       if (options.signal?.aborted)
@@ -21790,6 +21827,8 @@ var runWebSocket = async (baseURL, agentToken, options) => {
       if (error2 instanceof WebSocketStoppedError || error2 instanceof WebSocketProtocolError || error2 instanceof RelayWebhookConfiguredError)
         throw error2;
       attempt += 1;
+    } finally {
+      options.onConnectionState?.("disconnected");
     }
     if (options.signal?.aborted)
       return;
@@ -21819,8 +21858,6 @@ var Transport = class {
   #timeout;
   #retryBaseDelayMs;
   constructor(options) {
-    if (!options.apiKey?.trim())
-      throw new Error("Relay API key is required.");
     this.baseURL = (options.baseURL ?? "https://api.relayapp.im").replace(/\/+$/, "");
     this.#apiKey = options.apiKey;
     const selectedFetch = options.fetch ?? globalThis.fetch;
@@ -21842,7 +21879,10 @@ var Transport = class {
       const timeoutSignal = AbortSignal.timeout(timeout);
       const signal = request.options?.signal ? AbortSignal.any([request.options.signal, timeoutSignal]) : timeoutSignal;
       const headers = new Headers(request.options?.headers);
-      headers.set("authorization", `Bearer ${this.#apiKey}`);
+      if (this.#apiKey)
+        headers.set("authorization", `Bearer ${this.#apiKey}`);
+      else
+        headers.delete("authorization");
       headers.set("accept", "application/json");
       if (request.body !== void 0)
         headers.set("content-type", "application/json");
@@ -21869,6 +21909,9 @@ var Transport = class {
         continue;
       }
       if (response.ok) {
+        if (request.expectedStatus !== void 0 && response.status !== request.expectedStatus) {
+          throw new RelayAPIError("Unexpected Relay success status.", { status: response.status });
+        }
         if (response.status === 204)
           return void 0;
         const text3 = await response.text();
@@ -21917,6 +21960,8 @@ var Transport = class {
     }
   }
   runWebSocket(options) {
+    if (!this.#apiKey)
+      throw new Error("Relay API key is required.");
     return runWebSocket(this.baseURL, this.#apiKey, options);
   }
 };
@@ -22298,12 +22343,41 @@ var WebSocket2 = class {
    * transport-only cumulative ACK after that promise resolves. The ACK does
    * not change Delivered or Read receipts. `onFullSync` must return only after
    * a complete REST snapshot is durably applied.
+   * Explicit observe:true requests confirmed read-only observation and never
+   * sends ACK/FULL-sync completion. It is best-effort, may have retention gaps,
+   * and is not durable recovery or evidence that a model is running.
    */
   run(options) {
     return this.transport.runWebSocket(options);
   }
 };
+var Agents = class {
+  transport;
+  constructor(transport2) {
+    this.transport = transport2;
+  }
+  delete(handle, options) {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/agents/${pathID(handle)}`,
+      expectedStatus: 204,
+      options: { ...options, maxRetries: 0 }
+    });
+  }
+};
 var Relay = class {
+  /** Bootstrap a new identity. The one-time secret is never retried/replayed. */
+  static createAgent(body = {}, options = {}) {
+    const { apiKey: _ignored, ...transportOptions } = options;
+    return new Transport(transportOptions).request({
+      method: "POST",
+      path: "/v1/agents",
+      body,
+      options,
+      expectedStatus: 201
+    });
+  }
+  agents;
   baseURL;
   chats;
   messages;
@@ -22316,8 +22390,11 @@ var Relay = class {
   websocket;
   webhooks;
   constructor(options) {
+    if (!options.apiKey?.trim())
+      throw new Error("Relay API key is required.");
     const transport2 = new Transport(options);
     this.baseURL = transport2.baseURL;
+    this.agents = new Agents(transport2);
     this.chats = new Chats(transport2);
     this.messages = new Messages(transport2);
     this.attachments = new Attachments(transport2);
@@ -22396,7 +22473,7 @@ function parseEnvFile(contents) {
 function parseAllowedSenders(value) {
   const configured = [...new Set(value.split(",").map((entry) => entry.trim()).filter(Boolean))];
   if (configured.length === 0) {
-    throw new Error("RELAY_ALLOWED_SENDERS must contain at least one Relay user UUID or exact Handle");
+    throw new Error("RELAY_ALLOWED_SENDERS must contain at least one Relay Contact UUID or exact Handle");
   }
   if (configured.length > 64) {
     throw new Error("RELAY_ALLOWED_SENDERS accepts at most 64 entries");
@@ -22413,7 +22490,7 @@ function parseAllowedSenders(value) {
   return { ids, handles, configured };
 }
 function senderIsAllowed(allowed, sender) {
-  return sender.kind === "user" && (allowed.ids.has(sender.id.toLowerCase()) || allowed.handles.has(sender.handle));
+  return (sender.kind === "user" || sender.kind === "agent") && (allowed.ids.has(sender.id.toLowerCase()) || allowed.handles.has(sender.handle));
 }
 function defaultChannelDir(env = process.env) {
   const configured = actualValue(env.RELAY_CHANNEL_DIR);
@@ -22664,10 +22741,10 @@ function deliveryFromSnapshotMessage(params) {
   const message = params.message;
   if (message.is_from_me || message.is_system_message) return null;
   const sender = message.from_handle;
-  if (!sender || sender.kind !== "user") {
+  if (!sender || sender.kind !== "user" && sender.kind !== "agent") {
     if (snapshotMessageIsUnreadByAgent(message)) {
       throw new Error(
-        `FULL sync cannot authenticate unread inbound Message ${message.id}: from_handle is absent`
+        `FULL sync cannot authenticate unread inbound Message ${message.id}: from_handle is absent or has an unsupported kind`
       );
     }
     return null;
@@ -23716,7 +23793,7 @@ var RelayStateStore = class {
 };
 
 // server.ts
-var VERSION = true ? "0.3.0-staging.6" : createRequire(import.meta.url)("./package.json").version;
+var VERSION = true ? "0.3.1-staging.3" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);
@@ -23776,7 +23853,7 @@ var mcp = new Server(
       tools: {}
     },
     instructions: [
-      'Messages from allowlisted Relay users arrive as <channel source="relay" chat_id="..." message_id="..." delivery_id="...">.',
+      'Messages from allowlisted Relay Contacts (users or agents) arrive as <channel source="relay" chat_id="..." message_id="..." delivery_id="...">.',
       "For every Relay message, call begin_processing with delivery_id before doing any work, invoking any other tool, or replying. Continue only when it confirms the Chat was explicitly marked Read.",
       "Every begin_processing opens one short-lived Relay turn. A successful reply completes it automatically. If the turn ends without a reply or must be abandoned, call complete_processing with the same delivery_id and outcome completed or failed. Never leave a Relay turn open.",
       "Channel notifications are at-least-once until begin_processing succeeds. If a delivery repeats, reconcile any prior external side effect before repeating it.",

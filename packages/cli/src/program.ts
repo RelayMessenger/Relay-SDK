@@ -1,7 +1,17 @@
+import { openSavedAgentSession, type AgentSessionInput, type AgentSessionDependencies } from "./agent-session.js";
+import { prepareAgentImage, type LocalAgentImage } from "./local-image.js";
+import { uploadAgentImage, type AgentImageUploadResult } from "./agent-image-upload.js";
+import { homedir } from "node:os";
+import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactiveEntry, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
+import { installRelaySkill, relaySkillPresent } from "./skill-offer.js";
+import { readHiddenToken } from "./secret-input.js";
+import { handoffAgent, handoffOptions, handoffTarget, type HandoffOptions } from "./agent-handoff.js";
+import { agentDependencies, createAgent, deleteAgent, listAgents, type AgentDependencies } from "./agents.js";
 import { createRequire } from "node:module";
 import { readFile, stat } from "node:fs/promises";
 import Relay, {
   RELAY_WEBHOOK_EVENT_TYPES,
+  type AgentImageRecipe,
   type ChatCreateParams,
   type ChatSendVoicememoParams,
   type ChatUpdateParams,
@@ -25,6 +35,7 @@ import { createClientContext } from "./client.js";
 import type { ConfigContext, RelayProfile } from "./config.js";
 import {
   DEFAULT_API_URL,
+  defaultCreationApiURL,
   collectConfiguredTokens,
   configPath,
   readConfig,
@@ -35,7 +46,7 @@ import {
   writeConfig,
 } from "./config.js";
 import { runDoctor } from "./doctor.js";
-import { errorText, jsonText } from "./output.js";
+import { errorText, jsonText, safeMetadata } from "./output.js";
 import { listenForAgentEvents } from "./event-listen.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
@@ -43,9 +54,22 @@ import { listenForAgentEvents } from "./event-listen.js";
 const PACKAGE_VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
 export interface ProgramDependencies {
+  agents?: AgentDependencies;
   configContext?: ConfigContext;
   resolveClient?: (profile?: string) => Promise<ClientContext>;
   readStdin?: () => Promise<string>;
+  readSecret?: () => Promise<string>;
+  isInteractive?: boolean;
+  prompts?: InteractivePrompts;
+  skillPresent?: () => Promise<boolean | "unknown">;
+  skillInstaller?: () => Promise<void>;
+  cwd?: string;
+  confirmDelete?: () => Promise<boolean>;
+  confirmLogout?: () => Promise<boolean>;
+  beforeSetup?: () => Promise<void>;
+  terminalSession?: AgentSessionDependencies["session"];
+  terminalIO?: AgentSessionDependencies["io"];
+  terminalClient?: AgentSessionDependencies["client"];
   stdout?: (value: string) => void;
   stderr?: (value: string) => void;
   fetch?: typeof fetch;
@@ -53,6 +77,8 @@ export interface ProgramDependencies {
 
 interface GlobalOptions {
   profile?: string;
+  json?: boolean;
+  nonInteractive?: boolean;
 }
 
 const integer = (value: string): number => {
@@ -107,6 +133,18 @@ const textContent = (
     : {}),
 });
 
+async function readImageRecipe(path: string): Promise<AgentImageRecipe> {
+  try {
+    const info = await stat(path);
+    if (!info.isFile() || info.size > 8192) throw new Error("Invalid recipe file.");
+    const raw = await readFile(path, "utf8");
+    if (Buffer.byteLength(raw, "utf8") > 8192) throw new Error("Recipe too large.");
+    const value: unknown = JSON.parse(raw.replace(/^\uFEFF/u, ""));
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Recipe must be an object.");
+    return value as AgentImageRecipe; // Server's existing recipe parser is authoritative.
+  } catch { throw new Error("Image recipe must be a readable JSON object file no larger than 8192 bytes."); }
+}
+
 const voidResult = { ok: true };
 
 export const createProgram = (
@@ -122,77 +160,209 @@ export const createProgram = (
     (await resolveClient(globals(command).profile)).client;
 
   const program = new Command()
-    .name("relay")
+    .name("relaymessenger")
     .description("Official CLI for Relay v1 Agent resources.")
     .version(PACKAGE_VERSION)
-    .option("--profile <name>", "local Relay profile", process.env.RELAY_PROFILE);
+    .option("--json", "machine-readable output; disables optional prompts")
+    .option("--non-interactive", "disable menus and optional prompts")
+    .option("--profile <name>", "local Relay profile", (configContext.env ?? process.env).RELAY_PROFILE);
   program.exitOverride();
   program.configureOutput({
     writeOut: stdout,
     writeErr: stderr,
   });
 
-  const auth = program.command("auth").description("Manage local Agent Token authentication.");
-  auth
-    .command("login")
-    .description("Store an Agent Token from stdin or RELAY_AGENT_TOKEN.")
-    .option("--token-stdin", "read the token from stdin")
-    .option("--from-env", "read the token from RELAY_AGENT_TOKEN")
+  program.hook("preAction", async (_root, action) => {
+    if (dependencies.beforeSetup && ((action.parent?.name() === "agents" && action.name() === "create")
+      || (action.parent?.name() === "auth" && action.name() === "login"))) await dependencies.beforeSetup();
+  });
+  const agentDeps = dependencies.agents ?? agentDependencies(configContext, dependencies.fetch);
+  const showSavedAgent = async (command: Command, input: AgentSessionInput): Promise<void> => {
+    const enabled = !globals(command).json && !globals(command).nonInteractive && dependencies.isInteractive === true
+      && (dependencies.terminalSession !== undefined || dependencies.terminalIO !== undefined || Boolean(process.stdin.isTTY && process.stderr.isTTY));
+    if (!enabled) return;
+    try {
+      await openSavedAgentSession(input, {
+        agents: agentDeps,
+        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+        ...(dependencies.terminalSession ? { session: dependencies.terminalSession } : {}),
+        ...(dependencies.terminalIO ? { io: dependencies.terminalIO } : {}),
+        ...(dependencies.terminalClient ? { client: dependencies.terminalClient } : {}),
+      });
+    } catch {
+      stderr("Terminal view unavailable. The saved agent and token remain unchanged.\n");
+    }
+  };
+
+  const agents = program.command("agents").description("Create, inspect local profiles, and delete developer-managed agents.");
+  handoffOptions(agents.command("create"))
+    .option("--api-url <url>", "Relay API origin", validateApiURL)
+    .option("--token-name <name>", "label for the new Agent Token")
+    .option("--handle <handle>", "optional full .dev handle; omission keeps server assignment")
+    .option("--name <name>", "optional display name")
+    .option("--image <path-or-url>", "local image path or public HTTPS image URL")
+    .option("--image-url <url>", "public HTTPS image URL (compatibility option)")
+    .option("--image-recipe <json-file>", "existing Relay recipe JSON; requires a rendered --image or --image-url")
+    .option("--json", "print safe metadata as JSON")
+    .action(async (options: HandoffOptions & { apiUrl?: string; tokenName?: string; json?: boolean; handle?: string; name?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
+      const target = await handoffTarget(options);
+      let localImage: LocalAgentImage | undefined;
+      if (options.image !== undefined && options.imageUrl !== undefined) throw new Error("Choose --image or --image-url, not both.");
+      if (options.image !== undefined) {
+        const image = await prepareAgentImage(options.image, {
+          ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}),
+          ...(configContext.home ? { home: configContext.home } : {}),
+        });
+        if (image.kind === "file") localImage = image.file;
+        else options.imageUrl = image.url;
+      }
+      let imageRecipe: AgentImageRecipe | undefined;
+      if (options.imageRecipe !== undefined) {
+        if (options.imageUrl === undefined && !localImage) throw new Error("--image-recipe requires its rendered --image or --image-url.");
+        imageRecipe = await readImageRecipe(options.imageRecipe);
+      }
+      const result = await createAgent({
+        ...(program.getOptionValueSource("profile") === "cli" && globals(command).profile ? { profile: globals(command).profile } : {}),
+        ...(options.apiUrl ? { apiURL: options.apiUrl } : {}),
+        ...(options.tokenName === undefined ? {} : { tokenName: options.tokenName }),
+        ...(options.handle === undefined ? {} : { handle: options.handle }),
+        ...(options.name === undefined ? {} : { firstName: options.name }),
+        ...(options.imageUrl === undefined ? {} : { imageURL: options.imageUrl }),
+        ...(imageRecipe === undefined || localImage ? {} : { imageRecipe }),
+      }, agentDeps);
+      let imageUpdate: AgentImageUploadResult | undefined;
+      if (localImage) {
+        try {
+          // Identity/token are already persisted. Never apply an ENV token to
+          // a just-created agent's upload or promotion.
+          const saved = (await agentDeps.read()).profiles[result.profile];
+          if (!saved?.agent_token || validateApiURL(saved.api_url ?? DEFAULT_API_URL) !== result.api_url) throw new Error("Saved identity changed.");
+          const client = new Relay({ apiKey: saved.agent_token, baseURL: result.api_url, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) });
+          const outcome = await uploadAgentImage({ handle: result.agent.handle, image: localImage }, client,
+            (attachmentID) => client.contactCard.update({ handle: result.agent.handle, attachment_id: attachmentID,
+              ...(imageRecipe ? { image_recipe: imageRecipe } : {}),
+            }, { maxRetries: 0 }));
+          imageUpdate = safeMetadata(outcome, [saved.agent_token]);
+          if (imageUpdate.status === "updated") result.agent = imageUpdate.agent;
+        } catch {
+          imageUpdate = { status: "incomplete", phase: "identity", message: "Agent was created and its credential was saved. Image update was not confirmed; retry on this existing profile, not agent creation." };
+        }
+      }
+      let handoff;
+      if (target) {
+        try { handoff = await handoffAgent(target, result.profile, agentDeps, { consent: options.confirmConfigure === true, runtimeStopped: options.runtimeStopped === true }, true); }
+        catch { handoff = { status: "required-action", code: "handoff-failed", message: "Agent credential is stored; runtime handoff failed. Use auth login --connect with the stored credential; do not create another agent.", connected: false }; }
+      }
+      if (globals(command).json) output({ ...result, ...(imageUpdate ? { image: imageUpdate } : {}), ...(handoff ? { handoff } : {}) });
+      else {
+        stdout(`${result.agent.first_name} (@${result.agent.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken: stored\n`);
+        // Load only for human output; the QR encodes the public share URL, not credentials.
+        const qr = createRequire(import.meta.url)("qrcode") as {
+          toString(text: string, options: { type: "terminal"; small: boolean }): Promise<string>;
+        };
+        try { stdout(await qr.toString(result.share_url, { type: "terminal", small: true })); }
+        catch { stderr("QR rendering unavailable; use the share link above.\n"); }
+        if (imageUpdate?.status === "incomplete") output({ image: imageUpdate });
+        if (handoff) output({ handoff });
+      }
+      if (imageUpdate?.status !== "incomplete" && (!handoff || handoff.status === "configured")) {
+        await showSavedAgent(command, { profile: result.profile, handle: result.agent.handle, apiURL: result.api_url, shareURL: result.share_url,
+          runtime: target ? { ownership: "external", connection: "unknown", label: target.runtime } : { ownership: "none", connection: "not-started" },
+        });
+      }
+      if (imageUpdate?.status === "incomplete") {
+        const retry = imageUpdate.attachment_id && ["completion", "promotion"].includes(imageUpdate.phase)
+          ? `--attachment-id ${imageUpdate.attachment_id}` : "--image <local-file>";
+        throw new Error(`Agent @${result.agent.handle} was created; its profile/token remain stored. Image update was not confirmed. Retry on the existing profile: relay --profile ${result.profile} contact-card update --handle ${result.agent.handle} ${retry}${imageRecipe ? " --image-recipe <json-file>" : ""}. Do not create another agent.`);
+      }
+      if (handoff && handoff.status !== "configured") throw new Error("Agent credential is stored; runtime handoff requires action. Use auth login --connect rather than creating again.");
+    });
+  agents.command("list").option("--json", "print safe metadata as JSON")
+    .action(async () => output(await listAgents(agentDeps)));
+  agents.command("delete").argument("<handle>", "agent handle", handle)
+    .option("--json", "print safe metadata as JSON")
+    .action(async (agentHandle: string, _options: object, command: Command) => {
+      if (!globals(command).nonInteractive && !globals(command).json && dependencies.confirmDelete && !await dependencies.confirmDelete()) throw new InteractiveCancelled();
+      output(await deleteAgent(agentHandle, globals(command).profile, agentDeps));
+    });
+
+  const authCommands = program.command("auth").description("Manage Agent Token authentication.");
+  authCommands.configureOutput({
+    outputError: (_message, write) => write("Invalid auth arguments. Use auth login --with-token with stdin; never put a token in an argument.\n"),
+  });
+  handoffOptions(authCommands.command("login"))
+    .description("Save an Agent Token using a hidden prompt, stdin, environment, or selected handoff profile.")
+    .option("--with-token", "read the token from stdin")
     .option("--api-url <url>", "set the profile API origin")
     .action(async (
-      options: { tokenStdin?: boolean; fromEnv?: boolean; apiUrl?: string },
+      options: HandoffOptions & { withToken?: boolean; apiUrl?: string },
       command: Command,
     ) => {
-      if (options.tokenStdin === options.fromEnv) {
-        throw new Error("Choose exactly one of --token-stdin or --from-env.");
-      }
+      const target = await handoffTarget(options);
       const env = configContext.env ?? process.env;
-      const raw = options.fromEnv
-        ? env.RELAY_AGENT_TOKEN
-        : await (dependencies.readStdin
-          ?? (async () => {
-            const chunks: Buffer[] = [];
-            for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
-            return Buffer.concat(chunks).toString("utf8");
-          }))();
-      if (!raw) throw new Error("RELAY_AGENT_TOKEN is not set.");
-      const token = validateToken(raw);
       const config = await readConfig(configContext);
-      const profile = validateProfileName(
-        globals(command).profile ?? config.current_profile,
-      );
+      const profile = validateProfileName(globals(command).profile ?? config.current_profile);
       const previous = config.profiles[profile] ?? {};
-      config.profiles[profile] = {
-        api_url: validateApiURL(
-          options.apiUrl ?? previous.api_url ?? DEFAULT_API_URL,
-        ),
-        agent_token: token,
-      };
+      // Explicit --connect can reuse a saved profile without substituting an
+      // unrelated environment token. --with-token always selects stdin.
+      const reuseSaved = Boolean(target && previous.agent_token) && !options.withToken;
+      let raw: string | undefined;
+      if (options.withToken && !dependencies.readStdin && process.stdin.isTTY) {
+        if (globals(command).nonInteractive || globals(command).json || dependencies.isInteractive === false) throw new Error("Use redirected stdin with --with-token in non-interactive mode.");
+        raw = await (dependencies.readSecret ?? (() => readHiddenToken(process.stdin, stderr)))();
+      } else if (options.withToken) {
+        raw = await (dependencies.readStdin ?? (async () => {
+          const chunks: Buffer[] = [];
+          for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+          return Buffer.concat(chunks).toString("utf8");
+        }))();
+      } else if (reuseSaved) raw = previous.agent_token;
+      else if (env.RELAY_AGENT_TOKEN !== undefined) raw = env.RELAY_AGENT_TOKEN;
+      else {
+        const interactive = !globals(command).nonInteractive && !globals(command).json && (dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stderr.isTTY));
+        if (!interactive) throw new Error("No Agent Token available in non-interactive mode. Use auth login --with-token with stdin or RELAY_AGENT_TOKEN.");
+        raw = await (dependencies.readSecret ?? (() => readHiddenToken(process.stdin, stderr)))();
+      }
+      if (!raw) throw new Error("No Agent Token was supplied; no credentials were changed.");
+      const token = validateToken(raw);
+      const apiURL = validateApiURL(options.apiUrl ?? (reuseSaved ? previous.api_url : env.RELAY_API_URL ?? previous.api_url) ?? defaultCreationApiURL());
+      {
+        try {
+          const cards = await agentDeps.client(token, apiURL).contactCard.retrieve();
+          if (cards.contact_cards.filter((card) => card.kind === "agent" && card.is_active).length !== 1) throw new Error("Agent credential required.");
+        } catch { throw new Error("Agent Token validation failed; existing credentials and runtime configuration were kept."); }
+      }
+      config.profiles[profile] = { api_url: apiURL, agent_token: token };
       await writeConfig(config, configContext);
-      output({
-        ok: true,
-        profile,
-        api_url: config.profiles[profile].api_url,
-        token: "stored",
+      const handoff = target ? await handoffAgent(target, profile, agentDeps, { consent: options.confirmConfigure === true, runtimeStopped: options.runtimeStopped === true }, true) : undefined;
+      output(safeMetadata({ ok: true, profile, api_url: apiURL, token: "stored", ...(handoff ? { handoff } : {}) }, [token]));
+      if (!handoff || handoff.status === "configured") await showSavedAgent(command, { profile, apiURL,
+        runtime: { ownership: target ? "external" : "unknown", connection: "unknown", ...(target ? { label: target.runtime } : {}) },
       });
+      if (handoff && handoff.status !== "configured") throw new Error("Token is stored; native runtime configuration requires action.");
     });
-  auth
+  authCommands
     .command("status")
     .description("Show token resolution without revealing the token.")
     .action(async (_options: object, command: Command) => {
       const resolved = await resolveAuth(globals(command).profile, configContext);
       output({
-        authenticated: true,
+        configured: true,
         profile: resolved.profile,
         api_url: resolved.apiURL,
         token_source: resolved.tokenSource,
         config_path: resolved.configPath,
       });
+      const saved = (await agentDeps.read()).profiles[resolved.profile];
+      if (saved?.agent_token === resolved.token && validateApiURL(saved.api_url ?? DEFAULT_API_URL) === resolved.apiURL) {
+        await showSavedAgent(command, { profile: resolved.profile, apiURL: resolved.apiURL });
+      }
     });
-  auth
+  authCommands
     .command("logout")
     .description("Remove the selected profile's stored token.")
     .action(async (_options: object, command: Command) => {
+      if (!globals(command).nonInteractive && !globals(command).json && dependencies.confirmLogout && !await dependencies.confirmLogout()) throw new InteractiveCancelled();
       const config = await readConfig(configContext);
       const profile = validateProfileName(
         globals(command).profile ?? config.current_profile,
@@ -266,7 +436,7 @@ export const createProgram = (
 
   program
     .command("doctor")
-    .description("Check runtime, auth, config security, SDK contract, and API.")
+    .description("Check runtime, token configuration, config security, SDK contract, and API.")
     .option("--offline", "skip the read-only API request")
     .action(async (options: { offline?: boolean }, command: Command) => {
       const report = await runDoctor(
@@ -833,7 +1003,10 @@ export const createProgram = (
     .option("--first-name <name>")
     .option("--last-name <name>")
     .option("--clear-last-name")
+    .option("--image <path-or-url>", "local image file or public HTTPS image URL")
     .option("--image-url <url>")
+    .option("--attachment-id <id>", "retry promotion of this agent's completed image upload")
+    .option("--image-recipe <json-file>", "existing recipe paired with selected image")
     .option("--clear-image-url")
     .action(async (
       options: {
@@ -841,7 +1014,10 @@ export const createProgram = (
         firstName?: string;
         lastName?: string;
         clearLastName?: boolean;
+        image?: string;
         imageUrl?: string;
+        attachmentId?: string;
+        imageRecipe?: string;
         clearImageUrl?: boolean;
       },
       command: Command,
@@ -849,9 +1025,13 @@ export const createProgram = (
       if (options.lastName && options.clearLastName) {
         throw new Error("Choose --last-name or --clear-last-name, not both.");
       }
-      if (options.imageUrl && options.clearImageUrl) {
-        throw new Error("Choose --image-url or --clear-image-url, not both.");
-      }
+      if ([options.image, options.imageUrl, options.attachmentId, options.clearImageUrl || undefined].filter((value) => value !== undefined).length > 1) throw new Error("Choose one image input or --clear-image-url.");
+      const image = options.image === undefined ? undefined : await prepareAgentImage(options.image, {
+        ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}), ...(configContext.home ? { home: configContext.home } : {}),
+      });
+      const imageURL = image?.kind === "url" ? image.url : options.imageUrl;
+      if (options.imageRecipe && !image && !options.imageUrl && !options.attachmentId) throw new Error("--image-recipe requires a rendered image URL, file, or completed attachment.");
+      const recipe = options.imageRecipe ? await readImageRecipe(options.imageRecipe) : undefined;
       const body = {
         handle: options.handle,
         ...(options.firstName ? { first_name: options.firstName } : {}),
@@ -860,12 +1040,24 @@ export const createProgram = (
           : options.clearLastName
           ? { last_name: null }
           : {}),
-        ...(options.imageUrl
-          ? { image_url: options.imageUrl }
+        ...(imageURL
+          ? { image_url: imageURL }
           : options.clearImageUrl
           ? { image_url: null }
           : {}),
+        ...(recipe ? { image_recipe: recipe } : {}),
       } satisfies ContactCardUpdateParams;
+      if (image?.kind === "file" || options.attachmentId) {
+        const selected = await resolveClient(globals(command).profile);
+        const client = selected.client;
+        const rawOutcome = await uploadAgentImage({ handle: options.handle,
+          ...(image?.kind === "file" ? { image: image.file } : {}), ...(options.attachmentId ? { attachmentID: options.attachmentId } : {}),
+        }, client, (attachmentID) => client.contactCard.update({ ...body, attachment_id: attachmentID }, { maxRetries: 0 }));
+        const outcome = safeMetadata(rawOutcome, [selected.auth.token]);
+        if (outcome.status === "updated") output(outcome.agent);
+        else { output({ image: outcome }); throw new Error("Image update was not confirmed; keep the existing profile and retry this update, not agent creation."); }
+        return;
+      }
       if (Object.keys(body).length === 1) {
         throw new Error("No Contact Card update was provided.");
       }
@@ -903,10 +1095,57 @@ export const runCLI = async (
   dependencies: ProgramDependencies = {},
 ): Promise<number> => {
   const stderr = dependencies.stderr ?? ((value: string) => process.stderr.write(value));
+  const env = dependencies.configContext?.env ?? process.env;
+  const interactive = interactiveAllowed(argv, env, dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY && process.stderr.isTTY));
+  const ui = interactive ? dependencies.prompts ?? clackPrompts((message) => stderr(`${message}\n`)) : undefined;
+  const agentDeps = dependencies.agents ?? agentDependencies(dependencies.configContext, dependencies.fetch);
+  let offered = false;
+  const skillOffer = async (force = false): Promise<number> => {
+    if (!ui || offered) return 0;
+    offered = true;
+    const inform = (message: string) => { try { ui.info(message); } catch { /* Optional output cannot invalidate the command. */ } };
+    try {
+      const cwd = dependencies.cwd ?? process.cwd();
+      if (!force) {
+        const present = await (dependencies.skillPresent ?? (() => relaySkillPresent(cwd, dependencies.configContext?.home ?? homedir(), env)))();
+        if (present !== false) return 0;
+      }
+      if (!await ui.confirm("Install the Relay skill? The standard installer will ask you to choose agents and project/global scope.")) return 0;
+      try {
+        await (dependencies.skillInstaller ?? (() => installRelaySkill(cwd, env)))();
+        inform("The standard skill installer finished.");
+        return 0;
+      } catch {
+        inform("Skill installation did not complete. Existing agent and credential results are unchanged.");
+        return force ? 1 : 0;
+      }
+    } catch (error) {
+      inform("Skill offer dismissed. Existing agent and credential results are unchanged.");
+      if (error instanceof InteractiveCancelled && !force) throw error;
+      return error instanceof InteractiveCancelled ? 0 : force ? 1 : 0;
+    }
+  };
   try {
-    await createProgram(dependencies).parseAsync(argv, { from: "user" });
+    let args = argv;
+    const entry = interactiveEntry(argv);
+    if (ui && entry) {
+      const selected = await chooseInteractiveCommand(entry.entry, entry.prefix, agentDeps, ui, async () => { await skillOffer(); });
+      if (!selected) return 0;
+      if (selected === "install-skill") return await skillOffer(true);
+      args = selected;
+    } else if (entry) args = [...argv, "--help"];
+    await createProgram({
+      ...dependencies, agents: agentDeps, isInteractive: interactive,
+      ...(ui ? {
+        beforeSetup: async () => { await skillOffer(); },
+        readSecret: dependencies.readSecret ?? (() => ui.password("Agent Token")),
+        confirmDelete: () => ui.confirm("Delete the selected agent? This cannot be undone."),
+        confirmLogout: () => ui.confirm("Remove the selected stored token? The agent identity will not be deleted."),
+      } : {}),
+    }).parseAsync(args, { from: "user" });
     return 0;
   } catch (error) {
+    if (error instanceof InteractiveCancelled) { stderr("Cancelled.\n"); return 0; }
     if (error instanceof CommanderError) {
       if (
         error.code === "commander.helpDisplayed"

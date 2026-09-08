@@ -74,7 +74,10 @@ required_markers = [
     "does not create Delivered or Read",
     "POST /v1/contact_requests",
     "contactRequests.create",
-    "@relaymessenger/sdk@0.3.0-staging.8",
+    "npx relaymessenger@staging",
+    "auth login --with-token",
+    "Relay.createAgent",
+    "agent.agents.delete",
     "relay.chats.messages.send",
     "relay.chats.markAsRead",
     "relayApiOrigin(process.env.RELAY_API_URL)",
@@ -113,7 +116,7 @@ mcp = json_object(DIST_ROOT / "mcp.json")
 relay_mcp = mcp.get("mcpServers", {}).get("relayDocs", {})
 if relay_mcp != {
     "type": "streamable-http",
-    "url": "https://docs.relayapp.im/mcp",
+    "url": "https://docs.staging.relayapp.im/mcp",
 }:
     fail("portable docs MCP configuration drifted")
 
@@ -121,21 +124,29 @@ claude = json_object(DIST_ROOT / ".claude-plugin" / "plugin.json")
 if claude.get("name") != "relay":
     fail("Claude plugin name must be relay")
 if claude.get("mcpServers", {}).get("relayDocs", {}).get("url") != (
-    "https://docs.relayapp.im/mcp"
+    "https://docs.staging.relayapp.im/mcp"
 ):
     fail("Claude docs MCP configuration drifted")
 
 lock = json_object(LOCK_PATH)
 if lock.get("api", {}).get("commit") != (
-    "24c577e9802e07d6c61718ebca12e84d79113727"
+    "5607d9f73d99eef3da6c5dc0b1066f91e602b337"
 ):
     fail("Relay Server lock commit drifted")
 if lock.get("docs", {}).get("commit") != (
-    "aae6a9f3ee8084820910761c8aa8a85ed2826dda"
+    "79e5abe98860840a12fc46ae70ad3a42131283aa"
 ):
     fail("Relay Docs lock commit drifted")
-if lock.get("sdk", {}).get("version") != "0.3.0-staging.8":
+if lock.get("sdk", {}).get("version") != "0.3.1-staging.1":
     fail("Relay SDK lock version drifted")
+if lock.get("sdk", {}).get("commit") != (
+    "79517a1c9fcb1c82b474cd72ba8bc10197ff363f"
+):
+    fail("Relay SDK source commit drifted")
+if lock.get("sdk", {}).get("package_sha256") != (
+    "9d5ae725fc4f9195681da434d18470053e69ea1d380e8ce1c0de39be71e845ca"
+):
+    fail("Relay SDK source manifest digest drifted")
 
 for host in ("codex", "cursor"):
     build = DIST_ROOT / "src" / "plugins" / host / "build.sh"

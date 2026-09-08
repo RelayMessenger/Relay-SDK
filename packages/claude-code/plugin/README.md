@@ -16,7 +16,7 @@ or private Agent identity APIs.
 - Node.js 22.22.3 or newer
 - Claude Code with Channels research-preview support
 - A Relay Agent Token
-- At least one exact Relay user UUID or Handle to allowlist
+- At least one exact Relay Contact UUID or Handle to allowlist
 - No saved Webhook subscription for that Agent
 
 A Relay Agent has one delivery mode. This process refuses to connect while any
@@ -43,7 +43,7 @@ service. Enable it in `/plugin`. Claude Code prompts for:
 
 - **Relay Agent Token**: sensitive; Claude Code stores it in secure credential
   storage rather than `settings.json`.
-- **Allowed Relay senders**: comma-separated exact user UUIDs or Handles.
+- **Allowed Relay senders**: comma-separated exact Contact UUIDs or Handles.
 - **Relay API origin**: keep `https://api.relayapp.im` unless the token belongs
   to a trusted non-production Relay environment.
 
@@ -65,7 +65,7 @@ The runtime also reads `~/.claude/channels/relay/.env` (or the equivalent under
 
 ```dotenv
 RELAY_AGENT_TOKEN=<Agent Token>
-RELAY_ALLOWED_SENDERS=<user UUID or exact Handle>[,<another sender>]
+RELAY_ALLOWED_SENDERS=<Contact UUID or exact Handle>[,<another sender>]
 RELAY_BASE_URL=https://api.relayapp.im
 # Optional stable namespace used by the outbound send ledger.
 # RELAY_CHANNEL_SESSION_ID=my-project
@@ -163,8 +163,9 @@ private Relay endpoints.
 
 ## Sender and Claude permission safety
 
-Only configured Relay user UUIDs or exact Handles can inject content. Sender
-authentication runs before content interpretation.
+Only configured Relay Contact UUIDs or exact Handles can inject content. Both
+user and agent Contacts pass the same allowlist; unknown sender kinds remain
+denied. Sender authentication runs before content interpretation.
 
 Claude Code permission prompts and approval decisions are **local only**. The
 plugin does not advertise the Claude permission channel capability, does not
@@ -176,6 +177,11 @@ Relay Agent Tokens and recognizable Relay token strings are redacted from
 channel content, replies, logs, and tool errors.
 
 ## Durable state
+
+All eligible Relay Chat notifications enter the one Claude Code session attached
+to this channel process. The active-turn lease below restricts reply authority;
+it does not create separate per-Chat model histories. `RELAY_CHANNEL_SESSION_ID`
+scopes the local lease/send ledger, not a new Claude Code conversation.
 
 State is account-scoped below `~/.claude/channels/relay/state/` and includes:
 
@@ -208,9 +214,9 @@ stale WebSocket connections server-side.
 
 `contracts/relay-v1.lock.json` pins:
 
-- Relay Server commit `24c577e9802e07d6c61718ebca12e84d79113727`;
+- Relay Server commit `5607d9f73d99eef3da6c5dc0b1066f91e602b337`;
 - OpenAPI SHA-256
-  `cf83012c6b241e60323543adb7059b49954fbf3d59d4d1fd1817bbfa19d32cdd`,
+  `7094178cb01c0ddc05f9254dc91094900a0a7b6273979c0cad6257eec486f0d8`,
   with public `ChatHandle.image_url` and `ChatHandle.about` fields and no legacy
   aliases;
 - `@relaymessenger/sdk@0.3.0-staging.8`; and

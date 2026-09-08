@@ -51,7 +51,9 @@ export const runDoctor = async (
     name: "config_permissions",
     ok: permissions.secure,
     detail: permissions.exists
-      ? `mode ${(permissions.mode ?? 0).toString(8).padStart(3, "0")}`
+      ? permissions.aclChecked !== undefined
+        ? permissions.aclChecked ? "native ACL inspected" : "native ACL inspection unavailable"
+        : `mode ${(permissions.mode ?? 0).toString(8).padStart(3, "0")}`
       : "no local config (environment-only is allowed)",
   });
 

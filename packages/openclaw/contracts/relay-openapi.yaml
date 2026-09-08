@@ -15,6 +15,9 @@ servers:
 security:
   - BearerAuth: []
 tags:
+  - name: Agents
+    x-page-title: Agents
+    description: Create and delete developer-managed agents.
   - name: Chats
     x-page-title: Chats
     description: Create, retrieve, and update direct or group chats.
@@ -44,6 +47,124 @@ tags:
   - name: Contacts
     description: Request a user Contact.
 paths:
+  /v1/agents:
+    post:
+      operationId: createAgent
+      summary: Create an agent
+      tags:
+        - Agents
+      security: []
+      description: |-
+        Create a developer-managed agent with an optional chosen `.dev` Handle,
+        display name, and image. Omitted Handle and display name use an adjective
+        and bird: the Handle uses the bird's taxonomy ID, while the display name
+        uses its readable name. A color can resolve a generated-name collision.
+        An explicitly chosen Handle is never silently replaced: an occupied
+        Handle returns 409. Omitted image uses Relay's default image.
+
+        Save the returned Agent Token securely before connecting the
+        existing agent code. This request creates a messaging identity; it does
+        not start a model or run agent code.
+
+        This bootstrap request does not require a bearer token. It is limited
+        to 10 creations per caller address per day. On 429, respect Retry-After.
+        Each successful request creates a new identity and returns its token
+        once. Do not automatically retry an uncertain creation response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentRequest"
+            example:
+              token_name: Relay CLI
+      responses:
+        "201":
+          description: Agent created; save the returned Agent Token.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAgentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: The explicitly chosen Handle is already in use.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Request body exceeds 8192 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Agent creation limit reached.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          description: An available Agent Handle could not be allocated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/agents/{handle}:
+    delete:
+      operationId: deleteAgent
+      summary: Delete an agent
+      tags:
+        - Agents
+      security:
+        - BearerAuth: []
+      description: |-
+        Delete the developer-managed `.dev` agent authenticated by the supplied
+        Agent Token. The Handle must match that agent. Organization-managed
+        agents remain managed through Relay Console.
+
+        The Contact is archived and its tokens are revoked. Existing conversation
+        history is retained. Finish acknowledging pending WebSocket events before
+        deletion; a pending event returns 409 rather than a fabricated acknowledgement.
+        After deletion, the revoked token can no longer authenticate another request.
+      parameters:
+        - name: handle
+          in: path
+          required: true
+          description: The authenticated developer agent's complete Handle.
+          schema:
+            type: string
+            pattern: '^[a-z][a-z0-9_]{2,31}(?:\.[a-z0-9][a-z0-9_-]{1,62})?$'
+          example: brave_cangoo.dev
+      responses:
+        "204":
+          description: Agent deleted and credentials revoked.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
   /v1/chats:
     post:
       operationId: createChat
@@ -1178,6 +1299,24 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: |-
+            The Handle cannot be blocked. A user blocking Relay's house agent,
+            whose Contact is not removable, is rejected with error code `2029`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                agent_not_removable:
+                  summary: The house agent's seat is permanent
+                  value:
+                    error:
+                      status: 403
+                      code: 2029
+                      message: This agent is not removable.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2029
+                    success: false
         "500":
           $ref: "#/components/responses/InternalServerError"
       description: |-
@@ -1198,7 +1337,8 @@ paths:
         `message.delivered` fires when at least one recipient was delivered.
 
         Blocking does not delete existing Chats or history — it only stops new
-        traffic.
+        traffic. Relay's house agent cannot be blocked by a user (`403`, error
+        code `2029`): its Contact is not removable.
 
         Chat membership is where a block is refused out loud: adding a Handle
         that has blocked, or is blocked by, the Chat's user is rejected with
@@ -1505,6 +1645,19 @@ paths:
         - WebSocket
       security:
         - BearerAuth: []
+      parameters:
+        - name: observe
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: >-
+            Read-only diagnostic event view. The ready frame includes
+            observational:true. Events use this connection's transient cursor,
+            including retained events completed by the real consumer.
+            ACK and full_sync_complete frames are rejected. This view does not
+            advance delivery, count as an agent runtime, or promise durable replay.
       responses:
         "101":
           description: WebSocket connection accepted
@@ -1516,8 +1669,12 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
-      description: "Upgrade wss://api.relayapp.im/v1/websocket with Authorization: Bearer <Agent Token>. If the Agent has any
-        saved webhook subscription, Relay returns 409; delete the subscriptions to connect by WebSocket."
+      description: >-
+        Upgrade wss://api.relayapp.im/v1/websocket with Authorization: Bearer
+        <Agent Token>. If the Agent has any saved webhook subscription, Relay
+        returns 409. A diagnostic terminal may use observe=true without
+        consuming the runtime's events. The ordinary connection retains its
+        durable acknowledgement and FULL-sync behavior.
   /v1/contact_requests:
     post:
       operationId: createContactRequest
@@ -1896,6 +2053,13 @@ components:
         verified:
           type: boolean
           description: Whether Relay has verified this agent.
+        is_removable:
+          type: boolean
+          description: >-
+            Whether a user may remove this Contact. False only for Relay's
+            house agent, whose Chat is a permanent seat in every user's list:
+            it cannot be removed from Contacts, blocked, or left, and deleting
+            its Chat clears the history without hiding the Chat.
     ChatInfo:
       type: object
       required:
@@ -1980,6 +2144,155 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/ContactAddedEvent"
+    CreateAgentRequest:
+      type: object
+      additionalProperties: false
+      dependentRequired:
+        image_recipe:
+          - image_url
+      properties:
+        token_name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '^[^\u0000-\u001f\u007f]+$'
+          default: Relay CLI
+          description: A label for the issued token, not an agent name or owner identity.
+        handle:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{2,31}\.dev$'
+          description: >-
+            An available developer Handle, including .dev. Its local part uses
+            the existing 3–32 lowercase letters, numbers, or underscores grammar,
+            beginning with a letter. Omit for an assigned adjective/bird-ID Handle.
+        first_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[^\u0000-\u001f\u007f]+$'
+          description: Display name. Surrounding whitespace is trimmed. Omit for an assigned adjective/bird name.
+        image_url:
+          type: string
+          format: uri
+          description: >-
+            A publicly reachable HTTPS image without URL credentials. Relay uses
+            its existing image ingestion and permanent-image storage. Omit for
+            Relay's default image.
+        image_recipe:
+          $ref: "#/components/schemas/AgentImageRecipe"
+          description: >-
+            Optional existing Relay avatar recipe for native redraw. Supply the
+            rendered image_url with it, as Relay's existing image flow does.
+            A recipe alone is not an image-rendering service.
+    AgentImageRecipe:
+      oneOf:
+        - $ref: "#/components/schemas/AgentMonogramImageRecipe"
+        - $ref: "#/components/schemas/AgentEmojiImageRecipe"
+        - $ref: "#/components/schemas/AgentPhotoImageRecipe"
+    AgentImageBackground:
+      type: object
+      additionalProperties: false
+      required: [linearGradient]
+      properties:
+        linearGradient:
+          type: object
+          additionalProperties: false
+          required: [colors]
+          properties:
+            colors:
+              type: array
+              minItems: 2
+              maxItems: 2
+              items:
+                type: string
+              description: One existing Relay gradient pair, ordered top then base.
+              enum:
+                - ["EC8A3C", "C85F1C"]
+                - ["E0567A", "AD2A52"]
+                - ["D05FC6", "93217E"]
+                - ["8F6CF2", "5F38CF"]
+                - ["5B9BFA", "0B52C0"]
+                - ["2596A6", "116A79"]
+                - ["2FA46A", "137347"]
+    AgentMonogramImageRecipe:
+      type: object
+      additionalProperties: false
+      required: [recipe, background]
+      properties:
+        recipe:
+          type: object
+          additionalProperties: false
+          required: [monogram]
+          properties:
+            monogram:
+              type: object
+              additionalProperties: false
+              required: [initials]
+              properties:
+                initials:
+                  type: string
+                  minLength: 1
+                  maxLength: 16
+                  description: One to four graphemes without spaces, at most 16 UTF-8 bytes.
+        background:
+          $ref: "#/components/schemas/AgentImageBackground"
+    AgentEmojiImageRecipe:
+      type: object
+      additionalProperties: false
+      required: [recipe, background]
+      properties:
+        recipe:
+          type: object
+          additionalProperties: false
+          required: [emoji]
+          properties:
+            emoji:
+              type: object
+              additionalProperties: false
+              required: [emoji]
+              properties:
+                emoji:
+                  type: string
+                  description: Exactly one emoji, validated by Relay's existing image-recipe parser.
+        background:
+          $ref: "#/components/schemas/AgentImageBackground"
+    AgentPhotoImageRecipe:
+      type: object
+      additionalProperties: false
+      required: [recipe]
+      properties:
+        recipe:
+          type: object
+          additionalProperties: false
+          required: [image]
+          properties:
+            image:
+              type: object
+              additionalProperties: false
+    CreateAgentResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - agent
+        - secret
+        - share_url
+      properties:
+        agent:
+          allOf:
+            - $ref: "#/components/schemas/ContactCardItem"
+            - type: object
+              properties:
+                kind:
+                  const: agent
+        secret:
+          type: string
+          pattern: '^rly_live_[A-Za-z0-9]{43}$'
+          description: The Agent Token, returned only in this creation response.
+          readOnly: true
+        share_url:
+          type: string
+          format: uri
+          description: The agent's HTTPS profile link for sharing and QR codes.
     ContactCardItem:
       type: object
       required:
@@ -3340,6 +3653,14 @@ components:
             - type: "null"
     SetContactCardRequest:
       type: object
+      additionalProperties: false
+      not:
+        required: [image_url, attachment_id]
+      dependentSchemas:
+        image_recipe:
+          anyOf:
+            - required: [attachment_id]
+            - required: [image_url]
       required:
         - handle
         - first_name
@@ -3356,6 +3677,17 @@ components:
             Profile image for the contact card. Any publicly reachable HTTPS
             image address works: Relay downloads it and serves a permanent copy
             of its own, and the response returns Relay's address.
+        attachment_id:
+          type: string
+          format: uuid
+          description: >-
+            An image uploaded through the existing Attachments API by this
+            authenticated agent. Upload must be complete. Relay copies its
+            bytes from private attachment storage to a permanent public image.
+            Choose this or image_url, not both.
+        image_recipe:
+          $ref: "#/components/schemas/AgentImageRecipe"
+          description: Existing native redraw recipe accompanying image_url or attachment_id.
         handle:
           type: string
           description: Relay Handle associated with this contact card.
@@ -3587,6 +3919,17 @@ components:
             not have to stay up. Send null to clear the photo.
     UpdateContactCardRequest:
       type: object
+      additionalProperties: false
+      not:
+        required: [image_url, attachment_id]
+      dependentSchemas:
+        image_recipe:
+          anyOf:
+            - required: [attachment_id]
+            - required: [image_url]
+              properties:
+                image_url:
+                  type: string
       properties:
         first_name:
           type: string
@@ -3606,6 +3949,17 @@ components:
             and the response returns Relay's address. If omitted, the existing
             image is kept.
           format: uri
+        attachment_id:
+          type: string
+          format: uuid
+          description: >-
+            This agent's completed image upload from the Attachments API.
+            Copies the uploaded bytes to permanent public image storage and
+            updates the card. Mutually exclusive with image_url, including null.
+            Omit both to keep the existing image.
+        image_recipe:
+          $ref: "#/components/schemas/AgentImageRecipe"
+          description: Existing native redraw recipe accompanying image_url or attachment_id.
     UpdateWebhookSubscriptionRequest:
       type: object
       properties:

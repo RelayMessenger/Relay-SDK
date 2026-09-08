@@ -32,7 +32,10 @@ describe("Relay channel configuration", () => {
     expect(allowed.configured).toEqual([uuid, "@Owner"]);
     expect(senderIsAllowed(allowed, { id: uuid, handle: "@different", kind: "user" })).toBe(true);
     expect(senderIsAllowed(allowed, { id: "other", handle: "@Owner", kind: "user" })).toBe(true);
-    expect(senderIsAllowed(allowed, { id: uuid, handle: "@Owner", kind: "agent" })).toBe(false);
+    expect(senderIsAllowed(allowed, { id: uuid, handle: "@Owner", kind: "agent" })).toBe(true);
+    expect(senderIsAllowed(allowed, { id: "other", handle: "@Owner", kind: "agent" })).toBe(true);
+    expect(senderIsAllowed(allowed, { id: uuid, handle: "@Owner", kind: "unknown" })).toBe(false);
+    expect(senderIsAllowed(allowed, { id: "other", handle: "@owner", kind: "agent" })).toBe(false);
     expect(senderIsAllowed(allowed, { id: "other", handle: "@owner", kind: "user" })).toBe(false);
   });
 

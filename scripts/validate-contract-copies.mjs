@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const expected =
-  "cf83012c6b241e60323543adb7059b49954fbf3d59d4d1fd1817bbfa19d32cdd";
+  "7094178cb01c0ddc05f9254dc91094900a0a7b6273979c0cad6257eec486f0d8";
 const copies = [
   "contracts/relay-v1-openapi.yaml",
   "packages/chat-sdk-adapter/contracts/relay-openapi.yaml",
@@ -28,10 +28,12 @@ const skillLock = JSON.parse(
   ),
 );
 assert.equal(skillLock.api.openapi_sha256, expected);
-assert.equal(skillLock.api.commit, "24c577e9802e07d6c61718ebca12e84d79113727");
-assert.equal(skillLock.sdk.commit, "1bbcb486b4a91860ee3527ce95d015883e4cc1ae");
-assert.equal(skillLock.sdk.version, "0.3.0-staging.8");
+assert.equal(skillLock.api.commit, "5607d9f73d99eef3da6c5dc0b1066f91e602b337");
+assert.equal(skillLock.sdk.commit, "79517a1c9fcb1c82b474cd72ba8bc10197ff363f");
+assert.equal(skillLock.sdk.version, "0.3.1-staging.1");
 
+// The skill lock is historical source provenance, not the moving workspace version.
+const sdkManifest = JSON.parse(await readFile(join(root, "packages/sdk/package.json"), "utf8"));
 for (const path of [
   "packages/openclaw/contracts/relay-v1.lock.json",
   "packages/claude-code/contracts/relay-v1.lock.json",
@@ -41,7 +43,7 @@ for (const path of [
   assert.equal(lock.relayServer.sha256, expected, `${path}: Server digest`);
   assert.equal(lock.relayServer.commit, skillLock.api.commit, `${path}: Server pin`);
   assert.equal(lock.relaySdk.workspaceOpenapiSha256, expected, `${path}: workspace digest`);
-  assert.equal(lock.relaySdk.version, skillLock.sdk.version, `${path}: SDK version`);
+  assert.equal(lock.relaySdk.version, sdkManifest.version, `${path}: SDK version`);
 }
 assert.deepEqual(
   JSON.parse(await readFile(

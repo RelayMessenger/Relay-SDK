@@ -1,0 +1,171 @@
+name: Staging package
+
+# One package's staging publish, called once per changed package by
+# publish-package-staging.yml after it has committed the automatic version
+# bump. `sha` is that bump commit, which is staging's tip by the time this runs;
+# `github.sha` stays the push that started the run, an ancestor of `sha`.
+#
+# Every job runs on Blacksmith (owner ruling, 2026-09-07), so the publish
+# carries no npm attestation and authenticates with the npm-staging
+# environment's NPM_PUBLISH_TOKEN. This file may never ask for a permission
+# publish-package-staging.yml does not grant (GitHub: called workflows can
+# only downgrade the caller's GITHUB_TOKEN permissions).
+
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: Release catalog key (scripts/release-packages.mjs)
+        required: true
+        type: string
+      sha:
+        description: Exact 40-character staging commit to publish
+        required: true
+        type: string
+    secrets:
+      NPM_PUBLISH_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_PACKAGE: ${{ inputs.package }}
+  RELEASE_SHA: ${{ inputs.sha }}
+
+jobs:
+  package:
+    if: >-
+      github.repository == 'RelayMessenger/Relay-SDK' &&
+      github.ref == 'refs/heads/staging'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 45
+    outputs:
+      workspace: ${{ steps.resolve.outputs.workspace }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Verify exact staging input
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+        run: |
+          case "$EXPECTED_SHA" in
+            (""|*[!0-9a-f]*) exit 2 ;;
+          esac
+          test "${#EXPECTED_SHA}" -eq 40
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify canonical staging SHA
+        env:
+          EXPECTED_SHA: ${{ env.RELEASE_SHA }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          git fetch origin staging
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$EXPECTED_SHA" = "$(git rev-parse origin/staging)"
+          git merge-base --is-ancestor "$EVENT_SHA" HEAD
+          test -z "$(git status --porcelain)"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm install --global npm@11.19.1 --no-audit --no-fund
+      - run: npm ci
+      - name: Build the canonical SDK workspace
+        run: npm run build --workspace @relaymessenger/sdk
+      - id: resolve
+        run: node scripts/release-catalog.mjs --key "$RELEASE_PACKAGE"
+      - name: Validate selected package
+        run: npm run '${{ steps.resolve.outputs.validate }}'
+      - name: Verify validation kept the tracked tree clean
+        run: test -z "$(git status --porcelain)"
+      - id: pack
+        name: Pack one retained tarball
+        run: |
+          mkdir -p .release-tmp/package-staging
+          npm pack \
+            --workspace '${{ steps.resolve.outputs.workspace }}' \
+            --ignore-scripts \
+            --pack-destination .release-tmp/package-staging
+          mapfile -t TARBALLS < <(
+            find .release-tmp/package-staging -name '*.tgz' -print
+          )
+          test "${#TARBALLS[@]}" -eq 1
+          echo "tarball=$(realpath "${TARBALLS[0]}")" >> "$GITHUB_OUTPUT"
+      - name: Verify OpenClaw staging release identity
+        if: env.RELEASE_PACKAGE == 'openclaw'
+        working-directory: packages/openclaw
+        env:
+          RELEASE_VERSION: ${{ steps.resolve.outputs.version }}
+          RELEASE_TAG: staging
+        run: node scripts/staging-release-guard.mjs
+      - name: Verify Claude Code staging release identity
+        if: env.RELEASE_PACKAGE == 'claude-code'
+        working-directory: packages/claude-code
+        env:
+          RELEASE_VERSION: ${{ steps.resolve.outputs.version }}
+          RELEASE_TAG: staging
+          RELEASE_TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: node scripts/staging-release-guard.mjs
+      - name: Retain the release identity
+        run: |
+          IDENTITY='${{ steps.resolve.outputs.directory }}/.release/npm-staging/release-identity.json'
+          if [ -f "$IDENTITY" ]; then
+            cp "$IDENTITY" .release-tmp/package-staging/release-identity.json
+          fi
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: relay-${{ env.RELEASE_PACKAGE }}-${{ env.RELEASE_SHA }}
+          path: .release-tmp/package-staging/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: package
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    environment: npm-staging
+    # No write permission of any kind: the caller grants contents: read and
+    # a called workflow may only keep or reduce what it is passed; asking for
+    # id-token: write here made GitHub refuse the whole run at startup
+    # (run 34153613220, 2026-09-07). The publish authenticates with the
+    # environment token and asks for no attestation, so it needs no OIDC token.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org/
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: relay-${{ env.RELEASE_PACKAGE }}-${{ env.RELEASE_SHA }}
+          path: .release-tmp/package-staging
+      - name: Verify publish checkout matches release artifact
+        run: test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+      - name: Publish or reconcile exactly once
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+        run: |
+          # npm@12.0.2 supports node ^22.22.2 || ^24.15.0 || >=26.0.0.
+          # Bumping this pin requires re-checking .nvmrc against that range.
+          npm install --global npm@12.0.2 --no-audit --no-fund
+          TARBALL="$(find .release-tmp/package-staging -name '*.tgz' -print -quit)"
+          node scripts/publish-package-staging.mjs \
+            --tarball "$TARBALL" \
+            --package '${{ needs.package.outputs.workspace }}' \
+            --receipt .release-tmp/package-staging/publish.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: relay-${{ env.RELEASE_PACKAGE }}-publish-${{ env.RELEASE_SHA }}
+          path: .release-tmp/package-staging/
+          if-no-files-found: error
+          retention-days: 30

@@ -35,7 +35,7 @@ Resolution order:
 
 1. `RELAY_AGENT_TOKEN`, `RELAY_API_URL`, and `RELAY_PROFILE`;
 2. `${XDG_CONFIG_HOME:-~/.config}/relay/config.json`, shared with
-   `@relaymessenger/cli`;
+   `relaymessenger`;
 3. `https://api.relayapp.im` as the default API URL.
 
 Example client configuration:

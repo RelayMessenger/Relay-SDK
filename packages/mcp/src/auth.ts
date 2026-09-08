@@ -52,7 +52,7 @@ export const relayConfigPath = (context: AuthContext = {}): string => {
 };
 
 const profileName = (value: string): string => {
-  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(value)) {
+  if (!/^[a-z0-9][a-z0-9_.-]{0,63}$/i.test(value)) {
     throw new Error("Relay profile name is invalid.");
   }
   return value;
@@ -172,7 +172,7 @@ export const resolveAgentAuth = async (
   const token = environmentToken ?? selected?.agent_token;
   if (!token) {
     throw new Error(
-      `No Agent Token for Relay profile ${profile}. Configure @relaymessenger/cli or RELAY_AGENT_TOKEN.`,
+      `No Agent Token for Relay profile ${profile}. Configure relaymessenger or RELAY_AGENT_TOKEN.`,
     );
   }
   return {

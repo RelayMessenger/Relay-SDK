@@ -2,6 +2,8 @@ import { RelayAPIError, isAbortError } from "./errors.js";
 import { ChatsPage, MessagesPage } from "./pagination.js";
 import type {
   AcceptedResponse,
+  AgentCreateParams,
+  AgentCreateResponse,
   Attachment,
   AttachmentCreateParams,
   AttachmentCreateResponse,
@@ -65,6 +67,8 @@ export interface RelayOptions {
   fetch?: FetchLike;
 }
 
+export type AgentCreateOptions = Omit<RelayOptions, "apiKey" | "webhookSecret"> & RequestOptions;
+
 interface InternalRequest {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
@@ -73,6 +77,7 @@ interface InternalRequest {
   options?: RequestOptions | undefined;
   idempotencyKey?: string;
   retryable?: boolean;
+  expectedStatus?: number;
 }
 
 interface ErrorBody {
@@ -101,14 +106,13 @@ const pathID = (value: string): string => encodeURIComponent(value);
 
 class Transport {
   readonly baseURL: string;
-  readonly #apiKey: string;
+  readonly #apiKey: string | undefined;
   readonly #fetch: FetchLike;
   readonly #maxRetries: number;
   readonly #timeout: number;
   readonly #retryBaseDelayMs: number;
 
-  constructor(options: RelayOptions) {
-    if (!options.apiKey?.trim()) throw new Error("Relay API key is required.");
+  constructor(options: Omit<RelayOptions, "apiKey"> & { apiKey?: string }) {
     this.baseURL = (options.baseURL ?? "https://api.relayapp.im").replace(/\/+$/, "");
     this.#apiKey = options.apiKey;
     const selectedFetch = options.fetch ?? globalThis.fetch;
@@ -141,7 +145,8 @@ class Transport {
         ? AbortSignal.any([request.options.signal, timeoutSignal])
         : timeoutSignal;
       const headers = new Headers(request.options?.headers);
-      headers.set("authorization", `Bearer ${this.#apiKey}`);
+      if (this.#apiKey) headers.set("authorization", `Bearer ${this.#apiKey}`);
+      else headers.delete("authorization");
       headers.set("accept", "application/json");
       if (request.body !== undefined) headers.set("content-type", "application/json");
       if (request.idempotencyKey) {
@@ -173,6 +178,9 @@ class Transport {
       }
 
       if (response.ok) {
+        if (request.expectedStatus !== undefined && response.status !== request.expectedStatus) {
+          throw new RelayAPIError("Unexpected Relay success status.", { status: response.status });
+        }
         if (response.status === 204) return undefined as T;
         const text = await response.text();
         return (text ? JSON.parse(text) : undefined) as T;
@@ -238,6 +246,7 @@ class Transport {
   }
 
   runWebSocket(options: WebSocketRunOptions): Promise<void> {
+    if (!this.#apiKey) throw new Error("Relay API key is required.");
     return runWebSocket(this.baseURL, this.#apiKey, options);
   }
 }
@@ -741,13 +750,38 @@ export class WebSocket {
    * transport-only cumulative ACK after that promise resolves. The ACK does
    * not change Delivered or Read receipts. `onFullSync` must return only after
    * a complete REST snapshot is durably applied.
+   * Explicit observe:true requests confirmed read-only observation and never
+   * sends ACK/FULL-sync completion. It is best-effort, may have retention gaps,
+   * and is not durable recovery or evidence that a model is running.
    */
   run(options: WebSocketRunOptions): Promise<void> {
     return this.transport.runWebSocket(options);
   }
 }
 
+export class Agents {
+  constructor(private readonly transport: Transport) {}
+
+  delete(handle: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/agents/${pathID(handle)}`,
+      expectedStatus: 204,
+      options: { ...options, maxRetries: 0 },
+    });
+  }
+}
+
 export class Relay {
+  /** Bootstrap a new identity. The one-time secret is never retried/replayed. */
+  static createAgent(body: AgentCreateParams = {}, options: AgentCreateOptions = {}): Promise<AgentCreateResponse> {
+    const { apiKey: _ignored, ...transportOptions } = options as AgentCreateOptions & { apiKey?: string };
+    return new Transport(transportOptions).request({
+      method: "POST", path: "/v1/agents", body, options, expectedStatus: 201,
+    });
+  }
+
+  readonly agents: Agents;
   readonly baseURL: string;
   readonly chats: Chats;
   readonly messages: Messages;
@@ -761,8 +795,10 @@ export class Relay {
   readonly webhooks: Webhooks;
 
   constructor(options: RelayOptions) {
+    if (!options.apiKey?.trim()) throw new Error("Relay API key is required.");
     const transport = new Transport(options);
     this.baseURL = transport.baseURL;
+    this.agents = new Agents(transport);
     this.chats = new Chats(transport);
     this.messages = new Messages(transport);
     this.attachments = new Attachments(transport);

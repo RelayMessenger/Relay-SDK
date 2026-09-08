@@ -23,7 +23,7 @@ participants, including the sender (`to` accepts at most 6 recipient Handles).
 packages/
   sdk/                    @relaymessenger/sdk
   chat-sdk-adapter/       @relaymessenger/chat-sdk-adapter
-  cli/                    @relaymessenger/cli
+  cli/                    relaymessenger
   mcp/                    @relaymessenger/mcp
   openclaw/               @relaymessenger/openclaw-plugin
   claude-code/            relay-claude-channel
@@ -121,8 +121,17 @@ placeholder snippets.
 Nothing is published by hand. Two npm channels, kept apart:
 
 - Staging publishes `X.Y.Z-staging.N` prereleases under the `staging`
-  dist-tag from the `staging` branch
+  dist-tag on every push to the `staging` branch
   ([`publish-package-staging.yml`](.github/workflows/publish-package-staging.yml)).
+  Nobody writes a version: [`scripts/staging-bump.mjs`](scripts/staging-bump.mjs)
+  packs each package, compares its files with the tarball npm holds for the
+  version in the tree, and when they differ moves the version, `-staging.N`
+  to `-staging.N+1` while the plain `X.Y.Z` is unpublished, or to
+  `X.Y.(Z+1)-staging.0` once `X.Y.Z` is on npm (a prerelease ranks below its
+  base, so the base must move for main to publish again). Dependents are
+  pinned to the versions decided in the same run. The workflow commits that
+  bump to `staging` as `github-actions[bot]` and publishes each changed
+  package from that commit, in the order below.
 - Production publishes plain `X.Y.Z` versions under the `latest` dist-tag.
   The one deliberate act is merging `staging` into `main`; the push to `main`
   runs [`release.yml`](.github/workflows/release.yml), which:
@@ -144,7 +153,7 @@ Order and record tags, from [`scripts/release-packages.mjs`](scripts/release-pac
 | --- | --- | --- |
 | 1 | `@relaymessenger/sdk` | `sdk-v<version>` |
 | 2 | `@relaymessenger/chat-sdk-adapter` | `chat-sdk-v<version>` |
-| 3 | `@relaymessenger/cli` | `relaymessenger-v<version>` |
+| 3 | `relaymessenger` | `relaymessenger-v<version>` |
 | 4 | `@relaymessenger/mcp` | `mcp-v<version>` |
 | 5 | `@relaymessenger/openclaw-plugin` | `openclaw-v<version>` |
 | 6 | `relay-claude-channel` | `claude-channel-v<version>` |

@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
+import { verifyImportInventory } from "./import-inventory.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const lock = JSON.parse(readFileSync(join(root, "sources.lock.json"), "utf8"));
@@ -51,18 +52,17 @@ function walk(directory) {
 const destinations = Object.keys(lock.imports).flatMap((directory) =>
   walk(join(root, directory)).map((path) => relative(root, path))
 ).sort();
-const manifested = manifest.entries.map((entry) => entry.destination).sort();
-assert.deepEqual(
-  destinations,
-  manifested,
-  "imported destination inventory drifted from the historical manifest",
+const tracked = spawnSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" });
+assert.equal(tracked.status, 0, "canonical source inventory requires its Git checkout");
+const additions = verifyImportInventory(
+  manifest.entries, destinations, new Set(tracked.stdout.split("\0").filter(Boolean)),
 );
 
 for (const entry of manifest.entries) {
   assert.match(entry.commit, /^[0-9a-f]{40}$/u);
   assert.ok(["exact", "canonicalized"].includes(entry.status));
   const destination = join(root, entry.destination);
-  assert.equal(sha256(bytes(destination)), entry.destination_sha256);
+  assert.equal(sha256(bytes(destination)), entry.destination_sha256, `${entry.destination}: destination metadata drifted; run npm run metadata:sync`);
   assert.equal(mode(destination), entry.destination_mode);
   if (entry.status === "exact") {
     assert.equal(entry.source_sha256, entry.destination_sha256);
@@ -143,5 +143,6 @@ const canonicalized = manifest.entries.length - exact;
 console.log(
   `verified ${manifest.entries.length} historical imports from `
     + `${checkouts.size} immutable GitHub commits: `
-    + `${exact} exact and ${canonicalized} explicitly canonicalized`,
+    + `${exact} exact and ${canonicalized} explicitly canonicalized; `
+    + `${additions.length} tracked monorepo additions are not historical imports`,
 );

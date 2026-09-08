@@ -6,6 +6,18 @@ import { fileURLToPath } from "node:url";
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const propagation404 = /\bE404\b/iu;
 
+// How long a publish that exited 0 may take to become readable. npm answers
+// every publish with "Your package is being processed and may take a few
+// minutes to become available"; on 2026-09-07 (run 34154163996)
+// @relaymessenger/openclaw-plugin@0.4.1-staging.0 was still absent after the
+// old 18 x 5 s loop and appeared later, so the publish failed on a package that
+// had published. Ten minutes, read every ten seconds, is the one budget every
+// publish in this repository waits.
+export const PUBLISH_PROPAGATION = Object.freeze({
+  maxAttempts: 60,
+  retryDelayMs: 10_000,
+});
+
 function requirePositiveInteger(value, name) {
   const text = String(value);
   if (!/^[1-9]\d*$/u.test(text)) {
