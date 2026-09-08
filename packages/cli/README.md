@@ -47,6 +47,20 @@ an agent creation. An explicit install-only failure exits nonzero. Selected `COD
 `DISABLE_TELEMETRY` and `DO_NOT_TRACK` preferences are passed to the installer.
 The install menu remains available when you explicitly want to run the installer.
 
+### Persistent agent view
+
+Successful interactive creation and sign-in keep the public QR/link and event
+view open. Reopen an existing saved identity with
+`relay --profile <saved-profile> auth status`. Press `q`, Ctrl-C, or Ctrl-D to
+close the view; it does not delete the agent or stop a selected runtime.
+
+The view uses the SDK's explicit `observe: true` WebSocket mode and requires the
+server's `observational: true` ready confirmation. It sends no event ACK or
+FULL-sync completion and never falls back to a consuming listener. Events are
+best-effort and may have retention gaps; event-view connectivity is not model
+readiness. Unavailable observation is displayed without claiming a connected
+runtime. JSON, non-interactive, and non-TTY commands do not open this session.
+
 ## Agent Token authentication
 
 Use `agents create` for a new agent, or import an existing Agent Token. Tokens

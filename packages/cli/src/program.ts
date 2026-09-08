@@ -1,3 +1,4 @@
+import { openSavedAgentSession, type AgentSessionInput, type AgentSessionDependencies } from "./agent-session.js";
 import { prepareAgentImage, type LocalAgentImage } from "./local-image.js";
 import { uploadAgentImage, type AgentImageUploadResult } from "./agent-image-upload.js";
 import { homedir } from "node:os";
@@ -66,6 +67,9 @@ export interface ProgramDependencies {
   confirmDelete?: () => Promise<boolean>;
   confirmLogout?: () => Promise<boolean>;
   beforeSetup?: () => Promise<void>;
+  terminalSession?: AgentSessionDependencies["session"];
+  terminalIO?: AgentSessionDependencies["io"];
+  terminalClient?: AgentSessionDependencies["client"];
   stdout?: (value: string) => void;
   stderr?: (value: string) => void;
   fetch?: typeof fetch;
@@ -173,6 +177,23 @@ export const createProgram = (
       || (action.parent?.name() === "auth" && action.name() === "login"))) await dependencies.beforeSetup();
   });
   const agentDeps = dependencies.agents ?? agentDependencies(configContext, dependencies.fetch);
+  const showSavedAgent = async (command: Command, input: AgentSessionInput): Promise<void> => {
+    const enabled = !globals(command).json && !globals(command).nonInteractive && dependencies.isInteractive === true
+      && (dependencies.terminalSession !== undefined || dependencies.terminalIO !== undefined || Boolean(process.stdin.isTTY && process.stderr.isTTY));
+    if (!enabled) return;
+    try {
+      await openSavedAgentSession(input, {
+        agents: agentDeps,
+        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+        ...(dependencies.terminalSession ? { session: dependencies.terminalSession } : {}),
+        ...(dependencies.terminalIO ? { io: dependencies.terminalIO } : {}),
+        ...(dependencies.terminalClient ? { client: dependencies.terminalClient } : {}),
+      });
+    } catch {
+      stderr("Terminal view unavailable. The saved agent and token remain unchanged.\n");
+    }
+  };
+
   const agents = program.command("agents").description("Create, inspect local profiles, and delete developer-managed agents.");
   handoffOptions(agents.command("create"))
     .option("--api-url <url>", "Relay API origin", validateApiURL)
@@ -244,6 +265,11 @@ export const createProgram = (
         if (imageUpdate?.status === "incomplete") output({ image: imageUpdate });
         if (handoff) output({ handoff });
       }
+      if (imageUpdate?.status !== "incomplete" && (!handoff || handoff.status === "configured")) {
+        await showSavedAgent(command, { profile: result.profile, handle: result.agent.handle, apiURL: result.api_url, shareURL: result.share_url,
+          runtime: target ? { ownership: "external", connection: "unknown", label: target.runtime } : { ownership: "none", connection: "not-started" },
+        });
+      }
       if (imageUpdate?.status === "incomplete") {
         const retry = imageUpdate.attachment_id && ["completion", "promotion"].includes(imageUpdate.phase)
           ? `--attachment-id ${imageUpdate.attachment_id}` : "--image <local-file>";
@@ -310,6 +336,9 @@ export const createProgram = (
       await writeConfig(config, configContext);
       const handoff = target ? await handoffAgent(target, profile, agentDeps, { consent: options.confirmConfigure === true, runtimeStopped: options.runtimeStopped === true }, true) : undefined;
       output(safeMetadata({ ok: true, profile, api_url: apiURL, token: "stored", ...(handoff ? { handoff } : {}) }, [token]));
+      if (!handoff || handoff.status === "configured") await showSavedAgent(command, { profile, apiURL,
+        runtime: { ownership: target ? "external" : "unknown", connection: "unknown", ...(target ? { label: target.runtime } : {}) },
+      });
       if (handoff && handoff.status !== "configured") throw new Error("Token is stored; native runtime configuration requires action.");
     });
   authCommands
@@ -324,6 +353,10 @@ export const createProgram = (
         token_source: resolved.tokenSource,
         config_path: resolved.configPath,
       });
+      const saved = (await agentDeps.read()).profiles[resolved.profile];
+      if (saved?.agent_token === resolved.token && validateApiURL(saved.api_url ?? DEFAULT_API_URL) === resolved.apiURL) {
+        await showSavedAgent(command, { profile: resolved.profile, apiURL: resolved.apiURL });
+      }
     });
   authCommands
     .command("logout")
