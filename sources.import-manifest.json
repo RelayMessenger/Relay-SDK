@@ -778,7 +778,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/config.test.ts",
       "source_sha256": "7122c4d4989b618f61c5cc320c6dd319fd0d4698e5f643a3c24c4f3ecab612da",
-      "destination_sha256": "a2af550409de24f6f5ad12438cd9bc32634a050d7a0de9ac344cb8d512e84655",
+      "destination_sha256": "b57d1899ff9f669362becc6e929f4cf8f87168f093391e059058d132ece19553",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
