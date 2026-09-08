@@ -34,6 +34,7 @@ interface ChatHandleBase {
   image_url: string | null;
   about: string | null;
   verified: boolean;
+  is_removable?: boolean;
 }
 
 export interface UserChatHandle extends ChatHandleBase {
