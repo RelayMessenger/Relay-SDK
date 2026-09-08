@@ -10,7 +10,7 @@ export interface TerminalAgent {
 }
 export interface TerminalRuntimeState {
   ownership: TerminalRuntimeOwnership;
-  /** Supplied by actual selected-runtime evidence; an observer socket ready is NOT runtime ready. */
+  /** Set from what the runtime itself shows. A live view that has connected does NOT mean the agent is running. */
   connection: "unknown" | "not-started" | "connected" | "disconnected";
   label?: string;
 }
@@ -118,11 +118,11 @@ export async function runTerminalSession(options: TerminalSessionOptions, io: Te
     const handle = terminalText(options.agent.handle, secrets, width);
     const profile = terminalText(options.agent.profile, secrets, width);
     const info = [`${title} · @${handle}`, ...(profile ? [`Profile: ${profile}`] : [])];
-    info.push(share ?? "Public share link unavailable.");
+    info.push(share ?? "Relay could not build the public link for this agent.");
     info.push(terminalRuntimeLabel(options.runtime, secrets));
-    // This view only watches: it never answers or claims an event, so a real
-    // runtime still receives every message. Say that in the words of the
-    // person reading it, never in wire vocabulary (ACK, listener, retention).
+    // This view only watches. It never answers and never takes an event, so the
+    // runtime you chose still receives every message. Say that in the reader's
+    // own words, never in wire vocabulary.
     const statuses = { connecting: "connecting", ready: "watching only; your agent still receives every message", disconnected: "disconnected", unavailable: "unavailable", gap: "watching; some earlier events are not shown" };
     info.push(`Live view: ${statuses[watch]}`);
     if (options.runtime.ownership !== "none") info.push("This view does not start or stop your agent.");

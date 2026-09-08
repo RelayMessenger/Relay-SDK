@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -699,6 +700,37 @@ const validateOpenAPI = () => {
   }
 };
 validateOpenAPI();
+
+// The skill tells an installed coding agent to read the contract from the
+// PUBLIC Relay-SDK mirror at `api.public_source.commit` and check its hash
+// against `api.openapi_sha256` (skills/relay/SKILL.md, Ground truth step 2).
+// Relay-Server is private, so that commit is the only copy such an agent can
+// fetch. Read the pinned commit here rather than trust the two fields to agree:
+// on 2026-09-08 they did not, and every skill run would have called our own
+// contract stale.
+const skillLock = JSON.parse(
+  readFileSync(resolve(root, "skills/relay/references/relay-v1-lock.json"), "utf8"),
+);
+const pinned = skillLock.api.public_source;
+const pinnedFile = spawnSync(
+  "git",
+  ["-C", root, "show", `${pinned.commit}:${pinned.path}`],
+  { maxBuffer: 64 * 1024 * 1024 },
+);
+assert.equal(
+  pinnedFile.status,
+  0,
+  `skill lock api.public_source.commit ${pinned.commit} is not readable in this checkout`
+  + ` (fetch the full history): ${String(pinnedFile.stderr)}`,
+);
+const pinnedDigest = createHash("sha256").update(pinnedFile.stdout).digest("hex");
+assert.equal(
+  pinnedDigest,
+  skillLock.api.openapi_sha256,
+  `skill lock: ${pinned.path} at ${pinned.commit} hashes ${pinnedDigest},`
+  + ` but api.openapi_sha256 is ${skillLock.api.openapi_sha256};`
+  + " point public_source.commit at the commit that carries the locked contract",
+);
 
 console.log(JSON.stringify({
   ok: true,

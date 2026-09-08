@@ -51,9 +51,9 @@ export async function chooseInteractiveCommand(
   beforeSetup: () => Promise<void> = async () => undefined,
 ): Promise<string[] | "install-skill" | undefined> {
   const options = entry === "auth" ? [
-    { value: "login", label: "Sign in with an existing token" },
-    { value: "status", label: "Authentication status" },
-    { value: "logout", label: "Sign out locally" },
+    { value: "login", label: "Sign in with a token you already have" },
+    { value: "status", label: "Show which token this computer uses" },
+    { value: "logout", label: "Remove the saved token from this computer" },
     { value: "exit", label: "Exit" },
   ] : [
     { value: "create", label: "Create agent" },
@@ -68,7 +68,7 @@ export async function chooseInteractiveCommand(
   if (action === "skill") return "install-skill";
   if (action === "create") {
     await beforeSetup();
-    ui.info("Leave fields blank to use defaults. Handles include .dev; images can be a local file or HTTPS URL.");
+    ui.info("Press Enter to skip any of these. Relay picks a handle for you if you skip it. A picture can be a file on this computer or an https:// address.");
     const chosenHandle = (await ui.text("Handle (optional)", "")).trim();
     const displayName = (await ui.text("Name (optional)", "")).trim();
     const image = (await ui.text("Image (optional)", "")).trim();
@@ -87,7 +87,7 @@ export async function chooseInteractiveCommand(
     const legacyEmptyDefault = selectedName === DEFAULT_PROFILE && !saved?.agent_token
       && saved?.api_url === DEFAULT_API_URL && !profileArg && !deps.env.RELAY_PROFILE;
     const initial = validateApiURL(deps.env.RELAY_API_URL ?? (!legacyEmptyDefault ? saved?.api_url : undefined) ?? defaultCreationApiURL());
-    const origin = validateApiURL(await ui.text("Relay API origin", initial));
+    const origin = validateApiURL(await ui.text("Relay API address", initial));
     return [...prefix, "auth", "login", "--api-url", origin];
   }
   if (action === "status" || action === "logout") return [...prefix, "auth", action];
@@ -95,14 +95,14 @@ export async function chooseInteractiveCommand(
   if (action === "delete") {
     const inventory = await listAgents(deps);
     const choices = inventory.agents.flatMap((row) => "handle" in row
-      ? [{ profile: row.profile, handle: row.handle, label: `${row.handle} · ${row.profile} · ${row.api_url}` }]
+      ? [{ profile: row.profile, handle: row.handle, label: `@${row.handle} · profile ${row.profile} · ${row.api_url}` }]
       : []);
-    if (!choices.length) { ui.info("No saved agents with an available Contact Card."); return undefined; }
+    if (!choices.length) { ui.info("No saved agents."); return undefined; }
     const selected = await ui.select("Select the agent to delete", choices.map((choice, index) => ({ value: String(index), label: choice.label })));
     const choice = choices[Number(selected)];
     if (!choice) throw new InteractiveCancelled();
-    // Explicit selection resolves origin ambiguity; the existing delete handler
-    // and its confirmation still own the mutation and credential cleanup.
+    // Choosing here removes any doubt about which profile is meant; the delete
+    // command and its confirmation still do the deleting and the token cleanup.
     return ["--profile", choice.profile, "agents", "delete", choice.handle];
   }
   throw new InteractiveCancelled();

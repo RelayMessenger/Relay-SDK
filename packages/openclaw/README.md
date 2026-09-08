@@ -166,14 +166,14 @@ candidate: Relay Server commit
 `5458497fe8db4ee7dfe6bef67f2803137575d3ea4d835748290a5c9f8d906791`,
 public `ChatHandle.image_url` and `ChatHandle.about` fields with no legacy
 aliases,
-and the exact `@relaymessenger/sdk@0.3.0-staging.8` registry integrity, source
+and the exact `@relaymessenger/sdk@0.3.1-staging.2` registry integrity, source
 commit `1bbcb486b4a91860ee3527ce95d015883e4cc1ae`, REST operations, and WebSocket
 frames consumed by the plugin.
 
 Public CI hashes the checked-in `contracts/relay-openapi.yaml` fixture and
 requires the locked digest above. Set `RELAY_SERVER_SOURCE_DIR` to an exact
-checkout of the final Server commit (currently awaiting validation) to additionally
-prove that the fixture bytes match committed source before packaging. The public Relay-SDK monorepo does not require credentials for the
+checkout of the Server commit above to additionally prove that the fixture bytes
+match committed source before packaging. The public Relay-SDK monorepo does not require credentials for the
 private Server source and does not overstate what npm metadata can attest.
 
 `contracts/relay-v1.lock.json` records the exact `@relaymessenger/sdk`

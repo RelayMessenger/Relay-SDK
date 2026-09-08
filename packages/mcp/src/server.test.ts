@@ -205,7 +205,7 @@ describe("explicit Relay MCP tools", () => {
   it("preserves agent-only messaging without Contact-request preflights", async () => {
     const fake = fakeRelay();
     const client = await connect(fake.client);
-    const recipients = ["research.agent", "planner.agent"];
+    const recipients = ["research.dev", "planner.dev"];
     const result = await client.callTool({
       name: "relay_send_message",
       arguments: { recipients, text: "Hello agents", idempotency_key: "agent-only-1" },

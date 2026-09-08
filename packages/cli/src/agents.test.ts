@@ -45,14 +45,14 @@ describe("pure agent command handlers", () => {
   it("rejects existing explicit profiles and invalid labels before POST", async () => {
     const { deps } = setup();
     await expect(createAgent({ profile: "default" }, deps)).rejects.toThrow("exists");
-    await expect(createAgent({ tokenName: "" }, deps)).rejects.toThrow("1–80");
+    await expect(createAgent({ tokenName: "" }, deps)).rejects.toThrow("1 to 80 characters");
     await expect(createAgent({ tokenName: "label\ncontrol" }, deps)).rejects.toThrow("control characters");
     expect(deps.bootstrap).not.toHaveBeenCalled();
   });
   it("does not leak bootstrap or persistence errors or retry", async () => {
     const { deps } = setup();
     vi.mocked(deps.bootstrap).mockRejectedValueOnce(new Error(secret));
-    await expect(createAgent({}, deps)).rejects.toThrow("not confirmed");
+    await expect(createAgent({}, deps)).rejects.toThrow("may or may not have been created");
     expect(deps.bootstrap).toHaveBeenCalledTimes(1);
     vi.mocked(deps.update).mockRejectedValueOnce(new Error(secret));
     await expect(createAgent({}, deps)).rejects.toThrow("could not be saved");
@@ -76,7 +76,7 @@ describe("pure agent command handlers", () => {
     const config = emptyConfig(); config.profiles.default!.agent_token = secret;
     const { deps, remove, config: saved } = setup(config);
     remove.mockRejectedValueOnce(new Error("409 pending events"));
-    await expect(deleteAgent(card.handle, "default", deps)).rejects.toThrow("kept");
+    await expect(deleteAgent(card.handle, "default", deps)).rejects.toThrow("the token saved on this computer is unchanged");
     expect(deps.update).not.toHaveBeenCalled();
     expect(saved()).toEqual(config);
   });
@@ -113,7 +113,7 @@ describe("agent CLI program", () => {
     expect(stdout.join("")).not.toContain('"secret"');
     expect(stderr).toEqual([]);
   });
-  it("prints public link/QR and safe metadata in human mode", async () => {
+  it("prints the public link and QR code, and never the token, in human mode", async () => {
     const { deps } = setup(); const stdout: string[] = [];
     expect(await runCLI(["agents", "create"], { agents: deps, configContext: privateContext, stdout: (s) => stdout.push(s) })).toBe(0);
     expect(stdout.join("")).toContain(response.share_url);
@@ -127,9 +127,9 @@ it("reports safe rate-limit status/code without reflecting a server message", as
   const { deps } = setup();
   vi.mocked(deps.bootstrap).mockRejectedValue(new RelayAPIError(secret, { status: 429, code: 2008, retryAfter: 60 }));
   const error = await createAgent({}, deps).catch((error: Error) => error);
-  expect(String(error)).toContain("HTTP 429");
-  expect(String(error)).toContain("Code 2008");
-  expect(String(error)).toContain("Retry-After: 60s");
+  expect(String(error)).toContain("Relay said: error 429, code 2008.");
+  expect(String(error)).toContain("code 2008");
+  expect(String(error)).toContain("Try again in 60 seconds.");
   expect(String(error)).not.toContain(secret);
   expect(deps.bootstrap).toHaveBeenCalledOnce();
 });
@@ -145,17 +145,17 @@ it("never reflects a newly issued credential even inside unexpected response met
 
 it("storage preflight rejection sends no creation request", async () => {
   const { deps } = setup(); vi.mocked(deps.preflight).mockRejectedValue(new Error("unwritable"));
-  await expect(createAgent({}, deps)).rejects.toThrow("no agent creation request was sent");
+  await expect(createAgent({}, deps)).rejects.toThrow("it did not create the agent");
   expect(deps.bootstrap).not.toHaveBeenCalled(); expect(deps.update).not.toHaveBeenCalled();
 });
 
 it("post-create storage failure reports assigned handle and actual local outcome, never the secret", async () => {
   const first = setup(); vi.mocked(first.deps.update).mockRejectedValue(new Error(secret));
   const lost = await createAgent({}, first.deps).catch((error: Error) => error.message);
-  expect(lost).toContain(`@${card.handle}`); expect(lost).toContain("could not be saved"); expect(lost).toContain("no durable recovery"); expect(lost).not.toContain(secret);
+  expect(lost).toContain(`@${card.handle}`); expect(lost).toContain("could not be saved"); expect(lost).toContain("it cannot get that token back"); expect(lost).not.toContain(secret);
   const second = setup(); const write = second.deps.update;
   second.deps.update = async (change) => { await write(change); throw new Error("final security verification failed"); };
   const saved = await createAgent({}, second.deps).catch((error: Error) => error.message);
-  expect(saved).toContain(`@${card.handle}`); expect(saved).toContain("present in local config"); expect(saved).not.toContain(secret);
+  expect(saved).toContain(`@${card.handle}`); expect(saved).toContain("is in your Relay config file"); expect(saved).not.toContain(secret);
   expect(second.deps.bootstrap).toHaveBeenCalledOnce();
 });

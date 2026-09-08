@@ -41,55 +41,55 @@ export const runDoctor = async (
   const checks: DoctorCheck[] = [];
   const nodeVersion = options.nodeVersion ?? process.version;
   checks.push({
-    name: "node",
+    name: "Node.js version",
     ok: nodeIsSupported(nodeVersion),
     detail: nodeVersion,
   });
 
   const permissions = await inspectConfigPermissions(dependencies.configContext);
   checks.push({
-    name: "config_permissions",
+    name: "Relay config file",
     ok: permissions.secure,
     detail: permissions.exists
       ? permissions.aclChecked !== undefined
-        ? permissions.aclChecked ? "native ACL inspected" : "native ACL inspection unavailable"
-        : `mode ${(permissions.mode ?? 0).toString(8).padStart(3, "0")}`
-      : "no local config (environment-only is allowed)",
+        ? permissions.aclChecked ? "only your Windows account can read it" : "Relay could not read the Windows permissions on it"
+        : permissions.secure ? "only you can read it" : "other people on this computer can read it"
+      : "no config file yet, which is fine when the token comes from RELAY_AGENT_TOKEN",
   });
 
   let auth: Awaited<ReturnType<typeof resolveAuth>> | undefined;
   try {
     auth = await resolveAuth(options.profile, dependencies.configContext);
     checks.push({
-      name: "agent_token",
+      name: "Token",
       ok: true,
-      detail: `resolved from ${auth.tokenSource}`,
+      detail: auth.tokenSource === "environment" ? "taken from RELAY_AGENT_TOKEN" : `taken from the saved profile ${auth.profile}`,
     });
     checks.push({
-      name: "api_url",
+      name: "Relay API address",
       ok: true,
       detail: validateApiURL(auth.apiURL),
     });
   } catch (error) {
     checks.push({
-      name: "agent_token",
+      name: "Token",
       ok: false,
       detail: error instanceof Error ? error.message : String(error),
     });
   }
 
-  // `doctor` runs against whatever `@relaymessenger/sdk` the user installed,
-  // so it reports what that SDK carries and fails only when the contract is
-  // not Relay v1. An exact operation count cannot live here: it would have to
-  // be the published SDK's number, which the workspace SDK contradicts the
-  // moment the contract grows. `scripts/check-contract.mjs` holds the exact
-  // count, against the workspace, where a change is meant to be reviewed.
+  // `doctor` runs against whatever `@relaymessenger/sdk` is installed, so it
+  // reports what that package carries and fails only when it is not Relay v1.
+  // An exact count of calls cannot live here: it would be the published
+  // package's number, which this workspace contradicts the moment the contract
+  // grows. `scripts/validate-contract.mjs` holds the exact count, against the
+  // workspace, where a change is meant to be reviewed.
   checks.push({
-    name: "sdk_contract",
+    name: "Installed Relay package",
     ok: RELAY_V1_OPERATIONS.length > 0
       && RELAY_V1_OPERATIONS.every((operation) =>
         operation.path.startsWith("/v1/")),
-    detail: `${RELAY_V1_OPERATIONS.length} v1 operations`,
+    detail: `it can make all ${RELAY_V1_OPERATIONS.length} Relay v1 calls`,
   });
 
   if (!options.offline && auth) {
@@ -97,22 +97,24 @@ export const runDoctor = async (
       const client = dependencies.createClient(auth);
       await client.webhookEvents.list();
       checks.push({
-        name: "api_reachability",
+        name: "Relay answers",
         ok: true,
-        detail: "read-only webhook event list succeeded",
+        detail: "Relay answered this token",
       });
     } catch (error) {
+      // Never print the raw error: it can carry headers, tokens or a socket
+      // address the reader cannot act on.
       checks.push({
-        name: "api_reachability",
+        name: "Relay answers",
         ok: false,
-        detail: error instanceof Error ? error.message : String(error),
+        detail: "Relay did not answer this token. Check your network, the API address above, and that the token is still valid.",
       });
     }
   } else if (options.offline) {
     checks.push({
-      name: "api_reachability",
+      name: "Relay answers",
       ok: true,
-      detail: "skipped (--offline)",
+      detail: "skipped, because you passed --offline",
     });
   }
 

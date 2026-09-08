@@ -271,17 +271,17 @@ try {
   }
 
   const originalConfig = JSON.parse(readFileSync(configPath, "utf8"));
-  assert.equal(gateway, undefined, "selected isolated runtime must really be stopped before handoff");
+  assert.equal(gateway, undefined, "the isolated runtime must really be stopped before Relay writes its configuration");
   const loginArgs = ["--profile", "phone-roundtrip", "auth", "login", "--with-token", "--api-url", live.origin, "--connect", "openclaw", "--runtime-config", configPath, "--runtime-state-dir", stateDir, "--runtime-account", "work", "--confirm-configure", "--runtime-stopped"];
   const loggedIn = JSON.parse(execFileSync(join(consumer, "node_modules/.bin/relaymessenger"), loginArgs, { cwd: consumer, encoding: "utf8", input: live.secret + "\n", env: { ...env, RELAY_CONFIG_PATH: cliConfig } }));
-  assert.equal(loggedIn.token, "stored"); assert.equal(loggedIn.handoff.status, "configured"); assert.equal(loggedIn.handoff.connected, false);
-  assert.equal(loggedIn.handoff.handle, live.agent.handle);
+  assert.equal(loggedIn.token, "stored"); assert.equal(loggedIn.connect.status, "configured"); assert.equal(loggedIn.connect.connected, false);
+  assert.equal(loggedIn.connect.handle, live.agent.handle);
   const configured = JSON.parse(readFileSync(configPath, "utf8"));
   const expectedConfig = structuredClone(originalConfig);
   expectedConfig.channels.relay.accounts.work.token = live.secret;
   expectedConfig.channels.relay.accounts.work.baseUrl = live.origin;
-  assert.deepEqual(configured, expectedConfig, "handoff must preserve all unrelated runtime settings/accounts");
-  receipt.handoff = { profile: loggedIn.profile, handle: live.agent.handle, status: loggedIn.handoff.status, connectedBeforeLaunch: false, preservedOtherSettings: true };
+  assert.deepEqual(configured, expectedConfig, "connecting must preserve every unrelated runtime setting and account");
+  receipt.connect = { profile: loggedIn.profile, handle: live.agent.handle, status: loggedIn.connect.status, connectedBeforeLaunch: false, preservedOtherSettings: true };
   receipt.privatePaths = { cliConfig, runtimeConfig: configPath, consumer, home, temp, originalAgentFile: liveFile };
   console.log("Existing assigned Agent Token configured in selected stopped native context; zero bootstrap calls");
 

@@ -124,8 +124,8 @@ it("detects only existing source-backed project/global Relay skill files", async
   expect(await relaySkillPresent(cwd, home, {})).toBe(true);
 });
 it("installer args follow the build's environment without default agent/global flags or credentials", () => {
-  expect(relaySkillInstallArgs("0.1.0-staging.2")).toEqual(["--yes", "skills@1.5.24", "add", "https://github.com/RelayMessenger/Relay-SDK/tree/staging/skills/relay", "--skill", "relay"]);
-  expect(relaySkillInstallArgs("0.1.0")).toEqual(["--yes", "skills@1.5.24", "add", "https://github.com/RelayMessenger/Relay-SDK/tree/main/skills/relay", "--skill", "relay"]);
+  expect(relaySkillInstallArgs("0.1.0-staging.2")).toEqual(["--yes", "skills@1.5.25", "add", "https://github.com/RelayMessenger/Relay-SDK/tree/staging/skills/relay", "--skill", "relay"]);
+  expect(relaySkillInstallArgs("0.1.0")).toEqual(["--yes", "skills@1.5.25", "add", "https://github.com/RelayMessenger/Relay-SDK/tree/main/skills/relay", "--skill", "relay"]);
   expect(relaySkillSourceBranch("0.1.0-staging")).toBe("staging"); expect(relaySkillSourceBranch("0.1.0-rc.1")).toBe("main");
   expect(RELAY_SKILL_INSTALL_ARGS).toEqual(relaySkillInstallArgs(packageVersion()));
   expect(relaySkillSourceBranch(packageVersion())).toBe(defaultCreationApiURL() === STAGING_API_URL ? "staging" : "main");

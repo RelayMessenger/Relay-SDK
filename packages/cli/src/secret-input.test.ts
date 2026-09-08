@@ -16,7 +16,7 @@ describe("private token prompt", () => {
     const answer = readHiddenToken(input as unknown as ReadStream, (s) => output.push(s));
     input.write("private-tokeX"); input.write("\x7f"); input.write("n"); input.write("\r");
     expect(await answer).toBe("private-token");
-    expect(output.join("")).toBe("Agent Token (hidden): \n");
+    expect(output.join("")).toBe("Paste your token (it stays hidden): \n");
     expect(input.isRaw).toBe(false);
     input.destroy();
   });
@@ -41,6 +41,6 @@ it("removes PowerShell module paths only from the child environment, case-insens
   const before = { ...parent };
   const child = aclChildEnvironment(parent, '{"action":"inspect"}');
   expect(Object.keys(child).some((key) => key.toLowerCase() === "psmodulepath")).toBe(false);
-  expect(child.PATH).toBe("keep"); expect(child.RELAY_HANDOFF_ACL).toBe('{"action":"inspect"}');
+  expect(child.PATH).toBe("keep"); expect(child.RELAY_CONNECT_ACL).toBe('{"action":"inspect"}');
   expect(parent).toEqual(before);
 });

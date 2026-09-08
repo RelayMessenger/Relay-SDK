@@ -35,7 +35,7 @@ const deps = {
   },
 };
 // The Hermes .env written at creation binds the origin the installed CLI's
-// version selects; a later login must name that same origin or the handoff
+// version selects; a later login must name that same origin or the connect
 // refuses to rebind the identity.
 const nativeHome = join(home, "native Hermes profile");
 await mkdir(nativeHome, { mode: 0o700 });
@@ -45,10 +45,10 @@ if (process.platform === "win32") {
 }
 const nativeYaml = 'gateway:\n  platforms:\n    relayapp:\n      enabled: true\n      extra:\n        allowed_contacts: [alice]\n';
 await writeFile(join(nativeHome, "config.yaml"), nativeYaml, { mode: 0o600 });
-const handoffArgs = ["--connect", "hermes", "--runtime-home", nativeHome, "--runtime-state-dir", join(nativeHome, "relay"), "--confirm-configure", "--runtime-stopped"];
-assert.equal(await runCLI(["agents", "create", "--json", ...handoffArgs], deps), 0);
-assert.equal(JSON.parse(output[0]).handoff.status, "configured");
-assert.equal(JSON.parse(output[0]).handoff.connected, false);
+const connectArgs = ["--connect", "hermes", "--runtime-home", nativeHome, "--runtime-state-dir", join(nativeHome, "relay"), "--confirm-configure", "--runtime-stopped"];
+assert.equal(await runCLI(["agents", "create", "--json", ...connectArgs], deps), 0);
+assert.equal(JSON.parse(output[0]).connect.status, "configured");
+assert.equal(JSON.parse(output[0]).connect.connected, false);
 assert.ok((await readFile(join(nativeHome, ".env"), "utf8")).includes(token));
 assert.equal((await readFile(join(nativeHome, ".env"), "utf8")).includes("unrelated-env-token"), false);
 assert.equal(await readFile(join(nativeHome, "config.yaml"), "utf8"), nativeYaml);
@@ -66,7 +66,7 @@ assert.equal(config.current_profile, "default");
 assert.equal(await runCLI(["agents", "list", "--json"], deps), 0);
 delete deps.configContext.env.RELAY_AGENT_TOKEN;
 delete deps.configContext.env.RELAY_PROFILE;
-assert.equal(await runCLI(["--profile", card.handle, "auth", "login", "--with-token", "--api-url", configModule.defaultCreationApiURL(), ...handoffArgs], { ...deps, readStdin: async () => token }), 0);
+assert.equal(await runCLI(["--profile", card.handle, "auth", "login", "--with-token", "--api-url", configModule.defaultCreationApiURL(), ...connectArgs], { ...deps, readStdin: async () => token }), 0);
 assert.equal((await configModule.inspectConfigPermissions(deps.configContext)).secure, true);
 assert.equal(await runCLI(["--profile", card.handle, "doctor", "--offline"], deps), 0);
 if (aclModule) assert.equal((await aclModule.inspectWindowsAcl(home)).sddl, originalParentACL);

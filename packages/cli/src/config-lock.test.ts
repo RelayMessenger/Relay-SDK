@@ -50,7 +50,7 @@ it("never removes an existing owner's lock when the busy deadline expires", asyn
   await writeFile(path, "other owned fixture");
   vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(120_001);
   const change = vi.fn();
-  await expect(mutateConfig(change, ctx)).rejects.toThrow("configuration is busy");
+  await expect(mutateConfig(change, ctx)).rejects.toThrow("Another Relay command is writing the config file");
   expect(change).not.toHaveBeenCalled(); expect(await readFile(path, "utf8")).toBe("other owned fixture");
 });
 
