@@ -11,7 +11,13 @@ const card = { handle, first_name: "Brave Canada Goose", last_name: null, image_
 async function fixture() {
   const home = await realpath(await mkdtemp(join(tmpdir(), "relay agent lifecycle-")));
   if (process.platform === "win32") await protectWindowsPath(home, true);
-  const env: NodeJS.ProcessEnv = { RELAY_CONFIG_PATH: join(home, "config.json") };
+  const env: NodeJS.ProcessEnv = {
+    RELAY_CONFIG_PATH: join(home, "config.json"),
+    // These are fake HTTP fixtures. Pin their origin explicitly so the tests
+    // remain stable when release validation rewrites the package version from
+    // staging to production before running the same test suite.
+    RELAY_API_URL: "https://api.staging.relayapp.im",
+  };
   const output: string[] = [];
   const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     if (init?.method === "POST") return Response.json({ agent: card, secret: "created-private-token", share_url: `https://go.test/@${handle}` }, { status: 201 });

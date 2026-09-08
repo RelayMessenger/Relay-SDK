@@ -22,7 +22,7 @@ function setup(initial: RelayConfig = emptyConfig()) {
     update: vi.fn(async (change) => { const next = structuredClone(config); const result = change(next); config = next; return result; }),
     bootstrap: vi.fn(async () => response),
     client: vi.fn(() => ({ contactCard: { retrieve }, agents: { delete: remove } }) as unknown as Relay),
-    auth: vi.fn(async () => auth), env: {},
+    auth: vi.fn(async () => auth), env: { RELAY_API_URL: "https://api.staging.relayapp.im" },
   };
   return { deps, config: () => config, auth, remove, retrieve };
 }
