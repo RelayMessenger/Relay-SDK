@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Staging HTTP protocol proof, not a substitute for native CLI/SDK integration.
 import assert from 'node:assert/strict';
-import { writeFileSync, mkdirSync, existsSync, renameSync, chmodSync, unlinkSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, chmodSync, unlinkSync } from 'node:fs';
 import { dirname, resolve, isAbsolute } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 export const STAGING_ORIGIN = 'https://api.staging.relayapp.im';
 export const PLAN = [
@@ -13,12 +15,12 @@ export const PLAN = [
   'Delete only fixtures created by this run, once each; verify token revocation',
   'Retain private recovery state if cleanup is unconfirmed; never touch operator data',
 ];
-export async function runOwnedSmoke({ runId, serverSha, fetchImpl = fetch, saveReceipt = () => {}, savePrivate = () => {} }) {
+export async function runOwnedSmoke({ runId, serverSha, fetchImpl = fetch, saveReceipt = () => {}, savePrivate = () => {}, provenance = {} }) {
   assert.match(runId, /^[a-z0-9][a-z0-9-]{0,39}$/);
   assert.match(serverSha, /^[a-f0-9]{40}$/);
   const fixtures = [];
   const secrets = [];
-  const receipt = { runId, serverSha, origin: STAGING_ORIGIN, proof: 'staging HTTP only; CLI list/runtime not claimed', requests: [], fixtures: [], uncertainCreations: [], failures: [] };
+  const receipt = { runId, serverSha, provenance, origin: STAGING_ORIGIN, proof: 'staging HTTP only; CLI list/runtime not claimed', requests: [], fixtures: [], uncertainCreations: [], failures: [] };
   const redact = value => secrets.reduce((text, secret) => text.split(secret).join('[REDACTED]').split(JSON.stringify(secret).slice(1,-1)).join('[REDACTED]'), JSON.stringify(value));
   const snapshot = () => JSON.parse(redact(receipt));
   const persist = () => { savePrivate({ runId, serverSha, origin: STAGING_ORIGIN, fixtures, uncertainCreations: receipt.uncertainCreations }); saveReceipt(snapshot()); };
@@ -126,7 +128,14 @@ async function main() {
   mkdirSync(dirname(privatePath), { recursive: true, mode: 0o700 });
   writeFileSync(privatePath, '{}\n', { flag: 'wx', mode: 0o600 });
   mkdirSync(dirname(receiptPath), { recursive: true });
-  const result = await runOwnedSmoke({ runId: values['run-id'], serverSha: values['server-sha'],
+  const scriptPath = fileURLToPath(import.meta.url);
+  const sourceRoot = resolve(dirname(scriptPath), '..');
+  const harnessSha = execFileSync('git', ['-C', sourceRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const harnessDirty = execFileSync('git', ['-C', sourceRoot, 'status', '--porcelain'], { encoding: 'utf8' }).trim();
+  assert.match(harnessSha, /^[a-f0-9]{40}$/);
+  const provenance = { harnessSha, harnessDirty, scriptSHA256: createHash('sha256').update(readFileSync(scriptPath)).digest('hex'),
+    platform: process.platform, arch: process.arch, node: process.version, sandbox: process.env.RELAY_DAYTONA_SANDBOX_ID, serverShaSource: 'deployment SHA supplied by main' };
+  const result = await runOwnedSmoke({ provenance, runId: values['run-id'], serverSha: values['server-sha'],
     saveReceipt: value => writeFileSync(receiptPath, JSON.stringify(value, null, 2)),
     savePrivate: value => {
       const temporary = `${privatePath}.${process.pid}.tmp`;
