@@ -117,10 +117,10 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
 
 it("detects only existing source-backed project/global Relay skill files", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "relay-skill-project-")); const home = await mkdtemp(join(tmpdir(), "relay-skill-home-"));
-  expect(await relaySkillPresent(cwd, home)).toBe(false);
+  expect(await relaySkillPresent(cwd, home, {})).toBe(false);
   await mkdir(join(home, ".codex", "skills", "relay"), { recursive: true });
   await writeFile(join(home, ".codex", "skills", "relay", "SKILL.md"), "fixture");
-  expect(await relaySkillPresent(cwd, home)).toBe(true);
+  expect(await relaySkillPresent(cwd, home, {})).toBe(true);
 });
 it("uses fixed installer args without default agent/global flags or credentials", () => {
   expect(RELAY_SKILL_INSTALL_ARGS).toEqual(["--yes", "skills@1.5.24", "add", "https://github.com/RelayMessenger/Relay-SDK/tree/staging/skills/relay", "--skill", "relay"]);
@@ -140,4 +140,39 @@ it("interactive creation collects optional fields; blanks keep server defaults",
   const blank = await fixture(); blank.prompts.select.mockResolvedValueOnce("create"); blank.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   expect(await runCLI([], blank.deps)).toBe(0);
   expect(JSON.parse(String(blank.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body))).toEqual({});
+});
+
+it.each(["CODEX_HOME", "CLAUDE_CONFIG_DIR", "HERMES_HOME"])("preserves and detects the installer's selected %s", async (key) => {
+  const cwd = await mkdtemp(join(tmpdir(), "relay-selected-cwd-")); const home = await mkdtemp(join(tmpdir(), "relay-selected-home-"));
+  const selected = join(home, `selected-${key}`);
+  await mkdir(join(selected, "skills", "relay"), { recursive: true });
+  await writeFile(join(selected, "skills", "relay", "SKILL.md"), "fixture");
+  const env = { [key]: selected, RELAY_AGENT_TOKEN: token, OPENAI_API_KEY: "filtered-key" };
+  expect(await relaySkillPresent(cwd, home, env)).toBe(true);
+  expect(installerEnvironment(env)).toEqual({ [key]: selected });
+});
+it("does not let an old default-home installation hide absence in the selected home", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "relay-selected-cwd-")); const home = await mkdtemp(join(tmpdir(), "relay-selected-home-"));
+  await mkdir(join(home, ".codex", "skills", "relay"), { recursive: true });
+  await writeFile(join(home, ".codex", "skills", "relay", "SKILL.md"), "old fixture");
+  expect(await relaySkillPresent(cwd, home, { CODEX_HOME: join(home, "selected-empty") })).toBe(false);
+  expect(await relaySkillPresent(cwd, home, { CODEX_HOME: "   " })).toBe(true);
+});
+it("preserves explicit telemetry opt-outs while keeping credentials out of installer env", () => {
+  const parent = { PATH: "keep", DISABLE_TELEMETRY: "1", DO_NOT_TRACK: "1", RELAY_AGENT_TOKEN: token, ANTHROPIC_API_KEY: "filtered-key" };
+  expect(installerEnvironment(parent)).toEqual({ PATH: "keep", DISABLE_TELEMETRY: "1", DO_NOT_TRACK: "1" });
+  expect(parent.RELAY_AGENT_TOKEN).toBe(token);
+});
+it("explicit install-only failure exits nonzero, without API calls or credential output", async () => {
+  const f = await fixture(); f.prompts.select.mockResolvedValueOnce("skill"); f.prompts.confirm.mockResolvedValueOnce(true);
+  f.skillInstaller.mockRejectedValueOnce(new Error(token));
+  expect(await runCLI([], f.deps)).toBe(1);
+  expect(f.skillInstaller).toHaveBeenCalledOnce(); expect(f.fetch).not.toHaveBeenCalled();
+  expect(f.stderr.join("")).not.toContain(token);
+});
+it("cancelled optional post-create offer preserves the completed creation", async () => {
+  const f = await fixture(); f.prompts.confirm.mockRejectedValueOnce(new InteractiveCancelled());
+  expect(await runCLI(["agents", "create"], f.deps)).toBe(0);
+  expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  expect(f.skillInstaller).not.toHaveBeenCalled();
 });

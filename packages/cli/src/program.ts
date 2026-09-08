@@ -999,22 +999,28 @@ export const runCLI = async (
   const ui = interactive ? dependencies.prompts ?? clackPrompts((message) => stderr(`${message}\n`)) : undefined;
   const agentDeps = dependencies.agents ?? agentDependencies(dependencies.configContext, dependencies.fetch);
   let offered = false;
-  const skillOffer = async (force = false): Promise<void> => {
-    if (!ui || offered) return;
+  const skillOffer = async (force = false): Promise<number> => {
+    if (!ui || offered) return 0;
     offered = true;
+    const inform = (message: string) => { try { ui.info(message); } catch { /* Optional output cannot invalidate the command. */ } };
     try {
       const cwd = dependencies.cwd ?? process.cwd();
-      const present = await (dependencies.skillPresent ?? (() => relaySkillPresent(cwd, dependencies.configContext?.home ?? homedir())))();
-      if (!force && present !== false) return;
-      if (!await ui.confirm("Install the Relay skill? The standard installer will ask you to choose agents and project/global scope.")) return;
+      if (!force) {
+        const present = await (dependencies.skillPresent ?? (() => relaySkillPresent(cwd, dependencies.configContext?.home ?? homedir(), env)))();
+        if (present !== false) return 0;
+      }
+      if (!await ui.confirm("Install the Relay skill? The standard installer will ask you to choose agents and project/global scope.")) return 0;
       try {
         await (dependencies.skillInstaller ?? (() => installRelaySkill(cwd, env)))();
-        ui.info("The standard skill installer finished.");
-      } catch { ui.info("Skill installation did not complete. Existing agent and credential results are unchanged."); }
-    } catch {
-      // A declined/cancelled/unavailable optional offer must not turn successful
-      // agent creation into a failure or suggest repeating the creation POST.
-      ui.info("Skill offer dismissed. Existing agent and credential results are unchanged.");
+        inform("The standard skill installer finished.");
+        return 0;
+      } catch {
+        inform("Skill installation did not complete. Existing agent and credential results are unchanged.");
+        return force ? 1 : 0;
+      }
+    } catch (error) {
+      inform("Skill offer dismissed. Existing agent and credential results are unchanged.");
+      return error instanceof InteractiveCancelled ? 0 : force ? 1 : 0;
     }
   };
   try {
@@ -1023,7 +1029,7 @@ export const runCLI = async (
     if (ui && entry) {
       const selected = await chooseInteractiveCommand(entry.entry, entry.prefix, agentDeps, ui);
       if (!selected) return 0;
-      if (selected === "install-skill") { await skillOffer(true); return 0; }
+      if (selected === "install-skill") return await skillOffer(true);
       args = selected;
     } else if (entry) args = [...argv, "--help"];
     await createProgram({

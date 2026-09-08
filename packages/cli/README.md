@@ -41,7 +41,10 @@ npx --yes skills@1.5.24 add https://github.com/RelayMessenger/Relay-SDK/tree/sta
 ```
 
 The CLI does not silently download skills or change every agent's configuration.
-Installer errors do not undo agent creation or suggest creating another agent.
+Optional installer errors do not undo agent creation or suggest creating another
+agent. An explicit install-only failure exits nonzero. Selected `CODEX_HOME`,
+`CLAUDE_CONFIG_DIR`, and `HERMES_HOME` locations are preserved and checked; explicit
+`DISABLE_TELEMETRY` and `DO_NOT_TRACK` preferences are passed to the installer.
 The install menu remains available when you explicitly want to run the installer.
 
 ## Agent Token authentication
