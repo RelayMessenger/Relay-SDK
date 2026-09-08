@@ -1,0 +1,34 @@
+name: Agent CLI native platforms
+on:
+  push:
+    branches: [agent-cli-verification-20260908]
+    paths: ['scripts/agent-cli-platforms*', '.github/workflows/agent-cli-platforms.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: .nvmrc
+      - run: npm install --global npm@11.19.1 --no-audit --no-fund
+      - run: npm ci
+      - run: npm exec -- node scripts/agent-cli-platforms.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: agent-cli-${{ matrix.os }}-${{ github.sha }}
+          path: .release-tmp/agent-cli-platforms
+          if-no-files-found: error
+# Linux installs/builds/tests run exclusively in the owned Daytona sandbox,
+# using the identical harness and RELAY_DAYTONA_SANDBOX_ID (not a hosted Linux job).
