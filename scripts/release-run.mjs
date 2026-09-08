@@ -24,8 +24,13 @@ import {
   readManifests,
   releasePlan,
   rewritePackage,
+  rewriteReleaseWorkspace,
 } from "./release-derive.mjs";
 import { releasePackages } from "./release-packages.mjs";
+import {
+  PUBLISH_PROPAGATION,
+  verifyNpmRegistryIntegrity,
+} from "./verify-npm-registry-integrity.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const dryRun = process.argv.includes("--dry-run");
@@ -100,16 +105,15 @@ const tarballFor = (row) => {
   return { path, integrity: `sha512-${createHash("sha512").update(readFileSync(path)).digest("base64")}` };
 };
 
+// npm processes a publish after answering it ("may take a few minutes to
+// become available"); the shared budget is the one place that wait is sized.
 async function waitForRegistry(row, integrity) {
-  for (let attempt = 0; attempt < 24; attempt += 1) {
-    const seen = view(`${row.name}@${row.version}`, "dist.integrity");
-    if (seen.found) {
-      assert.equal(seen.value, integrity, `${row.name}@${row.version} on npm is not the tarball this run packed`);
-      return;
-    }
-    await new Promise((wake) => setTimeout(wake, 5_000));
-  }
-  throw new Error(`${row.name}@${row.version} did not appear on npm`);
+  await verifyNpmRegistryIntegrity({
+    packageSpec: `${row.name}@${row.version}`,
+    expectedIntegrity: integrity,
+    ...PUBLISH_PROPAGATION,
+    log: say,
+  });
 }
 
 async function github(path, body) {
@@ -139,6 +143,15 @@ async function recordTag(row) {
   const created = await github("/git/refs", { ref: `refs/tags/${row.tag}`, sha });
   assert.equal(created.status, 201, `could not create ${row.tag}: ${JSON.stringify(created.body)}`);
   say(`tag ${row.tag} records ${sha}`);
+}
+
+// A skipped package is already on npm, but its workspace still has a staging
+// identity. Derive the entire workspace before npm resolves any dependent.
+// Skip still means no pack, publish, registry verification or tag for that row.
+rewriteReleaseWorkspace(root, plan, { sdkIntegrity });
+run(process.execPath, ["scripts/sync-root-discovery.mjs", "--write"]);
+for (const row of plan.filter((entry) => entry.action === "skip")) {
+  run(npm, ["run", "build", "--workspace", row.name]);
 }
 
 rmSync(join(root, ".release-tmp", "release"), { recursive: true, force: true });

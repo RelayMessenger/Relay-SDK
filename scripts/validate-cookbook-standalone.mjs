@@ -21,16 +21,11 @@
 //    whatever the registry has. Every tsconfig stays inside its folder, and
 //    the tools its scripts run are its own devDependencies.
 //
-// Why the sdk range is `^0.3.0-staging.0` and not `^0.3.0`: the release job
-// (scripts/release-derive.mjs) rewrites only the packages it publishes and
-// never commits back, so a cookbook manifest on main reads exactly as staging
-// wrote it. A plain caret excludes the workspace's `X.Y.Z-staging.N`
-// prerelease, so npm would install the registry copy inside the workspace
-// too. A caret with a prerelease floor on the same X.Y.Z tuple matches both
-// the workspace prerelease and the published `X.Y.Z` release, and npm
-// resolves the highest, which is the release. The floor only covers ITS OWN
-// tuple: when packages/sdk moves to `0.3.1-staging.0` the workspace stops
-// satisfying `^0.3.0-staging.0`, and the link check below is what fails.
+// A semver prerelease range covers only its own X.Y.Z tuple. The automatic
+// bump can move to the next tuple before its plain release exists. Root
+// postinstall therefore links unpinned cookbook Relay dependencies explicitly
+// (scripts/link-cookbook-workspaces.mjs); standalone copies retain their
+// registry ranges and do not inherit that root-only lifecycle script.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -125,7 +120,7 @@ function linkCheck(name) {
       resolved,
       expected,
       `${name} resolves ${dependency.name} from ${relative(root, resolved)}, not the workspace ${relative(root, expected)}; `
-        + `its range ${dependency.range} no longer matches the workspace version ${readJson(expected).version}`,
+        + `run the root npm install lifecycle to link workspace version ${readJson(expected).version}`,
     );
     say(`  ${name}: ${dependency.name}@${dependency.range} -> workspace ${readJson(expected).version}`);
   }

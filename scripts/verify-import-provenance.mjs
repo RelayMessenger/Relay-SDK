@@ -62,7 +62,7 @@ for (const entry of manifest.entries) {
   assert.match(entry.commit, /^[0-9a-f]{40}$/u);
   assert.ok(["exact", "canonicalized"].includes(entry.status));
   const destination = join(root, entry.destination);
-  assert.equal(sha256(bytes(destination)), entry.destination_sha256);
+  assert.equal(sha256(bytes(destination)), entry.destination_sha256, `${entry.destination}: destination metadata drifted; run npm run metadata:sync`);
   assert.equal(mode(destination), entry.destination_mode);
   if (entry.status === "exact") {
     assert.equal(entry.source_sha256, entry.destination_sha256);

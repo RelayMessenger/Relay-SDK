@@ -89,15 +89,18 @@ jobs:
           fi
           git status --porcelain
           # Only what a bump may write: manifests, pins, locks, plugin
-          # manifests, the lockfile, and claude-code's generated runtime that
-          # embeds the version. Anything else means a build wrote where it
+          # manifests, current import metadata, the lockfile, and claude-code's
+          # generated runtime that embeds the version. Anything else means a build wrote where it
           # must not, and the run stops here.
-          git status --porcelain | awk '{print $2}' | grep -Ev \
-            '^(package-lock\.json|packages/[a-z-]+/(package\.json|contracts/relay-v1\.lock\.json|plugin/contracts/relay-v1\.lock\.json|\.claude-plugin/(plugin|marketplace)\.json|plugin/\.claude-plugin/plugin\.json|runtime/server\.mjs|plugin/runtime/server\.mjs))$' \
-            && { echo "unexpected paths changed" >&2; exit 1; } || true
+          if git status --porcelain | awk '{print $2}' | grep -Ev \
+            '^(\.claude-plugin/marketplace\.json|sources\.import-manifest\.json|package-lock\.json|packages/[a-z-]+/(package\.json|contracts/relay-v1\.lock\.json|plugin/contracts/relay-v1\.lock\.json|\.claude-plugin/(plugin|marketplace)\.json|plugin/\.claude-plugin/plugin\.json|runtime/server\.mjs|plugin/runtime/server\.mjs))$' \
+          then
+            echo "unexpected paths changed" >&2
+            exit 1
+          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add package-lock.json packages
+          git add package-lock.json packages .claude-plugin/marketplace.json sources.import-manifest.json
           git commit -F - <<'EOF'
           release: version the changed staging packages automatically
 

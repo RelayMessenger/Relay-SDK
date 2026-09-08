@@ -379,6 +379,13 @@ export async function stagingBump({ write }) {
     // the nested registry copies the old pins installed.
     run(npm, ["install", "--package-lock-only", "--no-audit", "--no-fund"]);
   }
+  if (write) {
+    // The root Claude marketplace is generated from the package identity.
+    run(process.execPath, ["scripts/sync-root-discovery.mjs", "--write"]);
+    run(process.execPath, ["scripts/sync-import-metadata.mjs", "--write"]);
+    run(process.execPath, ["scripts/validate-contract-copies.mjs"]);
+    run(process.execPath, ["scripts/validate-workflows.mjs"]);
+  }
   const changed = plan.filter((row) => row.action !== "none").map((row) => row.key);
   say(`\nstaging bump plan (${write ? "written" : "dry run"}):`);
   for (const row of plan) {

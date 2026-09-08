@@ -231,6 +231,23 @@ assert.match(
   "registry integrity reconciliation must still require exactly one match",
 );
 
+// The caller event SHA predates the automatic bump; only the verified input
+// can identify the retained tarball's checkout and successful receipt.
+assert.match(publishProgram, /git_sha: releaseSha/u);
+assert.doesNotMatch(publishProgram, /git_sha: (?:process\.)?env\.GITHUB_SHA/u);
+const publishJob = publish.slice(publish.indexOf("\n  publish:\n"));
+assert.ok(
+  publishJob.indexOf('test "$(git rev-parse HEAD)" = "$RELEASE_SHA"') >= 0
+    && publishJob.indexOf('test "$(git rev-parse HEAD)" = "$RELEASE_SHA"') < publishJob.indexOf("Publish or reconcile exactly once"),
+  "publish job must verify RELEASE_SHA before entering the publish step",
+);
+const bumpProgram = readFileSync("scripts/staging-bump.mjs", "utf8");
+for (const script of ["sync-root-discovery.mjs", "sync-import-metadata.mjs", "validate-contract-copies.mjs", "validate-workflows.mjs"]) {
+  assert.ok(bumpProgram.includes(`"scripts/${script}"`), `bump omits coupled metadata step ${script}`);
+}
+assert.match(staging, /git add .*\.claude-plugin\/marketplace\.json .*sources\.import-manifest\.json/u);
+assert.equal(rootManifest.scripts.postinstall, "node scripts/link-cookbook-workspaces.mjs");
+
 // Sigstore verifies an npm attestation against GitHub-hosted runner identity
 // and rejects every other runner with
 // E422 "Unsupported GitHub Actions runner" (measured 2026-09-07 on staging
@@ -338,6 +355,24 @@ for (const [source, text] of workflowFiles) {
   );
 }
 const releaseRun = readFileSync("scripts/release-run.mjs", "utf8");
+// Every publish waits through npm's post-publish processing with the one
+// shared budget; a private loop drifted to 90 s and failed a publish that had
+// succeeded (run 34154163996, 2026-09-07).
+for (const [source, text] of [
+  ["scripts/publish-package-staging.mjs", publishProgram],
+  ["scripts/release-run.mjs", releaseRun],
+]) {
+  assert.match(
+    text,
+    /verifyNpmRegistryIntegrity\(\{[\s\S]*?\.\.\.PUBLISH_PROPAGATION,/u,
+    `${source} must wait for propagation through verifyNpmRegistryIntegrity with PUBLISH_PROPAGATION`,
+  );
+  assert.doesNotMatch(
+    text,
+    /setTimeout\([^)]*,\s*\d[\d_]*\)/u,
+    `${source} carries a private registry wait`,
+  );
+}
 assert.match(
   releaseRun,
   /"publish", tarball\.path,\n\s*"--access", "public",\n\s*"--tag", "latest",\n\s*"--no-provenance",/u,
