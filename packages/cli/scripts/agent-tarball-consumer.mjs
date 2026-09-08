@@ -53,7 +53,7 @@ assert.equal(config.current_profile, "default");
 assert.equal(await runCLI(["agents", "list", "--json"], deps), 0);
 delete deps.configContext.env.RELAY_AGENT_TOKEN;
 delete deps.configContext.env.RELAY_PROFILE;
-assert.equal(await runCLI(["--profile", card.handle, "auth", "login", "--token-stdin", "--api-url", "https://api.staging.relayapp.im", ...handoffArgs], { ...deps, readStdin: async () => token }), 0);
+assert.equal(await runCLI(["--profile", card.handle, "token", "import", "--token-stdin", "--api-url", "https://api.staging.relayapp.im", ...handoffArgs], { ...deps, readStdin: async () => token }), 0);
 assert.equal(await runCLI(["agents", "delete", card.handle], deps), 1);
 config = JSON.parse(await readFile(configPath, "utf8"));
 assert.equal(config.profiles[card.handle].agent_token, token);

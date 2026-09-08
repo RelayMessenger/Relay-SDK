@@ -291,7 +291,7 @@ export const resolveAuth = async (
     : validateToken(envToken);
   if (!token) {
     throw new Error(
-      `No Agent Token for profile ${profile}. Run relay auth login --token-stdin.`,
+      `No Agent Token for profile ${profile}. Run relay token import --token-stdin.`,
     );
   }
   return {
