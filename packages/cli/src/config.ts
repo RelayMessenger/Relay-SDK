@@ -7,12 +7,17 @@ import {
   stat,
   unlink,
 } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export const DEFAULT_API_URL = "https://api.relayapp.im";
 export const DEFAULT_PROFILE = "default";
+export const STAGING_API_URL = "https://api.staging.relayapp.im";
+export const defaultCreationApiURL = (
+  version: string = createRequire(import.meta.url)("../package.json").version,
+): string => /-staging(?:\.|$)/u.test(version) ? STAGING_API_URL : DEFAULT_API_URL;
 
 export interface RelayProfile {
   api_url?: string;
