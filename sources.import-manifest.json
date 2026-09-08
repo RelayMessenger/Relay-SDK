@@ -811,10 +811,10 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/event-listen.test.ts",
       "source_sha256": "f19bfc95724e7a5c1d30724c52fd6e5b23378239f6bdf0210bc4a9b1dc5b0bc2",
-      "destination_sha256": "f19bfc95724e7a5c1d30724c52fd6e5b23378239f6bdf0210bc4a9b1dc5b0bc2",
+      "destination_sha256": "4d8675a30b8a89fb078a9e906ccb64885dc6d7ad2cd74b425a4d96f7e0d1558b",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/cli/src/event-listen.ts",
@@ -822,10 +822,10 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/event-listen.ts",
       "source_sha256": "c413174f9910ee40cda7d549ad26896dbcf3b417c694f62fb19c5ff1f76fe39f",
-      "destination_sha256": "c413174f9910ee40cda7d549ad26896dbcf3b417c694f62fb19c5ff1f76fe39f",
+      "destination_sha256": "2af05ec5d9100a9a5c2a5a3de06b5e06fdeed5dd0a36d27a9f33523db8621479",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/cli/src/output.test.ts",
