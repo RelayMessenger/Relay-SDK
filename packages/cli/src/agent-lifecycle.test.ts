@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { protectWindowsPath } from "./runtime-connect/windows-acl.js";
 import { runCLI } from "./program.js";
-import { emptyConfig, readConfig, writeConfig } from "./config.js";
+import { STAGING_API_URL, defaultCreationApiURL, emptyConfig, readConfig, writeConfig } from "./config.js";
+
+// The CLI creates on the origin its own version selects (staging for a
+// `-staging.N` build, production for the plain build the release job derives),
+// so every creation expectation reads from the version under test.
+const creationOrigin = defaultCreationApiURL();
 
 const handle = "brave_cangoo.dev";
 const card = { handle, first_name: "Brave Canada Goose", last_name: null, image_url: null, is_active: true, kind: "agent" };
@@ -20,7 +25,7 @@ async function fixture() {
   });
   const deps = { configContext: { env, home }, skillPresent: async () => true, fetch: async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
-    expect(url.origin === "https://api.staging.relayapp.im" || url.hostname.endsWith(".staging.test")).toBe(true);
+    expect([creationOrigin, STAGING_API_URL].includes(url.origin) || url.hostname.endsWith(".staging.test")).toBe(true);
     return fetch(input, init);
   }, stdout: (s: string) => output.push(s), stderr: (s: string) => output.push(s) };
   return { deps, env, fetch, output, home };
@@ -100,7 +105,7 @@ describe("real program runtime handoff", { timeout: 120_000 }, () => {
     expect(output.join("")).not.toContain("unrelated-env-secret");
     env.RELAY_API_URL = "https://unrelated.staging.test";
     expect(await runCLI(["--profile", handle, "auth", "login", "--connect", "hermes", "--runtime-home", home, "--runtime-state-dir", join(home, "state"), ...confirmations], deps)).toBe(0);
-    expect((await readConfig(deps.configContext)).profiles[handle]?.api_url).toBe("https://api.staging.relayapp.im");
+    expect((await readConfig(deps.configContext)).profiles[handle]?.api_url).toBe(creationOrigin);
     expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
   it("existing-token login handoff binds an explicit new OpenClaw account without any POST", async () => {
@@ -148,15 +153,15 @@ it("does not delete on another origin if a profile changes during automatic iden
   expect((await readConfig(deps.configContext)).profiles.one?.agent_token).toBe("two-token");
 });
 
-it("new staging creation ignores a tokenless legacy production default without rewriting it", async () => {
+it("new creation ignores a tokenless legacy production default without rewriting it", async () => {
   const { deps, fetch } = await fixture();
   const legacy = emptyConfig();
   await writeConfig(legacy, deps.configContext);
   expect(await runCLI(["agents", "create", "--json"], deps)).toBe(0);
-  expect(String(fetch.mock.calls.find(([, init]) => init?.method === "POST")![0])).toBe("https://api.staging.relayapp.im/v1/agents");
+  expect(String(fetch.mock.calls.find(([, init]) => init?.method === "POST")![0])).toBe(`${creationOrigin}/v1/agents`);
   const after = await readConfig(deps.configContext);
   expect(after.profiles.default).toEqual(legacy.profiles.default);
-  expect(after.profiles[handle]?.api_url).toBe("https://api.staging.relayapp.im");
+  expect(after.profiles[handle]?.api_url).toBe(creationOrigin);
 });
 
 it("keeps exactly the three approved agents verbs and a version-aware creation origin", async () => {

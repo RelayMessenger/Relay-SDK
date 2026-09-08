@@ -4,11 +4,13 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type Relay from "@relaymessenger/sdk";
 import { createAgent, deleteAgent, listAgents, type AgentDependencies } from "./agents.js";
-import { emptyConfig, type RelayConfig, type ResolvedAuth } from "./config.js";
+import { defaultCreationApiURL, emptyConfig, type RelayConfig, type ResolvedAuth } from "./config.js";
 import { runCLI } from "./program.js";
 
 const privateContext = { env: { RELAY_CONFIG_PATH: join(mkdtempSync(join(tmpdir(), "relay-unit-config-")), "config.json") } };
 const secret = "one-time-secret-not-for-output";
+// Creation targets the origin the version under test selects (see config.ts).
+const creationOrigin = defaultCreationApiURL();
 const card = { handle: "brave_cangoo.dev", first_name: "Brave Canada Goose", last_name: null, image_url: null, is_active: true, kind: "agent" as const };
 const response = { agent: card, secret, share_url: "https://go.test/@brave_cangoo.dev" };
 function setup(initial: RelayConfig = emptyConfig()) {
@@ -31,7 +33,7 @@ describe("pure agent command handlers", () => {
   it("creates a named identity while preserving default and existing credentials", async () => {
     const test = setup();
     const result = await createAgent({}, test.deps);
-    expect(result).toEqual({ profile: card.handle, api_url: "https://api.staging.relayapp.im", agent: card, share_url: response.share_url, token: "stored" });
+    expect(result).toEqual({ profile: card.handle, api_url: creationOrigin, agent: card, share_url: response.share_url, token: "stored" });
     expect(JSON.stringify(result)).not.toContain(secret);
     expect(test.config().profiles[card.handle]?.agent_token).toBe(secret);
     expect(test.config().current_profile).toBe("default");
@@ -102,7 +104,7 @@ describe("agent CLI program", () => {
     const stdout: string[] = []; const stderr: string[] = [];
     const options = { agents: deps, configContext: privateContext, stdout: (s: string) => stdout.push(s), stderr: (s: string) => stderr.push(s) };
     expect(await runCLI(["--profile", "new-profile", "agents", "create", "--token-name", "Laptop", "--json"], options)).toBe(0);
-    expect(deps.bootstrap).toHaveBeenCalledWith({ token_name: "Laptop" }, { baseURL: "https://api.staging.relayapp.im", maxRetries: 0 });
+    expect(deps.bootstrap).toHaveBeenCalledWith({ token_name: "Laptop" }, { baseURL: creationOrigin, maxRetries: 0 });
     expect(await runCLI(["agents", "list", "--json"], options)).toBe(0);
     expect(await runCLI(["--profile", "default", "agents", "delete", card.handle, "--json"], options)).toBe(0);
     expect(stdout.join("")).not.toContain(secret);
