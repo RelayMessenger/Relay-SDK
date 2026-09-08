@@ -1,7 +1,7 @@
 // Native-platform, offline package proof. Linux callers must identify their Daytona sandbox.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir, platform, arch, release } from 'node:os';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,8 +26,12 @@ function run(command, args, options = {}) {
   return r.stdout ?? '';
 }
 // Invoking npm's JS entry point avoids Windows .cmd spawn limitations.
-const npmCli = process.env.npm_execpath;
-assert.ok(npmCli, 'Invoke with npm exec -- node scripts/agent-cli-platforms.mjs');
+const npmLocation = spawnSync(platform() === 'win32' ? 'where.exe' : 'which', ['npm'], { encoding: 'utf8' });
+assert.equal(npmLocation.status, 0, 'npm must already be installed');
+const npmBinary = npmLocation.stdout.trim().split(/\r?\n/)[0];
+const npmCli = process.env.npm_execpath ?? (platform() === 'win32'
+  ? join(dirname(npmBinary), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  : realpathSync(npmBinary));
 const npm = (args, options) => run(process.execPath, [npmCli, ...args], options);
 try {
   report.sha = run('git', ['rev-parse', 'HEAD']).trim();
