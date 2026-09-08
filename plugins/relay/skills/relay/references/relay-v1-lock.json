@@ -30,7 +30,7 @@
     "integrity": "sha512-wqg+3Cio8rxbRrqagknXKf7MChGwVEhQQJxXwSbl4H9gH42OkzhsAIZHBeCbsid+fB6uVZv5cF+JX5lghYxe2A=="
   },
   "docs_mcp": {
-    "url": "https://docs.staging.relayapp.im/mcp",
+    "url": "https://docs.relayapp.im/mcp",
     "role": "discovery",
     "authority": "Every result must agree with the locked OpenAPI before use."
   }

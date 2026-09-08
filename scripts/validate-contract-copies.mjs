@@ -31,6 +31,9 @@ assert.equal(skillLock.api.openapi_sha256, expected);
 assert.equal(skillLock.api.commit, "1a2245dd775f781b57e0d1f6f3146ebd384c90c3");
 assert.equal(skillLock.sdk.commit, "79517a1c9fcb1c82b474cd72ba8bc10197ff363f");
 assert.equal(skillLock.sdk.version, "0.3.1-staging.1");
+// The lock is what a customer's installed skill reads, on every branch, so its
+// docs address is the production one even while this branch targets staging.
+assert.equal(skillLock.docs_mcp.url, "https://docs.relayapp.im/mcp");
 
 // The skill lock is historical source provenance, not the moving workspace version.
 const sdkManifest = JSON.parse(await readFile(join(root, "packages/sdk/package.json"), "utf8"));

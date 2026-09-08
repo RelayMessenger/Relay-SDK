@@ -1136,17 +1136,6 @@
       "status": "canonicalized"
     },
     {
-      "destination": "packages/openclaw/contracts/relay-sdk-0.3.0-staging.4.registry.json",
-      "repository": "RelayMessenger/Relay-OpenClaw",
-      "commit": "ff013f2247adb9360ece63799874024c216d040c",
-      "source": "contracts/relay-sdk-0.3.0-staging.4.registry.json",
-      "source_sha256": "97302337835edde22192bdf84a20f7d37860b068c7130bf02aff457ba093c139",
-      "destination_sha256": "97302337835edde22192bdf84a20f7d37860b068c7130bf02aff457ba093c139",
-      "source_mode": "100644",
-      "destination_mode": "100644",
-      "status": "exact"
-    },
-    {
       "destination": "packages/openclaw/contracts/relay-v1.lock.json",
       "repository": "RelayMessenger/Relay-OpenClaw",
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
@@ -2043,7 +2032,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/relay-v1-lock.json",
       "source_sha256": "c18b70f1edfed7cfc6a396ed86c609e667975396d4c3ff57c00a49c0ad7e4ab4",
-      "destination_sha256": "85b935495f773b419a96c4c230082e93b55afadb2681024c2e7d30131b01f40b",
+      "destination_sha256": "169f18d10eec736013c194886e32dc74daf8fdacb0f80a4cc6bd2612aaff517e",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -3375,17 +3364,6 @@
       "source": "examples/message-attachment/tsconfig.json",
       "source_sha256": "4d099d2d35ac0d736a1a9faf332993510a79b8aae276dbbaf388129badf97599",
       "destination_sha256": "da4ac92f441a1c6699349f06f16819d7aeec472fda020dcd70a68309f4a5fe92",
-      "source_mode": "100644",
-      "destination_mode": "100644",
-      "status": "canonicalized"
-    },
-    {
-      "destination": "packages/openclaw/contracts/relay-sdk-0.3.0-staging.8.registry.json",
-      "repository": "RelayMessenger/Relay-OpenClaw",
-      "commit": "ff013f2247adb9360ece63799874024c216d040c",
-      "source": "contracts/relay-sdk-0.3.0-staging.4.registry.json",
-      "source_sha256": "97302337835edde22192bdf84a20f7d37860b068c7130bf02aff457ba093c139",
-      "destination_sha256": "0b5be614afacc187ad06110b304ddd3d5b6c99697d29a8215ad0097599309638",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
