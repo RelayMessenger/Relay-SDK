@@ -1,7 +1,7 @@
 // Native-platform, offline package proof. Linux callers must identify their Daytona sandbox.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, realpathSync, existsSync } from 'node:fs';
 import { tmpdir, platform, arch, release } from 'node:os';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,31 +36,38 @@ const npm = (args, options) => run(process.execPath, [npmCli, ...args], options)
 try {
   report.sha = run('git', ['rev-parse', 'HEAD']).trim();
   report.dirty = run('git', ['status', '--porcelain']).trim();
+  const packageNames = { sdk: '@relaymessenger/sdk', cli: 'relaymessenger' };
+  const cliManifest = JSON.parse(readFileSync(join(root, 'packages/cli/package.json')));
+  assert.equal(cliManifest.name, packageNames.cli, 'Final proof requires canonical relaymessenger, not a scoped wrapper');
+  assert.ok(cliManifest.bin?.relaymessenger, 'Canonical executable missing');
+  report.packageName = cliManifest.name;
+  report.packageVersion = cliManifest.version;
   report.validationFailures = [];
   for (const pkg of ['sdk', 'cli']) {
-    for (const task of ['check', 'build']) npm(['run', task, '--workspace', `@relaymessenger/${pkg}`]);
+    for (const task of ['check', 'build']) npm(['run', task, '--workspace', packageNames[pkg]]);
     // Keep the overall run red, but still collect independent installed-package evidence.
-    try { npm(['run', 'test', '--workspace', `@relaymessenger/${pkg}`]); }
+    try { npm(['run', 'test', '--workspace', packageNames[pkg]]); }
     catch (error) { report.validationFailures.push({ package: pkg, failure: error.message }); }
   }
   const packs = {};
   for (const pkg of ['sdk', 'cli']) {
-    const packed = JSON.parse(npm(['pack', '--workspace', `@relaymessenger/${pkg}`, '--ignore-scripts', '--json', '--pack-destination', scratch]));
+    const packed = JSON.parse(npm(['pack', '--workspace', packageNames[pkg], '--ignore-scripts', '--json', '--pack-destination', scratch]));
     packs[pkg] = join(scratch, packed[0].filename);
   }
   report.tarballSHA256 = Object.fromEntries(Object.entries(packs).map(([k,v]) => [k,createHash('sha256').update(readFileSync(v)).digest('hex')]));
   const consumer = join(scratch, 'consumer'); mkdirSync(consumer);
   writeFileSync(join(consumer, 'package.json'), JSON.stringify({ private: true }));
   npm(['install', '--ignore-scripts', '--no-audit', '--no-fund', packs.sdk, packs.cli], { cwd: consumer });
-  const bin = join(consumer, 'node_modules', '@relaymessenger', 'cli', 'dist', 'cli.js');
+  assert.ok(!existsSync(join(consumer, 'node_modules', '@relaymessenger', 'cli')), 'Retired scoped compatibility package must not be installed');
+  const bin = resolve(consumer, 'node_modules', packageNames.cli, cliManifest.bin.relaymessenger);
   const cli = (...args) => run(process.execPath, [bin, ...args], { cwd: consumer });
   const help = cli('--help');
   assert.match(help, /auth/);
   const hasAgentCommands = /^  agent(?:s)?[ \[]/m.test(help);
   report.agentCommands = hasAgentCommands ? 'available; tests pending below' : 'pending feature commits: no agent command in root help';
-  const expectedVersion = JSON.parse(readFileSync(join(root, 'packages/cli/package.json'))).version;
+  const expectedVersion = cliManifest.version;
   assert.equal(cli('--version').trim(), expectedVersion);
-  for (const executable of ['relay', 'relaymessenger']) {
+  for (const executable of Object.keys(cliManifest.bin)) {
     assert.equal(npm(['exec', '--offline', '--', executable, '--version'], { cwd: consumer }).trim(), expectedVersion);
   }
   cli('profiles', 'add', 'verification', '--api-url', 'http://127.0.0.1:1');
@@ -79,7 +86,9 @@ try {
   cli('profiles', 'use', 'default');
   cli('profiles', 'remove', 'verification');
   if (hasAgentCommands) {
-    assert.match(cli('agents', '--help'), /create/);
+    const agentHelp = cli('agents', '--help');
+    assert.match(agentHelp, /create/);
+    assert.doesNotMatch(agentHelp, /^\s+setup[ \[]/m, 'Owner approved exactly create/list/delete under agents');
     assert.match(cli('agents', 'create', '--help'), /token-name/);
     assert.match(cli('agents', 'delete', '--help'), /handle/);
     const inventory = JSON.parse(cli('agents', 'list', '--json'));

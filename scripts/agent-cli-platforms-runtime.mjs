@@ -153,14 +153,17 @@ try {
   const cliPack = join(temp, "cli-pack"); const consumer = join(temp, "consumer");
   mkdirSync(cliPack); mkdirSync(consumer);
   writeFileSync(join(consumer, "package.json"), JSON.stringify({ private: true, type: "module" }));
+  const cliManifest = JSON.parse(readFileSync(join(workspace, "packages/cli/package.json"), "utf8"));
+  assert.equal(cliManifest.name, "relaymessenger", "Use the canonical package, not a scoped compatibility wrapper");
   const archivesForCLI = [];
-  for (const name of ["sdk", "cli"]) {
-    const packed = JSON.parse(execFileSync(npm, ["pack", "--workspace", `@relaymessenger/${name}`, "--ignore-scripts", "--json", "--pack-destination", cliPack], { cwd: workspace, encoding: "utf8" }));
+  for (const name of ["@relaymessenger/sdk", "relaymessenger"]) {
+    const packed = JSON.parse(execFileSync(npm, ["pack", "--workspace", name, "--ignore-scripts", "--json", "--pack-destination", cliPack], { cwd: workspace, encoding: "utf8" }));
     archivesForCLI.push(join(cliPack, packed[0].filename));
   }
   receipt.tarballs = archivesForCLI.map(file => ({ name: file.split("/").at(-1), sha256: createHash("sha256").update(readFileSync(file)).digest("hex") }));
   execFileSync(npm, ["install", "--ignore-scripts", "--no-audit", "--no-fund", ...archivesForCLI], { cwd: consumer, stdio: "pipe" });
-  const cliBin = join(consumer, "node_modules/@relaymessenger/cli/dist/cli.js");
+  assert.equal(existsSync(join(consumer, "node_modules/@relaymessenger/cli")), false, "No retired scoped wrapper may be installed");
+  const cliBin = resolve(consumer, "node_modules/relaymessenger", cliManifest.bin.relaymessenger);
   const cliConfig = join(temp, "cli-config.json");
   for (const key of Object.keys(env)) if (key.startsWith("RELAY_")) delete env[key];
 
@@ -189,9 +192,10 @@ try {
         channels: {
           relay: {
             enabled: true,
+            // dispatch.ts uses the fixture Contact ID as the stable allowlist identity.
             defaultAccount: "work",
             accounts: {
-              work: { enabled: true, allowFrom: ["harness"] },
+              work: { enabled: true, allowFrom: ["00000000-0000-7000-8000-000000000013"] },
               other: { enabled: false, token: "synthetic-unrelated-account", allowFrom: ["other-fixture"] },
             },
           },
