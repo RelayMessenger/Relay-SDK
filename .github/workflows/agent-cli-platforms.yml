@@ -2,8 +2,10 @@ name: Agent CLI native platforms
 on:
   push:
     branches: [agent-cli-verification-20260908]
-    paths: ['scripts/agent-cli-platforms*', '.github/workflows/agent-cli-platforms.yml']
   workflow_dispatch:
+concurrency:
+  group: agent-cli-native-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
