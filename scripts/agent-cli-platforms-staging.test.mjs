@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { STAGING_ORIGIN, runOwnedSmoke } from './agent-cli-platforms-staging.mjs';
+import { STAGING_ORIGIN, runOwnedSmoke, canonicalRulesFromYaml } from './agent-cli-platforms-staging.mjs';
 const serverSha = 'a'.repeat(40);
 function fixtureServer({ uncertainSecond = false, cleanupConflict = false, permitForeignDelete = false, malformedCreate = false } = {}) {
   const calls = []; const identities = new Map(); let creates = 0;
@@ -80,4 +80,8 @@ test('default CLI is plan-only, and production-origin overrides are rejected', (
   assert.equal(plan.status,0); assert.equal(JSON.parse(plan.stdout).requestsSent,0);
   const invalid = spawnSync(process.execPath,[fileURLToPath(script),'--origin','https://api.relayapp.im'],{encoding:'utf8'});
   assert.notEqual(invalid.status,0);
+});
+
+test('stale or missing canonical operations fail closed before execution', () => {
+  assert.throws(() => canonicalRulesFromYaml('openapi: 3.1.0\npaths: {}\n'), /Canonical createAgent operation missing/);
 });

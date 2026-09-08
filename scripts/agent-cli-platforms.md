@@ -117,6 +117,7 @@ RELAY_DAYTONA_SANDBOX_ID=21b65902-6e9d-4d91-8857-63cbccebe8f9 \
 node scripts/agent-cli-platforms-staging.mjs --execute \
   --run-id verify-20260908-first \
   --server-sha "$DEPLOYED_SERVER_SHA" \
+  --canonical-spec /home/daytona/verification-canonical-openapi.yaml \
   --receipt /home/daytona/verification-receipts/staging-http-first.json \
   --private-state /home/daytona/.config/relay-verification/staging-http-first.json
 ```
@@ -131,3 +132,12 @@ to rerun blindly (the contract's bootstrap limit still applies).
 This HTTP proof does **not** claim final CLI `agents list` environment-isolation,
 installed package behavior, or runtime handoff. Those tests follow the delivered
 feature commands and native matrix against exact feature SHAs.
+
+The staging smoke requires `--canonical-spec` for live execution. Transfer
+main's exact canonical file from
+`_worktrees/agent-management-server-20260908/contracts/developer/openapi.yaml`
+to the above remote path; do not substitute an older SDK copy. Plan-only mode
+can also accept this flag to validate the declared operations/auth/body and
+record a SHA-256 without making requests. The live receipt preserves this
+canonical hash alongside harness git SHA/dirty state and main's declared
+deployment SHA. No canonical file is authored or edited by verification.

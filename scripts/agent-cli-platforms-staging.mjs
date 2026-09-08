@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, chmodSy
 import { dirname, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import YAML from 'yaml';
 export const STAGING_ORIGIN = 'https://api.staging.relayapp.im';
 export const PLAN = [
   'Create exactly two named test fixtures; never retry bootstrap',
@@ -15,7 +16,25 @@ export const PLAN = [
   'Delete only fixtures created by this run, once each; verify token revocation',
   'Retain private recovery state if cleanup is unconfirmed; never touch operator data',
 ];
-export async function runOwnedSmoke({ runId, serverSha, fetchImpl = fetch, saveReceipt = () => {}, savePrivate = () => {}, provenance = {} }) {
+export function canonicalRulesFromYaml(text) {
+  const spec = YAML.parse(text);
+  const create = spec?.paths?.['/v1/agents']?.post;
+  const remove = spec?.paths?.['/v1/agents/{handle}']?.delete;
+  const card = spec?.paths?.['/v1/contact_card']?.get;
+  assert.equal(create?.operationId, 'createAgent', 'Canonical createAgent operation missing');
+  assert.deepEqual(create.security, [], 'Canonical bootstrap must be explicitly unauthenticated');
+  assert.equal(remove?.operationId, 'deleteAgent', 'Canonical deleteAgent operation missing');
+  assert.deepEqual(remove.security, [{ BearerAuth: [] }], 'Canonical delete auth changed');
+  assert.equal(card?.operationId, 'getContactCard', 'Canonical Contact Card operation missing');
+  assert.ok(create.responses?.['201'] && remove.responses?.['204'] && remove.responses?.['401'] && remove.responses?.['403']);
+  const request = spec.components?.schemas?.CreateAgentRequest;
+  assert.equal(request?.additionalProperties, false, 'Canonical bootstrap body must remain strict');
+  const response = spec.components?.schemas?.CreateAgentResponse;
+  for (const key of ['agent','secret','share_url']) assert.ok(response?.required?.includes(key));
+  assert.equal(typeof response.properties?.secret?.pattern, 'string', 'Canonical token format missing');
+  return { secretPattern: response.properties.secret.pattern, tokenName: request.properties.token_name };
+}
+export async function runOwnedSmoke({ runId, serverSha, fetchImpl = fetch, saveReceipt = () => {}, savePrivate = () => {}, provenance = {}, canonicalRules }) {
   assert.match(runId, /^[a-z0-9][a-z0-9-]{0,39}$/);
   assert.match(serverSha, /^[a-f0-9]{40}$/);
   const fixtures = [];
@@ -61,6 +80,10 @@ export async function runOwnedSmoke({ runId, serverSha, fetchImpl = fetch, saveR
     persist(); // Prove recovery-state storage before minting anything.
     for (const suffix of ['a', 'b']) {
       const tokenName = `verification-agent-cli-${runId}-${suffix}`;
+      if (canonicalRules) {
+        assert.ok(tokenName.length >= canonicalRules.tokenName.minLength && tokenName.length <= canonicalRules.tokenName.maxLength);
+        assert.match(tokenName, new RegExp(canonicalRules.tokenName.pattern));
+      }
       receipt.uncertainCreations.push({ tokenName }); persist();
       const response = await request(`create-${suffix}`, 'POST', '/v1/agents', undefined, { token_name: tokenName });
       expectStatus(response, 201, `create-${suffix}`);
@@ -73,6 +96,7 @@ export async function runOwnedSmoke({ runId, serverSha, fetchImpl = fetch, saveR
       receipt.fixtures.push({ label: tokenName, handle: fixture.handle });
       receipt.uncertainCreations = receipt.uncertainCreations.filter(x => x.tokenName !== tokenName);
       persist();
+      if (canonicalRules) assert.ok(new RegExp(canonicalRules.secretPattern).test(body.secret), 'Bootstrap credential did not match canonical format');
       assert.match(response.headers.get('cache-control') ?? '', /\bno-store\b/, 'bootstrap must not be cached');
       assert.equal(body.agent.kind, 'agent'); assert.equal(body.agent.is_active, true);
       const share = new URL(body.share_url);
@@ -115,9 +139,17 @@ export async function runOwnedSmoke({ runId, serverSha, fetchImpl = fetch, saveR
 async function main() {
   const { values } = parseArgs({ options: {
     execute: { type: 'boolean', default: false }, 'run-id': { type: 'string' },
-    'server-sha': { type: 'string' }, receipt: { type: 'string' }, 'private-state': { type: 'string' },
+    'server-sha': { type: 'string' }, receipt: { type: 'string' }, 'private-state': { type: 'string' }, 'canonical-spec': { type: 'string' },
   } });
-  if (!values.execute) { console.log(JSON.stringify({ origin: STAGING_ORIGIN, requestsSent: 0, plan: PLAN }, null, 2)); return; }
+  let canonicalRules; let canonicalSpec;
+  if (values['canonical-spec']) {
+    const canonicalPath = resolve(values['canonical-spec']);
+    const raw = readFileSync(canonicalPath);
+    canonicalRules = canonicalRulesFromYaml(raw.toString('utf8'));
+    canonicalSpec = { path: canonicalPath, sha256: createHash('sha256').update(raw).digest('hex') };
+  }
+  if (!values.execute) { console.log(JSON.stringify({ origin: STAGING_ORIGIN, requestsSent: 0, canonicalSpec, plan: PLAN }, null, 2)); return; }
+  assert.ok(canonicalRules, "--canonical-spec must name main's supplied canonical file");
   assert.equal(process.platform, 'linux', 'Execute live proof only in Daytona');
   assert.ok(process.env.RELAY_DAYTONA_SANDBOX_ID, 'Owned Daytona sandbox ID is required');
   assert.ok(values.receipt && values['private-state'], 'Explicit receipt and private-state paths are required');
@@ -135,9 +167,9 @@ async function main() {
   const harnessSha = execFileSync('git', ['-C', sourceRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const harnessDirty = execFileSync('git', ['-C', sourceRoot, 'status', '--porcelain'], { encoding: 'utf8' }).trim();
   assert.match(harnessSha, /^[a-f0-9]{40}$/);
-  const provenance = { harnessSha, harnessDirty, scriptSHA256: createHash('sha256').update(readFileSync(scriptPath)).digest('hex'),
+  const provenance = { harnessSha, harnessDirty, canonicalSpec, scriptSHA256: createHash('sha256').update(readFileSync(scriptPath)).digest('hex'),
     platform: process.platform, arch: process.arch, node: process.version, sandbox: process.env.RELAY_DAYTONA_SANDBOX_ID, serverShaSource: 'deployment SHA supplied by main' };
-  const result = await runOwnedSmoke({ provenance, runId: values['run-id'], serverSha: values['server-sha'],
+  const result = await runOwnedSmoke({ provenance, canonicalRules, runId: values['run-id'], serverSha: values['server-sha'],
     saveReceipt: value => writeFileSync(receiptPath, JSON.stringify(value, null, 2)),
     savePrivate: value => {
       const temporary = `${privatePath}.${process.pid}.tmp`;
