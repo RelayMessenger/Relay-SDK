@@ -19,16 +19,20 @@ npm install --global relaymessenger@staging
 Node.js 22.22.3 or newer is required. `relaymessenger` is
 the canonical executable; `relay` is the shorter command alias.
 
-## Existing tokens
+## Agent Token authentication
 
 Use `agents create` for a new agent, or import an existing Agent Token. Tokens
-are accepted only from stdin,
-the `RELAY_AGENT_TOKEN` environment variable, or an owner-only local profile;
+can be entered through the private `auth login` prompt, read from stdin with
+`auth login --with-token`, supplied by `RELAY_AGENT_TOKEN` when present, or reused
+from the selected saved profile with `--connect`;
 there is deliberately no token command-line option.
 
 ```sh
-printf '%s' "$RELAY_AGENT_TOKEN" | relay token import --token-stdin --api-url https://api.staging.relayapp.im
-relay token status
+# Private prompt when RELAY_AGENT_TOKEN is not set:
+relay auth login --api-url https://api.staging.relayapp.im
+# Headless stdin:
+printf '%s' "$RELAY_AGENT_TOKEN" | relay auth login --with-token --api-url https://api.staging.relayapp.im
+relay auth status
 relay doctor
 ```
 
@@ -39,7 +43,7 @@ directory is mode `0700` and the file is mode `0600` on POSIX systems.
 relay profiles add staging --api-url https://api.staging.relayapp.im
 relay profiles use staging
 printf '%s' "$STAGING_RELAY_AGENT_TOKEN" |
-  relay token import --profile staging --token-stdin
+  relay auth login --profile staging --with-token
 relay profiles list
 ```
 
@@ -150,7 +154,7 @@ relay agents create --api-url https://api.staging.relayapp.im --connect hermes \
   --confirm-configure --runtime-stopped
 
 # Import into a staging profile via private stdin; no creation request.
-relay --profile staging token import --token-stdin --api-url https://api.staging.relayapp.im --connect openclaw \
+relay --profile staging auth login --with-token --api-url https://api.staging.relayapp.im --connect openclaw \
   --runtime-config /absolute/openclaw.json \
   --runtime-state-dir /absolute/openclaw-state --runtime-account my-agent \
   --confirm-configure --runtime-stopped
@@ -163,9 +167,9 @@ directory and `--runtime-context` for its session identifier. Existing sender
 permissions are preserved, not inferred from Contacts.
 
 Creation handoff reads the newly saved profile directly, ignoring unrelated ENV
-credentials. `token import --connect` without token-input flags reuses the selected saved profile
-and its origin, ignoring unrelated ENV credentials. Add `--token-stdin` or
-`--from-env` to import instead. Handoff validates the credential before saving
+credentials. `auth login --connect` without token-input flags reuses the selected saved profile
+and its origin, ignoring unrelated ENV credentials. Add `--with-token` to select stdin explicitly. Plain `auth login` uses
+`RELAY_AGENT_TOKEN` in headless environments or a hidden terminal prompt. Handoff validates the credential before saving
 an import and never falls back to creation.
 Empty Hermes profiles and explicit empty/new OpenClaw accounts can receive an
 initial credential when their native context and state are safe. Occupied
@@ -173,7 +177,7 @@ credentials, unknown secret references, and bound/corrupt state are not replaced
 
 Handoff output reports configuration status and `connected: false`: this command
 does not install, launch, stop, or test-connect a runtime. Start it using its native
-workflow. If handoff fails after creation, the token remains stored; use `token import --connect` with the existing token rather than creating another identity.
+workflow. If handoff fails after creation, the token remains stored; use `auth login --connect` with the existing token rather than creating another identity.
 
 ## Local event forwarding
 
