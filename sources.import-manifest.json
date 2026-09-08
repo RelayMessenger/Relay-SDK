@@ -1119,7 +1119,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "README.md",
       "source_sha256": "37378dff5e8813fa293b810e73bdae667c9b92610992b7b2917fad0a4a58dda2",
-      "destination_sha256": "c27b6a276bc4e38ac6da453aa03513b49e38bb4e8a7e8257d7e4f93bd22e6fe5",
+      "destination_sha256": "dec972f316523ee4f0d2326bdcf46f561ec37473f4865298f143a267674f1b79",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1163,7 +1163,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "harness/mock-relay-server.mjs",
       "source_sha256": "589317732fd49b9544cd8c49b048444e5f3757214189107ab95259e67315476c",
-      "destination_sha256": "d48b07afc34e7341ea8ea9736fbb49bc24e55f5cc45731169ff38fa5b22b1265",
+      "destination_sha256": "ac60b1a6a2f27738c639ba02020b396e95fa0a688d072c69380fa18d72d7d413",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1383,7 +1383,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "src/inbound.test.ts",
       "source_sha256": "d4e4933493e8968e5d62abaf244aea0143b7e5c712918f4d6c627164866b580d",
-      "destination_sha256": "3ebc278b9dfe5aa6b06a69a3e3d42a71997cbad7551ff7ba23971d63f3aa513a",
+      "destination_sha256": "a7fb2eeb225236b2b1f7031b738d05de6dd7ab73c8e1794dfed688aca36a92bd",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1394,10 +1394,10 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "src/inbound.ts",
       "source_sha256": "ffb3fe55b3e7e0a2f629a6df200026c10c7d5a265fc6cdce089802557e334a30",
-      "destination_sha256": "ffb3fe55b3e7e0a2f629a6df200026c10c7d5a265fc6cdce089802557e334a30",
+      "destination_sha256": "bf9dfe9c0e041d6dc57a4ff8672b2f7f3d96f412600d2b7bc32b4f5230bfdcd2",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/openclaw/src/ingress.test.ts",
