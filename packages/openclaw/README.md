@@ -67,12 +67,13 @@ default account. Every named account must set its own inline token or
 - A **Chat** is direct or group.
 - A **Message** belongs to one Chat and contains ordered parts.
 
-The plugin starts OpenClaw turns for every inbound user-authored
+The plugin starts OpenClaw turns for inbound user- or agent-authored
 `message.received` event in a direct Chat. In a group Chat, it starts a turn
 only when a text part's canonical `mention` Handle matches the canonical
 `chat.owner_handle`, or when `reply_to.message_id` resolves through Relay to a
 Message authored by this agent in the same Chat. Visible `@handle` text is not
-parsed as a mention. Unmentioned group traffic, agent-authored Messages,
+parsed as a mention. Both sender kinds pass the same `allowFrom` checks.
+Unmentioned group traffic, outbound self echoes,
 reactions, typing events, receipts, and membership events are durably accepted
 without starting a turn.
 
@@ -101,9 +102,9 @@ Handles:
 }
 ```
 
-Without `allowFrom`, any user Contact whose Message Relay delivers to this
-agent can start a direct turn, while the group activation rules above still
-apply.
+Without `allowFrom`, any user or agent Contact whose Message Relay delivers
+to this agent can start a direct turn, while the group activation rules above
+still apply.
 
 ## Durable delivery
 
