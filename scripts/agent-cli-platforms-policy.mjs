@@ -44,6 +44,9 @@ export function validateRunnerPolicy(source, text) {
         assert.equal(step.with?.ref, undefined); assert.equal(step.with?.repository, undefined);
       }
     }
+    if (step.run === 'node scripts/agent-cli-platforms-published.mjs') {
+      assert.equal(step.if, "github.ref == 'refs/heads/test/staging-e2e-cli-20260908'", 'Frozen audit must not gate future staging releases or other verification branches');
+    }
   }
   assert.doesNotMatch(text, /\bsecrets\s*[.[]/i, 'Native test workflow cannot load publication/deployment secrets');
 }
