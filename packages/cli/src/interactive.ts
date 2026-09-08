@@ -94,9 +94,9 @@ export async function chooseInteractiveCommand(
   if (action === "list") return [...prefix, "agents", "list"];
   if (action === "delete") {
     const inventory = await listAgents(deps);
-    const choices = inventory.agents.flatMap((row) => row.contact_cards?.filter((card) => card.kind === "agent").map((card) => ({
-      profile: row.profile, handle: card.handle, label: `${card.handle} · ${row.profile} · ${row.api_url}`,
-    })) ?? []);
+    const choices = inventory.agents.flatMap((row) => "handle" in row
+      ? [{ profile: row.profile, handle: row.handle, label: `${row.handle} · ${row.profile} · ${row.api_url}` }]
+      : []);
     if (!choices.length) { ui.info("No saved agents with an available Contact Card."); return undefined; }
     const selected = await ui.select("Select the agent to delete", choices.map((choice, index) => ({ value: String(index), label: choice.label })));
     const choice = choices[Number(selected)];

@@ -75,14 +75,14 @@ describe("saved-agent local image promotion", { timeout: 120_000 }, () => {
       "POST /v1/agents", "GET /v1/contact_card", "POST /v1/attachments", "PUT /fixture/upload", `GET /v1/attachments/${attachmentID}`, "PATCH /v1/contact_card",
     ]);
     const output = JSON.parse(f.out[0]!);
-    expect(output.agent.image_url).toBe(permanent.image_url); expect(output.image.status).toBe("updated");
+    expect(output.image_url).toBe(permanent.image_url); expect(output.agent).toBeUndefined(); expect(output.image.status).toBe("updated");
     expect(f.out.join("")).not.toContain(secret); expect(f.out.join("")).not.toContain("unrelated-env-identity");
   });
   it.each(["upload", "promotion", "pending"] as const)("retains identity/token and can retry existing image after %s failure without another bootstrap", async (failure) => {
     const f = await fixture(); f.setFailure(failure);
     expect(await runCLI(["agents", "create", "--image", f.path, "--json"], f.deps)).toBe(1);
     const partial = JSON.parse(f.out[0]!);
-    expect(partial.agent.handle).toBe(handle); expect(partial.token).toBe("stored"); expect(partial.image.status).toBe("incomplete");
+    expect(partial.handle).toBe(handle); expect(partial.token).toBe("stored"); expect(partial.image.status).toBe("incomplete");
     expect((await readConfig(f.deps.configContext)).profiles[handle]?.agent_token).toBe(secret);
     expect(f.out.join("")).not.toContain(secret);
     f.setFailure(undefined);
