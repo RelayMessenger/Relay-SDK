@@ -65,15 +65,15 @@
     "@chat-adapter/shared": "4.39.0"
   },
   "devDependencies": {
-    "@chat-adapter/state-memory": "4.39.0",
-    "@chat-adapter/tests": "4.39.0",
-    "@cloudflare/vitest-plugin": "1.1.2",
-    "@types/node": "26.4.0",
-    "@vitest/coverage-v8": "4.1.11",
+    "@chat-adapter/state-memory": "4.40.0",
+    "@chat-adapter/tests": "4.40.0",
+    "@cloudflare/vitest-plugin": "1.1.4",
+    "@types/node": "26.4.1",
+    "@vitest/coverage-v8": "5.0.0",
     "chat": "4.39.0",
     "typescript": "7.0.2",
-    "vitest": "4.1.11",
-    "wrangler": "4.127.1",
+    "vitest": "5.0.0",
+    "wrangler": "4.129.0",
     "yaml": "2.9.0"
   }
 }

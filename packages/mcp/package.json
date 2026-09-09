@@ -48,10 +48,10 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.0.0",
-    "@modelcontextprotocol/inspector": "2.4.0",
-    "@types/node": "^22.18.0",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.0"
+    "@modelcontextprotocol/inspector": "2.5.0",
+    "@types/node": "^26.4.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
   },
   "publishConfig": {
     "access": "public",
