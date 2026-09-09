@@ -51,6 +51,21 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
     expect(f.calls.filter((call) => call === "POST /v1/agents")).toHaveLength(1);
     expect(f.output.join("")).not.toMatch(/unrelated-env-token|rly_live_[A-Za-z0-9]{43}/u);
   });
+  it("draws the QR code once: the live view owns it when it opens, the create screen owns it otherwise", async () => {
+    // The owner saw two identical QR codes stacked in his terminal after
+    // `agents create` (2026-09-08): the create screen printed one, then the
+    // live view drew its own. Exactly one surface may draw it.
+    const qr = /[\u2580\u2584\u2588]/u; // half-block glyphs of a terminal QR
+    const live = await fixture();
+    live.terminalSession.mockImplementation(async () => exited);
+    expect(await runCLI(["agents", "create"], live.deps)).toBe(0);
+    expect(live.terminalSession).toHaveBeenCalledTimes(1);
+    expect(live.output.join("")).not.toMatch(qr);
+    const plain = await fixture();
+    expect(await runCLI(["--non-interactive", "agents", "create"], plain.deps)).toBe(0);
+    expect(plain.terminalSession).not.toHaveBeenCalled();
+    expect(plain.output.join("")).toMatch(qr);
+  });
   it.each([["--json"], ["--non-interactive"], []])("never opens a persistent session for scripted/JSON or nonTTY create %j", async (...flags) => {
     const f = await fixture();
     const args = flags as string[];
