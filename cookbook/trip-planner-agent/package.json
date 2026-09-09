@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.123.0",
+    "@anthropic-ai/sdk": "0.124.0",
     "@relaymessenger/sdk": "^0.3.0-staging.0"
   },
   "devDependencies": {
