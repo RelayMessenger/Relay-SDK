@@ -302,8 +302,11 @@ async function verifyRegistry() {
         join(installedRoot, smoke.run.entry),
         ...smoke.run.args,
       ], { cwd: temp, encoding: "utf8" });
+      // Commander wraps long descriptions at the terminal width (80 columns
+      // in CI), so compare with whitespace collapsed on both sides.
+      const collapse = (text) => text.replace(/\s+/gu, " ").trim();
       assert.ok(
-        output.includes(smoke.run.expect),
+        collapse(output).includes(collapse(smoke.run.expect)),
         `${smoke.run.entry} ${smoke.run.args.join(" ")} did not print ${
           JSON.stringify(smoke.run.expect)
         }:\n${output}`,
