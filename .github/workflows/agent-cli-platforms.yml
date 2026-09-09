@@ -39,7 +39,7 @@ jobs:
       - name: Verify the owner-frozen staging release
         if: github.ref == 'refs/heads/test/staging-e2e-cli-20260908'
         run: node scripts/agent-cli-platforms-published.mjs
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: agent-cli-${{ matrix.os }}-${{ github.sha }}
