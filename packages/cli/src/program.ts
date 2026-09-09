@@ -178,10 +178,14 @@ export const createProgram = (
       || (action.parent?.name() === "auth" && action.name() === "login"))) await dependencies.beforeSetup();
   });
   const agentDeps = dependencies.agents ?? agentDependencies(configContext, dependencies.fetch);
-  const showSavedAgent = async (command: Command, input: AgentSessionInput): Promise<void> => {
-    const enabled = !globals(command).json && !globals(command).nonInteractive && dependencies.isInteractive === true
+  // The live view draws the QR code itself, so a caller that will open it must
+  // not print a second copy first (the owner saw two identical codes stacked
+  // in the terminal, 2026-09-08).
+  const willShowSavedAgent = (command: Command): boolean =>
+    !globals(command).json && !globals(command).nonInteractive && dependencies.isInteractive === true
       && (dependencies.terminalSession !== undefined || dependencies.terminalIO !== undefined || Boolean(process.stdin.isTTY && process.stderr.isTTY));
-    if (!enabled) return;
+  const showSavedAgent = async (command: Command, input: AgentSessionInput): Promise<void> => {
+    if (!willShowSavedAgent(command)) return;
     try {
       await openSavedAgentSession(input, {
         agents: agentDeps,
@@ -259,12 +263,15 @@ export const createProgram = (
       if (globals(command).json) output({ ...result, ...(imageUpdate ? { image: imageUpdate } : {}), ...(connectResult ? { connect: connectResult } : {}) });
       else {
         stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\n`);
-        // Loaded only for the printed screen; the QR code holds the public link, never the token.
-        const qr = createRequire(import.meta.url)("qrcode") as {
-          toString(text: string, options: { type: "terminal"; small: boolean }): Promise<string>;
-        };
-        try { stdout(await qr.toString(result.share_url, { type: "terminal", small: true })); }
-        catch { stderr("Relay could not draw the QR code. Use the link above instead.\n"); }
+        const liveViewFollows = imageUpdate?.status !== "incomplete" && (!connectResult || connectResult.status === "configured") && willShowSavedAgent(command);
+        if (!liveViewFollows) {
+          // Loaded only for the printed screen; the QR code holds the public link, never the token.
+          const qr = createRequire(import.meta.url)("qrcode") as {
+            toString(text: string, options: { type: "terminal"; small: boolean }): Promise<string>;
+          };
+          try { stdout(await qr.toString(result.share_url, { type: "terminal", small: true })); }
+          catch { stderr("Relay could not draw the QR code. Use the link above instead.\n"); }
+        }
         if (imageUpdate?.status === "incomplete") output({ image: imageUpdate });
         if (connectResult) output({ connect: connectResult });
       }
