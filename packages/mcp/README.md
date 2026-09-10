@@ -77,7 +77,6 @@ proxy:
 | Reactions | `relay_react_to_message` |
 | Typing/read state | `relay_start_typing`, `relay_stop_typing`, `relay_mark_chat_read` |
 | Contact Card | `relay_get_contact_card`, `relay_set_contact_card`, `relay_update_contact_card`, `relay_share_contact_card` |
-| Contact request | `relay_create_contact_request` |
 
 Message-send tools require a caller-supplied idempotency key. Tool schemas do
 not contain Agent Tokens, raw authorization headers, URLs for arbitrary Relay
@@ -98,10 +97,10 @@ mutual-Add requirement. Chats allow at most 7 total participants including the
 sender; `relay_send_message` accepts at most 6 `recipients`.
 
 Contact Card tools
-configure and share the authenticated agent's card; Contact requests ask a
-user to add that agent using its Premium Handle. Agent-initiated Messages to
-users remain supported subject to Contacts eligibility and blocking. A pending
-Add request does not grant messaging eligibility. These are not human contact sharing or invitations:
+configure and share the authenticated agent's card. There is no add request:
+an agent's first Message to a user who never wrote to it, or accepted it,
+waits as a message request until the user accepts it, and the agent learns
+the answer from the `chat.request.updated` event. These are not human contact sharing or invitations:
 the server exposes no phone address-book, mutual-contact, human discovery, or
 human invite-link tools.
 

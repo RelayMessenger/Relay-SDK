@@ -21,7 +21,6 @@ const fakeRelay = () => {
       message: { id: MESSAGE_ID },
     })),
     react: vi.fn(async () => ({ status: "accepted" })),
-    requestContact: vi.fn(async () => ({ state: "pending" })),
     shareCard: vi.fn(async () => undefined),
     sendToUser: vi.fn(async () => ({ chat_id: CHAT_ID })),
   };
@@ -32,7 +31,6 @@ const fakeRelay = () => {
       shareContactCard: calls.shareCard,
     },
     messages: { addReaction: calls.react, create: calls.sendToUser },
-    contactRequests: { create: calls.requestContact },
   } as unknown as Relay;
   return { client, calls };
 };
@@ -69,7 +67,6 @@ describe("explicit Relay MCP tools", () => {
     const client = await connect(fake.client);
     const tools = (await client.listTools()).tools;
     expect(tools.map((tool) => tool.name).sort()).toEqual([
-      "relay_create_contact_request",
       "relay_get_chat",
       "relay_get_contact_card",
       "relay_get_message",
@@ -153,7 +150,7 @@ describe("explicit Relay MCP tools", () => {
     expect(fake.calls.react).not.toHaveBeenCalled();
   });
 
-  it("preserves agent card sharing, add requests, and Messages to an eligible user", async () => {
+  it("preserves agent card sharing and Messages to an eligible user", async () => {
     const fake = fakeRelay();
     const client = await connect(fake.client);
     const shared = await client.callTool({
@@ -162,13 +159,6 @@ describe("explicit Relay MCP tools", () => {
     });
     expect(shared.isError).not.toBe(true);
     expect(fake.calls.shareCard).toHaveBeenCalledWith(CHAT_ID);
-
-    const requested = await client.callTool({
-      name: "relay_create_contact_request",
-      arguments: { handle: "advait" },
-    });
-    expect(requested.isError).not.toBe(true);
-    expect(fake.calls.requestContact).toHaveBeenCalledWith({ handle: "advait" });
 
     const sent = await client.callTool({
       name: "relay_send_message",
@@ -197,8 +187,7 @@ describe("explicit Relay MCP tools", () => {
       .toContain("Creating or reusing a user-containing Chat requires every agent to be that user's added, unblocked Contact");
     expect(tools.find((entry) => entry.name === "relay_send_message_to_chat")!.description)
       .toContain("Existing membership and messaging rules apply");
-    expect(tools.find((entry) => entry.name === "relay_create_contact_request")!.description)
-      .toContain("A pending Add request does not grant messaging eligibility");
+    expect(tools.some((entry) => /contact_request|add_request/i.test(entry.name))).toBe(false);
     expect(tools.some((entry) => /approval|mutual|policy/i.test(entry.name))).toBe(false);
   });
 
@@ -218,7 +207,6 @@ describe("explicit Relay MCP tools", () => {
         idempotency_key: "agent-only-1",
       },
     });
-    expect(fake.calls.requestContact).not.toHaveBeenCalled();
   });
 
   it("accepts six recipients and rejects seven before sending", async () => {
@@ -251,7 +239,6 @@ describe("explicit Relay MCP tools", () => {
     });
     expect(rejected.isError).toBe(true);
     expect(fake.calls.sendToUser).toHaveBeenCalledOnce();
-    expect(fake.calls.requestContact).not.toHaveBeenCalled();
   });
 
   it("redacts Agent Tokens from tool failures", async () => {

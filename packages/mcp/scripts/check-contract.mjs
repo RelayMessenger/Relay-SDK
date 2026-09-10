@@ -34,7 +34,7 @@ assert.equal(
   expected,
   "The SDK v1 operation contract changed; review the public contract before refreshing this hash.",
 );
-assert.equal(RELAY_V1_OPERATIONS.length, 38);
+assert.equal(RELAY_V1_OPERATIONS.length, 37);
 assert.match(sdkTypes, /\bimage_url: string \| null;/u);
 assert.match(sdkTypes, /\babout: string \| null;/u);
 assert.doesNotMatch(sdkTypes, /\bavatar_url\b/u);
