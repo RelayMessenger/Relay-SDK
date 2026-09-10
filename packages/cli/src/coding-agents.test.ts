@@ -104,4 +104,5 @@ it("the composed plan counts every step of every chosen agent", () => {
   expect(plan.agents.map((entry) => entry.agent)).toEqual(["claude-code", "cursor", "hermes"]);
   expect(plan.steps.length).toBe(1 + 4 + 1 + 3);
   expect(codingAgent("cursor").label).toBe("Cursor");
+  expect(runtimeConnectPlan({ ...context(), agents: ["cursor"] }).headline).toBe("Relay will do 1 thing. Continue?");
 });

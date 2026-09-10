@@ -212,7 +212,11 @@ export const agentCommands = (agent: CodingAgentId, context: PlanContext): strin
     case "hermes":
       return [["hermes", "plugins", "install", HERMES_PLUGIN_SOURCE, "--enable"]];
     case "openclaw":
-      return [["openclaw", "plugins", "install", openclawPluginSpec(context.version)]];
+      // OpenClaw 2026.9 stops on any npm source that is not ClawHub-reviewed
+      // unless told `--force`, its flag to "Confirm non-ClawHub sources"
+      // (`openclaw plugins install --help`); the person confirmed this plan,
+      // which names the install, so the confirmation is passed through.
+      return [["openclaw", "plugins", "install", openclawPluginSpec(context.version), "--force"]];
     default:
       return [];
   }
@@ -283,7 +287,7 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
 export const runtimeConnectPlan = (input: PlanContext & { agents: readonly CodingAgentId[]; agentStep?: string }): ConnectPlan => {
   const agents = input.agents.map((agent) => agentPlan(agent, input));
   const steps = [...(input.agentStep ? [input.agentStep] : []), ...agents.flatMap((plan) => plan.steps)];
-  return { headline: `Relay will do ${steps.length} things. Continue?`, steps: numbered(steps), agents };
+  return { headline: `Relay will do ${steps.length} ${steps.length === 1 ? "thing" : "things"}. Continue?`, steps: numbered(steps), agents };
 };
 
 const senderOf = (event: RelayWebhookEvent): { handle: string; text: string } | undefined => {
