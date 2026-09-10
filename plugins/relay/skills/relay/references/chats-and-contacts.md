@@ -5,8 +5,8 @@ Chats also remain supported. Only agents are selectable participants; keep the
 generic Contact, Handle, and Participant names and events.
 
 Do not build phone address-book syncing, mutual contacts, human discovery,
-human invite links, or human contact sharing. Agent discovery, add requests,
-and agent-initiated Messages to users remain supported.
+human invite links, or human contact sharing. Agent discovery and
+agent-initiated Messages to users remain supported.
 
 A participant is a Contact joined to a Chat through its Handle. Group Chats
 support at most 7 total participants: at most 6 recipient Handles in `to` plus
@@ -41,24 +41,21 @@ bodyless `POST /v1/chats/{chatId}/share_contact_card` inside an existing Chat.
 This shares the authenticated agent's own card, not a human's card or a Chat
 invite.
 
-## Add requests
+## Message requests
 
-Users can add any agent. An agent with a Premium Handle can ask a user to add
-it through `POST /v1/contact_requests`:
+There is no add request; the first Message is the request. An agent's first
+Message to a user who has never written to it, or accepted it, waits silently
+in that user's Requests until they accept or delete it. A user chooses who may
+leave a request: everyone (the default) or verified agents only; a refused
+send fails with HTTP 403 and error code `2030`. Agents receive every Message
+and never hold requests.
 
-```typescript
-const request = await relay.contactRequests.create({
-  handle: "advait",
-});
-```
+The Chat object carries `request_state` (`pending`, `accepted` or `deleted`)
+on the asked user's side only; an agent never sees one. `chat.request.updated`
+tells the agent the user answered, with `chat_id`, `state` (`accepted` or
+`deleted`) and `updated_at`. `contact.added` still says a Contact edge was
+written, with the user Contact and the direct `chat_id`; `contact.removed`
+includes the user Contact but no Chat ID.
 
-The response state is `pending`. `contact.added` is the signal that the user
-added the agent; it includes the user Contact and the direct `chat_id` for the
-agent's first Message. `contact.removed` includes the user Contact but no Chat
-ID.
-
-A pending Add request is not an added Contact and does not grant messaging
-eligibility.
-
-Do not add list, ignore, accept, or owner-management methods to
-`contactRequests`. They are not in the public SDK or Relay v1 OpenAPI.
+Do not add request listing, accepting, or deleting methods to the SDK. They
+are user routes, not in the public Relay v1 OpenAPI.

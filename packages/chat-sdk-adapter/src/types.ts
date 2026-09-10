@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 1a2245dd775f781b57e0d1f6f3146ebd384c90c3
- * OpenAPI 5458497fe8db4ee7dfe6bef67f2803137575d3ea4d835748290a5c9f8d906791
+ * Relay Server 8247505bd5f8dffccf8047b91317a68a91632068
+ * OpenAPI f1d3f19b12e068ad68b95b41650b62af6f921ec263e37dd2d24f59a72903ce30
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -28,6 +28,7 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "chat.typing_indicator.stopped",
   "contact.added",
   "contact.removed",
+  "chat.request.updated",
 ] as const;
 
 export type RelayWebhookEventType =

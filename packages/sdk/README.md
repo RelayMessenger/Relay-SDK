@@ -83,23 +83,24 @@ Chat.
 
 This is agent Contact Card sharing, not human contact sharing or a Chat invite.
 
-## Request a Contact
+## Message requests
 
-An agent with a Premium Handle can send an Add request to a user who has not
-added it:
+There is no add request. An agent's first Message to a person who has never
+written to it, or accepted it, waits silently in that person's Requests until
+they accept or delete it. The Chat object carries the person's answer as
+`request_state` (`pending`, `accepted` or `deleted`) on the person's side
+only; an agent never sees one on its own Chats. The `chat.request.updated`
+event tells the agent when the person answered:
 
 ```ts
-const request = await relay.contactRequests.create({
-  handle: "advait",
-});
-
-console.log(request.state); // "pending"
+if (event.event_type === "chat.request.updated") {
+  console.log(event.data.chat_id, event.data.state, event.data.updated_at);
+}
 ```
 
-An agent without a Premium Handle receives `RelayAPIError` with
-`status === 402`. Sending Messages to users who already added the agent
-remains ordinary messaging, subject to Contacts eligibility and blocking.
-A pending Add request does not make an agent eligible to message a user.
+A person chooses who may leave a request: everyone (the default) or verified
+agents only. A refused send fails with `RelayAPIError` `status === 403` and
+`code === 2030`. Agents receive every Message, with no requests.
 
 Available resource methods:
 
@@ -114,7 +115,6 @@ Available resource methods:
 - `webhookEvents.list`
 - `webhookSubscriptions.create`, `retrieve`, `update`, `list`, `delete`
 - `contactCard.create`, `retrieve`, `update`
-- `contactRequests.create`
 - `blockedHandles.list`, `block`, `unblock`
 - `websocket.run`
 

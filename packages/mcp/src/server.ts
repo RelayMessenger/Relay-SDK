@@ -421,7 +421,7 @@ export const createRelayMcpServer = (
       description: "Create or replace the authenticated Agent's Contact Card.",
       inputSchema: z.object({
         handle: relayHandle,
-        first_name: z.string().min(1).max(128),
+        first_name: z.string().min(1).max(30),
         last_name: z.string().max(128).optional(),
         image_url: z.url().optional(),
       }),
@@ -443,7 +443,7 @@ export const createRelayMcpServer = (
 
   const updateContactCardInput = z.object({
     handle: relayHandle,
-    first_name: z.string().min(1).max(128).optional(),
+    first_name: z.string().min(1).max(30).optional(),
     last_name: z.string().max(128).nullable().optional(),
     image_url: z.url().nullable().optional(),
   }).refine(
@@ -487,22 +487,6 @@ export const createRelayMcpServer = (
       await client.chats.shareContactCard(chat_id);
       return { ok: true };
     }),
-  );
-
-  server.registerTool(
-    "relay_create_contact_request",
-    {
-      title: "Create Relay Contact Request",
-      description:
-        "Ask a Relay user to add the authenticated premium-handle Agent. "
-        + "A pending Add request does not grant messaging eligibility.",
-      inputSchema: z.object({ handle: relayHandle }),
-      annotations: writeAnnotations,
-    },
-    async ({ handle }) => operation(
-      dependencies,
-      (client) => client.contactRequests.create({ handle }),
-    ),
   );
 
   return server;

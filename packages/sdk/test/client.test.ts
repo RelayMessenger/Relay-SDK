@@ -109,54 +109,6 @@ describe("Relay transport", () => {
     });
   });
 
-  it("uses RelayAPIError for paid-agent HTTP 402 responses", async () => {
-    const client = new Relay({
-      apiKey: "free-agent-token",
-      maxRetries: 3,
-      retryBaseDelayMs: 0,
-      fetch: async () => Response.json({
-        error: {
-          status: 402,
-          code: 2402,
-          message: "A paid Handle is required to Add a user first.",
-          doc_url: "https://docs.relayapp.im/errors/paid-handle-required",
-        },
-        trace_id: "trace-paid-handle-required",
-      }, { status: 402 }),
-    });
-
-    const error = await client.contactRequests
-      .create({ handle: "advait" })
-      .catch((value: unknown) => value);
-    expect(error).toBeInstanceOf(RelayAPIError);
-    expect(error).toMatchObject({
-      status: 402,
-      code: 2402,
-      traceId: "trace-paid-handle-required",
-      docURL: "https://docs.relayapp.im/errors/paid-handle-required",
-      retryable: false,
-    });
-  });
-
-  it("does not retry Add requests", async () => {
-    let calls = 0;
-    const client = new Relay({
-      apiKey: "paid-agent-token",
-      maxRetries: 3,
-      retryBaseDelayMs: 0,
-      fetch: async () => {
-        calls += 1;
-        return Response.json(
-          { error: { message: "later" } },
-          { status: 503 },
-        );
-      },
-    });
-    await expect(client.contactRequests.create({ handle: "advait" }))
-      .rejects.toBeInstanceOf(RelayAPIError);
-    expect(calls).toBe(1);
-  });
-
   it("uploads raw bytes without Relay authorization", async () => {
     const bytes = new Uint8Array([1, 2, 3]);
     let captured: { input: string; init?: RequestInit } | undefined;

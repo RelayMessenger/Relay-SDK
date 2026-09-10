@@ -6,6 +6,7 @@ import Relay, {
   RELAY_WEBHOOK_EVENT_TYPES,
   WebhookVerificationError,
   verifyWebhookSignature,
+  type ChatRequestUpdatedWebhookEvent,
   type ContactAddedWebhookEvent,
   type ContactRemovedWebhookEvent,
   type MessageEditedWebhook,
@@ -86,6 +87,29 @@ describe("Standard Webhooks", () => {
     expect(() =>
       verifyWebhookSignature(secret, `${body} `, headers)
     ).toThrow(WebhookVerificationError);
+  });
+
+  it("verifies and unwraps a typed chat.request.updated fixture", () => {
+    const secret = `whsec_${Buffer.alloc(32, 7).toString("base64")}`;
+    const client = new Relay({ apiKey: "token", webhookSecret: secret });
+    const updated = fixture<ChatRequestUpdatedWebhookEvent>("chat.request.updated");
+    const body = JSON.stringify(updated);
+    const unwrapped = client.webhooks.unwrap<ChatRequestUpdatedWebhookEvent>(
+      body,
+      { headers: signedHeaders(secret, updated, body) },
+    );
+    expect(unwrapped.event_type).toBe("chat.request.updated");
+    expect(unwrapped.data).toEqual({
+      chat_id: "01993d50-b4ce-71e6-8e65-35d325d95de0",
+      state: "accepted",
+      updated_at: "2026-09-09T21:40:00.000Z",
+    });
+    const narrowed: RelayWebhookEvent = unwrapped;
+    if (narrowed.event_type === "chat.request.updated") {
+      const state: "accepted" | "deleted" = narrowed.data.state;
+      expect(state).toBe("accepted");
+    }
+    expect(RELAY_WEBHOOK_EVENT_TYPES).toContain("chat.request.updated");
   });
 
   it("verifies and unwraps typed contact.added and contact.removed fixtures", () => {

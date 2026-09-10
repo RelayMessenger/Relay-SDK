@@ -31,9 +31,8 @@ try {
   assert.equal(client.getProtocolEra(), "modern");
   assert.match(client.getNegotiatedProtocolVersion() ?? "", /^2026-/);
   const listed = await client.listTools();
-  assert.equal(listed.tools.length, 16);
+  assert.equal(listed.tools.length, 15);
   assert.ok(listed.tools.some((tool) => tool.name === "relay_send_message"));
-  assert.ok(listed.tools.some((tool) => tool.name === "relay_create_contact_request"));
   assert.equal(
     listed.tools.some((tool) =>
       JSON.stringify(tool.inputSchema).toLowerCase().includes("token")),

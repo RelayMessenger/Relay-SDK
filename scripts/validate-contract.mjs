@@ -35,9 +35,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "1a2245dd775f781b57e0d1f6f3146ebd384c90c3",
+    commit: "8247505bd5f8dffccf8047b91317a68a91632068",
     path: "contracts/developer/openapi.yaml",
-    sha256: "5458497fe8db4ee7dfe6bef67f2803137575d3ea4d835748290a5c9f8d906791",
+    sha256: "f1d3f19b12e068ad68b95b41650b62af6f921ec263e37dd2d24f59a72903ce30",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -88,7 +88,6 @@ const allowedOperationSignatures = [
   "GET /v1/contact_card",
   "POST /v1/contact_card",
   "PATCH /v1/contact_card",
-  "POST /v1/contact_requests",
 ];
 const forbiddenPathPrefixes = [
   "/v1/me/",
@@ -99,14 +98,14 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 38);
-assert.equal(manifest.path_count, 23);
-assert.equal(manifest.source_path_count, 24);
+assert.equal(manifest.operation_count, 37);
+assert.equal(manifest.path_count, 22);
+assert.equal(manifest.source_path_count, 23);
 assert.equal(manifest.source_schema_count, 119);
-assert.equal(manifest.callback_count, 18);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 23);
-assert.equal(operationJSON.length, 38);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 18);
+assert.equal(manifest.callback_count, 19);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 22);
+assert.equal(operationJSON.length, 37);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
@@ -171,15 +170,10 @@ assert.ok(operationJSON.some((operation) =>
   && operation.method === "DELETE"));
 assert.equal(operationJSON.some((operation) =>
   operation.path === "/v1/websocket-connections"), false);
-assert.deepEqual(
-  operationJSON.filter((operation) =>
-    operation.path === "/v1/contact_requests"),
-  [{
-    method: "POST",
-    path: "/v1/contact_requests",
-    operationId: "createContactRequest",
-  }],
-  "Only the public Agent Add-request operation belongs in the SDK",
+assert.equal(
+  operationJSON.some((operation) => operation.path === "/v1/contact_requests"),
+  false,
+  "add requests are gone; the first Message is the request",
 );
 for (const unsupported of [
   "/v1/broadcasts",
@@ -208,7 +202,6 @@ assert.deepEqual(Object.keys(client).sort(), [
   "blockedHandles",
   "chats",
   "contactCard",
-  "contactRequests",
   "messages",
   "webhookEvents",
   "webhookSubscriptions",
@@ -258,7 +251,6 @@ assert.deepEqual(publicMethods(client.contactCard), [
   "retrieve",
   "update",
 ]);
-assert.deepEqual(publicMethods(client.contactRequests), ["create"]);
 assert.deepEqual(publicMethods(client.blockedHandles), [
   "block",
   "list",
@@ -315,7 +307,7 @@ const validateOpenAPI = () => {
   assert.deepEqual(Object.keys(createParams.properties), ["token_name", "handle", "first_name", "image_url", "image_recipe"]);
   assert.deepEqual(createParams.dependentRequired, { image_recipe: ["image_url"] });
   assert.equal(createParams.properties.handle.pattern, "^[a-z][a-z0-9_]{2,31}\\.dev$");
-  assert.equal(createParams.properties.first_name.maxLength, 255);
+  assert.equal(createParams.properties.first_name.maxLength, 30);
   assert.equal(createParams.properties.image_recipe.$ref, "#/components/schemas/AgentImageRecipe");
   assert.equal(document.components.schemas.AgentImageRecipe.oneOf.length, 3);
   assert.deepEqual(document.components.schemas.AgentImageBackground.properties.linearGradient.properties.colors.enum, [
@@ -371,11 +363,11 @@ const validateOpenAPI = () => {
   );
   assert.match(
     document.paths["/v1/chats/{chatId}/participants"].post.description,
-    /target agent and any acting agent/u,
+    /target agent must not be blocked by, or have blocked, that user/u,
   );
   assert.match(
     document.paths["/v1/chats/{chatId}/participants"].delete.description,
-    /acting agent must remain an added, unblocked Contact/u,
+    /Any active member may remove one/u,
   );
   assert.match(
     document.paths["/v1/chats/{chatId}/leave"].post.description,
@@ -579,23 +571,15 @@ const validateOpenAPI = () => {
       `ChatHandle.${privateField} must not enter the SDK`,
     );
   }
+  assert.equal("/v1/contact_requests" in document.paths, false);
+  assert.equal("CreateContactRequest" in document.components.schemas, false);
+  assert.equal("CreateContactRequestResult" in document.components.schemas, false);
   assert.deepEqual(
-    document.components.schemas.CreateContactRequest.required,
-    ["handle"],
+    document.components.schemas.Chat.properties.request_state.enum,
+    ["pending", "accepted", "deleted"],
   );
-  assert.equal(
-    document.components.schemas.CreateContactRequest.additionalProperties,
-    false,
-  );
-  assert.deepEqual(
-    Object.keys(document.components.schemas.CreateContactRequest.properties),
-    ["handle"],
-  );
-  assert.deepEqual(
-    document.paths["/v1/contact_requests"].post.parameters ?? [],
-    [],
-    "Contact requests must not advertise idempotency",
-  );
+  assert.equal(document.components.schemas.Chat.required.includes("request_state"), false);
+  assert.match(declaredTypes, /request_state\?: ChatRequestState;/u);
   for (const path of [
     "/v1/chats",
     "/v1/messages",
@@ -630,13 +614,17 @@ const validateOpenAPI = () => {
     255,
   );
   assert.deepEqual(
-    document.components.schemas.CreateContactRequestResult
-      .properties.state.enum,
-    ["pending"],
+    document.components.schemas.ChatRequestUpdatedEvent.required,
+    ["chat_id", "state", "updated_at"],
   );
-  assert.ok(
-    document.paths["/v1/contact_requests"].post.responses["402"],
-    "Contact requests must expose paid-agent HTTP 402 behavior",
+  assert.deepEqual(
+    document.components.schemas.ChatRequestUpdatedEvent.properties.state.enum,
+    ["accepted", "deleted"],
+  );
+  assert.equal(
+    document["x-relay-webhooks"]["chat.request.updated.v2026-08-30"].post
+      .requestBody.content["application/json"].schema.$ref,
+    "#/components/schemas/ChatRequestUpdatedWebhook",
   );
   assert.deepEqual(
     document.components.schemas.ContactAddedEvent.required,

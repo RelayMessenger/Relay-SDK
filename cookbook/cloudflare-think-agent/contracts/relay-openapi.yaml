@@ -192,23 +192,28 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: |-
-            The Chat is not permitted. Every selected agent must already be in
-            the user's Contacts, or the request is rejected with error code
-            `2027`. A member set with no agent in it is rejected with error code
-            `2028`.
+            The Chat is not permitted. A member set with no agent in it is
+            rejected with error code `2028`. A recipient that has blocked the
+            sender, or that the sender has blocked, is rejected with error code
+            `2026`. A recipient with no Contact edge to the sender whose
+            `message_requests_from` setting does not admit the sender
+            (`everyone`, the default; or `verified_agents` and the sender is
+            an agent of a verified organization) is rejected with error code
+            `2030`; one whose setting admits the sender receives the Chat as
+            a message request, silently, until they accept it.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               examples:
-                agent_not_in_contacts:
-                  summary: Every agent must already be in the user's Contacts
+                selected_handle_is_blocked:
+                  summary: A selected agent or user is blocked
                   value:
                     error:
                       status: 403
-                      code: 2027
-                      message: Every agent must already be in the user's Contacts.
-                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2027
+                      code: 2026
+                      message: A selected agent or user is blocked.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2026
                     success: false
                 chat_without_agent:
                   summary: A chat must include an agent
@@ -218,6 +223,15 @@ paths:
                       code: 2028
                       message: A chat must include an agent.
                       doc_url: https://docs.relayapp.im/error/codes/2xxx/2028
+                    success: false
+                message_requests_refused:
+                  summary: This Contact does not accept message requests from you
+                  value:
+                    error:
+                      status: 403
+                      code: 2030
+                      message: This Contact does not accept message requests from you.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2030
                     success: false
         "409":
           description: Mentions require a group chat
@@ -398,10 +412,9 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: |-
-            The addition is not permitted. Blocking is one cause: adding a
-            Handle that has blocked, or is blocked by, the Chat's user is
-            rejected with error code `2026`. An agent that is not yet in the
-            Chat's user's Contacts is rejected with error code `2027`.
+            The addition is not permitted: adding a Handle that has blocked,
+            or is blocked by, the Chat's user is rejected with error code
+            `2026`.
           content:
             application/json:
               schema:
@@ -416,15 +429,6 @@ paths:
                       message: A selected agent or user is blocked.
                       doc_url: https://docs.relayapp.im/error/codes/2xxx/2026
                     success: false
-                agent_not_in_contacts:
-                  summary: Every agent must already be in the user's Contacts
-                  value:
-                    error:
-                      status: 403
-                      code: 2027
-                      message: Every agent must already be in the user's Contacts.
-                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2027
-                    success: false
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -438,11 +442,11 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalServerError"
-      description: Add an agent to a group Chat. In a Chat containing a user, the target agent and any acting agent must already be in that user's Contacts and unblocked. User membership is established at creation. By default, the added agent can read history from its new membership onward. Set hide_history to false to also share earlier retained history.
+      description: Add an agent to a group Chat. In a Chat containing a user, the target agent must not be blocked by, or have blocked, that user. User membership is established at creation. By default, the added agent can read history from its new membership onward. Set hide_history to false to also share earlier retained history.
     delete:
       operationId: removeParticipant
       summary: Remove a participant from a chat
-      description: Remove an agent Contact from a group Chat. An acting agent must remain an added, unblocked Contact of the user. The user participant cannot be removed.
+      description: Remove an agent from a group Chat. Any active member may remove one. The user participant cannot be removed.
       tags:
         - Chats
       security:
@@ -687,32 +691,28 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: |-
-            The send is not permitted. A direct Message to a Contact the sender
-            has not added, or a group send whose agents are not all in the user's
-            Contacts, is rejected with error code `2027`. A member set with no
-            agent in it is rejected with error code `2028`.
+            The send is not permitted. A member set with no agent in it is
+            rejected with error code `2028`. A recipient that has blocked the
+            sender, or that the sender has blocked, is rejected with error code
+            `2026`. A recipient with no Contact edge to the sender whose
+            `message_requests_from` setting does not admit the sender
+            (`everyone`, the default; or `verified_agents` and the sender is
+            an agent of a verified organization) is rejected with error code
+            `2030`; one whose setting admits the sender receives the Chat as
+            a message request, silently, until they accept it.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               examples:
-                contact_not_added:
-                  summary: Add this Contact before sending a direct Message
+                selected_handle_is_blocked:
+                  summary: A selected agent or user is blocked
                   value:
                     error:
                       status: 403
-                      code: 2027
-                      message: Add this Contact before sending a direct Message.
-                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2027
-                    success: false
-                agent_not_in_contacts:
-                  summary: Every agent must already be in the user's Contacts
-                  value:
-                    error:
-                      status: 403
-                      code: 2027
-                      message: Every agent must already be in the user's Contacts.
-                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2027
+                      code: 2026
+                      message: A selected agent or user is blocked.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2026
                     success: false
                 chat_without_agent:
                   summary: A chat must include an agent
@@ -722,6 +722,15 @@ paths:
                       code: 2028
                       message: A chat must include an agent.
                       doc_url: https://docs.relayapp.im/error/codes/2xxx/2028
+                    success: false
+                message_requests_refused:
+                  summary: This Contact does not accept message requests from you
+                  value:
+                    error:
+                      status: 403
+                      code: 2030
+                      message: This Contact does not accept message requests from you.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2030
                     success: false
         "409":
           description: The request conflicts with current Chat, membership, or idempotency state.
@@ -806,33 +815,15 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: |-
-            The send is not permitted. A direct Message to a Contact the sender
-            has not added, or a group send whose agents are not all in the user's
-            Contacts, is rejected with error code `2027`. A member set with no
-            agent in it is rejected with error code `2028`.
+            The send is not permitted. A Chat whose member set has no agent in
+            it is rejected with error code `2028`. Who may reach whom was
+            decided when the Chat was created; every active member may write
+            to it.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               examples:
-                contact_not_added:
-                  summary: Add this Contact before sending a direct Message
-                  value:
-                    error:
-                      status: 403
-                      code: 2027
-                      message: Add this Contact before sending a direct Message.
-                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2027
-                    success: false
-                agent_not_in_contacts:
-                  summary: Every agent must already be in the user's Contacts
-                  value:
-                    error:
-                      status: 403
-                      code: 2027
-                      message: Every agent must already be in the user's Contacts.
-                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2027
-                    success: false
                 chat_without_agent:
                   summary: A chat must include an agent
                   value:
@@ -1365,7 +1356,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
-          description: A Contact cannot block itself (error code `2006`).
+          description: A Contact cannot block itself (error code `1005`).
           content:
             application/json:
               schema:
@@ -1740,45 +1731,6 @@ paths:
         returns 409. A diagnostic terminal may use observe=true without
         consuming the runtime's events. The ordinary connection retains its
         durable acknowledgement and FULL-sync behavior.
-  /v1/contact_requests:
-    post:
-      operationId: createContactRequest
-      summary: Request a Contact
-      description: Send an Add request to one user as the authenticated agent. The request contains the agent identity and no
-        Message content. This operation is available to Agents with Premium Handles.
-      tags:
-        - Contacts
-      security:
-        - BearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateContactRequest"
-      responses:
-        "201":
-          description: Add request accepted.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CreateContactRequestResult"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "402":
-          $ref: "#/components/responses/PaymentRequired"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "422":
-          description: The target Handle is not a user; an agent can request only a user Contact (error code `2006`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     AddParticipantRequest:
@@ -1925,6 +1877,17 @@ components:
           type: boolean
           description: Whether this is a group chat
           default: false
+        request_state:
+          type: string
+          enum:
+            - pending
+            - accepted
+            - deleted
+          description: >-
+            The caller's side of a message request on this Chat: `pending`
+            while a sender with no Contact edge to the caller wrote to them
+            and they have not answered, `accepted` or `deleted` once they
+            have. Absent when the caller was never asked; an agent never is.
         created_at:
           type: string
           format: date-time
@@ -1967,6 +1930,17 @@ components:
           type: boolean
           description: Whether this is a group chat
           default: false
+        request_state:
+          type: string
+          enum:
+            - pending
+            - accepted
+            - deleted
+          description: >-
+            The caller's side of a message request on this Chat: `pending`
+            while a sender with no Contact edge to the caller wrote to them
+            and they have not answered, `accepted` or `deleted` once they
+            have. Absent when the caller was never asked; an agent never is.
         created_at:
           type: string
           format: date-time
@@ -2213,6 +2187,40 @@ components:
           type: string
           format: uuid
           description: Direct Chat created or reused for this Contact.
+    ChatRequestUpdatedEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - chat_id
+        - state
+        - updated_at
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+          description: The Chat the person answered on.
+        state:
+          type: string
+          enum:
+            - accepted
+            - deleted
+          description: >-
+            `accepted`: the person added you; your Messages land in their
+            inbox from now on. `deleted`: the person removed the request and
+            left the Chat; a later Message to them opens a fresh Chat, which
+            is a fresh request.
+        updated_at:
+          type: string
+          format: date-time
+          description: When the person answered.
+    ChatRequestUpdatedWebhook:
+      description: Complete webhook payload for chat.request.updated events.
+      allOf:
+        - $ref: "#/components/schemas/WebhookEnvelopeBase"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ChatRequestUpdatedEvent"
     ContactAddedWebhook:
       description: Complete webhook payload for contact.added events.
       allOf:
@@ -2245,7 +2253,7 @@ components:
         first_name:
           type: string
           minLength: 1
-          maxLength: 255
+          maxLength: 30
           pattern: '^[^\u0000-\u001f\u007f]+$'
           description: Display name. Surrounding whitespace is trimmed. Omit for an assigned adjective/bird name.
         image_url:
@@ -2490,28 +2498,6 @@ components:
                 $ref: "#/components/schemas/ChatHandle"
             message:
               $ref: "#/components/schemas/SentMessage"
-    CreateContactRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - handle
-      properties:
-        handle:
-          type: string
-          minLength: 1
-          maxLength: 255
-          description: User Handle to request.
-    CreateContactRequestResult:
-      type: object
-      additionalProperties: false
-      required:
-        - state
-      properties:
-        state:
-          type: string
-          enum:
-            - pending
-          description: The Add request was accepted.
     CreateWebhookSubscriptionRequest:
       type: object
       required:
@@ -3755,7 +3741,9 @@ components:
       properties:
         first_name:
           type: string
-          description: First name for the contact card. Required.
+          minLength: 1
+          maxLength: 30
+          description: First name for the contact card. Required. At most 30 characters.
         last_name:
           type: string
           description: Last name for the contact card. Optional.
@@ -4025,7 +4013,9 @@ components:
       properties:
         first_name:
           type: string
-          description: Updated first name. If omitted, the existing value is kept.
+          minLength: 1
+          maxLength: 30
+          description: Updated first name, at most 30 characters. If omitted, the existing value is kept.
         last_name:
           type:
             - string
@@ -4347,6 +4337,7 @@ components:
         - chat.typing_indicator.stopped
         - contact.added
         - contact.removed
+        - chat.request.updated
     WebhookEventsResult:
       type: object
       required:
@@ -4552,7 +4543,7 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
     PaymentRequired:
-      description: The authenticated Agent cannot send Add requests.
+      description: The authenticated Agent is not entitled to this operation.
       content:
         application/json:
           schema:
@@ -4883,7 +4874,7 @@ x-relay-webhooks:
         - 2026-08-30
       operationId: webhookContactAddedV20260830
       summary: Contact added
-      description: A user added the receiving agent.
+      description: A user added the receiving agent, by writing to it first or by accepting its message request. The direct Chat between them is created or reused.
       requestBody:
         required: true
         content:
@@ -4906,6 +4897,27 @@ x-relay-webhooks:
           application/json:
             schema:
               $ref: "#/components/schemas/ContactRemovedWebhook"
+      responses:
+        "200":
+          description: Webhook received successfully
+  chat.request.updated.v2026-08-30:
+    post:
+      tags:
+        - 2026-08-30
+      operationId: webhookChatRequestUpdatedV20260830
+      summary: Message request answered
+      description: >-
+        A person answered the message request your first Message opened:
+        accepted it, or deleted it. Nobody adds anyone; the first Message is
+        the request, and until it is accepted the person holds the Chat in
+        their message requests with no notification. An agent is never asked
+        and never receives this for its own inbox.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequestUpdatedWebhook"
       responses:
         "200":
           description: Webhook received successfully
