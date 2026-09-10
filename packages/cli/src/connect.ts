@@ -9,6 +9,8 @@ import {
   CODING_AGENTS,
   CODING_AGENT_IDS,
   codingAgent,
+  platformPath,
+  claudeConfigDir,
   hermesHome,
   normalizeAgentId,
   openclawHome,
@@ -160,8 +162,9 @@ const paths = (context: { env: NodeJS.ProcessEnv; home: string; platform: NodeJS
  * and the config file only when it is not the default one, so the server reads
  * the same file this command saved the token to (packages/mcp/src/auth.ts). */
 export const mcpServerSpec = (context: PlanContext): { command: string; args: string[]; env: Record<string, string> } => {
-  const saved = configPath({ env: context.env, home: context.home });
-  const standard = join(context.home, ".config", "relay", "config.json");
+  const path = platformPath(context.platform);
+  const standard = path.join(context.home, ".config", "relay", "config.json");
+  const saved = context.env.RELAY_CONFIG_PATH ?? path.resolve(context.env.RELAY_CONFIG_DIR ?? context.env.XDG_CONFIG_HOME ?? path.join(context.home, ".config"), "relay", "config.json");
   return {
     command: "npx",
     args: ["-y", mcpPackageSpec(context.version), "--profile", context.profile],
@@ -181,10 +184,14 @@ export const mcpEntry = (shape: "mcpServers" | "vscode" | "opencode", spec: Retu
 const mcpRootKey = (shape: "mcpServers" | "vscode" | "opencode"): string =>
   shape === "vscode" ? "servers" : shape === "opencode" ? "mcp" : "mcpServers";
 
-const hermesEnvPath = (context: PlanContext): string => join(hermesHome(context.env, context.home), ".env");
-const hermesStateDir = (context: PlanContext): string => join(hermesHome(context.env, context.home), "relay");
-const openclawConfigPath = (context: PlanContext): string => join(openclawHome(context.home), "openclaw.json");
-const openclawTokenPath = (context: PlanContext): string => join(openclawHome(context.home), "secrets", `relay-${context.handle}.token`);
+const hermesEnvPath = (context: PlanContext): string => platformPath(context.platform).join(hermesHome(context.env, context.home, context.platform), ".env");
+export const hermesStateDir = (context: PlanContext): string => {
+  const path = platformPath(context.platform).join(hermesHome(context.env, context.home, context.platform), "relay");
+  // Independently released plugins read literal .env values, not escapes.
+  return context.platform === "win32" ? path.replace(/\\/gu, "/") : path;
+};
+const openclawConfigPath = (context: PlanContext): string => platformPath(context.platform).join(openclawHome(context.home, context.platform), "openclaw.json");
+const openclawTokenPath = (context: PlanContext): string => platformPath(context.platform).join(openclawHome(context.home, context.platform), "secrets", `relay-${context.handle}.token`);
 
 /** The agent's own command lines, exactly as this command runs them. */
 export const agentCommands = (agent: CodingAgentId, context: PlanContext): string[][] => {
@@ -228,7 +235,7 @@ export const agentCommands = (agent: CodingAgentId, context: PlanContext): strin
 export const agentFiles = (agent: CodingAgentId, context: PlanContext): string[] => {
   const method = codingAgent(agent).connect;
   switch (method.kind) {
-    case "claude-plugin": return [join(claudeChannelDir(context.env, context.home), ".env")];
+    case "claude-plugin": return [platformPath(context.platform).join(context.env.RELAY_CHANNEL_DIR?.trim() || platformPath(context.platform).join(claudeConfigDir(context.env, context.home, context.platform), "channels", "relay"), ".env")];
     case "mcp-command": return [method.file(paths(context))];
     case "mcp-file": return [method.file(paths(context))];
     case "hermes-plugin": return [hermesEnvPath(context)];

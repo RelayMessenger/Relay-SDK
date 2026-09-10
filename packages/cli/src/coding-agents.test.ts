@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { posix, win32 } from "node:path";
 import { expect, it } from "vitest";
 import { CODING_AGENTS, CODING_AGENT_IDS, agentDetectedAs, codingAgent, normalizeAgentId, supportedAgentsLine } from "./coding-agents.js";
 import { agentFiles, agentPlan, runtimeConnectPlan, type PlanContext } from "./connect.js";
@@ -56,16 +56,16 @@ it("@vercel/detect-agent's names map onto ours, and unknown names onto nothing",
 it("every agent has a plan that names the real file it writes", () => {
   const home = "/home/dev";
   const expected: Record<(typeof TEN)[number], string> = {
-    "claude-code": join(home, ".claude", "channels", "relay", ".env"),
-    codex: join(home, ".codex", "config.toml"),
-    cursor: join(home, ".cursor", "mcp.json"),
-    opencode: join(home, ".config", "opencode", "opencode.json"),
-    cline: join(home, ".cline", "data", "settings", "cline_mcp_settings.json"),
-    vscode: join(home, ".config", "Code", "User", "mcp.json"),
-    "gemini-cli": join(home, ".gemini", "settings.json"),
-    "claude-desktop": join(home, ".config", "claude", "claude_desktop_config.json"),
-    hermes: join(home, ".hermes", ".env"),
-    openclaw: join(home, ".openclaw", "secrets", "relay-calm_cangoo.dev.token"),
+    "claude-code": posix.join(home, ".claude", "channels", "relay", ".env"),
+    codex: posix.join(home, ".codex", "config.toml"),
+    cursor: posix.join(home, ".cursor", "mcp.json"),
+    opencode: posix.join(home, ".config", "opencode", "opencode.json"),
+    cline: posix.join(home, ".cline", "data", "settings", "cline_mcp_settings.json"),
+    vscode: posix.join(home, ".config", "Code", "User", "mcp.json"),
+    "gemini-cli": posix.join(home, ".gemini", "settings.json"),
+    "claude-desktop": posix.join(home, ".config", "claude", "claude_desktop_config.json"),
+    hermes: posix.join(home, ".hermes", ".env"),
+    openclaw: posix.join(home, ".openclaw", "secrets", "relay-calm_cangoo.dev.token"),
   };
   for (const id of TEN) {
     const plan = agentPlan(id, context());
@@ -73,7 +73,7 @@ it("every agent has a plan that names the real file it writes", () => {
     expect(plan.steps.length, id).toBeGreaterThan(0);
     expect(plan.steps.join("\n"), id).toContain(expected[id]);
   }
-  expect(agentFiles("openclaw", context())[1]).toBe(join(home, ".openclaw", "openclaw.json"));
+  expect(agentFiles("openclaw", context())[1]).toBe(posix.join(home, ".openclaw", "openclaw.json"));
 });
 
 it("macOS and Windows put VS Code and Claude Desktop where their vendors say", () => {
@@ -81,8 +81,8 @@ it("macOS and Windows put VS Code and Claude Desktop where their vendors say", (
   expect(agentFiles("vscode", mac)[0]).toBe("/home/dev/Library/Application Support/Code/User/mcp.json");
   expect(agentFiles("claude-desktop", mac)[0]).toBe("/home/dev/Library/Application Support/Claude/claude_desktop_config.json");
   const windows = context({ platform: "win32", home: "C:\\Users\\dev", env: { APPDATA: "C:\\Users\\dev\\AppData\\Roaming" } });
-  expect(agentFiles("vscode", windows)[0]).toBe(join("C:\\Users\\dev\\AppData\\Roaming", "Code", "User", "mcp.json"));
-  expect(agentFiles("claude-desktop", windows)[0]).toBe(join("C:\\Users\\dev\\AppData\\Roaming", "Claude", "claude_desktop_config.json"));
+  expect(agentFiles("vscode", windows)[0]).toBe(win32.join("C:\\Users\\dev\\AppData\\Roaming", "Code", "User", "mcp.json"));
+  expect(agentFiles("claude-desktop", windows)[0]).toBe(win32.join("C:\\Users\\dev\\AppData\\Roaming", "Claude", "claude_desktop_config.json"));
 });
 
 it("the MCP agents run our server by npx, the staging tag on a staging build", () => {

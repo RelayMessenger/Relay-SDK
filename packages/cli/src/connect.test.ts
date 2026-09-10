@@ -6,7 +6,7 @@ import { runCLI, type ProgramDependencies } from "./program.js";
 import { readConfig } from "./config.js";
 import type { InteractivePrompts } from "./interactive.js";
 import { claudeMarketplaceSource, CLAUDE_PLUGIN_ID, NO_TTY_NEXT_STEP, NO_TTY_SENTENCE, waitForNewSender } from "./connect.js";
-import { CODING_AGENT_IDS } from "./coding-agents.js";
+import { CODING_AGENT_IDS, codingAgent } from "./coding-agents.js";
 import type { RuntimeFound } from "./runtime-sniff.js";
 import type { TerminalObserver } from "./terminal-watch.js";
 import { expectOwnerOnly } from "./private-file.test.js";
@@ -243,18 +243,18 @@ describe("the MCP agents", () => {
 
     const d = await fixture({}, runtimes());
     expect(await runCLI(["connect", "claude-desktop", "--token", token, "--yes", "--no-skill"], d.deps)).toBe(0);
-    const file = process.platform === "darwin"
-      ? join(d.home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
-      : join(d.home, ".config", "claude", "claude_desktop_config.json");
+    const method = codingAgent("claude-desktop").connect;
+    if (method.kind !== "mcp-file") throw new Error("Expected a file connector");
+    const file = method.file({ home: d.home, env: d.env, platform: process.platform });
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ mcpServers: { relay: server(d) } });
   });
 
   it("vscode writes servers.relay with type stdio; opencode writes mcp.relay in its own shape", async () => {
     const f = await fixture({}, runtimes());
     expect(await runCLI(["connect", "vscode", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
-    const file = process.platform === "darwin"
-      ? join(f.home, "Library", "Application Support", "Code", "User", "mcp.json")
-      : join(f.home, ".config", "Code", "User", "mcp.json");
+    const method = codingAgent("vscode").connect;
+    if (method.kind !== "mcp-file") throw new Error("Expected a file connector");
+    const file = method.file({ home: f.home, env: f.env, platform: process.platform });
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ servers: { relay: { type: "stdio", ...server(f) } } });
 
     const o = await fixture({}, runtimes());
@@ -296,7 +296,7 @@ describe("Hermes and OpenClaw", () => {
     const written = await readFile(envPath, "utf8");
     expect(written).toContain(`RELAY_AGENT_TOKEN="${token}"`);
     expect(written).toContain('RELAY_BASE_URL="https://api.staging.relayapp.im"');
-    expect(written).toContain(`RELAY_STATE_DIR="${join(f.home, ".hermes", "relay")}"`);
+    expect(written).toContain(`RELAY_STATE_DIR="${process.platform === "win32" ? join(f.home, ".hermes", "relay").replace(/\\/gu, "/") : join(f.home, ".hermes", "relay")}"`);
     expect(written).toContain('RELAY_ALLOWED_CONTACTS="00000000-0000-7000-8000-000000000901"');
     await expectOwnerOnly(envPath, join(f.home, ".hermes"));
     expect(f.stdout.join("")).toContain("hermes gateway run");
