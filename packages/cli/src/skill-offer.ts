@@ -173,12 +173,23 @@ export async function resolveNpx(env: NodeJS.ProcessEnv, platform: NodeJS.Platfo
   }
   throw new Error("Relay could not find npx on this computer. Install Node.js, which includes npm and npx, then run this command again.");
 }
-export async function installRelaySkill(cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
+/** `--global --yes --agent <name>…`: the same installer, told where to go, for
+ * `--install-skills`, where nobody is there to answer its questions. */
+export const relaySkillGlobalArgs = (
+  targets: readonly string[],
+  version?: string,
+): readonly string[] => [
+  ...relaySkillInstallArgs(version ?? packageVersion()),
+  "--global", "--yes",
+  ...targets.flatMap((target) => ["--agent", target]),
+];
+
+export async function installRelaySkill(cwd: string, env: NodeJS.ProcessEnv, args: readonly string[] = RELAY_SKILL_INSTALL_ARGS): Promise<void> {
   const executable = await resolveNpx(env);
   const windows = process.platform === "win32";
   const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(windows ? quote(executable) : executable, windows ? RELAY_SKILL_INSTALL_ARGS.map(quote) : [...RELAY_SKILL_INSTALL_ARGS], {
+    const child = spawn(windows ? quote(executable) : executable, windows ? args.map(quote) : [...args], {
       cwd, env: installerEnvironment(env), stdio: "inherit", shell: windows, windowsHide: true,
     });
     let finished = false;

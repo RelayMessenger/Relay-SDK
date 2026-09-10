@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactiveEntry, HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { runConnect, ConnectFailure, type ConnectOptions as ConnectRunOptions } from "./connect.js";
 import { sdkTerminalObserver } from "./terminal-watch.js";
-import { installRelaySkill, relaySkillPresent } from "./skill-offer.js";
+import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
 import { renderTerminalQR } from "./qr-terminal.js";
 import { agentDependencies, deleteAgent, listAgents, selectAgentAuth, type AgentDependencies } from "./agents.js";
@@ -51,6 +51,7 @@ import {
 } from "./config.js";
 import { runDoctor } from "./doctor.js";
 import { everythingElseHelp, HELP_GROUPS } from "./help-groups.js";
+import { DOCS_LLMS_URL, drivingAgent, drivingAgentHint, readDocs, skillTargets } from "./agent-driver.js";
 import { errorText, jsonText, safeMetadata } from "./output.js";
 import { listenForAgentEvents } from "./event-listen.js";
 
@@ -173,6 +174,7 @@ export const createProgram = (
     .version(PACKAGE_VERSION)
     .option("--json", "print the result as JSON")
     .option("--non-interactive", "never show menus or ask questions")
+    .option("--install-skills", "install the Relay skill for the coding agents on this computer, then carry on")
     .option("--profile <name>", "which saved profile on this computer to use", (configContext.env ?? process.env).RELAY_PROFILE);
   program.exitOverride();
   program.configureOutput({
@@ -497,6 +499,20 @@ export const createProgram = (
           has_token: Boolean(profile.agent_token),
         })),
       });
+    });
+
+  program
+    .command("docs", { hidden: true })
+    .description("Print Relay's documentation for agents, or the address to read it at.")
+    .helpGroup(HELP_GROUPS.everythingElse)
+    .action(async (_options: object, command: Command) => {
+      // A person gets the address to open. An agent, which has no terminal, gets
+      // the text itself in one request, the way Railway prints its llms.txt.
+      const headless = dependencies.isInteractive === false
+        || (dependencies.isInteractive === undefined && !process.stdout.isTTY);
+      if (globals(command).json) { output({ url: DOCS_LLMS_URL }); return; }
+      const text = headless ? await readDocs(dependencies.fetch ?? globalThis.fetch) : undefined;
+      stdout(text ?? `${DOCS_LLMS_URL}\n`);
     });
 
   program
@@ -1166,7 +1182,14 @@ export const runCLI = async (
 ): Promise<number> => {
   const stderr = dependencies.stderr ?? ((value: string) => process.stderr.write(value));
   const env = dependencies.configContext?.env ?? process.env;
-  const interactive = interactiveAllowed(argv, dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY && process.stderr.isTTY));
+  // An agent driving this command gets no questions, the way Vercel's CLI turns
+  // itself non-interactive when it sees CLAUDECODE.
+  const driver = drivingAgent(env);
+  const interactive = interactiveAllowed(argv, dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY && process.stderr.isTTY))
+    && driver === undefined;
+  if (driver && !argv.includes("--json") && !argv.some((arg) => ["--help", "-h", "--version", "-V"].includes(arg))) {
+    stderr(`${drivingAgentHint(driver)}\n`);
+  }
   const ui = interactive ? dependencies.prompts ?? clackPrompts((message) => stderr(`${message}\n`)) : undefined;
   const agentDeps = dependencies.agents ?? agentDependencies(dependencies.configContext, dependencies.fetch);
   let offered = false;
@@ -1197,13 +1220,26 @@ export const runCLI = async (
   };
   try {
     let args = argv;
-    const entry = interactiveEntry(argv);
+    if (argv.includes("--install-skills")) {
+      const home = dependencies.configContext?.home ?? homedir();
+      const cwd = dependencies.cwd ?? process.cwd();
+      const targets = await skillTargets(home, env);
+      try {
+        await (dependencies.skillInstaller ?? (() => installRelaySkill(cwd, env, relaySkillGlobalArgs(targets))))();
+      } catch {
+        stderr("The Relay skill was not installed. Nothing else was changed.\n");
+        return 1;
+      }
+      args = argv.filter((arg) => arg !== "--install-skills");
+      if (!args.length) return 0;
+    }
+    const entry = interactiveEntry(args);
     if (ui && entry) {
       const selected = await chooseInteractiveCommand(entry.entry, entry.prefix, agentDeps, ui, async () => { await skillOffer(); });
       if (!selected) return 0;
       if (selected === "install-skill") return await skillOffer(true);
       args = selected;
-    } else if (entry) args = [...argv, "--help"];
+    } else if (entry) args = [...args, "--help"];
     await createProgram({
       ...dependencies, agents: agentDeps, isInteractive: interactive,
       ...(ui ? {

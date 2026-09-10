@@ -89,6 +89,25 @@ they are. A connected view does not mean the agent is running, and the screen
 says that too. `--json`, `--non-interactive`, and any command not attached to a
 terminal never open this view.
 
+## For the agent running this command
+
+Relay reads the environment for the coding agent driving it — `CLAUDECODE`,
+`CURSOR_CLI`, `CURSOR`, `CODEX_HOME` — and when one is there it asks nothing and
+prints one line saying so. Every question has a flag.
+
+```sh
+relaymessenger --install-skills        # install the Relay skill for this computer's agents
+relaymessenger docs                    # the documentation itself when piped, its address in a terminal
+```
+
+`--install-skills` runs the pinned installer with `--global --yes`, targeting
+`~/.agents/skills` and, when this computer has Claude Code, `~/.claude/skills`.
+It answers nothing on your behalf beyond those targets, and the command you
+typed carries on afterwards.
+
+`docs` prints `https://docs.relayapp.im/llms.txt`: its contents when there is no
+terminal, and its address when there is one or when Relay cannot reach it.
+
 ## Agent Token authentication
 
 Use `agents create` for a new agent, or import an existing Agent Token. Tokens
