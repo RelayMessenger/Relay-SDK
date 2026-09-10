@@ -1,8 +1,11 @@
 import { openSavedAgentSession, type AgentSessionInput, type AgentSessionDependencies } from "./agent-session.js";
-import { prepareAgentImage, type LocalAgentImage } from "./local-image.js";
-import { uploadAgentImage, type AgentImageUploadResult } from "./agent-image-upload.js";
+import { prepareAgentImage } from "./local-image.js";
+import { uploadAgentImage } from "./agent-image-upload.js";
+import { createAgentWithPicture, incompletePictureMessage } from "./agent-create.js";
 import { homedir } from "node:os";
-import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactiveEntry, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
+import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactiveEntry, HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
+import { runConnect, ConnectFailure, type ConnectOptions as ConnectRunOptions } from "./connect.js";
+import { sdkTerminalObserver } from "./terminal-watch.js";
 import { installRelaySkill, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
 import { renderTerminalQR } from "./qr-terminal.js";
@@ -69,6 +72,9 @@ export interface ProgramDependencies {
   confirmDelete?: () => Promise<boolean>;
   confirmLogout?: () => Promise<boolean>;
   beforeSetup?: () => Promise<void>;
+  /** The one Relay skill offer, made at most once per run. */
+  offerSkill?: () => Promise<void>;
+  connect?: Partial<Pick<import("./connect.js").ConnectDependencies, "sniff" | "runCommand" | "startCommand" | "observer" | "renderQR" | "pairTimeoutMs" | "version">>;
   terminalSession?: AgentSessionDependencies["session"];
   terminalIO?: AgentSessionDependencies["io"];
   terminalClient?: AgentSessionDependencies["client"];
@@ -200,6 +206,44 @@ export const createProgram = (
     }
   };
 
+  program
+    .command("connect")
+    .argument("[runtime]", "what will answer as this agent: claude, hermes or openclaw")
+    .description("connect an agent, new or by token, and prove it answers")
+    .option("--new", "create a new agent instead of using one you already have")
+    .option("--handle <handle>", "the .dev handle you want for a new agent; leave it out and Relay picks one")
+    .option("--name <name>", "the name people see next to a new agent")
+    .option("--image <path-or-url>", "a picture for a new agent: a file on this computer, or an https:// address")
+    .option("--token <token>", "use an agent you already have, by its token")
+    .option("--allow <handles>", "the handles allowed to message this agent, separated by commas; skips waiting for a first message")
+    .option("--yes", "take the plan as it is, and replace a token already in the runtime's config")
+    .option("--dry-run", "print the plan and change nothing")
+    .option("--no-start", "do not start the runtime at the end; print its command instead")
+    .option("--no-skill", "do not offer the Relay skill at the end")
+    .option("--json", "print the result as JSON")
+    .option("--api-url <url>", "the Relay API address to use", validateApiURL)
+    .action(async (runtime: string | undefined, options: ConnectRunOptions, command: Command) => {
+      const env = configContext.env ?? process.env;
+      const home = configContext.home ?? homedir();
+      await runConnect(runtime, { ...options, json: options.json === true || globals(command).json === true }, {
+        agents: agentDeps,
+        env,
+        home,
+        cwd: dependencies.cwd ?? process.cwd(),
+        ...(configContext.platform ? { platform: configContext.platform } : {}),
+        ...(globals(command).profile ? { profile: globals(command).profile } : {}),
+        stdout,
+        stderr,
+        ...(dependencies.prompts && dependencies.isInteractive !== false ? { prompts: dependencies.prompts } : {}),
+        // Pairing watches the agent's own events; it never answers Relay and
+        // never takes an event, so the runtime still receives every message.
+        observer: (token, apiURL) => sdkTerminalObserver(new Relay({ apiKey: token, baseURL: apiURL, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) })),
+        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+        ...(dependencies.offerSkill ? { offerSkill: dependencies.offerSkill } : {}),
+        ...dependencies.connect,
+      });
+    });
+
   const agents = program.command("agents").description("Create an agent, list the agents saved on this computer, and delete one.");
   connectOptions(agents.command("create"))
     .option("--api-url <url>", "the Relay API address to use", validateApiURL)
@@ -212,50 +256,23 @@ export const createProgram = (
     .option("--json", "print the result as JSON")
     .action(async (options: ConnectOptions & { apiUrl?: string; tokenName?: string; json?: boolean; handle?: string; name?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
       const target = await connectTarget(options);
-      let localImage: LocalAgentImage | undefined;
       if (options.image !== undefined && options.imageUrl !== undefined) throw new Error("Choose --image or --image-url, not both.");
-      if (options.image !== undefined) {
-        // Only this command can say "No agent was created": contact-card update
-        // reaches the same checks with no agent in play.
-        const image = await prepareAgentImage(options.image, {
-          ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}),
-          ...(configContext.home ? { home: configContext.home } : {}),
-        }).catch((error: unknown) => { throw new Error(`${error instanceof Error ? error.message : String(error)} No agent was created.`); });
-        if (image.kind === "file") localImage = image.file;
-        else options.imageUrl = image.url;
-      }
-      let imageRecipe: AgentImageRecipe | undefined;
-      if (options.imageRecipe !== undefined) {
-        if (options.imageUrl === undefined && !localImage) throw new Error("--image-recipe requires its rendered --image or --image-url.");
-        imageRecipe = await readImageRecipe(options.imageRecipe);
-      }
-      const result = await createAgent({
+      const imageRecipe: AgentImageRecipe | undefined = options.imageRecipe === undefined
+        ? undefined : await readImageRecipe(options.imageRecipe);
+      const created = await createAgentWithPicture({
         ...(program.getOptionValueSource("profile") === "cli" && globals(command).profile ? { profile: globals(command).profile } : {}),
         ...(options.apiUrl ? { apiURL: options.apiUrl } : {}),
         ...(options.tokenName === undefined ? {} : { tokenName: options.tokenName }),
         ...(options.handle === undefined ? {} : { handle: options.handle }),
         ...(options.name === undefined ? {} : { firstName: options.name }),
+        ...(options.image === undefined ? {} : { image: options.image }),
         ...(options.imageUrl === undefined ? {} : { imageURL: options.imageUrl }),
-        ...(imageRecipe === undefined || localImage ? {} : { imageRecipe }),
-      }, agentDeps);
-      let imageUpdate: AgentImageUploadResult | undefined;
-      if (localImage) {
-        try {
-          // The agent and its token are already saved. Never use a token from the
-          // environment for a just-created agent's picture upload.
-          const saved = (await agentDeps.read()).profiles[result.profile];
-          if (!saved?.agent_token || validateApiURL(saved.api_url ?? DEFAULT_API_URL) !== result.api_url) throw new Error("Saved identity changed.");
-          const client = new Relay({ apiKey: saved.agent_token, baseURL: result.api_url, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) });
-          const outcome = await uploadAgentImage({ handle: result.handle, image: localImage }, client,
-            (attachmentID) => client.contactCard.update({ handle: result.handle, attachment_id: attachmentID,
-              ...(imageRecipe ? { image_recipe: imageRecipe } : {}),
-            }, { maxRetries: 0 }));
-          imageUpdate = safeMetadata(outcome, [saved.agent_token]);
-          if (imageUpdate.status === "updated") Object.assign(result, agentRecord(imageUpdate.agent));
-        } catch {
-          imageUpdate = { status: "incomplete", phase: "agent", message: "The agent was created and its token was saved. The picture did not go through. Set the picture on this profile; do not create the agent again." };
-        }
-      }
+        ...(imageRecipe === undefined ? {} : { imageRecipe }),
+        ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}),
+        ...(configContext.home ? { home: configContext.home } : {}),
+      }, agentDeps, dependencies.fetch);
+      const result = created.result;
+      const imageUpdate = created.image;
       let connectResult;
       if (target) {
         try { connectResult = await connectAgentToRuntime(target, result.profile, agentDeps, { consent: options.confirmConfigure === true, runtimeStopped: options.runtimeStopped === true }, true); }
@@ -279,9 +296,7 @@ export const createProgram = (
         });
       }
       if (imageUpdate?.status === "incomplete") {
-        const retry = imageUpdate.attachment_id && ["check", "save"].includes(imageUpdate.phase)
-          ? `--attachment-id ${imageUpdate.attachment_id}` : "--image <local-file>";
-        throw new Error(`Agent @${result.handle} was created and its profile and token are saved. The picture did not go through. Set it on this profile: npx relaymessenger --profile ${result.profile} contact-card update --handle ${result.handle} ${retry}${imageRecipe ? " --image-recipe <json-file>" : ""}. Do not create another agent.`);
+        throw new Error(incompletePictureMessage(result.handle, result.profile, imageUpdate, imageRecipe !== undefined));
       }
       if (connectResult && connectResult.status !== "configured") throw new Error("The token is saved, but the runtime you chose still needs something from you. Read the message above, then run npx relaymessenger auth login --connect; do not create another agent.");
     });
@@ -1147,7 +1162,9 @@ export const runCLI = async (
     await createProgram({
       ...dependencies, agents: agentDeps, isInteractive: interactive,
       ...(ui ? {
+        prompts: ui,
         beforeSetup: async () => { await skillOffer(); },
+        offerSkill: async () => { await skillOffer(); },
         readSecret: dependencies.readSecret ?? (() => ui.password("Paste your token")),
         confirmDelete: () => ui.confirm("Delete the selected agent? This cannot be undone."),
         confirmLogout: () => ui.confirm("Remove the saved token from this computer? The agent itself is not deleted."),

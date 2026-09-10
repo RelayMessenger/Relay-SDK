@@ -1,4 +1,4 @@
-import { confirm, isCancel, password, select, text } from "@clack/prompts";
+import { confirm, intro, isCancel, log, outro, password, select, spinner, text } from "@clack/prompts";
 import type { AgentDependencies } from "./agents.js";
 import { listAgents } from "./agents.js";
 import { DEFAULT_API_URL, DEFAULT_PROFILE, defaultCreationApiURL, validateApiURL } from "./config.js";
@@ -6,12 +6,31 @@ import { DEFAULT_API_URL, DEFAULT_PROFILE, defaultCreationApiURL, validateApiURL
 export class InteractiveCancelled extends Error {
   constructor() { super("Cancelled."); }
 }
+/**
+ * There is no terminal, so a question cannot be asked. Every one of these names
+ * the flags that would have answered it, and the command exits 2 (Stripe's and
+ * eas's shape: say the next step, never print a usage block).
+ */
+export class HeadlessPrompt extends Error {
+  constructor(message: string, readonly flags: readonly string[]) { super(message); }
+  get nextStep(): string { return this.flags.join("  ·  "); }
+}
+export interface InteractiveSpinner {
+  start(message: string): void;
+  stop(message: string): void;
+}
 export interface InteractivePrompts {
   select(message: string, options: Array<{ value: string; label: string }>): Promise<string>;
   confirm(message: string): Promise<boolean>;
   password(message: string): Promise<string>;
   text(message: string, initialValue: string): Promise<string>;
   info(message: string): void;
+  /** The opening and closing bars of one Clack session. */
+  intro(message: string): void;
+  outro(message: string): void;
+  /** A finished step: the same diamond the prompts leave behind. */
+  step(message: string): void;
+  spinner(): InteractiveSpinner;
 }
 function answer<T>(value: T | symbol): T {
   if (isCancel(value)) throw new InteractiveCancelled();
@@ -25,6 +44,13 @@ export function clackPrompts(info: (message: string) => void): InteractivePrompt
     password: async (message) => answer(await password({ message, ...io })),
     text: async (message, initialValue) => answer(await text({ message, initialValue, ...io })),
     info,
+    intro: (message) => intro(message),
+    outro: (message) => outro(message),
+    step: (message) => log.step(message),
+    spinner: () => {
+      const active = spinner({ output: process.stderr });
+      return { start: (message) => active.start(message), stop: (message) => active.stop(message) };
+    },
   };
 }
 // Source-backed CI/TTY conditions: Photon cli/src/lib/tty.ts. Unlike its
