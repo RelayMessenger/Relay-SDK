@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import YAML from 'yaml';
 export const NATIVE_WORKFLOW = '.github/workflows/agent-cli-platforms.yml';
-export const NATIVE_REF_GUARD = "github.ref == 'refs/heads/staging'";
+export const NATIVE_REF_GUARD = "github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/feat/connect-agents-20260910'";
 const commands = new Set([
   'git config --global core.autocrlf false',
   'npm install --global npm@11.19.1 --no-audit --no-fund',
@@ -20,7 +20,7 @@ export function validateRunnerPolicy(source, text) {
   }
   const workflow = YAML.parse(text);
   assert.deepEqual(Object.keys(workflow.on).sort(), ['push', 'workflow_dispatch']);
-  assert.deepEqual(workflow.on.push, { branches: ['staging'] });
+  assert.deepEqual(workflow.on.push, { branches: ['staging', 'feat/connect-agents-20260910'] });
   assert.ok(workflow.on.workflow_dispatch === null || Object.keys(workflow.on.workflow_dispatch).length === 0);
   assert.deepEqual(workflow.concurrency, { group: 'agent-cli-native-${{ github.ref }}', 'cancel-in-progress': false });
   assert.deepEqual(workflow.permissions, { contents: 'read' });

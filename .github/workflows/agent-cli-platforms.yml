@@ -1,7 +1,7 @@
 name: Agent CLI native platforms
 on:
   push:
-    branches: [staging]
+    branches: [staging, feat/connect-agents-20260910]
   workflow_dispatch:
 concurrency:
   group: agent-cli-native-${{ github.ref }}
@@ -10,7 +10,7 @@ permissions:
   contents: read
 jobs:
   native:
-    if: github.ref == 'refs/heads/staging'
+    if: github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/feat/connect-agents-20260910'
     strategy:
       fail-fast: false
       matrix:
