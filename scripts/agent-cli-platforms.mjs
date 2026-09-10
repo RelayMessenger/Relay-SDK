@@ -126,13 +126,13 @@ try {
   assert.equal(envStatus.token_source, 'environment');
   shim(['auth', 'logout']);
   assert.equal(JSON.parse(readFileSync(env.RELAY_CONFIG_PATH)).profiles.verification.agent_token, undefined);
-  run(process.execPath, [bin, 'auth', 'status'], { cwd: consumer, expectedExit: 1 });
-  run(process.execPath, [bin, 'chats', 'list'], { cwd: consumer, expectedExit: 1 });
+  run(process.execPath, [bin, 'auth', 'status'], { cwd: consumer, expectedExit: 4 });
+  run(process.execPath, [bin, 'chats', 'list'], { cwd: consumer, expectedExit: 4 });
   cli('profiles', 'use', 'default');
   cli('profiles', 'remove', 'verification');
-  shim(['token', 'status'], { expectedExit: 1 });
+  shim(['token', 'status'], { expectedExit: 2 });
   assert.match(report.commands.at(-1).output, /unknown command/i, 'No token namespace is allowed');
-  shim(['auth', 'login'], { expectedExit: 1, timeout: 5000 });
+  shim(['auth', 'login'], { expectedExit: 2, timeout: 5000 });
   assert.match(report.commands.at(-1).output, /non-interactive|--with-token/i);
   report.authProof = 'actual installed shim: stdin --with-token, invalid-token preservation, environment, status/logout, nonTTY no-flag failure; interactive PTY is separate';
   report.tokenHTTP = JSON.parse(readFileSync(httpLog));
