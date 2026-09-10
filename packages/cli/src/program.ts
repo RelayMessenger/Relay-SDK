@@ -1121,7 +1121,7 @@ export const runCLI = async (
 ): Promise<number> => {
   const stderr = dependencies.stderr ?? ((value: string) => process.stderr.write(value));
   const env = dependencies.configContext?.env ?? process.env;
-  const interactive = interactiveAllowed(argv, env, dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY && process.stderr.isTTY));
+  const interactive = interactiveAllowed(argv, dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY && process.stderr.isTTY));
   const ui = interactive ? dependencies.prompts ?? clackPrompts((message) => stderr(`${message}\n`)) : undefined;
   const agentDeps = dependencies.agents ?? agentDependencies(dependencies.configContext, dependencies.fetch);
   let offered = false;
@@ -1189,7 +1189,24 @@ export const runCLI = async (
       const env = dependencies.configContext?.env ?? process.env;
       if (env.RELAY_AGENT_TOKEN) secrets = [env.RELAY_AGENT_TOKEN];
     }
-    stderr(`Error: ${errorText(error, secrets)}\n`);
+    const message = errorText(error, secrets);
+    // A question that cannot be asked is not a crash: name the flags that would
+    // have answered it and exit 2, the way Stripe and eas do.
+    const headless = error instanceof HeadlessPrompt;
+    const nextStep = headless
+      ? (error as HeadlessPrompt).nextStep
+      : error instanceof ConnectFailure
+      ? errorText(new Error(error.nextStep), secrets)
+      : "Run  npx relaymessenger doctor  to check this computer.";
+    if (argv.includes("--json")) {
+      stderr(`${jsonText({ error: message, next_step: nextStep })}`);
+      return headless ? 2 : 1;
+    }
+    if (headless) {
+      stderr(`Error: ${message}\nThere is no terminal here, so nothing was asked. Pass one of these instead:\n${(error as HeadlessPrompt).flags.map((flag) => `  ${flag}`).join("\n")}\n`);
+      return 2;
+    }
+    stderr(`Error: ${message}\n`);
     return 1;
   }
 };

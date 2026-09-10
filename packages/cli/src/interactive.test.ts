@@ -102,12 +102,17 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
     expect(await runCLI(args as string[], f.deps)).toBe(0);
     expect(f.prompts.select).not.toHaveBeenCalled(); expect(f.prompts.confirm).not.toHaveBeenCalled(); expect(f.skillPresent).not.toHaveBeenCalled();
   });
-  it("CI or piped use never constructs menus/offers", async () => {
-    const f = await fixture(); f.env.CI = "true";
-    expect(await runCLI([], f.deps)).toBe(0);
-    delete f.env.CI;
+  it("piped use never constructs menus/offers", async () => {
+    const f = await fixture();
     expect(await runCLI(["agents", "list"], { ...f.deps, isInteractive: false })).toBe(0);
     expect(f.prompts.select).not.toHaveBeenCalled(); expect(f.skillPresent).not.toHaveBeenCalled();
+  });
+  it("a CI variable on a real terminal still gets the menu", async () => {
+    // The terminal decides, never an ambient variable: every one of the 27 tools
+    // measured on 2026-09-09 ignored CI.
+    const f = await fixture(); f.env.CI = "true"; f.env.GITHUB_ACTIONS = "true";
+    expect(await runCLI([], f.deps)).toBe(0);
+    expect(f.prompts.select).toHaveBeenCalledOnce();
   });
   it("explicit install menu asks permission once and invokes only injected standard installer", async () => {
     const f = await fixture(); f.prompts.select.mockResolvedValueOnce("skill"); f.prompts.confirm.mockResolvedValueOnce(true);
@@ -132,7 +137,9 @@ it("installer args follow the build's environment without default agent/global f
   const parent = { PATH: "keep", HOME: "/private-home", RELAY_AGENT_TOKEN: token, OPENAI_API_KEY: "other-secret", PSModulePath: "not-needed" };
   expect(installerEnvironment(parent)).toEqual({ PATH: "keep", HOME: "/private-home" });
   expect(parent.RELAY_AGENT_TOKEN).toBe(token);
-  expect(interactiveAllowed([], { GITHUB_ACTIONS: "true" }, true)).toBe(false);
+  expect(interactiveAllowed([], true)).toBe(true);
+  expect(interactiveAllowed(["--json"], true)).toBe(false);
+  expect(interactiveAllowed([], false)).toBe(false);
 });
 
 it("interactive creation collects optional fields; blanks keep server defaults", { timeout: 120_000 }, async () => {

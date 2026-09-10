@@ -53,11 +53,14 @@ export function clackPrompts(info: (message: string) => void): InteractivePrompt
     },
   };
 }
-// Source-backed CI/TTY conditions: Photon cli/src/lib/tty.ts. Unlike its
-// destructive helper, non-TTY Relay commands do NOT gain a mandatory --yes.
-export function interactiveAllowed(argv: readonly string[], env: NodeJS.ProcessEnv, tty: boolean): boolean {
-  return tty && !["CI", "GITHUB_ACTIONS", "GITLAB_CI", "CIRCLECI", "BUILDKITE", "TF_BUILD"].some((key) => Boolean(env[key]))
-    && !argv.some((arg) => ["--non-interactive", "--json", "--help", "-h", "--version", "-V"].includes(arg));
+/**
+ * The terminal and the flags decide, and nothing else. All 27 command-line tools
+ * measured on 2026-09-09 ignore `CI` and its relatives and key on whether stdin
+ * is a terminal, so a person on a machine that happens to export `CI` still gets
+ * the menus, and a script that owns a terminal still gets none when it says so.
+ */
+export function interactiveAllowed(argv: readonly string[], tty: boolean): boolean {
+  return tty && !argv.some((arg) => ["--non-interactive", "--json", "--help", "-h", "--version", "-V"].includes(arg));
 }
 export type InteractiveEntry = "root" | "agents" | "auth";
 export function interactiveEntry(argv: readonly string[]): { entry: InteractiveEntry; prefix: string[] } | undefined {
