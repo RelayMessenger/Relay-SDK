@@ -505,7 +505,7 @@ export const createProgram = (
       // file is left alone and the answer says so (ledger row P14).
       if (selected.agent_token === undefined) {
         output({ ok: true, profile, token: "none" });
-        if (!globals(command).json) stderr(`No token was saved for profile ${profile}.\n`);
+        if (!globals(command).json && !globals(command).quiet) stderr(`No token was saved for profile ${profile}.\n`);
         return;
       }
       const { agent_token: _removed, ...withoutToken } = selected;

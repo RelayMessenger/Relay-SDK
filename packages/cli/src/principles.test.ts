@@ -116,5 +116,6 @@ it("API failures retain numeric codes and select not-found exit", async () => {
 });
 it("quiet suppresses successful output but not usage errors", async () => {
   expect((await run(["--quiet", "config-path"])).out).toBe("");
+  expect((await run(["--quiet", "auth", "logout"])).err).toBe("");
   expect((await run(["--quiet", "--nope"])).err).toContain("unknown option");
 });
