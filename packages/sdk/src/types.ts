@@ -516,6 +516,8 @@ export interface ContactCardRetrieveResponse {
 }
 
 export interface ContactCardUpdateParams {
+  /** Server contract 3097dda: trimmed about text, 1 to 60 characters. */
+  about?: string;
   handle: string;
   first_name?: string;
   last_name?: string | null;
@@ -832,6 +834,8 @@ export type AgentImageRecipe = AgentMonogramImageRecipe | AgentEmojiImageRecipe 
 
 /** POST /v1/agents optional identity fields; omissions retain server defaults. */
 export interface AgentCreateProfileParams {
+  /** Server contract 3097dda: trimmed about text, 1 to 60 characters. */
+  about?: string;
   token_name?: string;
   /** Full lowercase developer handle, including .dev. */
   handle?: string;
