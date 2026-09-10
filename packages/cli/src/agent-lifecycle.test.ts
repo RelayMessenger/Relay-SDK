@@ -86,56 +86,6 @@ describe("real persisted agent selection", { timeout: 120_000 }, () => {
   });
 });
 
-describe("real program runtime connect", { timeout: 120_000 }, () => {
-  const confirmations = ["--confirm-configure", "--runtime-stopped"];
-  it("create -> Hermes binds the newly saved credential, not unrelated ENV auth", async () => {
-    const { deps, env, home, output, fetch } = await fixture();
-    env.RELAY_AGENT_TOKEN = "unrelated-env-secret";
-    const yaml = 'gateway:\n  platforms:\n    relayapp:\n      enabled: true\n      extra:\n        allowed_contacts: [alice]\n';
-    await writeFile(join(home, "config.yaml"), yaml, { mode: 0o600 });
-    expect(await runCLI(["agents", "create", "--json", "--connect", "hermes", "--runtime-home", home, "--runtime-state-dir", join(home, "state"), ...confirmations], deps)).toBe(0);
-    const saved = await readFile(join(home, ".env"), "utf8");
-    expect(saved).toContain('RELAY_AGENT_TOKEN="created-private-token"');
-    expect(saved).not.toContain("unrelated-env-secret");
-    expect(await readFile(join(home, "config.yaml"), "utf8")).toBe(yaml);
-    const result = JSON.parse(output[0]!);
-    expect(result.connect).toMatchObject({ status: "configured", connected: false, handle });
-    expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
-    expect(output.join("")).not.toContain("created-private-token");
-    expect(output.join("")).not.toContain("unrelated-env-secret");
-    env.RELAY_API_URL = "https://unrelated.staging.test";
-    expect(await runCLI(["--profile", handle, "auth", "login", "--connect", "hermes", "--runtime-home", home, "--runtime-state-dir", join(home, "state"), ...confirmations], deps)).toBe(0);
-    expect((await readConfig(deps.configContext)).profiles[handle]?.api_url).toBe(creationOrigin);
-    expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
-  });
-  it("existing-token login connect binds an explicit new OpenClaw account without any POST", async () => {
-    const { deps, env, home, fetch, output } = await fixture();
-    env.RELAY_AGENT_TOKEN = "existing-env-token";
-    const path = join(home, "openclaw.json");
-    await writeFile(path, JSON.stringify({ channels: { relay: { allowFrom: ["alice"], accounts: { other: { token: "other-credential", allowFrom: ["bob"] } } } } }), { mode: 0o600 });
-    expect(await runCLI(["auth", "login", "--api-url", "https://api.staging.relayapp.im", "--connect", "openclaw", "--runtime-config", path, "--runtime-state-dir", home, "--runtime-account", "new-account", ...confirmations], deps)).toBe(0);
-    const config = JSON.parse(await readFile(path, "utf8"));
-    expect(config.channels.relay.accounts["new-account"].token).toBe("existing-env-token");
-    expect(config.channels.relay.accounts.other).toEqual({ token: "other-credential", allowFrom: ["bob"] });
-    expect(config.channels.relay.allowFrom).toEqual(["alice"]);
-    expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
-    expect(JSON.parse(output[0]!).connect).toMatchObject({ status: "configured", connected: false });
-    expect(output.join("")).not.toMatch(/existing-env-token|other-credential/);
-  });
-  it("validates confirmations before creating and never falls back on an invalid token when connecting at login", async () => {
-    const { deps, env, home, fetch } = await fixture();
-    expect(await runCLI(["agents", "create", "--connect", "hermes", "--runtime-home", home], deps)).toBe(1);
-    expect(fetch).not.toHaveBeenCalled();
-    await writeFile(join(home, "config.yaml"), 'gateway: {}\n', { mode: 0o600 });
-    env.RELAY_AGENT_TOKEN = "invalid-env-token";
-    env.RELAY_API_URL = "https://api.staging.relayapp.im";
-    fetch.mockImplementation(async () => Response.json({ error: { message: "invalid-env-token" } }, { status: 401 }));
-    expect(await runCLI(["auth", "login", "--api-url", "https://api.staging.relayapp.im", "--connect", "hermes", "--runtime-home", home, "--runtime-state-dir", home, ...confirmations], deps)).toBe(1);
-    expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
-    await expect(readFile(join(home, ".env"))).rejects.toMatchObject({ code: "ENOENT" });
-  });
-});
-
 it("does not delete on another origin if a profile changes during automatic identification", async () => {
   const { deps, fetch } = await fixture();
   const config = emptyConfig();

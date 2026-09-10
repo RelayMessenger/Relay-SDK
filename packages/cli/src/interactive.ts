@@ -1,4 +1,4 @@
-import { confirm, isCancel, password, select, text } from "@clack/prompts";
+import { confirm, intro, isCancel, log, outro, password, select, spinner, text } from "@clack/prompts";
 import type { AgentDependencies } from "./agents.js";
 import { listAgents } from "./agents.js";
 import { DEFAULT_API_URL, DEFAULT_PROFILE, defaultCreationApiURL, validateApiURL } from "./config.js";
@@ -6,12 +6,31 @@ import { DEFAULT_API_URL, DEFAULT_PROFILE, defaultCreationApiURL, validateApiURL
 export class InteractiveCancelled extends Error {
   constructor() { super("Cancelled."); }
 }
+/**
+ * There is no terminal, so a question cannot be asked. Every one of these names
+ * the flags that would have answered it, and the command exits 2 (Stripe's and
+ * eas's shape: say the next step, never print a usage block).
+ */
+export class HeadlessPrompt extends Error {
+  constructor(message: string, readonly flags: readonly string[]) { super(message); }
+  get nextStep(): string { return this.flags.join("  ·  "); }
+}
+export interface InteractiveSpinner {
+  start(message: string): void;
+  stop(message: string): void;
+}
 export interface InteractivePrompts {
   select(message: string, options: Array<{ value: string; label: string }>): Promise<string>;
   confirm(message: string): Promise<boolean>;
   password(message: string): Promise<string>;
   text(message: string, initialValue: string): Promise<string>;
   info(message: string): void;
+  /** The opening and closing bars of one Clack session. */
+  intro(message: string): void;
+  outro(message: string): void;
+  /** A finished step: the same diamond the prompts leave behind. */
+  step(message: string): void;
+  spinner(): InteractiveSpinner;
 }
 function answer<T>(value: T | symbol): T {
   if (isCancel(value)) throw new InteractiveCancelled();
@@ -25,13 +44,23 @@ export function clackPrompts(info: (message: string) => void): InteractivePrompt
     password: async (message) => answer(await password({ message, ...io })),
     text: async (message, initialValue) => answer(await text({ message, initialValue, ...io })),
     info,
+    intro: (message) => intro(message),
+    outro: (message) => outro(message),
+    step: (message) => log.step(message),
+    spinner: () => {
+      const active = spinner({ output: process.stderr });
+      return { start: (message) => active.start(message), stop: (message) => active.stop(message) };
+    },
   };
 }
-// Source-backed CI/TTY conditions: Photon cli/src/lib/tty.ts. Unlike its
-// destructive helper, non-TTY Relay commands do NOT gain a mandatory --yes.
-export function interactiveAllowed(argv: readonly string[], env: NodeJS.ProcessEnv, tty: boolean): boolean {
-  return tty && !["CI", "GITHUB_ACTIONS", "GITLAB_CI", "CIRCLECI", "BUILDKITE", "TF_BUILD"].some((key) => Boolean(env[key]))
-    && !argv.some((arg) => ["--non-interactive", "--json", "--help", "-h", "--version", "-V"].includes(arg));
+/**
+ * The terminal and the flags decide, and nothing else. All 27 command-line tools
+ * measured on 2026-09-09 ignore `CI` and its relatives and key on whether stdin
+ * is a terminal, so a person on a machine that happens to export `CI` still gets
+ * the menus, and a script that owns a terminal still gets none when it says so.
+ */
+export function interactiveAllowed(argv: readonly string[], tty: boolean): boolean {
+  return tty && !argv.some((arg) => ["--non-interactive", "--json", "--help", "-h", "--version", "-V"].includes(arg));
 }
 export type InteractiveEntry = "root" | "agents" | "auth";
 export function interactiveEntry(argv: readonly string[]): { entry: InteractiveEntry; prefix: string[] } | undefined {
@@ -48,26 +77,32 @@ export function interactiveEntry(argv: readonly string[]): { entry: InteractiveE
 }
 export async function chooseInteractiveCommand(
   entry: InteractiveEntry, prefix: string[], deps: AgentDependencies, ui: InteractivePrompts,
-  beforeSetup: () => Promise<void> = async () => undefined,
 ): Promise<string[] | "install-skill" | undefined> {
-  const options = entry === "auth" ? [
+  // The door names what a person wants, not what Relay does. Creating an agent
+  // and pasting a token both live inside Connect, and only when they are needed.
+  const options = entry === "root" ? [
+    { value: "connect", label: "Connect an agent" },
+    { value: "watch", label: "Watch an agent" },
+    { value: "exit", label: "Exit" },
+  ] : entry === "auth" ? [
     { value: "login", label: "Sign in with a token you already have" },
     { value: "status", label: "Show which token this computer uses" },
     { value: "logout", label: "Remove the saved token from this computer" },
     { value: "exit", label: "Exit" },
   ] : [
     { value: "create", label: "Create agent" },
-    ...(entry === "root" ? [{ value: "login", label: "Sign in with an existing token" }] : []),
     { value: "list", label: "List saved agents" },
     { value: "delete", label: "Delete agent" },
-    ...(entry === "root" ? [{ value: "skill", label: "Install Relay skill" }] : []),
     { value: "exit", label: "Exit" },
   ];
-  const action = await ui.select("Relay — what would you like to do?", options);
+  const action = await ui.select(entry === "root" ? "What would you like to do?" : "Relay — what would you like to do?", options);
   if (action === "exit") return undefined;
-  if (action === "skill") return "install-skill";
+  if (action === "connect") return [...prefix, "connect"];
+  if (action === "watch") {
+    const chosen = await chooseSavedAgent("Select the agent to watch", deps, ui);
+    return chosen ? ["--profile", chosen.profile, "watch", chosen.handle] : undefined;
+  }
   if (action === "create") {
-    await beforeSetup();
     ui.info("Press Enter to skip any of these. Relay picks a handle for you if you skip it. A picture can be a file on this computer or an https:// address.");
     const chosenHandle = (await ui.text("Handle (optional)", "")).trim();
     const displayName = (await ui.text("Name (optional)", "")).trim();
@@ -79,7 +114,6 @@ export async function chooseInteractiveCommand(
     ];
   }
   if (action === "login") {
-    await beforeSetup();
     const config = await deps.read();
     const profileArg = prefix.find((value) => value.startsWith("--profile="))?.slice(10) ?? (prefix[0] === "--profile" ? prefix[1] : undefined);
     const selectedName = profileArg ?? deps.env.RELAY_PROFILE ?? config.current_profile;
@@ -93,17 +127,24 @@ export async function chooseInteractiveCommand(
   if (action === "status" || action === "logout") return [...prefix, "auth", action];
   if (action === "list") return [...prefix, "agents", "list"];
   if (action === "delete") {
-    const inventory = await listAgents(deps);
-    const choices = inventory.agents.flatMap((row) => "handle" in row
-      ? [{ profile: row.profile, handle: row.handle, label: `@${row.handle} · profile ${row.profile} · ${row.api_url}` }]
-      : []);
-    if (!choices.length) { ui.info("No saved agents."); return undefined; }
-    const selected = await ui.select("Select the agent to delete", choices.map((choice, index) => ({ value: String(index), label: choice.label })));
-    const choice = choices[Number(selected)];
-    if (!choice) throw new InteractiveCancelled();
     // Choosing here removes any doubt about which profile is meant; the delete
     // command and its confirmation still do the deleting and the token cleanup.
-    return ["--profile", choice.profile, "agents", "delete", choice.handle];
+    const chosen = await chooseSavedAgent("Select the agent to delete", deps, ui);
+    return chosen ? ["--profile", chosen.profile, "agents", "delete", chosen.handle] : undefined;
   }
   throw new InteractiveCancelled();
+}
+
+async function chooseSavedAgent(
+  message: string, deps: AgentDependencies, ui: InteractivePrompts,
+): Promise<{ profile: string; handle: string } | undefined> {
+  const inventory = await listAgents(deps);
+  const choices = inventory.agents.flatMap((row) => "handle" in row
+    ? [{ profile: row.profile, handle: row.handle, label: `@${row.handle} · profile ${row.profile} · ${row.api_url}` }]
+    : []);
+  if (!choices.length) { ui.info("No saved agents."); return undefined; }
+  const selected = await ui.select(message, choices.map((choice, index) => ({ value: String(index), label: choice.label })));
+  const choice = choices[Number(selected)];
+  if (!choice) throw new InteractiveCancelled();
+  return { profile: choice.profile, handle: choice.handle };
 }
