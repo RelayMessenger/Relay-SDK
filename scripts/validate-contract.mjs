@@ -35,9 +35,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "1a2245dd775f781b57e0d1f6f3146ebd384c90c3",
+    commit: "8247505bd5f8dffccf8047b91317a68a91632068",
     path: "contracts/developer/openapi.yaml",
-    sha256: "5458497fe8db4ee7dfe6bef67f2803137575d3ea4d835748290a5c9f8d906791",
+    sha256: "f1d3f19b12e068ad68b95b41650b62af6f921ec263e37dd2d24f59a72903ce30",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -99,14 +99,14 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 38);
-assert.equal(manifest.path_count, 23);
-assert.equal(manifest.source_path_count, 24);
+assert.equal(manifest.operation_count, 37);
+assert.equal(manifest.path_count, 22);
+assert.equal(manifest.source_path_count, 23);
 assert.equal(manifest.source_schema_count, 119);
-assert.equal(manifest.callback_count, 18);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 23);
-assert.equal(operationJSON.length, 38);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 18);
+assert.equal(manifest.callback_count, 19);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 22);
+assert.equal(operationJSON.length, 37);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
@@ -371,11 +371,11 @@ const validateOpenAPI = () => {
   );
   assert.match(
     document.paths["/v1/chats/{chatId}/participants"].post.description,
-    /target agent and any acting agent/u,
+    /target agent must not be blocked by, or have blocked, that user/u,
   );
   assert.match(
     document.paths["/v1/chats/{chatId}/participants"].delete.description,
-    /acting agent must remain an added, unblocked Contact/u,
+    /Any active member may remove one/u,
   );
   assert.match(
     document.paths["/v1/chats/{chatId}/leave"].post.description,

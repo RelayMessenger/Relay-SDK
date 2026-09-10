@@ -228,9 +228,9 @@ stale WebSocket connections server-side.
 
 `contracts/relay-v1.lock.json` pins:
 
-- Relay Server commit `1a2245dd775f781b57e0d1f6f3146ebd384c90c3`;
+- Relay Server commit `8247505bd5f8dffccf8047b91317a68a91632068`;
 - OpenAPI SHA-256
-  `5458497fe8db4ee7dfe6bef67f2803137575d3ea4d835748290a5c9f8d906791`,
+  `f1d3f19b12e068ad68b95b41650b62af6f921ec263e37dd2d24f59a72903ce30`,
   with public `ChatHandle.image_url` and `ChatHandle.about` fields and no legacy
   aliases;
 - `@relaymessenger/sdk@0.3.1-staging.2`; and
