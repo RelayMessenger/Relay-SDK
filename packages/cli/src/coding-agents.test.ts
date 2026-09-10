@@ -45,7 +45,12 @@ it("@vercel/detect-agent's names map onto ours, and unknown names onto nothing",
   expect(agentDetectedAs("gemini")).toBe("gemini-cli");
   expect(agentDetectedAs("codex")).toBe("codex");
   expect(agentDetectedAs("opencode")).toBe("opencode");
+  // AI_AGENT names: the package's own convention and Claude Code 2.1's.
+  expect(agentDetectedAs("claude-code")).toBe("claude-code");
+  expect(agentDetectedAs("claude-code_2-1-261_agent")).toBe("claude-code");
+  expect(agentDetectedAs("cursor-cli@1")).toBe("cursor");
   expect(agentDetectedAs("devin")).toBeUndefined();
+  expect(agentDetectedAs("relay")).toBeUndefined();
 });
 
 it("every agent has a plan that names the real file it writes", () => {

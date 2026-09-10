@@ -232,6 +232,15 @@ export const normalizeAgentId = (value: string): CodingAgentId | undefined => {
   return CODING_AGENTS.find((agent) => agent.id === normalized || agent.aliases.includes(normalized))?.id;
 };
 
-/** The agent `@vercel/detect-agent` says we are running inside, when we know it. */
-export const agentDetectedAs = (name: string): CodingAgentId | undefined =>
-  CODING_AGENTS.find((agent) => agent.detectedAs.includes(name))?.id;
+/**
+ * The agent `@vercel/detect-agent` says we are running inside, when we know it.
+ * The package answers with its own short names, or with whatever `AI_AGENT`
+ * holds; its README asks tools to set `<name>` or `<name>@<version>`, and
+ * Claude Code 2.1 sets `claude-code_<version>_agent` (measured 2026-09-10 on
+ * the owner's Mac mini), so the leading word is what is matched.
+ */
+export const agentDetectedAs = (name: string): CodingAgentId | undefined => {
+  const normalized = name.trim().toLowerCase();
+  const leading = normalized.split(/[@_/:\s]/u)[0] ?? "";
+  return CODING_AGENTS.find((agent) => agent.detectedAs.includes(normalized) || agent.id === leading || agent.detectedAs.includes(leading))?.id;
+};

@@ -1198,7 +1198,7 @@ export const runCLI = async (
   const driver = await drivingAgent(dependencies.detectAgent ?? (dependencies.configContext?.env ? async () => ({ isAgent: false, agent: undefined }) : undefined));
   const interactive = interactiveAllowed(argv, dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY && process.stderr.isTTY))
     && driver === undefined;
-  if (driver?.name === "claude" && !argv.includes("--json")) stderr(`${CLAUDE_CODE_HINT}\n`);
+  if (driver?.id === "claude-code" && !argv.includes("--json")) stderr(`${CLAUDE_CODE_HINT}\n`);
   if (driver?.id) dependencies = { ...dependencies, connect: { ...dependencies.connect, drivingAgent: driver.id } };
   const ui = interactive ? dependencies.prompts ?? clackPrompts((message) => stderr(`${message}\n`)) : undefined;
   const agentDeps = dependencies.agents ?? agentDependencies(dependencies.configContext, dependencies.fetch);
