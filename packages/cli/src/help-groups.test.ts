@@ -36,6 +36,16 @@ it("a description is a sentence, not a repeat of the command's own name", () => 
   }
 });
 
+// gh's convention, which the design page copies: one style down the whole page,
+// so no row reads as more important than its neighbour.
+it("every description starts lowercase and ends without a full stop", () => {
+  for (const row of commandRows(program())) {
+    const description = row.description.trim();
+    expect(description[0], `${row.path} starts with a capital`).toBe(description[0]?.toLowerCase());
+    expect(description.endsWith("."), `${row.path} ends with a full stop`).toBe(false);
+  }
+});
+
 it("the help is three groups, and Get started holds only connect", () => {
   const root = program();
   const groups = new Map<string, string[]>();

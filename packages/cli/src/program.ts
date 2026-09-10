@@ -72,8 +72,8 @@ export interface ProgramDependencies {
   cwd?: string;
   confirmDelete?: () => Promise<boolean>;
   confirmLogout?: () => Promise<boolean>;
-  beforeSetup?: () => Promise<void>;
-  /** The one Relay skill offer, made at most once per run. */
+  /** The one Relay skill offer of a run, made at the end of a connect and
+   * nowhere else (owner ruling, 2026-09-09). */
   offerSkill?: () => Promise<void>;
   connect?: Partial<Pick<import("./connect.js").ConnectDependencies, "sniff" | "runCommand" | "startCommand" | "observer" | "renderQR" | "pairTimeoutMs" | "version">>;
   terminalSession?: AgentSessionDependencies["session"];
@@ -189,10 +189,6 @@ export const createProgram = (
     ? `${everythingElseHelp(program)}\nNo environment variables are needed. RELAY_AGENT_TOKEN is honored in scripts only.`
     : "");
 
-  program.hook("preAction", async (_root, action) => {
-    if (dependencies.beforeSetup && ((action.parent?.name() === "agents" && action.name() === "create")
-      || (action.parent?.name() === "auth" && action.name() === "login"))) await dependencies.beforeSetup();
-  });
   const agentDeps = dependencies.agents ?? agentDependencies(configContext, dependencies.fetch);
   // The live view draws the QR code itself, so a caller that will open it must
   // not print a second copy first (the owner saw two identical codes stacked
@@ -280,7 +276,7 @@ export const createProgram = (
 
   program
     .command("doctor")
-    .description("Check every saved agent and this computer, and say what to fix.")
+    .description("check every saved agent and this computer, and say what to fix")
     .helpGroup(HELP_GROUPS.everyDay)
     .option("--offline", "skip the check that calls Relay")
     .action(async (options: { offline?: boolean }, command: Command) => {
@@ -304,10 +300,10 @@ export const createProgram = (
     });
 
   const agents = program.command("agents")
-    .description("Create an agent, list the agents saved on this computer, and delete one.")
+    .description("create an agent, list the agents saved on this computer, and delete one")
     .helpGroup(HELP_GROUPS.everyDay);
   agents.command("create")
-    .description("Create an agent and save its token privately on this computer. No account and no sign-in.")
+    .description("create an agent and save its token privately on this computer. No account and no sign-in")
     .option("--api-url <url>", "the Relay API address to use", validateApiURL)
     .option("--token-name <name>", "a label for the new token, so you can tell it apart later")
     .option("--handle <handle>", "the .dev handle you want; leave it out and Relay picks one")
@@ -356,23 +352,23 @@ export const createProgram = (
       }
     });
   agents.command("list")
-    .description("List the agents saved on this computer, each read with its own token.")
+    .description("list the agents saved on this computer, each read with its own token")
     .option("--json", "print the result as JSON")
     .action(async () => output(await listAgents(agentDeps)));
   agents.command("delete").argument("<handle>", "agent handle", handle)
-    .description("Delete an agent at Relay, then remove its saved token from this computer.")
+    .description("delete an agent at Relay, then remove its saved token from this computer")
     .option("--json", "print the result as JSON")
     .action(async (agentHandle: string, _options: object, command: Command) => {
       if (!globals(command).nonInteractive && !globals(command).json && dependencies.confirmDelete && !await dependencies.confirmDelete()) throw new InteractiveCancelled();
       output(await deleteAgent(agentHandle, globals(command).profile, agentDeps));
     });
 
-  const authCommands = program.command("auth", { hidden: true }).description("Save, check and remove the token this computer signs in with.").helpGroup(HELP_GROUPS.everythingElse);
+  const authCommands = program.command("auth", { hidden: true }).description("save, check and remove the token this computer signs in with").helpGroup(HELP_GROUPS.everythingElse);
   authCommands.configureOutput({
     outputError: (_message, write) => write("Those options are not right for auth. To sign in, pipe the token into npx relaymessenger auth login --with-token. Never type a token as an option value.\n"),
   });
   authCommands.command("login")
-    .description("Save a token for this computer. Relay asks for it in a hidden prompt, or reads it from a pipe or from RELAY_AGENT_TOKEN.")
+    .description("save a token for this computer. Relay asks for it in a hidden prompt, or reads it from a pipe or from RELAY_AGENT_TOKEN")
     .option("--with-token", "read the token from a pipe instead of asking for it")
     .option("--api-url <url>", "the Relay API address this profile uses")
     .action(async (
@@ -415,7 +411,7 @@ export const createProgram = (
     });
   authCommands
     .command("status")
-    .description("Show which token Relay would use, and where it comes from, without printing it.")
+    .description("show which token Relay would use, and where it comes from, without printing it")
     .action(async (_options: object, command: Command) => {
       const resolved = await resolveAuth(globals(command).profile, configContext);
       output({
@@ -432,7 +428,7 @@ export const createProgram = (
     });
   authCommands
     .command("logout")
-    .description("Remove the selected profile's stored token.")
+    .description("remove the selected profile's stored token")
     .action(async (_options: object, command: Command) => {
       if (!globals(command).nonInteractive && !globals(command).json && dependencies.confirmLogout && !await dependencies.confirmLogout()) throw new InteractiveCancelled();
       const config = await readConfig(configContext);
@@ -447,12 +443,12 @@ export const createProgram = (
       output({ ok: true, profile, token: "removed" });
     });
 
-  const profiles = program.command("profiles", { hidden: true }).description("Manage the saved profiles on this computer: add, choose, remove and list them.").helpGroup(HELP_GROUPS.everythingElse);
+  const profiles = program.command("profiles", { hidden: true }).description("manage the saved profiles on this computer: add, choose, remove and list them").helpGroup(HELP_GROUPS.everythingElse);
   profiles
     .command("add")
     .argument("<name>", "profile name", validateProfileName)
     .requiredOption("--api-url <url>", "the Relay API address this profile uses", validateApiURL)
-    .description("Add a profile without storing a token.")
+    .description("add a profile without storing a token")
     .action(async (name: string, options: { apiUrl: string }) => {
       const config = await readConfig(configContext);
       if (config.profiles[name]) throw new Error(`Relay profile ${name} already exists.`);
@@ -463,7 +459,7 @@ export const createProgram = (
   profiles
     .command("use")
     .argument("<name>", "profile name", validateProfileName)
-    .description("Select the default local profile.")
+    .description("select the default local profile")
     .action(async (name: string) => {
       const config = await readConfig(configContext);
       if (!config.profiles[name]) throw new Error(`Relay profile ${name} does not exist.`);
@@ -474,7 +470,7 @@ export const createProgram = (
   profiles
     .command("remove")
     .argument("<name>", "profile name", validateProfileName)
-    .description("Remove a non-current profile and its token.")
+    .description("remove a non-current profile and its token")
     .action(async (name: string) => {
       const config = await readConfig(configContext);
       if (name === config.current_profile) {
@@ -487,7 +483,7 @@ export const createProgram = (
     });
   profiles
     .command("list")
-    .description("List profiles without revealing tokens.")
+    .description("list profiles without revealing tokens")
     .action(async () => {
       const config = await readConfig(configContext);
       output({
@@ -503,7 +499,7 @@ export const createProgram = (
 
   program
     .command("docs", { hidden: true })
-    .description("Print Relay's documentation for agents, or the address to read it at.")
+    .description("print Relay's documentation for agents, or the address to read it at")
     .helpGroup(HELP_GROUPS.everythingElse)
     .action(async (_options: object, command: Command) => {
       // A person gets the address to open. An agent, which has no terminal, gets
@@ -517,17 +513,17 @@ export const createProgram = (
 
   program
     .command("config-path", { hidden: true })
-    .description("Print where Relay keeps its config file on this computer.")
+    .description("print where Relay keeps its config file on this computer")
     .helpGroup(HELP_GROUPS.everythingElse)
     .action(() => output({ path: configPath(configContext) }));
 
   const chats = program.command("chats", { hidden: true }).helpGroup(HELP_GROUPS.everythingElse).description(
-    "Read and update chats. To start or join a chat that includes a person, every agent in it must already be one of that person's contacts and not blocked. "
-    + "Chats between agents only need no such contact.",
+    "read and update chats. To start or join a chat that includes a person, every agent in it must already be one of that person's contacts and not blocked. "
+    + "Chats between agents only need no such contact",
   );
   chats
     .command("list")
-    .description("List the chats this agent is in, a page at a time.")
+    .description("list the chats this agent is in, a page at a time")
     .option("--cursor <cursor>")
     .option("--limit <number>", "page size", positiveInteger)
     .action(async (
@@ -539,13 +535,13 @@ export const createProgram = (
     });
   chats
     .command("get")
-    .description("Show one chat.")
+    .description("show one chat")
     .argument("<chat-id>")
     .action(async (chatID: string, _options: object, command: Command) =>
       output(await (await clientFor(command)).chats.retrieve(chatID)));
   chats
     .command("create")
-    .description("Create a Chat with at most 7 total participants, including the sender.")
+    .description("create a Chat with at most 7 total participants, including the sender")
     .requiredOption("--from <handle>", "sender Handle", handle)
     .requiredOption("--to <handles...>", "at most 6 recipient Handles", (value) => handle(value))
     .requiredOption("--text <text>")
@@ -564,7 +560,7 @@ export const createProgram = (
     });
   chats
     .command("update")
-    .description("Rename a group chat, or set or clear its picture.")
+    .description("rename a group chat, or set or clear its picture")
     .argument("<chat-id>")
     .option("--display-name <name>")
     .option("--group-icon <attachment-id-or-https-url>")
@@ -596,23 +592,23 @@ export const createProgram = (
     });
   chats
     .command("leave")
-    .description("Leave a chat. The chat itself stays where it is.")
+    .description("leave a chat. The chat itself stays where it is")
     .argument("<chat-id>")
     .action(async (chatID: string, _options: object, command: Command) =>
       output(await (await clientFor(command)).chats.leaveChat(chatID)));
   chats
     .command("read")
-    .description("Mark everything in a chat as read.")
+    .description("mark everything in a chat as read")
     .argument("<chat-id>")
     .action(async (chatID: string, _options: object, command: Command) => {
       await (await clientFor(command)).chats.markAsRead(chatID);
       output(voidResult);
     });
 
-  const typing = chats.command("typing").description("Manage Chat typing state.");
+  const typing = chats.command("typing").description("manage Chat typing state");
   typing
     .command("start")
-    .description("Show that this agent is typing in a chat.")
+    .description("show that this agent is typing in a chat")
     .argument("<chat-id>")
     .action(async (chatID: string, _options: object, command: Command) => {
       await (await clientFor(command)).chats.startTyping(chatID);
@@ -620,7 +616,7 @@ export const createProgram = (
     });
   typing
     .command("stop")
-    .description("Stop showing that this agent is typing.")
+    .description("stop showing that this agent is typing")
     .argument("<chat-id>")
     .action(async (chatID: string, _options: object, command: Command) => {
       await (await clientFor(command)).chats.stopTyping(chatID);
@@ -629,12 +625,12 @@ export const createProgram = (
 
   const participants = chats.command("participants")
     .description(
-      "Add or remove agents in a chat. In a chat that includes a person, the agent you add and the agent doing the adding must both be that person's contacts and not blocked. "
-      + "The same holds for an agent that removes another. An agent may always leave a chat itself.",
+      "add or remove agents in a chat. In a chat that includes a person, the agent you add and the agent doing the adding must both be that person's contacts and not blocked. "
+      + "The same holds for an agent that removes another. An agent may always leave a chat itself",
     );
   participants
     .command("add")
-    .description("Add an agent to a chat.")
+    .description("add an agent to a chat")
     .argument("<chat-id>")
     .argument("<handle>", "participant Handle", handle)
     .option("--hide-history", "the new agent sees only messages sent after it joins (this is what Relay does by default)")
@@ -655,7 +651,7 @@ export const createProgram = (
     ));
   participants
     .command("remove")
-    .description("Remove an agent from a chat.")
+    .description("remove an agent from a chat")
     .argument("<chat-id>")
     .argument("<handle>", "participant Handle", handle)
     .action(async (
@@ -670,10 +666,10 @@ export const createProgram = (
       ),
     ));
 
-  const chatMessages = chats.command("messages").description("Read and send Chat Messages.");
+  const chatMessages = chats.command("messages").description("read and send Chat Messages");
   chatMessages
     .command("list")
-    .description("List the messages in a chat, a page at a time.")
+    .description("list the messages in a chat, a page at a time")
     .argument("<chat-id>")
     .option("--cursor <cursor>")
     .option("--limit <number>", "page size", positiveInteger)
@@ -700,7 +696,7 @@ export const createProgram = (
     });
   chatMessages
     .command("send")
-    .description("Send a text message to a chat.")
+    .description("send a text message to a chat")
     .argument("<chat-id>")
     .requiredOption("--text <text>")
     .requiredOption("--idempotency-key <key>")
@@ -717,7 +713,7 @@ export const createProgram = (
 
   chats
     .command("voice-memo")
-    .description("Send a voice memo to a chat, by attachment or by address.")
+    .description("send a voice memo to a chat, by attachment or by address")
     .argument("<chat-id>")
     .option("--attachment-id <id>")
     .option("--url <url>")
@@ -740,10 +736,10 @@ export const createProgram = (
       );
     });
 
-  const messages = program.command("messages", { hidden: true }).description("Read, send, and react to Messages.").helpGroup(HELP_GROUPS.everythingElse);
+  const messages = program.command("messages", { hidden: true }).description("read, send, and react to Messages").helpGroup(HELP_GROUPS.everythingElse);
   messages
     .command("send")
-    .description("Start or reuse a chat with the handles you name, and send one message.")
+    .description("start or reuse a chat with the handles you name, and send one message")
     .requiredOption("--to <handles...>", "at most 6 recipient Handles", (value) => handle(value))
     .requiredOption("--text <text>")
     .requiredOption("--idempotency-key <key>")
@@ -760,13 +756,13 @@ export const createProgram = (
     });
   messages
     .command("get")
-    .description("Show one message.")
+    .description("show one message")
     .argument("<message-id>")
     .action(async (messageID: string, _options: object, command: Command) =>
       output(await (await clientFor(command)).messages.retrieve(messageID)));
   messages
     .command("thread")
-    .description("List the replies to a message, a page at a time.")
+    .description("list the replies to a message, a page at a time")
     .argument("<message-id>")
     .option("--cursor <cursor>")
     .option("--limit <number>", "page size", positiveInteger)
@@ -793,7 +789,7 @@ export const createProgram = (
     });
   messages
     .command("react")
-    .description("Add or remove a reaction on a message.")
+    .description("add or remove a reaction on a message")
     .argument("<message-id>")
     .requiredOption("--operation <operation>", "add or remove")
     .requiredOption("--type <type>")
@@ -836,10 +832,10 @@ export const createProgram = (
       output(await (await clientFor(command)).messages.addReaction(messageID, body));
     });
 
-  const attachments = program.command("attachments", { hidden: true }).description("Upload files to Relay, and read or delete the ones you uploaded.").helpGroup(HELP_GROUPS.everythingElse);
+  const attachments = program.command("attachments", { hidden: true }).description("upload files to Relay, and read or delete the ones you uploaded").helpGroup(HELP_GROUPS.everythingElse);
   attachments
     .command("allocate")
-    .description("Reserve a place for a file at Relay, and get the address to upload it to.")
+    .description("reserve a place for a file at Relay, and get the address to upload it to")
     .requiredOption("--filename <name>")
     .requiredOption("--content-type <type>")
     .requiredOption("--size <bytes>", "file size", positiveInteger)
@@ -856,7 +852,7 @@ export const createProgram = (
     })));
   attachments
     .command("upload")
-    .description("Upload a file from this computer in one step.")
+    .description("upload a file from this computer in one step")
     .argument("<file>")
     .requiredOption("--content-type <type>")
     .action(async (
@@ -880,28 +876,28 @@ export const createProgram = (
     });
   attachments
     .command("get")
-    .description("Show one file this agent uploaded.")
+    .description("show one file this agent uploaded")
     .argument("<attachment-id>")
     .action(async (attachmentID: string, _options: object, command: Command) =>
       output(await (await clientFor(command)).attachments.retrieve(attachmentID)));
   attachments
     .command("delete")
-    .description("Delete a file this agent uploaded.")
+    .description("delete a file this agent uploaded")
     .argument("<attachment-id>")
     .action(async (attachmentID: string, _options: object, command: Command) => {
       await (await clientFor(command)).attachments.delete(attachmentID);
       output(voidResult);
     });
 
-  const blocked = program.command("blocked-handles", { hidden: true }).description("Block a handle from reaching this agent, unblock one, or list them.").helpGroup(HELP_GROUPS.everythingElse);
+  const blocked = program.command("blocked-handles", { hidden: true }).description("block a handle from reaching this agent, unblock one, or list them").helpGroup(HELP_GROUPS.everythingElse);
   blocked
     .command("list")
-    .description("List the handles this agent has blocked.")
+    .description("list the handles this agent has blocked")
     .action(async (_options: object, command: Command) =>
       output(await (await clientFor(command)).blockedHandles.list()));
   blocked
     .command("add")
-    .description("Block a handle, so it can no longer reach this agent.")
+    .description("block a handle, so it can no longer reach this agent")
     .argument("<handle>", "Handle", handle)
     .option("--reason <reason>")
     .action(async (
@@ -914,7 +910,7 @@ export const createProgram = (
     })));
   blocked
     .command("remove")
-    .description("Unblock a handle.")
+    .description("unblock a handle")
     .argument("<handle>", "Handle", handle)
     .action(async (
       blockedHandle: string,
@@ -927,10 +923,10 @@ export const createProgram = (
       output(voidResult);
     });
 
-  const webhooks = program.command("webhooks", { hidden: true }).description("List the event types Relay can send, and manage where it sends them.").helpGroup(HELP_GROUPS.everythingElse);
+  const webhooks = program.command("webhooks", { hidden: true }).description("list the event types Relay can send, and manage where it sends them").helpGroup(HELP_GROUPS.everythingElse);
   webhooks
     .command("events")
-    .description("List every event type Relay can send, and where each is documented.")
+    .description("list every event type Relay can send, and where each is documented")
     .action(async (_options: object, command: Command) =>
       output(await (await clientFor(command)).webhookEvents.list()));
   // `watch` is the live view a person means. `events listen` is a different
@@ -938,7 +934,7 @@ export const createProgram = (
   // them elsewhere. It keeps its flags and its behaviour, and leaves the help.
   program
     .command("events", { hidden: true })
-    .description("The older name for watching events; it takes events, so prefer watch.")
+    .description("the older name for watching events; it takes events, so prefer watch")
     .helpGroup(HELP_GROUPS.unlisted)
     .command("listen")
     .option("--forward-to <url>", "also POST each event to this address on your own computer (localhost only)")
@@ -946,7 +942,7 @@ export const createProgram = (
       "--acknowledge-events",
       "yes: this agent is a test agent, and reading events here may make Relay stop resending them elsewhere",
     )
-    .description("Print each event as it arrives, and optionally send a copy to your own computer. Copies are not signed.")
+    .description("print each event as it arrives, and optionally send a copy to your own computer. Copies are not signed")
     .action(async (
       options: { forwardTo?: string; acknowledgeEvents: boolean },
       command: Command,
@@ -983,15 +979,15 @@ export const createProgram = (
       }
     });
 
-  const subscriptions = webhooks.command("subscriptions").description("Manage webhook subscriptions.");
+  const subscriptions = webhooks.command("subscriptions").description("manage webhook subscriptions");
   subscriptions
     .command("list")
-    .description("List the addresses Relay sends this agent's events to.")
+    .description("list the addresses Relay sends this agent's events to")
     .action(async (_options: object, command: Command) =>
       output(await (await clientFor(command)).webhookSubscriptions.list()));
   subscriptions
     .command("get")
-    .description("Show one address Relay sends events to.")
+    .description("show one address Relay sends events to")
     .argument("<subscription-id>")
     .action(async (subscriptionID: string, _options: object, command: Command) =>
       output(
@@ -1001,7 +997,7 @@ export const createProgram = (
       ));
   subscriptions
     .command("create")
-    .description("Tell Relay to send the events you choose to an address you own.")
+    .description("tell Relay to send the events you choose to an address you own")
     .requiredOption("--target-url <url>")
     .requiredOption("--event <events...>")
     .action(async (
@@ -1015,7 +1011,7 @@ export const createProgram = (
     ));
   subscriptions
     .command("update")
-    .description("Change the address, the events, or whether Relay sends to it at all.")
+    .description("change the address, the events, or whether Relay sends to it at all")
     .argument("<subscription-id>")
     .option("--target-url <url>")
     .option("--event <events...>")
@@ -1055,23 +1051,23 @@ export const createProgram = (
     });
   subscriptions
     .command("delete")
-    .description("Stop Relay sending events to that address.")
+    .description("stop Relay sending events to that address")
     .argument("<subscription-id>")
     .action(async (subscriptionID: string, _options: object, command: Command) => {
       await (await clientFor(command)).webhookSubscriptions.delete(subscriptionID);
       output(voidResult);
     });
 
-  const contactCard = program.command("contact-card", { hidden: true }).description("Set the name and picture people see for this agent, and share it into a chat.").helpGroup(HELP_GROUPS.everythingElse);
+  const contactCard = program.command("contact-card", { hidden: true }).description("set the name and picture people see for this agent, and share it into a chat").helpGroup(HELP_GROUPS.everythingElse);
   contactCard
     .command("get")
-    .description("Show the name and picture people see for this agent.")
+    .description("show the name and picture people see for this agent")
     .option("--handle <handle>", "the agent's handle", handle)
     .action(async (options: { handle?: string }, command: Command) =>
       output(await (await clientFor(command)).contactCard.retrieve(options)));
   contactCard
     .command("setup")
-    .description("Set the name and picture people see for this agent, the first time.")
+    .description("set the name and picture people see for this agent, the first time")
     .requiredOption("--handle <handle>", "the agent's handle", handle)
     .option("--name <name>", "the name people see next to this agent")
     .addOption(new Option("--first-name <name>").hideHelp())
@@ -1097,7 +1093,7 @@ export const createProgram = (
     });
   contactCard
     .command("update")
-    .description("Change the name or picture people see for this agent.")
+    .description("change the name or picture people see for this agent")
     .requiredOption("--handle <handle>", "the agent's handle", handle)
     .option("--name <name>", "the name people see next to this agent")
     .addOption(new Option("--first-name <name>").hideHelp())
@@ -1166,7 +1162,7 @@ export const createProgram = (
     });
   contactCard
     .command("share")
-    .description("Share this agent's name and picture into a chat.")
+    .description("share this agent's name and picture into a chat")
     .argument("<chat-id>")
     .action(async (chatID: string, _options: object, command: Command) => {
       await (await clientFor(command)).chats.shareContactCard(chatID);
@@ -1235,7 +1231,7 @@ export const runCLI = async (
     }
     const entry = interactiveEntry(args);
     if (ui && entry) {
-      const selected = await chooseInteractiveCommand(entry.entry, entry.prefix, agentDeps, ui, async () => { await skillOffer(); });
+      const selected = await chooseInteractiveCommand(entry.entry, entry.prefix, agentDeps, ui);
       if (!selected) return 0;
       if (selected === "install-skill") return await skillOffer(true);
       args = selected;
@@ -1244,7 +1240,6 @@ export const runCLI = async (
       ...dependencies, agents: agentDeps, isInteractive: interactive,
       ...(ui ? {
         prompts: ui,
-        beforeSetup: async () => { await skillOffer(); },
         offerSkill: async () => { await skillOffer(); },
         readSecret: dependencies.readSecret ?? (() => ui.password("Paste your token")),
         confirmDelete: () => ui.confirm("Delete the selected agent? This cannot be undone."),

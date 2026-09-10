@@ -204,7 +204,7 @@ describe("CLI command routing", () => {
 
   it("explains agent-only selection without renaming participant commands", async () => {
     expect(await run(["chats", "participants", "--help"])).toBe(0);
-    expect(stdout.join("")).toContain("Add or remove agents in a chat");
+    expect(stdout.join("")).toContain("add or remove agents in a chat");
     const help = stdout.join("").replace(/\s+/gu, " ");
     expect(help).toContain("the agent you add and the agent doing the adding must both be that person's contacts and not blocked");
     expect(help).toContain("The same holds for an agent that removes another");

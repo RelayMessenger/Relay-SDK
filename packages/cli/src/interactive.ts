@@ -77,7 +77,6 @@ export function interactiveEntry(argv: readonly string[]): { entry: InteractiveE
 }
 export async function chooseInteractiveCommand(
   entry: InteractiveEntry, prefix: string[], deps: AgentDependencies, ui: InteractivePrompts,
-  beforeSetup: () => Promise<void> = async () => undefined,
 ): Promise<string[] | "install-skill" | undefined> {
   // The door names what a person wants, not what Relay does. Creating an agent
   // and pasting a token both live inside Connect, and only when they are needed.
@@ -104,7 +103,6 @@ export async function chooseInteractiveCommand(
     return chosen ? ["--profile", chosen.profile, "watch", chosen.handle] : undefined;
   }
   if (action === "create") {
-    await beforeSetup();
     ui.info("Press Enter to skip any of these. Relay picks a handle for you if you skip it. A picture can be a file on this computer or an https:// address.");
     const chosenHandle = (await ui.text("Handle (optional)", "")).trim();
     const displayName = (await ui.text("Name (optional)", "")).trim();
@@ -116,7 +114,6 @@ export async function chooseInteractiveCommand(
     ];
   }
   if (action === "login") {
-    await beforeSetup();
     const config = await deps.read();
     const profileArg = prefix.find((value) => value.startsWith("--profile="))?.slice(10) ?? (prefix[0] === "--profile" ? prefix[1] : undefined);
     const selectedName = profileArg ?? deps.env.RELAY_PROFILE ?? config.current_profile;
