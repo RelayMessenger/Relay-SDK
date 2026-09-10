@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { pinReachability } from "./contract-pin.mjs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -719,6 +720,12 @@ assert.equal(
   + ` but api.openapi_sha256 is ${skillLock.api.openapi_sha256};`
   + " point public_source.commit at the commit that carries the locked contract",
 );
+// A commit that hashes right is still a bad pin when only one machine has it:
+// this repository squash-merges, so a PR-branch commit is gone after merge.
+// The pin has to be reachable from a durable public ref (scripts/contract-pin.mjs).
+const durability = pinReachability({ root, commit: pinned.commit, sha256: skillLock.api.openapi_sha256 });
+if (!durability.checked) console.warn(durability.message);
+assert.ok(durability.checked === false || durability.reachable, durability.message);
 
 console.log(JSON.stringify({
   ok: true,

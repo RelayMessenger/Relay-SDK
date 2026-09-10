@@ -74,10 +74,15 @@ try {
   const cli = (...args) => run(process.execPath, [bin, ...args], { cwd: consumer });
   const shim = (args, options = {}) => npm(['exec', '--offline', '--', 'relaymessenger', ...args], { cwd: consumer, ...options });
   const help = cli('--help');
-  assert.match(help, /^\s+auth[ \[]/m);
+  // The shipped help shape (packages/cli/src/help-groups.ts): three groups, with
+  // `auth` named only on the "Everything else" line, never as a row of its own.
+  for (const command of ['connect', 'watch', 'doctor', 'agents']) assert.match(help, new RegExp(`^  ${command}(?: \\[|\\n| {2,})`, 'm'), `root help must list ${command} as a row`);
+  const everythingElse = /^Everything else:\n(?:.*\n)*?  ((?:[a-z-]+, )*auth(?:, [a-z-]+)*)\n/m.exec(help);
+  assert.ok(everythingElse, 'root help must name auth on the "Everything else" line');
   assert.doesNotMatch(help, /^\s+(token|login|oauth|console)[ \[]/m);
-  const hasAgentCommands = /^  agent(?:s)?[ \[]/m.test(help);
+  const hasAgentCommands = /^  agents(?: {2,}|\n)/m.test(help);
   assert.ok(hasAgentCommands, 'Canonical CLI must include agent commands');
+  report.helpShape = { rows: ['connect', 'watch', 'doctor', 'agents'], everythingElse: everythingElse[1] };
   report.agentCommands = hasAgentCommands ? 'available; tests pending below' : 'pending feature commits: no agent command in root help';
   const expectedVersion = cliManifest.version;
   assert.equal(cli('--version').trim(), expectedVersion);

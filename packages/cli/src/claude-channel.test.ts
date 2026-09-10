@@ -1,8 +1,9 @@
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { inspectChannelEnv, readChannelEnv, renderChannelEnv, writeChannelEnv } from "./claude-channel.js";
+import { expectOwnerOnly } from "./private-file.test.js";
 
 const token = `rly_live_${"A".repeat(43)}`;
 const other = `rly_live_${"B".repeat(43)}`;
@@ -10,7 +11,7 @@ const channel = async (): Promise<string> => join(await mkdtemp(join(tmpdir(), "
 
 it("writes the three names the channel reads, owner-only, in an owner-only folder", async () => {
   const directory = await channel();
-  const written = await writeChannelEnv(directory, { token, baseURL: "https://api.staging.relayapp.im", allowedSenders: ["advait"] }, "linux");
+  const written = await writeChannelEnv(directory, { token, baseURL: "https://api.staging.relayapp.im", allowedSenders: ["advait"] });
   expect(written.path).toBe(join(directory, ".env"));
   const contents = await readFile(written.path, "utf8");
   expect(contents).toBe([
@@ -19,8 +20,7 @@ it("writes the three names the channel reads, owner-only, in an owner-only folde
     'RELAY_ALLOWED_SENDERS="advait"',
     "",
   ].join("\n"));
-  expect((await stat(written.path)).mode & 0o777).toBe(0o600);
-  expect((await stat(directory)).mode & 0o777).toBe(0o700);
+  await expectOwnerOnly(written.path, directory);
   // The channel's own reader gets back exactly what was written.
   expect(readChannelEnv(contents)).toMatchObject({
     RELAY_AGENT_TOKEN: token,
@@ -39,7 +39,7 @@ it("keeps every other line where it was, and rewrites Relay's own in place", asy
     'RELAY_BASE_URL="https://api.relayapp.im"',
     "",
   ].join("\n"), { mode: 0o600 });
-  await writeChannelEnv(directory, { token, baseURL: "https://api.staging.relayapp.im", allowedSenders: ["advait", "@advait", " "] }, "linux");
+  await writeChannelEnv(directory, { token, baseURL: "https://api.staging.relayapp.im", allowedSenders: ["advait", "@advait", " "] });
   expect(await readFile(join(directory, ".env"), "utf8")).toBe([
     "# written by hand",
     `RELAY_AGENT_TOKEN="${token}"`,
@@ -53,17 +53,17 @@ it("keeps every other line where it was, and rewrites Relay's own in place", asy
 it("reads back the token already there, so Keep and Replace can be offered", async () => {
   const directory = await channel();
   expect(await inspectChannelEnv(directory)).toMatchObject({ exists: false, allowedSenders: [] });
-  await writeChannelEnv(directory, { token: other, baseURL: "https://api.relayapp.im", allowedSenders: ["bob", "carol"] }, "linux");
+  await writeChannelEnv(directory, { token: other, baseURL: "https://api.relayapp.im", allowedSenders: ["bob", "carol"] });
   const state = await inspectChannelEnv(directory);
   expect(state).toMatchObject({ exists: true, token: other, baseURL: "https://api.relayapp.im", allowedSenders: ["bob", "carol"] });
   // Keep changes nothing: the caller simply does not write.
   const before = await readFile(state.path, "utf8");
   expect(await readFile(state.path, "utf8")).toBe(before);
   // Replace overwrites only the token, and the file stays owner-only.
-  await writeChannelEnv(directory, { token, baseURL: "https://api.relayapp.im", allowedSenders: ["bob", "carol"] }, "linux");
+  await writeChannelEnv(directory, { token, baseURL: "https://api.relayapp.im", allowedSenders: ["bob", "carol"] });
   expect(await readFile(state.path, "utf8")).toContain(`RELAY_AGENT_TOKEN="${token}"`);
   expect(await readFile(state.path, "utf8")).not.toContain(other);
-  expect((await stat(state.path)).mode & 0o777).toBe(0o600);
+  await expectOwnerOnly(state.path, directory);
 });
 
 it("refuses a value that a .env file cannot hold safely", () => {

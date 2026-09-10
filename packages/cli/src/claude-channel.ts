@@ -1,6 +1,6 @@
-import { chmod, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE, preparePrivateDestination, writePrivateDestination } from "./private-file.js";
 
 /**
  * The one file the Relay channel for Claude Code reads. Its three names, its
@@ -10,8 +10,8 @@ import { join } from "node:path";
  * owner-only and the file is mode 600, because it holds an agent's token.
  */
 export const CHANNEL_ENV_KEYS = ["RELAY_AGENT_TOKEN", "RELAY_BASE_URL", "RELAY_ALLOWED_SENDERS"] as const;
-export const CHANNEL_DIR_MODE = 0o700;
-export const CHANNEL_FILE_MODE = 0o600;
+export const CHANNEL_DIR_MODE = PRIVATE_DIR_MODE;
+export const CHANNEL_FILE_MODE = PRIVATE_FILE_MODE;
 
 export interface ChannelEnvValues {
   token: string;
@@ -102,9 +102,10 @@ export const inspectChannelEnv = async (channelDir: string): Promise<ChannelEnvS
 };
 
 /**
- * Writes the file through a private temporary file in the same folder, so a
- * reader never sees a half-written token and the token never exists in a
- * world-readable file for even an instant.
+ * Writes the file the way the Relay config is written (private-file.ts): an
+ * exclusive temporary file in the same folder, private before the token lands
+ * in it, renamed over the destination, read back. Owner-only by the platform's
+ * own means: mode bits on POSIX, a private ACL on Windows.
  */
 export const writeChannelEnv = async (
   channelDir: string,
@@ -113,21 +114,7 @@ export const writeChannelEnv = async (
 ): Promise<{ path: string; contents: string }> => {
   const state = await inspectChannelEnv(channelDir);
   const contents = renderChannelEnv(state.contents, values);
-  await mkdir(channelDir, { recursive: true, mode: CHANNEL_DIR_MODE });
-  if (platform !== "win32") await chmod(channelDir, CHANNEL_DIR_MODE);
-  const temporary = join(channelDir, `.relay-connect-${process.pid}-${randomUUID()}.tmp`);
-  const handle = await open(temporary, "wx", CHANNEL_FILE_MODE);
-  try {
-    try {
-      await handle.writeFile(contents, "utf8");
-      if (platform !== "win32") await handle.chmod(CHANNEL_FILE_MODE);
-      await handle.sync();
-    } finally { await handle.close(); }
-    await rename(temporary, state.path);
-    if (platform !== "win32") await chmod(state.path, CHANNEL_FILE_MODE);
-    return { path: state.path, contents };
-  } catch (error) {
-    await unlink(temporary).catch(() => undefined);
-    throw error;
-  }
+  const destination = await preparePrivateDestination(state.path, "Claude Code channel", platform);
+  await writePrivateDestination(destination, ".relay-connect", contents);
+  return { path: state.path, contents };
 };
