@@ -2637,10 +2637,10 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "test/deploy.test.ts",
       "source_sha256": "c97763411c138409caf91a228752ab717ff75687151890d72055d2df63dbe9cc",
-      "destination_sha256": "c97763411c138409caf91a228752ab717ff75687151890d72055d2df63dbe9cc",
+      "destination_sha256": "2931437dadde4446af2dca917358e956e18c664b2d55a133c9eff81b7a89f3e1",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "cookbook/cloudflare-think-agent/test/env.d.ts",
