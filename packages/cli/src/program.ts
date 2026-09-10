@@ -182,9 +182,6 @@ export const createProgram = (
     writeErr: stderr,
   });
 
-  // The help command belongs with everything else, not in a section of its own.
-  program.commandsGroup(HELP_GROUPS.everythingElse)
-    .helpCommand("help [command]", "show what a command does and the options it takes");
   program.addHelpText("after", (context) => context.command === program
     ? `${everythingElseHelp(program)}\nNo environment variables are needed. RELAY_AGENT_TOKEN is honored in scripts only.`
     : "");
@@ -303,7 +300,7 @@ export const createProgram = (
     .description("create an agent, list the agents saved on this computer, and delete one")
     .helpGroup(HELP_GROUPS.everyDay);
   agents.command("create")
-    .description("create an agent and save its token privately on this computer. No account and no sign-in")
+    .description("create an agent and save its token privately on this computer, with no account and no sign-in")
     .option("--api-url <url>", "the Relay API address to use", validateApiURL)
     .option("--token-name <name>", "a label for the new token, so you can tell it apart later")
     .option("--handle <handle>", "the .dev handle you want; leave it out and Relay picks one")
@@ -368,7 +365,7 @@ export const createProgram = (
     outputError: (_message, write) => write("Those options are not right for auth. To sign in, pipe the token into npx relaymessenger auth login --with-token. Never type a token as an option value.\n"),
   });
   authCommands.command("login")
-    .description("save a token for this computer. Relay asks for it in a hidden prompt, or reads it from a pipe or from RELAY_AGENT_TOKEN")
+    .description("save a token for this computer, from a hidden prompt, a pipe, or RELAY_AGENT_TOKEN")
     .option("--with-token", "read the token from a pipe instead of asking for it")
     .option("--api-url <url>", "the Relay API address this profile uses")
     .action(async (
@@ -517,10 +514,11 @@ export const createProgram = (
     .helpGroup(HELP_GROUPS.everythingElse)
     .action(() => output({ path: configPath(configContext) }));
 
-  const chats = program.command("chats", { hidden: true }).helpGroup(HELP_GROUPS.everythingElse).description(
-    "read and update chats. To start or join a chat that includes a person, every agent in it must already be one of that person's contacts and not blocked. "
-    + "Chats between agents only need no such contact",
-  );
+  const chats = program.command("chats", { hidden: true }).helpGroup(HELP_GROUPS.everythingElse)
+    .description("read and update chats");
+  chats.addHelpText("after",
+    "\nTo start or join a chat that includes a person, every agent in it must already be one of that person's contacts and not blocked. "
+    + "Chats between agents only need no such contact.\n");
   chats
     .command("list")
     .description("list the chats this agent is in, a page at a time")
@@ -592,7 +590,7 @@ export const createProgram = (
     });
   chats
     .command("leave")
-    .description("leave a chat. The chat itself stays where it is")
+    .description("leave a chat; it stays for everyone else")
     .argument("<chat-id>")
     .action(async (chatID: string, _options: object, command: Command) =>
       output(await (await clientFor(command)).chats.leaveChat(chatID)));
@@ -624,10 +622,10 @@ export const createProgram = (
     });
 
   const participants = chats.command("participants")
-    .description(
-      "add or remove agents in a chat. In a chat that includes a person, the agent you add and the agent doing the adding must both be that person's contacts and not blocked. "
-      + "The same holds for an agent that removes another. An agent may always leave a chat itself",
-    );
+    .description("add or remove agents in a chat");
+  participants.addHelpText("after",
+    "\nIn a chat that includes a person, the agent you add and the agent doing the adding must both be that person's contacts and not blocked. "
+    + "The same holds for an agent that removes another. An agent may always leave a chat itself.\n");
   participants
     .command("add")
     .description("add an agent to a chat")
@@ -942,7 +940,7 @@ export const createProgram = (
       "--acknowledge-events",
       "yes: this agent is a test agent, and reading events here may make Relay stop resending them elsewhere",
     )
-    .description("print each event as it arrives, and optionally send a copy to your own computer. Copies are not signed")
+    .description("print each event as it arrives, and optionally send an unsigned copy to your own computer")
     .action(async (
       options: { forwardTo?: string; acknowledgeEvents: boolean },
       command: Command,
@@ -1168,6 +1166,12 @@ export const createProgram = (
       await (await clientFor(command)).chats.shareContactCard(chatID);
       output(voidResult);
     });
+
+  // Last, so only the root's own help command takes this group: set earlier, the
+  // default would be inherited by every subcommand and put an "Everything else"
+  // heading on ten help screens that have no such section.
+  program.commandsGroup(HELP_GROUPS.everythingElse)
+    .helpCommand("help [command]", "show what a command does and the options it takes");
 
   return program;
 };
