@@ -1,16 +1,23 @@
 import { afterEach, expect, it } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createProgram, runCLI } from "./program.js";
 import { flagRows } from "./help-groups.js";
 import { CLI_ERROR_CODES, NEXT_STEP } from "./error-codes.js";
+import { protectWindowsPath } from "./runtime-connect/windows-acl.js";
 import { docsSection, docsSections } from "./agent-driver.js";
 
 const homes: string[] = [];
+async function privateHome(prefix: string): Promise<string> {
+  const home = await realpath(await mkdtemp(join(tmpdir(), prefix)));
+  if (process.platform === "win32") await protectWindowsPath(home, true);
+  homes.push(home);
+  return home;
+}
 afterEach(async () => { await Promise.all(homes.splice(0).map(home => rm(home, { recursive: true, force: true }))); });
 async function run(args: string[]) {
-  const home = await mkdtemp(join(tmpdir(), "cli-principles-20260910-")); homes.push(home);
+  const home = await privateHome("cli-principles-20260910-");
   const out: string[] = [], err: string[] = [];
   const code = await runCLI(["--agent", "no", ...args], {
     configContext: { home, env: { RELAY_CONFIG_PATH: join(home, "config.json") } },
@@ -81,7 +88,7 @@ it("agent creation forwards trimmed about and omits it when absent", async () =>
   const { createAgentWithPicture } = await import("./agent-create.js");
   const { agentDependencies } = await import("./agents.js");
   for (const about of [undefined, "  Helps with your calendar  "]) {
-    const home = await mkdtemp(join(tmpdir(), "cli-principles-20260910-about-")); homes.push(home);
+    const home = await privateHome("cli-principles-20260910-about-");
     let body: Record<string, unknown> = {};
     const deps = agentDependencies({ home, env: { RELAY_CONFIG_PATH: join(home, "config.json") } }, async (_url, init) => {
       body = JSON.parse(String(init?.body));
@@ -93,7 +100,7 @@ it("agent creation forwards trimmed about and omits it when absent", async () =>
   }
 });
 it("contact-card set sends the trimmed about field", async () => {
-  const home = await mkdtemp(join(tmpdir(), "cli-principles-20260910-card-")); homes.push(home);
+  const home = await privateHome("cli-principles-20260910-card-");
   let body: Record<string, unknown> = {};
   expect(await runCLI(["--agent", "no", "contact-card", "set", "--handle", "calendar.dev", "--about", "  Helps you plan  "], {
     configContext: { home, env: { RELAY_CONFIG_PATH: join(home, "config.json"), RELAY_AGENT_TOKEN: "rly_test_about_0123456789", RELAY_API_URL: "https://api.staging.relayapp.im" } },
