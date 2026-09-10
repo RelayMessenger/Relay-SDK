@@ -218,6 +218,8 @@ const defaultStartCommand = async (file: string, args: readonly string[]): Promi
 interface Screen {
   say(line: string): void;
   step(line: string): void;
+  /** A headline and its numbered steps, drawn as one block inside the gutter. */
+  block(headline: string, steps: readonly string[]): void;
   json: boolean;
 }
 
@@ -232,6 +234,11 @@ export const runConnect = async (
     json,
     say: (line) => { if (!json) deps.stdout(`${line}\n`); },
     step: (line) => { if (json) return; if (ui) ui.step(line); else deps.stdout(`${line}\n`); },
+    block: (headline, steps) => {
+      if (json) return;
+      if (ui) ui.step([headline, ...steps].join("\n"));
+      else deps.stdout(`${[headline, ...steps].join("\n")}\n`);
+    },
   };
   const runtimes = await (deps.sniff ?? sniffRuntimes)({
     env: deps.env, home: deps.home, ...(deps.platform ? { platform: deps.platform } : {}),
@@ -257,8 +264,7 @@ export const runConnect = async (
       runtime: selected.id, env: deps.env, home: deps.home, marketplaceSource, start: options.start !== false,
       agentStep: "create a new agent and save its token privately on this computer",
     });
-    screen.say(plan.headline.replace("will do", "would do"));
-    for (const line of plan.steps) screen.say(line);
+    screen.block(plan.headline.replace("will do", "would do"), plan.steps);
     throw new ConnectFailure(
       `${selected.label} is not yet supported in this build. Nothing was changed.`,
       "npx relaymessenger connect claude",
@@ -407,8 +413,7 @@ const connectClaude = async (
         ? "create a new agent and save its token privately on this computer"
         : "use the agent whose token you passed with --token",
     });
-    screen.say(dry.headline);
-    for (const line of dry.steps) screen.say(line);
+    screen.block(dry.headline, dry.steps);
     screen.say("Dry run: nothing was changed.");
     if (screen.json) {
       deps.stdout(`${JSON.stringify({
@@ -450,8 +455,7 @@ const connectClaude = async (
   }
 
   const confirmed = plan(replacing ? { replacing } : {});
-  screen.say(confirmed.headline);
-  for (const line of confirmed.steps) screen.say(line);
+  screen.block(confirmed.headline, confirmed.steps);
   if (options.yes !== true) {
     if (!ui || options.json) throw new HeadlessPrompt("Relay cannot ask you to confirm this plan.", ["--yes  to run the plan above"]);
     if (!await ui.confirm("Continue?")) throw new InteractiveCancelled();
