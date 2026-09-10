@@ -54,6 +54,6 @@ assert.equal(
 const parsed = JSON.parse(result.stdout);
 const tools = parsed.result?.tools ?? parsed.tools;
 assert.ok(Array.isArray(tools), "Inspector did not return a tools array");
-assert.equal(tools.length, 16);
+assert.equal(tools.length, 15);
 assert.ok(tools.some((tool) => tool.name === "relay_react_to_message"));
 console.log("MCP Inspector v2 tools/list --strict OK");

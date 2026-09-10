@@ -28,6 +28,7 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "chat.typing_indicator.stopped",
   "contact.added",
   "contact.removed",
+  "chat.request.updated",
 ] as const;
 
 export type RelayWebhookEventType =

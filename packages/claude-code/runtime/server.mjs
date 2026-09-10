@@ -21345,7 +21345,8 @@ var RELAY_WEBHOOK_EVENT_TYPES = [
   "chat.typing_indicator.started",
   "chat.typing_indicator.stopped",
   "contact.added",
-  "contact.removed"
+  "contact.removed",
+  "chat.request.updated"
 ];
 
 // node_modules/@relaymessenger/sdk/dist/websocket.js
@@ -22289,20 +22290,6 @@ var ContactCard = class {
     });
   }
 };
-var ContactRequests = class {
-  transport;
-  constructor(transport2) {
-    this.transport = transport2;
-  }
-  create({ handle }, options) {
-    return this.transport.request({
-      method: "POST",
-      path: "/v1/contact_requests",
-      body: { handle },
-      options
-    });
-  }
-};
 var BlockedHandles = class {
   transport;
   constructor(transport2) {
@@ -22385,7 +22372,6 @@ var Relay = class {
   webhookEvents;
   webhookSubscriptions;
   contactCard;
-  contactRequests;
   blockedHandles;
   websocket;
   webhooks;
@@ -22401,7 +22387,6 @@ var Relay = class {
     this.webhookEvents = new WebhookEvents(transport2);
     this.webhookSubscriptions = new WebhookSubscriptions(transport2);
     this.contactCard = new ContactCard(transport2);
-    this.contactRequests = new ContactRequests(transport2);
     this.blockedHandles = new BlockedHandles(transport2);
     this.websocket = new WebSocket2(transport2);
     this.webhooks = new Webhooks(options.webhookSecret ?? null);

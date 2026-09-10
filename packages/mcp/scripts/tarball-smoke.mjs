@@ -99,7 +99,7 @@ const client = new Client(
 try {
   await client.connect(transport, { timeout: 10_000 });
   assert.equal(client.getProtocolEra(), "modern");
-  assert.equal((await client.listTools()).tools.length, 16);
+  assert.equal((await client.listTools()).tools.length, 15);
 } finally {
   await client.close().catch(() => {});
 }

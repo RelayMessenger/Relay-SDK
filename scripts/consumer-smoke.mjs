@@ -112,8 +112,11 @@ try {
   assert.deepEqual(interfaceFields("AgentImageBackground"), ["linearGradient"]);
   assert.match(packedTypes, /export type AgentImageRecipe = AgentMonogramImageRecipe \| AgentEmojiImageRecipe \| AgentPhotoImageRecipe/);
   assert.deepEqual(interfaceFields("AgentCreateResponse"), ["agent", "secret", "share_url"]);
-  assert.deepEqual(interfaceFields("ContactRequestCreateParams"), [
-    "handle",
+  assert.doesNotMatch(packedTypes, /\bContactRequestCreate(?:Params|Response)\b/u);
+  assert.deepEqual(interfaceFields("ChatRequestUpdatedEvent"), [
+    "chat_id",
+    "state",
+    "updated_at",
   ]);
   assert.deepEqual(interfaceFields("MessageContent"), [
     "parts",
@@ -138,7 +141,7 @@ try {
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
       assert.equal(RELAY_V1_OPERATIONS.length, 37);
-      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 18);
+      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
       const allowedOperations = new Set([
         "POST /v1/chats",
         "GET /v1/chats",
