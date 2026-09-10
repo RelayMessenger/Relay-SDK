@@ -42,6 +42,7 @@ export interface CreateAgentInput {
   tokenName?: string;
   handle?: string;
   firstName?: string;
+  about?: string;
   imageURL?: string;
   imageRecipe?: AgentImageRecipe;
 }
@@ -56,6 +57,13 @@ const apiFailure = (error: unknown): string => {
     ? ` Try again in ${error.retryAfter} seconds.` : "";
   return `${said}${retry}`;
 };
+
+// Decision row 4: keep numeric API codes without exposing a bootstrap secret.
+const safeAPIFailure = (message: string, error: unknown): Error => error instanceof RelayAPIError
+  ? new RelayAPIError(message, {
+    ...(error.status === undefined ? {} : { status: error.status }),
+    ...(error.code === undefined ? {} : { code: error.code }),
+  }) : new Error(message);
 
 export async function createAgent(input: CreateAgentInput, deps: AgentDependencies) {
   const before = await deps.read();
@@ -85,6 +93,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     ? (input.imageURL === undefined ? {} : { image_url: input.imageURL })
     : { image_url: input.imageURL!, image_recipe: input.imageRecipe };
   const body: AgentCreateParams = {
+    ...(input.about === undefined ? {} : { about: input.about.trim() }),
     ...(input.tokenName === undefined ? {} : { token_name: input.tokenName }),
     ...(input.handle === undefined ? {} : { handle: input.handle }),
     ...(firstName === undefined ? {} : { first_name: firstName }),
@@ -99,9 +108,10 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     // The error body from Relay may hold a secret that is not yet in the redaction set.
     const rejected = error instanceof RelayAPIError && error.status !== undefined
       && error.status >= 400 && error.status < 500;
-    throw new Error(rejected
+    const message = rejected
       ? `Relay refused to create this agent.${apiFailure(error)} Relay did not try again.`
-      : `Relay did not answer, so this agent may or may not have been created.${apiFailure(error)} Relay did not try again. Run npx relaymessenger agents list to see what exists before you try once more.`);
+      : `Relay did not answer, so this agent may or may not have been created.${apiFailure(error)} Relay did not try again. Run npx relaymessenger agents list to see what exists before you try once more.`;
+    throw safeAPIFailure(message, error);
   }
   try {
     const token = validateToken(result.secret);
@@ -182,7 +192,7 @@ export async function deleteAgent(handle: string, profile: string | undefined, d
   try {
     await deps.client(auth.token, auth.apiURL).agents.delete(handle, { maxRetries: 0 });
   } catch (error) {
-    throw new Error(`Relay could not confirm this agent was deleted, so the token saved on this computer is unchanged.${apiFailure(error)}`);
+    throw safeAPIFailure(`Relay could not confirm this agent was deleted, so the token saved on this computer is unchanged.${apiFailure(error)}`, error);
   }
   let removed;
   try {

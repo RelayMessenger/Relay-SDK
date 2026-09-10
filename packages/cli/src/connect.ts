@@ -22,6 +22,7 @@ import { claudeChannelDir, sniffRuntimes, type RuntimeFound, type RuntimeId, typ
 import { readChannelEnv, writeChannelEnv, writeEnvFile } from "./claude-channel.js";
 import { configPath, defaultCreationApiURL, isStagingBuild, packageVersion, validateApiURL, validateProfileName, validateToken } from "./config.js";
 import { HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
+import { CliError, type CliErrorCode } from "./error-codes.js";
 import { preparePrivateDestination, writePrivateDestination } from "./private-file.js";
 import { renderTerminalQR } from "./qr-terminal.js";
 import { safeMetadata } from "./output.js";
@@ -62,6 +63,7 @@ export interface ConnectOptions {
   new?: boolean;
   handle?: string;
   name?: string;
+  about?: string;
   image?: string;
   token?: string;
   allow?: string;
@@ -72,6 +74,8 @@ export interface ConnectOptions {
   skill?: boolean;
   json?: boolean;
   apiUrl?: string;
+  /** The caller said never to ask (`--non-interactive`), so the plan is stated, not put as a question. */
+  nonInteractive?: boolean;
 }
 
 export interface ConnectCommandResult {
@@ -106,9 +110,15 @@ export interface ConnectDependencies {
   offerSkill?: () => Promise<void>;
 }
 
-/** A failure a person can act on: the sentence, and the next thing to run. */
-export class ConnectFailure extends Error {
-  constructor(message: string, readonly nextStep: string) { super(message); }
+/**
+ * A failure a person can act on: the sentence, and the next thing to run. The
+ * next thing sits inside the sentence, because the envelope's `next_step` is
+ * one fixed sentence per code (error-codes.ts).
+ */
+export class ConnectFailure extends CliError {
+  constructor(message: string, readonly nextStep: string, code: CliErrorCode = "refused") {
+    super(`${message} Run  ${nextStep}  next.`, code);
+  }
 }
 
 export interface ConnectAgent {
@@ -293,10 +303,14 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
  * Every file this command writes and every command it runs, for every chosen
  * agent, on one screen before anything changes.
  */
-export const runtimeConnectPlan = (input: PlanContext & { agents: readonly CodingAgentId[]; agentStep?: string }): ConnectPlan => {
+export const runtimeConnectPlan = (input: PlanContext & { agents: readonly CodingAgentId[]; agentStep?: string; ask?: boolean }): ConnectPlan => {
   const agents = input.agents.map((agent) => agentPlan(agent, input));
   const steps = [...(input.agentStep ? [input.agentStep] : []), ...agents.flatMap((plan) => plan.steps)];
-  return { headline: `Relay will do ${steps.length} ${steps.length === 1 ? "thing" : "things"}. Continue?`, steps: numbered(steps), agents };
+  // With `--non-interactive` no one can answer, so the plan is a statement:
+  // clig.dev, Interactivity: "If --no-input is passed, don't prompt or do
+  // anything interactive" (ledger row P27, captures/relay/ni2.out).
+  const count = `Relay will do ${steps.length} ${steps.length === 1 ? "thing" : "things"}.`;
+  return { headline: input.ask === false ? count : `${count} Continue?`, steps: numbered(steps), agents };
 };
 
 const senderOf = (event: RelayWebhookEvent): { handle: string; text: string } | undefined => {
@@ -477,8 +491,7 @@ export const runConnect = async (
   const platform = deps.platform ?? process.platform;
   const runtimes = await (deps.sniff ?? sniffRuntimes)({ env: deps.env, home: deps.home, platform });
   if (ui && !json) ui.intro("Relay");
-  // Vercel's skills line (src/add.ts:1103-1108), said once, only when it happens.
-  if (deps.drivingAgent && !json) deps.stderr(`●  ${deps.drivingAgent}  Agent detected — connecting non-interactively\n`);
+  // The "Agent detected" line is said once per run by runCLI, for every command.
   const targets = await chooseAgents(requested, options, runtimes, deps);
   for (const target of targets) {
     const selected = runtimes.find((runtime) => runtime.id === target);
@@ -503,7 +516,7 @@ export const runConnect = async (
     // A dry run reads nothing private, creates nothing and asks nothing, so the
     // whole plan is printable before an agent exists.
     const dry = runtimeConnectPlan({
-      ...context(undefined), agents: targets,
+      ...context(undefined), agents: targets, ask: options.nonInteractive !== true,
       agentStep: options.token === undefined
         ? "create a new agent and save its token privately on this computer"
         : "use the agent whose token you passed with --token",
@@ -551,7 +564,7 @@ export const runConnect = async (
     }
   }
 
-  const plan = runtimeConnectPlan({ ...context(agent, replacing), agents: targets });
+  const plan = runtimeConnectPlan({ ...context(agent, replacing), agents: targets, ask: options.nonInteractive !== true });
   screen.block(plan.headline, plan.steps);
   if (options.yes !== true) {
     if (!ui || json) throw new HeadlessPrompt("Relay cannot ask you to confirm this plan.", ["--yes  to run the plan above"]);
@@ -656,7 +669,7 @@ const chooseAgents = async (
   if (requested !== undefined) {
     const normalized = normalizeAgentId(requested);
     if (!normalized) {
-      throw new ConnectFailure(`Unknown agent: ${requested.trim()}. ${supportedAgentsLine()}`, "npx relaymessenger connect --help");
+      throw new ConnectFailure(`Unknown agent: ${requested.trim()}. ${supportedAgentsLine()}`, "npx relaymessenger connect --help", "usage");
     }
     return [normalized];
   }
@@ -735,6 +748,7 @@ const resolveAgent = async (options: ConnectOptions, deps: ConnectDependencies):
     ...(deps.profile ? { profile: deps.profile } : {}),
     ...(handle ? { handle } : {}),
     ...(options.name ? { firstName: options.name } : {}),
+    ...(options.about === undefined ? {} : { about: options.about }),
     ...(options.image ? { image: options.image } : {}),
     cwd: deps.cwd,
     home: deps.home,

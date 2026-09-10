@@ -11,6 +11,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import { constants } from "node:fs";
+import { CliError } from "./error-codes.js";
 import type { FileHandle } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
@@ -294,7 +295,7 @@ export const resolveAuth = async (
     requestedProfile ?? env.RELAY_PROFILE ?? config.current_profile,
   );
   const selected = config.profiles[profile];
-  if (!selected) throw new Error(`Relay profile ${profile} does not exist.`);
+  if (!selected) throw new CliError(`Relay profile ${profile} does not exist.`, "not_found");
   const apiURL = validateApiURL(
     env.RELAY_API_URL ?? selected.api_url ?? DEFAULT_API_URL,
   );
@@ -303,8 +304,10 @@ export const resolveAuth = async (
     ? selected.agent_token
     : validateToken(envToken);
   if (!token) {
-    throw new Error(
+    // `no_token` is the one code that exits 4 (gh's "requires authentication").
+    throw new CliError(
       `Profile ${profile} has no saved token. Run npx relaymessenger auth login --with-token to save one.`,
+      "no_token",
     );
   }
   return {

@@ -305,7 +305,7 @@ const validateOpenAPI = () => {
   assert.equal(bootstrap.responses["201"].content["application/json"].schema.$ref, "#/components/schemas/CreateAgentResponse");
   const createParams = document.components.schemas.CreateAgentRequest;
   assert.equal(createParams.additionalProperties, false);
-  assert.deepEqual(Object.keys(createParams.properties), ["token_name", "handle", "first_name", "image_url", "image_recipe"]);
+  assert.deepEqual(Object.keys(createParams.properties), ["about", "token_name", "handle", "first_name", "image_url", "image_recipe"]);
   assert.deepEqual(createParams.dependentRequired, { image_recipe: ["image_url"] });
   assert.equal(createParams.properties.handle.pattern, "^[a-z][a-z0-9_]{2,31}\\.dev$");
   assert.equal(createParams.properties.first_name.maxLength, 30);

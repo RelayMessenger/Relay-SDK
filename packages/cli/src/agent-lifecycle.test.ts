@@ -81,7 +81,7 @@ describe("real persisted agent selection", { timeout: 120_000 }, () => {
     env.RELAY_AGENT_TOKEN = "invalid-env-token";
     env.RELAY_API_URL = "https://api.staging.relayapp.im";
     fetch.mockImplementation(async () => Response.json({ error: { message: "invalid" } }, { status: 401 }));
-    expect(await runCLI(["agents", "delete", handle], deps)).toBe(1);
+    expect(await runCLI(["agents", "delete", handle], deps)).toBe(4);
     expect((await readConfig(deps.configContext)).profiles[handle]?.agent_token).toBe("created-private-token");
   });
 });
@@ -149,7 +149,7 @@ it("non-TTY login without a token fails without reading stdin, fetching, or chan
   const { deps, fetch, output } = await fixture();
   const readStdin = vi.fn(async () => "must-not-read");
   const readSecret = vi.fn(async () => "must-not-prompt");
-  expect(await runCLI(["auth", "login", "--api-url", "https://api.staging.relayapp.im"], { ...deps, isInteractive: false, readStdin, readSecret })).toBe(1);
+  expect(await runCLI(["auth", "login", "--api-url", "https://api.staging.relayapp.im"], { ...deps, isInteractive: false, readStdin, readSecret })).toBe(2);
   expect(fetch).not.toHaveBeenCalled(); expect(readStdin).not.toHaveBeenCalled(); expect(readSecret).not.toHaveBeenCalled();
   expect(output.join("")).toContain("--with-token");
   expect(await readConfig(deps.configContext)).toEqual(emptyConfig());
