@@ -36,7 +36,7 @@ export type AgentMode = (typeof AGENT_MODES)[number];
  * inside one. An unknown value is left to commander, whose choices refuse it.
  */
 export const agentMode = (argv: readonly string[]): AgentMode => {
-  for (let index = 0; index < argv.length; index++) {
+  for (let index = argv.length - 1; index >= 0; index--) {
     const arg = argv[index]!;
     const value = arg === "--agent" ? argv[index + 1] : arg.startsWith("--agent=") ? arg.slice(8) : undefined;
     if (value !== undefined && (AGENT_MODES as readonly string[]).includes(value)) return value as AgentMode;
