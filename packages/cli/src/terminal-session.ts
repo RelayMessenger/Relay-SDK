@@ -1,5 +1,5 @@
-import { createRequire } from "node:module";
 import { stripVTControlCharacters } from "node:util";
+import { renderTerminalQR } from "./qr-terminal.js";
 import { runTerminalWatch, terminalText, type TerminalObserver, type TerminalRuntimeOwnership, type TerminalWatchStatus } from "./terminal-watch.js";
 
 export interface TerminalAgent {
@@ -55,10 +55,7 @@ const ENTER_SCREEN = "\u001b[?1049h\u001b[?25l";
 const LEAVE_SCREEN = "\u001b[0m\u001b[?25h\u001b[?1049l";
 const CLEAR = "\u001b[H\u001b[2J";
 const HELP = "c · redraw QR    ? · help    q / Ctrl-C / Ctrl-D · stop viewing";
-const defaultQR = async (url: string): Promise<string> => {
-  const qr = createRequire(import.meta.url)("qrcode") as { toString(value: string, options: { type: "terminal"; small: boolean }): Promise<string> };
-  return await qr.toString(url, { type: "terminal", small: true });
-};
+const defaultQR = async (url: string): Promise<string> => renderTerminalQR(url);
 function publicShareUrl(value: string, secrets: readonly string[]): string | undefined {
   if (value.length > 1024 || terminalText(value, secrets, 1024) !== value) return;
   try {
