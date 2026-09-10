@@ -421,7 +421,14 @@ export const createProgram = (
   agents.command("list")
     .description("list the agents saved on this computer, each read with its own token")
     .option("--json", "print the result as JSON")
-    .action(async () => output(await listAgents(agentDeps)));
+    .action(async () => {
+      let firstFailure: Error | undefined;
+      const result = await listAgents(agentDeps, (error) => { firstFailure ??= error; });
+      output(result);
+      // Keep successful entries on stdout; the first failed entry determines
+      // the standard stderr envelope and classified command exit.
+      if (firstFailure) throw firstFailure;
+    });
   agents.command("delete").argument("<handle>", "agent handle", handle)
     .description("delete an agent at Relay, then remove its saved token from this computer")
     .option("--json", "print the result as JSON")

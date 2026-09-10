@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type Relay from "@relaymessenger/sdk";
+import Relay, { RelayAPIError } from "@relaymessenger/sdk";
 import { createAgent, deleteAgent, listAgents, type AgentDependencies } from "./agents.js";
 import { defaultCreationApiURL, emptyConfig, type RelayConfig, type ResolvedAuth } from "./config.js";
 import { runCLI } from "./program.js";
@@ -158,4 +158,31 @@ it("post-create storage failure reports assigned handle and actual local outcome
   const saved = await createAgent({}, second.deps).catch((error: Error) => error.message);
   expect(saved).toContain(`@${card.handle}`); expect(saved).toContain("is in your Relay config file"); expect(saved).not.toContain(secret);
   expect(second.deps.bootstrap).toHaveBeenCalledOnce();
+});
+
+
+it.each([
+  [new TypeError("fetch failed: secret-server-text"), "network", 1],
+  [new RelayAPIError("secret-server-text", { status: 401, code: 1001 }), "1001", 4],
+  [new RelayAPIError("secret-server-text", { status: 404 }), "404", 3],
+  [new Error("secret-server-text"), "refused", 1],
+])("keeps successful list entries and classifies each failed lookup (%s)", async (error, code, exit) => {
+  const config = emptyConfig();
+  config.profiles.failed = { agent_token: "token-failed" };
+  config.profiles.good = { agent_token: "token-good" };
+  const { deps, retrieve } = setup(config);
+  retrieve.mockRejectedValueOnce(error);
+  const stdout: string[] = []; const stderr: string[] = [];
+  const result = await runCLI(["agents", "list", "--json"], {
+    agents: deps, configContext: privateContext,
+    stdout: (s) => stdout.push(s), stderr: (s) => stderr.push(s),
+  });
+  expect(result).toBe(exit);
+  const entries = JSON.parse(stdout.join("")).agents;
+  expect(entries).toHaveLength(2);
+  expect(entries[0]).toMatchObject({ profile: "failed", code, next_step: expect.any(String) });
+  expect(entries[1]).toMatchObject({ profile: "good", handle: card.handle });
+  expect(entries[1]).not.toHaveProperty("error");
+  expect(JSON.parse(stderr.join(""))).toMatchObject({ code, next_step: entries[0].next_step });
+  expect(stdout.concat(stderr).join("")).not.toMatch(/secret-server-text|token-failed|token-good/);
 });
