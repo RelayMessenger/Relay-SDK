@@ -13,6 +13,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -50,7 +51,9 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 function createFixture(branch = "staging"): DeployFixture {
-  const root = mkdtempSync(join(tmpdir(), "relay-deploy-test-"));
+  // macOS hands out /var/folders/..., a symlink to /private/var/...; the deploy
+  // script resolves the real path, so the expectation is built from it too.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "relay-deploy-test-")));
   temporaryRoots.push(root);
   const remote = join(root, "remote.git");
   const repo = join(root, "repo");

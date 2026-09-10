@@ -25,8 +25,8 @@ def exercise(name, menu=False, cancel=False):
             drain()
             if child.poll() is not None or time.monotonic()>deadline:raise AssertionError('Expected actual PTY prompt did not appear')
     try:
-        if not menu:
-            wait_for(b'Install the Relay skill?');offer=True;os.write(master,b'\r') # decline before credential prompt
+        # `auth login` never offers the skill (packages/cli/src/interactive.test.ts,
+        # '["auth","login"] never asks about the Relay skill'); only connect does, at its end.
         wait_for(b'what would you like to do?' if menu else b'Paste your token')
         during=termios.tcgetattr(slave);assert not during[3]&termios.ECHO,'TTY echo was not disabled'
         if menu:
