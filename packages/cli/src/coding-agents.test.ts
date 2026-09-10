@@ -106,3 +106,19 @@ it("the composed plan counts every step of every chosen agent", () => {
   expect(codingAgent("cursor").label).toBe("Cursor");
   expect(runtimeConnectPlan({ ...context(), agents: ["cursor"] }).headline).toBe("Relay will do 1 thing. Continue?");
 });
+
+
+it("every agent plan uses Windows separators independently of the host", () => {
+  const windows = context({ platform: "win32", home: "C:\\Users\\dev" });
+  const expected = [
+    ".claude/channels/relay/.env", ".codex/config.toml", ".cursor/mcp.json",
+    ".config/opencode/opencode.json", ".cline/data/settings/cline_mcp_settings.json",
+    "AppData/Roaming/Code/User/mcp.json", ".gemini/settings.json",
+    "AppData/Roaming/Claude/claude_desktop_config.json", ".hermes/.env",
+    ".openclaw/secrets/relay-calm_cangoo.dev.token",
+  ];
+  TEN.forEach((id, index) => {
+    expect(agentFiles(id, windows)[0], id).toBe(win32.join(windows.home, expected[index]!));
+  });
+  expect(agentPlan("codex", windows).commands).toEqual(["codex mcp add relay -- npx -y @relaymessenger/mcp@staging --profile calm_cangoo.dev"]);
+});
