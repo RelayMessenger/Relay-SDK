@@ -59,8 +59,7 @@ Use only the public resources exported by this version:
 - `webhookSubscriptions`;
 - `webhooks`;
 - `websocket`;
-- `contactCard`;
-- `contactRequests`.
+- `contactCard`.
 
 The SDK defaults to a 15-second request timeout and two retries. Message sends
 are retried only when they carry an idempotency key. Reads, idempotent HTTP

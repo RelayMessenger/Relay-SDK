@@ -98,15 +98,6 @@ await relay.webhookSubscriptions.create({
   target_url: "https://receiver.test/webhook",
   subscribed_events: ["message.received"],
 });
-const addRequest = await relay.contactRequests.create({
-  handle: "advait",
-});
-addRequest.state satisfies "pending";
-relay.contactRequests.create({
-  handle: "advait",
-  // @ts-expect-error Contact requests accept only a handle.
-  "Idempotency-Key": "contact-request-key",
-});
 await relay.messages.create({
   to: ["advait"],
   message: {
@@ -142,6 +133,7 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "chat.typing_indicator.stopped",
   "contact.added",
   "contact.removed",
+  "chat.request.updated",
 ];
 
 const envelope: RelayWebhookEnvelope = {
@@ -178,10 +170,8 @@ relay.messages.poll;
 relay.socketMode;
 // @ts-expect-error Private user Contact operations are not in the Agent SDK.
 relay.contacts;
-// @ts-expect-error The Agent SDK cannot list private user Contact requests.
-relay.contactRequests.list();
-// @ts-expect-error The Agent SDK cannot ignore private user Contact requests.
-relay.contactRequests.ignore({ handle: "echo" });
+// @ts-expect-error Add requests are gone; the first Message is the request.
+relay.contactRequests;
 const withService: MessageContent = {
   parts: [{ type: "text", value: "No" }],
   // @ts-expect-error Relay messages have no service discriminator.

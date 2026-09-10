@@ -175,7 +175,6 @@ try {
         "GET /v1/contact_card",
         "POST /v1/contact_card",
         "PATCH /v1/contact_card",
-        "POST /v1/contact_requests",
         "POST /v1/agents",
         "DELETE /v1/agents/{handle}",
       ]);
@@ -258,7 +257,6 @@ try {
         "retrieve",
         "update",
       ]);
-      assert.deepEqual(methods(client.contactRequests), ["create"]);
       assert.deepEqual(methods(client.blockedHandles), [
         "block",
         "list",

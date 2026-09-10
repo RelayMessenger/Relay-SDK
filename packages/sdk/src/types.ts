@@ -206,9 +206,18 @@ export interface Chat {
   group_chat_icon?: string | null;
   handles: ChatHandle[];
   is_group: boolean;
+  /**
+   * The caller's side of a message request on this Chat: `pending` while a
+   * sender with no Contact edge to the caller wrote to them and they have not
+   * answered, `accepted` or `deleted` once they have. Absent when the caller
+   * was never asked; an agent never is.
+   */
+  request_state?: ChatRequestState;
   created_at: string;
   updated_at: string;
 }
+
+export type ChatRequestState = "pending" | "accepted" | "deleted";
 
 export interface ChatCreateParams {
   from: string;
@@ -517,14 +526,6 @@ export interface ContactCardUpdateParams {
   image_recipe?: AgentImageRecipe;
 }
 
-export interface ContactRequestCreateParams {
-  handle: string;
-}
-
-export interface ContactRequestCreateResponse {
-  state: "pending";
-}
-
 export interface BlockedHandle {
   handle: string;
   /** Optional note recorded when the handle was blocked. */
@@ -701,6 +702,20 @@ export interface ContactRemovedEvent {
   contact: ContactEventContact;
 }
 
+/** A person answered your message request. */
+export interface ChatRequestUpdatedEvent {
+  /** The Chat the person answered on. */
+  chat_id: UUID;
+  /**
+   * `accepted`: the person added you; your Messages land in their inbox from
+   * now on. `deleted`: the person removed the request and left the Chat; a
+   * later Message to them opens a fresh Chat, which is a fresh request.
+   */
+  state: "accepted" | "deleted";
+  /** When the person answered. */
+  updated_at: string;
+}
+
 export interface RelayWebhookEnvelope<
   T = Record<string, unknown>,
   TEventType extends WebhookEventType = WebhookEventType,
@@ -725,6 +740,11 @@ export type ContactRemovedWebhook = RelayWebhookEnvelope<
   "contact.removed"
 >;
 
+export type ChatRequestUpdatedWebhook = RelayWebhookEnvelope<
+  ChatRequestUpdatedEvent,
+  "chat.request.updated"
+>;
+
 export type MessageEditedWebhook = RelayWebhookEnvelope<
   MessageEditedEvent,
   "message.edited"
@@ -744,6 +764,8 @@ export type ContactAddedWebhookData = ContactAddedEvent;
 export type ContactRemovedWebhookData = ContactRemovedEvent;
 export type ContactAddedWebhookEvent = ContactAddedWebhook;
 export type ContactRemovedWebhookEvent = ContactRemovedWebhook;
+export type ChatRequestUpdatedWebhookData = ChatRequestUpdatedEvent;
+export type ChatRequestUpdatedWebhookEvent = ChatRequestUpdatedWebhook;
 
 type MessageWebhookEventType =
   | "message.sent"
@@ -761,6 +783,7 @@ type OtherWebhookEventType = Exclude<
   | TypingIndicatorWebhookEventType
   | "contact.added"
   | "contact.removed"
+  | "chat.request.updated"
   | "message.edited"
   | "message.unsent"
   | "message.failed"
@@ -777,6 +800,7 @@ export type RelayWebhookEvent =
   | MessageFailedWebhook
   | ContactAddedWebhookEvent
   | ContactRemovedWebhookEvent
+  | ChatRequestUpdatedWebhookEvent
   | RelayWebhookEnvelope<Record<string, unknown>, OtherWebhookEventType>;
 
 /** Existing Relay avatar gradient pairs, ordered top then base. */

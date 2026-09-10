@@ -57,7 +57,7 @@ For details, read only the reference needed:
 - [Messaging](references/messaging.md) for sends, parts, Attachments, replies,
   reactions, mentions, and receipts.
 - [Chats and Contacts](references/chats-and-contacts.md) for groups,
-  membership periods, Add requests, blocks, Contact Cards, and history.
+  membership periods, message requests, blocks, Contact Cards, and history.
 - [Agent events](references/agent-events.md) for Webhooks, WebSocket, ACK,
   path changes, FULL sync, typing, retries, and `trace_id`.
 - [SDK and authentication](references/sdk-and-auth.md) for Agent Tokens,

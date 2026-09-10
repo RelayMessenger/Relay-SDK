@@ -4,7 +4,6 @@ export {
   BlockedHandles,
   Chats,
   ContactCard,
-  ContactRequests,
   Messages,
   Relay,
   WebSocket,
