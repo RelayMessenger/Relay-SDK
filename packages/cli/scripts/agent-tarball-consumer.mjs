@@ -1,6 +1,6 @@
 // Exercises the installed SDK and CLI program, never workspace imports.
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -34,24 +34,27 @@ const deps = {
     return Response.json({ contact_cards: [card] });
   },
 };
-// The Hermes .env written at creation binds the origin the installed CLI's
-// version selects; a later login must name that same origin or the connect
-// refuses to rebind the identity.
-const nativeHome = join(home, "native Hermes profile");
-await mkdir(nativeHome, { mode: 0o700 });
-if (process.platform === "win32") {
-  const { protectWindowsPath } = await import(pathToFileURL(join(consumer, "node_modules/relaymessenger/dist/runtime-connect/windows-acl.js")));
-  await protectWindowsPath(nativeHome, true);
-}
-const nativeYaml = 'gateway:\n  platforms:\n    relayapp:\n      enabled: true\n      extra:\n        allowed_contacts: [alice]\n';
-await writeFile(join(nativeHome, "config.yaml"), nativeYaml, { mode: 0o600 });
-const connectArgs = ["--connect", "hermes", "--runtime-home", nativeHome, "--runtime-state-dir", join(nativeHome, "relay"), "--confirm-configure", "--runtime-stopped"];
-assert.equal(await runCLI(["agents", "create", "--json", ...connectArgs], deps), 0);
-assert.equal(JSON.parse(output[0]).connect.status, "configured");
-assert.equal(JSON.parse(output[0]).connect.connected, false);
-assert.ok((await readFile(join(nativeHome, ".env"), "utf8")).includes(token));
-assert.equal((await readFile(join(nativeHome, ".env"), "utf8")).includes("unrelated-env-token"), false);
-assert.equal(await readFile(join(nativeHome, "config.yaml"), "utf8"), nativeYaml);
+assert.equal(await runCLI(["agents", "create", "--json"], deps), 0);
+assert.equal(JSON.parse(output[0]).handle, card.handle);
+assert.equal(JSON.parse(output[0]).token, "stored");
+
+// The front door ships in the tarball and can say what it would do without
+// creating anything, running anything, or needing a terminal.
+const plan = [];
+assert.equal(await runCLI(["connect", "claude", "--dry-run"], {
+  ...deps, isInteractive: false, stdout: (text) => plan.push(text), stderr: (text) => plan.push(text),
+}), 0);
+assert.match(plan.join(""), /claude plugin marketplace add RelayMessenger\/Relay-SDK@/);
+assert.match(plan.join(""), /channels[\\/]relay[\\/]\.env/);
+assert.match(plan.join(""), /Dry run: nothing was changed\./);
+assert.equal(plan.join("").includes(token), false);
+
+// With no terminal, a question that cannot be asked names its flags and exits 2.
+const headless = [];
+assert.equal(await runCLI(["connect", "claude"], {
+  ...deps, isInteractive: false, stdout: (text) => headless.push(text), stderr: (text) => headless.push(text),
+}), 2);
+assert.match(headless.join(""), /--token <token>/);
 
 let config = JSON.parse(await readFile(configPath, "utf8"));
 assert.equal(config.profiles[card.handle].agent_token, token);
@@ -66,7 +69,7 @@ assert.equal(config.current_profile, "default");
 assert.equal(await runCLI(["agents", "list", "--json"], deps), 0);
 delete deps.configContext.env.RELAY_AGENT_TOKEN;
 delete deps.configContext.env.RELAY_PROFILE;
-assert.equal(await runCLI(["--profile", card.handle, "auth", "login", "--with-token", "--api-url", configModule.defaultCreationApiURL(), ...connectArgs], { ...deps, readStdin: async () => token }), 0);
+assert.equal(await runCLI(["--profile", card.handle, "auth", "login", "--with-token", "--api-url", configModule.defaultCreationApiURL()], { ...deps, readStdin: async () => token }), 0);
 assert.equal((await configModule.inspectConfigPermissions(deps.configContext)).secure, true);
 assert.equal(await runCLI(["--profile", card.handle, "doctor", "--offline"], deps), 0);
 if (aclModule) assert.equal((await aclModule.inspectWindowsAcl(home)).sddl, originalParentACL);
