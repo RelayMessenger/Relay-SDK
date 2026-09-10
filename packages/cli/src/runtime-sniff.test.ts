@@ -2,7 +2,8 @@ import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { expect, it } from "vitest";
-import { claudeChannelDir, claudeConfigDir, findExecutable, normalizeRuntimeChoice, runtimeConfigPath, sniffRuntimes } from "./runtime-sniff.js";
+import { CODING_AGENT_IDS } from "./coding-agents.js";
+import { claudeChannelDir, claudeConfigDir, findExecutable, sniffRuntimes } from "./runtime-sniff.js";
 
 const home = async (): Promise<string> => mkdtemp(join(tmpdir(), "relay-sniff-home-"));
 
@@ -14,53 +15,73 @@ async function fakeCommand(directory: string, name: string): Promise<string> {
   return path;
 }
 
-it("finds nothing in an empty home with an empty PATH", async () => {
+it("finds nothing in an empty home with an empty PATH, and lists the registry in order", async () => {
   const runtimes = await sniffRuntimes({ env: { PATH: "" }, home: await home(), platform: "linux" });
-  expect(runtimes.map((runtime) => runtime.id)).toEqual(["claude", "hermes", "openclaw"]);
+  expect(runtimes.map((runtime) => runtime.id)).toEqual(CODING_AGENT_IDS);
   expect(runtimes.every((runtime) => !runtime.found)).toBe(true);
-  expect(runtimes.map((runtime) => runtime.supported)).toEqual([true, false, false]);
 });
 
-it("a command on PATH is enough, and so is the runtime's own folder", async () => {
+it("a command on PATH is enough, and so is the agent's own folder", async () => {
   const root = await home();
   const bin = join(root, "bin");
   const executable = await fakeCommand(bin, "claude");
   await mkdir(join(root, ".hermes"), { recursive: true });
   const found = await sniffRuntimes({ env: { PATH: bin }, home: root, platform: "linux" });
-  const claude = found.find((runtime) => runtime.id === "claude")!;
+  const claude = found.find((runtime) => runtime.id === "claude-code")!;
   const hermes = found.find((runtime) => runtime.id === "hermes")!;
   const openclaw = found.find((runtime) => runtime.id === "openclaw")!;
-  expect(claude).toMatchObject({ found: true, executable });
+  expect(claude).toMatchObject({ found: true, executable, label: "Claude Code" });
   expect(claude.configPath).toBeUndefined();
   expect(hermes).toMatchObject({ found: true, configPath: join(root, ".hermes") });
   expect(hermes.executable).toBeUndefined();
   expect(openclaw.found).toBe(false);
 });
 
-it("OpenClaw counts only when its own config file is there, not just its folder", async () => {
+// The paths are the page's section 2: Docker's installCheckPaths and Vercel's
+// detect(home). One folder per agent, under the home this command was given.
+it.each([
+  ["codex", [".codex"]],
+  ["cursor", [".cursor"]],
+  ["opencode", [".config", "opencode"]],
+  ["cline", [".cline"]],
+  ["vscode", [".config", "Code"]],
+  ["gemini-cli", [".gemini"]],
+  ["hermes", [".hermes"]],
+  ["openclaw", [".openclaw"]],
+] as const)("%s is installed when its folder exists under home", async (id, parts) => {
   const root = await home();
-  await mkdir(join(root, ".openclaw"), { recursive: true });
-  expect((await sniffRuntimes({ env: { PATH: "" }, home: root, platform: "linux" }))
-    .find((runtime) => runtime.id === "openclaw")!.found).toBe(false);
-  await writeFile(join(root, ".openclaw", "openclaw.json"), "{}");
-  expect((await sniffRuntimes({ env: { PATH: "" }, home: root, platform: "linux" }))
-    .find((runtime) => runtime.id === "openclaw")!.found).toBe(true);
+  const before = await sniffRuntimes({ env: { PATH: "" }, home: root, platform: "linux" });
+  expect(before.find((runtime) => runtime.id === id)!.found).toBe(false);
+  await mkdir(join(root, ...parts), { recursive: true });
+  const after = await sniffRuntimes({ env: { PATH: "" }, home: root, platform: "linux" });
+  expect(after.find((runtime) => runtime.id === id)).toMatchObject({ found: true, configPath: join(root, ...parts) });
+});
+
+it("Claude Desktop and VS Code on Windows are found by their %APPDATA% folders", async () => {
+  const root = await home();
+  const appData = join(root, "AppData", "Roaming");
+  await mkdir(join(appData, "Claude"), { recursive: true });
+  await mkdir(join(appData, "Code"), { recursive: true });
+  const found = await sniffRuntimes({ env: { PATH: "", APPDATA: appData }, home: root, platform: "win32" });
+  expect(found.find((runtime) => runtime.id === "claude-desktop")).toMatchObject({ found: true, configPath: join(appData, "Claude") });
+  expect(found.find((runtime) => runtime.id === "vscode")).toMatchObject({ found: true, configPath: join(appData, "Code") });
 });
 
 it("selected homes replace the default ones, and never add to them", async () => {
   const root = await home();
   const selected = join(root, "selected-claude");
-  const hermesHome = join(root, "selected-hermes");
+  const codexHome = join(root, "selected-codex");
   await mkdir(selected, { recursive: true });
   await mkdir(join(root, ".claude"), { recursive: true });
+  await mkdir(join(root, ".codex"), { recursive: true });
   expect(claudeConfigDir({ CLAUDE_CONFIG_DIR: selected }, root)).toBe(selected);
   expect(claudeConfigDir({}, root)).toBe(join(root, ".claude"));
   expect(claudeChannelDir({ CLAUDE_CONFIG_DIR: selected }, root)).toBe(join(selected, "channels", "relay"));
   expect(claudeChannelDir({ RELAY_CHANNEL_DIR: "/somewhere/else" }, root)).toBe("/somewhere/else");
-  expect(runtimeConfigPath("hermes", { env: { HERMES_HOME: hermesHome }, home: root })).toBe(hermesHome);
-  // The default home holds a folder; the selected one does not, so nothing is found.
-  const found = await sniffRuntimes({ env: { PATH: "", CLAUDE_CONFIG_DIR: join(root, "absent") }, home: root, platform: "linux" });
-  expect(found.find((runtime) => runtime.id === "claude")!.found).toBe(false);
+  // The default homes hold folders; the selected ones do not, so nothing is found.
+  const found = await sniffRuntimes({ env: { PATH: "", CLAUDE_CONFIG_DIR: join(root, "absent"), CODEX_HOME: codexHome }, home: root, platform: "linux" });
+  expect(found.find((runtime) => runtime.id === "claude-code")!.found).toBe(false);
+  expect(found.find((runtime) => runtime.id === "codex")!.found).toBe(false);
 });
 
 it("only absolute PATH entries are searched", async () => {
@@ -70,13 +91,4 @@ it("only absolute PATH entries are searched", async () => {
   expect(await findExecutable("hermes", { PATH: "relative/bin" }, "linux")).toBeUndefined();
   expect(await findExecutable("hermes", { PATH: `relative/bin${delimiter}${bin}` }, "linux")).toBe(join(bin, "hermes"));
   expect(await findExecutable("absent", { PATH: bin }, "linux")).toBeUndefined();
-});
-
-it("accepts the short word a person types and refuses anything else", () => {
-  expect(normalizeRuntimeChoice("claude")).toBe("claude");
-  expect(normalizeRuntimeChoice("Claude-Code")).toBe("claude");
-  expect(normalizeRuntimeChoice(" hermes ")).toBe("hermes");
-  expect(normalizeRuntimeChoice("openclaw")).toBe("openclaw");
-  expect(normalizeRuntimeChoice("sdk")).toBe("other");
-  expect(normalizeRuntimeChoice("nonsense")).toBeUndefined();
 });

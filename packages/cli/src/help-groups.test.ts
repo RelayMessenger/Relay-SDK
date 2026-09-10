@@ -5,7 +5,7 @@ import { expect, it, vi } from "vitest";
 import { commandRows, everythingElseHelp, HELP_GROUPS } from "./help-groups.js";
 import { createProgram, runCLI } from "./program.js";
 import { relaySkillGlobalArgs } from "./skill-offer.js";
-import { skillTargets, drivingAgent, drivingAgentHint } from "./agent-driver.js";
+import { CLAUDE_CODE_HINT, drivingAgent, skillTargets } from "./agent-driver.js";
 
 const program = () => createProgram({});
 
@@ -137,30 +137,48 @@ it("--install-skills targets this computer's agents and answers the installer it
   expect(skillInstaller).toHaveBeenCalledOnce();
 });
 
-it("an agent driving the command is seen by its own variable", () => {
-  expect(drivingAgent({})).toBeUndefined();
-  expect(drivingAgent({ CLAUDECODE: "1" })).toEqual({ name: "Claude Code", variable: "CLAUDECODE" });
-  expect(drivingAgent({ CURSOR_CLI: "1" })).toMatchObject({ name: "Cursor" });
-  expect(drivingAgent({ CODEX_HOME: "/home/dev/.codex" })).toMatchObject({ name: "Codex" });
-  expect(drivingAgent({ CLAUDECODE: "  " })).toBeUndefined();
-  expect(drivingAgentHint({ name: "Claude Code", variable: "CLAUDECODE" })).toContain("asks nothing");
+it("an agent driving the command is what @vercel/detect-agent says, mapped onto our ids", async () => {
+  expect(await drivingAgent(async () => ({ isAgent: false, agent: undefined }))).toBeUndefined();
+  expect(await drivingAgent(async () => ({ isAgent: true, agent: { name: "claude" } }))).toEqual({ name: "claude", id: "claude-code" });
+  expect(await drivingAgent(async () => ({ isAgent: true, agent: { name: "cursor-cli" } }))).toEqual({ name: "cursor-cli", id: "cursor" });
+  expect(await drivingAgent(async () => ({ isAgent: true, agent: { name: "devin" } }))).toEqual({ name: "devin" });
+  expect(CLAUDE_CODE_HINT).toBe('<claude-code-hint v="1" type="plugin" value="relay@relay-messenger" />');
 });
 
-it("an agent driving the command gets no menu, and one line saying why", async () => {
+it("an agent driving the command gets no menu; inside Claude Code the plugin hint goes to stderr, and nothing else does", async () => {
   const home = await mkdtemp(join(tmpdir(), "relay-driving-"));
   const select = vi.fn(async () => "exit");
   const stderr: string[] = [];
+  const prompts = {
+    select, multiselect: vi.fn(async () => []), confirm: vi.fn(async () => false), password: vi.fn(async () => ""),
+    text: vi.fn(async () => ""), info: vi.fn(), intro: vi.fn(), outro: vi.fn(),
+    step: vi.fn(), spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
+  };
   const code = await runCLI([], {
-    configContext: { env: { RELAY_CONFIG_PATH: join(home, "config.json"), CLAUDECODE: "1" }, home },
-    isInteractive: true,
-    prompts: {
-      select, confirm: vi.fn(async () => false), password: vi.fn(async () => ""),
-      text: vi.fn(async () => ""), info: vi.fn(), intro: vi.fn(), outro: vi.fn(),
-      step: vi.fn(), spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
-    },
+    configContext: { env: { RELAY_CONFIG_PATH: join(home, "config.json") }, home },
+    isInteractive: true, prompts,
+    detectAgent: async () => ({ isAgent: true, agent: { name: "claude" } }),
     stdout: () => undefined, stderr: (value) => stderr.push(value),
   });
   expect(code).toBe(0);
   expect(select).not.toHaveBeenCalled();
-  expect(stderr.join("")).toContain("Relay sees Claude Code (CLAUDECODE)");
+  expect(stderr.join("")).toBe(`${CLAUDE_CODE_HINT}\n`);
+  // Another agent: no menu, no hint, no banner.
+  const quiet: string[] = [];
+  await runCLI([], {
+    configContext: { env: { RELAY_CONFIG_PATH: join(home, "config.json") }, home },
+    isInteractive: true, prompts,
+    detectAgent: async () => ({ isAgent: true, agent: { name: "codex" } }),
+    stdout: () => undefined, stderr: (value) => quiet.push(value),
+  });
+  expect(quiet.join("")).toBe("");
+  // --json keeps stderr as one document even inside Claude Code.
+  const json: string[] = [];
+  await runCLI(["--json", "agents", "list"], {
+    configContext: { env: { RELAY_CONFIG_PATH: join(home, "config.json") }, home },
+    isInteractive: false,
+    detectAgent: async () => ({ isAgent: true, agent: { name: "claude" } }),
+    stdout: () => undefined, stderr: (value) => json.push(value),
+  });
+  expect(json.join("")).not.toContain("claude-code-hint");
 });

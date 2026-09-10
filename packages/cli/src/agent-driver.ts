@@ -1,39 +1,35 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 
-/**
- * The coding agents that announce themselves in the environment, and the exact
- * variable each one sets. Measured on 2026-09-09: with `CLAUDECODE=1` Vercel's
- * CLI prints `isAgent=true agentName=claude … => nonInteractive=true`, and its
- * own bundled detector carries the strings `CODEX_HOME`, `CURSOR` and
- * `CURSOR_CLI` (Relay-Research/research/cli-hands-on-20260909/vercel.md, section
- * 12). `CODEX_HOME` and `CLAUDE_CONFIG_DIR` are also the homes the pinned skills
- * installer reads, so Relay already trusts them to mean those agents.
- */
-export const AGENT_VARIABLES: ReadonlyArray<{ variable: string; name: string }> = [
-  { variable: "CLAUDECODE", name: "Claude Code" },
-  { variable: "CURSOR_CLI", name: "Cursor" },
-  { variable: "CURSOR", name: "Cursor" },
-  { variable: "CODEX_HOME", name: "Codex" },
-];
+import { determineAgent, type AgentResult } from "@vercel/detect-agent";
+import { agentDetectedAs, type CodingAgentId } from "./coding-agents.js";
+import { CLAUDE_PLUGIN_ID } from "./connect.js";
 
 export interface DrivingAgent {
+  /** The name `@vercel/detect-agent` gives it. */
   name: string;
-  variable: string;
+  /** Our id for it, when it is one of the ten `connect` knows. */
+  id?: CodingAgentId;
 }
 
-/** The agent running this command, when one says so. */
-export const drivingAgent = (env: NodeJS.ProcessEnv): DrivingAgent | undefined => {
-  for (const entry of AGENT_VARIABLES) {
-    const value = env[entry.variable]?.trim();
-    if (value) return { name: entry.name, variable: entry.variable };
-  }
-  return undefined;
+/**
+ * The agent running this command, when one says so. The rules are Vercel's
+ * package, the same twelve Supabase ported and Smithery inherits; we use the
+ * package rather than copy its variables.
+ */
+export const drivingAgent = async (detect: () => Promise<AgentResult> = determineAgent): Promise<DrivingAgent | undefined> => {
+  const result = await detect();
+  if (!result.isAgent) return undefined;
+  const id = agentDetectedAs(result.agent.name);
+  return { name: result.agent.name, ...(id ? { id } : {}) };
 };
 
-/** One line, so the agent reading it knows why it saw no menu. */
-export const drivingAgentHint = (agent: DrivingAgent): string =>
-  `Relay sees ${agent.name} (${agent.variable}), so it asks nothing. Every question has a flag: run  relaymessenger connect --help.`;
+/**
+ * The machine tag Vercel's CLI (packages/cli/src/index.ts:179-184) and
+ * Supabase's (login-claude-hint.ts:12) write to stderr inside Claude Code, so it
+ * can offer the plugin. Ours names our plugin and marketplace.
+ */
+export const CLAUDE_CODE_HINT = `<claude-code-hint v="1" type="plugin" value="${CLAUDE_PLUGIN_ID}" />`;
 
 /** Relay's documentation, written for an agent to read in one request. */
 export const DOCS_LLMS_URL = "https://docs.relayapp.im/llms.txt";

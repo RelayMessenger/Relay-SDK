@@ -1,4 +1,4 @@
-import { confirm, intro, isCancel, log, outro, password, select, spinner, text } from "@clack/prompts";
+import { confirm, intro, isCancel, log, multiselect, outro, password, select, spinner, text } from "@clack/prompts";
 import type { AgentDependencies } from "./agents.js";
 import { listAgents } from "./agents.js";
 import { DEFAULT_API_URL, DEFAULT_PROFILE, defaultCreationApiURL, validateApiURL } from "./config.js";
@@ -12,8 +12,9 @@ export class InteractiveCancelled extends Error {
  * eas's shape: say the next step, never print a usage block).
  */
 export class HeadlessPrompt extends Error {
-  constructor(message: string, readonly flags: readonly string[]) { super(message); }
-  get nextStep(): string { return this.flags.join("  ·  "); }
+  constructor(message: string, readonly flags: readonly string[], private readonly step?: string) { super(message); }
+  /** The one thing to run next: the flags, or the sentence a caller gave instead. */
+  get nextStep(): string { return this.step ?? this.flags.join("  ·  "); }
 }
 export interface InteractiveSpinner {
   start(message: string): void;
@@ -21,6 +22,8 @@ export interface InteractiveSpinner {
 }
 export interface InteractivePrompts {
   select(message: string, options: Array<{ value: string; label: string }>): Promise<string>;
+  /** Several boxes, some ticked before the person touches them. */
+  multiselect(message: string, options: Array<{ value: string; label: string }>, initialValues: string[]): Promise<string[]>;
   confirm(message: string): Promise<boolean>;
   password(message: string): Promise<string>;
   text(message: string, initialValue: string): Promise<string>;
@@ -40,6 +43,7 @@ export function clackPrompts(info: (message: string) => void): InteractivePrompt
   const io = { input: process.stdin, output: process.stderr };
   return {
     select: async (message, options) => answer(await select({ message, options, ...io })),
+    multiselect: async (message, options, initialValues) => answer(await multiselect({ message, options, initialValues, required: false, ...io })),
     confirm: async (message) => answer(await confirm({ message, initialValue: false, ...io })),
     password: async (message) => answer(await password({ message, ...io })),
     text: async (message, initialValue) => answer(await text({ message, initialValue, ...io })),

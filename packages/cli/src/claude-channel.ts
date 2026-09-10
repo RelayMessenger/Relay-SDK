@@ -45,15 +45,11 @@ const quoted = (value: string): string => {
 };
 
 /**
- * Rewrites only Relay's own three names, in place. Every other line a person or
- * another tool put in this file is kept exactly where it was.
+ * Rewrites only the named keys, in place. Every other line a person or another
+ * tool put in this file is kept exactly where it was. Shared by every runtime
+ * that keeps its Relay settings in a .env file (Claude Code, Hermes).
  */
-export const renderChannelEnv = (existing: string, values: ChannelEnvValues): string => {
-  const changes: Record<string, string> = {
-    RELAY_AGENT_TOKEN: values.token,
-    RELAY_BASE_URL: values.baseURL,
-    RELAY_ALLOWED_SENDERS: [...new Set(values.allowedSenders.map((sender) => sender.trim()).filter(Boolean))].join(","),
-  };
+export const renderEnvFile = (existing: string, changes: Record<string, string>): string => {
   const lines = existing ? existing.split(/\r?\n/u) : [];
   const written = new Set<string>();
   const output = lines.map((line) => {
@@ -63,7 +59,7 @@ export const renderChannelEnv = (existing: string, values: ChannelEnvValues): st
     written.add(key);
     return `${key}=${quoted(changes[key]!)}`;
   });
-  for (const key of CHANNEL_ENV_KEYS) {
+  for (const key of Object.keys(changes)) {
     if (written.has(key)) continue;
     if (output.at(-1) === "") output.pop();
     output.push(`${key}=${quoted(changes[key]!)}`);
@@ -71,6 +67,12 @@ export const renderChannelEnv = (existing: string, values: ChannelEnvValues): st
   if (output.at(-1) !== "") output.push("");
   return output.join(existing.includes("\r\n") ? "\r\n" : "\n");
 };
+
+export const renderChannelEnv = (existing: string, values: ChannelEnvValues): string => renderEnvFile(existing, {
+  RELAY_AGENT_TOKEN: values.token,
+  RELAY_BASE_URL: values.baseURL,
+  RELAY_ALLOWED_SENDERS: [...new Set(values.allowedSenders.map((sender) => sender.trim()).filter(Boolean))].join(","),
+});
 
 export interface ChannelEnvState {
   path: string;
@@ -117,4 +119,22 @@ export const writeChannelEnv = async (
   const destination = await preparePrivateDestination(state.path, "Claude Code channel", platform);
   await writePrivateDestination(destination, ".relay-connect", contents);
   return { path: state.path, contents };
+};
+
+/** The same private write for any runtime's .env file: only the named keys change. */
+export const writeEnvFile = async (
+  path: string,
+  changes: Record<string, string>,
+  label: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<{ path: string; contents: string }> => {
+  let existing = "";
+  try { existing = await readFile(path, "utf8"); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const contents = renderEnvFile(existing, changes);
+  const destination = await preparePrivateDestination(path, label, platform);
+  await writePrivateDestination(destination, ".relay-connect", contents);
+  return { path, contents };
 };

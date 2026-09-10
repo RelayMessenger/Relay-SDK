@@ -1,22 +1,26 @@
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
 import { spawn } from "node:child_process";
-import { join } from "node:path";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { createAgentWithPicture, incompletePictureMessage } from "./agent-create.js";
 import type { AgentDependencies } from "./agents.js";
 import { savedAgentShareURL } from "./agent-session.js";
 import {
-  claudeChannelDir,
-  normalizeRuntimeChoice,
-  runtimeConfigPath,
-  sniffRuntimes,
-  type RuntimeChoice,
-  type RuntimeFound,
-  type RuntimeId,
-  type RuntimeSniffContext,
-} from "./runtime-sniff.js";
-import { inspectChannelEnv, writeChannelEnv } from "./claude-channel.js";
-import { defaultCreationApiURL, isStagingBuild, packageVersion, validateApiURL, validateProfileName, validateToken } from "./config.js";
+  CODING_AGENTS,
+  CODING_AGENT_IDS,
+  codingAgent,
+  hermesHome,
+  normalizeAgentId,
+  openclawHome,
+  supportedAgentsLine,
+  type AgentPaths,
+  type CodingAgentId,
+} from "./coding-agents.js";
+import { claudeChannelDir, sniffRuntimes, type RuntimeFound, type RuntimeId, type RuntimeSniffContext } from "./runtime-sniff.js";
+import { readChannelEnv, writeChannelEnv, writeEnvFile } from "./claude-channel.js";
+import { configPath, defaultCreationApiURL, isStagingBuild, packageVersion, validateApiURL, validateProfileName, validateToken } from "./config.js";
 import { HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
+import { preparePrivateDestination, writePrivateDestination } from "./private-file.js";
 import { renderTerminalQR } from "./qr-terminal.js";
 import { safeMetadata } from "./output.js";
 import type { TerminalObserver } from "./terminal-watch.js";
@@ -35,7 +39,24 @@ export const CLAUDE_START_ARGS = ["--dangerously-load-development-channels", `pl
 /** Pairing waits this long for a first message before it names --allow instead. */
 export const PAIR_TIMEOUT_MS = 180_000;
 
+/** The MCP server the seven MCP agents run (packages/mcp, bin `relay-mcp`). A
+ * staging build takes the `staging` dist-tag, the way it takes the staging API. */
+export const MCP_PACKAGE = "@relaymessenger/mcp";
+export const mcpPackageSpec = (version: string = packageVersion()): string =>
+  isStagingBuild(version) ? `${MCP_PACKAGE}@staging` : MCP_PACKAGE;
+/** The name every agent lists the server under. */
+export const MCP_SERVER_NAME = "relay";
+/** Our plugins for the two gateways, as Relay-Docs integrations/hermes.mdx and openclaw.mdx install them. */
+export const HERMES_PLUGIN_SOURCE = "RelayMessenger/Relay-Hermes";
+export const openclawPluginSpec = (version: string = packageVersion()): string =>
+  `@relaymessenger/openclaw-plugin${isStagingBuild(version) ? "@staging" : ""}`;
+
+/** Vercel's `skills` sentence for a pipe with no target and no -y (src/add.ts:408-418), with our nouns. */
+export const NO_TTY_SENTENCE = "Interactive prompt required but stdin is not a TTY. Nothing was connected.";
+export const NO_TTY_NEXT_STEP = "Name an agent (or --all) and -y to run non-interactively.";
+
 export interface ConnectOptions {
+  all?: boolean;
   new?: boolean;
   handle?: string;
   name?: string;
@@ -68,10 +89,12 @@ export interface ConnectDependencies {
   stderr(value: string): void;
   /** Absent means there is no terminal, so nothing may be asked. */
   prompts?: InteractivePrompts;
+  /** The coding agent this command is running inside, when one announced itself. */
+  drivingAgent?: RuntimeId;
   sniff?: (context: RuntimeSniffContext) => Promise<RuntimeFound[]>;
-  /** Runs one of the runtime's own commands and waits for it. */
+  /** Runs one of the agent's own commands and waits for it. */
   runCommand?: (file: string, args: readonly string[]) => Promise<ConnectCommandResult>;
-  /** Hands this terminal to the runtime. */
+  /** Hands this terminal to the agent. */
   startCommand?: (file: string, args: readonly string[]) => Promise<number>;
   observer?: (token: string, apiURL: string) => TerminalObserver | undefined;
   renderQR?: (url: string) => string;
@@ -96,54 +119,171 @@ export interface ConnectAgent {
   created: boolean;
 }
 
+/** What one coding agent's part of the plan touches. */
+export interface AgentPlan {
+  agent: CodingAgentId;
+  steps: string[];
+  /** The files this command writes for that agent, in full. */
+  files: string[];
+  /** The agent's own commands this command runs, as one line each. */
+  commands: string[];
+}
+
 export interface ConnectPlan {
   headline: string;
   steps: string[];
+  agents: AgentPlan[];
 }
 
 const numbered = (steps: readonly string[]): string[] =>
   steps.map((line, index) => `  ${index + 1}  ${line}`);
 
-/**
- * Every file this command writes and every command it runs, on one screen,
- * before anything changes. The Hermes and OpenClaw steps are the ones the design
- * note fixes (Relay-Design/design/relay-cli-ideal-20260909.md, section 6); this
- * build prints them and stops, because it writes only Claude Code.
- */
-export const runtimeConnectPlan = (input: {
-  runtime: RuntimeId;
+export interface PlanContext {
   env: NodeJS.ProcessEnv;
   home: string;
-  handle?: string;
-  marketplaceSource: string;
-  agentStep?: string;
-  replacing?: string;
+  platform: NodeJS.Platform;
+  version: string;
+  /** The saved profile the MCP server reads the token from. */
+  profile: string;
+  handle: string;
+  /** What the person allowed with --allow, when anything. */
+  allow: readonly string[];
   start: boolean;
-}): ConnectPlan => {
-  const claudeEnv = join(claudeChannelDir(input.env, input.home), ".env");
-  const write = (path: string, names: string): string =>
-    `${input.replacing ? "replace the token already in" : "write"}  ${path}  (${names})`;
-  const runtimeSteps: Record<RuntimeId, string[]> = {
-    claude: [
-      `run  claude plugin marketplace add ${input.marketplaceSource}`,
-      `run  claude plugin install ${CLAUDE_PLUGIN_ID} --yes, then  claude plugin enable ${CLAUDE_PLUGIN_ID}`,
-      write(claudeEnv, "token, API address, allowed senders"),
-      ...(input.start ? ["start Claude Code with Relay when you are ready"] : []),
-    ],
-    hermes: [
-      "run  hermes plugins install RelayMessenger/Relay-Hermes --enable",
-      write(join(runtimeConfigPath("hermes", { env: input.env, home: input.home }), ".env"), "token, API address, data folder, allowed contacts"),
-      ...(input.start ? ["start the Hermes gateway"] : []),
-    ],
-    openclaw: [
-      "run  openclaw plugins install @relaymessenger/openclaw-plugin",
-      write(join(input.home, ".openclaw", "secrets", `relay-${input.handle ?? "<handle>"}.token`), "the token alone, owner-only"),
-      `add  channels.relay  to  ${runtimeConfigPath("openclaw", { env: input.env, home: input.home })}  (every other setting kept)`,
-      ...(input.start ? ["restart the OpenClaw gateway"] : []),
-    ],
+  /** The agents whose file already holds a token for someone else. */
+  replacing?: Partial<Record<CodingAgentId, string>>;
+}
+
+const paths = (context: { env: NodeJS.ProcessEnv; home: string; platform: NodeJS.Platform }): AgentPaths =>
+  ({ env: context.env, home: context.home, platform: context.platform });
+
+/** The MCP server's own process flags and environment: the profile by name,
+ * and the config file only when it is not the default one, so the server reads
+ * the same file this command saved the token to (packages/mcp/src/auth.ts). */
+export const mcpServerSpec = (context: PlanContext): { command: string; args: string[]; env: Record<string, string> } => {
+  const saved = configPath({ env: context.env, home: context.home });
+  const standard = join(context.home, ".config", "relay", "config.json");
+  return {
+    command: "npx",
+    args: ["-y", mcpPackageSpec(context.version), "--profile", context.profile],
+    env: saved === standard ? {} : { RELAY_CONFIG_PATH: saved },
   };
-  const steps = [...(input.agentStep ? [input.agentStep] : []), ...runtimeSteps[input.runtime]];
-  return { headline: `Relay will do ${steps.length} things. Continue?`, steps: numbered(steps) };
+};
+
+/** One entry, in the shape each agent's own documentation gives it. */
+export const mcpEntry = (shape: "mcpServers" | "vscode" | "opencode", spec: ReturnType<typeof mcpServerSpec>): Record<string, unknown> => {
+  const env = Object.keys(spec.env).length ? spec.env : undefined;
+  if (shape === "opencode") {
+    return { type: "local", command: [spec.command, ...spec.args], ...(env ? { environment: env } : {}), enabled: true };
+  }
+  return { ...(shape === "vscode" ? { type: "stdio" } : {}), command: spec.command, args: spec.args, ...(env ? { env } : {}) };
+};
+
+const mcpRootKey = (shape: "mcpServers" | "vscode" | "opencode"): string =>
+  shape === "vscode" ? "servers" : shape === "opencode" ? "mcp" : "mcpServers";
+
+const hermesEnvPath = (context: PlanContext): string => join(hermesHome(context.env, context.home), ".env");
+const hermesStateDir = (context: PlanContext): string => join(hermesHome(context.env, context.home), "relay");
+const openclawConfigPath = (context: PlanContext): string => join(openclawHome(context.home), "openclaw.json");
+const openclawTokenPath = (context: PlanContext): string => join(openclawHome(context.home), "secrets", `relay-${context.handle}.token`);
+
+/** The agent's own command lines, exactly as this command runs them. */
+export const agentCommands = (agent: CodingAgentId, context: PlanContext): string[][] => {
+  const spec = mcpServerSpec(context);
+  const envPairs = Object.entries(spec.env).map(([key, value]) => `${key}=${value}`);
+  switch (agent) {
+    case "claude-code":
+      return [
+        ["claude", "plugin", "marketplace", "add", claudeMarketplaceSource(context.version)],
+        ["claude", "plugin", "install", CLAUDE_PLUGIN_ID, "--yes"],
+        ["claude", "plugin", "enable", CLAUDE_PLUGIN_ID],
+      ];
+    case "codex":
+      // `codex mcp add --help`: `codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)`, `--env <KEY=VALUE>`.
+      return [["codex", "mcp", "add", MCP_SERVER_NAME, ...envPairs.flatMap((pair) => ["--env", pair]), "--", spec.command, ...spec.args]];
+    case "gemini-cli":
+      // `gemini mcp add [options] <name> <commandOrUrl> [args...]`, `-s user`
+      // for ~/.gemini/settings.json; the server's own flags go after `--`
+      // (measured 2026-09-10 in the lane sandbox: `-e` before the name swallows it).
+      return [["gemini", "mcp", "add", "-s", "user", ...envPairs.map((pair) => `-e=${pair}`), MCP_SERVER_NAME, spec.command, "--", ...spec.args]];
+    case "cline":
+      // `cline mcp add --yes <name> -- <command> <args>` installs without the
+      // wizard; it takes no environment, so the profile travels as a flag.
+      return [["cline", "mcp", "add", "--yes", MCP_SERVER_NAME, "--", spec.command, ...spec.args]];
+    case "hermes":
+      return [["hermes", "plugins", "install", HERMES_PLUGIN_SOURCE, "--enable"]];
+    case "openclaw":
+      return [["openclaw", "plugins", "install", openclawPluginSpec(context.version)]];
+    default:
+      return [];
+  }
+};
+
+/** The files this command writes for the agent, in full. */
+export const agentFiles = (agent: CodingAgentId, context: PlanContext): string[] => {
+  const method = codingAgent(agent).connect;
+  switch (method.kind) {
+    case "claude-plugin": return [join(claudeChannelDir(context.env, context.home), ".env")];
+    case "mcp-command": return [method.file(paths(context))];
+    case "mcp-file": return [method.file(paths(context))];
+    case "hermes-plugin": return [hermesEnvPath(context)];
+    case "openclaw-plugin": return [openclawTokenPath(context), openclawConfigPath(context)];
+  }
+};
+
+/**
+ * Every file this command writes and every command it runs for one agent, as
+ * the lines the plan screen shows.
+ */
+export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan => {
+  const commands = agentCommands(agent, context).map((line) => line.join(" "));
+  const files = agentFiles(agent, context);
+  const replacing = context.replacing?.[agent];
+  const write = (path: string, names: string): string =>
+    `${replacing ? "replace the token already in" : "write"}  ${path}  (${names})`;
+  const method = codingAgent(agent).connect;
+  let steps: string[];
+  switch (method.kind) {
+    case "claude-plugin":
+      steps = [
+        `run  ${commands[0]}`,
+        `run  ${commands[1]}, then  ${commands[2]}`,
+        write(files[0]!, "token, API address, allowed senders"),
+        ...(context.start ? ["start Claude Code with Relay when you are ready"] : []),
+      ];
+      break;
+    case "mcp-command":
+      steps = [`run  ${commands[0]}  (adds the Relay MCP server to ${files[0]})`];
+      break;
+    case "mcp-file":
+      steps = [`add  ${mcpRootKey(method.shape)}.${MCP_SERVER_NAME}  to  ${files[0]}  (every other entry kept)`];
+      break;
+    case "hermes-plugin":
+      steps = [
+        `run  ${commands[0]}`,
+        write(files[0]!, `token, API address, state folder${context.allow.length ? ", allowed contacts" : ""}`),
+        ...(context.start ? ["start the Hermes gateway when you are ready:  hermes gateway run"] : []),
+      ];
+      break;
+    case "openclaw-plugin":
+      steps = [
+        `run  ${commands[0]}`,
+        write(files[0]!, "the token alone, owner-only"),
+        `add  channels.relay  to  ${files[1]}  (every other setting kept)`,
+        ...(context.start ? ["restart the OpenClaw gateway when you are ready"] : []),
+      ];
+      break;
+  }
+  return { agent, steps, files, commands };
+};
+
+/**
+ * Every file this command writes and every command it runs, for every chosen
+ * agent, on one screen before anything changes.
+ */
+export const runtimeConnectPlan = (input: PlanContext & { agents: readonly CodingAgentId[]; agentStep?: string }): ConnectPlan => {
+  const agents = input.agents.map((agent) => agentPlan(agent, input));
+  const steps = [...(input.agentStep ? [input.agentStep] : []), ...agents.flatMap((plan) => plan.steps)];
+  return { headline: `Relay will do ${steps.length} things. Continue?`, steps: numbered(steps), agents };
 };
 
 const senderOf = (event: RelayWebhookEvent): { handle: string; text: string } | undefined => {
@@ -163,7 +303,7 @@ const senderOf = (event: RelayWebhookEvent): { handle: string; text: string } | 
 
 /**
  * Watches only. This connection never answers Relay and never takes an event,
- * so the runtime being connected still receives every message.
+ * so the agent being connected still receives every message.
  */
 export const waitForNewSender = async (
   observer: TerminalObserver,
@@ -223,6 +363,87 @@ interface Screen {
   json: boolean;
 }
 
+/** Reads a strict-JSON config file; absent is an empty object, broken is a refusal. */
+const readJsonConfig = async (path: string, what: string): Promise<Record<string, unknown>> => {
+  let text: string;
+  try { text = await readFile(path, "utf8"); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw error;
+  }
+  let parsed: unknown;
+  try { parsed = text.trim() ? JSON.parse(text) : {}; }
+  catch {
+    throw new ConnectFailure(`${path} is not plain JSON, so Relay did not change it. Fix the file, or add the ${what} entry yourself, then run this command again.`, "npx relaymessenger connect");
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new ConnectFailure(`${path} does not hold a JSON object, so Relay did not change it.`, "npx relaymessenger connect");
+  }
+  return parsed as Record<string, unknown>;
+};
+
+/** Writes the whole object back, same folder temp then rename, every other key kept. */
+const writeJsonConfig = async (path: string, value: Record<string, unknown>): Promise<void> => {
+  await mkdir(dirname(path), { recursive: true });
+  const temp = join(dirname(path), `.relay-connect-${process.pid}-${Date.now()}.tmp`);
+  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await rename(temp, path);
+};
+
+const objectAt = (root: Record<string, unknown>, key: string): Record<string, unknown> => {
+  const existing = root[key];
+  if (existing !== undefined && (existing === null || typeof existing !== "object" || Array.isArray(existing))) {
+    throw new ConnectFailure(`The "${key}" entry in that file is not an object, so Relay did not change it.`, "npx relaymessenger connect");
+  }
+  const value = (existing ?? {}) as Record<string, unknown>;
+  root[key] = value;
+  return value;
+};
+
+/** Adds `<rootKey>.relay` to an agent's MCP config file, every other entry kept. */
+export const writeMcpFileEntry = async (path: string, shape: "mcpServers" | "vscode" | "opencode", spec: ReturnType<typeof mcpServerSpec>): Promise<void> => {
+  const root = await readJsonConfig(path, MCP_SERVER_NAME);
+  if (shape === "opencode" && root.$schema === undefined && !Object.keys(root).length) root.$schema = "https://opencode.ai/config.json";
+  objectAt(root, mcpRootKey(shape))[MCP_SERVER_NAME] = mcpEntry(shape, spec);
+  await writeJsonConfig(path, root);
+};
+
+/** Adds `channels.relay` to openclaw.json (packages/openclaw/README.md, "Configure the channel"). */
+export const writeOpenclawChannel = async (path: string, values: { baseURL: string; tokenFile: string; allowFrom: readonly string[] }): Promise<void> => {
+  const root = await readJsonConfig(path, "channels.relay");
+  const relay = objectAt(objectAt(root, "channels"), "relay");
+  relay.enabled = true;
+  relay.baseUrl = values.baseURL;
+  relay.tokenFile = values.tokenFile;
+  delete relay.token;
+  if (values.allowFrom.length) relay.allowFrom = [...values.allowFrom];
+  await writeJsonConfig(path, root);
+};
+
+const runAgentCommands = async (
+  agent: CodingAgentId,
+  runtime: RuntimeFound | undefined,
+  context: PlanContext,
+  runCommand: (file: string, args: readonly string[]) => Promise<ConnectCommandResult>,
+): Promise<string[]> => {
+  const ran: string[] = [];
+  for (const [name, ...args] of agentCommands(agent, context)) {
+    const file = runtime?.executable ?? name!;
+    const outcome = await runCommand(file, args);
+    const line = [name, ...args].join(" ");
+    if (outcome.code !== 0) {
+      // The agent's own words first, then what is true about Relay's side.
+      const said = `${outcome.stderr}\n${outcome.stdout}`.split("\n").map((entry) => entry.trim()).find(Boolean) ?? "";
+      throw new ConnectFailure(
+        `${line} did not finish.${said ? ` It said: ${said}` : ""} Nothing else was changed; your agent and its token are saved. Run the same command again.`,
+        `npx relaymessenger connect ${agent} --yes`,
+      );
+    }
+    ran.push(line);
+  }
+  return ran;
+};
+
 export const runConnect = async (
   requested: string | undefined,
   options: ConnectOptions,
@@ -240,69 +461,208 @@ export const runConnect = async (
       else deps.stdout(`${[headline, ...steps].join("\n")}\n`);
     },
   };
-  const runtimes = await (deps.sniff ?? sniffRuntimes)({
-    env: deps.env, home: deps.home, ...(deps.platform ? { platform: deps.platform } : {}),
-  });
+  const platform = deps.platform ?? process.platform;
+  const runtimes = await (deps.sniff ?? sniffRuntimes)({ env: deps.env, home: deps.home, platform });
   if (ui && !json) ui.intro("Relay");
-  const choice = await chooseRuntime(requested, options, runtimes, deps);
-  const selected = choice === "other" ? undefined : runtimes.find((runtime) => runtime.id === choice);
-  if (!selected) {
-    throw new ConnectFailure(
-      "Relay does not write configuration for that yet. Create the agent with  npx relaymessenger agents create  and use its token in your own code.",
-      "npx relaymessenger agents create",
-    );
+  // Vercel's skills line (src/add.ts:1103-1108), said once, only when it happens.
+  if (deps.drivingAgent && !json) deps.stderr(`●  ${deps.drivingAgent}  Agent detected — connecting non-interactively\n`);
+  const targets = await chooseAgents(requested, options, runtimes, deps);
+  for (const target of targets) {
+    const selected = runtimes.find((runtime) => runtime.id === target);
+    screen.step(selected?.found
+      ? `${selected.label} found  ${selected.executable ?? selected.configPath ?? "on this computer"}`
+      // Named outright, so Relay goes on and lets the agent's own command say
+      // what is wrong; it never claims to have found something it did not.
+      : `${codingAgent(target).label} was not found on this computer; you named it, so Relay will try anyway`);
   }
-  screen.step(selected.found
-    ? `${selected.label} found  ${selected.executable ?? selected.configPath ?? "on this computer"}`
-    // Named outright, so Relay goes on and lets the runtime's own command say
-    // what is wrong; it never claims to have found something it did not.
-    : `${selected.label} was not found on this computer; you named it, so Relay will try anyway`);
-  const marketplaceSource = claudeMarketplaceSource(deps.version);
-  if (selected.id !== "claude") {
-    // Detection and the plan only. Nothing is written for these runtimes yet.
-    const plan = runtimeConnectPlan({
-      runtime: selected.id, env: deps.env, home: deps.home, marketplaceSource, start: options.start !== false,
-      agentStep: "create a new agent and save its token privately on this computer",
+
+  const version = deps.version ?? packageVersion();
+  const allow = (options.allow ?? "").split(",").map((entry) => entry.trim().replace(/^@/u, "")).filter(Boolean);
+  const context = (agent: ConnectAgent | undefined, replacing?: PlanContext["replacing"]): PlanContext => ({
+    env: deps.env, home: deps.home, platform, version,
+    profile: agent?.profile ?? deps.profile ?? "<profile>",
+    handle: agent?.handle ?? options.handle ?? "<handle>",
+    allow, start: options.start !== false,
+    ...(replacing ? { replacing } : {}),
+  });
+
+  if (options.dryRun === true) {
+    // A dry run reads nothing private, creates nothing and asks nothing, so the
+    // whole plan is printable before an agent exists.
+    const dry = runtimeConnectPlan({
+      ...context(undefined), agents: targets,
+      agentStep: options.token === undefined
+        ? "create a new agent and save its token privately on this computer"
+        : "use the agent whose token you passed with --token",
     });
-    screen.block(plan.headline.replace("will do", "would do"), plan.steps);
-    throw new ConnectFailure(
-      `${selected.label} is not yet supported in this build. Nothing was changed.`,
-      "npx relaymessenger connect claude",
-    );
+    screen.block(dry.headline, dry.steps);
+    screen.say("Dry run: nothing was changed.");
+    if (json) {
+      deps.stdout(`${JSON.stringify({
+        ok: true, dry_run: true,
+        agents: dry.agents.map((plan) => ({ agent: plan.agent, files: plan.files, commands: plan.commands })),
+        steps: dry.steps.map((line) => line.trim()),
+      }, null, 2)}\n`);
+    }
+    return;
   }
-  await connectClaude(selected, options, deps, screen, marketplaceSource);
+
+  const agent = await resolveAgent(options, deps);
+  const secrets = [agent.token];
+  screen.step(safeMetadata(`${agent.created ? "Created" : "That token is"} @${agent.handle}  token saved privately on this computer`, secrets));
+
+  // A token already in a .env file belongs to whatever answers as that agent
+  // today, so it is never replaced without being told to.
+  const replacing: PlanContext["replacing"] = {};
+  for (const target of targets) {
+    const path = target === "claude-code" ? join(claudeChannelDir(deps.env, deps.home), ".env")
+      : target === "hermes" ? hermesEnvPath(context(agent)) : undefined;
+    if (!path) continue;
+    let existing: string | undefined;
+    try { existing = readChannelEnv(await readFile(path, "utf8")).RELAY_AGENT_TOKEN; } catch { /* No file yet. */ }
+    if (!existing || existing === agent.token) continue;
+    const config = await deps.agents.read();
+    const owner = Object.entries(config.profiles).find(([, profile]) => profile.agent_token === existing)?.[0];
+    replacing[target] = owner ? `@${owner}` : "another agent";
+    if (options.yes === true) continue;
+    if (!ui || json) {
+      throw new HeadlessPrompt(`${path} already holds a token for ${replacing[target]}.`, ["--yes  to replace it with the agent you are connecting"]);
+    }
+    const answer = await ui.select(`${codingAgent(target).label} already has a Relay token for ${replacing[target]}. Keep it, or replace it with @${agent.handle}?`, [
+      { value: "keep", label: "Keep" },
+      { value: "replace", label: "Replace" },
+    ]);
+    if (answer !== "replace") {
+      screen.say(`Kept the token for ${replacing[target]}. Nothing was changed there. Your agent and its token are saved on this computer.`);
+      return;
+    }
+  }
+
+  const plan = runtimeConnectPlan({ ...context(agent, replacing), agents: targets });
+  screen.block(plan.headline, plan.steps);
+  if (options.yes !== true) {
+    if (!ui || json) throw new HeadlessPrompt("Relay cannot ask you to confirm this plan.", ["--yes  to run the plan above"]);
+    if (!await ui.confirm("Continue?")) throw new InteractiveCancelled();
+  }
+
+  const runCommand = deps.runCommand ?? defaultRunCommand;
+  const done: Array<Record<string, unknown>> = [];
+  const allowed = [...allow];
+  let claudeStart: string | undefined;
+  for (const target of targets) {
+    const runtime = runtimes.find((entry) => entry.id === target);
+    const planned = plan.agents.find((entry) => entry.agent === target)!;
+    const method = codingAgent(target).connect;
+    const ctx = context(agent, replacing);
+    const result: Record<string, unknown> = { agent: target, files: planned.files, commands: planned.commands };
+    if (method.kind === "claude-plugin") {
+      const channelDir = claudeChannelDir(deps.env, deps.home);
+      const envPath = join(channelDir, ".env");
+      const claude = runtime?.executable ?? "claude";
+      await runAgentCommands(target, runtime, ctx, runCommand);
+      screen.step("Plugin installed");
+      await writeChannelEnv(channelDir, { token: agent.token, baseURL: agent.apiURL, allowedSenders: allowed }, platform);
+      screen.step(`Config written, owner-only  ${envPath}`);
+      if (!allowed.length) {
+        const paired = await pairFirstSender(agent, deps, screen);
+        if (paired) {
+          allowed.push(paired);
+          await writeChannelEnv(channelDir, { token: agent.token, baseURL: agent.apiURL, allowedSenders: allowed }, platform);
+          screen.step(`Allowed: @${paired}`);
+        }
+      }
+      claudeStart = `${claude} ${CLAUDE_START_ARGS.join(" ")}`;
+      Object.assign(result, { env_path: envPath, plugin: CLAUDE_PLUGIN_ID, marketplace: claudeMarketplaceSource(version), allowed_senders: allowed, start_command: claudeStart });
+    } else if (method.kind === "mcp-command") {
+      await runAgentCommands(target, runtime, ctx, runCommand);
+      screen.step(`Relay MCP server added to ${codingAgent(target).label}  ${planned.files[0]}`);
+    } else if (method.kind === "mcp-file") {
+      await writeMcpFileEntry(planned.files[0]!, method.shape, mcpServerSpec(ctx));
+      screen.step(`Relay MCP server added to ${codingAgent(target).label}  ${planned.files[0]}`);
+    } else if (method.kind === "hermes-plugin") {
+      await runAgentCommands(target, runtime, ctx, runCommand);
+      screen.step("Plugin installed");
+      await writeEnvFile(hermesEnvPath(ctx), {
+        RELAY_AGENT_TOKEN: agent.token,
+        RELAY_BASE_URL: agent.apiURL,
+        RELAY_STATE_DIR: hermesStateDir(ctx),
+        ...(allowed.length ? { RELAY_ALLOWED_CONTACTS: allowed.join(",") } : {}),
+      }, "Hermes", platform);
+      screen.step(`Config written, owner-only  ${hermesEnvPath(ctx)}`);
+      Object.assign(result, { env_path: hermesEnvPath(ctx), start_command: "hermes gateway run" });
+    } else {
+      await runAgentCommands(target, runtime, ctx, runCommand);
+      screen.step("Plugin installed");
+      const tokenPath = openclawTokenPath(ctx);
+      const destination = await preparePrivateDestination(tokenPath, "OpenClaw secrets", platform);
+      await writePrivateDestination(destination, ".relay-connect", `${agent.token}\n`);
+      await writeOpenclawChannel(openclawConfigPath(ctx), { baseURL: agent.apiURL, tokenFile: tokenPath, allowFrom: allowed });
+      screen.step(`Config written  ${openclawConfigPath(ctx)}  token owner-only in  ${tokenPath}`);
+      Object.assign(result, { token_file: tokenPath, config_path: openclawConfigPath(ctx) });
+    }
+    done.push(result);
+  }
+
+  const start = claudeStart !== undefined && options.start !== false && Boolean(ui) && !json
+    ? await ui!.confirm("Start Claude Code with Relay now?")
+    : false;
+  if (json) {
+    deps.stdout(`${JSON.stringify(safeMetadata({
+      ok: true, profile: agent.profile, handle: agent.handle, api_url: agent.apiURL, token: "stored", agents: done,
+    }, secrets), null, 2)}\n`);
+  } else {
+    screen.say(`Relay is ready for ${targets.map((target) => codingAgent(target).label).join(", ")}.`);
+    // Docker MCP's line after a connect (cmd/docker-mcp/client/connect.go:30).
+    for (const target of targets) {
+      if (codingAgent(target).connect.kind === "mcp-file") screen.say(`You might have to restart '${codingAgent(target).label}'.`);
+    }
+    if (claudeStart) {
+      screen.say(start
+        ? `Claude opens next. Say anything to @${agent.handle} from your phone; the answer shows here and on your phone.`
+        : `Start it yourself when you are ready:  ${claudeStart}`);
+    }
+    screen.say(`Later:  relay watch ${agent.handle}  ·  relay doctor`);
+  }
+  if (options.skill !== false && deps.offerSkill && !json) await deps.offerSkill();
+  if (start) await (deps.startCommand ?? defaultStartCommand)(runtimes.find((entry) => entry.id === "claude-code")?.executable ?? "claude", CLAUDE_START_ARGS);
 };
 
-const chooseRuntime = async (
+/**
+ * Which agents to connect. A name on the command line decides; `--all` takes
+ * every detected one; a terminal asks with the detected ones pre-selected; a
+ * pipe with nothing named exits 2 with the sentence and the next step. Detection
+ * pre-selects and never chooses (Vercel's resolve.ts:73-86).
+ */
+const chooseAgents = async (
   requested: string | undefined,
   options: ConnectOptions,
   runtimes: readonly RuntimeFound[],
   deps: ConnectDependencies,
-): Promise<RuntimeChoice> => {
+): Promise<CodingAgentId[]> => {
+  const found = runtimes.filter((runtime) => runtime.found).map((runtime) => runtime.id);
   if (requested !== undefined) {
-    const normalized = normalizeRuntimeChoice(requested);
+    const normalized = normalizeAgentId(requested);
     if (!normalized) {
-      throw new ConnectFailure("Name one of: claude, hermes, openclaw. Leave it out and Relay asks.", "npx relaymessenger connect");
+      throw new ConnectFailure(`Unknown agent: ${requested.trim()}. ${supportedAgentsLine()}`, "npx relaymessenger connect --help");
     }
-    return normalized;
+    return [normalized];
   }
-  const found = runtimes.filter((runtime) => runtime.found);
-  if (!deps.prompts || options.json) {
-    throw new HeadlessPrompt("Relay cannot ask which runtime should answer as this agent.", [
-      `name the runtime after the command, for example  connect ${found[0]?.id ?? "claude"}`,
-    ]);
+  if (options.all === true) {
+    if (!found.length) {
+      throw new ConnectFailure(`No coding agent was found on this computer. Name one instead. ${supportedAgentsLine()}`, "npx relaymessenger connect <agent>");
+    }
+    return found;
   }
-  if (!found.length) {
-    throw new ConnectFailure(
-      "No runtime found on this computer. Install Claude Code, Hermes or OpenClaw, or create the agent with  npx relaymessenger agents create  and use its token in your own code.",
-      "npx relaymessenger agents create",
-    );
-  }
-  const answer = await deps.prompts.select("What will answer as this agent?", [
-    ...found.map((runtime) => ({ value: runtime.id, label: `${runtime.label}  found on this computer` })),
-    { value: "other", label: "Something else  (any backend: I have a token, or start from code)" },
-  ]);
-  return normalizeRuntimeChoice(answer) ?? "other";
+  if (deps.drivingAgent) return [deps.drivingAgent];
+  if (!deps.prompts || options.json) throw new HeadlessPrompt(NO_TTY_SENTENCE, [], NO_TTY_NEXT_STEP);
+  const picked = await deps.prompts.multiselect(
+    "Which coding agents should Relay connect?\n  Detected agents are pre-selected",
+    CODING_AGENTS.map((agent) => ({ value: agent.id, label: found.includes(agent.id) ? `${agent.label}  found on this computer` : agent.label })),
+    found,
+  );
+  const chosen = CODING_AGENT_IDS.filter((id) => picked.includes(id));
+  if (!chosen.length) throw new InteractiveCancelled();
+  return chosen;
 };
 
 const saveExistingAgent = async (
@@ -322,7 +682,7 @@ const saveExistingAgent = async (
   } catch {
     throw new ConnectFailure(
       "Relay would not accept that token, so nothing was changed.",
-      "npx relaymessenger connect claude --token <token>",
+      "npx relaymessenger connect <agent> --token <token>",
     );
   }
   const profile = await deps.agents.update((config) => {
@@ -390,130 +750,6 @@ const resolveAgent = async (options: ConnectOptions, deps: ConnectDependencies):
   };
 };
 
-const connectClaude = async (
-  runtime: RuntimeFound,
-  options: ConnectOptions,
-  deps: ConnectDependencies,
-  screen: Screen,
-  marketplaceSource: string,
-): Promise<void> => {
-  const ui = deps.prompts;
-  const channelDir = claudeChannelDir(deps.env, deps.home);
-  const envPath = join(channelDir, ".env");
-  const claude = runtime.executable ?? "claude";
-  const plan = (extra: { replacing?: string; agentStep?: string }): ConnectPlan => runtimeConnectPlan({
-    runtime: "claude", env: deps.env, home: deps.home, marketplaceSource, start: options.start !== false, ...extra,
-  });
-
-  if (options.dryRun === true) {
-    // A dry run reads nothing private, creates nothing and asks nothing, so the
-    // whole plan is printable before an agent exists.
-    const dry = plan({
-      agentStep: options.token === undefined
-        ? "create a new agent and save its token privately on this computer"
-        : "use the agent whose token you passed with --token",
-    });
-    screen.block(dry.headline, dry.steps);
-    screen.say("Dry run: nothing was changed.");
-    if (screen.json) {
-      deps.stdout(`${JSON.stringify({
-        ok: true, runtime: "claude", dry_run: true, env_path: envPath,
-        marketplace: marketplaceSource, plugin: CLAUDE_PLUGIN_ID,
-        steps: dry.steps.map((line) => line.trim()),
-      }, null, 2)}\n`);
-    }
-    return;
-  }
-
-  const agent = await resolveAgent(options, deps);
-  const secrets = [agent.token];
-  screen.step(safeMetadata(`${agent.created ? "Created" : "That token is"} @${agent.handle}  token saved privately on this computer`, secrets));
-
-  // A token already in this file belongs to whatever answers as that agent
-  // today, so it is never replaced without being told to.
-  const existing = await inspectChannelEnv(channelDir);
-  let replacing: string | undefined;
-  if (existing.token && existing.token !== agent.token) {
-    const config = await deps.agents.read();
-    const owner = Object.entries(config.profiles).find(([, profile]) => profile.agent_token === existing.token)?.[0];
-    replacing = owner ? `@${owner}` : "another agent";
-    if (options.yes !== true) {
-      if (!ui || options.json) {
-        throw new HeadlessPrompt(`${envPath} already holds a token for ${replacing}.`, [
-          "--yes  to replace it with the agent you are connecting",
-        ]);
-      }
-      const answer = await ui.select(`Claude Code already has a Relay token for ${replacing}. Keep it, or replace it with @${agent.handle}?`, [
-        { value: "keep", label: "Keep" },
-        { value: "replace", label: "Replace" },
-      ]);
-      if (answer !== "replace") {
-        screen.say(`Kept the token for ${replacing}. Nothing was changed there. Your agent and its token are saved on this computer.`);
-        return;
-      }
-    }
-  }
-
-  const confirmed = plan(replacing ? { replacing } : {});
-  screen.block(confirmed.headline, confirmed.steps);
-  if (options.yes !== true) {
-    if (!ui || options.json) throw new HeadlessPrompt("Relay cannot ask you to confirm this plan.", ["--yes  to run the plan above"]);
-    if (!await ui.confirm("Continue?")) throw new InteractiveCancelled();
-  }
-
-  const runCommand = deps.runCommand ?? defaultRunCommand;
-  for (const args of [
-    ["plugin", "marketplace", "add", marketplaceSource],
-    ["plugin", "install", CLAUDE_PLUGIN_ID, "--yes"],
-    ["plugin", "enable", CLAUDE_PLUGIN_ID],
-  ]) {
-    const outcome = await runCommand(claude, args);
-    if (outcome.code !== 0) {
-      // The runtime's own words first, then what is true about Relay's side.
-      const said = `${outcome.stderr}\n${outcome.stdout}`.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
-      throw new ConnectFailure(
-        `claude ${args.join(" ")} did not finish.${said ? ` It said: ${said}` : ""} Nothing else was changed; your agent and its token are saved. Run the same command again.`,
-        "npx relaymessenger connect claude --yes",
-      );
-    }
-  }
-  screen.step("Plugin installed");
-
-  const allowed = (options.allow ?? "").split(",").map((entry) => entry.trim().replace(/^@/u, "")).filter(Boolean);
-  await writeChannelEnv(channelDir, { token: agent.token, baseURL: agent.apiURL, allowedSenders: allowed }, deps.platform);
-  screen.step(`Config written, owner-only  ${envPath}`);
-
-  if (!allowed.length) {
-    const paired = await pairFirstSender(agent, deps, screen);
-    if (paired) {
-      allowed.push(paired);
-      await writeChannelEnv(channelDir, { token: agent.token, baseURL: agent.apiURL, allowedSenders: allowed }, deps.platform);
-      screen.step(`Allowed: @${paired}`);
-    }
-  }
-
-  const startLine = `${claude} ${CLAUDE_START_ARGS.join(" ")}`;
-  const start = options.start !== false && Boolean(ui) && !options.json
-    ? await ui!.confirm("Start Claude Code with Relay now?")
-    : false;
-  if (screen.json) {
-    deps.stdout(`${JSON.stringify(safeMetadata({
-      ok: true, runtime: "claude", profile: agent.profile, handle: agent.handle,
-      api_url: agent.apiURL, env_path: envPath, plugin: CLAUDE_PLUGIN_ID,
-      marketplace: marketplaceSource, allowed_senders: allowed, token: "stored",
-      start_command: startLine,
-    }, secrets), null, 2)}\n`);
-  } else {
-    screen.say("Relay is ready for Claude Code.");
-    screen.say(start
-      ? `Claude opens next. Say anything to @${agent.handle} from your phone; the answer shows here and on your phone.`
-      : `Start it yourself when you are ready:  ${startLine}`);
-    screen.say(`Later:  relay watch ${agent.handle}  ·  relay doctor`);
-  }
-  if (options.skill !== false && deps.offerSkill && !options.json) await deps.offerSkill();
-  if (start) await (deps.startCommand ?? defaultStartCommand)(claude, CLAUDE_START_ARGS);
-};
-
 const pairFirstSender = async (
   agent: ConnectAgent,
   deps: ConnectDependencies,
@@ -543,7 +779,7 @@ const pairFirstSender = async (
   const sender = await waitForNewSender(observer, [], { timeoutMs: deps.pairTimeoutMs ?? PAIR_TIMEOUT_MS });
   spinner.stop(sender ? `@${sender.handle} wrote "${sender.text}"` : "No message yet.");
   if (!sender) {
-    screen.say("No message arrived. Run  npx relaymessenger connect claude --allow <your handle>  to allow a sender without waiting.");
+    screen.say("No message arrived. Run  npx relaymessenger connect claude-code --allow <your handle>  to allow a sender without waiting.");
     return undefined;
   }
   return await ui.confirm(`Allow @${sender.handle} to message this agent?`) ? sender.handle : undefined;
