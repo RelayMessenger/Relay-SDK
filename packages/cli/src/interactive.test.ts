@@ -14,7 +14,7 @@ async function fixture() {
   const env: NodeJS.ProcessEnv = { RELAY_CONFIG_PATH: join(home, "config.json"), RELAY_API_URL: "https://api.staging.relayapp.im" };
   const stdout: string[] = []; const stderr: string[] = [];
   const prompts = {
-    select: vi.fn(async () => "exit"), confirm: vi.fn(async () => false),
+    select: vi.fn(async () => "exit"), multiselect: vi.fn(async (_m: string, _o: unknown, initial: string[]) => initial), confirm: vi.fn(async () => false),
     password: vi.fn(async () => token), text: vi.fn(async (_message: string, initial: string) => initial),
     info: vi.fn((message: string) => { stderr.push(message); }),
     intro: vi.fn(), outro: vi.fn(), step: vi.fn((message: string) => { stdout.push(`${message}\n`); }),

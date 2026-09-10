@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { expect, it } from "vitest";
-import { inspectChannelEnv, readChannelEnv, renderChannelEnv, writeChannelEnv } from "./claude-channel.js";
+import { inspectChannelEnv, readChannelEnv, renderChannelEnv, writeChannelEnv, writeEnvFile } from "./claude-channel.js";
 import { expectOwnerOnly } from "./private-file.test.js";
 
 const token = `rly_live_${"A".repeat(43)}`;
@@ -76,4 +76,18 @@ it("leaves a file with no trailing newline ending in one, and never duplicates a
   const rendered = renderChannelEnv(`RELAY_AGENT_TOKEN="${other}"`, { token, baseURL: "https://api.relayapp.im", allowedSenders: ["advait"] });
   expect(rendered.match(/RELAY_AGENT_TOKEN=/gu)).toHaveLength(1);
   expect(rendered.endsWith("\n")).toBe(true);
+});
+
+
+it("writes a Windows Hermes state directory that the shipped runtime reader preserves", async () => {
+  const { parseEnvFile } = await import("../../claude-code/src/config.js");
+  const { hermesStateDir } = await import("./connect.js");
+  const original = String.raw`C:\Users\x\AppData\Roaming\hermes\relay`;
+  const value = hermesStateDir({ env: { HERMES_HOME: String.raw`C:\Users\x\AppData\Roaming\hermes` }, home: String.raw`C:\Users\x`, platform: "win32", version: "0.1.6-staging.3", profile: "default", handle: "test.dev", allow: [], start: false });
+  const directory = await channel();
+  const written = await writeEnvFile(join(directory, ".env"), { RELAY_STATE_DIR: value }, "Hermes");
+  const parsed = parseEnvFile(await readFile(written.path, "utf8"));
+  expect(parsed.RELAY_STATE_DIR).toBe("C:/Users/x/AppData/Roaming/hermes/relay");
+  expect(win32.normalize(parsed.RELAY_STATE_DIR!)).toBe(original);
+  await expectOwnerOnly(written.path, directory);
 });

@@ -51,7 +51,8 @@ import {
 } from "./config.js";
 import { runDoctor } from "./doctor.js";
 import { everythingElseHelp, HELP_GROUPS } from "./help-groups.js";
-import { DOCS_LLMS_URL, drivingAgent, drivingAgentHint, readDocs, skillTargets } from "./agent-driver.js";
+import { CLAUDE_CODE_HINT, DOCS_LLMS_URL, drivingAgent, readDocs, skillTargets } from "./agent-driver.js";
+import { supportedAgentsLine } from "./coding-agents.js";
 import { errorText, jsonText, safeMetadata } from "./output.js";
 import { listenForAgentEvents } from "./event-listen.js";
 
@@ -75,7 +76,9 @@ export interface ProgramDependencies {
   /** The one Relay skill offer of a run, made at the end of a connect and
    * nowhere else (owner ruling, 2026-09-09). */
   offerSkill?: () => Promise<void>;
-  connect?: Partial<Pick<import("./connect.js").ConnectDependencies, "sniff" | "runCommand" | "startCommand" | "observer" | "renderQR" | "pairTimeoutMs" | "version">>;
+  connect?: Partial<Pick<import("./connect.js").ConnectDependencies, "sniff" | "runCommand" | "startCommand" | "observer" | "renderQR" | "pairTimeoutMs" | "version" | "drivingAgent">>;
+  /** Which coding agent is driving this command; `@vercel/detect-agent` by default. */
+  detectAgent?: () => Promise<import("@vercel/detect-agent").AgentResult>;
   terminalSession?: AgentSessionDependencies["session"];
   terminalIO?: AgentSessionDependencies["io"];
   terminalClient?: AgentSessionDependencies["client"];
@@ -208,27 +211,31 @@ export const createProgram = (
     }
   };
 
+  // Docker MCP's shape (cmd/docker-mcp/commands/client.go:56-59): the supported
+  // list sits inside the usage line, built from the registry so it cannot drift.
   program
     .command("connect")
-    .argument("[runtime]", "what will answer as this agent: claude, hermes or openclaw")
-    .description("connect an agent, new or by token, and prove it answers")
+    .usage(`[options] [agent]\n${supportedAgentsLine()}`)
+    .argument("[agent]", "Coding agent to connect (see Supported agents above)")
+    .description("connect a coding agent to Relay, new or by token, and prove it answers")
     .helpGroup(HELP_GROUPS.getStarted)
+    .option("--all", "connect every detected coding agent")
     .option("--new", "create a new agent instead of using one you already have")
     .option("--handle <handle>", "the .dev handle you want for a new agent; leave it out and Relay picks one")
     .option("--name <name>", "the name people see next to a new agent")
     .option("--image <path-or-url>", "a picture for a new agent: a file on this computer, or an https:// address")
     .option("--token <token>", "use an agent you already have, by its token")
     .option("--allow <handles>", "the handles allowed to message this agent, separated by commas; skips waiting for a first message")
-    .option("--yes", "take the plan as it is, and replace a token already in the runtime's config")
+    .option("-y, --yes", "take the plan as it is")
     .option("--dry-run", "print the plan and change nothing")
-    .option("--no-start", "do not start the runtime at the end; print its command instead")
+    .option("--no-start", "do not start the agent at the end; print its command instead")
     .option("--no-skill", "do not offer the Relay skill at the end")
     .option("--json", "print the result as JSON")
     .option("--api-url <url>", "the Relay API address to use", validateApiURL)
-    .action(async (runtime: string | undefined, options: ConnectRunOptions, command: Command) => {
+    .action(async (agent: string | undefined, options: ConnectRunOptions, command: Command) => {
       const env = configContext.env ?? process.env;
       const home = configContext.home ?? homedir();
-      await runConnect(runtime, { ...options, json: options.json === true || globals(command).json === true }, {
+      await runConnect(agent, { ...options, json: options.json === true || globals(command).json === true }, {
         agents: agentDeps,
         env,
         home,
@@ -1183,13 +1190,16 @@ export const runCLI = async (
   const stderr = dependencies.stderr ?? ((value: string) => process.stderr.write(value));
   const env = dependencies.configContext?.env ?? process.env;
   // An agent driving this command gets no questions, the way Vercel's CLI turns
-  // itself non-interactive when it sees CLAUDECODE.
-  const driver = drivingAgent(env);
+  // itself non-interactive when its detector says so. Inside Claude Code the
+  // plugin hint goes to stderr first, as Vercel's and Supabase's CLIs do; it is
+  // held back under --json so that stream stays one JSON document.
+  // The detector reads the process environment; a caller that injects its own
+  // environment injects its own detector too, or is taken to be no agent.
+  const driver = await drivingAgent(dependencies.detectAgent ?? (dependencies.configContext?.env ? async () => ({ isAgent: false, agent: undefined }) : undefined));
   const interactive = interactiveAllowed(argv, dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY && process.stderr.isTTY))
     && driver === undefined;
-  if (driver && !argv.includes("--json") && !argv.some((arg) => ["--help", "-h", "--version", "-V"].includes(arg))) {
-    stderr(`${drivingAgentHint(driver)}\n`);
-  }
+  if (driver?.id === "claude-code" && !argv.includes("--json")) stderr(`${CLAUDE_CODE_HINT}\n`);
+  if (driver?.id) dependencies = { ...dependencies, connect: { ...dependencies.connect, drivingAgent: driver.id } };
   const ui = interactive ? dependencies.prompts ?? clackPrompts((message) => stderr(`${message}\n`)) : undefined;
   const agentDeps = dependencies.agents ?? agentDependencies(dependencies.configContext, dependencies.fetch);
   let offered = false;
@@ -1283,7 +1293,12 @@ export const runCLI = async (
       return headless ? 2 : 1;
     }
     if (headless) {
-      stderr(`Error: ${message}\nThere is no terminal here, so nothing was asked. Pass one of these instead:\n${(error as HeadlessPrompt).flags.map((flag) => `  ${flag}`).join("\n")}\n`);
+      const flags = (error as HeadlessPrompt).flags;
+      // A question with flags names them; one with a sentence instead (the
+      // no-TTY line) prints that sentence and its next step, nothing more.
+      stderr(flags.length
+        ? `Error: ${message}\nThere is no terminal here, so nothing was asked. Pass one of these instead:\n${flags.map((flag) => `  ${flag}`).join("\n")}\n`
+        : `Error: ${message} ${nextStep}\n`);
       return 2;
     }
     stderr(`Error: ${message}\n`);

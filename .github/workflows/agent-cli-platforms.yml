@@ -1,7 +1,7 @@
 name: Agent CLI native platforms
 on:
   push:
-    branches: [staging, agent-cli-verification-20260908, test/staging-e2e-cli-20260908, fix/platforms-green-20260910]
+    branches: [staging]
   workflow_dispatch:
 concurrency:
   group: agent-cli-native-${{ github.ref }}
@@ -10,7 +10,7 @@ permissions:
   contents: read
 jobs:
   native:
-    if: github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/agent-cli-verification-20260908' || github.ref == 'refs/heads/test/staging-e2e-cli-20260908' || github.ref == 'refs/heads/fix/platforms-green-20260910'
+    if: github.ref == 'refs/heads/staging'
     strategy:
       fail-fast: false
       matrix:
@@ -36,9 +36,6 @@ jobs:
       - run: node --test scripts/agent-cli-platforms-policy.test.mjs scripts/agent-cli-platforms-registry.test.mjs
       - run: node --test scripts/agent-cli-platforms-staging.test.mjs
       - run: node scripts/agent-cli-platforms.mjs
-      - name: Verify the owner-frozen staging release
-        if: github.ref == 'refs/heads/test/staging-e2e-cli-20260908'
-        run: node scripts/agent-cli-platforms-published.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

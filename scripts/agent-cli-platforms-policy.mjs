@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import YAML from 'yaml';
 export const NATIVE_WORKFLOW = '.github/workflows/agent-cli-platforms.yml';
-export const NATIVE_REF_GUARD = "github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/agent-cli-verification-20260908' || github.ref == 'refs/heads/test/staging-e2e-cli-20260908' || github.ref == 'refs/heads/fix/platforms-green-20260910'";
+export const NATIVE_REF_GUARD = "github.ref == 'refs/heads/staging'";
 const commands = new Set([
   'git config --global core.autocrlf false',
   'npm install --global npm@11.19.1 --no-audit --no-fund',
@@ -10,7 +10,6 @@ const commands = new Set([
   'node --test scripts/agent-cli-platforms-staging.test.mjs',
   'node --test scripts/agent-cli-platforms-policy.test.mjs scripts/agent-cli-platforms-registry.test.mjs',
   'node scripts/agent-cli-platforms.mjs',
-  'node scripts/agent-cli-platforms-published.mjs',
 ]);
 export function validateRunnerPolicy(source, text) {
   if (source.replaceAll('\\', '/') !== NATIVE_WORKFLOW) {
@@ -21,7 +20,7 @@ export function validateRunnerPolicy(source, text) {
   }
   const workflow = YAML.parse(text);
   assert.deepEqual(Object.keys(workflow.on).sort(), ['push', 'workflow_dispatch']);
-  assert.deepEqual(workflow.on.push, { branches: ['staging', 'agent-cli-verification-20260908', 'test/staging-e2e-cli-20260908', 'fix/platforms-green-20260910'] });
+  assert.deepEqual(workflow.on.push, { branches: ['staging'] });
   assert.ok(workflow.on.workflow_dispatch === null || Object.keys(workflow.on.workflow_dispatch).length === 0);
   assert.deepEqual(workflow.concurrency, { group: 'agent-cli-native-${{ github.ref }}', 'cancel-in-progress': false });
   assert.deepEqual(workflow.permissions, { contents: 'read' });
@@ -43,9 +42,6 @@ export function validateRunnerPolicy(source, text) {
         assert.equal(step.with?.['persist-credentials'], false);
         assert.equal(step.with?.ref, undefined); assert.equal(step.with?.repository, undefined);
       }
-    }
-    if (step.run === 'node scripts/agent-cli-platforms-published.mjs') {
-      assert.equal(step.if, "github.ref == 'refs/heads/test/staging-e2e-cli-20260908'", 'Frozen audit must not gate future staging releases or other verification branches');
     }
   }
   assert.doesNotMatch(text, /\bsecrets\s*[.[]/i, 'Native test workflow cannot load publication/deployment secrets');
