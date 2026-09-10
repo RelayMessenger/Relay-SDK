@@ -789,7 +789,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/config.ts",
       "source_sha256": "4b641e37fda663f328c994b4b32e755425c38b5005827439db188550553ce49f",
-      "destination_sha256": "6d51b7a83711d60b945dbabd93814543010e1de1f47aaf81d7f25a74f560907b",
+      "destination_sha256": "d9e4177365740e31c01365190097c772f61fdf4c10f40e97b6533560c8a390d2",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2032,7 +2032,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/relay-v1-lock.json",
       "source_sha256": "c18b70f1edfed7cfc6a396ed86c609e667975396d4c3ff57c00a49c0ad7e4ab4",
-      "destination_sha256": "6891327231b5ba7508a2b160f6af60fb80c48f7ccf0048c90c5ee129196fc451",
+      "destination_sha256": "35e7c097043d05796af161166b4e0978a69887b6af1f97cb5bc0b8687e4c71dc",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2637,10 +2637,10 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "test/deploy.test.ts",
       "source_sha256": "c97763411c138409caf91a228752ab717ff75687151890d72055d2df63dbe9cc",
-      "destination_sha256": "c97763411c138409caf91a228752ab717ff75687151890d72055d2df63dbe9cc",
+      "destination_sha256": "2931437dadde4446af2dca917358e956e18c664b2d55a133c9eff81b7a89f3e1",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "cookbook/cloudflare-think-agent/test/env.d.ts",

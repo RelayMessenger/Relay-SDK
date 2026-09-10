@@ -38,6 +38,13 @@ it("preserves a secure existing descriptor and never changes parent ACLs", async
   await writeConfig(emptyConfig(), ctx);
   expect(protectWindowsPath).toHaveBeenCalledOnce();
 });
+it("gives a hand-made file whose inherited descriptor will not reproduce Relay's own private one", async () => {
+  const ctx = await context(); await writeFile(configPath(ctx), JSON.stringify(emptyConfig()));
+  vi.mocked(inspectWindowsAcl).mockResolvedValue(acl("inherited-private"));
+  vi.mocked(protectWindowsPath).mockImplementation(async (_path, _directory, prior) => prior === undefined ? acl("relay-private") : unsafe);
+  await writeConfig(emptyConfig(), ctx);
+  expect(vi.mocked(protectWindowsPath).mock.calls.map(([, , prior]) => prior)).toEqual(["inherited-private", undefined]);
+});
 it("does not write secrets if private ACL creation fails and removes its empty temp", async () => {
   const ctx = await context(); vi.mocked(inspectWindowsAcl).mockResolvedValue(acl());
   vi.mocked(protectWindowsPath).mockResolvedValue(unsafe);

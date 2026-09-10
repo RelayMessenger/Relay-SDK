@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import type { InteractivePrompts } from "./interactive.js";
 import { claudeMarketplaceSource, CLAUDE_PLUGIN_ID, runtimeConnectPlan, waitForNewSender } from "./connect.js";
 import type { RuntimeFound } from "./runtime-sniff.js";
 import type { TerminalObserver } from "./terminal-watch.js";
+import { expectOwnerOnly } from "./private-file.test.js";
 
 const token = `rly_live_${"C".repeat(43)}`;
 const card = { handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
@@ -46,7 +47,7 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}) {
   const startCommand = vi.fn(async () => 0);
   const observer: TerminalObserver = { semantics: "observational-no-ack", run: async () => undefined };
   const deps: ProgramDependencies = {
-    configContext: { env, home, platform: "linux" },
+    configContext: { env, home, platform: process.platform },
     cwd: home,
     isInteractive: true,
     prompts,
@@ -62,35 +63,39 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}) {
 }
 
 describe("the plan screen", () => {
+  // The plan names files the way this platform names them (path.join), so the
+  // expectations are built the same way rather than spelled with one separator.
+  const dev = "/home/dev";
+  const claudeEnv = join(dev, ".claude", "channels", "relay", ".env");
   it("names every command it will run and every file it will write", () => {
     const plan = runtimeConnectPlan({
-      runtime: "claude", env: {}, home: "/home/dev", marketplaceSource: "RelayMessenger/Relay-SDK@staging", start: true,
+      runtime: "claude", env: {}, home: dev, marketplaceSource: "RelayMessenger/Relay-SDK@staging", start: true,
     });
     expect(plan.headline).toBe("Relay will do 4 things. Continue?");
     expect(plan.steps).toEqual([
       "  1  run  claude plugin marketplace add RelayMessenger/Relay-SDK@staging",
       "  2  run  claude plugin install relay@relay-messenger --yes, then  claude plugin enable relay@relay-messenger",
-      "  3  write  /home/dev/.claude/channels/relay/.env  (token, API address, allowed senders)",
+      `  3  write  ${claudeEnv}  (token, API address, allowed senders)`,
       "  4  start Claude Code with Relay when you are ready",
     ]);
   });
 
   it("says replace, not write, when a token is already there", () => {
     const plan = runtimeConnectPlan({
-      runtime: "claude", env: {}, home: "/home/dev", marketplaceSource: "x@main", start: false, replacing: "@other.dev",
+      runtime: "claude", env: {}, home: dev, marketplaceSource: "x@main", start: false, replacing: "@other.dev",
     });
-    expect(plan.steps.at(-1)).toContain("replace the token already in  /home/dev/.claude/channels/relay/.env");
+    expect(plan.steps.at(-1)).toContain(`replace the token already in  ${claudeEnv}`);
     expect(plan.headline).toBe("Relay will do 3 things. Continue?");
   });
 
   it("names each other runtime's own files and its own installer", () => {
-    const hermes = runtimeConnectPlan({ runtime: "hermes", env: {}, home: "/home/dev", marketplaceSource: "x@main", start: false });
+    const hermes = runtimeConnectPlan({ runtime: "hermes", env: {}, home: dev, marketplaceSource: "x@main", start: false });
     expect(hermes.steps.join("\n")).toContain("hermes plugins install RelayMessenger/Relay-Hermes --enable");
-    expect(hermes.steps.join("\n")).toContain("/home/dev/.hermes/.env");
-    const openclaw = runtimeConnectPlan({ runtime: "openclaw", env: {}, home: "/home/dev", marketplaceSource: "x@main", start: false, handle: "devbot.dev" });
+    expect(hermes.steps.join("\n")).toContain(join(dev, ".hermes", ".env"));
+    const openclaw = runtimeConnectPlan({ runtime: "openclaw", env: {}, home: dev, marketplaceSource: "x@main", start: false, handle: "devbot.dev" });
     expect(openclaw.steps.join("\n")).toContain("openclaw plugins install @relaymessenger/openclaw-plugin");
-    expect(openclaw.steps.join("\n")).toContain("/home/dev/.openclaw/secrets/relay-devbot.dev.token");
-    expect(openclaw.steps.join("\n")).toContain("/home/dev/.openclaw/openclaw.json");
+    expect(openclaw.steps.join("\n")).toContain(join(dev, ".openclaw", "secrets", "relay-devbot.dev.token"));
+    expect(openclaw.steps.join("\n")).toContain(join(dev, ".openclaw", "openclaw.json"));
   });
 
   it("a staging build takes the plugin from staging, a release from main", () => {
@@ -127,7 +132,7 @@ describe("the Claude Code path", () => {
     expect(written).toContain(`RELAY_AGENT_TOKEN="${token}"`);
     expect(written).toContain('RELAY_BASE_URL="https://api.staging.relayapp.im"');
     expect(written).toContain('RELAY_ALLOWED_SENDERS="advait"');
-    expect((await stat(join(f.channel, ".env"))).mode & 0o777).toBe(0o600);
+    await expectOwnerOnly(join(f.channel, ".env"), f.channel);
     expect((await readConfig(f.deps.configContext)).profiles[card.handle]?.agent_token).toBe(token);
     expect(f.startCommand).not.toHaveBeenCalled();
     expect([...f.stdout, ...f.stderr].join("")).not.toContain(token);

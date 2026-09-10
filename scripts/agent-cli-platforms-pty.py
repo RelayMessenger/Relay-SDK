@@ -12,7 +12,9 @@ def exercise(name, menu=False, cancel=False):
     for key in ['RELAY_AGENT_TOKEN','RELAY_PROFILE','CI','GITHUB_ACTIONS','GITLAB_CI','CIRCLECI','BUILDKITE','TF_BUILD']:env.pop(key,None)
     env.update(RELAY_CONFIG_PATH=str(config),RELAY_API_URL=a.origin,HOME=str(home),USERPROFILE=str(home),XDG_CONFIG_HOME=str(home/'.config'),TERM='xterm-256color')
     master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',30,120,0,0));before=termios.tcgetattr(slave)
-    command=[a.shim]+([] if menu else ['auth','login'])
+    # The menu case opens the `agents` door: the root menu (Connect, Watch, Exit)
+    # no longer lists agents since PR 176; "List saved agents" is the second row here.
+    command=[a.shim]+(['agents'] if menu else ['auth','login'])
     child=subprocess.Popen(command,stdin=slave,stdout=slave,stderr=slave,env=env,cwd=cwd,start_new_session=True)
     raw=b'';deadline=time.monotonic()+25;offer=False
     def drain(wait=.05):
@@ -25,12 +27,12 @@ def exercise(name, menu=False, cancel=False):
             drain()
             if child.poll() is not None or time.monotonic()>deadline:raise AssertionError('Expected actual PTY prompt did not appear')
     try:
-        if not menu:
-            wait_for(b'Install the Relay skill?');offer=True;os.write(master,b'\r') # decline before credential prompt
+        # `auth login` never offers the skill (packages/cli/src/interactive.test.ts,
+        # '["auth","login"] never asks about the Relay skill'); only connect does, at its end.
         wait_for(b'what would you like to do?' if menu else b'Paste your token')
         during=termios.tcgetattr(slave);assert not during[3]&termios.ECHO,'TTY echo was not disabled'
         if menu:
-            os.write(master,b'\x03' if cancel else b'\x1b[B\x1b[B\r') # actual root menu: select saved-agent list
+            os.write(master,b'\x03' if cancel else b'\x1b[B\r') # actual agents menu: select "List saved agents"
         else:
             os.write(master,secret.encode());time.sleep(.05);drain();assert secret.encode() not in raw,'Token echoed before submission'
             os.write(master,b'\x03' if cancel else b'\r')

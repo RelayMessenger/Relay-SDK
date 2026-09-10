@@ -1,6 +1,6 @@
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { expect, it } from "vitest";
 import { claudeChannelDir, claudeConfigDir, findExecutable, normalizeRuntimeChoice, runtimeConfigPath, sniffRuntimes } from "./runtime-sniff.js";
 
@@ -68,7 +68,7 @@ it("only absolute PATH entries are searched", async () => {
   const bin = join(root, "bin");
   await fakeCommand(bin, "hermes");
   expect(await findExecutable("hermes", { PATH: "relative/bin" }, "linux")).toBeUndefined();
-  expect(await findExecutable("hermes", { PATH: `relative/bin:${bin}` }, "linux")).toBe(join(bin, "hermes"));
+  expect(await findExecutable("hermes", { PATH: `relative/bin${delimiter}${bin}` }, "linux")).toBe(join(bin, "hermes"));
   expect(await findExecutable("absent", { PATH: bin }, "linux")).toBeUndefined();
 });
 

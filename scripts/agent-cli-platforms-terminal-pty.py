@@ -10,7 +10,9 @@ def drain(fd,seconds):
    try:out+=os.read(fd,65536)
    except OSError:break
  return out
-steps=[(b'what would you like to do?',b'\r'),(b'Install the Relay skill?',b'n\r'),(b'Handle (optional)',b'\r'),(b'Name (optional)',b'\r'),(b'Image (optional)',b'\r')]
+# The `agents` door: "Create agent" is its first row, it never offers the skill, and it asks exactly
+# three optional questions (packages/cli/src/interactive.test.ts). The root menu is Connect/Watch/Exit since PR 176.
+steps=[(b'what would you like to do?',b'\r'),(b'Handle (optional)',b'\r'),(b'Name (optional)',b'\r'),(b'Image (optional)',b'\r')]
 modes=[('light',80,24),('dark',100,32)]+([('tmux',100,32)] if os.uname().sysname=='Linux' else [])
 for mode,columns,rows in modes:
  home=root/mode;home.mkdir();ready=home/'ready.json';report=home/'server.json';socket=home/'tmux.sock';env={**baseenv,'HOME':str(home),'TERM':'xterm-256color','COLORFGBG':'0;15' if mode=='light' else '15;0','RELAY_CONFIG_PATH':str(home/'config.json')}
@@ -22,24 +24,24 @@ for mode,columns,rows in modes:
   while not ready.exists() and time.monotonic()<end:time.sleep(.05)
   env['RELAY_API_URL']=json.loads(ready.read_text())['origin'];master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',rows,columns,0,0));before=termios.tcgetattr(slave)
   if mode=='tmux':
-   tmux('new-session','-d','-s','terminal','-c',str(home),'-x',str(columns),'-y',str(rows),f'{shlex.quote(shim)}; sleep 10')
+   tmux('new-session','-d','-s','terminal','-c',str(home),'-x',str(columns),'-y',str(rows),f'{shlex.quote(shim)} agents; sleep 10')
    process=subprocess.Popen(['tmux','-S',str(socket),'attach-session','-t','terminal'],stdin=slave,stdout=slave,stderr=slave,env=env)
-  else:process=subprocess.Popen([shim],stdin=slave,stdout=slave,stderr=slave,env=env,cwd=home)
+  else:process=subprocess.Popen([shim,'agents'],stdin=slave,stdout=slave,stderr=slave,env=env,cwd=home)
   stage=0;end=time.monotonic()+20
   while time.monotonic()<end:
    output+=drain(master,.08)
    if stage<len(steps) and steps[stage][0] in output:os.write(master,steps[stage][1]);stage+=1
    if stage==len(steps) and b'owned integrated observer event' in output:break
    if process.poll() is not None:break
-  assert stage==5 and b'owned integrated observer event' in output,{'mode':mode,'stage':stage,'exit':process.poll()}
+  assert stage==len(steps) and b'owned integrated observer event' in output,{'mode':mode,'stage':stage,'exit':process.poll()}
   state=json.loads(report.read_text());assert state['creates']==1 and state['observers']==1 and state['authConfirmed'] and state['queries']==['/v1/websocket?observe=true'] and state['frames']==[],state
   assert b'Create a new agent at' not in output and b'rly_live_'+b'P'*43 not in output
-  assert output.index(b'Install the Relay skill?')<output.index(b'Handle (optional)')
+  assert b'Install the Relay skill?' not in output
   # Inspect latest alternate-screen frame, not old prompts/history.
   frame=output.split(b'\x1b[H\x1b[2J')[-1]
   assert b'Enlarge terminal' not in frame and ('▄'.encode() in frame or '▀'.encode() in frame),frame
   assert b'https://staging.relayapp.im/' in output and b'Agent: not running yet' in output
-  detail={'mode':mode,'size':[columns,rows],'inputSteps':stage,'installedShim':True,'skillBeforeCreate':True,'noExtraCreateConfirmation':True,'apexURL':True,'QRfits':True,'eventsVisible':True,'noTokenEcho':True}
+  detail={'mode':mode,'size':[columns,rows],'inputSteps':stage,'installedShim':True,'skillNotOffered':True,'noExtraCreateConfirmation':True,'apexURL':True,'QRfits':True,'eventsVisible':True,'noTokenEcho':True}
   if mode=='tmux':
    os.write(master,b'\x02d');output+=drain(master,.3);process.wait(timeout=3)
    pre=json.loads(report.read_text())['eventsSent'];time.sleep(.8);post=json.loads(report.read_text())['eventsSent'];assert post>pre
