@@ -245,7 +245,11 @@ export const runConnect = async (
       "npx relaymessenger agents create",
     );
   }
-  screen.step(`${selected.label} found  ${selected.executable ?? selected.configPath ?? "on this computer"}`);
+  screen.step(selected.found
+    ? `${selected.label} found  ${selected.executable ?? selected.configPath ?? "on this computer"}`
+    // Named outright, so Relay goes on and lets the runtime's own command say
+    // what is wrong; it never claims to have found something it did not.
+    : `${selected.label} was not found on this computer; you named it, so Relay will try anyway`);
   const marketplaceSource = claudeMarketplaceSource(deps.version);
   if (selected.id !== "claude") {
     // Detection and the plan only. Nothing is written for these runtimes yet.
