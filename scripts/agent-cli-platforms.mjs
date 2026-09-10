@@ -84,7 +84,8 @@ try {
   assert.ok(hasAgentCommands, 'Canonical CLI must include agent commands');
   report.helpShape = { rows: ['connect', 'watch', 'doctor', 'agents'], everythingElse: everythingElse[1] };
   report.agentCommands = hasAgentCommands ? 'available; tests pending below' : 'pending feature commits: no agent command in root help';
-  const expectedVersion = cliManifest.version;
+  // --version includes the canonical executable name (program.ts).
+  const expectedVersion = `relaymessenger ${cliManifest.version}`;
   assert.equal(cli('--version').trim(), expectedVersion);
   for (const executable of Object.keys(cliManifest.bin)) {
     assert.equal(npm(['exec', '--offline', '--', executable, '--version'], { cwd: consumer }).trim(), expectedVersion);
