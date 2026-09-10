@@ -79,22 +79,30 @@ export async function chooseInteractiveCommand(
   entry: InteractiveEntry, prefix: string[], deps: AgentDependencies, ui: InteractivePrompts,
   beforeSetup: () => Promise<void> = async () => undefined,
 ): Promise<string[] | "install-skill" | undefined> {
-  const options = entry === "auth" ? [
+  // The door names what a person wants, not what Relay does. Creating an agent
+  // and pasting a token both live inside Connect, and only when they are needed.
+  const options = entry === "root" ? [
+    { value: "connect", label: "Connect an agent" },
+    { value: "watch", label: "Watch an agent" },
+    { value: "exit", label: "Exit" },
+  ] : entry === "auth" ? [
     { value: "login", label: "Sign in with a token you already have" },
     { value: "status", label: "Show which token this computer uses" },
     { value: "logout", label: "Remove the saved token from this computer" },
     { value: "exit", label: "Exit" },
   ] : [
     { value: "create", label: "Create agent" },
-    ...(entry === "root" ? [{ value: "login", label: "Sign in with an existing token" }] : []),
     { value: "list", label: "List saved agents" },
     { value: "delete", label: "Delete agent" },
-    ...(entry === "root" ? [{ value: "skill", label: "Install Relay skill" }] : []),
     { value: "exit", label: "Exit" },
   ];
-  const action = await ui.select("Relay — what would you like to do?", options);
+  const action = await ui.select(entry === "root" ? "What would you like to do?" : "Relay — what would you like to do?", options);
   if (action === "exit") return undefined;
-  if (action === "skill") return "install-skill";
+  if (action === "connect") return [...prefix, "connect"];
+  if (action === "watch") {
+    const chosen = await chooseSavedAgent("Select the agent to watch", deps, ui);
+    return chosen ? ["--profile", chosen.profile, "watch", chosen.handle] : undefined;
+  }
   if (action === "create") {
     await beforeSetup();
     ui.info("Press Enter to skip any of these. Relay picks a handle for you if you skip it. A picture can be a file on this computer or an https:// address.");
@@ -122,17 +130,24 @@ export async function chooseInteractiveCommand(
   if (action === "status" || action === "logout") return [...prefix, "auth", action];
   if (action === "list") return [...prefix, "agents", "list"];
   if (action === "delete") {
-    const inventory = await listAgents(deps);
-    const choices = inventory.agents.flatMap((row) => "handle" in row
-      ? [{ profile: row.profile, handle: row.handle, label: `@${row.handle} · profile ${row.profile} · ${row.api_url}` }]
-      : []);
-    if (!choices.length) { ui.info("No saved agents."); return undefined; }
-    const selected = await ui.select("Select the agent to delete", choices.map((choice, index) => ({ value: String(index), label: choice.label })));
-    const choice = choices[Number(selected)];
-    if (!choice) throw new InteractiveCancelled();
     // Choosing here removes any doubt about which profile is meant; the delete
     // command and its confirmation still do the deleting and the token cleanup.
-    return ["--profile", choice.profile, "agents", "delete", choice.handle];
+    const chosen = await chooseSavedAgent("Select the agent to delete", deps, ui);
+    return chosen ? ["--profile", chosen.profile, "agents", "delete", chosen.handle] : undefined;
   }
   throw new InteractiveCancelled();
+}
+
+async function chooseSavedAgent(
+  message: string, deps: AgentDependencies, ui: InteractivePrompts,
+): Promise<{ profile: string; handle: string } | undefined> {
+  const inventory = await listAgents(deps);
+  const choices = inventory.agents.flatMap((row) => "handle" in row
+    ? [{ profile: row.profile, handle: row.handle, label: `@${row.handle} · profile ${row.profile} · ${row.api_url}` }]
+    : []);
+  if (!choices.length) { ui.info("No saved agents."); return undefined; }
+  const selected = await ui.select(message, choices.map((choice, index) => ({ value: String(index), label: choice.label })));
+  const choice = choices[Number(selected)];
+  if (!choice) throw new InteractiveCancelled();
+  return { profile: choice.profile, handle: choice.handle };
 }

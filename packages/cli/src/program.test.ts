@@ -18,7 +18,6 @@ const makeClient = () => {
     sendToHandles: vi.fn(async () => ({ chat_id: "chat-1" })),
     react: vi.fn(async () => ({ status: "accepted" })),
     getCard: vi.fn(async () => ({ contact_cards: [] })),
-    createRequest: vi.fn(async () => ({ state: "pending" })),
     shareCard: vi.fn(async () => undefined),
     addParticipant: vi.fn(async () => ({ status: "accepted" })),
     removeParticipant: vi.fn(async () => ({ status: "accepted" })),
@@ -41,7 +40,6 @@ const makeClient = () => {
     },
     messages: { addReaction: methods.react, create: methods.sendToHandles },
     contactCard: { retrieve: methods.getCard },
-    contactRequests: { create: methods.createRequest },
     webhookEvents: { list: methods.webhookEvents },
   } as unknown as Relay;
   return { client, methods };
@@ -126,7 +124,7 @@ describe("CLI command routing", () => {
     ])).not.toBe(0);
   });
 
-  it("routes reactions, Contact Cards, requests, and webhook metadata", async () => {
+  it("routes reactions, Contact Cards, and webhook metadata", async () => {
     expect(await run([
       "messages",
       "react",
@@ -142,8 +140,6 @@ describe("CLI command routing", () => {
     });
     expect(await run(["contact-card", "get"])).toBe(0);
     expect(fake.methods.getCard).toHaveBeenCalledWith({});
-    expect(await run(["contact-requests", "create", "advait"])).toBe(0);
-    expect(fake.methods.createRequest).toHaveBeenCalledWith({ handle: "advait" });
     expect(await run(["webhooks", "events"])).toBe(0);
     expect(fake.methods.webhookEvents).toHaveBeenCalledOnce();
   });

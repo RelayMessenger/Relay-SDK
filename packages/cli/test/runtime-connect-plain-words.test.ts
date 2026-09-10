@@ -1,8 +1,8 @@
-// Owner rule: a word a reader has to ask about is a defect. The `--connect`
-// surface is where a developer meets the most of them, so this test refuses the
-// exact vocabulary the owner banned on 2026-09-08, in the two places it can
-// reach a person: the messages this module produces, and the help text of the
-// options that drive it.
+// Owner rule: a word a reader has to ask about is a defect. The runtime writers
+// and the connect flow are where a developer meets the most of them, so this
+// test refuses the exact vocabulary the owner banned on 2026-09-08, in the two
+// places it can reach a person: the messages these modules produce, and the help
+// text of the command that drives them.
 //
 // `acknowledge` is banned here on purpose. It survives only in
 // `relay events listen` and its `--acknowledge-events` flag, neither of which
@@ -13,7 +13,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, expect, it } from "vitest";
-import { connectTarget } from "../src/agent-handoff.js";
 import { createProgram } from "../src/program.js";
 import { applyRuntimeConnect, planRuntimeConnect, type RuntimeConnectInput } from "../src/runtime-connect.js";
 import { protectWindowsPath } from "../src/runtime-connect/windows-acl.js";
@@ -115,30 +114,15 @@ it("says nothing to a developer in banned wire vocabulary, on the messages this 
   await privateFile(join(hermes, "config.yaml"), "gateway: {\n");
   await say({ agent: { ...agent }, target: { runtime: "hermes", profileHome: hermes, stateDir: join(hermes, "state") } });
 
-  // The CLI wrapper's own refusals, before any plan exists.
-  const refusals: Array<Parameters<typeof connectTarget>[0]> = [
-    { runtimeHome: "/tmp" },
-    { connect: "openclaw" },
-    { connect: "openclaw", confirmConfigure: true, runtimeStopped: true },
-    { connect: "openclaw", confirmConfigure: true, runtimeStopped: true, runtimeAccount: "work", runtimeConfig: "relative.json" },
-    { connect: "openclaw", confirmConfigure: true, runtimeStopped: true, runtimeAccount: "work", runtimeConfig: join(home, "absent.json"), runtimeStateDir: home },
-    { connect: "claude-code", confirmConfigure: true, runtimeStopped: true },
-    { connect: "nonsense", confirmConfigure: true, runtimeStopped: true },
-  ];
-  for (const options of refusals) {
-    await expect(connectTarget(options)).rejects.toThrow();
-    said.push(await connectTarget(options).then(() => "", (error: unknown) => (error as Error).message));
-  }
-
-  // The help text of the options that drive all of the above.
-  const help = createProgram({}).commands.find(c => c.name() === "agents")!.commands.find(c => c.name() === "create")!.helpInformation();
+  // The help text of the command a person actually meets.
+  const help = createProgram({}).commands.find(c => c.name() === "connect")!.helpInformation();
   said.push(help);
 
   expect(said.length).toBeGreaterThan(25);
   expect(said.join("\n")).not.toMatch(BANNED);
   // Guard the guard: the collection really did capture text, not empty strings.
   expect(said.filter(Boolean).join("\n")).toContain("Stop the runtime you chose");
-  expect(help).toContain("--connect <runtime>");
+  expect(help).toContain("--token <token>");
 });
 
 it("carries no banned word in any string this surface can print", async () => {
@@ -147,7 +131,9 @@ it("carries no banned word in any string this surface can print", async () => {
     join(src, "runtime-connect.ts"),
     join(src, "runtime-connect", "implementation.ts"),
     join(src, "runtime-connect", "windows-acl.ts"),
-    join(src, "agent-handoff.ts"),
+    join(src, "connect.ts"),
+    join(src, "claude-channel.ts"),
+    join(src, "runtime-sniff.ts"),
   ];
   for (const file of files) {
     const withoutComments = (await readFile(file, "utf8"))

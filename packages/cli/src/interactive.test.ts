@@ -36,11 +36,11 @@ async function fixture() {
 }
 
 describe("interactive Commander adapter", { timeout: 120_000 }, () => {
-  it("offers the six root choices and exit does nothing", async () => {
+  it("offers the three root choices and exit does nothing", async () => {
     const f = await fixture();
     expect(await runCLI([], f.deps)).toBe(0);
     const options = (f.prompts.select.mock.calls[0] as unknown as [string, Array<{ label: string }>])[1];
-    expect(options.map((option) => option.label)).toEqual(["Create agent", "Sign in with an existing token", "List saved agents", "Delete agent", "Install Relay skill", "Exit"]);
+    expect(options.map((option) => option.label)).toEqual(["Connect an agent", "Watch an agent", "Exit"]);
     expect(f.fetch).not.toHaveBeenCalled(); expect(f.skillPresent).not.toHaveBeenCalled(); expect(f.skillInstaller).not.toHaveBeenCalled();
   });
   it("delegates creation once and declining its one skill offer leaves success intact", async () => {
@@ -114,11 +114,6 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
     expect(await runCLI([], f.deps)).toBe(0);
     expect(f.prompts.select).toHaveBeenCalledOnce();
   });
-  it("explicit install menu asks permission once and invokes only injected standard installer", async () => {
-    const f = await fixture(); f.prompts.select.mockResolvedValueOnce("skill"); f.prompts.confirm.mockResolvedValueOnce(true);
-    expect(await runCLI([], f.deps)).toBe(0);
-    expect(f.skillInstaller).toHaveBeenCalledOnce(); expect(f.fetch).not.toHaveBeenCalled();
-  });
 });
 
 it("detects only existing source-backed project/global Relay skill files", async () => {
@@ -174,13 +169,6 @@ it("preserves explicit telemetry opt-outs while keeping credentials out of insta
   const parent = { PATH: "keep", DISABLE_TELEMETRY: "1", DO_NOT_TRACK: "1", RELAY_AGENT_TOKEN: token, ANTHROPIC_API_KEY: "filtered-key" };
   expect(installerEnvironment(parent)).toEqual({ PATH: "keep", DISABLE_TELEMETRY: "1", DO_NOT_TRACK: "1" });
   expect(parent.RELAY_AGENT_TOKEN).toBe(token);
-});
-it("explicit install-only failure exits nonzero, without API calls or credential output", async () => {
-  const f = await fixture(); f.prompts.select.mockResolvedValueOnce("skill"); f.prompts.confirm.mockResolvedValueOnce(true);
-  f.skillInstaller.mockRejectedValueOnce(new Error(token));
-  expect(await runCLI([], f.deps)).toBe(1);
-  expect(f.skillInstaller).toHaveBeenCalledOnce(); expect(f.fetch).not.toHaveBeenCalled();
-  expect(f.stderr.join("")).not.toContain(token);
 });
 it("cancelled pre-create skill offer stops before identity creation", async () => {
   const f = await fixture(); f.prompts.confirm.mockRejectedValueOnce(new InteractiveCancelled());

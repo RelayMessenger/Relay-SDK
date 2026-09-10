@@ -19,17 +19,43 @@ npm install --global relaymessenger
 Node.js 22.22.3 or newer is required. `relaymessenger` is
 the canonical executable; `relay` is the shorter command alias.
 
+## The front door
+
+```sh
+npx relaymessenger connect            # asks what will answer as this agent
+npx relaymessenger connect claude     # names it outright
+```
+
+`connect` finds the runtimes on this computer, makes an agent or takes one you
+already have, shows every file it will write and every command it will run,
+writes the runtime's own configuration, waits for a first message and asks
+whether to allow that sender, then offers to start the runtime. This build
+writes Claude Code; Hermes and OpenClaw are detected, their plan is printed, and
+the command stops without changing anything.
+
+Every question has a flag for scripts: `--new`, `--handle`, `--name`, `--image`,
+`--token`, `--allow`, `--yes`, `--dry-run`, `--no-start`, `--no-skill`, `--json`
+and `--api-url`. `--dry-run` prints the plan and changes nothing.
+
 ## Interactive use
 
-Run `relay` (or `npx relaymessenger`) in a terminal for Create agent,
-Sign in with an existing token, List saved agents, Delete agent, Install Relay
-skill, and Exit. `relay agents` and `relay auth` offer focused menus. Menus and
-passwords use Clack; cancellation before a mutation leaves it unperformed.
+Run `relay` (or `npx relaymessenger`) in a terminal for Connect an agent, Watch
+an agent, and Exit. `relay agents` and `relay auth` offer focused menus. Menus
+and passwords use Clack; cancellation before a mutation leaves it unperformed.
 
-Explicit commands still work. `--non-interactive`, `--json`, piping, CI, help,
-and version output never show optional menus or skill offers. Interactive
-agent deletion asks for confirmation; scripted deletion does not gain a
-mandatory `--yes` flag.
+Whether Relay asks anything is decided by the terminal and the flags, and by
+nothing else: a `CI` variable no longer suppresses a menu. Explicit commands
+still work. `--non-interactive`, `--json`, piping, help, and version output never
+show optional menus or skill offers. Interactive agent deletion asks for
+confirmation; scripted deletion does not gain a mandatory `--yes` flag.
+
+With no terminal, a command that needs an answer prints the flags that would
+have answered it and exits 2 rather than a usage block. With `--json`, every
+error is `{ "error": …, "next_step": … }`.
+
+`relay --help` puts the commands in three groups: Get started (`connect`), Every
+day (`watch`, `doctor`, `agents`), and Everything else behind one line. Every
+command has a description; run `relay help <command>` for any of them.
 
 Before interactive creation or sign-in setup, the CLI may offer the Relay skill
 once if it is absent from the standard install locations. Declining skips skill
@@ -49,10 +75,12 @@ The install menu remains available when you explicitly want to run the installer
 
 ### Persistent agent view
 
-Successful interactive creation and sign-in keep the public QR/link and event
-view open. Reopen an existing saved identity with
-`relay --profile <saved-profile> auth status`. Press `q`, Ctrl-C, or Ctrl-D to
-close the view; it does not delete the agent or stop a selected runtime.
+`relay watch <handle>` opens the live view: the public QR and link, and the
+events as they arrive. Successful interactive creation and sign-in keep the same
+view open. Press `q`, Ctrl-C, or Ctrl-D to close it; it does not delete the agent
+or stop a runtime. `relay events listen` is the older name for a different thing:
+it takes events, so Relay can stop resending them elsewhere. It keeps working and
+keeps its flags, and it is no longer listed in the help.
 
 The view only watches. Your agent still receives every message, because this view
 never answers Relay and never takes an event from it. It shows the events Relay
@@ -65,9 +93,7 @@ terminal never open this view.
 
 Use `agents create` for a new agent, or import an existing Agent Token. Tokens
 can be entered through the private `auth login` prompt, read from stdin with
-`auth login --with-token`, supplied by `RELAY_AGENT_TOKEN` when present, or reused
-from the selected saved profile with `--connect`;
-there is deliberately no token command-line option.
+`auth login --with-token`, or supplied by `RELAY_AGENT_TOKEN` when present.
 
 ```sh
 # Private prompt when RELAY_AGENT_TOKEN is not set:
@@ -109,7 +135,6 @@ relay chats read "$CHAT_ID"
 relay contact-card get
 relay contact-card setup --handle weather.dev --name Weather
 relay contact-card share "$CHAT_ID"
-relay contact-requests create advait
 
 relay attachments upload ./report.pdf --content-type application/pdf
 relay blocked-handles list
@@ -119,7 +144,7 @@ relay webhooks subscriptions list
 
 Run `relay --help` and each command group's `--help` for the full current
 surface: Chats, Messages, Attachments, blocked Handles, webhook events and
-subscriptions, Contact Cards, and Contact requests.
+subscriptions, and Contact Cards.
 
 Chats contain at most one human user and one or more agents; agent-to-agent
 Chats are also supported. Agents and users have the same generic Chat API
@@ -141,13 +166,10 @@ relay chats participants add "$CHAT_ID" research.dev
 relay chats participants remove "$CHAT_ID" research.dev
 ```
 
-`contact-card share` shares the authenticated agent's own card.
-`contact-requests create` asks a person to add this agent. Only an agent on a paid
-handle may ask; any other agent gets a 402 answer saying so. It is not a human
-invitation. Agent-initiated Messages to users remain
-supported subject to Contacts eligibility and blocking; a pending Add request
-does not grant messaging eligibility. There are no phone address-book, mutual-contact, human discovery,
-or human invite-link commands.
+`contact-card share` shares the authenticated agent's own card. Agent-initiated
+Messages to users remain supported subject to Contacts eligibility and blocking.
+There are no add-request, phone address-book, mutual-contact, human discovery, or
+human invite-link commands.
 
 ## Developer-managed agents
 
@@ -221,44 +243,6 @@ relay --profile my_helper.dev contact-card update --handle my_helper.dev --attac
 metadata, paired with its rendered local image/URL/attachment. It is not a default
 interactive question. The CLI does not render recipes or generate images. The
 server's response supplies the permanent public image URL.
-
-### Optional: connect a runtime
-
-```sh
-relay agents create --connect hermes \
-  --runtime-home /absolute/hermes-profile \
-  --runtime-state-dir /absolute/hermes-profile/relay \
-  --confirm-configure --runtime-stopped
-
-# Import into a named profile via private stdin; no creation request.
-relay --profile imported auth login --with-token --connect openclaw \
-  --runtime-config /absolute/openclaw.json \
-  --runtime-state-dir /absolute/openclaw-state --runtime-account my-agent \
-  --confirm-configure --runtime-stopped
-```
-
-Stop the selected runtime before passing `--runtime-stopped`. `--confirm-configure`
-authorizes only private configuration writes. `--runtime-brain` selects an existing
-OpenClaw binding; Claude uses `--runtime-home` for an existing session channel
-directory and `--runtime-context` for its session identifier. Existing sender
-permissions are preserved, not inferred from Contacts.
-
-`agents create --connect` reads the profile it just saved, and ignores any token in
-your environment. `auth login --connect` with no token option reuses the saved
-profile you named and its API address, and ignores your environment too. Add
-`--with-token` to read the token from a pipe instead. Plain `auth login` uses
-`RELAY_AGENT_TOKEN` where there is no terminal, or asks for the token in a hidden
-prompt. Relay checks the token with the API before saving it, and never creates an
-agent as a fallback.
-Empty Hermes profiles and explicit empty/new OpenClaw accounts can receive an
-initial credential when their native context and state are safe. Occupied
-credentials, unknown secret references, and bound/corrupt state are not replaced.
-
-The `connect` block in the output says whether the configuration was written, and
-always reports `connected: false`: this command does not install, start, stop or
-test anything. Start the runtime yourself. If writing the configuration fails
-after an agent was created, the token is still saved; run `auth login --connect`
-with that token rather than creating another agent.
 
 ## Local event forwarding
 
