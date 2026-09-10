@@ -323,7 +323,7 @@ describe("Hermes and OpenClaw", () => {
     await mkdir(join(f.home, ".openclaw"), { recursive: true });
     await writeFile(config, JSON.stringify({ gateway: { port: 1 }, channels: { telegram: { enabled: true } } }));
     expect(await runCLI(["connect", "openclaw", "--token", token, "--yes", "--allow", "alice", "--no-skill"], f.deps)).toBe(0);
-    expect(ranLines(f)).toEqual(["/fake/bin/openclaw plugins install @relaymessenger/openclaw-plugin@staging --force"]);
+    expect(ranLines(f)).toEqual(["/fake/bin/openclaw plugins install @relaymessenger/openclaw-plugin@staging --force --accept-capabilities"]);
     const tokenFile = join(f.home, ".openclaw", "secrets", `relay-${card.handle}.token`);
     expect(await readFile(tokenFile, "utf8")).toBe(`${token}\n`);
     await expectOwnerOnly(tokenFile, join(f.home, ".openclaw", "secrets"));

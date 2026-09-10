@@ -212,11 +212,13 @@ export const agentCommands = (agent: CodingAgentId, context: PlanContext): strin
     case "hermes":
       return [["hermes", "plugins", "install", HERMES_PLUGIN_SOURCE, "--enable"]];
     case "openclaw":
-      // OpenClaw 2026.9 stops on any npm source that is not ClawHub-reviewed
-      // unless told `--force`, its flag to "Confirm non-ClawHub sources"
-      // (`openclaw plugins install --help`); the person confirmed this plan,
-      // which names the install, so the confirmation is passed through.
-      return [["openclaw", "plugins", "install", openclawPluginSpec(context.version), "--force"]];
+      // OpenClaw stops on any npm source that is not ClawHub-reviewed unless
+      // told `--force` ("Confirm non-ClawHub sources"), and refuses to enable a
+      // plugin that declares capabilities unless told `--accept-capabilities`
+      // (both from `openclaw plugins install --help`, measured on 2026.8.1 and
+      // 2026.9.2 in the lane sandbox, 2026-09-10). The person confirmed this
+      // plan, which names the install, so both confirmations pass through.
+      return [["openclaw", "plugins", "install", openclawPluginSpec(context.version), "--force", "--accept-capabilities"]];
     default:
       return [];
   }
