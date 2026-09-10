@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import { spawn } from "node:child_process";
 import { access, stat } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -184,22 +185,43 @@ export const relaySkillGlobalArgs = (
   ...targets.flatMap((target) => ["--agent", target]),
 ];
 
-export async function installRelaySkill(cwd: string, env: NodeJS.ProcessEnv, args: readonly string[] = RELAY_SKILL_INSTALL_ARGS): Promise<void> {
+/**
+ * `headless`: nobody is watching a terminal, or stdout is spoken for by
+ * `--json`. The vendored installer then runs with NO_COLOR=1 (no-color.org:
+ * "when present and not an empty string ... prevents the addition of ANSI
+ * color") and everything it prints goes to stderr, so a pipe never sees its
+ * banner, its 15 escapes or its spinner (ledger rows P12, P15, P17; captures/
+ * relay/is5.out and is.out). Its own non-interactive flags come in `args`.
+ */
+export async function installRelaySkill(cwd: string, env: NodeJS.ProcessEnv, args: readonly string[] = RELAY_SKILL_INSTALL_ARGS, headless = false): Promise<void> {
   const executable = await resolveNpx(env);
   const windows = process.platform === "win32";
   const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
   await new Promise<void>((resolve, reject) => {
     const child = spawn(windows ? quote(executable) : executable, windows ? args.map(quote) : [...args], {
-      cwd, env: installerEnvironment(env), stdio: "inherit", shell: windows, windowsHide: true,
+      cwd, env: headless ? { ...installerEnvironment(env), NO_COLOR: "1" } : installerEnvironment(env),
+      stdio: headless ? ["ignore", "pipe", "pipe"] : "inherit", shell: windows, windowsHide: true,
     });
+    // skills@1.5.25 emits literal ANSI even with NO_COLOR=1 (measured 2026-09-10).
+    // Decision row 9 requires plain diagnostics, so render its headless output once.
+    const chunks: Buffer[] = [];
+    if (headless) {
+      child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+      child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
+    }
     let finished = false;
     const interrupted = () => { child.kill("SIGINT"); };
     process.on("SIGINT", interrupted);
     const finish = (ok: boolean) => {
       if (finished) return; finished = true; process.removeListener("SIGINT", interrupted);
+      if (headless) process.stderr.write(plainInstallerOutput(Buffer.concat(chunks).toString("utf8")));
       if (ok) resolve(); else reject(new Error("The Relay skill was not installed. Your agent and your saved token are unchanged."));
     };
     child.once("error", () => finish(false));
     child.once("close", (code) => finish(code === 0));
   });
 }
+
+export const plainInstallerOutput = (text: string): string => stripVTControlCharacters(text)
+  .replace(/[◒◐◓◑][^\r\n◇●]*/gu, "")
+  .replaceAll("\r", "");

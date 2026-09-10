@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { commandRows, everythingElseHelp, HELP_GROUPS } from "./help-groups.js";
+import { commandRows, everythingElseNames, HELP_GROUPS } from "./help-groups.js";
 import { createProgram, runCLI } from "./program.js";
 import { relaySkillGlobalArgs } from "./skill-offer.js";
 import { CLAUDE_CODE_HINT, drivingAgent, skillTargets } from "./agent-driver.js";
@@ -58,10 +58,10 @@ it("the help is three groups, and Get started holds only connect", () => {
   expect(groups.get(HELP_GROUPS.everyDay)).toEqual(["watch", "doctor", "agents"]);
   expect(groups.get(HELP_GROUPS.everythingElse)).toContain("chats");
   // The older name is reachable and described, and named nowhere in the help.
-  expect(groups.get(HELP_GROUPS.unlisted)).toEqual(["events"]);
+  expect(groups.get(HELP_GROUPS.unlisted)).toEqual(["events", "exit-codes"]);
   // The names line is built from the program, so nothing can fall out of it.
   for (const name of groups.get(HELP_GROUPS.everythingElse) ?? []) {
-    expect(everythingElseHelp(root)).toContain(name);
+    expect(everythingElseNames(root)).toContain(name);
   }
 });
 
@@ -70,7 +70,7 @@ it("--help prints the three headings and the one line that replaces the rest", a
   expect(help).toContain("Get started:");
   expect(help).toContain("Every day:");
   expect(help).toContain("Everything else:");
-  expect(help).toContain("run  relaymessenger help <command>  for any of these");
+  expect(help).toContain("help [command]");
   expect(help).toContain("No environment variables are needed.");
   // The older name is described and reachable, and listed nowhere.
   expect(help).not.toMatch(/^\s*events\b/mu);
@@ -162,7 +162,7 @@ it("an agent driving the command gets no menu; inside Claude Code the plugin hin
   });
   expect(code).toBe(0);
   expect(select).not.toHaveBeenCalled();
-  expect(stderr.join("")).toBe(`${CLAUDE_CODE_HINT}\n`);
+  expect(stderr.join("")).toBe(`${CLAUDE_CODE_HINT}\n●  claude-code  Agent detected — running non-interactively\nDocs: https://docs.relayapp.im/llms.txt\n`);
   // Another agent: no menu, no hint, no banner.
   const quiet: string[] = [];
   await runCLI([], {
@@ -171,7 +171,7 @@ it("an agent driving the command gets no menu; inside Claude Code the plugin hin
     detectAgent: async () => ({ isAgent: true, agent: { name: "codex" } }),
     stdout: () => undefined, stderr: (value) => quiet.push(value),
   });
-  expect(quiet.join("")).toBe("");
+  expect(quiet.join("")).toBe("●  codex  Agent detected — running non-interactively\nDocs: https://docs.relayapp.im/llms.txt\n");
   // --json keeps stderr as one document even inside Claude Code.
   const json: string[] = [];
   await runCLI(["--json", "agents", "list"], {
@@ -180,5 +180,5 @@ it("an agent driving the command gets no menu; inside Claude Code the plugin hin
     detectAgent: async () => ({ isAgent: true, agent: { name: "claude" } }),
     stdout: () => undefined, stderr: (value) => json.push(value),
   });
-  expect(json.join("")).not.toContain("claude-code-hint");
+  expect(json.join("")).toContain("Docs: https://docs.relayapp.im/llms.txt");
 });

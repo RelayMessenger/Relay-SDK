@@ -64,8 +64,14 @@ export function clackPrompts(info: (message: string) => void): InteractivePrompt
  * the menus, and a script that owns a terminal still gets none when it says so.
  */
 export function interactiveAllowed(argv: readonly string[], tty: boolean): boolean {
-  return tty && !argv.some((arg) => ["--non-interactive", "--json", "--help", "-h", "--version", "-V"].includes(arg));
+  // `--no-input` is clig.dev's name for the flag ("If --no-input is passed,
+  // don't prompt or do anything interactive"); `--non-interactive` is Vercel's
+  // and eas's, kept as the same flag (ledger rows P21 and P27).
+  return tty && !argv.some((arg) => ["--non-interactive", "--no-input", "--json", "--help", "-h", "--version", "-V"].includes(arg));
 }
+/** Named the flag, in either spelling. */
+export const nonInteractiveRequested = (argv: readonly string[]): boolean =>
+  argv.includes("--non-interactive") || argv.includes("--no-input");
 export type InteractiveEntry = "root" | "agents" | "auth";
 export function interactiveEntry(argv: readonly string[]): { entry: InteractiveEntry; prefix: string[] } | undefined {
   const rest: string[] = []; const prefix: string[] = [];
@@ -73,7 +79,9 @@ export function interactiveEntry(argv: readonly string[]): { entry: InteractiveE
     const arg = argv[index]!;
     if (arg === "--profile" && argv[index + 1]) { prefix.push(arg, argv[++index]!); }
     else if (arg.startsWith("--profile=")) prefix.push(arg);
-    else if (arg !== "--non-interactive" && arg !== "--json") rest.push(arg);
+    else if (arg === "--agent" && argv[index + 1]) { prefix.push(arg, argv[++index]!); }
+    else if (arg.startsWith("--agent=")) prefix.push(arg);
+    else if (!["--non-interactive", "--no-input", "--json", "-q", "--quiet", "--verbose"].includes(arg)) rest.push(arg);
   }
   if (!rest.length) return { entry: "root", prefix };
   if (rest.length === 1 && (rest[0] === "agents" || rest[0] === "auth")) return { entry: rest[0], prefix };

@@ -36,9 +36,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "8247505bd5f8dffccf8047b91317a68a91632068",
+    commit: "3097ddaed0724d7b9c4af85304355ffb1500d0f1",
     path: "contracts/developer/openapi.yaml",
-    sha256: "f1d3f19b12e068ad68b95b41650b62af6f921ec263e37dd2d24f59a72903ce30",
+    sha256: "ccc6eed43086ffdd9912a9d021469948128f8dee080f00f15ad2c0c269196cdc",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -305,7 +305,7 @@ const validateOpenAPI = () => {
   assert.equal(bootstrap.responses["201"].content["application/json"].schema.$ref, "#/components/schemas/CreateAgentResponse");
   const createParams = document.components.schemas.CreateAgentRequest;
   assert.equal(createParams.additionalProperties, false);
-  assert.deepEqual(Object.keys(createParams.properties), ["token_name", "handle", "first_name", "image_url", "image_recipe"]);
+  assert.deepEqual(Object.keys(createParams.properties), ["about", "token_name", "handle", "first_name", "image_url", "image_recipe"]);
   assert.deepEqual(createParams.dependentRequired, { image_recipe: ["image_url"] });
   assert.equal(createParams.properties.handle.pattern, "^[a-z][a-z0-9_]{2,31}\\.dev$");
   assert.equal(createParams.properties.first_name.maxLength, 30);

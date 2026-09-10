@@ -1,3 +1,4 @@
+import { NEXT_STEP } from "./error-codes.js";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -125,17 +126,19 @@ describe("choosing agents", () => {
 
   it("an unknown name is refused with the supported list", async () => {
     const f = await fixture({ isInteractive: false });
-    expect(await runCLI(["--json", "connect", "nonsense"], f.deps)).toBe(1);
+    expect(await runCLI(["--json", "connect", "nonsense"], f.deps)).toBe(2);
     const refusal = JSON.parse(f.stderr.join(""));
-    expect(refusal.error).toBe(`Unknown agent: nonsense. Supported agents: ${CODING_AGENT_IDS.join(" ")}`);
-    expect(refusal.next_step).toBe("npx relaymessenger connect --help");
+    expect(refusal.error).toContain(`Unknown agent: nonsense. Supported agents: ${CODING_AGENT_IDS.join(" ")}`);
+    expect(refusal.code).toBe("usage");
+    expect(refusal.next_step).toBe(NEXT_STEP.usage);
   });
 
   it("inside a coding agent, that agent is pre-selected and the ● line says so once", async () => {
     const f = await fixture({ isInteractive: false, connect: undefined });
+    f.deps.detectAgent = async () => ({ isAgent: true, agent: { name: "codex" } });
     f.deps.connect = { sniff: async () => claudeAndHermes, version: "0.1.6-staging.0", drivingAgent: "codex" };
     expect(await runCLI(["connect", "--dry-run"], f.deps)).toBe(0);
-    expect(f.stderr.join("")).toBe("●  codex  Agent detected — connecting non-interactively\n");
+    expect(f.stderr.join("")).toBe("●  codex  Agent detected — running non-interactively\nDocs: https://docs.relayapp.im/llms.txt\n");
     expect(f.stdout.join("")).toContain("codex mcp add relay");
     // Under --json the stderr stream stays JSON-only.
     const quiet = await fixture({ isInteractive: false });
@@ -345,7 +348,7 @@ describe("with no terminal", () => {
     expect(f.prompts.multiselect).not.toHaveBeenCalled();
     const j = await fixture(headless);
     expect(await runCLI(["connect", "--json"], j.deps)).toBe(2);
-    expect(JSON.parse(j.stderr.join(""))).toEqual({ error: NO_TTY_SENTENCE, next_step: NO_TTY_NEXT_STEP });
+    expect(JSON.parse(j.stderr.join(""))).toEqual({ error: `${NO_TTY_SENTENCE} ${NO_TTY_NEXT_STEP}`, code: "not_a_tty", next_step: NEXT_STEP.not_a_tty });
   });
 
   it.each([
@@ -365,9 +368,10 @@ describe("with no terminal", () => {
     const f = await fixture(headless);
     expect(await runCLI(["connect", "claude", "--json"], f.deps)).toBe(2);
     const answer = JSON.parse(f.stderr.join(""));
-    expect(Object.keys(answer).sort()).toEqual(["error", "next_step"]);
+    expect(Object.keys(answer).sort()).toEqual(["code", "error", "next_step"]);
     expect(answer.error).toContain("Relay cannot ask which agent to connect");
-    expect(answer.next_step).toContain("--token <token>");
+    expect(answer.error).toContain("--token <token>");
+    expect(answer.next_step).toBe(NEXT_STEP.not_a_tty);
   });
 
   it("-y is --yes", async () => {

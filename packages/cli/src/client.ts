@@ -10,6 +10,7 @@ export interface ClientContext {
 export const createClientContext = async (
   profile?: string,
   configContext: ConfigContext = {},
+  fetch?: typeof globalThis.fetch,
 ): Promise<ClientContext> => {
   const auth = await resolveAuth(profile, configContext);
   return {
@@ -17,6 +18,7 @@ export const createClientContext = async (
     client: new Relay({
       apiKey: auth.token,
       baseURL: auth.apiURL,
+      ...(fetch ? { fetch } : {}),
     }),
   };
 };

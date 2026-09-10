@@ -107,7 +107,7 @@ try {
   ]);
   assert.doesNotMatch(packedTypes, /\bavatar_url\b/u);
   assert.doesNotMatch(packedTypes, /\btagline\b/u);
-  assert.deepEqual(interfaceFields("AgentCreateProfileParams"), ["token_name", "handle", "first_name"]);
+  assert.deepEqual(interfaceFields("AgentCreateProfileParams"), ["about", "token_name", "handle", "first_name"]);
   assert.match(packedTypes, /export type AgentCreateParams = AgentCreateProfileParams/);
   assert.deepEqual(interfaceFields("AgentImageBackground"), ["linearGradient"]);
   assert.match(packedTypes, /export type AgentImageRecipe = AgentMonogramImageRecipe \| AgentEmojiImageRecipe \| AgentPhotoImageRecipe/);

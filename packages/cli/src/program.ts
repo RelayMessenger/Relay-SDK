@@ -50,11 +50,15 @@ import {
   writeConfig,
 } from "./config.js";
 import { runDoctor } from "./doctor.js";
-import { everythingElseHelp, HELP_GROUPS } from "./help-groups.js";
-import { CLAUDE_CODE_HINT, DOCS_LLMS_URL, drivingAgent, readDocs, skillTargets } from "./agent-driver.js";
+import { DOCS_LINE, formatRelayHelp, HELP_GROUPS, helpFooter } from "./help-groups.js";
+import { AGENT_MODES, CLAUDE_CODE_HINT, DOCS_LLMS_URL, agentDetectedLines, agentMode, docsSection, docsSections, readDocs, resolveDrivingAgent, skillTargets } from "./agent-driver.js";
 import { supportedAgentsLine } from "./coding-agents.js";
 import { errorText, jsonText, safeMetadata } from "./output.js";
 import { listenForAgentEvents } from "./event-listen.js";
+import { CliError } from "./error-codes.js";
+import { describeFailure } from "./errors.js";
+import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
+import { verboseFetch } from "./verbose.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
 // source file may carry its own copy.
@@ -85,13 +89,30 @@ export interface ProgramDependencies {
   stdout?: (value: string) => void;
   stderr?: (value: string) => void;
   fetch?: typeof fetch;
+  /** `--json` was asked for, so commander's own usage text stays off the streams. */
+  json?: boolean;
 }
 
 interface GlobalOptions {
   profile?: string;
   json?: boolean;
   nonInteractive?: boolean;
+  agent?: string;
+  quiet?: boolean;
+  verbose?: boolean;
 }
+
+const agentModeValue = (value: string): string => {
+  if (!(AGENT_MODES as readonly string[]).includes(value)) throw new InvalidArgumentError("Expected auto, yes or no.");
+  return value;
+};
+
+// Relay-Server 3097dda, CreateAgentRequest and UpdateContactCardRequest: trim, 1–60.
+const aboutText = (value: string): string => {
+  const text = value.trim();
+  if (!text || [...text].length > 60) throw new InvalidArgumentError("About must be 1 to 60 characters.");
+  return text;
+};
 
 const integer = (value: string): number => {
   const parsed = Number(value);
@@ -166,30 +187,53 @@ export const createProgram = (
   const stderr = dependencies.stderr ?? ((value: string) => process.stderr.write(value));
   const configContext = dependencies.configContext ?? {};
   const resolveClient = dependencies.resolveClient
-    ?? ((profile?: string) => createClientContext(profile, configContext));
+    ?? ((profile?: string) => createClientContext(profile, configContext, dependencies.fetch));
   const output = (value: unknown): void => stdout(jsonText(value));
   const clientFor = async (command: Command): Promise<Relay> =>
     (await resolveClient(globals(command).profile)).client;
 
+  // The option rows are the decision page's, in its order. `--version` names
+  // the program (GNU 4.8.1: "the canonical name for this program"; gh prints
+  // `gh version 2.100.0`, stripe `stripe version 1.50.10`). `--no-input` is
+  // clig.dev's name and `--non-interactive` Vercel's, one flag with two
+  // spellings so neither is a second row. `--agent` is Supabase's global flag.
+  // `-q` and `--verbose` are clig.dev's standard names (ledger rows P21, P36,
+  // P53).
   const program = new Command()
     .name("relaymessenger")
     .description("Relay: give the agent on your computer a phone number.")
-    .version(PACKAGE_VERSION)
-    .option("--json", "print the result as JSON")
-    .option("--non-interactive", "never show menus or ask questions")
-    .option("--install-skills", "install the Relay skill for the coding agents on this computer, then carry on")
-    .option("--profile <name>", "which saved profile on this computer to use", (configContext.env ?? process.env).RELAY_PROFILE);
+    .version(`relaymessenger ${PACKAGE_VERSION}`, "-V, --version", "print the version")
+    .option("--json", "print the result as JSON, errors included")
+    .option("--no-input, --non-interactive", "never ask a question; fail with exit 2 where one is required")
+    .option("--agent <auto|yes|no>", "override coding-agent detection (default auto)", agentModeValue)
+    .option("-q, --quiet", "errors only")
+    .option("--verbose", "print each request it makes to stderr, as METHOD path status ms")
+    .option("--profile <name>", "which saved profile on this computer to use", (configContext.env ?? process.env).RELAY_PROFILE)
+    .option("--install-skills", "install the Relay skill for the coding agents on this computer");
   program.exitOverride();
+  // A usage error keeps commander's sentence and gains the Docs line; under
+  // --json it prints nothing here, because runCLI prints the envelope (MCP's
+  // protocol-error class obeys the same format as every other error; ledger
+  // rows P05 and P49, captures/relay/exit-usage-badflag-json.txt).
+  const usageError = (message: string, write: (value: string) => void): void => {
+    if (!dependencies.json) write(`${message.replace(/rly_[A-Za-z0-9_-]+/gu, "[REDACTED]")}${DOCS_LINE}\n`);
+  };
   program.configureOutput({
     writeOut: stdout,
     writeErr: stderr,
+    outputError: usageError,
   });
-
-  program.addHelpText("after", (context) => context.command === program
-    ? `${everythingElseHelp(program)}\nNo environment variables are needed. RELAY_AGENT_TOKEN is honored in scripts only.`
-    : "");
+  // gh's order: commands before flags, examples first, no wrapping (help-groups.ts).
+  program.configureHelp({ formatHelp: formatRelayHelp, minWidthToWrap: Number.POSITIVE_INFINITY });
+  // Every help screen ends the same way (GNU 4.8.2; gh's LEARN MORE block).
+  program.addHelpText("afterAll", (context) => helpFooter(context.command === program));
 
   const agentDeps = dependencies.agents ?? agentDependencies(configContext, dependencies.fetch);
+  const readStdinText = dependencies.readStdin ?? (async () => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks).toString("utf8");
+  });
   // The live view draws the QR code itself, so a caller that will open it must
   // not print a second copy first (the owner saw two identical codes stacked
   // in the terminal, 2026-09-08).
@@ -223,8 +267,13 @@ export const createProgram = (
     .option("--new", "create a new agent instead of using one you already have")
     .option("--handle <handle>", "the .dev handle you want for a new agent; leave it out and Relay picks one")
     .option("--name <name>", "the name people see next to a new agent")
+    .option("--about <text>", "the one line people see above your agent's first message", aboutText)
     .option("--image <path-or-url>", "a picture for a new agent: a file on this computer, or an https:// address")
-    .option("--token <token>", "use an agent you already have, by its token")
+    // gh's `auth login --with-token` (ledger row P25): the token comes down a
+    // pipe and never touches `ps` or the shell history. `--token` stays for
+    // scripts and is the visible one.
+    .option("--with-token", "use an agent you already have; its token is read from a pipe")
+    .option("--token <token>", "use an agent you already have, by its token; visible in ps and shell history")
     .option("--allow <handles>", "the handles allowed to message this agent, separated by commas; skips waiting for a first message")
     .option("-y, --yes", "take the plan as it is")
     .option("--dry-run", "print the plan and change nothing")
@@ -232,10 +281,21 @@ export const createProgram = (
     .option("--no-skill", "do not offer the Relay skill at the end")
     .option("--json", "print the result as JSON")
     .option("--api-url <url>", "the Relay API address to use", validateApiURL)
-    .action(async (agent: string | undefined, options: ConnectRunOptions, command: Command) => {
+    .action(async (agent: string | undefined, options: ConnectRunOptions & { withToken?: boolean }, command: Command) => {
       const env = configContext.env ?? process.env;
       const home = configContext.home ?? homedir();
-      await runConnect(agent, { ...options, json: options.json === true || globals(command).json === true }, {
+      const { withToken, ...rest } = options;
+      let token = rest.token;
+      if (withToken) {
+        if (token !== undefined) throw new CliError("Choose --with-token or --token, not both.", "usage");
+        token = (await readStdinText()).trim();
+        if (!token) throw new CliError("Nothing was piped in. Pipe the token into this command, for example: echo \"$RELAY_AGENT_TOKEN\" | npx relaymessenger connect codex --with-token", "usage");
+      }
+      await runConnect(agent, {
+        ...rest, ...(token === undefined ? {} : { token }),
+        json: options.json === true || globals(command).json === true,
+        nonInteractive: globals(command).nonInteractive === true || program.getOptionValue("input") === false,
+      }, {
         agents: agentDeps,
         env,
         home,
@@ -296,6 +356,7 @@ export const createProgram = (
           createClient: (resolved) => new Relay({
             apiKey: resolved.token,
             baseURL: resolved.apiURL,
+            ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
           }),
         },
       );
@@ -304,7 +365,7 @@ export const createProgram = (
     });
 
   const agents = program.command("agents")
-    .description("create an agent, list the agents saved on this computer, and delete one")
+    .description("create, list and delete the agents saved on this computer")
     .helpGroup(HELP_GROUPS.everyDay);
   agents.command("create")
     .description("create an agent and save its token privately on this computer, with no account and no sign-in")
@@ -312,11 +373,12 @@ export const createProgram = (
     .option("--token-name <name>", "a label for the new token, so you can tell it apart later")
     .option("--handle <handle>", "the .dev handle you want; leave it out and Relay picks one")
     .option("--name <name>", "the name people see next to this agent")
+    .option("--about <text>", "the one line people see above your agent's first message", aboutText)
     .option("--image <path-or-url>", "a picture: a file on this computer, or an https:// address")
     .option("--image-url <url>", "a picture at an https:// address (same as --image with a URL)")
     .option("--image-recipe <json-file>", "a Relay picture recipe file; needs --image or --image-url as well")
     .option("--json", "print the result as JSON")
-    .action(async (options: { apiUrl?: string; tokenName?: string; json?: boolean; handle?: string; name?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
+    .action(async (options: { apiUrl?: string; tokenName?: string; json?: boolean; handle?: string; name?: string; about?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
       if (options.image !== undefined && options.imageUrl !== undefined) throw new Error("Choose --image or --image-url, not both.");
       const imageRecipe: AgentImageRecipe | undefined = options.imageRecipe === undefined
         ? undefined : await readImageRecipe(options.imageRecipe);
@@ -326,6 +388,7 @@ export const createProgram = (
         ...(options.tokenName === undefined ? {} : { tokenName: options.tokenName }),
         ...(options.handle === undefined ? {} : { handle: options.handle }),
         ...(options.name === undefined ? {} : { firstName: options.name }),
+        ...(options.about === undefined ? {} : { about: options.about }),
         ...(options.image === undefined ? {} : { image: options.image }),
         ...(options.imageUrl === undefined ? {} : { imageURL: options.imageUrl }),
         ...(imageRecipe === undefined ? {} : { imageRecipe }),
@@ -369,7 +432,7 @@ export const createProgram = (
 
   const authCommands = program.command("auth", { hidden: true }).description("save, check and remove the token this computer signs in with").helpGroup(HELP_GROUPS.everythingElse);
   authCommands.configureOutput({
-    outputError: (_message, write) => write("Those options are not right for auth. To sign in, pipe the token into npx relaymessenger auth login --with-token. Never type a token as an option value.\n"),
+    outputError: usageError,
   });
   authCommands.command("login")
     .description("save a token for this computer, from a hidden prompt, a pipe, or RELAY_AGENT_TOKEN")
@@ -385,18 +448,14 @@ export const createProgram = (
       const previous = config.profiles[profile] ?? {};
       let raw: string | undefined;
       if (options.withToken && !dependencies.readStdin && process.stdin.isTTY) {
-        if (globals(command).nonInteractive || globals(command).json || dependencies.isInteractive === false) throw new Error("Nothing is piped in. Pipe the token into this command, for example: echo \"$RELAY_AGENT_TOKEN\" | npx relaymessenger auth login --with-token");
+        if (globals(command).nonInteractive || globals(command).json || dependencies.isInteractive === false) throw new CliError("Nothing is piped in. Pipe the token into this command, for example: echo \"$RELAY_AGENT_TOKEN\" | npx relaymessenger auth login --with-token", "not_a_tty");
         raw = await (dependencies.readSecret ?? (() => readHiddenToken(process.stdin, stderr)))();
       } else if (options.withToken) {
-        raw = await (dependencies.readStdin ?? (async () => {
-          const chunks: Buffer[] = [];
-          for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
-          return Buffer.concat(chunks).toString("utf8");
-        }))();
+        raw = await readStdinText();
       } else if (env.RELAY_AGENT_TOKEN !== undefined) raw = env.RELAY_AGENT_TOKEN;
       else {
         const interactive = !globals(command).nonInteractive && !globals(command).json && (dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stderr.isTTY));
-        if (!interactive) throw new Error("Relay has no token and cannot ask for one here. Pipe it into npx relaymessenger auth login --with-token, or set RELAY_AGENT_TOKEN.");
+        if (!interactive) throw new CliError("Relay has no token and cannot ask for one here. Pipe it into npx relaymessenger auth login --with-token, or set RELAY_AGENT_TOKEN.", "not_a_tty");
         raw = await (dependencies.readSecret ?? (() => readHiddenToken(process.stdin, stderr)))();
       }
       if (!raw) throw new Error("No token was given, so nothing was changed.");
@@ -440,7 +499,15 @@ export const createProgram = (
         globals(command).profile ?? config.current_profile,
       );
       const selected = config.profiles[profile];
-      if (!selected) throw new Error(`Relay profile ${profile} does not exist.`);
+      if (!selected) throw new CliError(`Relay profile ${profile} does not exist.`, "not_found");
+      // clig.dev, Output: "If you change state, tell the user" — and only when
+      // it changed. With nothing saved there is nothing to remove, so the
+      // file is left alone and the answer says so (ledger row P14).
+      if (selected.agent_token === undefined) {
+        output({ ok: true, profile, token: "none" });
+        if (!globals(command).json && !globals(command).quiet) stderr(`No token was saved for profile ${profile}.\n`);
+        return;
+      }
       const { agent_token: _removed, ...withoutToken } = selected;
       config.profiles[profile] = withoutToken;
       await writeConfig(config, configContext);
@@ -466,7 +533,7 @@ export const createProgram = (
     .description("select the default local profile")
     .action(async (name: string) => {
       const config = await readConfig(configContext);
-      if (!config.profiles[name]) throw new Error(`Relay profile ${name} does not exist.`);
+      if (!config.profiles[name]) throw new CliError(`Relay profile ${name} does not exist.`, "not_found");
       config.current_profile = name;
       await writeConfig(config, configContext);
       output({ ok: true, current_profile: name });
@@ -480,7 +547,7 @@ export const createProgram = (
       if (name === config.current_profile) {
         throw new Error("Cannot remove the current profile; select another first.");
       }
-      if (!config.profiles[name]) throw new Error(`Relay profile ${name} does not exist.`);
+      if (!config.profiles[name]) throw new CliError(`Relay profile ${name} does not exist.`, "not_found");
       delete config.profiles[name];
       await writeConfig(config, configContext);
       output({ ok: true, removed: name });
@@ -503,15 +570,35 @@ export const createProgram = (
 
   program
     .command("docs", { hidden: true })
+    .argument("[section]", "print one section of the documentation, by the name docs --list shows")
+    .option("--list", "print the section names, one per line")
     .description("print Relay's documentation for agents, or the address to read it at")
     .helpGroup(HELP_GROUPS.everythingElse)
-    .action(async (_options: object, command: Command) => {
+    .action(async (section: string | undefined, options: { list?: boolean }, command: Command) => {
+      const fetchDocs = () => readDocs(dependencies.fetch ?? globalThis.fetch);
+      // Anthropic's pagination rule for a response that could fill the context
+      // (ledger rows P45, P47): the names, or one section, on request.
+      if (options.list || section !== undefined) {
+        const text = await fetchDocs();
+        if (text === undefined) throw new CliError(`Relay's documentation could not be read from ${DOCS_LLMS_URL}.`, "network");
+        if (options.list) {
+          const names = docsSections(text);
+          if (globals(command).json) output({ sections: names });
+          else stdout(`${names.join("\n")}\n`);
+          return;
+        }
+        const chosen = docsSection(text, section!);
+        if (chosen === undefined) throw new CliError(`There is no documentation section named ${section}. Run npx relaymessenger docs --list to see the names.`, "not_found");
+        if (globals(command).json) output({ section, text: chosen });
+        else stdout(chosen);
+        return;
+      }
       // A person gets the address to open. An agent, which has no terminal, gets
       // the text itself in one request, the way Railway prints its llms.txt.
       const headless = dependencies.isInteractive === false
         || (dependencies.isInteractive === undefined && !process.stdout.isTTY);
       if (globals(command).json) { output({ url: DOCS_LLMS_URL }); return; }
-      const text = headless ? await readDocs(dependencies.fetch ?? globalThis.fetch) : undefined;
+      const text = headless ? await fetchDocs() : undefined;
       stdout(text ?? `${DOCS_LLMS_URL}\n`);
     });
 
@@ -529,7 +616,7 @@ export const createProgram = (
   chats
     .command("list")
     .description("list the chats this agent is in, a page at a time")
-    .option("--cursor <cursor>")
+    .option("--cursor <cursor>", "continue from the cursor returned by the previous page")
     .option("--limit <number>", "page size", positiveInteger)
     .action(async (
       options: { cursor?: string; limit?: number },
@@ -541,7 +628,7 @@ export const createProgram = (
   chats
     .command("get")
     .description("show one chat")
-    .argument("<chat-id>")
+    .argument("<chat-id>", "the chat ID")
     .action(async (chatID: string, _options: object, command: Command) =>
       output(await (await clientFor(command)).chats.retrieve(chatID)));
   chats
@@ -549,8 +636,8 @@ export const createProgram = (
     .description("create a Chat with at most 7 total participants, including the sender")
     .requiredOption("--from <handle>", "sender Handle", handle)
     .requiredOption("--to <handles...>", "at most 6 recipient Handles", (value) => handle(value))
-    .requiredOption("--text <text>")
-    .requiredOption("--idempotency-key <key>")
+    .requiredOption("--text <text>", "the text to send")
+    .requiredOption("--idempotency-key <key>", "reuse this key to avoid sending the same request twice")
     .action(async (
       options: { from: string; to: string[]; text: string; idempotencyKey: string },
       command: Command,
@@ -566,10 +653,10 @@ export const createProgram = (
   chats
     .command("update")
     .description("rename a group chat, or set or clear its picture")
-    .argument("<chat-id>")
-    .option("--display-name <name>")
-    .option("--group-icon <attachment-id-or-https-url>")
-    .option("--clear-group-icon")
+    .argument("<chat-id>", "the chat ID")
+    .option("--display-name <name>", "the name people see for this chat")
+    .option("--group-icon <attachment-id-or-https-url>", "the picture for this chat")
+    .option("--clear-group-icon", "remove the picture from this chat")
     .action(async (
       chatID: string,
       options: {
@@ -598,13 +685,13 @@ export const createProgram = (
   chats
     .command("leave")
     .description("leave a chat; it stays for everyone else")
-    .argument("<chat-id>")
+    .argument("<chat-id>", "the chat ID")
     .action(async (chatID: string, _options: object, command: Command) =>
       output(await (await clientFor(command)).chats.leaveChat(chatID)));
   chats
     .command("read")
     .description("mark everything in a chat as read")
-    .argument("<chat-id>")
+    .argument("<chat-id>", "the chat ID")
     .action(async (chatID: string, _options: object, command: Command) => {
       await (await clientFor(command)).chats.markAsRead(chatID);
       output(voidResult);
@@ -614,7 +701,7 @@ export const createProgram = (
   typing
     .command("start")
     .description("show that this agent is typing in a chat")
-    .argument("<chat-id>")
+    .argument("<chat-id>", "the chat ID")
     .action(async (chatID: string, _options: object, command: Command) => {
       await (await clientFor(command)).chats.startTyping(chatID);
       output(voidResult);
@@ -622,7 +709,7 @@ export const createProgram = (
   typing
     .command("stop")
     .description("stop showing that this agent is typing")
-    .argument("<chat-id>")
+    .argument("<chat-id>", "the chat ID")
     .action(async (chatID: string, _options: object, command: Command) => {
       await (await clientFor(command)).chats.stopTyping(chatID);
       output(voidResult);
@@ -636,7 +723,7 @@ export const createProgram = (
   participants
     .command("add")
     .description("add an agent to a chat")
-    .argument("<chat-id>")
+    .argument("<chat-id>", "the chat ID")
     .argument("<handle>", "participant Handle", handle)
     .option("--hide-history", "the new agent sees only messages sent after it joins (this is what Relay does by default)")
     .option("--no-hide-history", "the new agent can also read the messages sent before it joined")
@@ -657,7 +744,7 @@ export const createProgram = (
   participants
     .command("remove")
     .description("remove an agent from a chat")
-    .argument("<chat-id>")
+    .argument("<chat-id>", "the chat ID")
     .argument("<handle>", "participant Handle", handle)
     .action(async (
       chatID: string,
@@ -675,8 +762,8 @@ export const createProgram = (
   chatMessages
     .command("list")
     .description("list the messages in a chat, a page at a time")
-    .argument("<chat-id>")
-    .option("--cursor <cursor>")
+    .argument("<chat-id>", "the chat ID")
+    .option("--cursor <cursor>", "continue from the cursor returned by the previous page")
     .option("--limit <number>", "page size", positiveInteger)
     .option("--order <order>", "asc (default, oldest first) or desc (newest first)")
     .action(async (
@@ -702,9 +789,9 @@ export const createProgram = (
   chatMessages
     .command("send")
     .description("send a text message to a chat")
-    .argument("<chat-id>")
-    .requiredOption("--text <text>")
-    .requiredOption("--idempotency-key <key>")
+    .argument("<chat-id>", "the chat ID")
+    .requiredOption("--text <text>", "the text to send")
+    .requiredOption("--idempotency-key <key>", "reuse this key to avoid sending the same request twice")
     .action(async (
       chatID: string,
       options: { text: string; idempotencyKey: string },
@@ -719,9 +806,9 @@ export const createProgram = (
   chats
     .command("voice-memo")
     .description("send a voice memo to a chat, by attachment or by address")
-    .argument("<chat-id>")
-    .option("--attachment-id <id>")
-    .option("--url <url>")
+    .argument("<chat-id>", "the chat ID")
+    .option("--attachment-id <id>", "the completed attachment to send")
+    .option("--url <url>", "the address of the audio to send")
     .action(async (
       chatID: string,
       options: { attachmentId?: string; url?: string },
@@ -746,8 +833,8 @@ export const createProgram = (
     .command("send")
     .description("start or reuse a chat with the handles you name, and send one message")
     .requiredOption("--to <handles...>", "at most 6 recipient Handles", (value) => handle(value))
-    .requiredOption("--text <text>")
-    .requiredOption("--idempotency-key <key>")
+    .requiredOption("--text <text>", "the text to send")
+    .requiredOption("--idempotency-key <key>", "reuse this key to avoid sending the same request twice")
     .action(async (
       options: { to: string[]; text: string; idempotencyKey: string },
       command: Command,
@@ -762,14 +849,14 @@ export const createProgram = (
   messages
     .command("get")
     .description("show one message")
-    .argument("<message-id>")
+    .argument("<message-id>", "the message ID")
     .action(async (messageID: string, _options: object, command: Command) =>
       output(await (await clientFor(command)).messages.retrieve(messageID)));
   messages
     .command("thread")
     .description("list the replies to a message, a page at a time")
-    .argument("<message-id>")
-    .option("--cursor <cursor>")
+    .argument("<message-id>", "the message ID")
+    .option("--cursor <cursor>", "continue from the cursor returned by the previous page")
     .option("--limit <number>", "page size", positiveInteger)
     .option("--order <order>", "asc or desc")
     .action(async (
@@ -795,10 +882,10 @@ export const createProgram = (
   messages
     .command("react")
     .description("add or remove a reaction on a message")
-    .argument("<message-id>")
+    .argument("<message-id>", "the message ID")
     .requiredOption("--operation <operation>", "add or remove")
-    .requiredOption("--type <type>")
-    .option("--custom-emoji <emoji>")
+    .requiredOption("--type <type>", "the reaction type to use")
+    .option("--custom-emoji <emoji>", "the emoji to use for a custom reaction")
     .option("--part-index <number>", "which part of the message to react to, counting from 0", integer)
     .action(async (
       messageID: string,
@@ -841,8 +928,8 @@ export const createProgram = (
   attachments
     .command("allocate")
     .description("reserve a place for a file at Relay, and get the address to upload it to")
-    .requiredOption("--filename <name>")
-    .requiredOption("--content-type <type>")
+    .requiredOption("--filename <name>", "the name of the uploaded file")
+    .requiredOption("--content-type <type>", "the MIME type of the file")
     .requiredOption("--size <bytes>", "file size", positiveInteger)
     .action(async (
       options: { filename: string; contentType: string; size: number },
@@ -858,8 +945,8 @@ export const createProgram = (
   attachments
     .command("upload")
     .description("upload a file from this computer in one step")
-    .argument("<file>")
-    .requiredOption("--content-type <type>")
+    .argument("<file>", "the file to upload")
+    .requiredOption("--content-type <type>", "the MIME type of the file")
     .action(async (
       file: string,
       options: { contentType: string },
@@ -882,13 +969,13 @@ export const createProgram = (
   attachments
     .command("get")
     .description("show one file this agent uploaded")
-    .argument("<attachment-id>")
+    .argument("<attachment-id>", "the attachment ID")
     .action(async (attachmentID: string, _options: object, command: Command) =>
       output(await (await clientFor(command)).attachments.retrieve(attachmentID)));
   attachments
     .command("delete")
     .description("delete a file this agent uploaded")
-    .argument("<attachment-id>")
+    .argument("<attachment-id>", "the attachment ID")
     .action(async (attachmentID: string, _options: object, command: Command) => {
       await (await clientFor(command)).attachments.delete(attachmentID);
       output(voidResult);
@@ -904,7 +991,7 @@ export const createProgram = (
     .command("add")
     .description("block a handle, so it can no longer reach this agent")
     .argument("<handle>", "Handle", handle)
-    .option("--reason <reason>")
+    .option("--reason <reason>", "a note explaining why this handle is blocked")
     .action(async (
       blockedHandle: string,
       options: { reason?: string },
@@ -993,7 +1080,7 @@ export const createProgram = (
   subscriptions
     .command("get")
     .description("show one address Relay sends events to")
-    .argument("<subscription-id>")
+    .argument("<subscription-id>", "the webhook subscription ID")
     .action(async (subscriptionID: string, _options: object, command: Command) =>
       output(
         await (await clientFor(command)).webhookSubscriptions.retrieve(
@@ -1003,8 +1090,8 @@ export const createProgram = (
   subscriptions
     .command("create")
     .description("tell Relay to send the events you choose to an address you own")
-    .requiredOption("--target-url <url>")
-    .requiredOption("--event <events...>")
+    .requiredOption("--target-url <url>", "the address that receives webhook events")
+    .requiredOption("--event <events...>", "the event types this subscription receives")
     .action(async (
       options: { targetUrl: string; event: string[] },
       command: Command,
@@ -1017,11 +1104,11 @@ export const createProgram = (
   subscriptions
     .command("update")
     .description("change the address, the events, or whether Relay sends to it at all")
-    .argument("<subscription-id>")
-    .option("--target-url <url>")
-    .option("--event <events...>")
-    .option("--active")
-    .option("--inactive")
+    .argument("<subscription-id>", "the webhook subscription ID")
+    .option("--target-url <url>", "the address that receives webhook events")
+    .option("--event <events...>", "the event types this subscription receives")
+    .option("--active", "enable delivery to this subscription")
+    .option("--inactive", "disable delivery to this subscription")
     .action(async (
       subscriptionID: string,
       options: {
@@ -1057,7 +1144,7 @@ export const createProgram = (
   subscriptions
     .command("delete")
     .description("stop Relay sending events to that address")
-    .argument("<subscription-id>")
+    .argument("<subscription-id>", "the webhook subscription ID")
     .action(async (subscriptionID: string, _options: object, command: Command) => {
       await (await clientFor(command)).webhookSubscriptions.delete(subscriptionID);
       output(voidResult);
@@ -1075,13 +1162,13 @@ export const createProgram = (
     .description("set the name and picture people see for this agent, the first time")
     .requiredOption("--handle <handle>", "the agent's handle", handle)
     .option("--name <name>", "the name people see next to this agent")
-    .addOption(new Option("--first-name <name>").hideHelp())
+    .addOption(new Option("--first-name <name>", "the name people see next to this agent").hideHelp())
     .option("--last-name <name>", "an optional second name")
     .option("--image-url <url>", "a picture at an https:// address")
     .action(async (
       options: {
         handle: string;
-        name?: string;
+        name?: string; about?: string;
         firstName?: string;
         lastName?: string;
         imageUrl?: string;
@@ -1098,10 +1185,12 @@ export const createProgram = (
     });
   contactCard
     .command("update")
+    .alias("set")
     .description("change the name or picture people see for this agent")
     .requiredOption("--handle <handle>", "the agent's handle", handle)
     .option("--name <name>", "the name people see next to this agent")
-    .addOption(new Option("--first-name <name>").hideHelp())
+    .option("--about <text>", "the one line people see above your agent's first message", aboutText)
+    .addOption(new Option("--first-name <name>", "the name people see next to this agent").hideHelp())
     .option("--last-name <name>", "an optional second name")
     .option("--clear-last-name", "remove the second name")
     .option("--image <path-or-url>", "a picture: a file on this computer, or an https:// address")
@@ -1112,7 +1201,7 @@ export const createProgram = (
     .action(async (
       options: {
         handle: string;
-        name?: string;
+        name?: string; about?: string;
         firstName?: string;
         lastName?: string;
         clearLastName?: boolean;
@@ -1136,6 +1225,7 @@ export const createProgram = (
       const recipe = options.imageRecipe ? await readImageRecipe(options.imageRecipe) : undefined;
       const body = {
         handle: options.handle,
+        ...(options.about === undefined ? {} : { about: options.about }),
         ...((options.name ?? options.firstName) ? { first_name: (options.name ?? options.firstName)! } : {}),
         ...(options.lastName
           ? { last_name: options.lastName }
@@ -1168,11 +1258,21 @@ export const createProgram = (
   contactCard
     .command("share")
     .description("share this agent's name and picture into a chat")
-    .argument("<chat-id>")
+    .argument("<chat-id>", "the chat ID")
     .action(async (chatID: string, _options: object, command: Command) => {
       await (await clientFor(command)).chats.shareContactCard(chatID);
       output(voidResult);
     });
+
+  // gh's `gh help exit-codes` (ledger row P40): a help topic, reachable as
+  // `help exit-codes`, `exit-codes` and `exit-codes --help`, each printing the
+  // same table and nothing else. Named nowhere in the listings.
+  program
+    .command("exit-codes", { hidden: true })
+    .description("the exit codes this command uses, and what each one means")
+    .helpGroup(HELP_GROUPS.unlisted)
+    .configureHelp({ formatHelp: () => `${exitCodesHelp()}\n` })
+    .action(() => stdout(exitCodesHelp()));
 
   // Last, so only the root's own help command takes this group: set earlier, the
   // default would be inherited by every subcommand and put an "Everything else"
@@ -1189,18 +1289,31 @@ export const runCLI = async (
 ): Promise<number> => {
   const stderr = dependencies.stderr ?? ((value: string) => process.stderr.write(value));
   const env = dependencies.configContext?.env ?? process.env;
+  const json = argv.includes("--json");
+  // `-q` keeps stderr for errors alone: the agent line, the plugin hint, the
+  // cancel note and the skill offer all stay silent (clig.dev, standard names).
+  const quiet = argv.includes("-q") || argv.includes("--quiet");
+  const note = quiet ? (): void => undefined : stderr;
+  if (argv.includes("--verbose")) {
+    dependencies = { ...dependencies, fetch: verboseFetch(dependencies.fetch ?? globalThis.fetch, stderr) };
+  }
   // An agent driving this command gets no questions, the way Vercel's CLI turns
-  // itself non-interactive when its detector says so. Inside Claude Code the
-  // plugin hint goes to stderr first, as Vercel's and Supabase's CLIs do; it is
-  // held back under --json so that stream stays one JSON document.
+  // itself non-interactive when its detector says so, and `--agent` overrides
+  // the detector either way (Supabase). Inside Claude Code the plugin hint goes
+  // to stderr first, as Vercel's and Supabase's CLIs do; every agent then gets
+  // the one "Agent detected" line and the docs address. All of it is held back
+  // under --json so that stream stays one JSON document.
   // The detector reads the process environment; a caller that injects its own
   // environment injects its own detector too, or is taken to be no agent.
-  const driver = await drivingAgent(dependencies.detectAgent ?? (dependencies.configContext?.env ? async () => ({ isAgent: false, agent: undefined }) : undefined));
+  const driver = await resolveDrivingAgent(agentMode(argv), dependencies.detectAgent ?? (dependencies.configContext?.env ? async () => ({ isAgent: false, agent: undefined }) : undefined), env);
   const interactive = interactiveAllowed(argv, dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY && process.stderr.isTTY))
-    && driver === undefined;
-  if (driver?.id === "claude-code" && !argv.includes("--json")) stderr(`${CLAUDE_CODE_HINT}\n`);
+    && driver === undefined && !quiet;
+  if (driver) {
+    if (driver.id === "claude-code" && !json) note(`${CLAUDE_CODE_HINT}\n`);
+    note(agentDetectedLines(driver));
+  }
   if (driver?.id) dependencies = { ...dependencies, connect: { ...dependencies.connect, drivingAgent: driver.id } };
-  const ui = interactive ? dependencies.prompts ?? clackPrompts((message) => stderr(`${message}\n`)) : undefined;
+  const ui = interactive ? dependencies.prompts ?? clackPrompts((message) => note(`${message}\n`)) : undefined;
   const agentDeps = dependencies.agents ?? agentDependencies(dependencies.configContext, dependencies.fetch);
   let offered = false;
   const skillOffer = async (force = false): Promise<number> => {
@@ -1235,23 +1348,24 @@ export const runCLI = async (
       const cwd = dependencies.cwd ?? process.cwd();
       const targets = await skillTargets(home, env);
       try {
-        await (dependencies.skillInstaller ?? (() => installRelaySkill(cwd, env, relaySkillGlobalArgs(targets))))();
+        // Off a terminal, or with stdout promised to --json, the installer
+        // paints nothing and speaks on stderr (skill-offer.ts).
+        await (dependencies.skillInstaller ?? (() => installRelaySkill(cwd, env, relaySkillGlobalArgs(targets), !interactive)))();
       } catch {
-        stderr("The Relay skill was not installed. Nothing else was changed.\n");
-        return 1;
+        throw new CliError("The Relay skill was not installed. Nothing else was changed.", "refused");
       }
       args = argv.filter((arg) => arg !== "--install-skills");
-      if (!args.length) return 0;
+      if (!args.length) return EXIT_CODES.ok;
     }
     const entry = interactiveEntry(args);
     if (ui && entry) {
       const selected = await chooseInteractiveCommand(entry.entry, entry.prefix, agentDeps, ui);
-      if (!selected) return 0;
+      if (!selected) return EXIT_CODES.ok;
       if (selected === "install-skill") return await skillOffer(true);
       args = selected;
     } else if (entry) args = [...args, "--help"];
     await createProgram({
-      ...dependencies, agents: agentDeps, isInteractive: interactive,
+      ...dependencies, agents: agentDeps, isInteractive: interactive, json, stderr, ...(quiet ? { stdout: () => undefined } : {}),
       ...(ui ? {
         prompts: ui,
         offerSkill: async () => { await skillOffer(); },
@@ -1260,48 +1374,36 @@ export const runCLI = async (
         confirmLogout: () => ui.confirm("Remove the saved token from this computer? The agent itself is not deleted."),
       } : {}),
     }).parseAsync(args, { from: "user" });
-    return 0;
+    return EXIT_CODES.ok;
   } catch (error) {
-    if (error instanceof InteractiveCancelled) { stderr("Cancelled.\n"); return 0; }
-    if (error instanceof CommanderError) {
-      if (
-        error.code === "commander.helpDisplayed"
-        || error.code === "commander.version"
-      ) {
-        return 0;
-      }
+    if (error instanceof InteractiveCancelled) { note("Cancelled.\n"); return EXIT_CODES.ok; }
+    if (error instanceof CommanderError && ["commander.helpDisplayed", "commander.version", "commander.help"].includes(error.code)) {
       return error.exitCode;
     }
     let secrets: string[] = [];
     try {
       secrets = await collectConfiguredTokens(dependencies.configContext);
     } catch {
-      const env = dependencies.configContext?.env ?? process.env;
       if (env.RELAY_AGENT_TOKEN) secrets = [env.RELAY_AGENT_TOKEN];
     }
-    const message = errorText(error, secrets);
-    // A question that cannot be asked is not a crash: name the flags that would
-    // have answered it and exit 2, the way Stripe and eas do.
-    const headless = error instanceof HeadlessPrompt;
-    const nextStep = headless
-      ? (error as HeadlessPrompt).nextStep
-      : error instanceof ConnectFailure
-      ? errorText(new Error(error.nextStep), secrets)
-      : "Run  npx relaymessenger doctor  to check this computer.";
-    if (argv.includes("--json")) {
-      stderr(`${jsonText({ error: message, next_step: nextStep })}`);
-      return headless ? 2 : 1;
+    // One envelope for every failure, usage errors included, and one exit code
+    // per class (exit-codes.ts). The text form keeps commander's own sentence
+    // for a usage error (already written, with the Docs line) and Stripe's and
+    // eas's shape for a question with no terminal: the flags, never a usage block.
+    const failure = describeFailure(error, secrets);
+    if (json) {
+      stderr(jsonText({ error: failure.error, code: failure.code, next_step: failure.next_step }));
+      return failure.exit;
     }
-    if (headless) {
-      const flags = (error as HeadlessPrompt).flags;
-      // A question with flags names them; one with a sentence instead (the
-      // no-TTY line) prints that sentence and its next step, nothing more.
-      stderr(flags.length
-        ? `Error: ${message}\nThere is no terminal here, so nothing was asked. Pass one of these instead:\n${flags.map((flag) => `  ${flag}`).join("\n")}\n`
-        : `Error: ${message} ${nextStep}\n`);
-      return 2;
+    if (error instanceof CommanderError) return failure.exit;
+    if (error instanceof HeadlessPrompt) {
+      const message = errorText(error, secrets);
+      stderr(error.flags.length
+        ? `Error: ${message}\nThere is no terminal here, so nothing was asked. Pass one of these instead:\n${error.flags.map((flag) => `  ${flag}`).join("\n")}\n`
+        : `Error: ${message} ${error.nextStep}\n`);
+      return failure.exit;
     }
-    stderr(`Error: ${message}\n`);
-    return 1;
+    stderr(`Error: ${failure.error}\n`);
+    return failure.exit;
   }
 };

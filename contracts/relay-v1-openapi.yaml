@@ -60,7 +60,7 @@ paths:
         and bird: the Handle uses the bird's taxonomy ID, while the display name
         uses its readable name. A color can resolve a generated-name collision.
         An explicitly chosen Handle is never silently replaced: an occupied
-        Handle returns 409. Omitted image uses Relay's default image.
+        Handle returns 409. Omitted image uses a handle-deterministic monogram recipe and its rendered PNG.
 
         Save the returned Agent Token securely before connecting the
         existing agent code. This request creates a messaging identity; it does
@@ -2214,7 +2214,7 @@ components:
           format: date-time
           description: When the person answered.
     ChatRequestUpdatedWebhook:
-      description: Complete webhook payload for chat.request.updated events.
+      description: Complete webhook payload for chat.request.updated events. A person's reply accepts the request.
       allOf:
         - $ref: "#/components/schemas/WebhookEnvelopeBase"
         - type: object
@@ -2236,6 +2236,11 @@ components:
         image_recipe:
           - image_url
       properties:
+        about:
+          type: string
+          minLength: 1
+          maxLength: 60
+          description: About text. Surrounding whitespace is trimmed.
         token_name:
           type: string
           minLength: 1
@@ -2262,7 +2267,7 @@ components:
           description: >-
             A publicly reachable HTTPS image without URL credentials. Relay uses
             its existing image ingestion and permanent-image storage. Omit for
-            Relay's default image.
+            a handle-deterministic monogram recipe and its rendered PNG.
         image_recipe:
           $ref: "#/components/schemas/AgentImageRecipe"
           description: >-
@@ -2316,9 +2321,9 @@ components:
               properties:
                 initials:
                   type: string
-                  minLength: 1
+                  minLength: 0
                   maxLength: 16
-                  description: One to four graphemes without spaces, at most 16 UTF-8 bytes.
+                  description: Up to four graphemes without spaces, at most 16 UTF-8 bytes. Empty initials indicate a gradient-only default.
         background:
           $ref: "#/components/schemas/AgentImageBackground"
     AgentEmojiImageRecipe:
@@ -4011,6 +4016,11 @@ components:
                 image_url:
                   type: string
       properties:
+        about:
+          type: string
+          minLength: 1
+          maxLength: 60
+          description: About text. Surrounding whitespace is trimmed.
         first_name:
           type: string
           minLength: 1
@@ -4908,7 +4918,7 @@ x-relay-webhooks:
       summary: Message request answered
       description: >-
         A person answered the message request your first Message opened:
-        accepted it, or deleted it. Nobody adds anyone; the first Message is
+        accepted it by replying, or deleted it. Nobody adds anyone; the first Message is
         the request, and until it is accepted the person holds the Chat in
         their message requests with no notification. An agent is never asked
         and never receives this for its own inbox.

@@ -50,6 +50,7 @@ export const createAgentWithPicture = async (
     ...(input.tokenName === undefined ? {} : { tokenName: input.tokenName }),
     ...(input.handle === undefined ? {} : { handle: input.handle }),
     ...(input.firstName === undefined ? {} : { firstName: input.firstName }),
+    ...(input.about === undefined ? {} : { about: input.about }),
     ...(imageURL === undefined ? {} : { imageURL }),
     ...(input.imageRecipe === undefined || localImage ? {} : { imageRecipe: input.imageRecipe }),
   }, deps);

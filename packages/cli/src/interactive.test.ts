@@ -127,12 +127,12 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
     expect(await runCLI(["agents", "list"], { ...f.deps, isInteractive: false })).toBe(0);
     expect(f.prompts.select).not.toHaveBeenCalled(); expect(f.skillPresent).not.toHaveBeenCalled();
   });
-  it("a CI variable on a real terminal still gets the menu", async () => {
+  it("a CI variable suppresses the menu per decision rows 8 and 17", async () => {
     // The terminal decides, never an ambient variable: every one of the 27 tools
     // measured on 2026-09-09 ignored CI.
     const f = await fixture(); f.env.CI = "true"; f.env.GITHUB_ACTIONS = "true";
     expect(await runCLI([], f.deps)).toBe(0);
-    expect(f.prompts.select).toHaveBeenCalledOnce();
+    expect(f.prompts.select).not.toHaveBeenCalled();
   });
 });
 
