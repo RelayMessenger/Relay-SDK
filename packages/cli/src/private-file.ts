@@ -77,9 +77,15 @@ export const openPrivateTemp = async (
   const handle = await open(path, "wx", PRIVATE_FILE_MODE);
   try {
     if (destination.windows) {
-      const acl = await protectWindowsPath(path, false, destination.existingACL);
-      if (!privateWindowsAcl(acl) || (destination.existingACL !== undefined && acl.sddl !== destination.existingACL)) {
-        throw new Error("Relay could not limit the new file to your Windows account, so it did not save the token.");
+      // A file Relay wrote before carries an explicit, protected descriptor and
+      // gets it back exactly. A file a person made by hand carries the folder's
+      // inherited descriptor, which a new file cannot always take byte for byte
+      // (inherited entries are re-derived by Windows), so when the kept
+      // descriptor does not come out private the file gets Relay's own.
+      let acl = await protectWindowsPath(path, false, destination.existingACL);
+      if (!privateWindowsAcl(acl) && destination.existingACL !== undefined) acl = await protectWindowsPath(path, false);
+      if (!privateWindowsAcl(acl)) {
+        throw new Error(`Relay could not limit the new file to your Windows account, so it did not save the token. (Descriptor: ${acl.sddl})`);
       }
     } else await handle.chmod(PRIVATE_FILE_MODE);
     return { path, handle };
@@ -91,8 +97,8 @@ export const openPrivateTemp = async (
 export const verifyPrivateACL = async (path: string, destination: PrivateDestination): Promise<void> => {
   if (!destination.windows) return;
   const acl = await inspectWindowsAcl(path);
-  if (!privateWindowsAcl(acl) || (destination.existingACL !== undefined && acl.sddl !== destination.existingACL)) {
-    throw new Error("Relay saved the file but could not confirm that only your Windows account can read it. Check its permissions.");
+  if (!privateWindowsAcl(acl)) {
+    throw new Error(`Relay saved the file but could not confirm that only your Windows account can read it. Check its permissions. (Descriptor: ${acl.sddl})`);
   }
 };
 
