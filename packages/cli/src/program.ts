@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactiveEntry, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { installRelaySkill, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
+import { renderTerminalQR } from "./qr-terminal.js";
 import { connectAgentToRuntime, connectOptions, connectTarget, type ConnectOptions } from "./agent-handoff.js";
 import { agentDependencies, agentRecord, createAgent, deleteAgent, listAgents, type AgentDependencies } from "./agents.js";
 import { createRequire } from "node:module";
@@ -265,11 +266,8 @@ export const createProgram = (
         stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\n`);
         const liveViewFollows = imageUpdate?.status !== "incomplete" && (!connectResult || connectResult.status === "configured") && willShowSavedAgent(command);
         if (!liveViewFollows) {
-          // Loaded only for the printed screen; the QR code holds the public link, never the token.
-          const qr = createRequire(import.meta.url)("qrcode") as {
-            toString(text: string, options: { type: "terminal"; small: boolean }): Promise<string>;
-          };
-          try { stdout(await qr.toString(result.share_url, { type: "terminal", small: true })); }
+          // The QR code holds the public link, never the token.
+          try { stdout(renderTerminalQR(result.share_url)); }
           catch { stderr("Relay could not draw the QR code. Use the link above instead.\n"); }
         }
         if (imageUpdate?.status === "incomplete") output({ image: imageUpdate });
