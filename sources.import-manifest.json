@@ -701,7 +701,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "contracts/sdk-v1-operations.sha256",
       "source_sha256": "837dfc17fc5477a14f0b0751149302146bd77221c0c471e6ea4ff90faa0c12e2",
-      "destination_sha256": "7b9e3591e1d3defe238232b2234564ee255b248a31b3ec0fd2e808fd67255caa",
+      "destination_sha256": "7f87291c279f2cd1300a9ed663af4a30523cb279c6a2b159f8be7240c84fb2d4",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
