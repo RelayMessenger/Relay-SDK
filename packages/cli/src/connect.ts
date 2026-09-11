@@ -103,15 +103,23 @@ export interface ConnectDependencies {
   observer?: (token: string, apiURL: string) => TerminalObserver | undefined;
   /**
    * Keeps answering this agent's Relay messages with the coding agent's own
-   * headless command, until the person stops it. Only an agent whose `start` is
-   * a bridge uses it (coding-agents/codex.ts).
+   * headless command, until the person stops it. Codex reaches it over its
+   * `app-server` (`kind: "codex"`, coding-agents/codex.ts); Cursor, Gemini CLI
+   * and OpenCode reach it over the Agent Client Protocol (`kind: "acp"`,
+   * coding-agents/{cursor,gemini-cli,opencode}.ts).
    */
   bridge?: (input: {
+    kind: "codex" | "acp";
     token: string;
     apiURL: string;
-    /** The agent that answers, so its Codex threads are kept apart from another's. */
+    /** The agent that answers, so its threads or sessions are kept apart from another's. */
     handle: string;
     command: string;
+    /** For an ACP agent, the words that put it in ACP mode, e.g. ["acp"]. */
+    acpArgs?: readonly string[];
+    /** The Relay MCP server handed to the agent's session, so its tools travel with it. */
+    mcpServer: { command: string; args: string[]; env: Record<string, string> };
+    label: string;
     cwd: string;
     say(line: string): void;
   }) => Promise<void>;
@@ -229,15 +237,6 @@ export const agentCommands = (agent: CodingAgentId, context: PlanContext): strin
     case "codex":
       // `codex mcp add --help`: `codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)`, `--env <KEY=VALUE>`.
       return [["codex", "mcp", "add", MCP_SERVER_NAME, ...envPairs.flatMap((pair) => ["--env", pair]), "--", spec.command, ...spec.args]];
-    case "gemini-cli":
-      // `gemini mcp add [options] <name> <commandOrUrl> [args...]`, `-s user`
-      // for ~/.gemini/settings.json; the server's own flags go after `--`
-      // (measured 2026-09-10 in the lane sandbox: `-e` before the name swallows it).
-      return [["gemini", "mcp", "add", "-s", "user", ...envPairs.map((pair) => `-e=${pair}`), MCP_SERVER_NAME, spec.command, "--", ...spec.args]];
-    case "cline":
-      // `cline mcp add --yes <name> -- <command> <args>` installs without the
-      // wizard; it takes no environment, so the profile travels as a flag.
-      return [["cline", "mcp", "add", "--yes", MCP_SERVER_NAME, "--", spec.command, ...spec.args]];
     case "hermes":
       return [["hermes", "plugins", "install", HERMES_PLUGIN_SOURCE, "--enable"]];
     case "openclaw":
@@ -260,6 +259,9 @@ export const agentFiles = (agent: CodingAgentId, context: PlanContext): string[]
     case "claude-plugin": return [platformPath(context.platform).join(context.env.RELAY_CHANNEL_DIR?.trim() || platformPath(context.platform).join(claudeConfigDir(context.env, context.home, context.platform), "channels", "relay"), ".env")];
     case "mcp-command": return [method.file(paths(context))];
     case "mcp-file": return [method.file(paths(context))];
+    // The ACP bridge writes no file: the Relay MCP server travels through the
+    // agent's session instead (acp-bridge.ts).
+    case "acp-bridge": return [];
     case "hermes-plugin": return [hermesEnvPath(context)];
     case "openclaw-plugin": return [openclawTokenPath(context), openclawConfigPath(context)];
   }
@@ -297,6 +299,16 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
     case "mcp-file":
       steps = [`add  ${mcpRootKey(method.shape)}.${MCP_SERVER_NAME}  to  ${files[0]}  (every other entry kept)`];
       break;
+    case "acp-bridge": {
+      const start = codingAgent(agent).start;
+      // `args` present means the agent's ACP command is confirmed from a source;
+      // absent (cline) means it is a TODO, so Relay wires but does not start it.
+      const confirmed = start?.kind === "acp-bridge" && start.args !== undefined;
+      steps = [confirmed
+        ? `keep running here, and answer your Relay messages with ${codingAgent(agent).label} from this folder  (Relay's tools travel through the session; no mcp.json is written)`
+        : `wire ${codingAgent(agent).label} to Relay's ACP bridge, but do not start it: its ACP command is not confirmed yet`];
+      break;
+    }
     case "hermes-plugin":
       steps = [
         `run  ${commands[0]}`,
@@ -592,7 +604,13 @@ export const runConnect = async (
   const done: Array<Record<string, unknown>> = [];
   const allowed = [...allow];
   const starts: Array<{ command: string; args: string[]; label: string }> = [];
-  let bridge: { label: string; command: string } | undefined;
+  let bridge: {
+    label: string;
+    command: string;
+    kind: "codex" | "acp";
+    acpArgs?: readonly string[];
+    mcpServer: ReturnType<typeof mcpServerSpec>;
+  } | undefined;
   for (const target of targets) {
     const runtime = runtimes.find((entry) => entry.id === target);
     const planned = plan.agents.find((entry) => entry.agent === target)!;
@@ -622,6 +640,10 @@ export const runConnect = async (
     } else if (method.kind === "mcp-file") {
       await writeMcpFileEntry(planned.files[0]!, method.shape, mcpServerSpec(ctx));
       screen.step(`Relay MCP server added to ${codingAgent(target).label}  ${planned.files[0]}`);
+    } else if (method.kind === "acp-bridge") {
+      // Nothing is written: the Relay MCP server is handed to the agent's ACP
+      // session, and this process drives the agent's turns (acp-bridge.ts).
+      screen.step(`Relay drives ${codingAgent(target).label} over ACP; no mcp.json is written`);
     } else if (method.kind === "hermes-plugin") {
       await runAgentCommands(target, runtime, ctx, runCommand);
       screen.step("Plugin installed");
@@ -651,7 +673,20 @@ export const runConnect = async (
         // `--yes` already took a plan whose last step is this one, so it is not
         // asked twice; without it, this is the one question left to answer.
         const accepted = options.yes === true || (ui !== undefined && await ui.confirm(start.prompt));
-        if (accepted) bridge = { label: definition.label, command };
+        if (accepted) bridge = { label: definition.label, command, kind: "codex", mcpServer: mcpServerSpec(ctx) };
+        else screen.say(`${definition.label} answers when you ask it to read your Relay messages.`);
+      }
+    } else if (start?.kind === "acp-bridge") {
+      const command = runtime?.executable ?? start.command;
+      result.bridge_command = command;
+      if (start.args !== undefined) result.bridge_args = [...start.args];
+      // No `args` means the agent's ACP command is not confirmed, so the bridge
+      // is not started: guessing a flag would print a promise Relay cannot keep.
+      if (start.args === undefined) {
+        if (!json) screen.say(`${definition.label}'s ACP command is not confirmed yet, so Relay did not start it.`);
+      } else if (!json && options.start !== false) {
+        const accepted = options.yes === true || (ui !== undefined && await ui.confirm(start.prompt));
+        if (accepted) bridge = { label: definition.label, command, kind: "acp", acpArgs: start.args, mcpServer: mcpServerSpec(ctx) };
         else screen.say(`${definition.label} answers when you ask it to read your Relay messages.`);
       }
     } else if (start?.kind === "command") {
@@ -691,7 +726,9 @@ export const runConnect = async (
     if (bridge && deps.bridge) {
       screen.say(`${bridge.label} answers your Relay messages from ${deps.cwd}. Press Control-C to stop.`);
       await deps.bridge({
-        token: agent.token, apiURL: agent.apiURL, handle: agent.handle, command: bridge.command, cwd: deps.cwd,
+        kind: bridge.kind, token: agent.token, apiURL: agent.apiURL, handle: agent.handle,
+        command: bridge.command, ...(bridge.acpArgs ? { acpArgs: bridge.acpArgs } : {}),
+        mcpServer: bridge.mcpServer, label: bridge.label, cwd: deps.cwd,
         say: (line) => screen.say(safeMetadata(line, secrets)),
       });
       screen.say(`Stopped. ${bridge.label} no longer answers your Relay messages.`);

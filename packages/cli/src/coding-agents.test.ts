@@ -5,8 +5,9 @@ import { CODING_AGENTS, CODING_AGENT_IDS, agentDetectedAs, codingAgent, normaliz
 import { agentFiles, agentPlan, runtimeConnectPlan, type PlanContext } from "./connect.js";
 import { createProgram } from "./program.js";
 
-/** The ten, in the order the page's section 4 lists them. Ruled 2026-09-10. */
-const TEN = ["claude-code", "codex", "cursor", "opencode", "cline", "vscode", "gemini-cli", "claude-desktop", "hermes", "openclaw"] as const;
+/** The nine, in the order the page's section 4 lists them. Ruled 2026-09-10;
+ * Claude Desktop dropped 2026-09-11 (no native wake). */
+const AGENTS = ["claude-code", "codex", "cursor", "opencode", "cline", "vscode", "gemini-cli", "hermes", "openclaw"] as const;
 
 const context = (overrides: Partial<PlanContext> = {}): PlanContext => ({
   env: {}, home: "/home/dev", platform: "linux", version: "0.1.6-staging.3",
@@ -14,12 +15,12 @@ const context = (overrides: Partial<PlanContext> = {}): PlanContext => ({
 });
 
 it("the registry is exactly the ten ruled agents, in the help's order", () => {
-  expect(CODING_AGENT_IDS).toEqual(TEN);
-  expect(new Set(CODING_AGENTS.map((agent) => agent.label)).size).toBe(TEN.length);
+  expect(CODING_AGENT_IDS).toEqual(AGENTS);
+  expect(new Set(CODING_AGENTS.map((agent) => agent.label)).size).toBe(AGENTS.length);
 });
 
 it("the help's Supported agents line is built from the registry", () => {
-  expect(supportedAgentsLine()).toBe(`Supported agents: ${TEN.join(" ")}`);
+  expect(supportedAgentsLine()).toBe(`Supported agents: ${AGENTS.join(" ")}`);
   const connect = createProgram({ configContext: { env: {}, home: "/home/dev" } }).commands.find((command) => command.name() === "connect")!;
   const help = connect.helpInformation();
   expect(help.startsWith(`Usage: relaymessenger connect [options] [agent]\n${supportedAgentsLine()}\n`)).toBe(true);
@@ -34,7 +35,7 @@ it("the help's Supported agents line is built from the registry", () => {
 it("claude stays as an alias of claude-code; ids and aliases resolve, nonsense does not", () => {
   expect(normalizeAgentId("claude")).toBe("claude-code");
   expect(normalizeAgentId(" Claude-Code ")).toBe("claude-code");
-  for (const id of TEN) expect(normalizeAgentId(id)).toBe(id);
+  for (const id of AGENTS) expect(normalizeAgentId(id)).toBe(id);
   expect(normalizeAgentId("gemini")).toBe("gemini-cli");
   expect(normalizeAgentId("nonsense")).toBeUndefined();
   expect(normalizeAgentId("other")).toBeUndefined();
@@ -54,48 +55,51 @@ it("@vercel/detect-agent's names map onto ours, and unknown names onto nothing",
   expect(agentDetectedAs("relay")).toBeUndefined();
 });
 
-it("every agent has a plan that names the real file it writes", () => {
+/** The agents that write a config file, and the file each one writes. The four
+ * ACP-bridge agents (cursor, opencode, cline, gemini-cli) write none. */
+const FILE_AGENTS = {
+  "claude-code": [".claude", "channels", "relay", ".env"],
+  codex: [".codex", "config.toml"],
+  vscode: [".config", "Code", "User", "mcp.json"],
+  hermes: [".hermes", ".env"],
+  openclaw: [".openclaw", "secrets", "relay-calm_cangoo.dev.token"],
+} as const;
+
+it("every agent has a plan that names the file it writes, or an ACP bridge that writes none", () => {
   const home = "/home/dev";
-  const expected: Record<(typeof TEN)[number], string> = {
-    "claude-code": posix.join(home, ".claude", "channels", "relay", ".env"),
-    codex: posix.join(home, ".codex", "config.toml"),
-    cursor: posix.join(home, ".cursor", "mcp.json"),
-    opencode: posix.join(home, ".config", "opencode", "opencode.json"),
-    cline: posix.join(home, ".cline", "data", "settings", "cline_mcp_settings.json"),
-    vscode: posix.join(home, ".config", "Code", "User", "mcp.json"),
-    "gemini-cli": posix.join(home, ".gemini", "settings.json"),
-    "claude-desktop": posix.join(home, ".config", "claude", "claude_desktop_config.json"),
-    hermes: posix.join(home, ".hermes", ".env"),
-    openclaw: posix.join(home, ".openclaw", "secrets", "relay-calm_cangoo.dev.token"),
-  };
-  for (const id of TEN) {
+  for (const id of AGENTS) {
     const plan = agentPlan(id, context());
-    expect(plan.files[0], id).toBe(expected[id]);
     expect(plan.steps.length, id).toBeGreaterThan(0);
-    expect(plan.steps.join("\n"), id).toContain(expected[id]);
+    if (codingAgent(id).connect.kind === "acp-bridge") {
+      // The ACP bridge writes no file; the Relay MCP server travels through the
+      // agent's session (acp-bridge.ts).
+      expect(plan.files, id).toEqual([]);
+    } else {
+      const file = posix.join(home, ...FILE_AGENTS[id as keyof typeof FILE_AGENTS]);
+      expect(plan.files[0], id).toBe(file);
+      expect(plan.steps.join("\n"), id).toContain(file);
+    }
   }
   expect(agentFiles("openclaw", context())[1]).toBe(posix.join(home, ".openclaw", "openclaw.json"));
 });
 
-it("macOS and Windows put VS Code and Claude Desktop where their vendors say", () => {
+it("macOS and Windows put VS Code where its vendor says", () => {
   const mac = context({ platform: "darwin" });
   expect(agentFiles("vscode", mac)[0]).toBe("/home/dev/Library/Application Support/Code/User/mcp.json");
-  expect(agentFiles("claude-desktop", mac)[0]).toBe("/home/dev/Library/Application Support/Claude/claude_desktop_config.json");
   const windows = context({ platform: "win32", home: "C:\\Users\\dev", env: { APPDATA: "C:\\Users\\dev\\AppData\\Roaming" } });
   expect(agentFiles("vscode", windows)[0]).toBe(win32.join("C:\\Users\\dev\\AppData\\Roaming", "Code", "User", "mcp.json"));
-  expect(agentFiles("claude-desktop", windows)[0]).toBe(win32.join("C:\\Users\\dev\\AppData\\Roaming", "Claude", "claude_desktop_config.json"));
 });
 
-it("the MCP agents run our server by npx, the staging tag on a staging build", () => {
+it("the MCP agents run our server by npx, the staging tag on a staging build; the ACP agents run none", () => {
   const staging = agentPlan("codex", context());
   expect(staging.commands).toEqual(["codex mcp add relay -- npx -y @relaymessenger/mcp@staging --profile calm_cangoo.dev"]);
-  const release = agentPlan("gemini-cli", context({ version: "0.2.0" }));
-  expect(release.commands).toEqual(["gemini mcp add -s user relay npx -- -y @relaymessenger/mcp --profile calm_cangoo.dev"]);
-  const cline = agentPlan("cline", context());
-  expect(cline.commands).toEqual(["cline mcp add --yes relay -- npx -y @relaymessenger/mcp@staging --profile calm_cangoo.dev"]);
   // A config file that is not the default one travels with the server.
   const elsewhere = agentPlan("codex", context({ env: { RELAY_CONFIG_PATH: "/tmp/x/config.json" } }));
   expect(elsewhere.commands[0]).toContain("--env RELAY_CONFIG_PATH=/tmp/x/config.json");
+  // The ACP-bridge agents run no install command of their own.
+  for (const id of ["cursor", "gemini-cli", "opencode", "cline"] as const) {
+    expect(agentPlan(id, context()).commands, id).toEqual([]);
+  }
 });
 
 it("the composed plan counts every step of every chosen agent", () => {
@@ -111,16 +115,20 @@ it("the composed plan counts every step of every chosen agent", () => {
 
 it("every agent plan uses Windows separators independently of the host", () => {
   const windows = context({ platform: "win32", home: "C:\\Users\\dev" });
-  const expected = [
-    ".claude/channels/relay/.env", ".codex/config.toml", ".cursor/mcp.json",
-    ".config/opencode/opencode.json", ".cline/data/settings/cline_mcp_settings.json",
-    "AppData/Roaming/Code/User/mcp.json", ".gemini/settings.json",
-    "AppData/Roaming/Claude/claude_desktop_config.json", ".hermes/.env",
-    ".openclaw/secrets/relay-calm_cangoo.dev.token",
-  ];
-  TEN.forEach((id, index) => {
-    expect(agentFiles(id, windows)[0], id).toBe(win32.join(windows.home, expected[index]!));
-  });
+  const expected: Record<string, string> = {
+    "claude-code": ".claude/channels/relay/.env",
+    codex: ".codex/config.toml",
+    vscode: "AppData/Roaming/Code/User/mcp.json",
+    hermes: ".hermes/.env",
+    openclaw: ".openclaw/secrets/relay-calm_cangoo.dev.token",
+  };
+  for (const id of AGENTS) {
+    if (codingAgent(id).connect.kind === "acp-bridge") {
+      expect(agentFiles(id, windows), id).toEqual([]);
+    } else {
+      expect(agentFiles(id, windows)[0], id).toBe(win32.join(windows.home, expected[id]!));
+    }
+  }
   expect(agentPlan("codex", windows).commands).toEqual(["codex mcp add relay -- npx -y @relaymessenger/mcp@staging --profile calm_cangoo.dev"]);
 });
 

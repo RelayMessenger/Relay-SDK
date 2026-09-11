@@ -7,23 +7,24 @@ import opencode from "./coding-agents/opencode.js";
 import cline from "./coding-agents/cline.js";
 import vscode from "./coding-agents/vscode.js";
 import geminiCli from "./coding-agents/gemini-cli.js";
-import claudeDesktop from "./coding-agents/claude-desktop.js";
 import hermes from "./coding-agents/hermes.js";
 import openclaw from "./coding-agents/openclaw.js";
 export { platformPath, claudeConfigDir, codexHome, hermesHome, openclawHome } from "./coding-agents/shared.js";
 
 
 /**
- * The ten coding agents `connect` knows, in the order the help lists them. This
- * is the one table: detection, the "Supported agents" line, the prompt, the
- * plan and the tests all read it, so the list cannot drift between screens.
+ * The nine coding agents `connect` knows, in the order the help lists them.
+ * This is the one table: detection, the "Supported agents" line, the prompt,
+ * the plan and the tests all read it, so the list cannot drift between screens.
  *
  * Ruled 2026-09-10 (_artifacts/cli-connect-targets-20260910): an agent ships
  * when at least three of the seven installers that publish a target list carry
- * it; Hermes and OpenClaw ship because the plugins are ours. Identifiers are
- * the ones Smithery and Docker MCP share, Docker's where they differ; `claude`
- * stays as an alias of `claude-code` so this week's docs and scripts keep
- * working. Install checks are Docker's `installCheckPaths`
+ * it; Hermes and OpenClaw ship because the plugins are ours. Claude Desktop was
+ * dropped 2026-09-11: it has no native wake (remote-MCP connectors only), so an
+ * MCP-file connect could never make it answer a Relay message on its own.
+ * Identifiers are the ones Smithery and Docker MCP share, Docker's where they
+ * differ; `claude` stays as an alias of `claude-code` so this week's docs and
+ * scripts keep working. Install checks are Docker's `installCheckPaths`
  * (docker/mcp-gateway pkg/client/config.yml) and Vercel's `detect(home)`
  * (vercel/vercel packages/cli/src/util/ai-gateway/coding-agents/agents/*):
  * does the agent's own folder exist under home. No binaries are run.
@@ -36,7 +37,6 @@ export type CodingAgentId =
   | "cline"
   | "vscode"
   | "gemini-cli"
-  | "claude-desktop"
   | "hermes"
   | "openclaw";
 
@@ -51,12 +51,15 @@ export interface AgentPaths {
  * - `claude-plugin`: the Relay channel plugin for Claude Code, as today.
  * - `mcp-command`: the agent's own `mcp add` writes its config.
  * - `mcp-file`: Relay adds one entry to the agent's MCP config file.
+ * - `acp-bridge`: Relay writes no config; it hands the Relay MCP server to the
+ *   agent's ACP session and drives the agent's turns (acp-bridge.ts).
  * - `hermes-plugin`, `openclaw-plugin`: our plugins, as Relay-Docs describe.
  */
 export type ConnectMethod =
   | { kind: "claude-plugin" }
   | { kind: "mcp-command"; file: (paths: AgentPaths) => string }
   | { kind: "mcp-file"; file: (paths: AgentPaths) => string; shape: "mcpServers" | "vscode" | "opencode" }
+  | { kind: "acp-bridge" }
   | { kind: "hermes-plugin" }
   | { kind: "openclaw-plugin" };
 
@@ -69,7 +72,6 @@ export const CODING_AGENTS: readonly CodingAgent[] = [
   cline,
   vscode,
   geminiCli,
-  claudeDesktop,
   hermes,
   openclaw,
 ];

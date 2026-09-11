@@ -1,7 +1,7 @@
 import { NEXT_STEP } from "./error-codes.js";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runCLI, type ProgramDependencies } from "./program.js";
 import { readConfig } from "./config.js";
@@ -96,9 +96,16 @@ describe("the plan screen", () => {
     expect(answer.dry_run).toBe(true);
     expect(answer.agents).toHaveLength(1);
     expect(answer.agents[0].agent).toBe(id === "claude" ? "claude-code" : id);
-    expect(answer.agents[0].files.length).toBeGreaterThan(0);
-    for (const file of answer.agents[0].files) expect(file.startsWith(f.home) || file.startsWith("/Applications")).toBe(true);
-    expect(answer.steps.join("\n")).toContain(answer.agents[0].files[0]);
+    if (codingAgent(id === "claude" ? "claude-code" : id).connect.kind === "acp-bridge") {
+      // The ACP bridge writes no file: the Relay MCP server travels through the
+      // agent's session instead (acp-bridge.ts).
+      expect(answer.agents[0].files).toEqual([]);
+      expect(answer.steps.join("\n")).toContain(codingAgent(id === "claude" ? "claude-code" : id).label);
+    } else {
+      expect(answer.agents[0].files.length).toBeGreaterThan(0);
+      for (const file of answer.agents[0].files) expect(file.startsWith(f.home) || file.startsWith("/Applications")).toBe(true);
+      expect(answer.steps.join("\n")).toContain(answer.agents[0].files[0]);
+    }
     expect(f.stderr.join("")).toBe("");
   });
 });
@@ -218,7 +225,7 @@ describe("the MCP agents", () => {
     command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", card.handle], env: { RELAY_CONFIG_PATH: f.env.RELAY_CONFIG_PATH },
   });
 
-  it("codex, gemini-cli and cline run their own mcp add and write nothing themselves", async () => {
+  it("codex runs its own mcp add and writes nothing itself", async () => {
     const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" } }));
     expect(await runCLI(["connect", "codex", "--new", "--yes", "--no-skill", "--json"], f.deps)).toBe(0);
     expect(ranLines(f)).toEqual([`/fake/bin/codex mcp add relay --env RELAY_CONFIG_PATH=${f.env.RELAY_CONFIG_PATH} -- npx -y @relaymessenger/mcp@staging --profile ${card.handle}`]);
@@ -226,70 +233,72 @@ describe("the MCP agents", () => {
     expect(answer).toMatchObject({ ok: true, handle: card.handle, token: "stored" });
     expect(answer.agents[0]).toMatchObject({ agent: "codex", files: [join(f.home, ".codex", "config.toml")] });
     expect(f.stdout.join("")).not.toContain(token);
-
-    const g = await fixture({}, runtimes());
-    expect(await runCLI(["connect", "gemini", "--token", token, "--yes", "--no-skill"], g.deps)).toBe(0);
-    expect(ranLines(g)).toEqual([`gemini mcp add -s user -e=RELAY_CONFIG_PATH=${g.env.RELAY_CONFIG_PATH} relay npx -- -y @relaymessenger/mcp@staging --profile ${card.handle}`]);
-    expect(g.stdout.join("")).toContain("Gemini CLI was not found on this computer; you named it, so Relay will try anyway");
-
-    const c = await fixture({}, runtimes());
-    expect(await runCLI(["connect", "cline", "--token", token, "--yes", "--no-skill"], c.deps)).toBe(0);
-    expect(ranLines(c)).toEqual([`cline mcp add --yes relay -- npx -y @relaymessenger/mcp@staging --profile ${card.handle}`]);
   });
 
-  it("cursor and claude-desktop add mcpServers.relay and keep every other entry", async () => {
+  it("the ACP agents write no mcp.json and run no command; Relay drives them over ACP", async () => {
+    // Cursor: no mcp.json is written even when one is already there, and no
+    // command is run. The Relay MCP server travels through the session instead.
     const f = await fixture({}, runtimes());
     const cursor = join(f.home, ".cursor", "mcp.json");
     await mkdir(join(f.home, ".cursor"), { recursive: true });
     await writeFile(cursor, JSON.stringify({ mcpServers: { other: { command: "x" } }, theme: "dark" }));
-    expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
-    expect(JSON.parse(await readFile(cursor, "utf8"))).toEqual({ mcpServers: { other: { command: "x" }, relay: server(f) }, theme: "dark" });
+    expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill", "--json"], f.deps)).toBe(0);
+    expect(JSON.parse(await readFile(cursor, "utf8"))).toEqual({ mcpServers: { other: { command: "x" } }, theme: "dark" });
     expect(f.runCommand).not.toHaveBeenCalled();
-    expect(f.stdout.join("")).toContain("Restart Cursor to load Relay, then ask it to read your Relay messages.");
+    const cursorAnswer = JSON.parse(f.stdout.join(""));
+    expect(cursorAnswer.agents[0]).toMatchObject({ agent: "cursor", files: [], bridge_command: "cursor-agent", bridge_args: ["acp"] });
 
-    const d = await fixture({}, runtimes());
-    expect(await runCLI(["connect", "claude-desktop", "--token", token, "--yes", "--no-skill"], d.deps)).toBe(0);
-    const method = codingAgent("claude-desktop").connect;
-    if (method.kind !== "mcp-file") throw new Error("Expected a file connector");
-    const file = method.file({ home: d.home, env: d.env, platform: process.platform });
-    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ mcpServers: { relay: server(d) } });
+    // Gemini CLI and OpenCode are the same: no file, and their own ACP words.
+    for (const [id, command, args] of [["gemini", "gemini", ["--experimental-acp"]], ["opencode", "opencode", ["acp"]]] as const) {
+      const g = await fixture({}, runtimes());
+      expect(await runCLI(["connect", id, "--token", token, "--yes", "--no-skill", "--json"], g.deps)).toBe(0);
+      expect(g.runCommand).not.toHaveBeenCalled();
+      expect(JSON.parse(g.stdout.join("")).agents[0]).toMatchObject({ files: [], bridge_command: command, bridge_args: args });
+    }
+
+    // Cline is wired to the bridge but its ACP command is not confirmed, so it
+    // carries no args and Relay does not start it.
+    const c = await fixture({}, runtimes());
+    expect(await runCLI(["connect", "cline", "--token", token, "--yes", "--no-skill", "--json"], c.deps)).toBe(0);
+    const clineAnswer = JSON.parse(c.stdout.join(""));
+    expect(clineAnswer.agents[0]).toMatchObject({ agent: "cline", files: [] });
+    expect(clineAnswer.agents[0].bridge_args).toBeUndefined();
   });
 
-  it("vscode writes servers.relay with type stdio; opencode writes mcp.relay in its own shape", async () => {
+  it("vscode writes servers.relay with type stdio, and keeps every other entry", async () => {
     const f = await fixture({}, runtimes());
-    expect(await runCLI(["connect", "vscode", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
     const method = codingAgent("vscode").connect;
     if (method.kind !== "mcp-file") throw new Error("Expected a file connector");
     const file = method.file({ home: f.home, env: f.env, platform: process.platform });
+    await mkdir(join(f.home, ".config", "Code", "User"), { recursive: true }).catch(() => undefined);
+    expect(await runCLI(["connect", "vscode", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ servers: { relay: { type: "stdio", ...server(f) } } });
-
-    const o = await fixture({}, runtimes());
-    expect(await runCLI(["connect", "opencode", "--token", token, "--yes", "--no-skill"], o.deps)).toBe(0);
-    expect(JSON.parse(await readFile(join(o.home, ".config", "opencode", "opencode.json"), "utf8"))).toEqual({
-      $schema: "https://opencode.ai/config.json",
-      mcp: { relay: { type: "local", command: ["npx", "-y", "@relaymessenger/mcp@staging", "--profile", card.handle], environment: { RELAY_CONFIG_PATH: o.env.RELAY_CONFIG_PATH }, enabled: true } },
-    });
   });
 
   it("a config file that is not JSON is left alone and named", async () => {
     const f = await fixture({}, runtimes());
-    const cursor = join(f.home, ".cursor", "mcp.json");
-    await mkdir(join(f.home, ".cursor"), { recursive: true });
-    await writeFile(cursor, "{ not json");
-    expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(1);
-    expect(f.stderr.join("")).toContain(`${cursor} is not plain JSON, so Relay did not change it.`);
-    expect(await readFile(cursor, "utf8")).toBe("{ not json");
+    const method = codingAgent("vscode").connect;
+    if (method.kind !== "mcp-file") throw new Error("Expected a file connector");
+    const file = method.file({ home: f.home, env: f.env, platform: process.platform });
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, "{ not json");
+    expect(await runCLI(["connect", "vscode", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(1);
+    expect(f.stderr.join("")).toContain(`${file} is not plain JSON, so Relay did not change it.`);
+    expect(await readFile(file, "utf8")).toBe("{ not json");
   });
 
   it("several agents at once share one agent, one plan and one confirmation", async () => {
-    const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" }, cursor: { found: true, configPath: "/fake/.cursor" } }));
+    const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" }, vscode: { found: true, configPath: "/fake/.vscode" } }));
     expect(await runCLI(["connect", "--all", "--new", "--no-skill"], f.deps)).toBe(0);
     expect(f.prompts.confirm).toHaveBeenCalledTimes(2);
     expect(f.prompts.confirm).toHaveBeenLastCalledWith("Answer Relay messages with Codex from this folder?");
     expect(f.stdout.join("")).toContain("Relay will do 3 things. Continue?");
     expect(ranLines(f)).toHaveLength(1);
-    expect(JSON.parse(await readFile(join(f.home, ".cursor", "mcp.json"), "utf8")).mcpServers.relay).toEqual(server(f));
-    expect(f.stdout.join("")).toContain("Relay is ready for Codex, Cursor.");
+    const vscodeMethod = codingAgent("vscode").connect;
+    if (vscodeMethod.kind !== "mcp-file") throw new Error("Expected a file connector");
+    const vscodeFile = vscodeMethod.file({ home: f.home, env: f.env, platform: process.platform });
+    expect(JSON.parse(await readFile(vscodeFile, "utf8")).servers.relay).toEqual({ type: "stdio", ...server(f) });
+    expect(f.stdout.join("")).toContain("Relay is ready for Codex, VS Code.");
     expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 });
@@ -380,8 +389,11 @@ describe("with no terminal", () => {
 
   it("-y is --yes", async () => {
     const f = await fixture(headless, runtimes());
-    expect(await runCLI(["connect", "cursor", "--token", token, "-y", "--no-skill"], f.deps)).toBe(0);
-    expect(JSON.parse(await readFile(join(f.home, ".cursor", "mcp.json"), "utf8")).mcpServers.relay.command).toBe("npx");
+    const method = codingAgent("vscode").connect;
+    if (method.kind !== "mcp-file") throw new Error("Expected a file connector");
+    const file = method.file({ home: f.home, env: f.env, platform: process.platform });
+    expect(await runCLI(["connect", "vscode", "--token", token, "-y", "--no-skill"], f.deps)).toBe(0);
+    expect(JSON.parse(await readFile(file, "utf8")).servers.relay.command).toBe("npx");
   });
 });
 
@@ -524,10 +536,15 @@ describe("connect first reply proof", () => {
     f.deps.connect!.observer = () => ({ semantics: "observational-no-ack", run });
     vi.useFakeTimers();
     try {
-      expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+      // VS Code is an mcp-file target with no bridge, so the reply-proof wait
+      // (not the bridge) is what runs after connecting.
+      const method = codingAgent("vscode").connect;
+      if (method.kind !== "mcp-file") throw new Error("Expected a file connector");
+      const file = method.file({ home: f.home, env: f.env, platform: process.platform });
+      expect(await runCLI(["connect", "vscode", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
       expect(run).toHaveBeenCalledOnce();
       expect(f.stdout.join("")).toContain(`No reply yet. Run:  relay watch @${card.handle}`);
-      expect(JSON.parse(await readFile(join(f.home, ".cursor", "mcp.json"), "utf8")).mcpServers.relay).toBeDefined();
+      expect(JSON.parse(await readFile(file, "utf8")).servers.relay).toBeDefined();
     } finally { vi.useRealTimers(); }
   });
 
@@ -544,7 +561,7 @@ describe("connect first reply proof", () => {
     const f = await fixture({ isInteractive: nonInteractive });
     const observer = vi.fn();
     f.deps.connect!.observer = observer;
-    expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill", ...(nonInteractive ? ["--non-interactive"] : [])], f.deps)).toBe(0);
+    expect(await runCLI(["connect", "vscode", "--token", token, "--yes", "--no-skill", ...(nonInteractive ? ["--non-interactive"] : [])], f.deps)).toBe(0);
     expect(observer).not.toHaveBeenCalled();
     expect(f.stdout.join("")).toContain(`No reply yet. Run:  relay watch @${card.handle}`);
   });

@@ -47,15 +47,18 @@
     "id": "cursor",
     "label": "Cursor",
     "aliases": [],
+    "command": "cursor-agent",
     "installedIf": "(paths) => [platformPath(paths.platform).join(paths.home, \".cursor\")]",
     "connect": {
-      "kind": "mcp-file",
-      "file": "(paths) => platformPath(paths.platform).join(paths.home, \".cursor\", \"mcp.json\")",
-      "shape": "mcpServers"
+      "kind": "acp-bridge"
     },
     "start": {
-      "kind": "restart",
-      "instruction": "Restart Cursor to load Relay, then ask it to read your Relay messages."
+      "kind": "acp-bridge",
+      "command": "cursor-agent",
+      "args": [
+        "acp"
+      ],
+      "prompt": "Answer Relay messages with Cursor from this folder?"
     },
     "detectedAs": [
       "cursor",
@@ -69,15 +72,15 @@
     "command": "opencode",
     "installedIf": "(paths) => [platformPath(paths.platform).join(configHome(paths), \"opencode\")]",
     "connect": {
-      "kind": "mcp-file",
-      "file": "(paths) => platformPath(paths.platform).join(configHome(paths), \"opencode\", \"opencode.json\")",
-      "shape": "opencode"
+      "kind": "acp-bridge"
     },
     "start": {
-      "kind": "command",
+      "kind": "acp-bridge",
       "command": "opencode",
-      "args": [],
-      "prompt": "Start OpenCode with Relay now?"
+      "args": [
+        "acp"
+      ],
+      "prompt": "Answer Relay messages with OpenCode from this folder?"
     },
     "detectedAs": [
       "opencode"
@@ -90,12 +93,12 @@
     "command": "cline",
     "installedIf": "(paths) => [platformPath(paths.platform).join(paths.home, \".cline\")]",
     "connect": {
-      "kind": "mcp-command",
-      "file": "(paths) => platformPath(paths.platform).join(paths.home, \".cline\", \"data\", \"settings\", \"cline_mcp_settings.json\")"
+      "kind": "acp-bridge"
     },
     "start": {
-      "kind": "restart",
-      "instruction": "Restart your editor so Cline loads Relay, then ask Cline to read your Relay messages."
+      "kind": "acp-bridge",
+      "command": "cline",
+      "prompt": "Answer Relay messages with Cline from this folder?"
     },
     "detectedAs": []
   },
@@ -127,36 +130,19 @@
     "command": "gemini",
     "installedIf": "(paths) => [platformPath(paths.platform).join(paths.home, \".gemini\")]",
     "connect": {
-      "kind": "mcp-command",
-      "file": "(paths) => platformPath(paths.platform).join(paths.home, \".gemini\", \"settings.json\")"
+      "kind": "acp-bridge"
     },
     "start": {
-      "kind": "command",
+      "kind": "acp-bridge",
       "command": "gemini",
-      "args": [],
-      "prompt": "Start Gemini CLI with Relay now?"
+      "args": [
+        "--experimental-acp"
+      ],
+      "prompt": "Answer Relay messages with Gemini CLI from this folder?"
     },
     "detectedAs": [
       "gemini"
     ]
-  },
-  {
-    "id": "claude-desktop",
-    "label": "Claude Desktop",
-    "aliases": [
-      "desktop"
-    ],
-    "installedIf": "(paths) => [\"/Applications/Claude.app\", win32.join(appData(paths), \"Claude\")]",
-    "connect": {
-      "kind": "mcp-file",
-      "file": "(paths) => byPlatform(paths, {\n        darwin: posix.join(appSupport(paths), \"Claude\", \"claude_desktop_config.json\"),\n        win32: win32.join(appData(paths), \"Claude\", \"claude_desktop_config.json\"),\n        linux: posix.join(paths.home, \".config\", \"claude\", \"claude_desktop_config.json\"),\n      })",
-      "shape": "mcpServers"
-    },
-    "start": {
-      "kind": "restart",
-      "instruction": "Restart Claude Desktop to load Relay, then ask it to read your Relay messages."
-    },
-    "detectedAs": []
   },
   {
     "id": "hermes",

@@ -1,25 +1,27 @@
-import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { runCLI } from "../program.js";
 import type { InteractivePrompts } from "../interactive.js";
+import { runCLI } from "../program.js";
 import agent from "./opencode.js";
 
-it("starts OpenCode with its configured MCP servers and the requested prompt", () => {
+it("connects over the ACP bridge and declares the opencode acp command", () => {
+  expect(agent.connect).toEqual({ kind: "acp-bridge" });
   expect(agent.start).toEqual({
-    kind: "command",
+    kind: "acp-bridge",
     command: "opencode",
-    args: [],
-    prompt: "Start OpenCode with Relay now?",
+    args: ["acp"],
+    prompt: "Answer Relay messages with OpenCode from this folder?",
   });
 });
 
-it.each([undefined, "/fake/bin/opencode"])("connect resolves the executable (%s) and asks to start", async (executable) => {
+it.each([undefined, "/fake/bin/opencode"])("connect drives OpenCode over ACP using executable=%s", async (executable) => {
   const scratch = join(tmpdir(), "relay-target-start-test");
   await mkdir(scratch, { recursive: true });
   const home = await mkdtemp(join(scratch, "connect-"));
   const token = `rly_live_${"C".repeat(43)}`;
+  const bridge = vi.fn(async (input: { say(line: string): void }) => { input.say("stopped"); });
   const prompts: InteractivePrompts = {
     select: vi.fn(async () => "new"),
     multiselect: vi.fn(async () => ["opencode"]),
@@ -29,11 +31,6 @@ it.each([undefined, "/fake/bin/opencode"])("connect resolves the executable (%s)
     info: vi.fn(), intro: vi.fn(), outro: vi.fn(), step: vi.fn(),
     spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
   };
-  const startCommand = vi.fn(async () => {
-    const config = JSON.parse(await readFile(join(home, ".config", "opencode", "opencode.json"), "utf8"));
-    expect(config.mcp.relay).toMatchObject({ type: "local", enabled: true });
-    return 0;
-  });
   const errors: string[] = [];
   expect(await runCLI(["connect", "opencode", "--token", token, "--yes", "--no-skill"], {
     configContext: { env: { RELAY_CONFIG_PATH: join(home, "config.json"), PATH: "" }, home, platform: "linux" },
@@ -42,12 +39,12 @@ it.each([undefined, "/fake/bin/opencode"])("connect resolves the executable (%s)
     stdout: () => undefined, stderr: (value) => errors.push(value),
     connect: {
       sniff: async () => [{ id: "opencode", label: "OpenCode", found: true, ...(executable ? { executable } : {}) }],
-      startCommand,
-      observer: () => ({ semantics: "observational-no-ack", run: async () => undefined }),
+      bridge, observer: () => ({ semantics: "observational-no-ack", run: async () => undefined }),
       renderQR: () => "[QR]\n", pairTimeoutMs: 1, version: "0.1.6-staging.0",
     },
   })).toBe(0);
   expect(errors).toEqual([]);
-  expect(prompts.confirm).toHaveBeenCalledWith("Start OpenCode with Relay now?");
-  expect(startCommand).toHaveBeenCalledExactlyOnceWith(executable ?? "opencode", []);
+  expect(bridge).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    kind: "acp", command: executable ?? "opencode", acpArgs: ["acp"], label: "OpenCode",
+  }));
 });

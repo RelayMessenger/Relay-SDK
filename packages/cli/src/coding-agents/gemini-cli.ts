@@ -8,13 +8,17 @@ const agent: CodingAgent =
     aliases: ["gemini"],
     command: "gemini",
     installedIf: (paths) => [platformPath(paths.platform).join(paths.home, ".gemini")],
-    // `gemini mcp add -s user` writes ~/.gemini/settings.json (Docker's registry, row `gemini`).
-    connect: { kind: "mcp-command", file: (paths) => platformPath(paths.platform).join(paths.home, ".gemini", "settings.json") },
+    // Gemini CLI cannot start a turn from a settings.json MCP entry, so Relay
+    // writes none and drives it over ACP instead (acp-bridge.ts).
+    connect: { kind: "acp-bridge" },
+    // `gemini --experimental-acp` runs Gemini CLI in ACP mode over stdio; Gemini
+    // CLI was Zed's first reference ACP agent (zed.dev/acp/agent/gemini-cli,
+    // _sources/host-connect-docs/gemini-cli/NOTES.md).
     start: {
-      kind: "command",
+      kind: "acp-bridge",
       command: "gemini",
-      args: [],
-      prompt: "Start Gemini CLI with Relay now?",
+      args: ["--experimental-acp"],
+      prompt: "Answer Relay messages with Gemini CLI from this folder?",
     },
     detectedAs: ["gemini"],
   };

@@ -8,15 +8,20 @@ const agent: CodingAgent =
     aliases: [],
     command: "opencode",
     installedIf: (paths) => [platformPath(paths.platform).join(configHome(paths), "opencode")],
-    // https://opencode.ai/docs/mcp-servers/: local servers are `mcp.<name>` with
-    // `type: "local"`, a `command` array, `environment` and `enabled`; the global
-    // file is ~/.config/opencode/opencode.json (Docker's registry, row `opencode`).
-    connect: { kind: "mcp-file", file: (paths) => platformPath(paths.platform).join(configHome(paths), "opencode", "opencode.json"), shape: "opencode" },
+    // OpenCode cannot start a turn from an opencode.json MCP entry, so Relay
+    // writes none and drives it over ACP instead (acp-bridge.ts).
+    connect: { kind: "acp-bridge" },
+    // `opencode acp` is OpenCode's native ACP server over stdio; the ACP
+    // registry resolves `opencode -> "opencode acp"`
+    // (_sources/native-connect/openclaw/extensions/acpx/src/runtime.test.ts).
+    // OpenCode also has an HTTP `opencode serve` + `@opencode-ai/sdk` path
+    // (Inkbox opencode-plugin/src/gateway/sessions.ts:238); the ACP command is
+    // used so all four targets share one bridge and one protocol.
     start: {
-      kind: "command",
+      kind: "acp-bridge",
       command: "opencode",
-      args: [],
-      prompt: "Start OpenCode with Relay now?",
+      args: ["acp"],
+      prompt: "Answer Relay messages with OpenCode from this folder?",
     },
     detectedAs: ["opencode"],
   };
