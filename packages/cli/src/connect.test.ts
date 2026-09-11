@@ -281,7 +281,8 @@ describe("the MCP agents", () => {
   it("several agents at once share one agent, one plan and one confirmation", async () => {
     const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" }, cursor: { found: true, configPath: "/fake/.cursor" } }));
     expect(await runCLI(["connect", "--all", "--new", "--no-skill"], f.deps)).toBe(0);
-    expect(f.prompts.confirm).toHaveBeenCalledTimes(1);
+    expect(f.prompts.confirm).toHaveBeenCalledTimes(2);
+    expect(f.prompts.confirm).toHaveBeenLastCalledWith("Start Codex with Relay now?");
     expect(f.stdout.join("")).toContain("Relay will do 2 things. Continue?");
     expect(ranLines(f)).toHaveLength(1);
     expect(JSON.parse(await readFile(join(f.home, ".cursor", "mcp.json"), "utf8")).mcpServers.relay).toEqual(server(f));
