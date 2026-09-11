@@ -1,6 +1,6 @@
 {
   "name": "relaymessenger",
-  "version": "0.1.6-staging.9",
+  "version": "0.1.6-staging.10",
   "description": "Official command-line client for Relay v1 resources.",
   "type": "module",
   "bin": {
