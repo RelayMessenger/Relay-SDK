@@ -248,21 +248,13 @@ describe("the MCP agents", () => {
     const cursorAnswer = JSON.parse(f.stdout.join(""));
     expect(cursorAnswer.agents[0]).toMatchObject({ agent: "cursor", files: [], bridge_command: "cursor-agent", bridge_args: ["acp"] });
 
-    // Gemini CLI and OpenCode are the same: no file, and their own ACP words.
-    for (const [id, command, args] of [["gemini", "gemini", ["--experimental-acp"]], ["opencode", "opencode", ["acp"]]] as const) {
+    // Gemini CLI, OpenCode and Cline are the same: no file, and their own ACP words.
+    for (const [id, command, args] of [["gemini", "gemini", ["--experimental-acp"]], ["opencode", "opencode", ["acp"]], ["cline", "cline", ["--acp"]]] as const) {
       const g = await fixture({}, runtimes());
       expect(await runCLI(["connect", id, "--token", token, "--yes", "--no-skill", "--json"], g.deps)).toBe(0);
       expect(g.runCommand).not.toHaveBeenCalled();
       expect(JSON.parse(g.stdout.join("")).agents[0]).toMatchObject({ files: [], bridge_command: command, bridge_args: args });
     }
-
-    // Cline is wired to the bridge but its ACP command is not confirmed, so it
-    // carries no args and Relay does not start it.
-    const c = await fixture({}, runtimes());
-    expect(await runCLI(["connect", "cline", "--token", token, "--yes", "--no-skill", "--json"], c.deps)).toBe(0);
-    const clineAnswer = JSON.parse(c.stdout.join(""));
-    expect(clineAnswer.agents[0]).toMatchObject({ agent: "cline", files: [] });
-    expect(clineAnswer.agents[0].bridge_args).toBeUndefined();
   });
 
   it("vscode writes servers.relay with type stdio, and keeps every other entry", async () => {

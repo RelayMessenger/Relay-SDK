@@ -98,6 +98,9 @@
     "start": {
       "kind": "acp-bridge",
       "command": "cline",
+      "args": [
+        "--acp"
+      ],
       "prompt": "Answer Relay messages with Cline from this folder?"
     },
     "detectedAs": []

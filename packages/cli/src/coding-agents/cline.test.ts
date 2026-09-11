@@ -6,20 +6,18 @@ import type { InteractivePrompts } from "../interactive.js";
 import { runCLI } from "../program.js";
 import agent from "./cline.js";
 
-it("connects over the ACP bridge, but its ACP command is not confirmed yet", () => {
+it("connects over the ACP bridge with Cline's confirmed --acp command", () => {
   expect(agent.connect).toEqual({ kind: "acp-bridge" });
-  // No `args`: Cline's exact ACP launch flag is not confirmed from any source,
-  // so the bridge is wired but not started (a TODO, not a guess).
+  // `cline --acp` is Cline's own documented ACP launch (docs.cline.bot/usage/acp).
   expect(agent.start).toEqual({
     kind: "acp-bridge",
     command: "cline",
+    args: ["--acp"],
     prompt: "Answer Relay messages with Cline from this folder?",
   });
-  if (agent.start?.kind !== "acp-bridge") throw new Error("Expected an acp-bridge start");
-  expect(agent.start.args).toBeUndefined();
 });
 
-it("connect wires Cline to the bridge but does not start it, and says so", async () => {
+it("connect starts Cline over its ACP bridge", async () => {
   const scratch = join(tmpdir(), "relay-target-start-test");
   await mkdir(scratch, { recursive: true });
   const home = await mkdtemp(join(scratch, "connect-"));
@@ -47,6 +45,5 @@ it("connect wires Cline to the bridge but does not start it, and says so", async
       renderQR: () => "[QR]\n", pairTimeoutMs: 1, version: "0.1.6-staging.0",
     },
   })).toBe(0);
-  expect(bridge).not.toHaveBeenCalled();
-  expect(stdout.join("")).toContain("Cline's ACP command is not confirmed yet, so Relay did not start it.");
+  expect(bridge).toHaveBeenCalledWith(expect.objectContaining({ command: "cline", acpArgs: ["--acp"], kind: "acp" }));
 });

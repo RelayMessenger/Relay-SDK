@@ -299,16 +299,11 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
     case "mcp-file":
       steps = [`add  ${mcpRootKey(method.shape)}.${MCP_SERVER_NAME}  to  ${files[0]}  (every other entry kept)`];
       break;
-    case "acp-bridge": {
-      const start = codingAgent(agent).start;
-      // `args` present means the agent's ACP command is confirmed from a source;
-      // absent (cline) means it is a TODO, so Relay wires but does not start it.
-      const confirmed = start?.kind === "acp-bridge" && start.args !== undefined;
-      steps = [confirmed
-        ? `keep running here, and answer your Relay messages with ${codingAgent(agent).label} from this folder  (Relay's tools travel through the session; no mcp.json is written)`
-        : `wire ${codingAgent(agent).label} to Relay's ACP bridge, but do not start it: its ACP command is not confirmed yet`];
+    case "acp-bridge":
+      // Relay drives the agent over its own ACP server and hands Relay's MCP
+      // tools into the session; no mcp.json is written.
+      steps = [`keep running here, and answer your Relay messages with ${codingAgent(agent).label} from this folder  (Relay's tools travel through the session; no mcp.json is written)`];
       break;
-    }
     case "hermes-plugin":
       steps = [
         `run  ${commands[0]}`,
@@ -679,12 +674,8 @@ export const runConnect = async (
     } else if (start?.kind === "acp-bridge") {
       const command = runtime?.executable ?? start.command;
       result.bridge_command = command;
-      if (start.args !== undefined) result.bridge_args = [...start.args];
-      // No `args` means the agent's ACP command is not confirmed, so the bridge
-      // is not started: guessing a flag would print a promise Relay cannot keep.
-      if (start.args === undefined) {
-        if (!json) screen.say(`${definition.label}'s ACP command is not confirmed yet, so Relay did not start it.`);
-      } else if (!json && options.start !== false) {
+      result.bridge_args = [...start.args];
+      if (!json && options.start !== false) {
         const accepted = options.yes === true || (ui !== undefined && await ui.confirm(start.prompt));
         if (accepted) bridge = { label: definition.label, command, kind: "acp", acpArgs: start.args, mcpServer: mcpServerSpec(ctx) };
         else screen.say(`${definition.label} answers when you ask it to read your Relay messages.`);
