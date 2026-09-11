@@ -122,6 +122,7 @@ try {
     "parts",
     "reply_to",
     "idempotency_key",
+    "silent",
   ]);
   assert.deepEqual(interfaceFields("MessageCreateParams"), [
     "to",
