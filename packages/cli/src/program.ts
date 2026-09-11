@@ -5,6 +5,7 @@ import { createAgentWithPicture, incompletePictureMessage } from "./agent-create
 import { homedir } from "node:os";
 import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactiveEntry, HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { runConnect, ConnectFailure, type ConnectOptions as ConnectRunOptions } from "./connect.js";
+import { codexRunner, runCodexBridge } from "./codex-bridge.js";
 import { sdkTerminalObserver } from "./terminal-watch.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
@@ -80,7 +81,7 @@ export interface ProgramDependencies {
   /** The one Relay skill offer of a run, made at the end of a connect and
    * nowhere else (owner ruling, 2026-09-09). */
   offerSkill?: () => Promise<void>;
-  connect?: Partial<Pick<import("./connect.js").ConnectDependencies, "sniff" | "runCommand" | "startCommand" | "observer" | "renderQR" | "pairTimeoutMs" | "version" | "drivingAgent">>;
+  connect?: Partial<Pick<import("./connect.js").ConnectDependencies, "sniff" | "runCommand" | "startCommand" | "observer" | "bridge" | "renderQR" | "pairTimeoutMs" | "version" | "drivingAgent">>;
   /** Which coding agent is driving this command; `@vercel/detect-agent` by default. */
   detectAgent?: () => Promise<import("@vercel/detect-agent").AgentResult>;
   terminalSession?: AgentSessionDependencies["session"];
@@ -137,6 +138,15 @@ const handle = (value: string): string => {
   }
   return normalized;
 };
+
+/**
+ * `--to` takes repeated flags, several words after one flag, or one
+ * comma-separated list. Commander hands a variadic option's coercion each value
+ * with what it kept so far, so the list has to be built here; returning one
+ * handle instead leaves a string where the command expects an array.
+ */
+const recipients = (value: string, previous: string[] = []): string[] =>
+  [...previous, ...value.split(",").map(handle)];
 
 const nonempty = (name: string, value: string): string => {
   const normalized = value.trim();
@@ -308,6 +318,23 @@ export const createProgram = (
         // Pairing watches the agent's own events; it never answers Relay and
         // never takes an event, so the runtime still receives every message.
         observer: (token, apiURL) => sdkTerminalObserver(new Relay({ apiKey: token, baseURL: apiURL, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) })),
+        // Codex cannot start a turn of its own, so connect stays and answers
+        // for it. Control-C ends the wait and the command (codex-bridge.ts).
+        bridge: async (input) => {
+          const control = new AbortController();
+          const stop = (): void => control.abort();
+          process.once("SIGINT", stop);
+          try {
+            await runCodexBridge({
+              client: new Relay({ apiKey: input.token, baseURL: input.apiURL, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) }),
+              run: codexRunner(input.command, input.cwd),
+              signal: control.signal,
+              say: input.say,
+            });
+          } finally {
+            process.off("SIGINT", stop);
+          }
+        },
         ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
         ...(dependencies.offerSkill ? { offerSkill: dependencies.offerSkill } : {}),
         ...dependencies.connect,
@@ -642,8 +669,7 @@ export const createProgram = (
     .command("create")
     .description("create a Chat with at most 7 total participants, including the sender")
     .requiredOption("--from <handle>", "sender Handle", handle)
-    .requiredOption("--to <handles...>", "at most 6 recipient Handles; repeat --to or use a comma-separated list",
-      (value: string, previous: string[] = []) => [...previous, ...value.split(",").map(handle)])
+    .requiredOption("--to <handles...>", "at most 6 recipient Handles; repeat --to or use a comma-separated list", recipients)
     .requiredOption("--text <text>", "the text to send")
     .requiredOption("--idempotency-key <key>", "reuse this key to avoid sending the same request twice")
     .action(async (
@@ -840,7 +866,7 @@ export const createProgram = (
   messages
     .command("send")
     .description("start or reuse a chat with the handles you name, and send one message")
-    .requiredOption("--to <handles...>", "at most 6 recipient Handles", (value) => handle(value))
+    .requiredOption("--to <handles...>", "at most 6 recipient Handles; repeat --to or use a comma-separated list", recipients)
     .requiredOption("--text <text>", "the text to send")
     .requiredOption("--idempotency-key <key>", "reuse this key to avoid sending the same request twice")
     .action(async (

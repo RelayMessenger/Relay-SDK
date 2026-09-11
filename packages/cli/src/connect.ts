@@ -101,6 +101,18 @@ export interface ConnectDependencies {
   /** Hands this terminal to the agent. */
   startCommand?: (file: string, args: readonly string[]) => Promise<number>;
   observer?: (token: string, apiURL: string) => TerminalObserver | undefined;
+  /**
+   * Keeps answering this agent's Relay messages with the coding agent's own
+   * headless command, until the person stops it. Only an agent whose `start` is
+   * a bridge uses it (coding-agents/codex.ts).
+   */
+  bridge?: (input: {
+    token: string;
+    apiURL: string;
+    command: string;
+    cwd: string;
+    say(line: string): void;
+  }) => Promise<void>;
   renderQR?: (url: string) => string;
   pairTimeoutMs?: number;
   version?: string;
@@ -273,7 +285,12 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
       ];
       break;
     case "mcp-command":
-      steps = [`run  ${commands[0]}  (adds the Relay MCP server to ${files[0]})`];
+      steps = [
+        `run  ${commands[0]}  (adds the Relay MCP server to ${files[0]})`,
+        ...(context.start && codingAgent(agent).start?.kind === "bridge"
+          ? [`keep running here, and answer your Relay messages with ${codingAgent(agent).label} from this folder`]
+          : []),
+      ];
       break;
     case "mcp-file":
       steps = [`add  ${mcpRootKey(method.shape)}.${MCP_SERVER_NAME}  to  ${files[0]}  (every other entry kept)`];
@@ -573,6 +590,7 @@ export const runConnect = async (
   const done: Array<Record<string, unknown>> = [];
   const allowed = [...allow];
   const starts: Array<{ command: string; args: string[]; label: string }> = [];
+  let bridge: { label: string; command: string } | undefined;
   for (const target of targets) {
     const runtime = runtimes.find((entry) => entry.id === target);
     const planned = plan.agents.find((entry) => entry.agent === target)!;
@@ -624,7 +642,17 @@ export const runConnect = async (
       Object.assign(result, { token_file: tokenPath, config_path: openclawConfigPath(ctx) });
     }
     const start = definition.start;
-    if (start?.kind === "command") {
+    if (start?.kind === "bridge") {
+      const command = runtime?.executable ?? start.command;
+      result.bridge_command = command;
+      if (!json && options.start !== false) {
+        // `--yes` already took a plan whose last step is this one, so it is not
+        // asked twice; without it, this is the one question left to answer.
+        const accepted = options.yes === true || (ui !== undefined && await ui.confirm(start.prompt));
+        if (accepted) bridge = { label: definition.label, command };
+        else screen.say(`${definition.label} answers when you ask it to read your Relay messages.`);
+      }
+    } else if (start?.kind === "command") {
       const command = runtime?.executable ?? start.command;
       const commandLine = [command, ...start.args].join(" ");
       result.start_command = commandLine;
@@ -658,7 +686,14 @@ export const runConnect = async (
   if (options.skill !== false && deps.offerSkill && !json) await deps.offerSkill();
   if (!json) {
     screen.say(`Say anything to @${agent.handle} from your phone.`);
-    if (!ui) {
+    if (bridge && deps.bridge) {
+      screen.say(`${bridge.label} answers your Relay messages from ${deps.cwd}. Press Control-C to stop.`);
+      await deps.bridge({
+        token: agent.token, apiURL: agent.apiURL, command: bridge.command, cwd: deps.cwd,
+        say: (line) => screen.say(safeMetadata(line, secrets)),
+      });
+      screen.say(`Stopped. ${bridge.label} no longer answers your Relay messages.`);
+    } else if (!ui) {
       screen.say(`No reply yet. Run:  relay watch @${agent.handle}`);
     } else {
       // Subscribe before launching: an immediate reply must not be lost while
