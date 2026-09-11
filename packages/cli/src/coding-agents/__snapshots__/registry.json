@@ -153,6 +153,10 @@
       "file": "(paths) => byPlatform(paths, {\n        darwin: posix.join(appSupport(paths), \"Claude\", \"claude_desktop_config.json\"),\n        win32: win32.join(appData(paths), \"Claude\", \"claude_desktop_config.json\"),\n        linux: posix.join(paths.home, \".config\", \"claude\", \"claude_desktop_config.json\"),\n      })",
       "shape": "mcpServers"
     },
+    "start": {
+      "kind": "restart",
+      "instruction": "Restart Claude Desktop to load Relay, then ask it to read your Relay messages."
+    },
     "detectedAs": []
   },
   {
