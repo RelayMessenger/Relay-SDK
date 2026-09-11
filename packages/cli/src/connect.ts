@@ -26,7 +26,7 @@ import { CliError, type CliErrorCode } from "./error-codes.js";
 import { preparePrivateDestination, writePrivateDestination } from "./private-file.js";
 import { renderTerminalQR } from "./qr-terminal.js";
 import { safeMetadata } from "./output.js";
-import type { TerminalObserver } from "./terminal-watch.js";
+import { runTerminalWatch, type TerminalObserver } from "./terminal-watch.js";
 
 /** The plugin, and the marketplace it comes from, exactly as Claude Code names
  * them (.claude-plugin/marketplace.json: marketplace "relay-messenger", plugin "relay"). */
@@ -41,6 +41,7 @@ export const claudeMarketplaceSource = (version: string = packageVersion()): str
 export const CLAUDE_START_ARGS = ["--dangerously-load-development-channels", `plugin:${CLAUDE_PLUGIN_ID}`] as const;
 /** Pairing waits this long for a first message before it names --allow instead. */
 export const PAIR_TIMEOUT_MS = 180_000;
+export const REPLY_TIMEOUT_MS = 300_000;
 
 /** The MCP server the seven MCP agents run (packages/mcp, bin `relay-mcp`). A
  * staging build takes the `staging` dist-tag, the way it takes the staging API. */
@@ -476,7 +477,7 @@ export const runConnect = async (
   options: ConnectOptions,
   deps: ConnectDependencies,
 ): Promise<void> => {
-  const ui = deps.prompts;
+  const ui = options.nonInteractive ? undefined : deps.prompts;
   const json = options.json === true;
   const screen: Screen = {
     json,
@@ -634,7 +635,7 @@ export const runConnect = async (
     : false;
   if (json) {
     deps.stdout(`${JSON.stringify(safeMetadata({
-      ok: true, profile: agent.profile, handle: agent.handle, api_url: agent.apiURL, token: "stored", agents: done,
+      ok: true, profile: agent.profile, handle: agent.handle, api_url: agent.apiURL, token: "stored", agents: done, proof: "skipped",
     }, secrets), null, 2)}\n`);
   } else {
     screen.say(`Relay is ready for ${targets.map((target) => codingAgent(target).label).join(", ")}.`);
@@ -644,13 +645,52 @@ export const runConnect = async (
     }
     if (claudeStart) {
       screen.say(start
-        ? `Claude opens next. Say anything to @${agent.handle} from your phone; the answer shows here and on your phone.`
+        ? `Claude opens next.`
         : `Start it yourself when you are ready:  ${claudeStart}`);
     }
     screen.say(`Later:  relay watch ${agent.handle}  ·  relay doctor`);
   }
   if (options.skill !== false && deps.offerSkill && !json) await deps.offerSkill();
-  if (start) await (deps.startCommand ?? defaultStartCommand)(runtimes.find((entry) => entry.id === "claude-code")?.executable ?? "claude", CLAUDE_START_ARGS);
+  if (!json) {
+    screen.say(`Say anything to @${agent.handle} from your phone.`);
+    if (!ui) {
+      screen.say(`No reply yet. Run:  relay watch @${agent.handle}`);
+    } else {
+      // Subscribe before launching: an immediate reply must not be lost while
+      // the foreground agent owns the terminal. Starting remains opt-in.
+      const proof = waitForFirstReply(agent, deps, screen);
+      if (start) await (deps.startCommand ?? defaultStartCommand)(runtimes.find((entry) => entry.id === "claude-code")?.executable ?? "claude", CLAUDE_START_ARGS);
+      await proof;
+    }
+  }
+};
+
+/** Reuse watch's read-only loop and rendering, but stop at this agent's reply. */
+const waitForFirstReply = async (agent: ConnectAgent, deps: ConnectDependencies, screen: Screen): Promise<void> => {
+  const source = deps.observer?.(agent.token, agent.apiURL);
+  const control = new AbortController();
+  const timer = setTimeout(() => control.abort(), REPLY_TIMEOUT_MS);
+  let replied = false;
+  const observer: TerminalObserver | undefined = source && {
+    semantics: source.semantics,
+    run: (input) => source.run({
+      ...input,
+      onEvent: (event) => {
+        const row = event as unknown as { event_type?: string; data?: { sender_handle?: { handle?: string } | null } };
+        if (row.event_type === "message.sent" && row.data?.sender_handle?.handle === agent.handle) input.onEvent(event);
+      },
+    }),
+  };
+  try {
+    await runTerminalWatch({
+      ...(observer ? { observer } : {}), runtimeOwnership: "external", signal: control.signal,
+      secrets: [agent.token], onStatus: () => undefined,
+      onLine: (line) => { replied = true; screen.say(line); control.abort(); },
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!replied) screen.say(`No reply yet. Run:  relay watch @${agent.handle}`);
 };
 
 /**

@@ -380,3 +380,61 @@ describe("with no terminal", () => {
     expect(JSON.parse(await readFile(join(f.home, ".cursor", "mcp.json"), "utf8")).mcpServers.relay.command).toBe("npx");
   });
 });
+
+describe("connect first reply proof", () => {
+  it.each(CODING_AGENT_IDS)("%s prints only this agent's first reply, even with --no-start", async (target) => {
+    const f = await fixture();
+    const run = vi.fn(async (input: Parameters<TerminalObserver["run"]>[0]) => {
+      for (const [kind, handle, text] of [
+        ["message.received", "person", "incoming"],
+        ["message.sent", "another.dev", "wrong agent"],
+        ["message.sent", card.handle, "first answer"],
+        ["message.sent", card.handle, "second answer"],
+      ]) input.onEvent({ event_type: kind, data: { sender_handle: { handle }, parts: [{ type: "text", value: text }] } } as never);
+      expect(input.signal.aborted).toBe(true);
+    });
+    f.deps.connect!.observer = () => ({ semantics: "observational-no-ack", run });
+    expect(await runCLI(["connect", target, "--token", token, "--yes", "--allow", "person", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    expect(run).toHaveBeenCalledOnce();
+    expect(f.stdout.join("")).toContain(`Say anything to @${card.handle} from your phone.`);
+    expect(f.stdout.join("")).toContain(`message.sent @${card.handle} — first answer`);
+    expect(f.stdout.join("")).not.toMatch(/wrong agent|incoming|second answer|No reply yet/);
+    expect(f.startCommand).not.toHaveBeenCalled();
+  });
+
+  it("times out after five minutes, exits zero and keeps the connection", async () => {
+    const f = await fixture();
+    const run = vi.fn(async (input: Parameters<TerminalObserver["run"]>[0]) => {
+      await new Promise<void>(resolve => {
+        input.signal.addEventListener("abort", () => resolve(), { once: true });
+        void vi.advanceTimersByTimeAsync(300_000);
+      });
+    });
+    f.deps.connect!.observer = () => ({ semantics: "observational-no-ack", run });
+    vi.useFakeTimers();
+    try {
+      expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+      expect(run).toHaveBeenCalledOnce();
+      expect(f.stdout.join("")).toContain(`No reply yet. Run:  relay watch @${card.handle}`);
+      expect(JSON.parse(await readFile(join(f.home, ".cursor", "mcp.json"), "utf8")).mcpServers.relay).toBeDefined();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("JSON skips proof without opening an observer", async () => {
+    const f = await fixture();
+    const observer = vi.fn();
+    f.deps.connect!.observer = observer;
+    expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--json"], f.deps)).toBe(0);
+    expect(JSON.parse(f.stdout.join(""))).toMatchObject({ ok: true, proof: "skipped" });
+    expect(observer).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("skips proof without a terminal or with non-interactive=%s", async (nonInteractive) => {
+    const f = await fixture({ isInteractive: nonInteractive });
+    const observer = vi.fn();
+    f.deps.connect!.observer = observer;
+    expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill", ...(nonInteractive ? ["--non-interactive"] : [])], f.deps)).toBe(0);
+    expect(observer).not.toHaveBeenCalled();
+    expect(f.stdout.join("")).toContain(`No reply yet. Run:  relay watch @${card.handle}`);
+  });
+});
