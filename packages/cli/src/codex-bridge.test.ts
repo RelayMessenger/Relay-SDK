@@ -1,43 +1,59 @@
 import type Relay from "@relaymessenger/sdk";
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
-  bridgeTurn, codexExecArgs, codexPrompt, codexRunner, readCodexJsonl, replyKey, runCodexBridge,
-  type CodexRunner,
+  bridgeTurn, codexCommand, codexExecArgs, codexPrompt, codexRunner, readCodexJsonl, replyKey, runCodexBridge,
+  type CodexCommand, type CodexRunner,
 } from "./codex-bridge.js";
+import { platformCommand } from "./spawn-command.js";
 
 const folders: string[] = [];
 afterAll(async () => { for (const folder of folders.splice(0)) await rm(folder, { recursive: true, force: true }); });
 
-/** A `codex` that answers whatever the test asked for, and records its own command line. */
-async function fakeCodex(behaviour: { answer?: string; code?: number; threadId?: string }): Promise<{ command: string; cwd: string; calls: () => Promise<string[][]> }> {
+interface FakeCall {
+  args: string[];
+  /** What Codex was given on stdin, where `-` stands on the command line. */
+  prompt: string;
+}
+
+/**
+ * A `codex` that answers whatever the test asked for, and writes down its own
+ * command line and prompt. It is a Node script run by this very Node, so
+ * Windows runs it exactly as macOS and Linux do: an extensionless file with a
+ * `#!` line is not a program there, and npm installs the real Codex as a
+ * `.cmd` shim, which is what the bridge now starts (spawn-command.ts).
+ */
+async function fakeCodex(behaviour: { answer?: string; code?: number; threadId?: string }): Promise<{ command: CodexCommand; cwd: string; calls: () => Promise<FakeCall[]> }> {
   const folder = await mkdtemp(join(tmpdir(), "relay-fake-codex-"));
   folders.push(folder);
-  const command = join(folder, "codex");
+  const script = join(folder, "codex.cjs");
   const record = join(folder, "calls.jsonl");
-  await writeFile(command, [
-    "#!/usr/bin/env node",
+  await writeFile(script, [
     'const fs = require("node:fs");',
     "const args = process.argv.slice(2);",
-    `fs.appendFileSync(${JSON.stringify(record)}, JSON.stringify(args) + "\\n");`,
     `const answer = ${JSON.stringify(behaviour.answer ?? "")};`,
     `const threadId = ${JSON.stringify(behaviour.threadId ?? "01a0-thread")};`,
-    'process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: threadId }) + "\\n");',
-    "if (answer) {",
-    '  process.stdout.write(JSON.stringify({ type: "item.completed", item: { id: "item_0", type: "agent_message", text: answer } }) + "\\n");',
-    '  const at = args.indexOf("--output-last-message");',
-    "  if (at >= 0) fs.writeFileSync(args[at + 1], answer + \"\\n\");",
-    "}",
-    'process.stdout.write(JSON.stringify({ type: "turn.completed" }) + "\\n");',
-    `process.exit(${behaviour.code ?? 0});`,
+    'let prompt = "";',
+    'process.stdin.setEncoding("utf8");',
+    'process.stdin.on("data", (chunk) => { prompt += chunk; });',
+    'process.stdin.on("end", () => {',
+    `  fs.appendFileSync(${JSON.stringify(record)}, JSON.stringify({ args, prompt }) + "\\n");`,
+    '  fs.writeSync(1, JSON.stringify({ type: "thread.started", thread_id: threadId }) + "\\n");',
+    "  if (answer) {",
+    '    fs.writeSync(1, JSON.stringify({ type: "item.completed", item: { id: "item_0", type: "agent_message", text: answer } }) + "\\n");',
+    '    const at = args.indexOf("--output-last-message");',
+    "    if (at >= 0) fs.writeFileSync(args[at + 1], answer + \"\\n\");",
+    "  }",
+    '  fs.writeSync(1, JSON.stringify({ type: "turn.completed" }) + "\\n");',
+    `  process.exitCode = ${behaviour.code ?? 0};`,
+    "});",
   ].join("\n"), "utf8");
-  await chmod(command, 0o755);
   return {
-    command, cwd: folder,
-    calls: async () => (await readFile(record, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line) as string[]),
+    command: { command: process.execPath, args: [script] }, cwd: folder,
+    calls: async () => (await readFile(record, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line) as FakeCall),
   };
 }
 
@@ -85,21 +101,21 @@ function fakeRelay(events: readonly RelayWebhookEvent[], deliverAtOnce = false) 
 }
 
 describe("the command line the bridge runs", () => {
-  it("opens a session without a prompt to confirm, and writes the answer to a file", () => {
-    expect(codexExecArgs({ prompt: "hello", answerFile: "/tmp/answer.txt" })).toEqual([
+  it("opens a session without a prompt to confirm, takes the prompt on stdin, and writes the answer to a file", () => {
+    expect(codexExecArgs({ answerFile: "/tmp/answer.txt" })).toEqual([
       "exec", "--json", "--skip-git-repo-check",
       "--sandbox", "workspace-write",
       "--output-last-message", "/tmp/answer.txt",
-      "hello",
+      "-",
     ]);
   });
 
   it("keeps the chat's context by resuming the session Codex opened for it", () => {
-    expect(codexExecArgs({ prompt: "and again", answerFile: "/tmp/answer.txt", threadId: "01a0-thread" })).toEqual([
+    expect(codexExecArgs({ answerFile: "/tmp/answer.txt", threadId: "01a0-thread" })).toEqual([
       "exec", "resume", "01a0-thread", "--json", "--skip-git-repo-check",
       "-c", 'sandbox_mode="workspace-write"',
       "--output-last-message", "/tmp/answer.txt",
-      "and again",
+      "-",
     ]);
   });
 
@@ -120,6 +136,36 @@ describe("the command line the bridge runs", () => {
 
   it("takes the message that arrived as the key, so one message is answered once", () => {
     expect(replyKey("0199e0d0-0000-7000-8000-000000000001")).toBe("codex-bridge-0199e0d0-0000-7000-8000-000000000001");
+  });
+});
+
+describe("the codex the bridge starts", () => {
+  it("takes the Windows shim npm installs, because Windows has no file called codex", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "relay-codex-path-"));
+    folders.push(folder);
+    await writeFile(join(folder, "codex.cmd"), "@echo off\r\n", "utf8");
+    expect(await codexCommand("codex", { PATH: folder }, "win32")).toEqual({ command: join(folder, "codex.cmd") });
+  });
+
+  it("leaves a Windows name the shell can find when nothing is on PATH", async () => {
+    expect(await codexCommand("codex", { PATH: "" }, "win32")).toEqual({ command: "codex.cmd" });
+  });
+
+  it("keeps the file connect already found", async () => {
+    const found = join(tmpdir(), "bin", "codex");
+    expect(await codexCommand(found, { PATH: "" }, "darwin")).toEqual({ command: found });
+  });
+
+  it("runs a Windows shim through the shell, and a program itself", () => {
+    expect(platformCommand("C:\\bin\\codex.cmd", ["exec", "-"], "win32")).toEqual({
+      file: '^"C:\\bin\\codex.cmd^"', args: ['^"exec^"', '^"-^"'], shell: true,
+    });
+    expect(platformCommand("C:\\Program Files\\nodejs\\node.exe", ["codex.cjs"], "win32")).toEqual({
+      file: "C:\\Program Files\\nodejs\\node.exe", args: ["codex.cjs"], shell: false,
+    });
+    expect(platformCommand("/usr/local/bin/codex", ["exec"], "darwin")).toEqual({
+      file: "/usr/local/bin/codex", args: ["exec"], shell: false,
+    });
   });
 });
 
@@ -157,7 +203,9 @@ describe("answering a message", () => {
     expect(said).toEqual(["@alice.dev  Hey, what's up", "Sent the answer to @alice.dev."]);
     const calls = await codex.calls();
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.slice(0, 5)).toEqual(["exec", "--json", "--skip-git-repo-check", "--sandbox", "workspace-write"]);
+    expect(calls[0]!.args.slice(0, 5)).toEqual(["exec", "--json", "--skip-git-repo-check", "--sandbox", "workspace-write"]);
+    expect(calls[0]!.args.at(-1)).toBe("-");
+    expect(calls[0]!.prompt).toBe(codexPrompt("alice.dev", "Hey, what's up"));
   });
 
   it("keeps the chat's context, and starts a new session for a new chat", async () => {
@@ -172,7 +220,7 @@ describe("answering a message", () => {
       signal: new AbortController().signal, say: () => undefined,
     });
     const calls = await codex.calls();
-    expect(calls.map((call) => call.slice(0, 3))).toEqual([
+    expect(calls.map((call) => call.args.slice(0, 3))).toEqual([
       ["exec", "--json", "--skip-git-repo-check"],
       ["exec", "resume", "01a0-thread"],
       ["exec", "--json", "--skip-git-repo-check"],

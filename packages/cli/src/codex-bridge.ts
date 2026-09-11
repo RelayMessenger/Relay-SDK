@@ -1,9 +1,10 @@
 import type Relay from "@relaymessenger/sdk";
 import type { MessagePartResponse, RelayWebhookEvent } from "@relaymessenger/sdk";
-import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
+import { findExecutable } from "./runtime-sniff.js";
+import { spawnCommand } from "./spawn-command.js";
 
 /**
  * What `relay connect codex` leaves running so Codex answers by itself.
@@ -35,6 +36,9 @@ export const MAX_RELAY_TEXT = 10_000;
 /** Codex may write files in the folder it was started in, and is never asked to confirm. */
 export const CODEX_SANDBOX = "workspace-write";
 
+/** Where the prompt would stand: Codex reads it from stdin instead. */
+export const CODEX_PROMPT_ON_STDIN = "-";
+
 /**
  * One message, as the prompt Codex is given. Codex keeps its Relay tools during
  * the run, so the prompt says who answers the person: this process sends the
@@ -53,20 +57,30 @@ export const codexPrompt = (sender: string, text: string): string => [
  * (codex-cli 0.154.0). `resume` takes a session id and keeps the chat's
  * context; it has no `--sandbox`, so the same setting travels as a config
  * override, whose value is read as TOML.
+ *
+ * The prompt is not on this line. `-` is where the prompt would stand, and it
+ * means Codex reads it from stdin: "If not provided as an argument (or if `-`
+ * is used), instructions are read from stdin" (`codex exec --help`), and
+ * "Prompt to send after resuming the session. If `-` is used, read from stdin"
+ * (`codex exec resume --help`). A message a person wrote cannot go on a
+ * command line on Windows at all, where Codex is a `.cmd` shim that only
+ * `cmd.exe` can run, and `cmd.exe` ends the command at the first newline
+ * (spawn-command.ts). Both lines were run against codex-cli 0.154.0 on
+ * 2026-09-11 and answered.
  */
-export const codexExecArgs = (input: { prompt: string; answerFile: string; threadId?: string }): string[] =>
+export const codexExecArgs = (input: { answerFile: string; threadId?: string }): string[] =>
   input.threadId === undefined
     ? [
       "exec", "--json", "--skip-git-repo-check",
       "--sandbox", CODEX_SANDBOX,
       "--output-last-message", input.answerFile,
-      input.prompt,
+      CODEX_PROMPT_ON_STDIN,
     ]
     : [
       "exec", "resume", input.threadId, "--json", "--skip-git-repo-check",
       "-c", `sandbox_mode="${CODEX_SANDBOX}"`,
       "--output-last-message", input.answerFile,
-      input.prompt,
+      CODEX_PROMPT_ON_STDIN,
     ];
 
 export interface CodexOutput {
@@ -110,21 +124,49 @@ export interface CodexAnswer {
 
 export type CodexRunner = (run: CodexRun) => Promise<CodexAnswer>;
 
+/** What to run for Codex: the file, and anything that comes before `exec`. */
+export interface CodexCommand {
+  command: string;
+  /** Empty for the `codex` on this computer; a test's stand-in is a script Node runs. */
+  args?: readonly string[];
+}
+
+/**
+ * The file to run for Codex. connect hands over the one its own sniff found on
+ * PATH, and the bare name when it found none (connect.ts). Windows has no file
+ * called `codex`: npm installs the shim `codex.cmd`, which is what the sniff
+ * looks for there (runtime-sniff.ts), so a bare name is looked up again here
+ * and, failing that, left with the extension `cmd.exe` can find.
+ */
+export const codexCommand = async (
+  found: string,
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): Promise<CodexCommand> => {
+  if (isAbsolute(found)) return { command: found };
+  const onPath = await findExecutable(found, env, platform);
+  return { command: onPath ?? (platform === "win32" ? `${found}.cmd` : found) };
+};
+
 /** Runs the `codex` on this computer, in the folder connect ran in. */
-export const codexRunner = (command: string, cwd: string): CodexRunner => async (run) => {
+export const codexRunner = (codex: CodexCommand, cwd: string): CodexRunner => async (run) => {
   const folder = await mkdtemp(join(tmpdir(), "relay-codex-"));
   const answerFile = join(folder, "answer.txt");
   try {
-    const args = codexExecArgs({
-      prompt: run.prompt, answerFile,
+    const args = [...codex.args ?? [], ...codexExecArgs({
+      answerFile,
       ...(run.threadId === undefined ? {} : { threadId: run.threadId }),
-    });
+    })];
     const finished = await new Promise<{ code: number; output: string }>((resolve) => {
-      // Nothing is piped in: Codex appends whatever it reads on stdin to the
-      // prompt, and this terminal's stdin belongs to the person.
-      const child = spawn(command, args, {
-        cwd, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, signal: run.signal,
+      // Started the way every other command this CLI runs is started, so the
+      // `.cmd` shim npm installs on Windows runs too (spawn-command.ts).
+      const child = spawnCommand(codex.command, args, {
+        cwd, stdio: ["pipe", "pipe", "pipe"], signal: run.signal,
       });
+      // The prompt, where `-` stands on the command line. The person's own
+      // terminal is never read: this is a pipe of the bridge's own.
+      child.stdin?.on("error", () => { /* Codex stopped before it read the prompt. */ });
+      child.stdin?.end(run.prompt);
       let output = "";
       child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString("utf8"); });
       child.stderr?.resume();

@@ -1,5 +1,4 @@
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
-import { spawn } from "node:child_process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createAgentWithPicture, incompletePictureMessage } from "./agent-create.js";
@@ -26,6 +25,7 @@ import { CliError, type CliErrorCode } from "./error-codes.js";
 import { preparePrivateDestination, writePrivateDestination } from "./private-file.js";
 import { renderTerminalQR } from "./qr-terminal.js";
 import { safeMetadata } from "./output.js";
+import { spawnCommand } from "./spawn-command.js";
 import { runTerminalWatch, type TerminalObserver } from "./terminal-watch.js";
 
 /** The plugin, and the marketplace it comes from, exactly as Claude Code names
@@ -381,7 +381,7 @@ export const waitForNewSender = async (
 
 const defaultRunCommand = async (file: string, args: readonly string[]): Promise<ConnectCommandResult> =>
   new Promise((resolve) => {
-    const child = spawn(file, [...args], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const child = spawnCommand(file, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
@@ -392,7 +392,7 @@ const defaultRunCommand = async (file: string, args: readonly string[]): Promise
 
 const defaultStartCommand = async (file: string, args: readonly string[]): Promise<number> =>
   new Promise((resolve) => {
-    const child = spawn(file, [...args], { stdio: "inherit", windowsHide: true });
+    const child = spawnCommand(file, args, { stdio: "inherit" });
     child.once("error", () => resolve(127));
     child.once("close", (code) => resolve(code ?? 1));
   });

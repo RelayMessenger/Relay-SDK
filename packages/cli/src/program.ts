@@ -5,7 +5,7 @@ import { createAgentWithPicture, incompletePictureMessage } from "./agent-create
 import { homedir } from "node:os";
 import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactiveEntry, HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { runConnect, ConnectFailure, type ConnectOptions as ConnectRunOptions } from "./connect.js";
-import { codexRunner, runCodexBridge } from "./codex-bridge.js";
+import { codexCommand, codexRunner, runCodexBridge } from "./codex-bridge.js";
 import { sdkTerminalObserver } from "./terminal-watch.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
@@ -329,7 +329,7 @@ export const createProgram = (
           try {
             await runCodexBridge({
               client: new Relay({ apiKey: input.token, baseURL: input.apiURL, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) }),
-              run: codexRunner(input.command, input.cwd),
+              run: codexRunner(await codexCommand(input.command, env), input.cwd),
               signal: control.signal,
               say: input.say,
             });

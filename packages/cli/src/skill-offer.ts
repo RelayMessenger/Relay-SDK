@@ -1,5 +1,5 @@
 import { stripVTControlCharacters } from "node:util";
-import { spawn } from "node:child_process";
+import { spawnCommand } from "./spawn-command.js";
 import { access, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
@@ -195,12 +195,11 @@ export const relaySkillGlobalArgs = (
  */
 export async function installRelaySkill(cwd: string, env: NodeJS.ProcessEnv, args: readonly string[] = RELAY_SKILL_INSTALL_ARGS, headless = false): Promise<void> {
   const executable = await resolveNpx(env);
-  const windows = process.platform === "win32";
-  const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(windows ? quote(executable) : executable, windows ? args.map(quote) : [...args], {
+    // Windows runs the `npx.cmd` shim npm installs through its shell (spawn-command.ts).
+    const child = spawnCommand(executable, args, {
       cwd, env: headless ? { ...installerEnvironment(env), NO_COLOR: "1" } : installerEnvironment(env),
-      stdio: headless ? ["ignore", "pipe", "pipe"] : "inherit", shell: windows, windowsHide: true,
+      stdio: headless ? ["ignore", "pipe", "pipe"] : "inherit",
     });
     // skills@1.5.25 emits literal ANSI even with NO_COLOR=1 (measured 2026-09-10).
     // Decision row 9 requires plain diagnostics, so render its headless output once.
