@@ -109,6 +109,8 @@ export interface ConnectDependencies {
   bridge?: (input: {
     token: string;
     apiURL: string;
+    /** The agent that answers, so its Codex threads are kept apart from another's. */
+    handle: string;
     command: string;
     cwd: string;
     say(line: string): void;
@@ -689,7 +691,7 @@ export const runConnect = async (
     if (bridge && deps.bridge) {
       screen.say(`${bridge.label} answers your Relay messages from ${deps.cwd}. Press Control-C to stop.`);
       await deps.bridge({
-        token: agent.token, apiURL: agent.apiURL, command: bridge.command, cwd: deps.cwd,
+        token: agent.token, apiURL: agent.apiURL, handle: agent.handle, command: bridge.command, cwd: deps.cwd,
         say: (line) => screen.say(safeMetadata(line, secrets)),
       });
       screen.say(`Stopped. ${bridge.label} no longer answers your Relay messages.`);

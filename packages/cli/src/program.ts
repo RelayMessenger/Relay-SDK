@@ -5,7 +5,8 @@ import { createAgentWithPicture, incompletePictureMessage } from "./agent-create
 import { homedir } from "node:os";
 import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactiveEntry, HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { runConnect, ConnectFailure, type ConnectOptions as ConnectRunOptions } from "./connect.js";
-import { codexCommand, codexRunner, runCodexBridge } from "./codex-bridge.js";
+import { codexCommand, runCodexBridge } from "./codex-bridge.js";
+import { openCodexThreads } from "./codex-threads.js";
 import { sdkTerminalObserver } from "./terminal-watch.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
@@ -329,7 +330,11 @@ export const createProgram = (
           try {
             await runCodexBridge({
               client: new Relay({ apiKey: input.token, baseURL: input.apiURL, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) }),
-              run: codexRunner(await codexCommand(input.command, env), input.cwd),
+              codex: await codexCommand(input.command, env),
+              cwd: input.cwd,
+              // The chat's Codex thread outlives this run, so a restart picks
+              // every chat up where it stopped (codex-threads.ts).
+              threads: await openCodexThreads({ apiURL: input.apiURL, handle: input.handle }, configContext),
               signal: control.signal,
               say: input.say,
             });
