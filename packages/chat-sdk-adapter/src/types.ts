@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 3097ddaed0724d7b9c4af85304355ffb1500d0f1
- * OpenAPI ccc6eed43086ffdd9912a9d021469948128f8dee080f00f15ad2c0c269196cdc
+ * Relay Server afa2b72998a90f9196a2fe573bfa943421c66e56
+ * OpenAPI 3120990c5b4ba81d7e2b733608674f006c7cc6e0f0ddae5188485ebdba5215d5
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -99,6 +99,16 @@ export type RelayOutgoingPart =
   | RelayLinkPart;
 
 export interface RelayTextPartResponse extends RelayTextPart {
+  mentions?: Array<{
+    id: string;
+    handle: string;
+    is_me: boolean;
+    range: [number, number];
+  }> | null;
+  /** @deprecated Use mentions instead. */
+  mention?: string | null;
+  /** @deprecated Use mentions instead. */
+  mention_range?: [number, number] | null;
   reactions?: RelayReaction[] | null;
 }
 

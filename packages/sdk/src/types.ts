@@ -75,6 +75,16 @@ export interface LinkPart {
 export type MessagePart = TextPart | MediaPart | LinkPart;
 
 export interface TextPartResponse extends TextPart {
+  mentions?: Array<{
+    id: string;
+    handle: string;
+    is_me: boolean;
+    range: [number, number];
+  }> | null;
+  /** @deprecated Use mentions instead. */
+  mention?: string | null;
+  /** @deprecated Use mentions instead. */
+  mention_range?: [number, number] | null;
   reactions: Reaction[] | null;
 }
 
