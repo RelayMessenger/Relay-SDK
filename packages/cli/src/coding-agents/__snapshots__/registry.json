@@ -153,6 +153,14 @@
     "connect": {
       "kind": "openclaw-plugin"
     },
+    "start": {
+      "kind": "command",
+      "command": "openclaw",
+      "args": [
+        "gateway"
+      ],
+      "prompt": "Start OpenClaw with Relay now?"
+    },
     "detectedAs": []
   }
 ]
