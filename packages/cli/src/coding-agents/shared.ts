@@ -43,6 +43,13 @@ export interface CodingAgent {
   connect: ConnectMethod;
   start?:
     | { kind: "command"; command: string; args: string[]; prompt: string }
+    /**
+     * Connect keeps running and answers Relay messages with the agent's own
+     * headless command. It is for an agent that cannot start a turn by itself:
+     * Codex reaches Relay through MCP, and MCP only answers a question the
+     * person already asked it.
+     */
+    | { kind: "bridge"; command: string; prompt: string }
     | { kind: "restart"; instruction: string };
   /** What `@vercel/detect-agent` calls it when we are running inside it. */
   detectedAs: readonly string[];

@@ -49,6 +49,9 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}, sniffed: Ru
   });
   const runCommand = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
   const startCommand = vi.fn(async () => 0);
+  // Codex's offer leaves connect answering messages; a test says what it printed
+  // and returns, the way Control-C ends it for a person.
+  const bridge = vi.fn(async (input: { say(line: string): void }) => { input.say("Codex answered nothing here."); });
   const observer: TerminalObserver = { semantics: "observational-no-ack", run: async () => undefined };
   const deps: ProgramDependencies = {
     configContext: { env, home, platform: process.platform },
@@ -60,10 +63,10 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}, sniffed: Ru
     skillInstaller: async () => undefined,
     stdout: (value) => stdout.push(value),
     stderr: (value) => stderr.push(value),
-    connect: { sniff: async () => sniffed, runCommand, startCommand, observer: () => observer, renderQR: () => "[QR]\n", pairTimeoutMs: 10, version: "0.1.6-staging.0" },
+    connect: { sniff: async () => sniffed, runCommand, startCommand, bridge, observer: () => observer, renderQR: () => "[QR]\n", pairTimeoutMs: 10, version: "0.1.6-staging.0" },
     ...overrides,
   };
-  return { deps, env, home, prompts, fetch, runCommand, startCommand, stdout, stderr, channel: join(home, ".claude", "channels", "relay") };
+  return { deps, env, home, prompts, fetch, runCommand, startCommand, bridge, stdout, stderr, channel: join(home, ".claude", "channels", "relay") };
 }
 
 const ranLines = (f: Awaited<ReturnType<typeof fixture>>): string[] =>
@@ -282,8 +285,8 @@ describe("the MCP agents", () => {
     const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" }, cursor: { found: true, configPath: "/fake/.cursor" } }));
     expect(await runCLI(["connect", "--all", "--new", "--no-skill"], f.deps)).toBe(0);
     expect(f.prompts.confirm).toHaveBeenCalledTimes(2);
-    expect(f.prompts.confirm).toHaveBeenLastCalledWith("Start Codex with Relay now?");
-    expect(f.stdout.join("")).toContain("Relay will do 2 things. Continue?");
+    expect(f.prompts.confirm).toHaveBeenLastCalledWith("Answer Relay messages with Codex from this folder?");
+    expect(f.stdout.join("")).toContain("Relay will do 3 things. Continue?");
     expect(ranLines(f)).toHaveLength(1);
     expect(JSON.parse(await readFile(join(f.home, ".cursor", "mcp.json"), "utf8")).mcpServers.relay).toEqual(server(f));
     expect(f.stdout.join("")).toContain("Relay is ready for Codex, Cursor.");

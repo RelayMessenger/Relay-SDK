@@ -6,12 +6,11 @@ import { runCLI } from "../program.js";
 import codex from "./codex.js";
 
 describe("Codex start", () => {
-  it("offers the interactive command using the saved MCP config", () => {
+  it("offers to answer Relay messages instead of handing over the terminal", () => {
     expect(codex.start).toEqual({
-      kind: "command",
+      kind: "bridge",
       command: "codex",
-      args: [],
-      prompt: "Start Codex with Relay now?",
+      prompt: "Answer Relay messages with Codex from this folder?",
     });
   });
 
@@ -38,6 +37,6 @@ describe("Codex start", () => {
       },
     });
     expect(code, stderr.join("")).toBe(0);
-    expect(JSON.parse(stdout.join("")).agents[0].start_command).toBe(executable ?? "codex");
+    expect(JSON.parse(stdout.join("")).agents[0].bridge_command).toBe(executable ?? "codex");
   });
 });

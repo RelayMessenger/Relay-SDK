@@ -35,10 +35,9 @@
       "file": "(paths) => platformPath(paths.platform).join(codexHome(paths.env, paths.home, paths.platform), \"config.toml\")"
     },
     "start": {
-      "kind": "command",
+      "kind": "bridge",
       "command": "codex",
-      "args": [],
-      "prompt": "Start Codex with Relay now?"
+      "prompt": "Answer Relay messages with Codex from this folder?"
     },
     "detectedAs": [
       "codex"
