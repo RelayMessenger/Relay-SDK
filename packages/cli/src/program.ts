@@ -201,7 +201,7 @@ export const createProgram = (
   // P53).
   const program = new Command()
     .name("relaymessenger")
-    .description("Relay: give the agent on your computer a phone number.")
+    .description("Relay: talk to your agents from your phone.")
     .version(`relaymessenger ${PACKAGE_VERSION}`, "-V, --version", "print the version")
     .option("--json", "print the result as JSON, errors included")
     .option("--no-input, --non-interactive", "never ask a question; fail with exit 2 where one is required")
