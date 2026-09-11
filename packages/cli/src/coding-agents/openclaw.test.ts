@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { runCLI } from "../program.js";
@@ -14,7 +15,7 @@ it("declares the OpenClaw gateway start command", () => {
 });
 
 it.each([undefined, "/fake/bin/openclaw"])("connect resolves the gateway executable (%s)", async (executable) => {
-  const scratch = "/tmp/target-start-openclaw-20260911";
+  const scratch = join(tmpdir(), "relay-target-start-test");
   await mkdir(scratch, { recursive: true });
   const home = await mkdtemp(join(scratch, "connect-"));
   const stdout: string[] = [];
