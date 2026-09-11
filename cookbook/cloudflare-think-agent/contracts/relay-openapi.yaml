@@ -2321,9 +2321,8 @@ components:
               properties:
                 initials:
                   type: string
-                  minLength: 0
-                  maxLength: 16
-                  description: Up to four graphemes without spaces, at most 16 UTF-8 bytes. Empty initials indicate a gradient-only default.
+                  minLength: 1
+                  description: One to four graphemes without spaces, at most 16 UTF-8 bytes.
         background:
           $ref: "#/components/schemas/AgentImageBackground"
     AgentEmojiImageRecipe:
