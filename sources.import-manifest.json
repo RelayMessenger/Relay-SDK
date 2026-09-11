@@ -712,7 +712,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "package.json",
       "source_sha256": "271918f460e07d8f61106da4bfbda7e2190a6b61214c809bd880c3fc51cb6bcd",
-      "destination_sha256": "7c8d9db5f8a73d723469f52b0a3b225e9393934971379b404174b05eff826303",
+      "destination_sha256": "67a3e4566706e6dde40ac56cc7845526984ee53712f74699834d0eeff6ff6cf6",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -723,10 +723,10 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "scripts/check-boundaries.mjs",
       "source_sha256": "6c8de7555076e2bab49e613089cf9cfefef005f1ac4461cbdceb1a5ed623c05a",
-      "destination_sha256": "6c8de7555076e2bab49e613089cf9cfefef005f1ac4461cbdceb1a5ed623c05a",
+      "destination_sha256": "78a98809a8e85452025082c11f2debf5c2b3c0bbcdaf4c46fd69d4ac6fcdffdd",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/cli/scripts/check-contract.mjs",
@@ -866,7 +866,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/program.ts",
       "source_sha256": "518b2a0b33539c4599832e0de3e62902e558879b1a7f5ed4ceac9877e3caed91",
-      "destination_sha256": "fa548f7c8b01bd8fab90b6164608bebadfaff6b01ceac7378917d00af042070a",
+      "destination_sha256": "f8dcf050580dc241cd079b2cb19ed6c0d30851877b265d295e8a46b3073647b8",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

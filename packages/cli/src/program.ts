@@ -7,6 +7,8 @@ import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactive
 import { runConnect, ConnectFailure, type ConnectOptions as ConnectRunOptions } from "./connect.js";
 import { codexCommand, runCodexBridge } from "./codex-bridge.js";
 import { openCodexThreads } from "./codex-threads.js";
+import { acpCommand, relayMcpServer, runAcpBridge } from "./acp-bridge.js";
+import { openAcpSessions } from "./acp-threads.js";
 import { sdkTerminalObserver } from "./terminal-watch.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
@@ -321,23 +323,42 @@ export const createProgram = (
         // Pairing watches the agent's own events; it never answers Relay and
         // never takes an event, so the runtime still receives every message.
         observer: (token, apiURL) => sdkTerminalObserver(new Relay({ apiKey: token, baseURL: apiURL, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) })),
-        // Codex cannot start a turn of its own, so connect stays and answers
-        // for it. Control-C ends the wait and the command (codex-bridge.ts).
+        // Codex, Cursor, Gemini CLI and OpenCode cannot start a turn of their
+        // own, so connect stays and answers for them: Codex over its app-server
+        // (codex-bridge.ts), the others over ACP (acp-bridge.ts). Control-C ends
+        // the wait and the command.
         bridge: async (input) => {
           const control = new AbortController();
           const stop = (): void => control.abort();
           process.once("SIGINT", stop);
+          const relayClient = () => new Relay({ apiKey: input.token, baseURL: input.apiURL, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) });
           try {
-            await runCodexBridge({
-              client: new Relay({ apiKey: input.token, baseURL: input.apiURL, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) }),
-              codex: await codexCommand(input.command, env),
-              cwd: input.cwd,
-              // The chat's Codex thread outlives this run, so a restart picks
-              // every chat up where it stopped (codex-threads.ts).
-              threads: await openCodexThreads({ apiURL: input.apiURL, handle: input.handle }, configContext),
-              signal: control.signal,
-              say: input.say,
-            });
+            if (input.kind === "acp") {
+              await runAcpBridge({
+                client: relayClient(),
+                acp: await acpCommand(input.command, input.acpArgs ?? [], env),
+                cwd: input.cwd,
+                // Relay's own tools travel through the agent's session.
+                mcpServers: [relayMcpServer(input.mcpServer)],
+                label: input.label,
+                // The chat's ACP session outlives this run, so a restart picks
+                // every chat up where it stopped (acp-threads.ts).
+                sessions: await openAcpSessions({ apiURL: input.apiURL, handle: input.handle }, configContext),
+                signal: control.signal,
+                say: input.say,
+              });
+            } else {
+              await runCodexBridge({
+                client: relayClient(),
+                codex: await codexCommand(input.command, env),
+                cwd: input.cwd,
+                // The chat's Codex thread outlives this run, so a restart picks
+                // every chat up where it stopped (codex-threads.ts).
+                threads: await openCodexThreads({ apiURL: input.apiURL, handle: input.handle }, configContext),
+                signal: control.signal,
+                say: input.say,
+              });
+            }
           } finally {
             process.off("SIGINT", stop);
           }

@@ -6,11 +6,19 @@ const agent: CodingAgent =
     id: "cursor",
     label: "Cursor",
     aliases: [],
+    command: "cursor-agent",
     installedIf: (paths) => [platformPath(paths.platform).join(paths.home, ".cursor")],
-    // https://cursor.com/docs/context/mcp: "Create ~/.cursor/mcp.json in your home
-    // directory for tools available everywhere"; entries live under `mcpServers`.
-    connect: { kind: "mcp-file", file: (paths) => platformPath(paths.platform).join(paths.home, ".cursor", "mcp.json"), shape: "mcpServers" },
-    start: { kind: "restart", instruction: "Restart Cursor to load Relay, then ask it to read your Relay messages." },
+    // Cursor cannot start a turn from an mcp.json entry, so Relay writes none
+    // and drives Cursor over ACP instead (acp-bridge.ts).
+    connect: { kind: "acp-bridge" },
+    // `cursor-agent acp` is Cursor's ACP server over stdio (cursor.com/docs/cli/acp;
+    // acpx alias `cursor -> cursor-agent acp`, _sources/.../acp-router/SKILL.md).
+    start: {
+      kind: "acp-bridge",
+      command: "cursor-agent",
+      args: ["acp"],
+      prompt: "Answer Relay messages with Cursor from this folder?",
+    },
     detectedAs: ["cursor", "cursor-cli"],
   };
 

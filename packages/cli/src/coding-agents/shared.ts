@@ -50,6 +50,14 @@ export interface CodingAgent {
      * person already asked it.
      */
     | { kind: "bridge"; command: string; prompt: string }
+    /**
+     * Connect keeps running and answers Relay messages by driving the agent
+     * over the Agent Client Protocol (acp-bridge.ts). `args` is the ACP
+     * sub-command, confirmed from the agent's own docs (`cursor-agent acp`,
+     * `gemini --experimental-acp`, `opencode acp`, `cline --acp`). It is
+     * required: an agent whose ACP command is not confirmed is not wired here.
+     */
+    | { kind: "acp-bridge"; command: string; args: readonly string[]; prompt: string }
     | { kind: "restart"; instruction: string };
   /** What `@vercel/detect-agent` calls it when we are running inside it. */
   detectedAs: readonly string[];

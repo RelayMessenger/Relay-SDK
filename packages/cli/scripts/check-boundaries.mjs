@@ -17,7 +17,6 @@ const manifest = JSON.parse(
 );
 
 for (const forbidden of [
-  "@agentclientprotocol/",
   "/v1/events",
   "/v1/pairings",
   "/v1/agents/me",
@@ -30,13 +29,14 @@ for (const forbidden of [
   );
 }
 
-for (const dependency of Object.keys(manifest.dependencies ?? {})) {
-  assert.equal(
-    dependency.startsWith("@agentclientprotocol/"),
-    false,
-    `Obsolete runtime dependency leaked into package: ${dependency}`,
-  );
-}
+// The ACP bridge drives Cursor, Gemini CLI and OpenCode over the Agent Client
+// Protocol (acp-bridge.ts, owner ruling 2026-09-11), so `@agentclientprotocol/`
+// is now a required dependency and import, not a forbidden one.
+assert.equal(
+  Object.keys(manifest.dependencies ?? {}).includes("@agentclientprotocol/sdk"),
+  true,
+  "The ACP bridge needs @agentclientprotocol/sdk as a runtime dependency.",
+);
 
 assert.match(source, /@relaymessenger\/sdk/);
 assert.doesNotMatch(source, /fetch\([^)]*api\.relayapp\.im/);

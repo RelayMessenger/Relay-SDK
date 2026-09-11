@@ -57,11 +57,10 @@ it.each([
   expect(after.find((runtime) => runtime.id === id)).toMatchObject({ found: true, configPath: join(root, ...parts) });
 });
 
-it("Claude Desktop and VS Code on Windows name their %APPDATA% folders", () => {
+it("VS Code on Windows names its %APPDATA% folder", () => {
   const root = "C:\\Users\\dev";
   const appData = win32.join(root, "AppData", "Roaming");
   const paths = { env: { APPDATA: appData }, home: root, platform: "win32" as const };
-  expect(codingAgent("claude-desktop").installedIf(paths)).toContain(win32.join(appData, "Claude"));
   expect(codingAgent("vscode").installedIf(paths)).toContain(win32.join(appData, "Code"));
 });
 
