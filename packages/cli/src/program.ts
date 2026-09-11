@@ -642,7 +642,8 @@ export const createProgram = (
     .command("create")
     .description("create a Chat with at most 7 total participants, including the sender")
     .requiredOption("--from <handle>", "sender Handle", handle)
-    .requiredOption("--to <handles...>", "at most 6 recipient Handles", (value) => handle(value))
+    .requiredOption("--to <handles...>", "at most 6 recipient Handles; repeat --to or use a comma-separated list",
+      (value: string, previous: string[] = []) => [...previous, ...value.split(",").map(handle)])
     .requiredOption("--text <text>", "the text to send")
     .requiredOption("--idempotency-key <key>", "reuse this key to avoid sending the same request twice")
     .action(async (
