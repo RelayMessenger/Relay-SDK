@@ -1064,7 +1064,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/server.test.ts",
       "source_sha256": "139f264949013c31d667e8e2ef72619ab2a5ead79ce5a896ecf909c10de80dcd",
-      "destination_sha256": "60567f1ae47ebb2c7d474954650a260a015d21b803cba51d3c83dbfaed7cf04f",
+      "destination_sha256": "362314ce8e2ffd46a6b7964b4fc61a78e303e5142b04ac8f23252df2a07047f2",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1075,7 +1075,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/server.ts",
       "source_sha256": "6040d775b0546cbabe46206f2a87b4b3d67f624163ce2de4c0ec0428dff49156",
-      "destination_sha256": "5d25827af35f70afee2476b93b1e40e56f684db148886f117c3eb53aa8687a4e",
+      "destination_sha256": "a494ebddeb546ba3773e33793fcf8bb102a94126a325c2e1b4f15526f9ce07cd",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1086,10 +1086,10 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "tsconfig.json",
       "source_sha256": "1445dd8db045a3fbb54e3d11bd1bde3ac2f0993edb130d479e8a32fb11add94d",
-      "destination_sha256": "1445dd8db045a3fbb54e3d11bd1bde3ac2f0993edb130d479e8a32fb11add94d",
+      "destination_sha256": "a74040aa3597451a18a7f628d9dbed97401e05affaa49220f96614814665b997",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/openclaw/.gitignore",

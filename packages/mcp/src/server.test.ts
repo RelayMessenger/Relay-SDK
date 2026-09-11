@@ -1,7 +1,8 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import type Relay from "@relaymessenger/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRelayMcpServer } from "./server.js";
+import { createRelayMcpServer, PACKAGE_VERSION } from "./server.js";
+import pkg from "../package.json" with { type: "json" };
 
 const CHAT_ID = "01993d50-754d-7f51-a51b-5da552024fd1";
 const MESSAGE_ID = "01993d50-4133-7178-8e16-7c1455c91d43";
@@ -255,5 +256,11 @@ describe("explicit Relay MCP tools", () => {
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result)).not.toContain(token);
     expect(JSON.stringify(result)).toContain("[REDACTED]");
+  });
+});
+
+describe("package version", () => {
+  it("PACKAGE_VERSION matches the manifest at runtime", () => {
+    expect(PACKAGE_VERSION).toBe(pkg.version);
   });
 });
