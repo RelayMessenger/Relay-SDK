@@ -382,6 +382,76 @@ describe("with no terminal", () => {
 });
 
 describe("connect first reply proof", () => {
+  it.each([undefined, "/fake/bin/target"])("starts a fake command target and prints its reply (executable=%s)", async (executable) => {
+    const definition = codingAgent("cursor");
+    const previous = definition.start;
+    definition.start = { kind: "command", command: "fake-target", args: ["--relay"], prompt: "Start fake target now?" };
+    try {
+      const f = await fixture({}, runtimes({ cursor: { found: true, ...(executable ? { executable } : {}) } }));
+      let emit: Parameters<TerminalObserver["run"]>[0]["onEvent"];
+      f.deps.connect!.observer = () => ({
+        semantics: "observational-no-ack",
+        run: async (input) => {
+          emit = input.onEvent;
+        },
+      });
+      f.startCommand.mockImplementation(async () => {
+        emit({ event_type: "message.sent", data: { sender_handle: { handle: card.handle }, parts: [{ type: "text", value: "fake answer" }] } } as never);
+        expect(f.stdout.join("")).not.toContain("Answered from your phone:");
+        return 0;
+      });
+      expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+      expect(f.prompts.confirm).toHaveBeenCalledWith("Start fake target now?");
+      expect(f.startCommand).toHaveBeenCalledExactlyOnceWith(executable ?? "fake-target", ["--relay"]);
+      expect(f.stdout.join("")).toContain("Answered from your phone: fake answer");
+    } finally {
+      if (previous) definition.start = previous; else delete definition.start;
+    }
+  });
+
+  it("prints a fake restart instruction and waits for the bounded reply", async () => {
+    const definition = codingAgent("cursor");
+    const previous = definition.start;
+    definition.start = { kind: "restart", instruction: "Restart Fake App to load Relay." };
+    try {
+      const f = await fixture();
+      const run = vi.fn(async (input: Parameters<TerminalObserver["run"]>[0]) => {
+        expect(f.stdout.join("")).toContain("Restart Fake App to load Relay.");
+        await new Promise<void>(resolve => {
+          input.signal.addEventListener("abort", () => resolve(), { once: true });
+          void vi.advanceTimersByTimeAsync(300_000);
+        });
+      });
+      f.deps.connect!.observer = () => ({ semantics: "observational-no-ack", run });
+      vi.useFakeTimers();
+      expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+      expect(run).toHaveBeenCalledOnce();
+      expect(f.stdout.join("")).toContain("Restart Fake App to load Relay.");
+      expect(f.startCommand).not.toHaveBeenCalled();
+      expect(f.prompts.confirm).not.toHaveBeenCalled();
+      expect(f.stdout.join("")).not.toContain("You might have to restart");
+      expect(f.stdout.join("")).toContain(`No reply yet. Run:  relay watch @${card.handle}`);
+    } finally {
+      vi.useRealTimers();
+      if (previous) definition.start = previous; else delete definition.start;
+    }
+  });
+
+  it("keeps the ready path and reply wait for a target without a start", async () => {
+    const f = await fixture();
+    expect(codingAgent("cursor").start).toBeUndefined();
+    const run = vi.fn(async (input: Parameters<TerminalObserver["run"]>[0]) => {
+      input.onEvent({ event_type: "message.sent", data: { sender_handle: { handle: card.handle }, parts: [{ type: "text", value: "still answers" }] } } as never);
+    });
+    f.deps.connect!.observer = () => ({ semantics: "observational-no-ack", run });
+    expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+    expect(f.stdout.join("")).toContain("Relay is ready for Cursor.");
+    expect(f.stdout.join("")).toContain("Answered from your phone: still answers");
+    expect(f.prompts.confirm).not.toHaveBeenCalled();
+    expect(f.startCommand).not.toHaveBeenCalled();
+    expect(run).toHaveBeenCalledOnce();
+  });
+
   it.each(CODING_AGENT_IDS)("%s prints only this agent's first reply, even with --no-start", async (target) => {
     const f = await fixture();
     const run = vi.fn(async (input: Parameters<TerminalObserver["run"]>[0]) => {
@@ -425,7 +495,7 @@ describe("connect first reply proof", () => {
       return 0;
     });
     expect(await runCLI(["connect", "claude", "--token", token, "--yes", "--allow", "person", "--no-skill"], f.deps)).toBe(0);
-    expect(f.startCommand).toHaveBeenCalledOnce();
+    expect(f.startCommand).toHaveBeenCalledExactlyOnceWith("/fake/bin/claude", ["--dangerously-load-development-channels", "plugin:relay@relay-messenger"]);
     expect(stopped).toBe(true);
     const outcome = hasReply ? "Answered from your phone: first answer" : `No reply yet. Run:  relay watch @${card.handle}`;
     expect(order.slice(-2)).toEqual(["start returned", outcome]);

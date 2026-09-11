@@ -36,9 +36,6 @@ export const CLAUDE_PLUGIN_ID = "relay@relay-messenger";
  * `main`, the same rule the Relay skill installer already follows. */
 export const claudeMarketplaceSource = (version: string = packageVersion()): string =>
   `${CLAUDE_MARKETPLACE_REPO}@${isStagingBuild(version) ? "staging" : "main"}`;
-/** Relay is not yet on the default channel allowlist, so a custom start is
- * required during the research preview (packages/claude-code/README.md). */
-export const CLAUDE_START_ARGS = ["--dangerously-load-development-channels", `plugin:${CLAUDE_PLUGIN_ID}`] as const;
 /** Pairing waits this long for a first message before it names --allow instead. */
 export const PAIR_TIMEOUT_MS = 180_000;
 export const REPLY_TIMEOUT_MS = 300_000;
@@ -575,17 +572,17 @@ export const runConnect = async (
   const runCommand = deps.runCommand ?? defaultRunCommand;
   const done: Array<Record<string, unknown>> = [];
   const allowed = [...allow];
-  let claudeStart: string | undefined;
+  const starts: Array<{ command: string; args: string[]; label: string }> = [];
   for (const target of targets) {
     const runtime = runtimes.find((entry) => entry.id === target);
     const planned = plan.agents.find((entry) => entry.agent === target)!;
-    const method = codingAgent(target).connect;
+    const definition = codingAgent(target);
+    const method = definition.connect;
     const ctx = context(agent, replacing);
     const result: Record<string, unknown> = { agent: target, files: planned.files, commands: planned.commands };
     if (method.kind === "claude-plugin") {
       const channelDir = claudeChannelDir(deps.env, deps.home);
       const envPath = join(channelDir, ".env");
-      const claude = runtime?.executable ?? "claude";
       await runAgentCommands(target, runtime, ctx, runCommand);
       screen.step("Plugin installed");
       await writeChannelEnv(channelDir, { token: agent.token, baseURL: agent.apiURL, allowedSenders: allowed }, platform);
@@ -598,8 +595,7 @@ export const runConnect = async (
           screen.step(`Allowed: @${paired}`);
         }
       }
-      claudeStart = `${claude} ${CLAUDE_START_ARGS.join(" ")}`;
-      Object.assign(result, { env_path: envPath, plugin: CLAUDE_PLUGIN_ID, marketplace: claudeMarketplaceSource(version), allowed_senders: allowed, start_command: claudeStart });
+      Object.assign(result, { env_path: envPath, plugin: CLAUDE_PLUGIN_ID, marketplace: claudeMarketplaceSource(version), allowed_senders: allowed });
     } else if (method.kind === "mcp-command") {
       await runAgentCommands(target, runtime, ctx, runCommand);
       screen.step(`Relay MCP server added to ${codingAgent(target).label}  ${planned.files[0]}`);
@@ -627,12 +623,25 @@ export const runConnect = async (
       screen.step(`Config written  ${openclawConfigPath(ctx)}  token owner-only in  ${tokenPath}`);
       Object.assign(result, { token_file: tokenPath, config_path: openclawConfigPath(ctx) });
     }
+    const start = definition.start;
+    if (start?.kind === "command") {
+      const command = runtime?.executable ?? start.command;
+      const commandLine = [command, ...start.args].join(" ");
+      result.start_command = commandLine;
+      if (!json) {
+        const accepted = options.start !== false && Boolean(ui) && await ui!.confirm(start.prompt);
+        if (accepted) {
+          starts.push({ command, args: start.args, label: definition.label });
+        } else {
+          screen.say(`Start it yourself when you are ready:  ${commandLine}`);
+        }
+      }
+    } else if (start?.kind === "restart" && !json) {
+      screen.say(start.instruction);
+    }
     done.push(result);
   }
 
-  const start = claudeStart !== undefined && options.start !== false && Boolean(ui) && !json
-    ? await ui!.confirm("Start Claude Code with Relay now?")
-    : false;
   if (json) {
     deps.stdout(`${JSON.stringify(safeMetadata({
       ok: true, profile: agent.profile, handle: agent.handle, api_url: agent.apiURL, token: "stored", agents: done, proof: "skipped",
@@ -641,13 +650,9 @@ export const runConnect = async (
     screen.say(`Relay is ready for ${targets.map((target) => codingAgent(target).label).join(", ")}.`);
     // Docker MCP's line after a connect (cmd/docker-mcp/client/connect.go:30).
     for (const target of targets) {
-      if (codingAgent(target).connect.kind === "mcp-file") screen.say(`You might have to restart '${codingAgent(target).label}'.`);
+      if (!codingAgent(target).start && codingAgent(target).connect.kind === "mcp-file") screen.say(`You might have to restart '${codingAgent(target).label}'.`);
     }
-    if (claudeStart) {
-      screen.say(start
-        ? `Claude opens next.`
-        : `Start it yourself when you are ready:  ${claudeStart}`);
-    }
+    for (const start of starts) screen.say(`${start.label} opens next.`);
     screen.say(`Later:  relay watch ${agent.handle}  ·  relay doctor`);
   }
   if (options.skill !== false && deps.offerSkill && !json) await deps.offerSkill();
@@ -659,10 +664,12 @@ export const runConnect = async (
       // Subscribe before launching: an immediate reply must not be lost while
       // the foreground agent owns the terminal. Starting remains opt-in.
       const control = new AbortController();
-      const proof = waitForFirstReply(agent, deps, control, !start);
-      if (start) {
+      const proof = waitForFirstReply(agent, deps, control, starts.length === 0);
+      if (starts.length) {
         try {
-          await (deps.startCommand ?? defaultStartCommand)(runtimes.find((entry) => entry.id === "claude-code")?.executable ?? "claude", CLAUDE_START_ARGS);
+          for (const start of starts) {
+            await (deps.startCommand ?? defaultStartCommand)(start.command, start.args);
+          }
         } finally {
           control.abort();
         }

@@ -11,6 +11,15 @@
     "connect": {
       "kind": "claude-plugin"
     },
+    "start": {
+      "kind": "command",
+      "command": "claude",
+      "args": [
+        "--dangerously-load-development-channels",
+        "plugin:relay@relay-messenger"
+      ],
+      "prompt": "Start Claude Code with Relay now?"
+    },
     "detectedAs": [
       "claude"
     ]
