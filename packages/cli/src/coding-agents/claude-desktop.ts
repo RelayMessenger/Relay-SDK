@@ -22,6 +22,7 @@ const agent: CodingAgent =
       }),
       shape: "mcpServers",
     },
+    start: { kind: "restart", instruction: "Restart Claude Desktop to load Relay, then ask it to read your Relay messages." },
     detectedAs: [],
   };
 
