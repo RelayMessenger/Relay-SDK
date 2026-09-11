@@ -94,6 +94,10 @@
       "kind": "mcp-command",
       "file": "(paths) => platformPath(paths.platform).join(paths.home, \".cline\", \"data\", \"settings\", \"cline_mcp_settings.json\")"
     },
+    "start": {
+      "kind": "restart",
+      "instruction": "Restart your editor so Cline loads Relay, then ask Cline to read your Relay messages."
+    },
     "detectedAs": []
   },
   {
