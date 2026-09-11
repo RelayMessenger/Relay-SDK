@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { posix, win32 } from "node:path";
 import { expect, it } from "vitest";
 import { CODING_AGENTS, CODING_AGENT_IDS, agentDetectedAs, codingAgent, normalizeAgentId, supportedAgentsLine } from "./coding-agents.js";
@@ -121,4 +122,18 @@ it("every agent plan uses Windows separators independently of the host", () => {
     expect(agentFiles(id, windows)[0], id).toBe(win32.join(windows.home, expected[index]!));
   });
   expect(agentPlan("codex", windows).commands).toEqual(["codex mcp add relay -- npx -y @relaymessenger/mcp@staging --profile calm_cangoo.dev"]);
+});
+
+it("the split registry preserves every definition and function source", async () => {
+  // Native type stripping preserves function source text; Vitest's bundler does not.
+  const serialized = execFileSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", `
+    import { registerHooks } from "node:module";
+    registerHooks({ resolve(specifier, context, nextResolve) {
+      return nextResolve(specifier.startsWith(".") && specifier.endsWith(".js")
+        ? specifier.slice(0, -3) + ".ts" : specifier, context);
+    } });
+    const { CODING_AGENTS } = await import(${JSON.stringify(new URL("./coding-agents.ts", import.meta.url).href)});
+    process.stdout.write(JSON.stringify(CODING_AGENTS, (_key, value) => typeof value === "function" ? value.toString() : value, 2) + "\\n");
+  `], { encoding: "utf8" });
+  await expect(serialized).toMatchFileSnapshot("./coding-agents/__snapshots__/registry.json");
 });

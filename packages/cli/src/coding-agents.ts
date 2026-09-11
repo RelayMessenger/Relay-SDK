@@ -1,4 +1,15 @@
-import { posix, win32 } from "node:path";
+import claudeCode from "./coding-agents/claude-code.js";
+import codex from "./coding-agents/codex.js";
+import cursor from "./coding-agents/cursor.js";
+import opencode from "./coding-agents/opencode.js";
+import cline from "./coding-agents/cline.js";
+import vscode from "./coding-agents/vscode.js";
+import geminiCli from "./coding-agents/gemini-cli.js";
+import claudeDesktop from "./coding-agents/claude-desktop.js";
+import hermes from "./coding-agents/hermes.js";
+import openclaw from "./coding-agents/openclaw.js";
+export { platformPath, claudeConfigDir, codexHome, hermesHome, openclawHome } from "./coding-agents/shared.js";
+
 
 /**
  * The ten coding agents `connect` knows, in the order the help lists them. This
@@ -61,163 +72,17 @@ export interface CodingAgent {
   detectedAs: readonly string[];
 }
 
-export const platformPath = (platform: NodeJS.Platform) => platform === "win32" ? win32 : posix;
-
-const appData = (paths: AgentPaths): string => paths.env.APPDATA?.trim() || win32.join(paths.home, "AppData", "Roaming");
-const configHome = (paths: AgentPaths): string => platformPath(paths.platform).join(paths.home, ".config");
-const appSupport = (paths: AgentPaths): string => posix.join(paths.home, "Library", "Application Support");
-
-/**
- * `CLAUDE_CONFIG_DIR` replaces the default folder rather than adding to it. The
- * Relay channel resolves the same way, so both sides always read one file
- * (packages/claude-code/src/config.ts, `defaultChannelDir`).
- */
-export const claudeConfigDir = (env: NodeJS.ProcessEnv, home: string, platform: NodeJS.Platform = process.platform): string => {
-  const configured = env.CLAUDE_CONFIG_DIR?.trim();
-  return configured ? configured : platformPath(platform).join(home, ".claude");
-};
-export const codexHome = (env: NodeJS.ProcessEnv, home: string, platform: NodeJS.Platform = process.platform): string => {
-  const configured = env.CODEX_HOME?.trim();
-  return configured ? configured : platformPath(platform).join(home, ".codex");
-};
-export const hermesHome = (env: NodeJS.ProcessEnv, home: string, platform: NodeJS.Platform = process.platform): string => {
-  const configured = env.HERMES_HOME?.trim();
-  return configured ? configured : platformPath(platform).join(home, ".hermes");
-};
-export const openclawHome = (home: string, platform: NodeJS.Platform = process.platform): string => platformPath(platform).join(home, ".openclaw");
-
-/** Per-OS config files, quoted from Docker's registry (`paths:` per client). */
-const byPlatform = (paths: AgentPaths, files: { darwin: string; win32: string; linux: string }): string =>
-  paths.platform === "darwin" ? files.darwin : paths.platform === "win32" ? files.win32 : files.linux;
-
 export const CODING_AGENTS: readonly CodingAgent[] = [
-  {
-    id: "claude-code",
-    label: "Claude Code",
-    aliases: ["claude", "claudecode"],
-    command: "claude",
-    installedIf: (paths) => [claudeConfigDir(paths.env, paths.home, paths.platform)],
-    connect: { kind: "claude-plugin" },
-    detectedAs: ["claude"],
-  },
-  {
-    id: "codex",
-    label: "Codex",
-    aliases: [],
-    command: "codex",
-    installedIf: (paths) => [codexHome(paths.env, paths.home, paths.platform)],
-    // `codex mcp add` writes ~/.codex/config.toml (its own --config help names the file).
-    connect: { kind: "mcp-command", file: (paths) => platformPath(paths.platform).join(codexHome(paths.env, paths.home, paths.platform), "config.toml") },
-    detectedAs: ["codex"],
-  },
-  {
-    id: "cursor",
-    label: "Cursor",
-    aliases: [],
-    installedIf: (paths) => [platformPath(paths.platform).join(paths.home, ".cursor")],
-    // https://cursor.com/docs/context/mcp: "Create ~/.cursor/mcp.json in your home
-    // directory for tools available everywhere"; entries live under `mcpServers`.
-    connect: { kind: "mcp-file", file: (paths) => platformPath(paths.platform).join(paths.home, ".cursor", "mcp.json"), shape: "mcpServers" },
-    detectedAs: ["cursor", "cursor-cli"],
-  },
-  {
-    id: "opencode",
-    label: "OpenCode",
-    aliases: [],
-    command: "opencode",
-    installedIf: (paths) => [platformPath(paths.platform).join(configHome(paths), "opencode")],
-    // https://opencode.ai/docs/mcp-servers/: local servers are `mcp.<name>` with
-    // `type: "local"`, a `command` array, `environment` and `enabled`; the global
-    // file is ~/.config/opencode/opencode.json (Docker's registry, row `opencode`).
-    connect: { kind: "mcp-file", file: (paths) => platformPath(paths.platform).join(configHome(paths), "opencode", "opencode.json"), shape: "opencode" },
-    detectedAs: ["opencode"],
-  },
-  {
-    id: "cline",
-    label: "Cline",
-    aliases: [],
-    command: "cline",
-    installedIf: (paths) => [platformPath(paths.platform).join(paths.home, ".cline")],
-    // `cline mcp add --yes <name> -- <command>` writes the CLI's own
-    // ~/.cline/data/settings/cline_mcp_settings.json (measured 2026-09-10 in the
-    // lane sandbox, cline 3.0.61); its entry shape is Cline's, so Cline writes it.
-    connect: { kind: "mcp-command", file: (paths) => platformPath(paths.platform).join(paths.home, ".cline", "data", "settings", "cline_mcp_settings.json") },
-    detectedAs: [],
-  },
-  {
-    id: "vscode",
-    label: "VS Code",
-    aliases: ["vs-code", "code"],
-    installedIf: (paths) => [
-      platformPath(paths.platform).join(configHome(paths), "Code"),
-      win32.join(appData(paths), "Code"),
-      "/Applications/Visual Studio Code.app",
-    ],
-    // https://code.visualstudio.com/docs/copilot/reference/mcp-configuration: the
-    // user file holds `servers.<name>` with `type: "stdio"`, `command`, `args`,
-    // `env`. Its location is the User folder of the profile (Docker's registry,
-    // row `vscode`: ~/.config/Code/User/mcp.json, ~/Library/Application
-    // Support/Code/User/mcp.json, %APPDATA%\Code\User\mcp.json).
-    connect: {
-      kind: "mcp-file",
-      file: (paths) => byPlatform(paths, {
-        darwin: posix.join(appSupport(paths), "Code", "User", "mcp.json"),
-        win32: win32.join(appData(paths), "Code", "User", "mcp.json"),
-        linux: posix.join(paths.home, ".config", "Code", "User", "mcp.json"),
-      }),
-      shape: "vscode",
-    },
-    detectedAs: [],
-  },
-  {
-    id: "gemini-cli",
-    label: "Gemini CLI",
-    aliases: ["gemini"],
-    command: "gemini",
-    installedIf: (paths) => [platformPath(paths.platform).join(paths.home, ".gemini")],
-    // `gemini mcp add -s user` writes ~/.gemini/settings.json (Docker's registry, row `gemini`).
-    connect: { kind: "mcp-command", file: (paths) => platformPath(paths.platform).join(paths.home, ".gemini", "settings.json") },
-    detectedAs: ["gemini"],
-  },
-  {
-    id: "claude-desktop",
-    label: "Claude Desktop",
-    aliases: ["desktop"],
-    installedIf: (paths) => ["/Applications/Claude.app", win32.join(appData(paths), "Claude")],
-    // https://modelcontextprotocol.io/docs/develop/connect-local-servers: the file
-    // is ~/Library/Application Support/Claude/claude_desktop_config.json on macOS
-    // and %APPDATA%\Claude\claude_desktop_config.json on Windows, entries under
-    // `mcpServers`. Linux has no Claude Desktop; Docker's registry names
-    // ~/.config/claude/claude_desktop_config.json there and so does Relay.
-    connect: {
-      kind: "mcp-file",
-      file: (paths) => byPlatform(paths, {
-        darwin: posix.join(appSupport(paths), "Claude", "claude_desktop_config.json"),
-        win32: win32.join(appData(paths), "Claude", "claude_desktop_config.json"),
-        linux: posix.join(paths.home, ".config", "claude", "claude_desktop_config.json"),
-      }),
-      shape: "mcpServers",
-    },
-    detectedAs: [],
-  },
-  {
-    id: "hermes",
-    label: "Hermes",
-    aliases: [],
-    command: "hermes",
-    installedIf: (paths) => [hermesHome(paths.env, paths.home, paths.platform)],
-    connect: { kind: "hermes-plugin" },
-    detectedAs: [],
-  },
-  {
-    id: "openclaw",
-    label: "OpenClaw",
-    aliases: ["open-claw"],
-    command: "openclaw",
-    installedIf: (paths) => [openclawHome(paths.home, paths.platform), platformPath(paths.platform).join(paths.home, ".clawdbot"), platformPath(paths.platform).join(paths.home, ".moltbot")],
-    connect: { kind: "openclaw-plugin" },
-    detectedAs: [],
-  },
+  claudeCode,
+  codex,
+  cursor,
+  opencode,
+  cline,
+  vscode,
+  geminiCli,
+  claudeDesktop,
+  hermes,
+  openclaw,
 ];
 
 export const CODING_AGENT_IDS: readonly CodingAgentId[] = CODING_AGENTS.map((agent) => agent.id);
