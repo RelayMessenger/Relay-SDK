@@ -30,7 +30,7 @@ export const HELP_FOOTER = `${DOCS_LINE}\nReport a problem: ${ISSUES_URL}`;
 /** clig.dev "Lead with examples"; gh, flyctl and codex do (ledger row P08). Three, from the decision page. */
 export const EXAMPLES = [
   "Examples:",
-  "  relaymessenger connect codex          connect Codex to a new Relay agent",
+  "  relaymessenger connect codex          connect Codex to Relay and wait for its first reply",
   "  relaymessenger watch                  see messages arrive and the agent reply",
   "  relaymessenger agents create --json   create an agent from a script",
 ];
