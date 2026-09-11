@@ -1,5 +1,5 @@
 import { posix, win32 } from "node:path";
-import type { AgentPaths } from "../coding-agents.js";
+import type { AgentPaths, CodingAgentId, ConnectMethod } from "../coding-agents.js";
 
 export const platformPath = (platform: NodeJS.Platform) => platform === "win32" ? win32 : posix;
 
@@ -30,3 +30,20 @@ export const openclawHome = (home: string, platform: NodeJS.Platform = process.p
 export const byPlatform = (paths: AgentPaths, files: { darwin: string; win32: string; linux: string }): string =>
   paths.platform === "darwin" ? files.darwin : paths.platform === "win32" ? files.win32 : files.linux;
 
+
+export interface CodingAgent {
+  id: CodingAgentId;
+  label: string;
+  /** Other words a person may type for it; the id itself always works. */
+  aliases: readonly string[];
+  /** Its own command on PATH, when Relay runs one or names one. */
+  command?: string;
+  /** Installed when any of these exists. Empty strings are skipped. */
+  installedIf: (paths: AgentPaths) => string[];
+  connect: ConnectMethod;
+  start?:
+    | { kind: "command"; command: string; args: string[]; prompt: string }
+    | { kind: "restart"; instruction: string };
+  /** What `@vercel/detect-agent` calls it when we are running inside it. */
+  detectedAs: readonly string[];
+}

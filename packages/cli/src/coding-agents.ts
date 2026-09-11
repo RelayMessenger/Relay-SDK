@@ -1,3 +1,5 @@
+import type { CodingAgent } from "./coding-agents/shared.js";
+export type { CodingAgent } from "./coding-agents/shared.js";
 import claudeCode from "./coding-agents/claude-code.js";
 import codex from "./coding-agents/codex.js";
 import cursor from "./coding-agents/cursor.js";
@@ -58,19 +60,6 @@ export type ConnectMethod =
   | { kind: "hermes-plugin" }
   | { kind: "openclaw-plugin" };
 
-export interface CodingAgent {
-  id: CodingAgentId;
-  label: string;
-  /** Other words a person may type for it; the id itself always works. */
-  aliases: readonly string[];
-  /** Its own command on PATH, when Relay runs one or names one. */
-  command?: string;
-  /** Installed when any of these exists. Empty strings are skipped. */
-  installedIf: (paths: AgentPaths) => string[];
-  connect: ConnectMethod;
-  /** What `@vercel/detect-agent` calls it when we are running inside it. */
-  detectedAs: readonly string[];
-}
 
 export const CODING_AGENTS: readonly CodingAgent[] = [
   claudeCode,
