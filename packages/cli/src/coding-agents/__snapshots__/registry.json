@@ -107,6 +107,12 @@
       "kind": "mcp-command",
       "file": "(paths) => platformPath(paths.platform).join(paths.home, \".gemini\", \"settings.json\")"
     },
+    "start": {
+      "kind": "command",
+      "command": "gemini",
+      "args": [],
+      "prompt": "Start Gemini CLI with Relay now?"
+    },
     "detectedAs": [
       "gemini"
     ]

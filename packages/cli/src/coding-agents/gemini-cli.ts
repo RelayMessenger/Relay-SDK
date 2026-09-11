@@ -10,6 +10,12 @@ const agent: CodingAgent =
     installedIf: (paths) => [platformPath(paths.platform).join(paths.home, ".gemini")],
     // `gemini mcp add -s user` writes ~/.gemini/settings.json (Docker's registry, row `gemini`).
     connect: { kind: "mcp-command", file: (paths) => platformPath(paths.platform).join(paths.home, ".gemini", "settings.json") },
+    start: {
+      kind: "command",
+      command: "gemini",
+      args: [],
+      prompt: "Start Gemini CLI with Relay now?",
+    },
     detectedAs: ["gemini"],
   };
 
