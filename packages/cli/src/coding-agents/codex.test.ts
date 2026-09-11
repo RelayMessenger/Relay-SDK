@@ -1,4 +1,5 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runCLI } from "../program.js";
@@ -15,7 +16,9 @@ describe("Codex start", () => {
   });
 
   it.each(["/detected/bin/codex", undefined])("resolves executable %s through connect", async (executable) => {
-    const home = await mkdtemp("/tmp/target-start-codex-20260911/connect-");
+    const scratch = join(tmpdir(), "relay-target-start-test");
+  await mkdir(scratch, { recursive: true });
+  const home = await mkdtemp(join(scratch, "connect-"));
     const stdout: string[] = [];
     const stderr: string[] = [];
     const code = await runCLI(["connect", "codex", "--new", "--yes", "--no-skill", "--json"], {

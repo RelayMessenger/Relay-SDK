@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { runCLI } from "../program.js";
@@ -15,7 +16,7 @@ it("starts the Hermes gateway with the Relay prompt", () => {
 });
 
 it.each([undefined, "/fake/bin/hermes"])("resolves the Hermes executable (%s)", async (executable) => {
-  const scratch = "/tmp/target-start-hermes-20260911";
+  const scratch = join(tmpdir(), "relay-target-start-test");
   await mkdir(scratch, { recursive: true });
   const home = await mkdtemp(join(scratch, "connect-"));
   const startCommand = vi.fn(async () => 0);

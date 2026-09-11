@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { runCLI } from "../program.js";
@@ -15,7 +16,7 @@ it("starts OpenCode with its configured MCP servers and the requested prompt", (
 });
 
 it.each([undefined, "/fake/bin/opencode"])("connect resolves the executable (%s) and asks to start", async (executable) => {
-  const scratch = "/tmp/target-start-opencode-20260911";
+  const scratch = join(tmpdir(), "relay-target-start-test");
   await mkdir(scratch, { recursive: true });
   const home = await mkdtemp(join(scratch, "connect-"));
   const token = `rly_live_${"C".repeat(43)}`;
