@@ -9,7 +9,14 @@ ansi=re.compile(rb'\x1b\[[0-?]*[ -/]*[@-~]')
 def exercise(name, menu=False, cancel=False):
     config=Path(a.scratch)/(name+'-config.json');home=Path(a.scratch)/(name+'-home');cwd=Path(a.scratch)/(name+'-cwd');home.mkdir(mode=0o700);cwd.mkdir(mode=0o700)
     env=os.environ.copy()
-    for key in ['RELAY_AGENT_TOKEN','RELAY_PROFILE','CI','GITHUB_ACTIONS','GITLAB_CI','CIRCLECI','BUILDKITE','TF_BUILD']:env.pop(key,None)
+    # This owned PTY models a human terminal, not the agent running the proof.
+    # Scrub every signal read by @vercel/detect-agent 1.2.5 and agent-driver.ts,
+    # as well as the CI flags this fixture has always removed.
+    for key in ['RELAY_AGENT_TOKEN','RELAY_PROFILE','CI','GITHUB_ACTIONS','GITLAB_CI','CIRCLECI','BUILDKITE','TF_BUILD',
+                'AI_AGENT','CURSOR_TRACE_ID','CURSOR_AGENT','CURSOR_EXTENSION_HOST_ROLE','GEMINI_CLI',
+                'CODEX_SANDBOX','CODEX_CI','CODEX_THREAD_ID','ANTIGRAVITY_AGENT','AUGMENT_AGENT','OPENCODE_CLIENT',
+                'CLAUDECODE','CLAUDE_CODE','CLAUDE_CODE_IS_COWORK','REPL_ID','COPILOT_MODEL','COPILOT_ALLOW_ALL',
+                'COPILOT_GITHUB_TOKEN']:env.pop(key,None)
     env.update(RELAY_CONFIG_PATH=str(config),RELAY_API_URL=a.origin,HOME=str(home),USERPROFILE=str(home),XDG_CONFIG_HOME=str(home/'.config'),TERM='xterm-256color')
     master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',30,120,0,0));before=termios.tcgetattr(slave)
     # The menu case opens the `agents` door: the root menu (Connect, Watch, Exit)

@@ -1,3 +1,4 @@
+import { describeFailure } from "./errors.js";
 import { safeMetadata } from "./output.js";
 import Relay, { RelayAPIError, type AgentCreateParams, type AgentImageRecipe, type ContactCardItem } from "@relaymessenger/sdk";
 import type { ConfigContext, RelayConfig, ResolvedAuth } from "./config.js";
@@ -140,7 +141,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
   }
 }
 
-export async function listAgents(deps: AgentDependencies) {
+export async function listAgents(deps: AgentDependencies, onFailure?: (error: Error) => void) {
   const config = await deps.read();
   const agents = [];
   for (const [profile, saved] of Object.entries(config.profiles)) {
@@ -152,8 +153,13 @@ export async function listAgents(deps: AgentDependencies) {
       const own = cards.contact_cards.find((card) => card.kind === "agent" && card.is_active);
       if (!own) throw new Error("no active agent card");
       agents.push({ profile, ...agentRecord(own), api_url: apiURL, token: "stored" as const });
-    } catch {
-      agents.push({ profile, api_url: apiURL, token: "stored" as const, error: "Agent details unavailable" });
+    } catch (error) {
+      const safeError = error instanceof TypeError && /fetch failed/iu.test(error.message)
+        ? new TypeError("Agent details unavailable: fetch failed")
+        : safeAPIFailure("Agent details unavailable", error);
+      const { error: message, code, next_step } = describeFailure(safeError);
+      agents.push({ profile, api_url: apiURL, token: "stored" as const, error: message, code, next_step });
+      onFailure?.(safeError);
     }
   }
   return safeMetadata({ agents }, [...Object.values(config.profiles).flatMap((saved) => saved.agent_token ? [saved.agent_token] : []), ...(deps.env.RELAY_AGENT_TOKEN ? [deps.env.RELAY_AGENT_TOKEN] : [])]);

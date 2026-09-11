@@ -28,7 +28,7 @@ export const exitCodesHelp = (): string => [
   "relaymessenger follows normal conventions regarding exit codes.",
   "",
   `- If a command completes successfully, the exit code will be ${EXIT_CODES.ok}`,
-  `- If a command fails for any reason, the exit code will be ${EXIT_CODES.failed}`,
+  `- If a command fails for a reason not covered by exit codes 2–4, the exit code will be ${EXIT_CODES.failed}`,
   `- If a command is given options it does not understand, or needs an answer and has no terminal, the exit code will be ${EXIT_CODES.usage}`,
   `- If the thing a command names does not exist, the exit code will be ${EXIT_CODES.notFound}`,
   `- If a command needs a token and none is saved, or Relay does not accept the one it has, the exit code will be ${EXIT_CODES.signInNeeded}`,
