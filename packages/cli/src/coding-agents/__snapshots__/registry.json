@@ -140,6 +140,15 @@
     "connect": {
       "kind": "hermes-plugin"
     },
+    "start": {
+      "kind": "command",
+      "command": "hermes",
+      "args": [
+        "gateway",
+        "run"
+      ],
+      "prompt": "Start Hermes Agent with Relay now?"
+    },
     "detectedAs": []
   },
   {
