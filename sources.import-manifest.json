@@ -943,7 +943,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "package.json",
       "source_sha256": "5d526432c2b28b9f79b11a6e3231c7b4e0e772b731ac1aae1514ee88bb41f2cf",
-      "destination_sha256": "58137778607e6eb325361c6ebabeceda1c1f9f040e1927ce8f0420fe7aa13fd3",
+      "destination_sha256": "795272fee4a338ea4eeaf79c27711096b8ff432f10fead69750b3e7cf5c99eb4",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
