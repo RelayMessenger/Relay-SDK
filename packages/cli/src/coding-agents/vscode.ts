@@ -26,6 +26,7 @@ const agent: CodingAgent =
       }),
       shape: "vscode",
     },
+    start: { kind: "restart", instruction: "Restart VS Code to load Relay, then ask it to read your Relay messages." },
     detectedAs: [],
   };
 

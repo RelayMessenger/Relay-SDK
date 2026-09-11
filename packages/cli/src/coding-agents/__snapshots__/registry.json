@@ -113,6 +113,10 @@
       "file": "(paths) => byPlatform(paths, {\n        darwin: posix.join(appSupport(paths), \"Code\", \"User\", \"mcp.json\"),\n        win32: win32.join(appData(paths), \"Code\", \"User\", \"mcp.json\"),\n        linux: posix.join(paths.home, \".config\", \"Code\", \"User\", \"mcp.json\"),\n      })",
       "shape": "vscode"
     },
+    "start": {
+      "kind": "restart",
+      "instruction": "Restart VS Code to load Relay, then ask it to read your Relay messages."
+    },
     "detectedAs": []
   },
   {
