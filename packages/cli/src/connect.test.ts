@@ -242,7 +242,7 @@ describe("the MCP agents", () => {
     expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
     expect(JSON.parse(await readFile(cursor, "utf8"))).toEqual({ mcpServers: { other: { command: "x" }, relay: server(f) }, theme: "dark" });
     expect(f.runCommand).not.toHaveBeenCalled();
-    expect(f.stdout.join("")).toContain("You might have to restart 'Cursor'.");
+    expect(f.stdout.join("")).toContain("Restart Cursor to load Relay, then ask it to read your Relay messages.");
 
     const d = await fixture({}, runtimes());
     expect(await runCLI(["connect", "claude-desktop", "--token", token, "--yes", "--no-skill"], d.deps)).toBe(0);
@@ -439,18 +439,25 @@ describe("connect first reply proof", () => {
   });
 
   it("keeps the ready path and reply wait for a target without a start", async () => {
-    const f = await fixture();
-    expect(codingAgent("cursor").start).toBeUndefined();
-    const run = vi.fn(async (input: Parameters<TerminalObserver["run"]>[0]) => {
-      input.onEvent({ event_type: "message.sent", data: { sender_handle: { handle: card.handle }, parts: [{ type: "text", value: "still answers" }] } } as never);
-    });
-    f.deps.connect!.observer = () => ({ semantics: "observational-no-ack", run });
-    expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
-    expect(f.stdout.join("")).toContain("Relay is ready for Cursor.");
-    expect(f.stdout.join("")).toContain("Answered from your phone: still answers");
-    expect(f.prompts.confirm).not.toHaveBeenCalled();
-    expect(f.startCommand).not.toHaveBeenCalled();
-    expect(run).toHaveBeenCalledOnce();
+    const definition = codingAgent("cursor");
+    const previous = definition.start;
+    delete definition.start;
+    try {
+      const f = await fixture();
+      expect(codingAgent("cursor").start).toBeUndefined();
+      const run = vi.fn(async (input: Parameters<TerminalObserver["run"]>[0]) => {
+        input.onEvent({ event_type: "message.sent", data: { sender_handle: { handle: card.handle }, parts: [{ type: "text", value: "still answers" }] } } as never);
+      });
+      f.deps.connect!.observer = () => ({ semantics: "observational-no-ack", run });
+      expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+      expect(f.stdout.join("")).toContain("Relay is ready for Cursor.");
+      expect(f.stdout.join("")).toContain("Answered from your phone: still answers");
+      expect(f.prompts.confirm).not.toHaveBeenCalled();
+      expect(f.startCommand).not.toHaveBeenCalled();
+      expect(run).toHaveBeenCalledOnce();
+    } finally {
+      if (previous) definition.start = previous; else delete definition.start;
+    }
   });
 
   it.each(CODING_AGENT_IDS)("%s prints only this agent's first reply, even with --no-start", async (target) => {

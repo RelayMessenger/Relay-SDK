@@ -54,6 +54,10 @@
       "file": "(paths) => platformPath(paths.platform).join(paths.home, \".cursor\", \"mcp.json\")",
       "shape": "mcpServers"
     },
+    "start": {
+      "kind": "restart",
+      "instruction": "Restart Cursor to load Relay, then ask it to read your Relay messages."
+    },
     "detectedAs": [
       "cursor",
       "cursor-cli"

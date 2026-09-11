@@ -10,6 +10,7 @@ const agent: CodingAgent =
     // https://cursor.com/docs/context/mcp: "Create ~/.cursor/mcp.json in your home
     // directory for tools available everywhere"; entries live under `mcpServers`.
     connect: { kind: "mcp-file", file: (paths) => platformPath(paths.platform).join(paths.home, ".cursor", "mcp.json"), shape: "mcpServers" },
+    start: { kind: "restart", instruction: "Restart Cursor to load Relay, then ask it to read your Relay messages." },
     detectedAs: ["cursor", "cursor-cli"],
   };
 
