@@ -12,6 +12,12 @@ const agent: CodingAgent =
     // `type: "local"`, a `command` array, `environment` and `enabled`; the global
     // file is ~/.config/opencode/opencode.json (Docker's registry, row `opencode`).
     connect: { kind: "mcp-file", file: (paths) => platformPath(paths.platform).join(configHome(paths), "opencode", "opencode.json"), shape: "opencode" },
+    start: {
+      kind: "command",
+      command: "opencode",
+      args: [],
+      prompt: "Start OpenCode with Relay now?",
+    },
     detectedAs: ["opencode"],
   };
 
