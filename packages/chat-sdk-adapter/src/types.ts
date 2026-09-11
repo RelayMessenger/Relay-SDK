@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 81979fd2ad4e6216bebc6992f89d0c06b6bc9518
- * OpenAPI e3c6378357bdd1f3a0c08c00d6bf6df0b387a864b6b401ad7861b4754b7a5495
+ * Relay Server 63d887d4ddc6d7bd04abc8cc14cdb7d1ca01868f
+ * OpenAPI 19bc597eee8369938354f4eac91fbf527bed3ee9e2084675173c5e5035bfb693
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -160,6 +160,7 @@ export interface RelayMessage {
   read_at?: string | null;
   reply_to?: RelayReplyTo | null;
   sent_at?: string | null;
+  silent?: boolean;
   system_event?: Record<string, unknown> | null;
   updated_at: string;
 }
@@ -181,6 +182,7 @@ export interface RelayWebhookMessageEvent {
   reply_to?: RelayReplyTo | null;
   sender_handle: RelayChatHandle;
   sent_at?: string | null;
+  silent?: boolean;
 }
 
 export interface RelaySentMessage {
@@ -194,6 +196,7 @@ export interface RelaySentMessage {
   >;
   reply_to?: RelayReplyTo | null;
   sent_at: string | null;
+  silent?: boolean;
 }
 
 export interface RelaySendMessageResponse {

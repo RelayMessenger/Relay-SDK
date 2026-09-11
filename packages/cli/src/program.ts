@@ -159,11 +159,13 @@ const globals = (command: Command): GlobalOptions =>
 const textContent = (
   text: string,
   idempotencyKey?: string,
+  silent?: boolean,
 ): MessageContent => ({
   parts: [{ type: "text", value: nonempty("Message text", text) }],
   ...(idempotencyKey
     ? { idempotency_key: nonempty("Idempotency key", idempotencyKey) }
     : {}),
+  ...(silent ? { silent: true } : {}),
 });
 
 async function readImageRecipe(path: string): Promise<AgentImageRecipe> {
@@ -800,13 +802,14 @@ export const createProgram = (
     .argument("<chat-id>", "the chat ID")
     .requiredOption("--text <text>", "the text to send")
     .requiredOption("--idempotency-key <key>", "reuse this key to avoid sending the same request twice")
+    .option("--silent", "deliver without a banner or sound")
     .action(async (
       chatID: string,
-      options: { text: string; idempotencyKey: string },
+      options: { text: string; idempotencyKey: string; silent?: boolean },
       command: Command,
     ) => {
       const body = {
-        message: textContent(options.text, options.idempotencyKey),
+        message: textContent(options.text, options.idempotencyKey, options.silent),
       } satisfies MessageSendParams;
       output(await (await clientFor(command)).chats.messages.send(chatID, body));
     });
@@ -843,14 +846,15 @@ export const createProgram = (
     .requiredOption("--to <handles...>", "at most 6 recipient Handles", (value) => handle(value))
     .requiredOption("--text <text>", "the text to send")
     .requiredOption("--idempotency-key <key>", "reuse this key to avoid sending the same request twice")
+    .option("--silent", "deliver without a banner or sound")
     .action(async (
-      options: { to: string[]; text: string; idempotencyKey: string },
+      options: { to: string[]; text: string; idempotencyKey: string; silent?: boolean },
       command: Command,
     ) => {
       if (options.to.length > 6) throw new Error("A Chat accepts at most 6 recipient Handles (7 total participants).");
       const body = {
         to: options.to,
-        message: textContent(options.text, options.idempotencyKey),
+        message: textContent(options.text, options.idempotencyKey, options.silent),
       } satisfies MessageCreateParams;
       output(await (await clientFor(command)).messages.create(body));
     });

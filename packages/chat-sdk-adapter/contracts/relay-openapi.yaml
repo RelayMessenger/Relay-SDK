@@ -2874,6 +2874,10 @@ components:
           format: date-time
           description: When the sender unsent the message, or null. An unsent Message keeps its place in the transcript
             and carries no parts.
+        silent:
+          type: boolean
+          description: Whether the sender sent this Message silently, so the recipient's device showed no banner and played
+            no sound.
         deliveries:
           type: array
           items:
@@ -2906,6 +2910,11 @@ components:
           description: Optional key for a safe retry. The same authenticated sender, key, and Message body return the original
             Message. Reusing the key with a different body returns a conflict.
           maxLength: 255
+        silent:
+          type: boolean
+          default: false
+          description: Send the Message with no banner and no sound on the recipient's device. The Message still arrives,
+            still counts as unread, and still moves the Chat to the top of the list.
       required:
         - parts
     MessageDeliveredWebhook:
@@ -3020,6 +3029,10 @@ components:
             - "null"
           format: date-time
           description: When the message was read. Null if not yet read.
+        silent:
+          type: boolean
+          description: Whether the sender sent this Message silently, so the recipient's device showed no banner and played
+            no sound.
         reply_to:
           type:
             - object
@@ -3725,6 +3738,10 @@ components:
           oneOf:
             - $ref: "#/components/schemas/ChatHandle"
             - type: "null"
+        silent:
+          type: boolean
+          description: Whether the sender sent this Message silently, so the recipient's device showed no banner and played
+            no sound.
         reply_to:
           oneOf:
             - $ref: "#/components/schemas/ReplyTo"

@@ -23,6 +23,7 @@ const makeClient = () => {
     removeParticipant: vi.fn(async () => ({ status: "accepted" })),
     webhookEvents: vi.fn(async () => ({ events: [], doc_url: "https://docs.relayapp.im" })),
     listMessages: vi.fn(async () => ({ messages: [], nextCursor: null })),
+    retrieveMessage: vi.fn(async () => ({ id: "message-1", silent: true })),
   };
   const client = {
     chats: {
@@ -38,7 +39,11 @@ const makeClient = () => {
         remove: methods.removeParticipant,
       },
     },
-    messages: { addReaction: methods.react, create: methods.sendToHandles },
+    messages: {
+      addReaction: methods.react,
+      create: methods.sendToHandles,
+      retrieve: methods.retrieveMessage,
+    },
     contactCard: { retrieve: methods.getCard },
     webhookEvents: { list: methods.webhookEvents },
   } as unknown as Relay;
@@ -122,6 +127,59 @@ describe("CLI command routing", () => {
       "--text",
       "hello",
     ])).not.toBe(0);
+  });
+
+  it("--silent marks a Chat send silent, and its absence leaves the body alone", async () => {
+    expect(await run([
+      "chats", "messages", "send", "chat-1",
+      "--text", "hello", "--idempotency-key", "send-silent", "--silent",
+    ])).toBe(0);
+    expect(fake.methods.sendMessage).toHaveBeenCalledWith("chat-1", {
+      message: {
+        parts: [{ type: "text", value: "hello" }],
+        idempotency_key: "send-silent",
+        silent: true,
+      },
+    });
+    expect(await run([
+      "chats", "messages", "send", "chat-1",
+      "--text", "hello", "--idempotency-key", "send-loud",
+    ])).toBe(0);
+    expect(fake.methods.sendMessage).toHaveBeenLastCalledWith("chat-1", {
+      message: {
+        parts: [{ type: "text", value: "hello" }],
+        idempotency_key: "send-loud",
+      },
+    });
+  });
+
+  it("--silent marks a handle send silent, and its absence leaves the body alone", async () => {
+    expect(await run([
+      "messages", "send", "--to", "advait",
+      "--text", "hello", "--idempotency-key", "handles-silent", "--silent",
+    ])).toBe(0);
+    expect(fake.methods.sendToHandles).toHaveBeenCalledWith(expect.objectContaining({
+      message: {
+        parts: [{ type: "text", value: "hello" }],
+        idempotency_key: "handles-silent",
+        silent: true,
+      },
+    }));
+    expect(await run([
+      "messages", "send", "--to", "advait",
+      "--text", "hello", "--idempotency-key", "handles-loud",
+    ])).toBe(0);
+    expect(fake.methods.sendToHandles).toHaveBeenLastCalledWith(expect.objectContaining({
+      message: {
+        parts: [{ type: "text", value: "hello" }],
+        idempotency_key: "handles-loud",
+      },
+    }));
+  });
+
+  it("messages get shows silent when the Message carries it", async () => {
+    expect(await run(["messages", "get", "message-1"])).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({ silent: true });
   });
 
   it("routes reactions, Contact Cards, and webhook metadata", async () => {

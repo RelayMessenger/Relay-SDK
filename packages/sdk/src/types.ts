@@ -156,6 +156,12 @@ export interface MessageContent {
   parts: MessagePart[];
   reply_to?: ReplyTo;
   idempotency_key?: string;
+  /**
+   * Send the Message with no banner and no sound on the recipient's device.
+   * The Message still arrives, still counts as unread, and still moves the
+   * Chat to the top of the list. Defaults to `false`.
+   */
+  silent?: boolean;
 }
 
 /**
@@ -175,6 +181,11 @@ export interface SentMessage {
   delivery_status: DeliveryStatus;
   from_handle?: ChatHandle | null;
   reply_to?: ReplyTo | null;
+  /**
+   * Whether the sender sent this Message silently, so the recipient's device
+   * showed no banner and played no sound.
+   */
+  silent?: boolean;
   is_system_message: false;
 }
 
@@ -201,6 +212,11 @@ export interface Message {
    * place in the transcript and carries no parts.
    */
   unsent_at?: string | null;
+  /**
+   * Whether the sender sent this Message silently, so the recipient's device
+   * showed no banner and played no sound.
+   */
+  silent?: boolean;
   deliveries?: MessageDelivery[];
 }
 
@@ -648,6 +664,11 @@ export interface MessageWebhookData {
   sent_at?: string | null;
   delivered_at?: string | null;
   read_at?: string | null;
+  /**
+   * Whether the sender sent this Message silently, so the recipient's device
+   * showed no banner and played no sound.
+   */
+  silent?: boolean;
   reply_to?: ReplyTo | null;
 }
 
