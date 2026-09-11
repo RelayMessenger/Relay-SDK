@@ -658,19 +658,28 @@ export const runConnect = async (
     } else {
       // Subscribe before launching: an immediate reply must not be lost while
       // the foreground agent owns the terminal. Starting remains opt-in.
-      const proof = waitForFirstReply(agent, deps, screen);
-      if (start) await (deps.startCommand ?? defaultStartCommand)(runtimes.find((entry) => entry.id === "claude-code")?.executable ?? "claude", CLAUDE_START_ARGS);
-      await proof;
+      const control = new AbortController();
+      const proof = waitForFirstReply(agent, deps, control, !start);
+      if (start) {
+        try {
+          await (deps.startCommand ?? defaultStartCommand)(runtimes.find((entry) => entry.id === "claude-code")?.executable ?? "claude", CLAUDE_START_ARGS);
+        } finally {
+          control.abort();
+        }
+      }
+      const reply = await proof;
+      screen.say(reply === undefined
+        ? `No reply yet. Run:  relay watch @${agent.handle}`
+        : `Answered from your phone: ${reply}`);
     }
   }
 };
 
 /** Reuse watch's read-only loop and rendering, but stop at this agent's reply. */
-const waitForFirstReply = async (agent: ConnectAgent, deps: ConnectDependencies, screen: Screen): Promise<void> => {
+const waitForFirstReply = async (agent: ConnectAgent, deps: ConnectDependencies, control: AbortController, bounded: boolean): Promise<string | undefined> => {
   const source = deps.observer?.(agent.token, agent.apiURL);
-  const control = new AbortController();
-  const timer = setTimeout(() => control.abort(), REPLY_TIMEOUT_MS);
-  let replied = false;
+  const timer = bounded ? setTimeout(() => control.abort(), REPLY_TIMEOUT_MS) : undefined;
+  let reply: string | undefined;
   const observer: TerminalObserver | undefined = source && {
     semantics: source.semantics,
     run: (input) => source.run({
@@ -685,12 +694,12 @@ const waitForFirstReply = async (agent: ConnectAgent, deps: ConnectDependencies,
     await runTerminalWatch({
       ...(observer ? { observer } : {}), runtimeOwnership: "external", signal: control.signal,
       secrets: [agent.token], onStatus: () => undefined,
-      onLine: (line) => { replied = true; screen.say(line); control.abort(); },
+      onLine: (line) => { reply = line.includes(" — ") ? line.slice(line.indexOf(" — ") + 3) : ""; control.abort(); },
     });
   } finally {
     clearTimeout(timer);
   }
-  if (!replied) screen.say(`No reply yet. Run:  relay watch @${agent.handle}`);
+  return reply;
 };
 
 /**

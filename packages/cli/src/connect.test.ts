@@ -397,9 +397,39 @@ describe("connect first reply proof", () => {
     expect(await runCLI(["connect", target, "--token", token, "--yes", "--allow", "person", "--no-start", "--no-skill"], f.deps)).toBe(0);
     expect(run).toHaveBeenCalledOnce();
     expect(f.stdout.join("")).toContain(`Say anything to @${card.handle} from your phone.`);
-    expect(f.stdout.join("")).toContain(`message.sent @${card.handle} — first answer`);
+    expect(f.stdout.join("")).toContain("Answered from your phone: first answer");
     expect(f.stdout.join("")).not.toMatch(/wrong agent|incoming|second answer|No reply yet/);
     expect(f.startCommand).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("keeps the terminal silent until foreground start returns (reply=%s)", async (hasReply) => {
+    const f = await fixture();
+    let emit: Parameters<TerminalObserver["run"]>[0]["onEvent"];
+    let stopped = false;
+    f.deps.connect!.observer = () => ({
+      semantics: "observational-no-ack",
+      run: async (input) => {
+        emit = input.onEvent;
+        await new Promise<void>(resolve => input.signal.addEventListener("abort", () => resolve(), { once: true }));
+        stopped = true;
+      },
+    });
+    const order: string[] = [];
+    f.deps.stdout = (message) => { f.stdout.push(message); order.push(message.trimEnd()); };
+    f.startCommand.mockImplementation(async () => {
+      const before = [...order];
+      if (hasReply) emit({ event_type: "message.sent", data: { sender_handle: { handle: card.handle }, parts: [{ type: "text", value: "first answer" }] } } as never);
+      await Promise.resolve();
+      expect(order).toEqual(before);
+      order.push("start returned");
+      return 0;
+    });
+    expect(await runCLI(["connect", "claude", "--token", token, "--yes", "--allow", "person", "--no-skill"], f.deps)).toBe(0);
+    expect(f.startCommand).toHaveBeenCalledOnce();
+    expect(stopped).toBe(true);
+    const outcome = hasReply ? "Answered from your phone: first answer" : `No reply yet. Run:  relay watch @${card.handle}`;
+    expect(order.slice(-2)).toEqual(["start returned", outcome]);
+    expect(order.filter(line => line === outcome)).toHaveLength(1);
   });
 
   it("times out after five minutes, exits zero and keeps the connection", async () => {
