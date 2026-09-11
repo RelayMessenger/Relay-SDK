@@ -241,6 +241,10 @@ const answerOne = async (
 export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => {
   const threads = new Map<string, string>();
   const answered = new Set<string>();
+  // One folder means one Codex at a time. Two runs of `codex exec` in the same
+  // folder, both allowed to write, would work on each other's files, so every
+  // message waits for the one before it, in the order they arrived.
+  let queue: Promise<void> = Promise.resolve();
   await input.client.websocket.run({
     signal: input.signal,
     onEvent: async (event) => {
@@ -248,8 +252,11 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
       if (!turn || answered.has(turn.eventId)) return;
       answered.add(turn.eventId);
       // Nothing may be thrown here: a failure would close the connection, and
-      // Codex failing to answer one message is not a reason to stop.
-      await answerOne(turn, threads, input);
+      // Codex failing to answer one message is not a reason to stop. The wait
+      // is inside this call, so Relay is told the message is handled only after
+      // the answer is sent.
+      queue = queue.then(() => answerOne(turn, threads, input)).catch(() => undefined);
+      await queue;
     },
     onFullSync: async () => {
       // This process keeps no copy of any chat, so there is nothing to rebuild.

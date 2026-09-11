@@ -139,6 +139,15 @@ const handle = (value: string): string => {
   return normalized;
 };
 
+/**
+ * `--to` takes repeated flags, several words after one flag, or one
+ * comma-separated list. Commander hands a variadic option's coercion each value
+ * with what it kept so far, so the list has to be built here; returning one
+ * handle instead leaves a string where the command expects an array.
+ */
+const recipients = (value: string, previous: string[] = []): string[] =>
+  [...previous, ...value.split(",").map(handle)];
+
 const nonempty = (name: string, value: string): string => {
   const normalized = value.trim();
   if (!normalized) throw new Error(`${name} cannot be empty.`);
@@ -660,8 +669,7 @@ export const createProgram = (
     .command("create")
     .description("create a Chat with at most 7 total participants, including the sender")
     .requiredOption("--from <handle>", "sender Handle", handle)
-    .requiredOption("--to <handles...>", "at most 6 recipient Handles; repeat --to or use a comma-separated list",
-      (value: string, previous: string[] = []) => [...previous, ...value.split(",").map(handle)])
+    .requiredOption("--to <handles...>", "at most 6 recipient Handles; repeat --to or use a comma-separated list", recipients)
     .requiredOption("--text <text>", "the text to send")
     .requiredOption("--idempotency-key <key>", "reuse this key to avoid sending the same request twice")
     .action(async (
@@ -858,7 +866,7 @@ export const createProgram = (
   messages
     .command("send")
     .description("start or reuse a chat with the handles you name, and send one message")
-    .requiredOption("--to <handles...>", "at most 6 recipient Handles", (value) => handle(value))
+    .requiredOption("--to <handles...>", "at most 6 recipient Handles; repeat --to or use a comma-separated list", recipients)
     .requiredOption("--text <text>", "the text to send")
     .requiredOption("--idempotency-key <key>", "reuse this key to avoid sending the same request twice")
     .action(async (

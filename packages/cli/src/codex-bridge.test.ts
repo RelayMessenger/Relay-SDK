@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   bridgeTurn, codexExecArgs, codexPrompt, codexRunner, readCodexJsonl, replyKey, runCodexBridge,
+  type CodexRunner,
 } from "./codex-bridge.js";
 
 const folders: string[] = [];
@@ -51,7 +52,7 @@ const received = (eventId: string, chatId: string, text: string, sender = "alice
 } as unknown as RelayWebhookEvent);
 
 /** Relay, reduced to what the bridge touches, with every call written down. */
-function fakeRelay(events: readonly RelayWebhookEvent[]) {
+function fakeRelay(events: readonly RelayWebhookEvent[], deliverAtOnce = false) {
   const typing: string[] = [];
   const sent: Array<{ chatId: string; text: string; key: string | undefined }> = [];
   let sendFails = false;
@@ -69,6 +70,13 @@ function fakeRelay(events: readonly RelayWebhookEvent[]) {
     },
     websocket: {
       run: async (options: { onEvent(event: RelayWebhookEvent, context: { sequence: string }): Promise<void> }) => {
+        // Relay's own connection hands events over one at a time. `deliverAtOnce`
+        // hands them all over at once instead, so the test reads the bridge's
+        // own ordering rather than the one it is given.
+        if (deliverAtOnce) {
+          await Promise.all(events.map((event, index) => options.onEvent(event, { sequence: String(index + 1) })));
+          return;
+        }
         for (const [index, event] of events.entries()) await options.onEvent(event, { sequence: String(index + 1) });
       },
     },
@@ -210,6 +218,35 @@ describe("answering a message", () => {
     });
     expect(said.filter((line) => line.includes("did not reach Relay"))).toHaveLength(2);
     expect(relay.typing).toEqual(["start chat-1", "stop chat-1", "start chat-1", "stop chat-1"]);
+  });
+
+  it.each([
+    ["one chat", ["chat-1", "chat-1"]],
+    ["two chats in one folder", ["chat-1", "chat-2"]],
+  ])("runs Codex once at a time for %s, in the order the messages arrived", async (_name, chats) => {
+    const order: string[] = [];
+    let running = 0;
+    const run: CodexRunner = async (codexRun) => {
+      const which = codexRun.prompt.includes("first") ? "first" : "second";
+      running += 1;
+      order.push(`start ${which} running=${running}`);
+      await new Promise((resolve) => { setTimeout(resolve, 25); });
+      running -= 1;
+      order.push(`end ${which}`);
+      return { code: 0, answer: `answered the ${which}`, threadId: `thread-${which}` };
+    };
+    const relay = fakeRelay([
+      received("event-1", chats[0]!, "the first message"),
+      received("event-2", chats[1]!, "the second message"),
+    ], true);
+    await runCodexBridge({
+      client: relay.client, run, signal: new AbortController().signal, say: () => undefined,
+    });
+    expect(order).toEqual([
+      "start first running=1", "end first",
+      "start second running=1", "end second",
+    ]);
+    expect(relay.sent.map((message) => message.text)).toEqual(["answered the first", "answered the second"]);
   });
 
   it("answers a message once, however often Relay sends it", async () => {
