@@ -654,7 +654,9 @@ export class RelayAdapter
     return message.parts.some(
       (part) =>
         part.type === "text" &&
-        part.mention === owner.handle,
+        (part.mentions !== undefined
+          ? part.mentions?.some((mention) => mention.is_me) === true
+          : part.mention === owner.handle),
     );
   }
 

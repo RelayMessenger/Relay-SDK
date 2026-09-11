@@ -62,10 +62,10 @@ describe("published artifact contracts", () => {
     );
     expect(pkg.dependencies["@relaymessenger/sdk"]).toBe(lock.relaySdk.version);
     expect(lock.relayServer.commit).toBe(
-      "3097ddaed0724d7b9c4af85304355ffb1500d0f1",
+      "afa2b72998a90f9196a2fe573bfa943421c66e56",
     );
     expect(lock.relayServer.sha256).toBe(
-      "ccc6eed43086ffdd9912a9d021469948128f8dee080f00f15ad2c0c269196cdc",
+      "3120990c5b4ba81d7e2b733608674f006c7cc6e0f0ddae5188485ebdba5215d5",
     );
   });
 

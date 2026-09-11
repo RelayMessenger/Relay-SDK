@@ -3928,12 +3928,41 @@ components:
         value:
           type: string
           description: The text content
+        mentions:
+          type:
+            - array
+            - "null"
+          description: Mentions ordered by position in the text; null when none. Handles reflect the participant's current handle.
+          items:
+            type: object
+            required: [id, handle, is_me, range]
+            properties:
+              id:
+                type: string
+                format: uuid
+                description: Stable participant Contact ID, unchanged when the handle changes.
+              handle:
+                type: string
+                description: The target participant's current Relay Handle.
+              is_me:
+                type: boolean
+                description: Whether the mention addresses the recipient reading this message.
+              range:
+                type: array
+                items:
+                  type: integer
+                  minimum: 0
+                minItems: 2
+                maxItems: 2
+                description: Inclusive-exclusive [start, end) UTF-16 code-unit range in value; the whole value when the send omitted mention_range.
         mention:
+          deprecated: true
           type:
             - string
             - "null"
-          description: Relay Handle mentioned by this text part.
+          description: Deprecated mirror of the first mention handle.
         mention_range:
+          deprecated: true
           type:
             - array
             - "null"
@@ -3944,7 +3973,7 @@ components:
               minimum: 1
           minItems: 2
           maxItems: 2
-          description: UTF-16 [start,end) range of the mention inside value.
+          description: Deprecated mirror of the first mention range; null when omitted on send.
         reactions:
           type:
             - array
@@ -4498,11 +4527,40 @@ components:
         value:
           type: string
           description: The text content
+        mentions:
+          type:
+            - array
+            - "null"
+          description: Mentions ordered by position in the text; null when none. Handles reflect the participant's current handle.
+          items:
+            type: object
+            required: [id, handle, is_me, range]
+            properties:
+              id:
+                type: string
+                format: uuid
+                description: Stable participant Contact ID, unchanged when the handle changes.
+              handle:
+                type: string
+                description: The target participant's current Relay Handle.
+              is_me:
+                type: boolean
+                description: Whether the mention addresses the recipient reading this message.
+              range:
+                type: array
+                items:
+                  type: integer
+                  minimum: 0
+                minItems: 2
+                maxItems: 2
+                description: Inclusive-exclusive [start, end) UTF-16 code-unit range in value; the whole value when the send omitted mention_range.
         mention:
+          deprecated: true
           type:
             - string
             - "null"
         mention_range:
+          deprecated: true
           type:
             - array
             - "null"

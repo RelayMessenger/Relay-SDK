@@ -21,6 +21,8 @@ import Relay, {
   type RelayWebhookEvent,
   type SentMessage,
   type TypingIndicatorWebhookData,
+  type TextPartResponse,
+  type TextPart,
   type WebSocketDisconnectFrame,
 } from "@relaymessenger/sdk";
 
@@ -312,3 +314,17 @@ await Relay.createAgent({ image_url: "https://images.example.test/snapshot.png",
 await Relay.createAgent({}, { apiKey: "fake" });
 // @ts-expect-error Authenticated instances still require an API key.
 new Relay({ baseURL: "https://api.example.test" });
+
+// Structured mentions are a read contract, not an outgoing message field.
+const readText: TextPartResponse = {
+  type: "text", value: "relay", reactions: null,
+  mentions: [{ id: "contact-1", handle: "relay", is_me: true, range: [0, 5] }],
+};
+const readRange: [number, number] | undefined = readText.mentions?.[0]?.range;
+const noMentions: TextPartResponse = { ...readText, mentions: null };
+const sendText: TextPart = {
+  type: "text", value: "relay",
+  // @ts-expect-error Structured mentions are only returned on reads.
+  mentions: [],
+};
+void [readRange, noMentions, sendText];

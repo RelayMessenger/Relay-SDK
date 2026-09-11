@@ -1,7 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
-import Relay, { RelayAPIError } from "../src/index.js";
+import Relay, { RelayAPIError, type TextPartResponse } from "../src/index.js";
 
 describe("Relay transport", () => {
+  it.each([
+    [{ id: "contact-1", handle: "relay", is_me: true, range: [0, 5] }],
+    null,
+  ] satisfies Array<TextPartResponse["mentions"]>)(
+    "preserves structured mentions on a message read: %j",
+    async (mentions) => {
+      const part: TextPartResponse = {
+        type: "text", value: "relay hello", reactions: null, mentions,
+      };
+      const client = new Relay({
+        apiKey: "token",
+        fetch: async () => Response.json({ id: "message-1", parts: [part] }),
+      });
+      const message = await client.messages.retrieve("message-1");
+      expect(message.parts[0]).toEqual(part);
+      if (message.parts[0]?.type !== "text") throw new Error("Expected text");
+      expect(message.parts[0].mentions).toEqual(mentions);
+    },
+  );
+
   it("preserves the global receiver required by Workers fetch", async () => {
     let receiver: unknown;
     vi.stubGlobal("fetch", async function (
