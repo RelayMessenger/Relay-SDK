@@ -14,9 +14,10 @@ import { constants } from "node:fs";
 import { CliError } from "./error-codes.js";
 import type { FileHandle } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { resolveFolderAgent } from "./folder-link.js";
 
 export const DEFAULT_API_URL = "https://api.relayapp.im";
 export const DEFAULT_PROFILE = "default";
@@ -34,11 +35,16 @@ export const defaultCreationApiURL = (
 export interface RelayProfile {
   api_url?: string;
   agent_token?: string;
+  /** The `whsec_` secret `listen` signs local forwards with. Made once per
+   * profile and kept, the way Stripe keeps one per account, so a restart does
+   * not force the developer to change RELAY_WEBHOOK_SECRET again. */
+  local_webhook_secret?: string;
 }
 
 export interface RelayConfig {
   version: 1;
   current_profile: string;
+  defaultAgent?: string;
   profiles: Record<string, RelayProfile>;
 }
 
@@ -46,6 +52,8 @@ export interface ConfigContext {
   env?: NodeJS.ProcessEnv;
   home?: string;
   platform?: NodeJS.Platform;
+  /** The folder the command runs in: its link names the agent when no --profile does. */
+  cwd?: string;
 }
 
 export interface ResolvedAuth {
@@ -106,9 +114,14 @@ const parseConfig = (value: unknown): RelayConfig => {
     if (token !== undefined && typeof token !== "string") {
       throw new Error(`Profile ${name} has a token that is not text. Fix it in the Relay config file, or sign in again.`);
     }
+    const localSecret = profile.local_webhook_secret;
+    if (localSecret !== undefined && !isLocalWebhookSecret(localSecret)) {
+      throw new Error(`Profile ${name} has a local signing secret that is not readable. Remove local_webhook_secret from the Relay config file and run listen again.`);
+    }
     profiles[name] = {
       ...(apiURL === undefined ? {} : { api_url: validateApiURL(apiURL) }),
       ...(token === undefined ? {} : { agent_token: validateToken(token) }),
+      ...(localSecret === undefined ? {} : { local_webhook_secret: localSecret }),
     };
   }
   if (!profiles[value.current_profile]) {
@@ -117,6 +130,7 @@ const parseConfig = (value: unknown): RelayConfig => {
   return {
     version: 1,
     current_profile: value.current_profile,
+    ...(typeof value.defaultAgent === "string" ? { defaultAgent: value.defaultAgent } : {}),
     profiles,
   };
 };
@@ -277,6 +291,29 @@ export const validateForwardURL = (input: string): string => {
   return url.toString();
 };
 
+const LOCAL_WEBHOOK_SECRET_PREFIX = "whsec_";
+const isLocalWebhookSecret = (value: unknown): value is string =>
+  typeof value === "string"
+  && value.startsWith(LOCAL_WEBHOOK_SECRET_PREFIX)
+  && /^[A-Za-z0-9+/]+=*$/u.test(value.slice(LOCAL_WEBHOOK_SECRET_PREFIX.length));
+
+/** A Standard Webhooks secret: `whsec_` and 32 random bytes in base64, the
+ * shape Relay's own subscriptions use, so the receiver's verify code is the
+ * same one it runs deployed. */
+export const newLocalWebhookSecret = (): string =>
+  `${LOCAL_WEBHOOK_SECRET_PREFIX}${randomBytes(32).toString("base64")}`;
+
+/** The saved local signing secret for a profile, made on first use and kept. */
+export const localWebhookSecret = async (
+  profile: string,
+  context: ConfigContext = {},
+): Promise<string> => mutateConfig((config) => {
+  const name = validateProfileName(profile);
+  const saved = config.profiles[name] ??= {};
+  saved.local_webhook_secret ??= newLocalWebhookSecret();
+  return saved.local_webhook_secret;
+}, context);
+
 export const validateToken = (value: string): string => {
   const token = value.trim();
   if (!token || /[\u0000-\u001f\u007f]/u.test(token)) {
@@ -291,9 +328,11 @@ export const resolveAuth = async (
 ): Promise<ResolvedAuth> => {
   const env = contextEnv(context);
   const config = await readConfig(context);
-  const profile = validateProfileName(
-    requestedProfile ?? env.RELAY_PROFILE ?? config.current_profile,
-  );
+  // One agent per folder (_artifacts/cli-connect-design-20260912.md, item 2):
+  // with no --profile and no RELAY_PROFILE, the folder link decides, then
+  // RELAY_AGENT, then the last connected agent, then the current profile.
+  const folder = requestedProfile ?? env.RELAY_PROFILE ?? (await resolveFolderAgent(context.cwd ?? process.cwd(), env, config))?.profile;
+  const profile = validateProfileName(folder ?? config.current_profile);
   const selected = config.profiles[profile];
   if (!selected) throw new CliError(`Relay profile ${profile} does not exist.`, "not_found");
   const apiURL = validateApiURL(

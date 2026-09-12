@@ -9,7 +9,8 @@ import { codexCommand, runCodexBridge } from "./codex-bridge.js";
 import { openCodexThreads } from "./codex-threads.js";
 import { acpCommand, relayMcpServer, runAcpBridge } from "./acp-bridge.js";
 import { openAcpSessions } from "./acp-threads.js";
-import { sdkTerminalObserver } from "./terminal-watch.js";
+import { sdkTerminalObserver, terminalEventLine } from "./terminal-watch.js";
+import { dim, link } from "./ui-colour.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
 import { renderTerminalQR, terminalQRRowsLeft } from "./qr-terminal.js";
@@ -28,6 +29,7 @@ import Relay, {
   type MessageContent,
   type MessageCreateParams,
   type MessageSendParams,
+  type RelayWebhookEvent,
   type SupportedContentType,
   type WebhookEventType,
   type WebhookSubscriptionUpdateParams,
@@ -40,15 +42,17 @@ import {
 } from "commander";
 import type { ClientContext } from "./client.js";
 import { createClientContext } from "./client.js";
-import type { ConfigContext, RelayProfile } from "./config.js";
+import type { ConfigContext, RelayProfile, ResolvedAuth } from "./config.js";
 import {
   DEFAULT_API_URL,
   defaultCreationApiURL,
   collectConfiguredTokens,
   configPath,
+  localWebhookSecret,
   readConfig,
   resolveAuth,
   validateApiURL,
+  validateForwardURL,
   validateProfileName,
   validateToken,
   writeConfig,
@@ -63,6 +67,8 @@ import { CliError } from "./error-codes.js";
 import { describeFailure } from "./errors.js";
 import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
 import { verboseFetch } from "./verbose.js";
+import { relayHelpHeading, writeRelayHelpHeading } from "./relay-brand.js";
+import { processPalette } from "./ui-colour.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
 // source file may carry its own copy.
@@ -85,7 +91,7 @@ export interface ProgramDependencies {
    * nowhere else (owner ruling, 2026-09-09). */
   offerSkill?: () => Promise<void>;
   connect?: Partial<Pick<import("./connect.js").ConnectDependencies, "sniff" | "runCommand" | "startCommand" | "observer" | "bridge" | "renderQR" | "pairTimeoutMs" | "version" | "drivingAgent">>;
-  /** Which coding agent is driving this command; `@vercel/detect-agent` by default. */
+  /** Which runtime is driving this command; `@vercel/detect-agent` by default. */
   detectAgent?: () => Promise<import("@vercel/detect-agent").AgentResult>;
   terminalSession?: AgentSessionDependencies["session"];
   terminalIO?: AgentSessionDependencies["io"];
@@ -95,6 +101,10 @@ export interface ProgramDependencies {
   fetch?: typeof fetch;
   /** `--json` was asked for, so commander's own usage text stays off the streams. */
   json?: boolean;
+  /** Override the process TTY check in focused tests. */
+  helpTTY?: boolean;
+  /** A pre-rendered root heading, normally supplied only for TTY animation. */
+  helpHeading?: string;
 }
 
 interface GlobalOptions {
@@ -200,7 +210,7 @@ export const createProgram = (
 ): Command => {
   const stdout = dependencies.stdout ?? ((value: string) => process.stdout.write(value));
   const stderr = dependencies.stderr ?? ((value: string) => process.stderr.write(value));
-  const configContext = dependencies.configContext ?? {};
+  const configContext: ConfigContext = { ...(dependencies.configContext ?? {}), ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}) };
   const resolveClient = dependencies.resolveClient
     ?? ((profile?: string) => createClientContext(profile, configContext, dependencies.fetch));
   const output = (value: unknown): void => stdout(jsonText(value));
@@ -216,15 +226,15 @@ export const createProgram = (
   // P53).
   const program = new Command()
     .name("relaymessenger")
-    .description("Relay: talk to your agents from your phone.")
+    .description("Message the agent on your computer from your phone.")
     .version(`relaymessenger ${PACKAGE_VERSION}`, "-V, --version", "print the version")
     .option("--json", "print the result as JSON, errors included")
     .option("--no-input, --non-interactive", "never ask a question; fail with exit 2 where one is required")
-    .option("--agent <auto|yes|no>", "override coding-agent detection (default auto)", agentModeValue)
+    .option("--agent <auto|yes|no>", "override runtime detection (default auto)", agentModeValue)
     .option("-q, --quiet", "errors only")
     .option("--verbose", "print each request it makes to stderr, as METHOD path status ms")
     .option("--profile <name>", "which saved profile on this computer to use", (configContext.env ?? process.env).RELAY_PROFILE)
-    .option("--install-skills", "install the Relay skill for the coding agents on this computer");
+    .option("--install-skills", "install the Relay skill for the runtimes on this computer");
   program.exitOverride();
   // A usage error keeps commander's sentence and gains the Docs line; under
   // --json it prints nothing here, because runCLI prints the envelope (MCP's
@@ -239,7 +249,10 @@ export const createProgram = (
     outputError: usageError,
   });
   // gh's order: commands before flags, examples first, no wrapping (help-groups.ts).
-  program.configureHelp({ formatHelp: formatRelayHelp, minWidthToWrap: Number.POSITIVE_INFINITY });
+  program.configureHelp({
+    formatHelp: (command, helper) => formatRelayHelp(command, helper, dependencies.helpHeading),
+    minWidthToWrap: Number.POSITIVE_INFINITY,
+  });
   // Every help screen ends the same way (GNU 4.8.2; gh's LEARN MORE block).
   program.addHelpText("afterAll", (context) => helpFooter(context.command === program));
 
@@ -275,15 +288,15 @@ export const createProgram = (
   program
     .command("connect")
     .usage(`[options] [agent]\n${supportedAgentsLine()}`)
-    .argument("[agent]", "Coding agent to connect (see Supported agents above)")
-    .description("connect a coding agent to Relay, new or by token, and wait for its first reply")
+    .argument("[agent]", "Runtime to connect (see Runs in above)")
+    .description("connect a runtime to Relay, new or by token, and wait for its first reply")
     .helpGroup(HELP_GROUPS.getStarted)
-    .option("--all", "connect every detected coding agent")
     .option("--new", "create a new agent instead of using one you already have")
     .option("--handle <handle>", "the .dev handle you want for a new agent; leave it out and Relay picks one")
     .option("--name <name>", "the name people see next to a new agent")
     .option("--about <text>", "the one line people see above your agent's first message", aboutText)
     .option("--image <path-or-url>", "a picture for a new agent: a file on this computer, or an https:// address")
+    .option("--avatar <file>", "a picture for a new agent: a PNG or JPEG on this computer")
     // gh's `auth login --with-token` (ledger row P25): the token comes down a
     // pipe and never touches `ps` or the shell history. `--token` stays for
     // scripts and is the visible one.
@@ -295,7 +308,7 @@ export const createProgram = (
     .option("--no-start", "skip the start offer, but still wait for the first reply")
     .option("--no-skill", "do not offer the Relay skill at the end")
     .option("--json", "print the result as JSON")
-    .option("--api-url <url>", "the Relay API address to use", validateApiURL)
+    .addOption(new Option("--api-url <url>", "the Relay API address to use").argParser(validateApiURL).hideHelp())
     .action(async (agent: string | undefined, options: ConnectRunOptions & { withToken?: boolean }, command: Command) => {
       const env = configContext.env ?? process.env;
       const home = configContext.home ?? homedir();
@@ -394,6 +407,22 @@ export const createProgram = (
     });
 
   program
+    .command("listen")
+    .description("forward each event to a route on this computer, signed like a webhook, while you develop")
+    .helpGroup(HELP_GROUPS.everyDay)
+    .requiredOption("--forward-to <url>", "the route on this computer to POST each event to, for example http://localhost:3000/relay-events")
+    .action(async (options: { forwardTo: string }, command: Command) => {
+      const context = await resolveClient(globals(command).profile);
+      await forwardEvents({
+        auth: context.auth,
+        client: context.client,
+        forwardTo: options.forwardTo,
+        render: (event) => terminalEventLine(event, [context.auth.token]),
+        banner: true,
+      });
+    });
+
+  program
     .command("doctor")
     .description("check every saved agent and this computer, and say what to fix")
     .helpGroup(HELP_GROUPS.everyDay)
@@ -424,7 +453,7 @@ export const createProgram = (
     .helpGroup(HELP_GROUPS.everyDay);
   agents.command("create")
     .description("create an agent and save its token privately on this computer, with no account and no sign-in")
-    .option("--api-url <url>", "the Relay API address to use", validateApiURL)
+    .addOption(new Option("--api-url <url>", "the Relay API address to use").argParser(validateApiURL).hideHelp())
     .option("--token-name <name>", "a label for the new token, so you can tell it apart later")
     .option("--handle <handle>", "the .dev handle you want; leave it out and Relay picks one")
     .option("--name <name>", "the name people see next to this agent")
@@ -497,14 +526,10 @@ export const createProgram = (
   authCommands.configureOutput({
     outputError: usageError,
   });
-  authCommands.command("login")
-    .description("save a token for this computer, from a hidden prompt, a pipe, or RELAY_AGENT_TOKEN")
-    .option("--with-token", "read the token from a pipe instead of asking for it")
-    .option("--api-url <url>", "the Relay API address this profile uses")
-    .action(async (
-      options: { withToken?: boolean; apiUrl?: string },
-      command: Command,
-    ) => {
+  const authLogin = async (
+    options: { withToken?: boolean; apiUrl?: string },
+    command: Command,
+  ): Promise<void> => {
       const env = configContext.env ?? process.env;
       const config = await readConfig(configContext);
       const profile = validateProfileName(globals(command).profile ?? config.current_profile);
@@ -534,11 +559,8 @@ export const createProgram = (
       await writeConfig(config, configContext);
       output(safeMetadata({ ok: true, profile, api_url: apiURL, token: "stored" }, [token]));
       await showSavedAgent(command, { profile, apiURL, runtime: { ownership: "unknown", connection: "unknown" } });
-    });
-  authCommands
-    .command("status")
-    .description("show which token Relay would use, and where it comes from, without printing it")
-    .action(async (_options: object, command: Command) => {
+  };
+  const authStatus = async (_options: object, command: Command): Promise<void> => {
       const resolved = await resolveAuth(globals(command).profile, configContext);
       output({
         configured: true,
@@ -551,11 +573,8 @@ export const createProgram = (
       if (saved?.agent_token === resolved.token && validateApiURL(saved.api_url ?? DEFAULT_API_URL) === resolved.apiURL) {
         await showSavedAgent(command, { profile: resolved.profile, apiURL: resolved.apiURL });
       }
-    });
-  authCommands
-    .command("logout")
-    .description("remove the selected profile's stored token")
-    .action(async (_options: object, command: Command) => {
+  };
+  const authLogout = async (_options: object, command: Command): Promise<void> => {
       if (!globals(command).nonInteractive && !globals(command).json && dependencies.confirmLogout && !await dependencies.confirmLogout()) throw new InteractiveCancelled();
       const config = await readConfig(configContext);
       const profile = validateProfileName(
@@ -575,13 +594,50 @@ export const createProgram = (
       config.profiles[profile] = withoutToken;
       await writeConfig(config, configContext);
       output({ ok: true, profile, token: "removed" });
-    });
+  };
+  const addAuthLogin = (command: Command): void => {
+    command
+      .option("--with-token", "read the token from a pipe instead of asking for it")
+      .addOption(new Option("--api-url <url>", "the Relay API address this profile uses").hideHelp())
+      .action(authLogin);
+  };
+  const addAuthStatus = (command: Command): void => {
+    command.action(authStatus);
+  };
+  const addAuthLogout = (command: Command): void => {
+    command.action(authLogout);
+  };
+  const authLoginCommand = authCommands.command("login")
+    .description("save a token for this computer, from a hidden prompt, a pipe, or RELAY_AGENT_TOKEN");
+  addAuthLogin(authLoginCommand);
+  const authStatusCommand = authCommands.command("status")
+    .description("show which token Relay would use, and where it comes from, without printing it");
+  addAuthStatus(authStatusCommand);
+  const authLogoutCommand = authCommands.command("logout")
+    .description("remove the selected profile's stored token");
+  addAuthLogout(authLogoutCommand);
+
+  // Linq-style top-level names; the hidden `auth` tree remains compatible with
+  // existing scripts and is still the canonical implementation underneath.
+  const loginCommand = program.command("login")
+    .description("authenticate with a Relay agent token")
+    .helpGroup(HELP_GROUPS.everythingElse);
+  addAuthLogin(loginCommand);
+  const whoamiCommand = program.command("whoami")
+    .description("show the current Relay identity without printing its token")
+    .helpGroup(HELP_GROUPS.everythingElse);
+  addAuthStatus(whoamiCommand);
+  const logoutCommand = program.command("logout")
+    .description("remove the saved Relay agent token from this computer")
+    .helpGroup(HELP_GROUPS.everythingElse);
+  addAuthLogout(logoutCommand);
 
   const profiles = program.command("profiles", { hidden: true }).description("manage the saved profiles on this computer: add, choose, remove and list them").helpGroup(HELP_GROUPS.everythingElse);
   profiles
     .command("add")
     .argument("<name>", "profile name", validateProfileName)
-    .requiredOption("--api-url <url>", "the Relay API address this profile uses", validateApiURL)
+    .addOption(new Option("--api-url <url>", "the Relay API address this profile uses")
+      .argParser(validateApiURL).makeOptionMandatory().hideHelp())
     .description("add a profile without storing a token")
     .action(async (name: string, options: { apiUrl: string }) => {
       const config = await readConfig(configContext);
@@ -1086,6 +1142,45 @@ export const createProgram = (
     .description("list every event type Relay can send, and where each is documented")
     .action(async (_options: object, command: Command) =>
       output(await (await clientFor(command)).webhookEvents.list()));
+  // `listen` is the local half of the two ways to run an agent backend, the
+  // way Stripe's `stripe listen --forward-to localhost:4242/webhook` is: each
+  // event is POSTed to a route on this computer, signed exactly like a
+  // deployed webhook, so the same handler runs unchanged in both places.
+  const forwardEvents = async (input: {
+    auth: ResolvedAuth;
+    client: Relay;
+    forwardTo?: string;
+    render?: (event: RelayWebhookEvent) => string;
+    banner: boolean;
+  }): Promise<void> => {
+    const forwardTo = input.forwardTo ? validateForwardURL(input.forwardTo) : undefined;
+    const secret = forwardTo ? await localWebhookSecret(input.auth.profile, configContext) : undefined;
+    if (input.banner && forwardTo && secret) {
+      stderr(`Forwarding events to ${link(forwardTo)}\n`);
+      stderr(`Local signing secret  ${secret}   ${dim("(set RELAY_WEBHOOK_SECRET to it while you develop)")}\n`);
+      stderr(`${dim("Events read here count as delivered; a deployed webhook for this agent does not get them.")}\n`);
+    }
+    const controller = new AbortController();
+    const abort = (): void => controller.abort();
+    process.once("SIGINT", abort);
+    process.once("SIGTERM", abort);
+    try {
+      await listenForAgentEvents(
+        input.client,
+        {
+          ...(forwardTo && secret ? { forwardTo, secret } : {}),
+          ...(input.render ? { render: input.render } : {}),
+          signal: controller.signal,
+          ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+        },
+        { stdout, stderr },
+      );
+    } finally {
+      process.off("SIGINT", abort);
+      process.off("SIGTERM", abort);
+    }
+  };
+
   // `watch` is the live view a person means. `events listen` is a different
   // thing wearing a similar name: it takes events, so Relay can stop resending
   // them elsewhere. It keeps its flags and its behaviour, and leaves the help.
@@ -1094,12 +1189,12 @@ export const createProgram = (
     .description("the older name for watching events; it takes events, so prefer watch")
     .helpGroup(HELP_GROUPS.unlisted)
     .command("listen")
-    .option("--forward-to <url>", "also POST each event to this address on your own computer (localhost only)")
+    .option("--forward-to <url>", "also POST each event to this address on your own computer (localhost only), signed like a webhook")
     .requiredOption(
       "--acknowledge-events",
       "yes: this agent is a test agent, and reading events here may make Relay stop resending them elsewhere",
     )
-    .description("print each event as it arrives, and optionally send an unsigned copy to your own computer")
+    .description("print each event as it arrives, and optionally send a signed copy to your own computer")
     .action(async (
       options: { forwardTo?: string; acknowledgeEvents: boolean },
       command: Command,
@@ -1116,24 +1211,12 @@ export const createProgram = (
           "This command only works against a test Relay API, never the live one. Use a profile pointed at staging.",
         );
       }
-      const controller = new AbortController();
-      const abort = (): void => controller.abort();
-      process.once("SIGINT", abort);
-      process.once("SIGTERM", abort);
-      try {
-        await listenForAgentEvents(
-          context.client,
-          {
-            ...(options.forwardTo ? { forwardTo: options.forwardTo } : {}),
-            signal: controller.signal,
-            ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
-          },
-          { stdout, stderr },
-        );
-      } finally {
-        process.off("SIGINT", abort);
-        process.off("SIGTERM", abort);
-      }
+      await forwardEvents({
+        auth: context.auth,
+        client: context.client,
+        ...(options.forwardTo ? { forwardTo: options.forwardTo } : {}),
+        banner: false,
+      });
     });
 
   const subscriptions = webhooks.command("subscriptions").description("manage webhook subscriptions");
@@ -1352,9 +1435,14 @@ export const runCLI = async (
   argv: string[],
   dependencies: ProgramDependencies = {},
 ): Promise<number> => {
+  const stdout = dependencies.stdout ?? ((value: string) => process.stdout.write(value));
   const stderr = dependencies.stderr ?? ((value: string) => process.stderr.write(value));
   const env = dependencies.configContext?.env ?? process.env;
   const json = argv.includes("--json");
+  const helpRequested = argv.length === 0
+    || argv.includes("--help")
+    || argv.includes("-h")
+    || argv[0] === "help";
   // `-q` keeps stderr for errors alone: the agent line, the plugin hint, the
   // cancel note and the skill offer all stay silent (clig.dev, standard names).
   const quiet = argv.includes("-q") || argv.includes("--quiet");
@@ -1374,8 +1462,8 @@ export const runCLI = async (
   const interactive = interactiveAllowed(argv, dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY && process.stderr.isTTY))
     && driver === undefined && !quiet;
   if (driver) {
-    if (driver.id === "claude-code" && !json) note(`${CLAUDE_CODE_HINT}\n`);
-    note(agentDetectedLines(driver));
+    if (!helpRequested && driver.id === "claude-code" && !json) note(`${CLAUDE_CODE_HINT}\n`);
+    if (!helpRequested) note(agentDetectedLines(driver));
   }
   if (driver?.id) dependencies = { ...dependencies, connect: { ...dependencies.connect, drivingAgent: driver.id } };
   const ui = interactive ? dependencies.prompts ?? clackPrompts((message) => note(`${message}\n`)) : undefined;
@@ -1391,7 +1479,7 @@ export const runCLI = async (
         const present = await (dependencies.skillPresent ?? (() => relaySkillPresent(cwd, dependencies.configContext?.home ?? homedir(), env)))();
         if (present !== false) return 0;
       }
-      if (!await ui.confirm("Install the Relay skill? The installer will ask which coding agents to install it for, and whether to install it for this folder or for you everywhere.")) return 0;
+      if (!await ui.confirm("Install the Relay skill? The installer will ask which runtimes to install it for, and whether to install it for this folder or for you everywhere.")) return 0;
       try {
         await (dependencies.skillInstaller ?? (() => installRelaySkill(cwd, env)))();
         inform("The Relay skill is installed.");
@@ -1423,14 +1511,33 @@ export const runCLI = async (
       if (!args.length) return EXIT_CODES.ok;
     }
     const entry = interactiveEntry(args);
-    if (ui && entry) {
+    if (ui && entry && entry.entry !== "root") {
       const selected = await chooseInteractiveCommand(entry.entry, entry.prefix, agentDeps, ui);
       if (!selected) return EXIT_CODES.ok;
       if (selected === "install-skill") return await skillOffer(true);
       args = selected;
     } else if (entry) args = [...args, "--help"];
+    const rootHelpRequested = args.length === 0
+      || (args.length === 1 && ["--help", "-h", "help"].includes(args[0]!));
+    let helpHeading: string | undefined;
+    if (rootHelpRequested && !json && !quiet) {
+      const helpTTY = dependencies.helpTTY
+        ?? Boolean(process.stdout.isTTY && process.stderr.isTTY);
+      if (helpTTY) {
+        await writeRelayHelpHeading(
+          stdout,
+          processPalette(),
+          true,
+        );
+        helpHeading = "";
+      } else {
+        helpHeading = relayHelpHeading(processPalette());
+      }
+    }
     await createProgram({
-      ...dependencies, agents: agentDeps, isInteractive: interactive, json, stderr, ...(quiet ? { stdout: () => undefined } : {}),
+      ...dependencies, agents: agentDeps, isInteractive: interactive, json, stderr,
+      ...(helpHeading !== undefined ? { helpHeading } : {}),
+      ...(quiet ? { stdout: () => undefined } : {}),
       ...(ui ? {
         prompts: ui,
         offerSkill: async () => { await skillOffer(); },

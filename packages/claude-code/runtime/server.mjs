@@ -22472,6 +22472,25 @@ function positiveInteger(value, fallback, name) {
   if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new Error(`${name} must be a positive integer`);
   return parsed;
 }
+function linkedAgent(cwd) {
+  let dir = resolve(cwd);
+  while (true) {
+    const path = join(dir, ".relay", "agent.json");
+    try {
+      const value = JSON.parse(readFileSync(path, "utf8"));
+      if (typeof value.handle === "string" && typeof value.apiUrl === "string") return { handle: value.handle, apiUrl: value.apiUrl, path };
+    } catch (error2) {
+      if (error2.code !== "ENOENT") throw new Error(`Relay folder link is not readable: ${path}`);
+    }
+    const parent = resolve(dir, "..");
+    if (parent === dir) return void 0;
+    dir = parent;
+  }
+}
+function profilePath(env) {
+  if (env.RELAY_CONFIG_PATH) return resolve(env.RELAY_CONFIG_PATH);
+  return resolve(env.RELAY_CONFIG_DIR ?? env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "relay", "config.json");
+}
 function loadConfig(env = process.env) {
   const channelDir = defaultChannelDir(env);
   mkdirSync(channelDir, { recursive: true, mode: 448 });
@@ -22480,7 +22499,22 @@ function loadConfig(env = process.env) {
   } catch {
   }
   const file = loadFileEnvironment(channelDir);
-  const value = (name) => actualValue(env[name]) ?? actualValue(file[name]);
+  const cwd = resolve(env.PWD ?? process.cwd());
+  const link = linkedAgent(cwd);
+  let linkedProfile;
+  if (link) {
+    try {
+      linkedProfile = JSON.parse(readFileSync(profilePath(env), "utf8")).profiles?.[link.handle];
+    } catch (error2) {
+      if (error2.code !== "ENOENT") throw error2;
+    }
+    if (!linkedProfile?.agent_token) throw new Error(`Relay profile ${link.handle} is missing; run npx relaymessenger connect`);
+  }
+  const value = (name) => {
+    if (link && name === "RELAY_AGENT_TOKEN") return actualValue(linkedProfile?.agent_token);
+    if (link && name === "RELAY_BASE_URL") return actualValue(link.apiUrl);
+    return actualValue(env[name]) ?? actualValue(file[name]);
+  };
   const agentToken = value("RELAY_AGENT_TOKEN") ?? "";
   if (!agentToken) throw new Error(`RELAY_AGENT_TOKEN is not configured (see ${join(channelDir, ".env")})`);
   if (agentToken.length > 4096 || /[\r\n\u0000]/u.test(agentToken)) {
@@ -23831,7 +23865,7 @@ var RelayStateStore = class {
 };
 
 // server.ts
-var VERSION = true ? "0.3.4-staging.5" : createRequire(import.meta.url)("./package.json").version;
+var VERSION = true ? "0.3.4-staging.6" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);

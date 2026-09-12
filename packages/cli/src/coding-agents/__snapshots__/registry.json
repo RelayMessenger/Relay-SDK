@@ -31,8 +31,8 @@
     "command": "codex",
     "installedIf": "(paths) => [codexHome(paths.env, paths.home, paths.platform)]",
     "connect": {
-      "kind": "mcp-command",
-      "file": "(paths) => platformPath(paths.platform).join(codexHome(paths.env, paths.home, paths.platform), \"config.toml\")"
+      "kind": "codex-project",
+      "file": "(paths) => platformPath(paths.platform).join(paths.cwd, \".codex\", \"config.toml\")"
     },
     "start": {
       "kind": "bridge",

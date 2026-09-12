@@ -5,8 +5,13 @@ import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runCLI, type ProgramDependencies } from "./program.js";
 import { readConfig } from "./config.js";
-import type { InteractivePrompts } from "./interactive.js";
-import { claudeMarketplaceSource, CLAUDE_PLUGIN_ID, NO_TTY_NEXT_STEP, NO_TTY_SENTENCE, waitForNewSender } from "./connect.js";
+import type { InteractivePrompts, SelectOption } from "./interactive.js";
+import {
+  ABOUT_QUESTION, AVATAR_QUESTION, claudeMarketplaceSource, CLAUDE_PLUGIN_ID, CUSTOMIZE_HINT, CUSTOMIZE_QUESTION, HANDLE_QUESTION, handleFromName,
+  linkedLine, NAME_QUESTION, NO_TTY_NEXT_STEP, NO_TTY_SENTENCE, NOT_AN_IMAGE, SAY_HI, waitForNewSender,
+} from "./connect.js";
+import type { TextOptions } from "./interactive.js";
+import { folderLinkPath } from "./folder-link.js";
 import { CODING_AGENT_IDS, codingAgent } from "./coding-agents.js";
 import type { RuntimeFound } from "./runtime-sniff.js";
 import type { TerminalObserver } from "./terminal-watch.js";
@@ -28,18 +33,18 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}, sniffed: Ru
   const stdout: string[] = [];
   const stderr: string[] = [];
   const prompts = {
-    select: vi.fn(async () => "new"),
-    multiselect: vi.fn(async (_message: string, _options: unknown, initial: string[]) => initial),
-    confirm: vi.fn(async () => true),
+    // Enter on every question: the runtime picker takes its default, and
+    // "Which agent?" takes "New agent".
+    select: vi.fn(async (message: string, options: SelectOption[], initial?: string) => message === "Where does your agent run?" ? initial ?? options[0]!.value : "new"),
+    // The optional customize step takes its default, No; every other yes/no is Yes.
+    confirm: vi.fn(async (message: string) => message !== CUSTOMIZE_QUESTION),
     password: vi.fn(async () => token),
-    text: vi.fn(async (_message: string, initial: string) => initial),
+    text: vi.fn(async (_message: string, initial: string, _options?: TextOptions) => initial),
     info: vi.fn(),
     intro: vi.fn(),
     outro: vi.fn(),
     step: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
-    success: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
     message: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
-    note: vi.fn((message: string, title: string) => { stdout.push(`${title}\n${message}\n`); }),
     spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn((message: string) => { stdout.push(`${message}\n`); }) })),
   } satisfies InteractivePrompts;
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -75,20 +80,171 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}, sniffed: Ru
 const ranLines = (f: Awaited<ReturnType<typeof fixture>>): string[] =>
   f.runCommand.mock.calls.map(([file, args]) => [file, ...(args as string[])].join(" "));
 
+describe("nothing is created before the plan is taken", () => {
+  it("a bad --handle is refused before any question, with the same words", async () => {
+    const f = await fixture();
+    expect(await runCLI(["connect", "--handle", "ci_connectwalk3_1789195591"], f.deps)).toBe(1);
+    expect(f.stderr.join("")).toContain("Error: A handle looks like name.dev. The part before .dev must be 3 to 32 characters, start with a lowercase letter, and use only lowercase letters, numbers and underscores.");
+    expect(f.prompts.select).not.toHaveBeenCalled();
+    expect(f.prompts.confirm).not.toHaveBeenCalled();
+    expect(f.prompts.intro).not.toHaveBeenCalled();
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect(f.stdout.join("")).not.toContain("Creating your agent");
+  });
+
+  it("No at Continue creates nothing: no agent, no token, no link", async () => {
+    const f = await fixture();
+    f.prompts.confirm.mockImplementation(async () => false);
+    expect(await runCLI(["connect", "claude", "--new", "--handle", "calm_cangoo.dev", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    expect(f.prompts.confirm).toHaveBeenCalledWith("Continue?", { initialValue: true });
+    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect(f.runCommand).not.toHaveBeenCalled();
+    expect((await readConfig(f.deps.configContext)).profiles[card.handle]).toBeUndefined();
+    await expect(readFile(folderLinkPath(f.home))).rejects.toMatchObject({ code: "ENOENT" });
+    // The plan named the creation as its first line, and the creation never started.
+    const printed = f.stdout.join("");
+    expect(printed).toContain("create a new agent  (@calm_cangoo.dev)");
+    expect(printed).not.toContain("Creating your agent");
+    expect(printed).not.toContain("Created @");
+  });
+
+  it("Yes at Continue creates exactly one agent, after the plan", async () => {
+    const f = await fixture();
+    expect(await runCLI(["connect", "claude", "--new", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    expect(f.prompts.confirm).toHaveBeenCalledWith("Continue?", { initialValue: true });
+    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    const lines = f.stdout.join("").split("\n");
+    const plan = lines.findIndex((line) => line.includes("create a new agent  (Relay picks the name)"));
+    const created = lines.findIndex((line) => line.startsWith(`Created @${card.handle}`));
+    expect(plan).toBeGreaterThanOrEqual(0);
+    expect(created).toBeGreaterThan(plan);
+    expect((await readConfig(f.deps.configContext)).profiles[card.handle]?.agent_token).toBe(token);
+  });
+});
+
+describe("the optional customize step", () => {
+  const argv = ["connect", "claude", "--new", "--allow", "advait", "--no-start", "--no-skill"];
+  const posted = (f: Awaited<ReturnType<typeof fixture>>): Record<string, unknown> =>
+    JSON.parse(String(f.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body)) as Record<string, unknown>;
+  const textOptions = (f: Awaited<ReturnType<typeof fixture>>, question: string): TextOptions =>
+    (f.prompts.text.mock.calls.find(([message]) => message === question) as [string, string, TextOptions])[2];
+  // A real PNG by signature, so the same local-image check `agents create --image` runs passes.
+  const png = async (home: string): Promise<string> => {
+    const path = join(home, "face.png");
+    await writeFile(path, Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.alloc(64)]));
+    return path;
+  };
+
+  it("is asked after the runtime question, defaults to No with its hint, and No leaves the run byte-identical", async () => {
+    // No runtime named, so the runtime question is asked and the order is real.
+    const asked = argv.filter((word) => word !== "claude");
+    const f = await fixture();
+    expect(await runCLI(asked, f.deps)).toBe(0);
+    expect(f.prompts.confirm).toHaveBeenCalledWith(CUSTOMIZE_QUESTION, { initialValue: false, hint: CUSTOMIZE_HINT });
+    expect(f.prompts.confirm.mock.calls.map(([message]) => message)).toEqual([CUSTOMIZE_QUESTION, "Continue?"]);
+    expect(f.prompts.select.mock.invocationCallOrder[0]).toBeLessThan(f.prompts.confirm.mock.invocationCallOrder[0]!);
+    expect(f.prompts.text).not.toHaveBeenCalled();
+    expect(posted(f)).toEqual({});
+    expect(f.stdout.join("")).toContain("create a new agent  (Relay picks the name)");
+    // Yes, then Enter on all four, is the same run: same request, same screen.
+    const yes = await fixture();
+    yes.prompts.confirm.mockImplementation(async () => true);
+    expect(await runCLI(asked, yes.deps)).toBe(0);
+    expect(yes.prompts.text.mock.calls.map(([message]) => message)).toEqual([NAME_QUESTION, HANDLE_QUESTION, ABOUT_QUESTION, AVATAR_QUESTION]);
+    expect(yes.prompts.text.mock.calls.every(([message]) => message.endsWith("(optional)"))).toBe(true);
+    expect(posted(yes)).toEqual(posted(f));
+    // Only each run's own temp home differs.
+    expect(yes.stdout.join("").replaceAll(yes.home, "<home>")).toBe(f.stdout.join("").replaceAll(f.home, "<home>"));
+  });
+
+  it("a name derives the handle placeholder, and Enter takes it", async () => {
+    const f = await fixture();
+    f.prompts.confirm.mockImplementation(async () => true);
+    f.prompts.text.mockImplementation(async (message: string) => message === NAME_QUESTION ? "Calm Canada Goose" : "");
+    expect(await runCLI(argv, f.deps)).toBe(0);
+    expect(handleFromName("Calm Canada Goose")).toBe("calm_canada_goose.dev");
+    expect(textOptions(f, NAME_QUESTION).placeholder).toBe("Relay picks one");
+    expect(textOptions(f, HANDLE_QUESTION).placeholder).toBe("calm_canada_goose.dev");
+    expect(textOptions(f, HANDLE_QUESTION).validate!("Not.dev")).toContain("A handle looks like name.dev");
+    expect(textOptions(f, HANDLE_QUESTION).validate!("")).toBeUndefined();
+    expect(textOptions(f, ABOUT_QUESTION).placeholder).toBe("One sentence about what it does");
+    expect(textOptions(f, AVATAR_QUESTION).placeholder).toBe("Path to a PNG or JPEG");
+    expect(posted(f)).toEqual({ handle: "calm_canada_goose.dev", first_name: "Calm Canada Goose" });
+    expect(f.stdout.join("")).toContain('create @calm_canada_goose.dev  "Calm Canada Goose"');
+  });
+
+  it("--name, --handle, --about and --avatar pre-fill, so nothing is asked, and the plan line carries them", async () => {
+    const f = await fixture();
+    const face = await png(f.home);
+    expect(await runCLI([...argv, "--name", "Calm Canada Goose", "--handle", "calm_cangoo.dev", "--about", "Answers the mail.", "--avatar", face], f.deps)).toBe(0);
+    expect(f.prompts.confirm.mock.calls.map(([message]) => message)).toEqual(["Continue?"]);
+    expect(f.prompts.text).not.toHaveBeenCalled();
+    expect(posted(f)).toEqual({ handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", about: "Answers the mail." });
+    expect(f.stdout.join("")).toContain('create @calm_cangoo.dev  "Calm Canada Goose"  about: Answers the mail.  avatar: face.png');
+    expect(f.fetch.mock.calls.some(([input]) => String(input).includes("/attachments"))).toBe(true);
+  });
+
+  it("--about alone leaves the other three questions open; --avatar refuses a file that is not an image", async () => {
+    const f = await fixture();
+    f.prompts.confirm.mockImplementation(async () => true);
+    expect(await runCLI([...argv, "--about", "Answers the mail."], f.deps)).toBe(0);
+    expect(f.prompts.text.mock.calls.map(([message]) => message)).toEqual([NAME_QUESTION, HANDLE_QUESTION, AVATAR_QUESTION]);
+    const bad = await fixture();
+    await writeFile(join(bad.home, "notes.txt"), "x");
+    expect(await runCLI([...argv, "--avatar", join(bad.home, "notes.txt")], bad.deps)).toBe(2);
+    expect(bad.stderr.join("")).toContain("Not an image file");
+    expect(bad.prompts.select).not.toHaveBeenCalled();
+    expect(bad.fetch).not.toHaveBeenCalled();
+  });
+
+  it("an avatar path that is not an image shows the one-line error, and Enter skips", async () => {
+    const f = await fixture();
+    f.prompts.confirm.mockImplementation(async () => true);
+    expect(await runCLI(argv, f.deps)).toBe(0);
+    const { validate } = textOptions(f, AVATAR_QUESTION);
+    expect(validate!(join(f.home, "missing.png"))).toBe(NOT_AN_IMAGE);
+    await writeFile(join(f.home, "notes.txt"), "x");
+    expect(validate!(join(f.home, "notes.txt"))).toBe(NOT_AN_IMAGE);
+    expect(validate!(await png(f.home))).toBeUndefined();
+    expect(validate!("")).toBeUndefined();
+    expect(posted(f)).toEqual({});
+    expect(f.fetch.mock.calls.some(([input]) => String(input).includes("/attachments"))).toBe(false);
+  });
+
+  it("a failed avatar upload prints one dim line and the connect still finishes", async () => {
+    const f = await fixture();
+    const face = await png(f.home);
+    const inner = f.fetch.getMockImplementation()!;
+    f.fetch.mockImplementation(async (input, init) => String(input).includes("/attachments")
+      ? Response.json({ error: "no" }, { status: 500 })
+      : inner(input, init));
+    expect(await runCLI([...argv, "--avatar", face], f.deps)).toBe(0);
+    const printed = f.stdout.join("");
+    expect(printed).toContain(`Created @${card.handle}`);
+    expect(printed).toContain("avatar not set: ");
+    expect(printed.indexOf("avatar not set: ")).toBeLessThan(printed.indexOf(SAY_HI));
+    expect(f.stderr.join("")).toBe("");
+    expect((await readConfig(f.deps.configContext)).profiles[card.handle]?.agent_token).toBe(token);
+    await expectOwnerOnly(join(f.channel, ".env"));
+  });
+});
+
 describe("the plan screen", () => {
-  it("--dry-run prints the plan, asks nothing, and changes nothing", async () => {
+  it("--dry-run prints the three plan lines, asks nothing, and changes nothing", async () => {
     const f = await fixture();
     expect(await runCLI(["connect", "claude", "--dry-run"], f.deps)).toBe(0);
     const printed = f.stdout.join("");
-    expect(printed).toContain("Claude Code found  /fake/bin/claude");
-    expect(printed).toContain("Relay will do 5 things. Continue?");
-    expect(printed).toContain("create a new agent and save its token privately on this computer");
-    expect(printed).toContain(`claude plugin marketplace add ${claudeMarketplaceSource("0.1.6-staging.0")}`);
-    expect(printed).toContain(join(f.home, ".claude", "channels", "relay", ".env"));
+    expect(printed).not.toContain("found on this computer");
+    expect(printed).toContain(`install  the Relay plugin for Claude Code  (claude plugin marketplace add ${claudeMarketplaceSource("0.1.6-staging.0")}; claude plugin install ${CLAUDE_PLUGIN_ID} --yes)`);
+    expect(printed).toContain(`write  ${join(f.home, ".claude", "channels", "relay", ".env")}  (token, API address, allowed senders)`);
+    expect(printed).toContain("start Claude Code with Relay when you are ready");
     expect(printed).toContain("Dry run: nothing was changed.");
     expect(f.fetch).not.toHaveBeenCalled();
     expect(f.runCommand).not.toHaveBeenCalled();
     expect(f.prompts.confirm).not.toHaveBeenCalled();
+    expect(f.prompts.select).not.toHaveBeenCalled();
+    await expect(readFile(folderLinkPath(f.home))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it.each([...CODING_AGENT_IDS, "claude"])("--dry-run --json --non-interactive %s answers ok with the file it would write", async (id) => {
@@ -99,60 +255,61 @@ describe("the plan screen", () => {
     expect(answer.dry_run).toBe(true);
     expect(answer.agents).toHaveLength(1);
     expect(answer.agents[0].agent).toBe(id === "claude" ? "claude-code" : id);
-    if (codingAgent(id === "claude" ? "claude-code" : id).connect.kind === "acp-bridge") {
+    const kind = codingAgent(id === "claude" ? "claude-code" : id).connect.kind;
+    if (kind === "acp-bridge" || kind === "openclaw-plugin") {
       // The ACP bridge writes no file: the Relay MCP server travels through the
-      // agent's session instead (acp-bridge.ts).
+      // agent's session instead (acp-bridge.ts). OpenClaw's own `channels add`
+      // keeps the token, so Relay writes no OpenClaw file either.
       expect(answer.agents[0].files).toEqual([]);
       expect(answer.steps.join("\n")).toContain(codingAgent(id === "claude" ? "claude-code" : id).label);
     } else {
       expect(answer.agents[0].files.length).toBeGreaterThan(0);
       for (const file of answer.agents[0].files) expect(file.startsWith(f.home) || file.startsWith("/Applications")).toBe(true);
-      expect(answer.steps.join("\n")).toContain(answer.agents[0].files[0]);
+      expect(answer.steps.length).toBeLessThanOrEqual(3);
     }
     expect(f.stderr.join("")).toBe("");
   });
 });
 
 describe("choosing agents", () => {
-  it("asks with every agent listed and the detected ones pre-selected, and detection never chooses", async () => {
+  it("asks one single-select question: the agents found first, the first of them the default, the rest dimmed", async () => {
     const f = await fixture();
-    expect(await runCLI(["connect", "--dry-run"], f.deps)).toBe(0);
-    expect(f.prompts.multiselect).toHaveBeenCalledOnce();
-    const [message, options, initial] = f.prompts.multiselect.mock.calls[0]!;
-    expect(message).toContain("Which coding agents should Relay connect?");
-    expect(message).toContain("Detected agents are pre-selected");
-    expect((options as Array<{ value: string }>).map((option) => option.value)).toEqual(CODING_AGENT_IDS);
-    expect(initial).toEqual(["claude-code", "hermes"]);
-    expect(f.stdout.join("")).toContain("Claude Code found");
-    expect(f.stdout.join("")).toContain("Hermes found");
-  });
-
-  it("--all takes every detected agent and none other", async () => {
-    const f = await fixture();
-    expect(await runCLI(["connect", "--all", "--dry-run", "--json"], f.deps)).toBe(0);
-    expect(f.prompts.multiselect).not.toHaveBeenCalled();
-    expect(JSON.parse(f.stdout.join("")).agents.map((entry: { agent: string }) => entry.agent)).toEqual(["claude-code", "hermes"]);
+    expect(await runCLI(["connect", "--dry-run", "--yes"], f.deps)).toBe(0);
+    expect(f.prompts.select).toHaveBeenCalledOnce();
+    const [message, options, initial] = f.prompts.select.mock.calls[0]!;
+    expect(message).toBe("Where does your agent run?");
+    expect(options.map((option) => option.value)).toEqual(["claude-code", "hermes", ...CODING_AGENT_IDS.filter((id) => id !== "claude-code" && id !== "hermes")]);
+    expect(options.slice(0, 2).map((option) => option.dim)).toEqual([undefined, undefined]);
+    expect(options.slice(2).every((option) => option.dim === true && option.hint === "not found")).toBe(true);
+    expect(initial).toBe("claude-code");
+    expect(f.stdout.join("")).not.toContain("found on this computer");
+    // Enter took Claude Code, so its plan is the one printed.
+    expect(f.stdout.join("")).toContain("install  the Relay plugin for Claude Code");
+    // With nothing found the list is the same nine, all dimmed, and no sentence is added.
     const none = await fixture({}, runtimes());
-    expect(await runCLI(["connect", "--all", "--dry-run", "--json"], none.deps)).toBe(1);
-    expect(JSON.parse(none.stderr.join("")).error).toContain("No coding agent was found on this computer");
+    expect(await runCLI(["connect", "--dry-run", "--yes"], none.deps)).toBe(0);
+    const [, bare] = none.prompts.select.mock.calls[0]!;
+    expect(bare.map((option) => option.value)).toEqual(CODING_AGENT_IDS);
+    expect(bare.every((option) => option.dim === true)).toBe(true);
+    expect(none.prompts.info).not.toHaveBeenCalled();
   });
 
   it("an unknown name is refused with the supported list", async () => {
     const f = await fixture({ isInteractive: false });
     expect(await runCLI(["--json", "connect", "nonsense"], f.deps)).toBe(2);
     const refusal = JSON.parse(f.stderr.join(""));
-    expect(refusal.error).toContain(`Unknown agent: nonsense. Supported agents: ${CODING_AGENT_IDS.join(" ")}`);
+    expect(refusal.error).toContain(`Unknown agent: nonsense. Runs in: ${CODING_AGENT_IDS.join(" ")}`);
     expect(refusal.code).toBe("usage");
     expect(refusal.next_step).toBe(NEXT_STEP.usage);
   });
 
-  it("inside a coding agent, that agent is pre-selected and the ● line says so once", async () => {
+  it("inside a runtime, that agent is pre-selected and the ● line says so once", async () => {
     const f = await fixture({ isInteractive: false, connect: undefined });
     f.deps.detectAgent = async () => ({ isAgent: true, agent: { name: "codex" } });
     f.deps.connect = { sniff: async () => claudeAndHermes, version: "0.1.6-staging.0", drivingAgent: "codex" };
     expect(await runCLI(["connect", "--dry-run"], f.deps)).toBe(0);
     expect(f.stderr.join("")).toBe("●  codex  Agent detected — running non-interactively\nDocs: https://docs.relayapp.im/llms.txt\n");
-    expect(f.stdout.join("")).toContain("codex mcp add relay");
+    expect(f.stdout.join("")).toContain("write  ./.codex/config.toml  (Relay's MCP server for this folder; Codex loads it when the folder is trusted)");
     // Under --json the stderr stream stays JSON-only.
     const quiet = await fixture({ isInteractive: false });
     quiet.deps.connect = { ...quiet.deps.connect, drivingAgent: "codex" };
@@ -178,7 +335,64 @@ describe("the Claude Code path", () => {
     expect((await readConfig(f.deps.configContext)).profiles[card.handle]?.agent_token).toBe(token);
     expect(f.startCommand).not.toHaveBeenCalled();
     expect([...f.stdout, ...f.stderr].join("")).not.toContain(token);
-    expect(f.stdout.join("")).toContain("Relay is ready for Claude Code.");
+    // Success is one line per file written, then the phone step with the link and the QR.
+    const printed = f.stdout.join("");
+    expect(printed).toContain(`wrote  ${join(f.channel, ".env")}`);
+    expect(printed).toContain(SAY_HI);
+    expect(printed).toContain(`[QR]\nhttps://staging.relayapp.im/@${card.handle}`);
+    expect(printed).not.toMatch(/Relay is ready|Open Relay, scan|Later:|opens next/u);
+    // No handle question: a new agent gets a picked handle.
+    expect(f.prompts.text).not.toHaveBeenCalled();
+  });
+
+  it("links the folder to the agent, ignores .relay in git, and a re-run uses the link without asking", async () => {
+    const f = await fixture();
+    await writeFile(join(f.home, ".gitignore"), "node_modules\n");
+    expect(await runCLI(["connect", "claude", "--yes", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    // No saved agents yet, so "Which agent?" was not asked; the only question was answered by the argument.
+    expect(f.prompts.select).not.toHaveBeenCalled();
+    expect(JSON.parse(await readFile(folderLinkPath(f.home), "utf8"))).toEqual({ handle: card.handle, apiUrl: "https://api.staging.relayapp.im" });
+    expect(await readFile(join(f.home, ".gitignore"), "utf8")).toBe("node_modules\n.relay\n");
+    expect((await readConfig(f.deps.configContext)).defaultAgent).toBe(card.handle);
+    const creates = f.fetch.mock.calls.filter(([, init]) => init?.method === "POST").length;
+    expect(creates).toBe(1);
+
+    // Linked: the same agent, said in one line, no question and no new agent.
+    f.stdout.length = 0;
+    expect(await runCLI(["connect", "claude", "--yes", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    expect(f.prompts.select).not.toHaveBeenCalled();
+    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(creates);
+    expect(f.stdout.join("")).toContain(linkedLine(card.handle));
+
+    // --new makes a fresh agent for this folder and re-links it.
+    expect(await runCLI(["connect", "claude", "--new", "--yes", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(creates + 1);
+  });
+
+  it("asks Which agent? only when saved agents exist, New agent first and the default", async () => {
+    const f = await fixture();
+    // A saved agent on this computer, and no link in this folder.
+    expect(await runCLI(["connect", "claude", "--new", "--yes", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    const { rm } = await import("node:fs/promises");
+    await rm(join(f.home, ".relay"), { recursive: true });
+    f.prompts.select.mockClear();
+    // "New agent" again: the .env still holds the first agent's token, and a new
+    // agent always gets its own, so the replace question is asked and answered.
+    f.prompts.select.mockImplementation(async (message: string, options: SelectOption[], initial?: string) =>
+      message === "Where does your agent run?" ? initial ?? options[0]!.value : message.startsWith("Claude Code already has") ? "replace" : "new");
+    expect(await runCLI(["connect", "claude", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    const asked = f.prompts.select.mock.calls.find(([message]) => message === "Which agent?");
+    expect(asked).toBeDefined();
+    const [, options, initial] = asked!;
+    expect(options.map((option) => option.label)).toEqual(["New agent", `@${card.handle}`]);
+    expect(initial).toBe("new");
+    // Picking the saved one creates nothing and links the folder to it.
+    await rm(join(f.home, ".relay"), { recursive: true });
+    const posts = f.fetch.mock.calls.filter(([, init]) => init?.method === "POST").length;
+    f.prompts.select.mockImplementationOnce(async (message: string, options: SelectOption[], initial?: string) => message === "Which agent?" ? card.handle : initial ?? options[0]!.value);
+    expect(await runCLI(["connect", "claude", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(posts);
+    expect(JSON.parse(await readFile(folderLinkPath(f.home), "utf8")).handle).toBe(card.handle);
   });
 
   it("a token already there for another agent is kept unless the person replaces it", async () => {
@@ -228,13 +442,21 @@ describe("the MCP agents", () => {
     command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", card.handle], env: { RELAY_CONFIG_PATH: f.env.RELAY_CONFIG_PATH },
   });
 
-  it("codex runs its own mcp add and writes nothing itself", async () => {
+  it("codex gets [mcp_servers.relay] written into this folder's .codex/config.toml, and runs no command", async () => {
     const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" } }));
+    const file = join(f.home, ".codex", "config.toml");
+    await mkdir(join(f.home, ".codex"), { recursive: true });
+    await writeFile(file, 'model = "o3"\n\n[mcp_servers.other]\ncommand = "x"\n');
     expect(await runCLI(["connect", "codex", "--new", "--yes", "--no-skill", "--json"], f.deps)).toBe(0);
-    expect(ranLines(f)).toEqual([`/fake/bin/codex mcp add relay --env RELAY_CONFIG_PATH=${f.env.RELAY_CONFIG_PATH} -- npx -y @relaymessenger/mcp@staging --profile ${card.handle}`]);
+    expect(ranLines(f)).toEqual([]);
     const answer = JSON.parse(f.stdout.join(""));
-    expect(answer).toMatchObject({ ok: true, handle: card.handle, token: "stored" });
-    expect(answer.agents[0]).toMatchObject({ agent: "codex", files: [join(f.home, ".codex", "config.toml")] });
+    expect(answer).toMatchObject({ ok: true, handle: card.handle, token: "stored", link: { path: folderLinkPath(f.home), handle: card.handle, api_url: "https://api.staging.relayapp.im" } });
+    expect(answer.agents[0]).toMatchObject({ agent: "codex", files: [file], commands: [] });
+    const { parse } = await import("smol-toml");
+    expect(parse(await readFile(file, "utf8"))).toEqual({
+      model: "o3",
+      mcp_servers: { other: { command: "x" }, relay: { ...server(f) } },
+    });
     expect(f.stdout.join("")).not.toContain(token);
   });
 
@@ -282,20 +504,7 @@ describe("the MCP agents", () => {
     expect(await readFile(file, "utf8")).toBe("{ not json");
   });
 
-  it("several agents at once share one agent, one plan and one confirmation", async () => {
-    const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" }, vscode: { found: true, configPath: "/fake/.vscode" } }));
-    expect(await runCLI(["connect", "--all", "--new", "--no-skill"], f.deps)).toBe(0);
-    expect(f.prompts.confirm).toHaveBeenCalledTimes(2);
-    expect(f.prompts.confirm).toHaveBeenLastCalledWith("Answer Relay messages with Codex from this folder?");
-    expect(f.stdout.join("")).toContain("Relay will do 3 things. Continue?");
-    expect(ranLines(f)).toHaveLength(1);
-    const vscodeMethod = codingAgent("vscode").connect;
-    if (vscodeMethod.kind !== "mcp-file") throw new Error("Expected a file connector");
-    const vscodeFile = vscodeMethod.file({ home: f.home, env: f.env, platform: process.platform });
-    expect(JSON.parse(await readFile(vscodeFile, "utf8")).servers.relay).toEqual({ type: "stdio", ...server(f) });
-    expect(f.stdout.join("")).toContain("Relay is ready for Codex, VS Code.");
-    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
-  });
+
 });
 
 describe("Hermes and OpenClaw", () => {
@@ -328,21 +537,52 @@ describe("Hermes and OpenClaw", () => {
     expect(written).toContain("OTHER=1");
   });
 
-  it("OpenClaw installs our plugin, keeps the token in its own owner-only file, and adds channels.relay", async () => {
+  it("OpenClaw installs our plugin, then adds the channel through its own command; Relay writes no OpenClaw file", async () => {
     const f = await fixture({}, runtimes({ openclaw: { found: true, executable: "/fake/bin/openclaw" } }));
     const config = join(f.home, ".openclaw", "openclaw.json");
     await mkdir(join(f.home, ".openclaw"), { recursive: true });
-    await writeFile(config, JSON.stringify({ gateway: { port: 1 }, channels: { telegram: { enabled: true } } }));
-    expect(await runCLI(["connect", "openclaw", "--token", token, "--yes", "--allow", "alice", "--no-skill"], f.deps)).toBe(0);
-    expect(ranLines(f)).toEqual(["/fake/bin/openclaw plugins install @relaymessenger/openclaw-plugin@staging --force --accept-capabilities"]);
-    const tokenFile = join(f.home, ".openclaw", "secrets", `relay-${card.handle}.token`);
-    expect(await readFile(tokenFile, "utf8")).toBe(`${token}\n`);
-    await expectOwnerOnly(tokenFile, join(f.home, ".openclaw", "secrets"));
-    expect(JSON.parse(await readFile(config, "utf8"))).toEqual({
-      gateway: { port: 1 },
-      channels: { telegram: { enabled: true }, relay: { enabled: true, baseUrl: "https://api.staging.relayapp.im", tokenFile, allowFrom: ["alice"] } },
+    const before = JSON.stringify({ gateway: { port: 1 }, channels: { telegram: { enabled: true } } });
+    await writeFile(config, before);
+    expect(await runCLI(["connect", "openclaw", "--token", token, "--yes", "--allow", "alice", "--no-skill", "--json"], f.deps)).toBe(0);
+    expect(ranLines(f)).toEqual([
+      "/fake/bin/openclaw plugins install @relaymessenger/openclaw-plugin@staging --force --accept-capabilities",
+      `/fake/bin/openclaw channels add relay --token ${token} --base-url https://api.staging.relayapp.im`,
+    ]);
+    expect(await readFile(config, "utf8")).toBe(before);
+    await expect(readFile(join(f.home, ".openclaw", "secrets", `relay-${card.handle}.token`))).rejects.toMatchObject({ code: "ENOENT" });
+    const answer = JSON.parse(f.stdout.join(""));
+    expect(answer.agents[0]).toMatchObject({ agent: "openclaw", files: [], channel: "relay", start_command: "/fake/bin/openclaw gateway" });
+    // The token is a flag on OpenClaw's command, and never on any screen.
+    expect(answer.agents[0].commands[1]).toBe("openclaw channels add relay --token <token> --base-url https://api.staging.relayapp.im");
+    expect([...f.stdout, ...f.stderr].join("")).not.toContain(token);
+  });
+
+  it("OpenClaw's dry run lists its two commands and no file", async () => {
+    const f = await fixture({ isInteractive: false });
+    expect(await runCLI(["connect", "openclaw", "--dry-run", "--json", "--non-interactive"], f.deps)).toBe(0);
+    const answer = JSON.parse(f.stdout.join(""));
+    expect(answer.agents[0]).toEqual({
+      agent: "openclaw",
+      files: [],
+      commands: [
+        "openclaw plugins install @relaymessenger/openclaw-plugin@staging --force --accept-capabilities",
+        "openclaw channels add relay --token <token> --base-url <api url>",
+      ],
     });
-    expect(await readFile(config, "utf8")).not.toContain(token);
+    expect(answer.steps).toEqual([
+      "run  openclaw plugins install @relaymessenger/openclaw-plugin@staging --force --accept-capabilities",
+      "run  openclaw channels add relay  (the token goes to OpenClaw's own channel store)",
+      "restart the OpenClaw gateway when you are ready",
+    ]);
+  });
+
+  it("a failed OpenClaw command names the command without the token", async () => {
+    const f = await fixture({}, runtimes({ openclaw: { found: true, executable: "/fake/bin/openclaw" } }));
+    f.runCommand.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }).mockResolvedValueOnce({ code: 1, stdout: "", stderr: "channel refused\n" });
+    expect(await runCLI(["connect", "openclaw", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(1);
+    const said = f.stderr.join("");
+    expect(said).toContain("openclaw channels add relay --token <token> --base-url https://api.staging.relayapp.im did not finish. It said: channel refused");
+    expect(said).not.toContain(token);
   });
 });
 
@@ -353,7 +593,7 @@ describe("with no terminal", () => {
     const f = await fixture(headless);
     expect(await runCLI(["connect"], f.deps)).toBe(2);
     expect(f.stderr.join("")).toBe(`Error: ${NO_TTY_SENTENCE} ${NO_TTY_NEXT_STEP}\n`);
-    expect(f.prompts.multiselect).not.toHaveBeenCalled();
+    expect(f.prompts.select).not.toHaveBeenCalled();
     const j = await fixture(headless);
     expect(await runCLI(["connect", "--json"], j.deps)).toBe(2);
     expect(JSON.parse(j.stderr.join(""))).toEqual({ error: `${NO_TTY_SENTENCE} ${NO_TTY_NEXT_STEP}`, code: "not_a_tty", next_step: NEXT_STEP.not_a_tty });
@@ -412,7 +652,8 @@ describe("connect first reply proof", () => {
         return 0;
       });
       expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
-      expect(f.prompts.confirm).toHaveBeenCalledWith("Start fake target now?");
+      // The plan said what starts and Continue took it; nothing asks again.
+      expect(f.prompts.confirm).not.toHaveBeenCalledWith("Start fake target now?");
       expect(f.startCommand).toHaveBeenCalledExactlyOnceWith(executable ?? "fake-target", ["--relay"]);
       expect(f.stdout.join("")).toContain("Answered from your phone: fake answer");
     } finally {
@@ -460,7 +701,7 @@ describe("connect first reply proof", () => {
       });
       f.deps.connect!.observer = () => ({ semantics: "observational-no-ack", run });
       expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
-      expect(f.stdout.join("")).toContain("Relay is ready for Cursor.");
+      expect(f.stdout.join("")).toContain(SAY_HI);
       expect(f.stdout.join("")).toContain("Answered from your phone: still answers");
       expect(f.prompts.confirm).not.toHaveBeenCalled();
       expect(f.startCommand).not.toHaveBeenCalled();
@@ -484,8 +725,8 @@ describe("connect first reply proof", () => {
     f.deps.connect!.observer = () => ({ semantics: "observational-no-ack", run });
     expect(await runCLI(["connect", target, "--token", token, "--yes", "--allow", "person", "--no-start", "--no-skill"], f.deps)).toBe(0);
     expect(run).toHaveBeenCalledOnce();
-    expect(f.stdout.join("")).toContain(`Add @${card.handle} from your phone`);
-    expect(f.stdout.join("")).toContain("Open Relay, scan, add this agent, then send it any message.");
+    expect(f.stdout.join("")).toContain(SAY_HI);
+    expect(f.stdout.join("")).toContain(`[QR]\nhttps://staging.relayapp.im/@${card.handle}`);
     expect(f.stdout.join("")).toContain("Answered from your phone: first answer");
     expect(f.stdout.join("")).not.toMatch(/wrong agent|incoming|second answer|No reply yet/);
     expect(f.startCommand).not.toHaveBeenCalled();

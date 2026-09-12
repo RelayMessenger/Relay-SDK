@@ -5,6 +5,7 @@ import { Webhook } from "standardwebhooks";
 import Relay, {
   RELAY_WEBHOOK_EVENT_TYPES,
   WebhookVerificationError,
+  signWebhookHeaders,
   verifyWebhookSignature,
   type ChatRequestUpdatedWebhookEvent,
   type ContactAddedWebhookEvent,
@@ -241,5 +242,19 @@ describe("Message change events", () => {
     expect(enumerated.length).toBeGreaterThan(0);
     expect([...RELAY_WEBHOOK_EVENT_TYPES].sort())
       .toEqual([...enumerated].sort());
+  });
+});
+
+describe("signWebhookHeaders", () => {
+  const secret = `whsec_${Buffer.from("local-secret-0123456789abcdef!!").toString("base64")}`;
+  it("signs so verifyWebhookSignature accepts the exact bytes", () => {
+    const body = JSON.stringify({ event_id: "evt_1", hello: "world" });
+    const headers = signWebhookHeaders(secret, { id: "evt_1", body });
+    expect(headers["webhook-id"]).toBe("evt_1");
+    expect(headers["webhook-timestamp"]).toMatch(/^\d{10}$/u);
+    expect(headers["webhook-signature"]).toMatch(/^v1,[A-Za-z0-9+/=]+$/u);
+    expect(() => verifyWebhookSignature(secret, body, headers)).not.toThrow();
+    expect(() => verifyWebhookSignature(secret, `${body} `, headers)).toThrow(WebhookVerificationError);
+    expect(() => verifyWebhookSignature(`whsec_${Buffer.from("other-secret").toString("base64")}`, body, headers)).toThrow(WebhookVerificationError);
   });
 });

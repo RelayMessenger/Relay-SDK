@@ -33,6 +33,23 @@ const requiredHeaders = (
   };
 };
 
+/** The three Standard Webhooks headers for one delivery: `webhook-id`,
+ * `webhook-timestamp` (unix seconds) and `webhook-signature` (`v1,<base64
+ * HMAC-SHA256 over id.timestamp.body>`), signed with a `whsec_` secret. Relay
+ * signs deliveries this way, and the CLI's local `listen` forwards sign the
+ * same way, so one receiver verifies both with `verifyWebhookSignature`. */
+export const signWebhookHeaders = (
+  secret: string,
+  delivery: { id: string; body: string | Buffer; timestamp?: Date },
+): Record<"webhook-id" | "webhook-timestamp" | "webhook-signature", string> => {
+  const timestamp = delivery.timestamp ?? new Date();
+  return {
+    "webhook-id": delivery.id,
+    "webhook-timestamp": String(Math.floor(timestamp.getTime() / 1_000)),
+    "webhook-signature": new Webhook(secret).sign(delivery.id, timestamp, delivery.body),
+  };
+};
+
 export const verifyWebhookSignature = (
   secret: string,
   body: string | Buffer,

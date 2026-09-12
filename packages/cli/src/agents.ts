@@ -46,6 +46,8 @@ export interface CreateAgentInput {
   about?: string;
   imageURL?: string;
   imageRecipe?: AgentImageRecipe;
+  /** Save the new profile as the last connected agent, in the same config write. */
+  makeDefault?: boolean;
 }
 
 // Status/code are safe structured diagnostics; server-controlled messages are not.
@@ -66,6 +68,23 @@ const safeAPIFailure = (message: string, error: unknown): Error => error instanc
     ...(error.code === undefined ? {} : { code: error.code }),
   }) : new Error(message);
 
+/** The handle a person asked for, checked before anything is created or asked. */
+export const validateHandle = (handle: string): string => {
+  if (!/^[a-z][a-z0-9_]{2,31}\.dev$/u.test(handle)) {
+    throw new Error("A handle looks like name.dev. The part before .dev must be 3 to 32 characters, start with a lowercase letter, and use only lowercase letters, numbers and underscores.");
+  }
+  return handle;
+};
+
+/** The name a person asked for, trimmed and checked the same way. */
+export const validateFirstName = (name: string): string => {
+  const firstName = name.trim();
+  if (!firstName || firstName.length > 255 || /[\u0000-\u001f\u007f]/u.test(firstName)) {
+    throw new Error("The name must be 1 to 255 characters, with no control characters.");
+  }
+  return firstName;
+};
+
 export async function createAgent(input: CreateAgentInput, deps: AgentDependencies) {
   const before = await deps.read();
   if (input.profile) {
@@ -77,13 +96,8 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
   }
   const apiURL = validateApiURL(input.apiURL ?? deps.env.RELAY_API_URL
     ?? defaultCreationApiURL());
-  if (input.handle !== undefined && !/^[a-z][a-z0-9_]{2,31}\.dev$/u.test(input.handle)) {
-    throw new Error("A handle looks like name.dev. The part before .dev must be 3 to 32 characters, start with a lowercase letter, and use only lowercase letters, numbers and underscores.");
-  }
-  const firstName = input.firstName?.trim();
-  if (firstName !== undefined && (!firstName || firstName.length > 255 || /[\u0000-\u001f\u007f]/u.test(firstName))) {
-    throw new Error("The name must be 1 to 255 characters, with no control characters.");
-  }
+  if (input.handle !== undefined) validateHandle(input.handle);
+  const firstName = input.firstName === undefined ? undefined : validateFirstName(input.firstName);
   if (input.imageURL !== undefined) {
     let image: URL;
     try { image = new URL(input.imageURL); } catch { throw new Error("Image URL must start with https://"); }
@@ -124,6 +138,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
         profile = `${base.slice(0, 54)}-${suffix}`;
       }
       config.profiles[profile] = { api_url: apiURL, agent_token: token };
+      if (input.makeDefault) config.defaultAgent = profile;
       return profile;
     });
     return safeMetadata({ profile, ...agentRecord(result.agent), share_url: result.share_url, api_url: apiURL, token: "stored" as const }, [token]);

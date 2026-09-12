@@ -53,6 +53,7 @@ export const createAgentWithPicture = async (
     ...(input.about === undefined ? {} : { about: input.about }),
     ...(imageURL === undefined ? {} : { imageURL }),
     ...(input.imageRecipe === undefined || localImage ? {} : { imageRecipe: input.imageRecipe }),
+    ...(input.makeDefault ? { makeDefault: true } : {}),
   }, deps);
   if (!localImage) return { result };
   let image: AgentImageUploadResult;

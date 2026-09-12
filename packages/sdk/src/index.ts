@@ -32,6 +32,7 @@ export {
 export {
   Webhooks,
   WebhookVerificationError,
+  signWebhookHeaders,
   verifyWebhookSignature,
   type WebhookHeaders,
 } from "./webhooks.js";
