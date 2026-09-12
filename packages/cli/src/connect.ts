@@ -535,7 +535,7 @@ export const runConnect = async (
 ): Promise<void> => {
   // Every flag is checked before anything is asked or shown: a bad --handle
   // once got through the picker and a "Creating your agent" spinner before it
-  // was refused (fresh Linux sandbox, relaymessenger@0.1.6-staging.32, 2026-09-12).
+  // was refused (fresh Linux sandbox, 2026-09-12).
   if (options.handle !== undefined) validateHandle(options.handle);
   if (options.name !== undefined) validateFirstName(options.name);
   if (options.token !== undefined) validateToken(options.token);
