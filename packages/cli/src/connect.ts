@@ -153,7 +153,7 @@ export interface ConnectAgent {
 }
 
 /** The line a re-run in a linked folder says, and the flag that makes another agent. */
-export const linkedLine = (handle: string): string => `Linked to @${handle}; run  connect --new  for another`;
+export const linkedLine = (handle: string): string => `Linked to @${handle}; run  connect --new  for another, or  --profile <handle>  to link a saved one`;
 export const SAY_HI = "Say hi from your phone";
 
 /** What one coding agent's part of the plan touches. */
