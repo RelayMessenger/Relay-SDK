@@ -46,6 +46,8 @@ export interface CreateAgentInput {
   about?: string;
   imageURL?: string;
   imageRecipe?: AgentImageRecipe;
+  /** Save the new profile as the last connected agent, in the same config write. */
+  makeDefault?: boolean;
 }
 
 // Status/code are safe structured diagnostics; server-controlled messages are not.
@@ -124,6 +126,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
         profile = `${base.slice(0, 54)}-${suffix}`;
       }
       config.profiles[profile] = { api_url: apiURL, agent_token: token };
+      if (input.makeDefault) config.defaultAgent = profile;
       return profile;
     });
     return safeMetadata({ profile, ...agentRecord(result.agent), share_url: result.share_url, api_url: apiURL, token: "stored" as const }, [token]);
