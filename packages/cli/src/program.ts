@@ -68,7 +68,6 @@ import { describeFailure } from "./errors.js";
 import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
 import { verboseFetch } from "./verbose.js";
 import { relayHelpHeading, writeRelayHelpHeading } from "./relay-brand.js";
-import { processPalette } from "./ui-colour.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
 // source file may carry its own copy.
@@ -1526,12 +1525,11 @@ export const runCLI = async (
       if (helpTTY) {
         await writeRelayHelpHeading(
           stdout,
-          processPalette(),
           true,
         );
         helpHeading = "";
       } else {
-        helpHeading = relayHelpHeading(processPalette());
+        helpHeading = relayHelpHeading();
       }
     }
     await createProgram({

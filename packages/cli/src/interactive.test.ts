@@ -51,12 +51,11 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
     expect(f.prompts.select).not.toHaveBeenCalled();
     expect(f.fetch).not.toHaveBeenCalled(); expect(f.skillPresent).not.toHaveBeenCalled(); expect(f.skillInstaller).not.toHaveBeenCalled();
   });
-  it("bare TTY launch keeps the animated heading and complete root help in one flow", async () => {
+  it("bare TTY launch keeps the static mark and complete root help in one flow", async () => {
     const f = await fixture();
     expect(await runCLI([], { ...f.deps, helpTTY: true })).toBe(0);
     const output = f.stdout.join("");
-    expect(output).toContain("\u001b[?25l");
-    expect(output).toContain("\u001b[?25h");
+    expect(output).not.toContain("\u001b[");
     expect(output).toContain("TOPICS");
     expect(output).toContain("COMMANDS");
   });

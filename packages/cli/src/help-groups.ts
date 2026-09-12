@@ -1,5 +1,4 @@
 import type { Command, Help } from "commander";
-import { processPalette } from "./ui-colour.js";
 import { relayHelpHeading } from "./relay-brand.js";
 
 /**
@@ -92,7 +91,7 @@ export const formatRelayHelp = (cmd: Command, helper: Help, heading?: string): s
     helper.formatItem(term, termWidth, description, helper);
   const lines: string[] = [];
   if (root) {
-    lines.push((heading ?? relayHelpHeading(processPalette())).trimEnd(), "");
+    lines.push((heading ?? relayHelpHeading()).trimEnd(), "");
     lines.push(helper.styleCommandDescription(helper.commandDescription(cmd)), "");
     const version = (cmd.version() ?? "unknown").replace(/^relaymessenger\s+/u, "");
     lines.push(helper.styleTitle("VERSION"), `  relaymessenger ${version}`, "");
