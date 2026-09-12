@@ -1,6 +1,7 @@
 import { confirm, intro, isCancel, log, multiselect, note, outro, password, select, spinner, text } from "@clack/prompts";
 import type { AgentDependencies } from "./agents.js";
 import { listAgents } from "./agents.js";
+import { active, dim as dimColour, error as errorColour, relayBlue, success as successColour } from "./ui-colour.js";
 import { DEFAULT_API_URL, DEFAULT_PROFILE, defaultCreationApiURL, validateApiURL } from "./config.js";
 
 export class InteractiveCancelled extends Error {
@@ -49,21 +50,21 @@ function answer<T>(value: T | symbol): T {
 export function clackPrompts(info: (message: string) => void): InteractivePrompts {
   const io = { input: process.stdin, output: process.stderr };
   return {
-    select: async (message, options) => answer(await select({ message, options, ...io })),
-    multiselect: async (message, options, initialValues) => answer(await multiselect({ message, options, initialValues, required: false, ...io })),
-    confirm: async (message, options) => answer(await confirm({ message, initialValue: options?.initialValue ?? false, ...io })),
+    select: async (message, options) => answer(await select({ message: relayBlue(message), options: options.map((option) => ({ ...option, label: active(option.label) })), ...io })),
+    multiselect: async (message, options, initialValues) => answer(await multiselect({ message: relayBlue(message), options: options.map((option) => ({ ...option, label: active(option.label) })), initialValues, required: false, ...io })),
+    confirm: async (message, options) => answer(await confirm({ message: relayBlue(message), initialValue: options?.initialValue ?? false, ...io })),
     password: async (message) => answer(await password({ message, ...io })),
-    text: async (message, initialValue) => answer(await text({ message, initialValue, ...io })),
+    text: async (message, initialValue) => answer(await text({ message: relayBlue(message), initialValue, ...io })),
     info,
-    intro: (message) => intro(message),
-    outro: (message) => outro(message),
-    step: (message) => log.step(message),
-    success: (message) => log.success(message),
-    message: (message) => log.message(message),
-    note: (message, title) => note(message, title),
+    intro: (message) => intro(relayBlue(message)),
+    outro: (message) => outro(relayBlue(message)),
+    step: (message) => log.step(relayBlue(message)),
+    success: (message) => log.success(successColour(message)),
+    message: (message) => log.message(dimColour(message)),
+    note: (message, title) => note(dimColour(message), relayBlue(title)),
     spinner: () => {
       const active = spinner({ output: process.stderr });
-      return { start: (message) => active.start(message), stop: (message) => active.stop(message) };
+      return { start: (message) => active.start(relayBlue(message)), stop: (message) => active.stop(successColour(message)) };
     },
   };
 }
