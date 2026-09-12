@@ -55,7 +55,7 @@ it("the help keeps the existing command groups for focused command screens", () 
     groups.set(group, [...(groups.get(group) ?? []), command.name()]);
   }
   expect(groups.get(HELP_GROUPS.getStarted)).toEqual(["connect"]);
-  expect(groups.get(HELP_GROUPS.everyDay)).toEqual(["watch", "doctor", "agents"]);
+  expect(groups.get(HELP_GROUPS.everyDay)).toEqual(["watch", "listen", "doctor", "agents"]);
   expect(groups.get(HELP_GROUPS.everythingElse)).toContain("chats");
   // The older name is reachable and described, and named nowhere in the help.
   expect(groups.get(HELP_GROUPS.unlisted)).toEqual(["events", "exit-codes"]);
