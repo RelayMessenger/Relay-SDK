@@ -24,7 +24,7 @@ export interface InteractivePrompts {
   select(message: string, options: Array<{ value: string; label: string }>): Promise<string>;
   /** Several boxes, some ticked before the person touches them. */
   multiselect(message: string, options: Array<{ value: string; label: string }>, initialValues: string[]): Promise<string[]>;
-  confirm(message: string): Promise<boolean>;
+  confirm(message: string, options?: { initialValue?: boolean }): Promise<boolean>;
   password(message: string): Promise<string>;
   text(message: string, initialValue: string): Promise<string>;
   info(message: string): void;
@@ -51,7 +51,7 @@ export function clackPrompts(info: (message: string) => void): InteractivePrompt
   return {
     select: async (message, options) => answer(await select({ message, options, ...io })),
     multiselect: async (message, options, initialValues) => answer(await multiselect({ message, options, initialValues, required: false, ...io })),
-    confirm: async (message) => answer(await confirm({ message, initialValue: false, ...io })),
+    confirm: async (message, options) => answer(await confirm({ message, initialValue: options?.initialValue ?? false, ...io })),
     password: async (message) => answer(await password({ message, ...io })),
     text: async (message, initialValue) => answer(await text({ message, initialValue, ...io })),
     info,

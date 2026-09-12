@@ -342,7 +342,7 @@ export const runtimeConnectPlan = (input: PlanContext & { agents: readonly Codin
   // clig.dev, Interactivity: "If --no-input is passed, don't prompt or do
   // anything interactive" (ledger row P27, captures/relay/ni2.out).
   const count = `Relay will do ${steps.length} ${steps.length === 1 ? "thing" : "things"}.`;
-  return { headline: input.ask === false ? count : `${count} Continue?`, steps: numbered(steps), agents };
+  return { headline: input.ask === false ? count : "Continue? (Y/n)", steps: steps.slice(0, 3), agents };
 };
 
 const senderOf = (event: RelayWebhookEvent): { handle: string; text: string } | undefined => {
@@ -558,14 +558,7 @@ export const runConnect = async (
   if (ui && !json) ui.intro("Relay");
   // The "Agent detected" line is said once per run by runCLI, for every command.
   const targets = await chooseAgents(requested, options, runtimes, deps);
-  for (const target of targets) {
-    const selected = runtimes.find((runtime) => runtime.id === target);
-    screen.step(selected?.found
-      ? `${selected.label} found  ${screen.dim(selected.executable ?? selected.configPath ?? "on this computer")}`
-      // Named outright, so Relay goes on and lets the agent's own command say
-      // what is wrong; it never claims to have found something it did not.
-      : `${codingAgent(target).label} was not found on this computer; you named it, so Relay will try anyway`);
-  }
+
 
   const version = deps.version ?? packageVersion();
   const allow = (options.allow ?? "").split(",").map((entry) => entry.trim().replace(/^@/u, "")).filter(Boolean);
@@ -635,7 +628,7 @@ export const runConnect = async (
   screen.block(plan.headline, plan.steps);
   if (options.yes !== true) {
     if (!ui || json) throw new HeadlessPrompt("Relay cannot ask you to confirm this plan.", ["--yes  to run the plan above"]);
-    if (!await ui.confirm("Continue?")) throw new InteractiveCancelled();
+    if (!await ui.confirm("Continue?", { initialValue: true })) throw new InteractiveCancelled();
   }
 
   const runCommand = deps.runCommand ?? defaultRunCommand;
@@ -851,14 +844,13 @@ const chooseAgents = async (
   }
   if (deps.drivingAgent) return [deps.drivingAgent];
   if (!deps.prompts || options.json) throw new HeadlessPrompt(NO_TTY_SENTENCE, [], NO_TTY_NEXT_STEP);
-  const picked = await deps.prompts.multiselect(
-    "Which coding agents should Relay connect?\n  Detected agents are pre-selected",
-    CODING_AGENTS.map((agent) => ({ value: agent.id, label: found.includes(agent.id) ? `${agent.label}  found on this computer` : agent.label })),
-    found,
-  );
-  const chosen = CODING_AGENT_IDS.filter((id) => picked.includes(id));
-  if (!chosen.length) throw new InteractiveCancelled();
-  return chosen;
+  const optionsList = [
+    ...CODING_AGENTS.filter((agent) => found.includes(agent.id)),
+    ...CODING_AGENTS.filter((agent) => !found.includes(agent.id)),
+  ].map((agent) => ({ value: agent.id, label: found.includes(agent.id) ? agent.label : `${agent.label}  (not found on this computer)` }));
+  if (!found.length) deps.prompts.info("No coding agents were found on this computer. Choose one to try.");
+  const picked = await deps.prompts.select("Which coding agent?", optionsList);
+  return [normalizeAgentId(picked)!];
 };
 
 const saveExistingAgent = async (
