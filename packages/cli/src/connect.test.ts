@@ -5,8 +5,9 @@ import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runCLI, type ProgramDependencies } from "./program.js";
 import { readConfig } from "./config.js";
-import type { InteractivePrompts } from "./interactive.js";
-import { claudeMarketplaceSource, CLAUDE_PLUGIN_ID, NO_TTY_NEXT_STEP, NO_TTY_SENTENCE, waitForNewSender } from "./connect.js";
+import type { InteractivePrompts, SelectOption } from "./interactive.js";
+import { claudeMarketplaceSource, CLAUDE_PLUGIN_ID, linkedLine, NO_TTY_NEXT_STEP, NO_TTY_SENTENCE, SAY_HI, waitForNewSender } from "./connect.js";
+import { folderLinkPath } from "./folder-link.js";
 import { CODING_AGENT_IDS, codingAgent } from "./coding-agents.js";
 import type { RuntimeFound } from "./runtime-sniff.js";
 import type { TerminalObserver } from "./terminal-watch.js";
@@ -28,8 +29,9 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}, sniffed: Ru
   const stdout: string[] = [];
   const stderr: string[] = [];
   const prompts = {
-    select: vi.fn(async () => "new"),
-    multiselect: vi.fn(async (_message: string, _options: unknown, initial: string[]) => initial),
+    // Enter on every question: the coding agent picker takes its default, and
+    // "Which agent?" takes "New agent".
+    select: vi.fn(async (message: string, options: SelectOption[], initial?: string) => message === "Which coding agent?" ? initial ?? options[0]!.value : "new"),
     confirm: vi.fn(async () => true),
     password: vi.fn(async () => token),
     text: vi.fn(async (_message: string, initial: string) => initial),
@@ -37,9 +39,7 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}, sniffed: Ru
     intro: vi.fn(),
     outro: vi.fn(),
     step: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
-    success: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
     message: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
-    note: vi.fn((message: string, title: string) => { stdout.push(`${title}\n${message}\n`); }),
     spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn((message: string) => { stdout.push(`${message}\n`); }) })),
   } satisfies InteractivePrompts;
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -76,19 +76,20 @@ const ranLines = (f: Awaited<ReturnType<typeof fixture>>): string[] =>
   f.runCommand.mock.calls.map(([file, args]) => [file, ...(args as string[])].join(" "));
 
 describe("the plan screen", () => {
-  it("--dry-run prints the plan, asks nothing, and changes nothing", async () => {
+  it("--dry-run prints the three plan lines, asks nothing, and changes nothing", async () => {
     const f = await fixture();
     expect(await runCLI(["connect", "claude", "--dry-run"], f.deps)).toBe(0);
     const printed = f.stdout.join("");
     expect(printed).not.toContain("found on this computer");
-    expect(printed).toContain("create a new agent");
-    expect(printed).toContain("create a new agent and save its token privately on this computer");
-    expect(printed).toContain(`claude plugin marketplace add ${claudeMarketplaceSource("0.1.6-staging.0")}`);
-    expect(printed).not.toContain(join(f.home, ".claude", "channels", "relay", ".env"));
+    expect(printed).toContain(`install  the Relay plugin for Claude Code  (claude plugin install ${CLAUDE_PLUGIN_ID} --yes)`);
+    expect(printed).toContain(`write  ${join(f.home, ".claude", "channels", "relay", ".env")}  (token, API address, allowed senders)`);
+    expect(printed).toContain("start Claude Code with Relay when you are ready");
     expect(printed).toContain("Dry run: nothing was changed.");
     expect(f.fetch).not.toHaveBeenCalled();
     expect(f.runCommand).not.toHaveBeenCalled();
     expect(f.prompts.confirm).not.toHaveBeenCalled();
+    expect(f.prompts.select).not.toHaveBeenCalled();
+    await expect(readFile(folderLinkPath(f.home))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it.each([...CODING_AGENT_IDS, "claude"])("--dry-run --json --non-interactive %s answers ok with the file it would write", async (id) => {
@@ -99,9 +100,11 @@ describe("the plan screen", () => {
     expect(answer.dry_run).toBe(true);
     expect(answer.agents).toHaveLength(1);
     expect(answer.agents[0].agent).toBe(id === "claude" ? "claude-code" : id);
-    if (codingAgent(id === "claude" ? "claude-code" : id).connect.kind === "acp-bridge") {
+    const kind = codingAgent(id === "claude" ? "claude-code" : id).connect.kind;
+    if (kind === "acp-bridge" || kind === "openclaw-plugin") {
       // The ACP bridge writes no file: the Relay MCP server travels through the
-      // agent's session instead (acp-bridge.ts).
+      // agent's session instead (acp-bridge.ts). OpenClaw's own `channels add`
+      // keeps the token, so Relay writes no OpenClaw file either.
       expect(answer.agents[0].files).toEqual([]);
       expect(answer.steps.join("\n")).toContain(codingAgent(id === "claude" ? "claude-code" : id).label);
     } else {
@@ -114,21 +117,32 @@ describe("the plan screen", () => {
 });
 
 describe("choosing agents", () => {
-  it("asks with every agent listed and picks one detected agent", async () => {
+  it("asks one single-select question: the agents found first, the first of them the default, the rest dimmed", async () => {
     const f = await fixture();
     expect(await runCLI(["connect", "--dry-run", "--yes"], f.deps)).toBe(0);
-    expect(f.prompts.select).toHaveBeenCalled();
-    const [message, options] = f.prompts.select.mock.calls.find(([m]) => m === "Which coding agent?")!;
+    expect(f.prompts.select).toHaveBeenCalledOnce();
+    const [message, options, initial] = f.prompts.select.mock.calls[0]!;
     expect(message).toBe("Which coding agent?");
-    expect((options as Array<{ value: string }>).map((option) => option.value)).toEqual(CODING_AGENT_IDS);
-    expect((options as Array<{ label: string }>).some((option) => option.label.includes("not found on this computer"))).toBe(true);
+    expect(options.map((option) => option.value)).toEqual(["claude-code", "hermes", ...CODING_AGENT_IDS.filter((id) => id !== "claude-code" && id !== "hermes")]);
+    expect(options.slice(0, 2).map((option) => option.dim)).toEqual([undefined, undefined]);
+    expect(options.slice(2).every((option) => option.dim === true && option.hint === "not found")).toBe(true);
+    expect(initial).toBe("claude-code");
     expect(f.stdout.join("")).not.toContain("found on this computer");
+    // Enter took Claude Code, so its plan is the one printed.
+    expect(f.stdout.join("")).toContain("install  the Relay plugin for Claude Code");
+    // With nothing found the list is the same nine, all dimmed, and no sentence is added.
+    const none = await fixture({}, runtimes());
+    expect(await runCLI(["connect", "--dry-run", "--yes"], none.deps)).toBe(0);
+    const [, bare] = none.prompts.select.mock.calls[0]!;
+    expect(bare.map((option) => option.value)).toEqual(CODING_AGENT_IDS);
+    expect(bare.every((option) => option.dim === true)).toBe(true);
+    expect(none.prompts.info).not.toHaveBeenCalled();
   });
 
   it("--all takes every detected agent and none other", async () => {
     const f = await fixture();
     expect(await runCLI(["connect", "--all", "--dry-run", "--json"], f.deps)).toBe(0);
-    expect(f.prompts.multiselect).not.toHaveBeenCalled();
+    expect(f.prompts.select).not.toHaveBeenCalled();
     expect(JSON.parse(f.stdout.join("")).agents.map((entry: { agent: string }) => entry.agent)).toEqual(["claude-code", "hermes"]);
     const none = await fixture({}, runtimes());
     expect(await runCLI(["connect", "--all", "--dry-run", "--json"], none.deps)).toBe(1);
@@ -150,7 +164,7 @@ describe("choosing agents", () => {
     f.deps.connect = { sniff: async () => claudeAndHermes, version: "0.1.6-staging.0", drivingAgent: "codex" };
     expect(await runCLI(["connect", "--dry-run"], f.deps)).toBe(0);
     expect(f.stderr.join("")).toBe("●  codex  Agent detected — running non-interactively\nDocs: https://docs.relayapp.im/llms.txt\n");
-    expect(f.stdout.join("")).toContain("codex mcp add relay");
+    expect(f.stdout.join("")).toContain("write  ./.codex/config.toml  (Relay's MCP server for this folder; Codex loads it when the folder is trusted)");
     // Under --json the stderr stream stays JSON-only.
     const quiet = await fixture({ isInteractive: false });
     quiet.deps.connect = { ...quiet.deps.connect, drivingAgent: "codex" };
@@ -176,7 +190,60 @@ describe("the Claude Code path", () => {
     expect((await readConfig(f.deps.configContext)).profiles[card.handle]?.agent_token).toBe(token);
     expect(f.startCommand).not.toHaveBeenCalled();
     expect([...f.stdout, ...f.stderr].join("")).not.toContain(token);
-    expect(f.stdout.join("")).toContain("Relay is ready for Claude Code.");
+    // Success is one line per file written, then the phone step with the link and the QR.
+    const printed = f.stdout.join("");
+    expect(printed).toContain(`wrote  ${join(f.channel, ".env")}`);
+    expect(printed).toContain(SAY_HI);
+    expect(printed).toContain(`[QR]\nhttps://staging.relayapp.im/@${card.handle}`);
+    expect(printed).not.toMatch(/Relay is ready|Open Relay, scan|Later:|opens next/u);
+    // No handle question: a new agent gets a picked handle.
+    expect(f.prompts.text).not.toHaveBeenCalled();
+  });
+
+  it("links the folder to the agent, ignores .relay in git, and a re-run uses the link without asking", async () => {
+    const f = await fixture();
+    await writeFile(join(f.home, ".gitignore"), "node_modules\n");
+    expect(await runCLI(["connect", "claude", "--yes", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    // No saved agents yet, so "Which agent?" was not asked; the only question was answered by the argument.
+    expect(f.prompts.select).not.toHaveBeenCalled();
+    expect(JSON.parse(await readFile(folderLinkPath(f.home), "utf8"))).toEqual({ handle: card.handle, apiUrl: "https://api.staging.relayapp.im" });
+    expect(await readFile(join(f.home, ".gitignore"), "utf8")).toBe("node_modules\n.relay\n");
+    expect((await readConfig(f.deps.configContext)).defaultAgent).toBe(card.handle);
+    const creates = f.fetch.mock.calls.filter(([, init]) => init?.method === "POST").length;
+    expect(creates).toBe(1);
+
+    // Linked: the same agent, said in one line, no question and no new agent.
+    f.stdout.length = 0;
+    expect(await runCLI(["connect", "claude", "--yes", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    expect(f.prompts.select).not.toHaveBeenCalled();
+    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(creates);
+    expect(f.stdout.join("")).toContain(linkedLine(card.handle));
+
+    // --new makes a fresh agent for this folder and re-links it.
+    expect(await runCLI(["connect", "claude", "--new", "--yes", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(creates + 1);
+  });
+
+  it("asks Which agent? only when saved agents exist, New agent first and the default", async () => {
+    const f = await fixture();
+    // A saved agent on this computer, and no link in this folder.
+    expect(await runCLI(["connect", "claude", "--new", "--yes", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    const { rm } = await import("node:fs/promises");
+    await rm(join(f.home, ".relay"), { recursive: true });
+    f.prompts.select.mockClear();
+    expect(await runCLI(["connect", "claude", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    const asked = f.prompts.select.mock.calls.find(([message]) => message === "Which agent?");
+    expect(asked).toBeDefined();
+    const [, options, initial] = asked!;
+    expect(options.map((option) => option.label)).toEqual(["New agent", `@${card.handle}`]);
+    expect(initial).toBe("new");
+    // Picking the saved one creates nothing and links the folder to it.
+    await rm(join(f.home, ".relay"), { recursive: true });
+    const posts = f.fetch.mock.calls.filter(([, init]) => init?.method === "POST").length;
+    f.prompts.select.mockImplementationOnce(async (message: string, options: SelectOption[], initial?: string) => message === "Which agent?" ? card.handle : initial ?? options[0]!.value);
+    expect(await runCLI(["connect", "claude", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(posts);
+    expect(JSON.parse(await readFile(folderLinkPath(f.home), "utf8")).handle).toBe(card.handle);
   });
 
   it("a token already there for another agent is kept unless the person replaces it", async () => {
@@ -226,13 +293,21 @@ describe("the MCP agents", () => {
     command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", card.handle], env: { RELAY_CONFIG_PATH: f.env.RELAY_CONFIG_PATH },
   });
 
-  it("codex runs its own mcp add and writes nothing itself", async () => {
+  it("codex gets [mcp_servers.relay] written into this folder's .codex/config.toml, and runs no command", async () => {
     const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" } }));
+    const file = join(f.home, ".codex", "config.toml");
+    await mkdir(join(f.home, ".codex"), { recursive: true });
+    await writeFile(file, 'model = "o3"\n\n[mcp_servers.other]\ncommand = "x"\n');
     expect(await runCLI(["connect", "codex", "--new", "--yes", "--no-skill", "--json"], f.deps)).toBe(0);
-    expect(ranLines(f)).toEqual([`/fake/bin/codex mcp add relay --env RELAY_CONFIG_PATH=${f.env.RELAY_CONFIG_PATH} -- npx -y @relaymessenger/mcp@staging --profile ${card.handle}`]);
+    expect(ranLines(f)).toEqual([]);
     const answer = JSON.parse(f.stdout.join(""));
-    expect(answer).toMatchObject({ ok: true, handle: card.handle, token: "stored" });
-    expect(answer.agents[0]).toMatchObject({ agent: "codex", files: [join(f.home, ".codex", "config.toml")] });
+    expect(answer).toMatchObject({ ok: true, handle: card.handle, token: "stored", link: { path: folderLinkPath(f.home), handle: card.handle, api_url: "https://api.staging.relayapp.im" } });
+    expect(answer.agents[0]).toMatchObject({ agent: "codex", files: [file], commands: [] });
+    const { parse } = await import("smol-toml");
+    expect(parse(await readFile(file, "utf8"))).toEqual({
+      model: "o3",
+      mcp_servers: { other: { command: "x" }, relay: { ...server(f) } },
+    });
     expect(f.stdout.join("")).not.toContain(token);
   });
 
@@ -313,21 +388,52 @@ describe("Hermes and OpenClaw", () => {
     expect(written).toContain("OTHER=1");
   });
 
-  it("OpenClaw installs our plugin, keeps the token in its own owner-only file, and adds channels.relay", async () => {
+  it("OpenClaw installs our plugin, then adds the channel through its own command; Relay writes no OpenClaw file", async () => {
     const f = await fixture({}, runtimes({ openclaw: { found: true, executable: "/fake/bin/openclaw" } }));
     const config = join(f.home, ".openclaw", "openclaw.json");
     await mkdir(join(f.home, ".openclaw"), { recursive: true });
-    await writeFile(config, JSON.stringify({ gateway: { port: 1 }, channels: { telegram: { enabled: true } } }));
-    expect(await runCLI(["connect", "openclaw", "--token", token, "--yes", "--allow", "alice", "--no-skill"], f.deps)).toBe(0);
-    expect(ranLines(f)).toEqual(["/fake/bin/openclaw plugins install @relaymessenger/openclaw-plugin@staging --force --accept-capabilities"]);
-    const tokenFile = join(f.home, ".openclaw", "secrets", `relay-${card.handle}.token`);
-    expect(await readFile(tokenFile, "utf8")).toBe(`${token}\n`);
-    await expectOwnerOnly(tokenFile, join(f.home, ".openclaw", "secrets"));
-    expect(JSON.parse(await readFile(config, "utf8"))).toEqual({
-      gateway: { port: 1 },
-      channels: { telegram: { enabled: true }, relay: { enabled: true, baseUrl: "https://api.staging.relayapp.im", tokenFile, allowFrom: ["alice"] } },
+    const before = JSON.stringify({ gateway: { port: 1 }, channels: { telegram: { enabled: true } } });
+    await writeFile(config, before);
+    expect(await runCLI(["connect", "openclaw", "--token", token, "--yes", "--allow", "alice", "--no-skill", "--json"], f.deps)).toBe(0);
+    expect(ranLines(f)).toEqual([
+      "/fake/bin/openclaw plugins install @relaymessenger/openclaw-plugin@staging --force --accept-capabilities",
+      `/fake/bin/openclaw channels add relay --token ${token} --base-url https://api.staging.relayapp.im`,
+    ]);
+    expect(await readFile(config, "utf8")).toBe(before);
+    await expect(readFile(join(f.home, ".openclaw", "secrets", `relay-${card.handle}.token`))).rejects.toMatchObject({ code: "ENOENT" });
+    const answer = JSON.parse(f.stdout.join(""));
+    expect(answer.agents[0]).toMatchObject({ agent: "openclaw", files: [], channel: "relay", start_command: "/fake/bin/openclaw gateway" });
+    // The token is a flag on OpenClaw's command, and never on any screen.
+    expect(answer.agents[0].commands[1]).toBe("openclaw channels add relay --token <token> --base-url https://api.staging.relayapp.im");
+    expect([...f.stdout, ...f.stderr].join("")).not.toContain(token);
+  });
+
+  it("OpenClaw's dry run lists its two commands and no file", async () => {
+    const f = await fixture({ isInteractive: false });
+    expect(await runCLI(["connect", "openclaw", "--dry-run", "--json", "--non-interactive"], f.deps)).toBe(0);
+    const answer = JSON.parse(f.stdout.join(""));
+    expect(answer.agents[0]).toEqual({
+      agent: "openclaw",
+      files: [],
+      commands: [
+        "openclaw plugins install @relaymessenger/openclaw-plugin@staging --force --accept-capabilities",
+        "openclaw channels add relay --token <token> --base-url <api url>",
+      ],
     });
-    expect(await readFile(config, "utf8")).not.toContain(token);
+    expect(answer.steps).toEqual([
+      "run  openclaw plugins install @relaymessenger/openclaw-plugin@staging --force --accept-capabilities",
+      "run  openclaw channels add relay  (the token goes to OpenClaw's own channel store)",
+      "restart the OpenClaw gateway when you are ready",
+    ]);
+  });
+
+  it("a failed OpenClaw command names the command without the token", async () => {
+    const f = await fixture({}, runtimes({ openclaw: { found: true, executable: "/fake/bin/openclaw" } }));
+    f.runCommand.mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" }).mockResolvedValueOnce({ code: 1, stdout: "", stderr: "channel refused\n" });
+    expect(await runCLI(["connect", "openclaw", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(1);
+    const said = f.stderr.join("");
+    expect(said).toContain("openclaw channels add relay --token <token> --base-url https://api.staging.relayapp.im did not finish. It said: channel refused");
+    expect(said).not.toContain(token);
   });
 });
 
@@ -338,7 +444,7 @@ describe("with no terminal", () => {
     const f = await fixture(headless);
     expect(await runCLI(["connect"], f.deps)).toBe(2);
     expect(f.stderr.join("")).toBe(`Error: ${NO_TTY_SENTENCE} ${NO_TTY_NEXT_STEP}\n`);
-    expect(f.prompts.multiselect).not.toHaveBeenCalled();
+    expect(f.prompts.select).not.toHaveBeenCalled();
     const j = await fixture(headless);
     expect(await runCLI(["connect", "--json"], j.deps)).toBe(2);
     expect(JSON.parse(j.stderr.join(""))).toEqual({ error: `${NO_TTY_SENTENCE} ${NO_TTY_NEXT_STEP}`, code: "not_a_tty", next_step: NEXT_STEP.not_a_tty });
@@ -397,7 +503,8 @@ describe("connect first reply proof", () => {
         return 0;
       });
       expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
-      expect(f.prompts.confirm).toHaveBeenCalledWith("Start fake target now?");
+      // The plan said what starts and Continue took it; nothing asks again.
+      expect(f.prompts.confirm).not.toHaveBeenCalledWith("Start fake target now?");
       expect(f.startCommand).toHaveBeenCalledExactlyOnceWith(executable ?? "fake-target", ["--relay"]);
       expect(f.stdout.join("")).toContain("Answered from your phone: fake answer");
     } finally {
@@ -445,7 +552,7 @@ describe("connect first reply proof", () => {
       });
       f.deps.connect!.observer = () => ({ semantics: "observational-no-ack", run });
       expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
-      expect(f.stdout.join("")).toContain("Relay is ready for Cursor.");
+      expect(f.stdout.join("")).toContain(SAY_HI);
       expect(f.stdout.join("")).toContain("Answered from your phone: still answers");
       expect(f.prompts.confirm).not.toHaveBeenCalled();
       expect(f.startCommand).not.toHaveBeenCalled();
@@ -469,8 +576,8 @@ describe("connect first reply proof", () => {
     f.deps.connect!.observer = () => ({ semantics: "observational-no-ack", run });
     expect(await runCLI(["connect", target, "--token", token, "--yes", "--allow", "person", "--no-start", "--no-skill"], f.deps)).toBe(0);
     expect(run).toHaveBeenCalledOnce();
-    expect(f.stdout.join("")).toContain(`Add @${card.handle} from your phone`);
-    expect(f.stdout.join("")).toContain("Open Relay, scan, add this agent, then send it any message.");
+    expect(f.stdout.join("")).toContain(SAY_HI);
+    expect(f.stdout.join("")).toContain(`[QR]\nhttps://staging.relayapp.im/@${card.handle}`);
     expect(f.stdout.join("")).toContain("Answered from your phone: first answer");
     expect(f.stdout.join("")).not.toMatch(/wrong agent|incoming|second answer|No reply yet/);
     expect(f.startCommand).not.toHaveBeenCalled();

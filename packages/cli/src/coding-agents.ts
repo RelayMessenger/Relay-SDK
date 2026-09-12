@@ -44,12 +44,17 @@ export interface AgentPaths {
   env: NodeJS.ProcessEnv;
   home: string;
   platform: NodeJS.Platform;
+  /** The folder connect runs in: the project scope of an agent that has one. */
+  cwd: string;
 }
 
 /**
  * How Relay reaches the agent once its token is saved on this computer.
  * - `claude-plugin`: the Relay channel plugin for Claude Code, as today.
  * - `mcp-command`: the agent's own `mcp add` writes its config.
+ * - `codex-project`: Relay writes `[mcp_servers.relay]` into the folder's own
+ *   `.codex/config.toml`, Codex's project layer (codex-rs/core/src/config.rs,
+ *   `project_config`), loaded when the folder is trusted.
  * - `mcp-file`: Relay adds one entry to the agent's MCP config file.
  * - `acp-bridge`: Relay writes no config; it hands the Relay MCP server to the
  *   agent's ACP session and drives the agent's turns (acp-bridge.ts).
@@ -58,6 +63,7 @@ export interface AgentPaths {
 export type ConnectMethod =
   | { kind: "claude-plugin" }
   | { kind: "mcp-command"; file: (paths: AgentPaths) => string }
+  | { kind: "codex-project"; file: (paths: AgentPaths) => string }
   | { kind: "mcp-file"; file: (paths: AgentPaths) => string; shape: "mcpServers" | "vscode" | "opencode" }
   | { kind: "acp-bridge" }
   | { kind: "hermes-plugin" }
