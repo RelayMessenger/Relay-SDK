@@ -183,3 +183,11 @@ tarball, hashes it against the lock, and checks the installed SDK's version and
 types. Production publishes carry no npm attestation (Blacksmith runners), so
 the tarball bytes are the receipt. These are artifact compatibility checks,
 not a claim of a hosted Relay deployment test.
+
+## Add Relay with `openclaw channels add relay`
+
+```bash
+openclaw channels add relay --token <RELAY_AGENT_TOKEN> --base-url https://api.relayapp.im
+```
+
+OpenClaw prints: `Relay configured.`

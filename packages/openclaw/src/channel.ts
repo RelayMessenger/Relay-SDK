@@ -6,6 +6,7 @@ import {
   type ChannelPlugin,
   type OpenClawConfig,
 } from "openclaw/plugin-sdk/channel-core";
+import { defineChannelSetupContract } from "openclaw/plugin-sdk/channel-setup";
 import {
   createMessageReceiptFromOutboundResults,
   defineChannelMessageAdapter,
@@ -187,6 +188,24 @@ export const relayMessageAdapter = defineChannelMessageAdapter({
   },
 });
 
+const relaySetupAdapter = {
+  applyAccountConfig: ({ cfg, accountId, input }: { cfg: OpenClawConfig; accountId: string; input: unknown }) => {
+    const core = cfg as RelayCoreConfig;
+    const patch = input as Record<string, unknown>;
+    const section = { ...core.channels?.relay };
+    const relay = accountId === DEFAULT_ACCOUNT_ID ? { ...section, ...patch } : { ...section, accounts: { ...section.accounts, [accountId]: { ...section.accounts?.[accountId], ...patch } } };
+    return { ...cfg, channels: { ...core.channels, relay } } as OpenClawConfig;
+  },
+};
+
+export const relaySetupContract = defineChannelSetupContract({
+  fields: {
+    token: { kind: "string", sensitive: true, cli: { flags: "--token <token>", description: "Relay Agent Token" } },
+    baseUrl: { kind: "string", cli: { flags: "--base-url <url>", description: "Relay API origin" } },
+  },
+  legacyAdapter: relaySetupAdapter,
+});
+
 export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> =
   createChatChannelPlugin({
     base: {
@@ -204,6 +223,7 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> =
         blockStreaming: false,
       },
       reload: { configPrefixes: ["channels.relay"] },
+      setupContract: relaySetupContract,
       setup: {
         applyAccountConfig: ({ cfg, accountId, input }) => {
           const core = cfg as RelayCoreConfig;
