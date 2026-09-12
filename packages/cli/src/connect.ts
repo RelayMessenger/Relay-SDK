@@ -595,7 +595,14 @@ export const runConnect = async (
   // The folder points at its agent, like `vercel link`; the token stays in the
   // global profile store, and the last connected agent is the default elsewhere.
   const linkPath = await writeFolderLink(deps.cwd, { handle: agent.handle, apiUrl: agent.apiURL });
-  await deps.agents.update((config) => { config.defaultAgent = agent.profile; });
+  // The config is written once per connect: a created or pasted agent saved
+  // its profile and the default together, so only an agent that was already
+  // saved needs a write here, and only when the default changes. A second
+  // write on a file that already exists is what the private-file check
+  // refuses on a Windows host running as another platform (CI, 2026-09-12).
+  if ((await deps.agents.read()).defaultAgent !== agent.profile) {
+    await deps.agents.update((config) => { config.defaultAgent = agent.profile; });
+  }
   const secrets = [agent.token];
 
   // A token already in a .env file belongs to whatever answers as that agent
@@ -871,6 +878,7 @@ const saveExistingAgent = async (
       name = `${base.slice(0, 54)}-${suffix}`;
     }
     config.profiles[name] = { api_url: apiURL, agent_token: token };
+    config.defaultAgent = name;
     return name;
   });
   return { profile, handle, displayName, apiURL, token, created: false, shareURL: savedAgentShareURL(apiURL, handle) };
@@ -933,6 +941,7 @@ const resolveAgent = async (
     ...(options.image ? { image: options.image } : {}),
     cwd: deps.cwd,
     home: deps.home,
+    makeDefault: true,
   }, deps.agents, deps.fetch), (result) => `Created ${screen.handle(result.result.handle)}  token saved privately on this computer`);
   if (created.image && created.image.status !== "updated") {
     throw new ConnectFailure(
