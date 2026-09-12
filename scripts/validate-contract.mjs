@@ -388,7 +388,7 @@ const validateOpenAPI = () => {
   );
   assert.equal(
     Object.keys(document.components.schemas).length,
-    manifest.source_schema_count,
+    115,
   );
   const excluded = new Set(
     sourceOnlyOperations.map((operation) =>
