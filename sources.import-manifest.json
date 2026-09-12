@@ -1295,7 +1295,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "src/channel.ts",
       "source_sha256": "8bee333306d155d5cb407a6560d8cd01aeceea835400626afe942114478760ab",
-      "destination_sha256": "ba7293928a2741a75a67bb5e98c6c794cc0b1f5de7af709730f37ba87f5d3f03",
+      "destination_sha256": "08ff9b062191f6bc1ec3f4534d3bb2c948cbe1f7a578ee7db23d0e1b139c7a1b",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

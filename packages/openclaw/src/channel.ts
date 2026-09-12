@@ -188,24 +188,22 @@ export const relayMessageAdapter = defineChannelMessageAdapter({
   },
 });
 
-const relaySetupAdapter = {
-  applyAccountConfig: ({ cfg, accountId, input }: { cfg: OpenClawConfig; accountId: string; input: unknown }) => {
-    const core = cfg as RelayCoreConfig;
-    const patch = input as Record<string, unknown>;
-    const section = { ...core.channels?.relay };
-    const relay = accountId === DEFAULT_ACCOUNT_ID ? { ...section, ...patch } : { ...section, accounts: { ...section.accounts, [accountId]: { ...section.accounts?.[accountId], ...patch } } };
-    return { ...cfg, channels: { ...core.channels, relay } } as OpenClawConfig;
-  },
-};
-
 const RELAY_MISSING_TOKEN = `relay: account "default" has no Relay Agent Token`;
 
 const baseRelaySetupContract = defineChannelSetupContract({
+  adapter: {
+    applyAccountConfig: ({ cfg, accountId, input }: { cfg: OpenClawConfig; accountId: string; input: unknown }) => {
+      const core = cfg as RelayCoreConfig;
+      const section = { ...core.channels?.relay };
+      const patch = input as Record<string, unknown>;
+      const relay = accountId === DEFAULT_ACCOUNT_ID ? { ...section, ...patch } : { ...section, accounts: { ...section.accounts, [accountId]: { ...section.accounts?.[accountId], ...patch } } };
+      return { ...cfg, channels: { ...core.channels, relay } } as OpenClawConfig;
+    },
+  },
   fields: {
     token: { kind: "string", sensitive: true, cli: { flags: "--token <token>", description: "Relay Agent Token" } },
     baseUrl: { kind: "string", cli: { flags: "--base-url <url>", description: "Relay API origin" } },
   },
-  legacyAdapter: relaySetupAdapter,
 });
 
 export const relaySetupContract = { ...baseRelaySetupContract, parseInput: (input: unknown) => { const result = baseRelaySetupContract.parseInput(input); if (!result.ok || typeof (result.value as Record<string, unknown>).token !== "string" || !((result.value as Record<string, unknown>).token as string).trim()) return { ok: false as const, error: RELAY_MISSING_TOKEN }; return result; } };
@@ -228,33 +226,6 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> =
       },
       reload: { configPrefixes: ["channels.relay"] },
       setupContract: relaySetupContract,
-      setup: {
-        applyAccountConfig: ({ cfg, accountId, input }) => {
-          const core = cfg as RelayCoreConfig;
-          const section = { ...core.channels?.relay };
-          const patch = input as Record<string, unknown>;
-          const relay =
-            !accountId || accountId === DEFAULT_ACCOUNT_ID
-              ? { ...section, ...patch }
-              : {
-                  ...section,
-                  accounts: {
-                    ...section.accounts,
-                    [accountId]: {
-                      ...section.accounts?.[accountId],
-                      ...patch,
-                    },
-                  },
-                };
-          return {
-            ...cfg,
-            channels: {
-              ...core.channels,
-              relay,
-            },
-          } as OpenClawConfig;
-        },
-      },
       config: {
         listAccountIds: (cfg) =>
           listRelayAccountIds(cfg as RelayCoreConfig),

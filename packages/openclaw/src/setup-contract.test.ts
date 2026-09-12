@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { relayChannelPlugin, relaySetupContract } from "../src/channel.js";
+import { relaySetupContract } from "../src/channel.js";
 
 const cfg = { channels: {} } as any;
 
@@ -9,11 +9,9 @@ describe("Relay OpenClaw setup contract", () => {
     expect(result).toEqual({ ok: false, error: "relay: account \"default\" has no Relay Agent Token" });
   });
 
-  it("matches the legacy account config for non-interactive flags", () => {
-    const input = { token: "t", baseUrl: "u" };
-    const contractCfg = relaySetupContract.applyAccountConfig({ cfg, accountId: "default", input });
-    const legacyCfg = relayChannelPlugin.setup!.applyAccountConfig({ cfg, accountId: "default", input });
-    expect(contractCfg).toEqual(legacyCfg);
+  it("pins the applied account config", () => {
+    const result = relaySetupContract.applyAccountConfig({ cfg, accountId: "default", input: { token: "t", baseUrl: "u" } });
+    expect(result).toEqual({ channels: { relay: { token: "t", baseUrl: "u" } } });
   });
 
   it("exposes exactly one required wizard question", () => {
