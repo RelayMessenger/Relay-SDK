@@ -1,7 +1,7 @@
 import { isCancel } from "@clack/core";
 import type { AgentDependencies } from "./agents.js";
 import { listAgents } from "./agents.js";
-import { makeTheme, type SelectOption } from "./clack-theme.js";
+import { makeTheme, type SelectOption, type TextOptions } from "./clack-theme.js";
 import { processPalette } from "./ui-colour.js";
 import { DEFAULT_API_URL, DEFAULT_PROFILE, defaultCreationApiURL, validateApiURL } from "./config.js";
 
@@ -22,7 +22,7 @@ export interface InteractiveSpinner {
   start(message: string): void;
   stop(message: string): void;
 }
-export type { SelectOption } from "./clack-theme.js";
+export type { SelectOption, TextOptions } from "./clack-theme.js";
 /**
  * Every question is a single choice or a yes/no with a highlighted default,
  * and Enter takes the default (the sixteen CLIs walked on 2026-09-12,
@@ -31,9 +31,11 @@ export type { SelectOption } from "./clack-theme.js";
 export interface InteractivePrompts {
   /** `initialValue` is the option Enter takes; the first one when absent. */
   select(message: string, options: SelectOption[], initialValue?: string): Promise<string>;
-  confirm(message: string, options?: { initialValue?: boolean }): Promise<boolean>;
+  /** `hint` is one dim line under the question (Hermes: "Add later with `hermes mcp add`"). */
+  confirm(message: string, options?: { initialValue?: boolean; hint?: string }): Promise<boolean>;
   password(message: string): Promise<string>;
-  text(message: string, initialValue: string): Promise<string>;
+  /** Enter with nothing typed answers "" (the placeholder is what that means); `validate` refuses a typed answer with one line. */
+  text(message: string, initialValue: string, options?: TextOptions): Promise<string>;
   info(message: string): void;
   /** The opening and closing bars of one Clack session. */
   intro(message: string): void;
@@ -52,9 +54,9 @@ export function clackPrompts(info: (message: string) => void): InteractivePrompt
   const theme = makeTheme(processPalette(), { input: process.stdin, output: process.stderr });
   return {
     select: async (message, options, initialValue) => answer(await theme.select(message, options, initialValue)),
-    confirm: async (message, options) => answer(await theme.confirm(message, options?.initialValue ?? false)),
+    confirm: async (message, options) => answer(await theme.confirm(message, options?.initialValue ?? false, options?.hint)),
     password: async (message) => answer(await theme.password(message)),
-    text: async (message, initialValue) => answer(await theme.text(message, initialValue)),
+    text: async (message, initialValue, options) => answer(await theme.text(message, initialValue, options)),
     info,
     intro: theme.intro,
     outro: theme.outro,

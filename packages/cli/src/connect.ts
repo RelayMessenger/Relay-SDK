@@ -1,6 +1,7 @@
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { createAgentWithPicture, incompletePictureMessage } from "./agent-create.js";
 import { validateFirstName, validateHandle, type AgentDependencies } from "./agents.js";
 import { savedAgentShareURL } from "./agent-session.js";
@@ -64,6 +65,8 @@ export interface ConnectOptions {
   name?: string;
   about?: string;
   image?: string;
+  /** A PNG or JPEG on this computer; `--image` also takes an https:// address. */
+  avatar?: string;
   token?: string;
   allow?: string;
   yes?: boolean;
@@ -152,6 +155,44 @@ export interface ConnectAgent {
   created: boolean;
 }
 
+/**
+ * The optional step after the runtime question, in Hermes' shape (`hermes
+ * setup`: "Step 2: Customize Your Bot (Optional)", "Add an MCP server now?"
+ * defaulting to No with "Add later with `hermes mcp add`"). Enter skips every
+ * one of these (owner ruling, 2026-09-12).
+ */
+export const CUSTOMIZE_QUESTION = "Customize the agent? (name, handle, about, avatar)";
+export const CUSTOMIZE_HINT = "Enter skips. Relay picks a name and handle.";
+export const NAME_QUESTION = "Name (optional)";
+export const HANDLE_QUESTION = "Handle (optional)";
+export const ABOUT_QUESTION = "About (optional)";
+export const AVATAR_QUESTION = "Avatar (optional)";
+export const NAME_PLACEHOLDER = "Relay picks one";
+export const ABOUT_PLACEHOLDER = "One sentence about what it does";
+export const AVATAR_PLACEHOLDER = "Path to a PNG or JPEG";
+export const NOT_AN_IMAGE = "Not an image file. Enter skips.";
+const AVATAR_EXTENSIONS = new Set([".png", ".jpg", ".jpeg"]);
+
+/**
+ * The handle Relay's rule allows for a name (agents.ts, validateHandle): the
+ * words lowercased and joined with underscores, a letter first, at most 32
+ * before `.dev`. Undefined when nothing of the name survives the rule.
+ */
+export const handleFromName = (name: string): string | undefined => {
+  const body = name.toLowerCase().replace(/[^a-z0-9]+/gu, "_").replace(/^[^a-z]+/u, "").replace(/_+$/u, "").slice(0, 32).replace(/_+$/u, "");
+  return body.length >= 3 ? `${body}.dev` : undefined;
+};
+
+/** The avatar's path when it is a PNG or JPEG that exists; undefined otherwise. */
+export const avatarFile = (input: string, context: { cwd: string; home: string }): string | undefined => {
+  const trimmed = input.trim();
+  if (!trimmed) return undefined;
+  const path = resolve(context.cwd, trimmed.startsWith("~/") ? join(context.home, trimmed.slice(2)) : trimmed);
+  if (!AVATAR_EXTENSIONS.has(extname(path).toLowerCase()) || !existsSync(path)) return undefined;
+  try { if (!statSync(path).isFile()) return undefined; } catch { return undefined; }
+  return path;
+};
+
 /** The line a re-run in a linked folder says, and the flag that makes another agent. */
 export const linkedLine = (handle: string): string => `Linked to @${handle}; run  connect --new  for another, or  --profile <handle>  to link a saved one`;
 export const SAY_HI = "Say hi from your phone";
@@ -191,8 +232,8 @@ export interface PlanContext {
   start: boolean;
   /** The agents whose file already holds a token for someone else. */
   replacing?: Partial<Record<CodingAgentId, string>>;
-  /** Present when the plan creates a new agent: its handle, when one was asked for. */
-  create?: { handle?: string };
+  /** Present when the plan creates a new agent: what was chosen for it, when anything was. */
+  create?: AgentIdentity;
   /** How a command or a path is marked inside a step. Absent means unmarked, so
    * every caller that prints the steps as data gets them byte for byte. */
   mark?: (value: string) => string;
@@ -351,9 +392,27 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
   return { agent, steps, files, commands };
 };
 
-/** The plan's first line when an agent will be created. */
-export const createLine = (handle: string | undefined): string =>
-  `create a new agent  (${handle ? `@${handle}` : "Relay picks the name"})`;
+/** What a person chose for a new agent; every field is optional. */
+export interface AgentIdentity {
+  handle?: string;
+  name?: string;
+  about?: string;
+  /** A resolved path to a PNG or JPEG on this computer. */
+  avatar?: string;
+}
+
+/** The plan's first line when an agent will be created: unchanged when nothing
+ * was chosen; otherwise the handle, the name, and the rest as dim words. */
+export const createLine = (create: AgentIdentity | undefined, mark: (value: string) => string = (value) => value): string => {
+  const { handle, name, about, avatar } = create ?? {};
+  if (!name && !about && !avatar) return `create a new agent  (${handle ? `@${handle}` : "Relay picks the name"})`;
+  return [
+    handle ? `create @${handle}` : "create a new agent",
+    ...(name ? [`"${name}"`] : []),
+    ...(about ? [mark(`about: ${about}`)] : []),
+    ...(avatar ? [mark(`avatar: ${basename(avatar)}`)] : []),
+  ].join("  ");
+};
 
 /**
  * Every file this command writes and every command it runs, for every chosen
@@ -364,7 +423,7 @@ export const runtimeConnectPlan = (input: PlanContext & { agents: readonly Codin
   // A new agent is the first thing the plan makes, so it is the first line:
   // nothing is created until the plan is taken (owner, 2026-09-12, after a No
   // at Continue left a stray agent on staging).
-  const steps = [...(input.create ? [createLine(input.create.handle)] : []), ...agents.flatMap((plan) => plan.steps)];
+  const steps = [...(input.create ? [createLine(input.create, input.mark)] : []), ...agents.flatMap((plan) => plan.steps)];
   // With `--non-interactive` no one can answer, so the plan is a statement:
   // clig.dev, Interactivity: "If --no-input is passed, don't prompt or do
   // anything interactive" (ledger row P27, captures/relay/ni2.out).
@@ -539,6 +598,9 @@ export const runConnect = async (
   if (options.handle !== undefined) validateHandle(options.handle);
   if (options.name !== undefined) validateFirstName(options.name);
   if (options.token !== undefined) validateToken(options.token);
+  if (options.avatar !== undefined && options.image !== undefined) throw new CliError("Choose --avatar or --image, not both.", "usage");
+  const avatarFlag = options.avatar === undefined ? undefined : avatarFile(options.avatar, { cwd: deps.cwd, home: deps.home });
+  if (options.avatar !== undefined && !avatarFlag) throw new CliError(`Not an image file: ${options.avatar}. --avatar takes a PNG or JPEG on this computer.`, "usage");
   const ui = options.nonInteractive ? undefined : deps.prompts;
   const json = options.json === true;
   // Only a framed, interactive run marks values.
@@ -585,7 +647,7 @@ export const runConnect = async (
     handle: agent?.handle ?? options.handle ?? "<handle>",
     allow, start: options.start !== false,
     ...(agent && "token" in agent ? { token: agent.token, apiURL: agent.apiURL } : {}),
-    ...(agent && "pending" in agent ? { apiURL: agent.apiURL, create: { ...(agent.handle ? { handle: agent.handle } : {}) } } : {}),
+    ...(agent && "pending" in agent ? { apiURL: agent.apiURL, create: agent.identity } : {}),
     ...(replacing ? { replacing } : {}),
     ...(marked ? { mark: dim } : {}),
   });
@@ -610,7 +672,7 @@ export const runConnect = async (
   // Which agent: one that exists, or one the plan will create. Nothing is
   // created here; every question comes before the plan, and the plan before
   // anything is made.
-  const chosen = await resolveAgent(options, deps, screen, linked);
+  const chosen = await resolveAgent({ ...options, ...(avatarFlag ? { avatar: avatarFlag } : {}) }, deps, screen, linked);
   const known = "pending" in chosen ? undefined : chosen;
 
   // A token already in a .env file belongs to whatever answers as that agent
@@ -917,7 +979,54 @@ interface PendingAgent {
   pending: true;
   apiURL: string;
   handle?: string;
+  identity: AgentIdentity;
 }
+
+/** The flags first; then, in a terminal, the optional step with one question per field the flags left open. */
+const chooseIdentity = async (options: ConnectOptions, deps: ConnectDependencies): Promise<AgentIdentity> => {
+  const identity: AgentIdentity = {
+    ...(options.handle ? { handle: options.handle } : {}),
+    ...(options.name ? { name: options.name } : {}),
+    ...(options.about ? { about: options.about } : {}),
+    ...(options.avatar ? { avatar: options.avatar } : {}),
+  };
+  const ui = deps.prompts;
+  if (!ui || options.json || options.nonInteractive) return identity;
+  const open = (["name", "handle", "about", "avatar"] as const).filter((field) => identity[field] === undefined);
+  if (!open.length) return identity;
+  if (!await ui.confirm(CUSTOMIZE_QUESTION, { initialValue: false, hint: CUSTOMIZE_HINT })) return identity;
+  if (open.includes("name")) {
+    const name = (await ui.text(NAME_QUESTION, "", {
+      placeholder: NAME_PLACEHOLDER,
+      validate: (value) => { try { if (value.trim()) validateFirstName(value); return undefined; } catch (error) { return (error as Error).message; } },
+    })).trim();
+    if (name) identity.name = name;
+  }
+  if (open.includes("handle")) {
+    // The placeholder is the handle Relay's rule gives the name, and Enter takes it.
+    const derived = identity.name ? handleFromName(identity.name) : undefined;
+    const typed = (await ui.text(HANDLE_QUESTION, "", {
+      placeholder: derived ?? NAME_PLACEHOLDER,
+      validate: (value) => { try { if (value.trim()) validateHandle(value.trim()); return undefined; } catch (error) { return (error as Error).message; } },
+    })).trim();
+    if (typed) identity.handle = typed;
+    else if (derived) identity.handle = derived;
+  }
+  if (open.includes("about")) {
+    const about = (await ui.text(ABOUT_QUESTION, "", { placeholder: ABOUT_PLACEHOLDER })).trim();
+    if (about) identity.about = about;
+  }
+  if (open.includes("avatar")) {
+    const where = { cwd: deps.cwd, home: deps.home };
+    const avatar = (await ui.text(AVATAR_QUESTION, "", {
+      placeholder: AVATAR_PLACEHOLDER,
+      validate: (value) => value.trim() && !avatarFile(value, where) ? NOT_AN_IMAGE : undefined,
+    })).trim();
+    const path = avatar ? avatarFile(avatar, where) : undefined;
+    if (path) identity.avatar = path;
+  }
+  return identity;
+};
 
 /**
  * Which agent to connect: the one named by a token, a linked folder or an
@@ -962,7 +1071,8 @@ const resolveAgent = async (
       }
     }
   }
-  return { pending: true, apiURL, ...(options.handle ? { handle: options.handle } : {}) };
+  const identity = await chooseIdentity(options, deps);
+  return { pending: true, apiURL, ...(identity.handle ? { handle: identity.handle } : {}), identity };
 };
 
 /** Creates the agent the plan named and saves its token; runs only after Continue. */
@@ -972,23 +1082,24 @@ const createNewAgent = async (
   deps: ConnectDependencies,
   screen: Screen,
 ): Promise<ConnectAgent> => {
-  const { apiURL, handle } = pending;
+  const { apiURL, handle, identity } = pending;
+  const image = identity.avatar ?? options.image;
+  // The picture goes up through the same upload `contact-card update --image`
+  // uses (agent-image-upload.ts), after the agent exists and before "Say hi".
   const created = await screen.work("Creating your agent", () => createAgentWithPicture({
     apiURL,
     ...(deps.profile ? { profile: deps.profile } : {}),
     ...(handle ? { handle } : {}),
-    ...(options.name ? { firstName: options.name } : {}),
-    ...(options.about === undefined ? {} : { about: options.about }),
-    ...(options.image ? { image: options.image } : {}),
+    ...(identity.name ? { firstName: identity.name } : {}),
+    ...(identity.about === undefined ? {} : { about: identity.about }),
+    ...(image ? { image } : {}),
     cwd: deps.cwd,
     home: deps.home,
     makeDefault: true,
   }, deps.agents, deps.fetch), (result) => `Created ${screen.handle(result.result.handle)}  token saved privately on this computer`);
   if (created.image && created.image.status !== "updated") {
-    throw new ConnectFailure(
-      incompletePictureMessage(created.result.handle, created.result.profile, created.image, false),
-      `npx relaymessenger --profile ${created.result.profile} contact-card update --handle ${created.result.handle} --image <local-file>`,
-    );
+    // A picture that did not go through never undoes the connect: one dim line, then on.
+    screen.say(screen.dim(`avatar not set: ${incompletePictureMessage(created.result.handle, created.result.profile, created.image, false)}`));
   }
   const saved = (await deps.agents.read()).profiles[created.result.profile];
   if (!saved?.agent_token) {

@@ -39,17 +39,20 @@ export interface Palette {
   dim(value: string): string;
   red(value: string): string;
   underline(value: string): string;
+  /** The cursor block a placeholder starts with, the way clack draws it. */
+  inverse(value: string): string;
 }
 
 export const palette = (input: ColourInput): Palette => {
   const depth = colourDepth(input);
-  if (depth === "none") return { depth, blue: (v) => v, dim: (v) => v, red: (v) => v, underline: (v) => v };
+  if (depth === "none") return { depth, blue: (v) => v, dim: (v) => v, red: (v) => v, underline: (v) => v, inverse: (v) => v };
   return {
     depth,
     blue: wrap(depth === "truecolor" ? BLUE_TRUECOLOR : BLUE_256, FG_RESET),
     dim: wrap(`${ESC}2m`, `${ESC}22m`),
     red: wrap(`${ESC}31m`, FG_RESET),
     underline: wrap(`${ESC}4m`, `${ESC}24m`),
+    inverse: wrap(`${ESC}7m`, `${ESC}27m`),
   };
 };
 

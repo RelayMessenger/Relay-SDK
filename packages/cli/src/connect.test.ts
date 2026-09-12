@@ -6,7 +6,11 @@ import { describe, expect, it, vi } from "vitest";
 import { runCLI, type ProgramDependencies } from "./program.js";
 import { readConfig } from "./config.js";
 import type { InteractivePrompts, SelectOption } from "./interactive.js";
-import { claudeMarketplaceSource, CLAUDE_PLUGIN_ID, linkedLine, NO_TTY_NEXT_STEP, NO_TTY_SENTENCE, SAY_HI, waitForNewSender } from "./connect.js";
+import {
+  ABOUT_QUESTION, AVATAR_QUESTION, claudeMarketplaceSource, CLAUDE_PLUGIN_ID, CUSTOMIZE_HINT, CUSTOMIZE_QUESTION, HANDLE_QUESTION, handleFromName,
+  linkedLine, NAME_QUESTION, NO_TTY_NEXT_STEP, NO_TTY_SENTENCE, NOT_AN_IMAGE, SAY_HI, waitForNewSender,
+} from "./connect.js";
+import type { TextOptions } from "./interactive.js";
 import { folderLinkPath } from "./folder-link.js";
 import { CODING_AGENT_IDS, codingAgent } from "./coding-agents.js";
 import type { RuntimeFound } from "./runtime-sniff.js";
@@ -32,9 +36,10 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}, sniffed: Ru
     // Enter on every question: the runtime picker takes its default, and
     // "Which agent?" takes "New agent".
     select: vi.fn(async (message: string, options: SelectOption[], initial?: string) => message === "Where does your agent run?" ? initial ?? options[0]!.value : "new"),
-    confirm: vi.fn(async () => true),
+    // The optional customize step takes its default, No; every other yes/no is Yes.
+    confirm: vi.fn(async (message: string) => message !== CUSTOMIZE_QUESTION),
     password: vi.fn(async () => token),
-    text: vi.fn(async (_message: string, initial: string) => initial),
+    text: vi.fn(async (_message: string, initial: string, _options?: TextOptions) => initial),
     info: vi.fn(),
     intro: vi.fn(),
     outro: vi.fn(),
@@ -89,7 +94,7 @@ describe("nothing is created before the plan is taken", () => {
 
   it("No at Continue creates nothing: no agent, no token, no link", async () => {
     const f = await fixture();
-    f.prompts.confirm.mockResolvedValueOnce(false);
+    f.prompts.confirm.mockImplementation(async () => false);
     expect(await runCLI(["connect", "claude", "--new", "--handle", "calm_cangoo.dev", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
     expect(f.prompts.confirm).toHaveBeenCalledWith("Continue?", { initialValue: true });
     expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
@@ -115,6 +120,113 @@ describe("nothing is created before the plan is taken", () => {
     expect(plan).toBeGreaterThanOrEqual(0);
     expect(created).toBeGreaterThan(plan);
     expect((await readConfig(f.deps.configContext)).profiles[card.handle]?.agent_token).toBe(token);
+  });
+});
+
+describe("the optional customize step", () => {
+  const argv = ["connect", "claude", "--new", "--allow", "advait", "--no-start", "--no-skill"];
+  const posted = (f: Awaited<ReturnType<typeof fixture>>): Record<string, unknown> =>
+    JSON.parse(String(f.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body)) as Record<string, unknown>;
+  const textOptions = (f: Awaited<ReturnType<typeof fixture>>, question: string): TextOptions =>
+    (f.prompts.text.mock.calls.find(([message]) => message === question) as [string, string, TextOptions])[2];
+  // A real PNG by signature, so the same local-image check `agents create --image` runs passes.
+  const png = async (home: string): Promise<string> => {
+    const path = join(home, "face.png");
+    await writeFile(path, Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.alloc(64)]));
+    return path;
+  };
+
+  it("is asked after the runtime question, defaults to No with its hint, and No leaves the run byte-identical", async () => {
+    // No runtime named, so the runtime question is asked and the order is real.
+    const asked = argv.filter((word) => word !== "claude");
+    const f = await fixture();
+    expect(await runCLI(asked, f.deps)).toBe(0);
+    expect(f.prompts.confirm).toHaveBeenCalledWith(CUSTOMIZE_QUESTION, { initialValue: false, hint: CUSTOMIZE_HINT });
+    expect(f.prompts.confirm.mock.calls.map(([message]) => message)).toEqual([CUSTOMIZE_QUESTION, "Continue?"]);
+    expect(f.prompts.select.mock.invocationCallOrder[0]).toBeLessThan(f.prompts.confirm.mock.invocationCallOrder[0]!);
+    expect(f.prompts.text).not.toHaveBeenCalled();
+    expect(posted(f)).toEqual({});
+    expect(f.stdout.join("")).toContain("create a new agent  (Relay picks the name)");
+    // Yes, then Enter on all four, is the same run: same request, same screen.
+    const yes = await fixture();
+    yes.prompts.confirm.mockImplementation(async () => true);
+    expect(await runCLI(asked, yes.deps)).toBe(0);
+    expect(yes.prompts.text.mock.calls.map(([message]) => message)).toEqual([NAME_QUESTION, HANDLE_QUESTION, ABOUT_QUESTION, AVATAR_QUESTION]);
+    expect(yes.prompts.text.mock.calls.every(([message]) => message.endsWith("(optional)"))).toBe(true);
+    expect(posted(yes)).toEqual(posted(f));
+    // Only each run's own temp home differs.
+    expect(yes.stdout.join("").replaceAll(yes.home, "<home>")).toBe(f.stdout.join("").replaceAll(f.home, "<home>"));
+  });
+
+  it("a name derives the handle placeholder, and Enter takes it", async () => {
+    const f = await fixture();
+    f.prompts.confirm.mockImplementation(async () => true);
+    f.prompts.text.mockImplementation(async (message: string) => message === NAME_QUESTION ? "Calm Canada Goose" : "");
+    expect(await runCLI(argv, f.deps)).toBe(0);
+    expect(handleFromName("Calm Canada Goose")).toBe("calm_canada_goose.dev");
+    expect(textOptions(f, NAME_QUESTION).placeholder).toBe("Relay picks one");
+    expect(textOptions(f, HANDLE_QUESTION).placeholder).toBe("calm_canada_goose.dev");
+    expect(textOptions(f, HANDLE_QUESTION).validate!("Not.dev")).toContain("A handle looks like name.dev");
+    expect(textOptions(f, HANDLE_QUESTION).validate!("")).toBeUndefined();
+    expect(textOptions(f, ABOUT_QUESTION).placeholder).toBe("One sentence about what it does");
+    expect(textOptions(f, AVATAR_QUESTION).placeholder).toBe("Path to a PNG or JPEG");
+    expect(posted(f)).toEqual({ handle: "calm_canada_goose.dev", first_name: "Calm Canada Goose" });
+    expect(f.stdout.join("")).toContain('create @calm_canada_goose.dev  "Calm Canada Goose"');
+  });
+
+  it("--name, --handle, --about and --avatar pre-fill, so nothing is asked, and the plan line carries them", async () => {
+    const f = await fixture();
+    const face = await png(f.home);
+    expect(await runCLI([...argv, "--name", "Calm Canada Goose", "--handle", "calm_cangoo.dev", "--about", "Answers the mail.", "--avatar", face], f.deps)).toBe(0);
+    expect(f.prompts.confirm.mock.calls.map(([message]) => message)).toEqual(["Continue?"]);
+    expect(f.prompts.text).not.toHaveBeenCalled();
+    expect(posted(f)).toEqual({ handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", about: "Answers the mail." });
+    expect(f.stdout.join("")).toContain('create @calm_cangoo.dev  "Calm Canada Goose"  about: Answers the mail.  avatar: face.png');
+    expect(f.fetch.mock.calls.some(([input]) => String(input).includes("/attachments"))).toBe(true);
+  });
+
+  it("--about alone leaves the other three questions open; --avatar refuses a file that is not an image", async () => {
+    const f = await fixture();
+    f.prompts.confirm.mockImplementation(async () => true);
+    expect(await runCLI([...argv, "--about", "Answers the mail."], f.deps)).toBe(0);
+    expect(f.prompts.text.mock.calls.map(([message]) => message)).toEqual([NAME_QUESTION, HANDLE_QUESTION, AVATAR_QUESTION]);
+    const bad = await fixture();
+    await writeFile(join(bad.home, "notes.txt"), "x");
+    expect(await runCLI([...argv, "--avatar", join(bad.home, "notes.txt")], bad.deps)).toBe(2);
+    expect(bad.stderr.join("")).toContain("Not an image file");
+    expect(bad.prompts.select).not.toHaveBeenCalled();
+    expect(bad.fetch).not.toHaveBeenCalled();
+  });
+
+  it("an avatar path that is not an image shows the one-line error, and Enter skips", async () => {
+    const f = await fixture();
+    f.prompts.confirm.mockImplementation(async () => true);
+    expect(await runCLI(argv, f.deps)).toBe(0);
+    const { validate } = textOptions(f, AVATAR_QUESTION);
+    expect(validate!(join(f.home, "missing.png"))).toBe(NOT_AN_IMAGE);
+    await writeFile(join(f.home, "notes.txt"), "x");
+    expect(validate!(join(f.home, "notes.txt"))).toBe(NOT_AN_IMAGE);
+    expect(validate!(await png(f.home))).toBeUndefined();
+    expect(validate!("")).toBeUndefined();
+    expect(posted(f)).toEqual({});
+    expect(f.fetch.mock.calls.some(([input]) => String(input).includes("/attachments"))).toBe(false);
+  });
+
+  it("a failed avatar upload prints one dim line and the connect still finishes", async () => {
+    const f = await fixture();
+    const face = await png(f.home);
+    const inner = f.fetch.getMockImplementation()!;
+    f.fetch.mockImplementation(async (input, init) => String(input).includes("/attachments")
+      ? Response.json({ error: "no" }, { status: 500 })
+      : inner(input, init));
+    expect(await runCLI([...argv, "--avatar", face], f.deps)).toBe(0);
+    const printed = f.stdout.join("");
+    expect(printed).toContain(`Created @${card.handle}`);
+    expect(printed).toContain("avatar not set: ");
+    expect(printed.indexOf("avatar not set: ")).toBeLessThan(printed.indexOf(SAY_HI));
+    expect(f.stderr.join("")).toBe("");
+    expect((await readConfig(f.deps.configContext)).profiles[card.handle]?.agent_token).toBe(token);
+    await expectOwnerOnly(join(f.channel, ".env"));
   });
 });
 

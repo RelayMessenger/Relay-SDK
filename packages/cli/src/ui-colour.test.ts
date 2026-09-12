@@ -33,6 +33,8 @@ describe("Relay terminal colour", () => {
     expect(p.dim("x")).toBe(`${ESC}2mx${ESC}22m`);
     expect(p.red("x")).toBe(`${ESC}31mx${ESC}39m`);
     expect(p.underline("x")).toBe(`${ESC}4mx${ESC}24m`);
-    for (const painted of [p.blue("x"), p.dim("x"), p.red("x"), p.underline("x")]) expect(painted).not.toMatch(GREEN);
+    // The cursor block a placeholder starts with (clack-theme.ts, text).
+    expect(p.inverse("x")).toBe(`${ESC}7mx${ESC}27m`);
+    for (const painted of [p.blue("x"), p.dim("x"), p.red("x"), p.underline("x"), p.inverse("x")]) expect(painted).not.toMatch(GREEN);
   });
 });
