@@ -69,6 +69,30 @@ it("resizes without clipping QR and bounds output to terminal height", async () 
   f.input.write("\x04"); await pending; f.input.destroy();
 });
 
+it("shows the compact QR in a short window and full cells in a tall one, never a size complaint", async () => {
+  // The real renderer, not the fixture's stand-in: this is the size rule itself.
+  const f = fixture(24); f.output.columns = 80;
+  const pending = runTerminalSession(options, { input: f.input, output: f.output, signals: f.signals });
+  await turn();
+  const last = (): string => f.output.write.mock.calls.at(-1)![0];
+  expect(last()).toMatch(/[▀▄█]/u);
+  expect(last()).not.toContain("Enlarge terminal");
+  expect(last()).not.toContain("QR unavailable");
+  expect(last().split("\n").length).toBeLessThanOrEqual(24);
+  // Tall enough for one text line per module row, so no half-block gap is drawn.
+  f.output.rows = 60; f.output.emit("resize"); await turn();
+  expect(last()).toContain("[48;5;16m");
+  expect(last()).not.toMatch(/[▀▄█]/u);
+  expect(last()).not.toContain("Enlarge terminal");
+  // 40 rows is taller than the full code's 35 lines and still has no room for it
+  // once the text is stacked underneath, so the code drops a size rather than
+  // asking the person to resize a window that is already big enough.
+  f.output.rows = 40; f.output.columns = 100; f.output.emit("resize"); await turn();
+  expect(last()).toMatch(/[▀▄█]/u);
+  expect(last()).not.toContain("Enlarge terminal");
+  f.input.write("q"); await pending; f.input.destroy();
+});
+
 it("sanitizes observer exceptions and handles EOF without changing an external runtime", async () => {
   const f = fixture();
   const observer: TerminalObserver = { semantics: "observational-no-ack", async run() { throw Error("Bearer private-token"); } };

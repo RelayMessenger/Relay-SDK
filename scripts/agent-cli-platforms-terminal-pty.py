@@ -13,7 +13,8 @@ def drain(fd,seconds):
 # The `agents` door: "Create agent" is its first row, it never offers the skill, and it asks exactly
 # three optional questions (packages/cli/src/interactive.test.ts). The root menu is Connect/Watch/Exit since PR 176.
 steps=[(b'what would you like to do?',b'\r'),(b'Handle (optional)',b'\r'),(b'Name (optional)',b'\r'),(b'Image (optional)',b'\r')]
-modes=[('light',80,24),('dark',100,32)]+([('tmux',100,32)] if os.uname().sysname=='Linux' else [])
+# 24 and 32 rows have no room for a full-cell code; 60 rows has. Both sizes are proved here.
+modes=[('light',80,24),('dark',100,32),('tall',100,60)]+([('tmux',100,32)] if os.uname().sysname=='Linux' else [])
 for mode,columns,rows in modes:
  home=root/mode;home.mkdir();ready=home/'ready.json';report=home/'server.json';socket=home/'tmux.sock';env={**baseenv,'HOME':str(home),'TERM':'xterm-256color','COLORFGBG':'0;15' if mode=='light' else '15;0','RELAY_CONFIG_PATH':str(home/'config.json')}
  server=subprocess.Popen([node,str(pathlib.Path(__file__).with_name('agent-cli-platforms-terminal-server.mjs')),str(ready),str(report)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
@@ -39,11 +40,17 @@ for mode,columns,rows in modes:
   assert b'Install the Relay skill?' not in output
   # Inspect latest alternate-screen frame, not old prompts/history.
   frame=output.split(b'\x1b[H\x1b[2J')[-1]
-  # The QR is full cells: two background-coloured spaces per module (white 231 / black 16),
-  # one text line per module row, never half-block glyphs (they leave hairline gaps in Terminal.app).
-  assert b'Enlarge terminal' not in frame and b'\x1b[48;5;16m' in frame and b'\x1b[48;5;231m' in frame and '▄'.encode() not in frame and '▀'.encode() not in frame,frame
+  # The QR is size-aware (packages/cli/src/qr-terminal.ts): full cells, two background-coloured
+  # spaces per module (white 231 / black 16), while the whole code fits the window; the compact
+  # half-block form below that. Either one scans. What must never appear is a window that
+  # shows no whole code at all.
+  fullCells=b'\x1b[48;5;16m' in frame and b'\x1b[48;5;231m' in frame
+  halfBlocks=any(glyph.encode() in frame for glyph in '▀▄█')
+  assert b'Enlarge terminal' not in frame and b'QR unavailable' not in frame and (fullCells or halfBlocks),frame
+  # 60 rows fit one text line per module row, so that window gets the full cells and no glyph.
+  if rows>=60: assert fullCells and not halfBlocks,frame
   assert b'https://staging.relayapp.im/' in output and b'Agent: not running yet' in output
-  detail={'mode':mode,'size':[columns,rows],'inputSteps':stage,'installedShim':True,'skillNotOffered':True,'noExtraCreateConfirmation':True,'apexURL':True,'QRfits':True,'eventsVisible':True,'noTokenEcho':True}
+  detail={'mode':mode,'size':[columns,rows],'inputSteps':stage,'installedShim':True,'skillNotOffered':True,'noExtraCreateConfirmation':True,'apexURL':True,'QRfits':True,'QRform':'full' if fullCells and not halfBlocks else 'compact','eventsVisible':True,'noTokenEcho':True}
   if mode=='tmux':
    os.write(master,b'\x02d');output+=drain(master,.3);process.wait(timeout=3)
    pre=json.loads(report.read_text())['eventsSent'];time.sleep(.8);post=json.loads(report.read_text())['eventsSent'];assert post>pre
