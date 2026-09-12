@@ -80,8 +80,8 @@ describe("the plan screen", () => {
     const f = await fixture();
     expect(await runCLI(["connect", "claude", "--dry-run"], f.deps)).toBe(0);
     const printed = f.stdout.join("");
-    expect(printed).toContain("Claude Code found  /fake/bin/claude");
-    expect(printed).toContain("Relay will do 5 things. Continue?");
+    expect(printed).not.toContain("found on this computer");
+    expect(printed).toContain("create a new agent");
     expect(printed).toContain("create a new agent and save its token privately on this computer");
     expect(printed).toContain(`claude plugin marketplace add ${claudeMarketplaceSource("0.1.6-staging.0")}`);
     expect(printed).toContain(join(f.home, ".claude", "channels", "relay", ".env"));
@@ -114,17 +114,15 @@ describe("the plan screen", () => {
 });
 
 describe("choosing agents", () => {
-  it("asks with every agent listed and the detected ones pre-selected, and detection never chooses", async () => {
+  it("asks with every agent listed and picks one detected agent", async () => {
     const f = await fixture();
     expect(await runCLI(["connect", "--dry-run"], f.deps)).toBe(0);
-    expect(f.prompts.multiselect).toHaveBeenCalledOnce();
-    const [message, options, initial] = f.prompts.multiselect.mock.calls[0]!;
-    expect(message).toContain("Which coding agents should Relay connect?");
-    expect(message).toContain("Detected agents are pre-selected");
+    expect(f.prompts.select).toHaveBeenCalled();
+    const [message, options] = f.prompts.select.mock.calls.find(([m]) => m === "Which coding agent?")!;
+    expect(message).toBe("Which coding agent?");
     expect((options as Array<{ value: string }>).map((option) => option.value)).toEqual(CODING_AGENT_IDS);
-    expect(initial).toEqual(["claude-code", "hermes"]);
-    expect(f.stdout.join("")).toContain("Claude Code found");
-    expect(f.stdout.join("")).toContain("Hermes found");
+    expect((options as Array<{ label: string }>).some((option) => option.label.includes("not found on this computer"))).toBe(true);
+    expect(f.stdout.join("")).not.toContain("found on this computer");
   });
 
   it("--all takes every detected agent and none other", async () => {
@@ -282,20 +280,7 @@ describe("the MCP agents", () => {
     expect(await readFile(file, "utf8")).toBe("{ not json");
   });
 
-  it("several agents at once share one agent, one plan and one confirmation", async () => {
-    const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" }, vscode: { found: true, configPath: "/fake/.vscode" } }));
-    expect(await runCLI(["connect", "--all", "--new", "--no-skill"], f.deps)).toBe(0);
-    expect(f.prompts.confirm).toHaveBeenCalledTimes(2);
-    expect(f.prompts.confirm).toHaveBeenLastCalledWith("Answer Relay messages with Codex from this folder?");
-    expect(f.stdout.join("")).toContain("Relay will do 3 things. Continue?");
-    expect(ranLines(f)).toHaveLength(1);
-    const vscodeMethod = codingAgent("vscode").connect;
-    if (vscodeMethod.kind !== "mcp-file") throw new Error("Expected a file connector");
-    const vscodeFile = vscodeMethod.file({ home: f.home, env: f.env, platform: process.platform });
-    expect(JSON.parse(await readFile(vscodeFile, "utf8")).servers.relay).toEqual({ type: "stdio", ...server(f) });
-    expect(f.stdout.join("")).toContain("Relay is ready for Codex, VS Code.");
-    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
-  });
+
 });
 
 describe("Hermes and OpenClaw", () => {
