@@ -283,6 +283,7 @@ export const createProgram = (
     .option("--name <name>", "the name people see next to a new agent")
     .option("--about <text>", "the one line people see above your agent's first message", aboutText)
     .option("--image <path-or-url>", "a picture for a new agent: a file on this computer, or an https:// address")
+    .option("--avatar <file>", "a picture for a new agent: a PNG or JPEG on this computer")
     // gh's `auth login --with-token` (ledger row P25): the token comes down a
     // pipe and never touches `ps` or the shell history. `--token` stays for
     // scripts and is the visible one.

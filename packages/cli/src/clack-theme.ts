@@ -18,12 +18,19 @@ import type { Palette } from "./ui-colour.js";
 
 export interface ThemeIO { input: Readable; output: Writable }
 export interface SelectOption { value: string; label: string; hint?: string; dim?: boolean }
+/** A text question: what an empty answer would mean, and the rule a typed one must pass. */
+export interface TextOptions {
+  placeholder?: string;
+  /** The one-line error shown under the input; `undefined` accepts. */
+  validate?: (value: string) => string | undefined;
+}
 
 export interface Theme {
   /** `undefined` and clack's cancel symbol both mean the person left the question. */
   select(message: string, options: SelectOption[], initialValue?: string): Promise<string | symbol | undefined>;
-  confirm(message: string, initialValue: boolean): Promise<boolean | symbol | undefined>;
-  text(message: string, initialValue: string): Promise<string | symbol | undefined>;
+  /** `hint` is one dim line under the question, the way Hermes marks a step a person may skip. */
+  confirm(message: string, initialValue: boolean, hint?: string): Promise<boolean | symbol | undefined>;
+  text(message: string, initialValue: string, options?: TextOptions): Promise<string | symbol | undefined>;
   password(message: string): Promise<string | symbol | undefined>;
   intro(message: string): void;
   outro(message: string): void;
@@ -79,11 +86,12 @@ export const makeTheme = (p: Palette, io: ThemeIO): Theme => {
         },
       }).prompt();
     },
-    confirm: (message, initialValue) => new ConfirmPrompt({
+    confirm: (message, initialValue, hint) => new ConfirmPrompt({
       active: "Yes", inactive: "No", initialValue, ...io,
       render() {
         // fly's "(Y/n)": the default is the capital, and Enter takes it.
-        const head = title(this.state, `${message} ${p.dim(initialValue ? "(Y/n)" : "(y/N)")}`);
+        const question = title(this.state, `${message} ${p.dim(initialValue ? "(Y/n)" : "(y/N)")}`);
+        const head = hint ? `${question}${this.state === "submit" || this.state === "cancel" ? bar : activeBar(this.state)}  ${p.dim(hint)}\n` : question;
         const answer = this.value ? "Yes" : "No";
         switch (this.state) {
           case "submit": return `${head}${bar}  ${p.dim(answer)}`;
@@ -96,16 +104,23 @@ export const makeTheme = (p: Palette, io: ThemeIO): Theme => {
         }
       },
     }).prompt(),
-    text: (message, initialValue) => new TextPrompt({
+    text: (message, initialValue, options) => new TextPrompt({
       initialValue, ...io,
+      ...(options?.validate ? { validate: (value: string | undefined) => options.validate!(value ?? "") } : {}),
       render() {
         const head = title(this.state, message);
         const value = this.value ?? "";
+        // An empty input shows the placeholder under the cursor block, the way
+        // @clack/prompts draws its own (dist/index.mjs, `text`).
+        const placeholder = options?.placeholder;
+        const typed = this.userInput === "" && placeholder
+          ? `${p.inverse(placeholder[0]!)}${p.dim(placeholder.slice(1))}`
+          : this.userInputWithCursor;
         switch (this.state) {
           case "submit": return `${head}${bar}${value ? `  ${p.dim(value)}` : ""}`;
           case "cancel": return `${head}${bar}${value ? `  ${p.dim(value)}` : ""}${value.trim() ? `\n${bar}` : ""}`;
-          case "error": return `${head.trim()}\n${p.red(S_BAR)}  ${this.userInputWithCursor}\n${p.red(S_BAR_END)}  ${p.red(this.error)}\n`;
-          default: return `${head}${p.blue(S_BAR)}  ${this.userInputWithCursor}\n${p.blue(S_BAR_END)}\n`;
+          case "error": return `${head.trim()}\n${p.red(S_BAR)}  ${typed}\n${p.red(S_BAR_END)}  ${p.red(this.error)}\n`;
+          default: return `${head}${p.blue(S_BAR)}  ${typed}\n${p.blue(S_BAR_END)}\n`;
         }
       },
     }).prompt(),

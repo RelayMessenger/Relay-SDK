@@ -2,7 +2,7 @@
 
 It drives the installed CLI through the redesigned screens
 (_artifacts/cli-connect-design-20260912.md): the one question `Where does your agent run?`
-answered with Enter, the plan (`create a new agent` first, then at most three lines for the
+answered with Enter, `Customize the agent?` answered with Enter (No), the plan (`create a new agent` first, then at most three lines for the
 agent), `Continue? (Y/n)` answered with Enter, only then the agent created, one line per file written, `Say hi from your phone`, the share link and the QR,
 then the agent's first reply. Relay is loopback only (agent-cli-platforms-terminal-server.mjs);
 no deployed Server is touched. A fake `claude` on PATH stands in for Claude Code's own
@@ -56,9 +56,10 @@ def drain(fd, seconds):
             except OSError: break
     return out
 
-# The two questions of the redesign, both answered with Enter: the runtime picker takes
-# its default (the first agent found), and the confirm takes Yes.
-steps = [(b'Where does your agent run?', b'\r'), (b'Continue? (Y/n)', b'\r')]
+# The three questions, all answered with Enter: the runtime picker takes its default (the
+# first agent found), the optional customize step takes No (owner ruling 2026-09-12, in
+# Hermes' "(Optional)" shape), and the confirm takes Yes.
+steps = [(b'Where does your agent run?', b'\r'), (b'Customize the agent? (name, handle, about, avatar)', b'\r'), (b'Continue? (Y/n)', b'\r')]
 # 24 and 32 rows have no room for a full-cell code; 60 rows has. All three are proved.
 modes = [('light', 80, 24), ('dark', 100, 32), ('tall', 100, 60)]
 for mode, columns, rows in modes:
@@ -82,9 +83,9 @@ for mode, columns, rows in modes:
         assert stage == len(steps), {'mode': mode, 'stage': stage, 'exit': process.poll()}
         assert process.wait(timeout=4) == 0, {'mode': mode, 'exit': process.returncode}
         assert termios.tcgetattr(slave) == before
-        # The screens, in order: the wordmark, the one question, the create line and the three plan lines, the confirm,
-        # the agent created only after it, the files, the phone step, the reply.
-        order = [b'Relay', b'Where does your agent run?', b'create a new agent  (Relay picks the name)', b'install  the Relay plugin for Claude Code', b'write  ', b'start Claude Code with Relay when you are ready',
+        # The screens, in order: the wordmark, the one question, the optional customize step and its hint, the create line
+        # and the three plan lines, the confirm, the agent created only after it, the files, the phone step, the reply.
+        order = [b'Relay', b'Where does your agent run?', b'Customize the agent? (name, handle, about, avatar)', b'Enter skips. Relay picks a name and handle.', b'create a new agent  (Relay picks the name)', b'install  the Relay plugin for Claude Code', b'write  ', b'start Claude Code with Relay when you are ready',
                  b'Continue? (Y/n)', b'Created @' + handle.encode(), b'wrote  ', b'Say hi from your phone', b'https://staging.relayapp.im/@' + handle.encode(), b'Answered from your phone: owned integrated agent reply']
         text = plain(output); at = 0
         for needle in order:
