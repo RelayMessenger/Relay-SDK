@@ -19,6 +19,7 @@ import {
 } from "./coding-agents.js";
 import { claudeChannelDir, sniffRuntimes, type RuntimeFound, type RuntimeId, type RuntimeSniffContext } from "./runtime-sniff.js";
 import { readChannelEnv, writeChannelEnv, writeEnvFile } from "./claude-channel.js";
+import { writeFolderLink } from "./folder-link.js";
 import { configPath, defaultCreationApiURL, isStagingBuild, packageVersion, validateApiURL, validateProfileName, validateToken } from "./config.js";
 import { HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { CliError, type CliErrorCode } from "./error-codes.js";
@@ -593,6 +594,8 @@ export const runConnect = async (
   }
 
   const agent = await resolveAgent(options, deps, screen);
+  await writeFolderLink(deps.cwd, { handle: agent.handle, apiUrl: agent.apiURL });
+  await deps.agents.update((config) => { config.defaultAgent = agent.profile; });
   const secrets = [agent.token];
   // A created agent was announced by the spinner that created it.
   if (!agent.created) screen.step(safeMetadata(`That token is ${screen.handle(agent.handle)}  token saved privately on this computer`, secrets));

@@ -39,6 +39,7 @@ export interface RelayProfile {
 export interface RelayConfig {
   version: 1;
   current_profile: string;
+  defaultAgent?: string;
   profiles: Record<string, RelayProfile>;
 }
 
@@ -117,6 +118,7 @@ const parseConfig = (value: unknown): RelayConfig => {
   return {
     version: 1,
     current_profile: value.current_profile,
+    ...(typeof value.defaultAgent === "string" ? { defaultAgent: value.defaultAgent } : {}),
     profiles,
   };
 };
