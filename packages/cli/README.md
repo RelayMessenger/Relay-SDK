@@ -265,24 +265,42 @@ server's response supplies the permanent public image URL.
 
 ## Local event forwarding
 
-`relay events listen` is a development convenience backed only by the SDK's
-source-backed Agent WebSocket. It refuses Relay's production API, requires an
-explicit profile, and asks you to confirm that the profile belongs to a test agent.
-Reading events here can make Relay stop resending them elsewhere, so never point it
-at an agent something else is reading:
+There are two ways to run an agent backend, the way Slack has Socket Mode for
+local work and request URLs once deployed, and Stripe has `stripe listen
+--forward-to` for local work and a registered endpoint once deployed. Deployed,
+Relay POSTs events to your webhook. While you develop, `relay listen` reads the
+same events over the socket and POSTs each one to a route on this computer,
+signed exactly like a deployed webhook, so the same handler runs unchanged:
 
 ```sh
-relay --profile staging events listen --acknowledge-events
-relay --profile staging events listen --acknowledge-events \
-  --forward-to http://127.0.0.1:3000/relay-events
+relay listen --forward-to http://localhost:3000/relay-events
 ```
 
-`--forward-to` must be an address on your own computer, such as
-`http://127.0.0.1:3000`. Each copy is the original Relay event, but it is **not
-signed**, and it carries `x-relay-dev-forwarded: 1`. Use a real webhook to test
-signature checking. If your own address answers with an error, this command stops
-rather than let the event be lost, so Relay can send it again. Your receiver must
-ignore an `event_id` it has already seen.
+It prints the address it forwards to and the local signing secret, then one
+line per event, the way `relay watch` shows them:
+
+```
+Forwarding events to http://localhost:3000/relay-events
+Local signing secret  whsec_…   (set RELAY_WEBHOOK_SECRET to it while you develop)
+Events read here count as delivered; a deployed webhook for this agent does not get them.
+```
+
+Set `RELAY_WEBHOOK_SECRET` to that secret where your handler runs. Each POST
+carries `webhook-id`, `webhook-timestamp` and `webhook-signature` (Standard
+Webhooks, HMAC-SHA256 over the exact bytes sent), plus `x-relay-event-id` and
+`x-relay-event-type`, so `verifyWebhookSignature` and the Chat SDK adapter accept
+it as they accept Relay's own deliveries. The secret is made once per profile and
+kept in the CLI's private config, the way Stripe keeps one per account, so a
+restart does not make you change it. `--forward-to` must be an address on your
+own computer, such as `http://127.0.0.1:3000`. If your route answers with an
+error, this command stops rather than let the event be lost, so Relay can send
+it again. Your receiver must ignore an `event_id` it has already seen.
+
+Reading events here delivers them: a deployed webhook for this agent does not get
+them, so run it against the agent you are developing, never one something else
+is reading. The older `relay --profile <name> events listen --acknowledge-events
+[--forward-to <url>]` still works for scripts, prints the raw envelope, and signs
+its forwards the same way.
 
 If the agent has been away longer than Relay keeps its events, Relay wants to send
 everything it missed. This command cannot go back over old events and says so

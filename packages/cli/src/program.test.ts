@@ -1,4 +1,5 @@
 import type Relay from "@relaymessenger/sdk";
+import { verifyWebhookSignature } from "@relaymessenger/sdk";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -299,6 +300,60 @@ describe("CLI command routing", () => {
       "--acknowledge-events",
     ])).toBe(1);
     expect(resolveClient).toHaveBeenCalledTimes(1);
+  });
+
+  it("listen forwards signed events to a loopback route and prints the secret once", async () => {
+    const posts: Array<{ body: string; headers: Record<string, string> }> = [];
+    (fake.client as unknown as { websocket: unknown }).websocket = {
+      run: async (options: { onEvent(event: unknown, context: { sequence: string }): Promise<void> }) => {
+        for (const id of ["evt-1", "evt-2"]) {
+          await options.onEvent({
+            api_version: "v1", webhook_version: "2026-02-03", event_type: "message.received", event_id: id,
+            created_at: "2026-09-01T00:00:00.000Z", trace_id: "trace", agent_id: "agent", data: {},
+          }, { sequence: id });
+        }
+      },
+    } as never;
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      posts.push({ body: init!.body as string, headers: init!.headers as Record<string, string> });
+      return new Response(null, { status: 204 });
+    });
+    expect(await runCLI(["listen", "--forward-to", "http://localhost:3000/relay-events"], {
+      resolveClient,
+      fetch: fetchMock as unknown as typeof fetch,
+      stdout: (value) => stdout.push(value),
+      stderr: (value) => stderr.push(value),
+      configContext: { env: { RELAY_CONFIG_PATH: privatePath } },
+    })).toBe(0);
+    const notes = stderr.join("");
+    expect(notes).toContain("Forwarding events to http://localhost:3000/relay-events");
+    expect(notes).toContain("Events read here count as delivered; a deployed webhook for this agent does not get them.");
+    const secretLines = notes.split("\n").filter((line) => line.includes("Local signing secret"));
+    expect(secretLines).toHaveLength(1);
+    const secret = /whsec_[A-Za-z0-9+/=]+/u.exec(secretLines[0]!)![0];
+    expect(secretLines[0]).toContain("(set RELAY_WEBHOOK_SECRET to it while you develop)");
+    expect(posts).toHaveLength(2);
+    for (const post of posts) expect(() => verifyWebhookSignature(secret, post.body, post.headers)).not.toThrow();
+    expect(stdout.join("")).toContain("message.received · evt-1");
+    // The secret is saved with the profile, so a second run prints the same one.
+    stderr.length = 0;
+    expect(await runCLI(["listen", "--forward-to", "http://localhost:3000/relay-events"], {
+      resolveClient, fetch: fetchMock as unknown as typeof fetch,
+      stdout: (value) => stdout.push(value), stderr: (value) => stderr.push(value),
+      configContext: { env: { RELAY_CONFIG_PATH: privatePath } },
+    })).toBe(0);
+    expect(stderr.join("")).toContain(secret);
+  });
+
+  it("listen refuses an address off this computer and needs --forward-to", async () => {
+    expect(await run(["listen", "--forward-to", "http://example.com/relay-events"])).not.toBe(0);
+    expect(stderr.join("")).toContain("must be on this computer");
+    stderr.length = 0;
+    expect(await run(["listen"])).not.toBe(0);
+    expect(stderr.join("")).toContain("required option '--forward-to <url>' not specified");
+    stderr.length = 0;
+    expect(await run(["listen", "--help"])).toBe(0);
+    expect(stdout.join("")).toContain("forward each event to a route on this computer, signed like a webhook, while you develop");
   });
 
   it("redacts a token from thrown errors", async () => {

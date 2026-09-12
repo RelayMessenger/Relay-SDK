@@ -9,7 +9,8 @@ import { codexCommand, runCodexBridge } from "./codex-bridge.js";
 import { openCodexThreads } from "./codex-threads.js";
 import { acpCommand, relayMcpServer, runAcpBridge } from "./acp-bridge.js";
 import { openAcpSessions } from "./acp-threads.js";
-import { sdkTerminalObserver } from "./terminal-watch.js";
+import { sdkTerminalObserver, terminalEventLine } from "./terminal-watch.js";
+import { dim, link } from "./ui-colour.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
 import { renderTerminalQR, terminalQRRowsLeft } from "./qr-terminal.js";
@@ -28,6 +29,7 @@ import Relay, {
   type MessageContent,
   type MessageCreateParams,
   type MessageSendParams,
+  type RelayWebhookEvent,
   type SupportedContentType,
   type WebhookEventType,
   type WebhookSubscriptionUpdateParams,
@@ -40,15 +42,17 @@ import {
 } from "commander";
 import type { ClientContext } from "./client.js";
 import { createClientContext } from "./client.js";
-import type { ConfigContext, RelayProfile } from "./config.js";
+import type { ConfigContext, RelayProfile, ResolvedAuth } from "./config.js";
 import {
   DEFAULT_API_URL,
   defaultCreationApiURL,
   collectConfiguredTokens,
   configPath,
+  localWebhookSecret,
   readConfig,
   resolveAuth,
   validateApiURL,
+  validateForwardURL,
   validateProfileName,
   validateToken,
   writeConfig,
@@ -389,6 +393,22 @@ export const createProgram = (
         ...(dependencies.terminalSession ? { session: dependencies.terminalSession } : {}),
         ...(dependencies.terminalIO ? { io: dependencies.terminalIO } : {}),
         ...(dependencies.terminalClient ? { client: dependencies.terminalClient } : {}),
+      });
+    });
+
+  program
+    .command("listen")
+    .description("forward each event to a route on this computer, signed like a webhook, while you develop")
+    .helpGroup(HELP_GROUPS.everyDay)
+    .requiredOption("--forward-to <url>", "the route on this computer to POST each event to, for example http://localhost:3000/relay-events")
+    .action(async (options: { forwardTo: string }, command: Command) => {
+      const context = await resolveClient(globals(command).profile);
+      await forwardEvents({
+        auth: context.auth,
+        client: context.client,
+        forwardTo: options.forwardTo,
+        render: (event) => terminalEventLine(event, [context.auth.token]),
+        banner: true,
       });
     });
 
@@ -1085,6 +1105,45 @@ export const createProgram = (
     .description("list every event type Relay can send, and where each is documented")
     .action(async (_options: object, command: Command) =>
       output(await (await clientFor(command)).webhookEvents.list()));
+  // `listen` is the local half of the two ways to run an agent backend, the
+  // way Stripe's `stripe listen --forward-to localhost:4242/webhook` is: each
+  // event is POSTed to a route on this computer, signed exactly like a
+  // deployed webhook, so the same handler runs unchanged in both places.
+  const forwardEvents = async (input: {
+    auth: ResolvedAuth;
+    client: Relay;
+    forwardTo?: string;
+    render?: (event: RelayWebhookEvent) => string;
+    banner: boolean;
+  }): Promise<void> => {
+    const forwardTo = input.forwardTo ? validateForwardURL(input.forwardTo) : undefined;
+    const secret = forwardTo ? await localWebhookSecret(input.auth.profile, configContext) : undefined;
+    if (input.banner && forwardTo && secret) {
+      stderr(`Forwarding events to ${link(forwardTo)}\n`);
+      stderr(`Local signing secret  ${secret}   ${dim("(set RELAY_WEBHOOK_SECRET to it while you develop)")}\n`);
+      stderr(`${dim("Events read here count as delivered; a deployed webhook for this agent does not get them.")}\n`);
+    }
+    const controller = new AbortController();
+    const abort = (): void => controller.abort();
+    process.once("SIGINT", abort);
+    process.once("SIGTERM", abort);
+    try {
+      await listenForAgentEvents(
+        input.client,
+        {
+          ...(forwardTo && secret ? { forwardTo, secret } : {}),
+          ...(input.render ? { render: input.render } : {}),
+          signal: controller.signal,
+          ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+        },
+        { stdout, stderr },
+      );
+    } finally {
+      process.off("SIGINT", abort);
+      process.off("SIGTERM", abort);
+    }
+  };
+
   // `watch` is the live view a person means. `events listen` is a different
   // thing wearing a similar name: it takes events, so Relay can stop resending
   // them elsewhere. It keeps its flags and its behaviour, and leaves the help.
@@ -1093,12 +1152,12 @@ export const createProgram = (
     .description("the older name for watching events; it takes events, so prefer watch")
     .helpGroup(HELP_GROUPS.unlisted)
     .command("listen")
-    .option("--forward-to <url>", "also POST each event to this address on your own computer (localhost only)")
+    .option("--forward-to <url>", "also POST each event to this address on your own computer (localhost only), signed like a webhook")
     .requiredOption(
       "--acknowledge-events",
       "yes: this agent is a test agent, and reading events here may make Relay stop resending them elsewhere",
     )
-    .description("print each event as it arrives, and optionally send an unsigned copy to your own computer")
+    .description("print each event as it arrives, and optionally send a signed copy to your own computer")
     .action(async (
       options: { forwardTo?: string; acknowledgeEvents: boolean },
       command: Command,
@@ -1115,24 +1174,12 @@ export const createProgram = (
           "This command only works against a test Relay API, never the live one. Use a profile pointed at staging.",
         );
       }
-      const controller = new AbortController();
-      const abort = (): void => controller.abort();
-      process.once("SIGINT", abort);
-      process.once("SIGTERM", abort);
-      try {
-        await listenForAgentEvents(
-          context.client,
-          {
-            ...(options.forwardTo ? { forwardTo: options.forwardTo } : {}),
-            signal: controller.signal,
-            ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
-          },
-          { stdout, stderr },
-        );
-      } finally {
-        process.off("SIGINT", abort);
-        process.off("SIGTERM", abort);
-      }
+      await forwardEvents({
+        auth: context.auth,
+        client: context.client,
+        ...(options.forwardTo ? { forwardTo: options.forwardTo } : {}),
+        banner: false,
+      });
     });
 
   const subscriptions = webhooks.command("subscriptions").description("manage webhook subscriptions");
