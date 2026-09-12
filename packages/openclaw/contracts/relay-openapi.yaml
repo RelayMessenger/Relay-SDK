@@ -742,7 +742,7 @@ paths:
           $ref: "#/components/responses/InternalServerError"
         "503":
           description: |
-            The send could not be completed. The condition is temporary — retry
+            The send could not be completed. The condition is temporary. Retry
             the request shortly.
 
             Retrying is safe, but send an `Idempotency-Key` header (or
@@ -1301,7 +1301,7 @@ paths:
         is raised for the sender, neither party is notified, and the sender's
         `message.delivered` fires when at least one recipient was delivered.
 
-        Blocking does not delete existing Chats or history — it only stops new
+        Blocking does not delete existing Chats or history. It only stops new
         traffic. Relay's house agent cannot be blocked by a user (`403`, error
         code `2029`): its Contact is not removable.
 

@@ -9,7 +9,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "8adc196c22e9cb3c59ed28c13107835c8f1826e073fa53c36d1cbba304b2942a";
+  "2febcdd44b00ed558f9f32698826d0661881d620d3d25bb8eedd2861f637ea70";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -120,7 +120,7 @@ describe("locked Relay Server contract", () => {
       "get",
     );
     // Relay retired message editing and unsending from the developer API on
-    // Relay Server fc3077e9, so a Message carries only a read verb.
+    // Relay Server aa456b46, so a Message carries only a read verb.
     expect(document.paths["/v1/messages/{messageId}"]).not.toHaveProperty(
       "patch",
     );
