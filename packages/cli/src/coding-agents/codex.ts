@@ -9,7 +9,7 @@ const agent: CodingAgent =
     command: "codex",
     installedIf: (paths) => [codexHome(paths.env, paths.home, paths.platform)],
     // `codex mcp add` writes ~/.codex/config.toml (its own --config help names the file).
-    connect: { kind: "mcp-command", file: (paths) => platformPath(paths.platform).join(codexHome(paths.env, paths.home, paths.platform), "config.toml") },
+    connect: { kind: "mcp-command", file: () => "./.codex/config.toml" },
     // Codex has no long-lived process that Relay can push a message into, so
     // connect stays running and answers over `codex app-server` (codex-bridge.ts).
     start: {
