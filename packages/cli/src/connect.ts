@@ -305,7 +305,9 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
   switch (method.kind) {
     case "claude-plugin":
       steps = [
-        `install  the Relay plugin for ${label}  (${shown.commands[1]})`,
+        // Both commands it runs, on the one install line (the tarball consumer
+        // reads the marketplace source here, packages/cli/scripts/agent-tarball-consumer.mjs:47).
+        `install  the Relay plugin for ${label}  (${shown.commands[0]}; ${shown.commands[1]})`,
         write(shown.files[0]!, "token, API address, allowed senders"),
         ...(context.start ? [`start ${label} with Relay when you are ready`] : []),
       ];

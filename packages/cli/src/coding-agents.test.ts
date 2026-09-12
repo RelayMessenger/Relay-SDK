@@ -116,7 +116,7 @@ it("every agent's plan is at most three lines: what is installed, what is writte
     expect(plan.agents.map((entry) => entry.agent)).toEqual([id]);
   }
   expect(runtimeConnectPlan({ ...context({ start: true }), agents: ["claude-code"] }).steps).toEqual([
-    "install  the Relay plugin for Claude Code  (claude plugin install relay@relay-messenger --yes)",
+    "install  the Relay plugin for Claude Code  (claude plugin marketplace add RelayMessenger/Relay-SDK@staging; claude plugin install relay@relay-messenger --yes)",
     "write  /home/dev/.claude/channels/relay/.env  (token, API address, allowed senders)",
     "start Claude Code with Relay when you are ready",
   ]);

@@ -81,7 +81,7 @@ describe("the plan screen", () => {
     expect(await runCLI(["connect", "claude", "--dry-run"], f.deps)).toBe(0);
     const printed = f.stdout.join("");
     expect(printed).not.toContain("found on this computer");
-    expect(printed).toContain(`install  the Relay plugin for Claude Code  (claude plugin install ${CLAUDE_PLUGIN_ID} --yes)`);
+    expect(printed).toContain(`install  the Relay plugin for Claude Code  (claude plugin marketplace add ${claudeMarketplaceSource("0.1.6-staging.0")}; claude plugin install ${CLAUDE_PLUGIN_ID} --yes)`);
     expect(printed).toContain(`write  ${join(f.home, ".claude", "channels", "relay", ".env")}  (token, API address, allowed senders)`);
     expect(printed).toContain("start Claude Code with Relay when you are ready");
     expect(printed).toContain("Dry run: nothing was changed.");
