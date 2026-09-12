@@ -26,7 +26,7 @@ it.each([undefined, "/fake/bin/hermes"])("resolves the Hermes executable (%s)", 
     confirm: vi.fn(async () => true),
     password: vi.fn(async () => ""),
     text: vi.fn(async () => ""),
-    info: vi.fn(), intro: vi.fn(), outro: vi.fn(), step: vi.fn(),
+    info: vi.fn(), intro: vi.fn(), outro: vi.fn(), step: vi.fn(), success: vi.fn(), message: vi.fn(), note: vi.fn(),
     spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
   } satisfies InteractivePrompts;
   const code = await runCLI(["connect", "hermes", "--token", `rly_live_${"C".repeat(43)}`, "--yes", "--no-skill"], {

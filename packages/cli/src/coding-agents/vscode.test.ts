@@ -32,7 +32,10 @@ it("connect prints the VS Code restart instruction and waits for the bounded rep
     intro: vi.fn(),
     outro: vi.fn(),
     step: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
-    spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
+    success: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
+    message: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
+    note: vi.fn((message: string, title: string) => { stdout.push(`${title}\n${message}\n`); }),
+    spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn((message: string) => { stdout.push(`${message}\n`); }) })),
   } satisfies InteractivePrompts;
   const run = vi.fn(async (input: Parameters<TerminalObserver["run"]>[0]) => {
     expect(stdout.join("")).toContain(instruction);

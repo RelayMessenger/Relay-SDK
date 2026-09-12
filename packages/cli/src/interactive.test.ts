@@ -18,6 +18,9 @@ async function fixture() {
     password: vi.fn(async () => token), text: vi.fn(async (_message: string, initial: string) => initial),
     info: vi.fn((message: string) => { stderr.push(message); }),
     intro: vi.fn(), outro: vi.fn(), step: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
+    success: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
+    message: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
+    note: vi.fn((message: string, title: string) => { stdout.push(`${title}\n${message}\n`); }),
     spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
   } satisfies InteractivePrompts;
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {

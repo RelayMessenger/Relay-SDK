@@ -37,7 +37,10 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}, sniffed: Ru
     intro: vi.fn(),
     outro: vi.fn(),
     step: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
-    spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
+    success: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
+    message: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
+    note: vi.fn((message: string, title: string) => { stdout.push(`${title}\n${message}\n`); }),
+    spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn((message: string) => { stdout.push(`${message}\n`); }) })),
   } satisfies InteractivePrompts;
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     void input;
@@ -502,6 +505,8 @@ describe("connect first reply proof", () => {
     });
     const order: string[] = [];
     f.deps.stdout = (message) => { f.stdout.push(message); order.push(message.trimEnd()); };
+    // The closing sentence goes out on Clack's gutter, not straight to stdout.
+    f.prompts.message.mockImplementation((message: string) => { f.stdout.push(`${message}\n`); order.push(message.trimEnd()); });
     f.startCommand.mockImplementation(async () => {
       const before = [...order];
       if (hasReply) emit({ event_type: "message.sent", data: { sender_handle: { handle: card.handle }, parts: [{ type: "text", value: "first answer" }] } } as never);

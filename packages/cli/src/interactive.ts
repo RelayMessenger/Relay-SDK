@@ -1,4 +1,4 @@
-import { confirm, intro, isCancel, log, multiselect, outro, password, select, spinner, text } from "@clack/prompts";
+import { confirm, intro, isCancel, log, multiselect, note, outro, password, select, spinner, text } from "@clack/prompts";
 import type { AgentDependencies } from "./agents.js";
 import { listAgents } from "./agents.js";
 import { DEFAULT_API_URL, DEFAULT_PROFILE, defaultCreationApiURL, validateApiURL } from "./config.js";
@@ -33,6 +33,13 @@ export interface InteractivePrompts {
   outro(message: string): void;
   /** A finished step: the same diamond the prompts leave behind. */
   step(message: string): void;
+  /** A step that went well. */
+  success(message: string): void;
+  /** A sentence inside the gutter that is neither a question nor a step. */
+  message(message: string): void;
+  /** A titled block, drawn as one box inside the gutter (Clack's own example
+   * ends with `p.note(nextSteps, 'Next steps.')`, examples/basic/index.ts:88). */
+  note(message: string, title: string): void;
   spinner(): InteractiveSpinner;
 }
 function answer<T>(value: T | symbol): T {
@@ -51,6 +58,9 @@ export function clackPrompts(info: (message: string) => void): InteractivePrompt
     intro: (message) => intro(message),
     outro: (message) => outro(message),
     step: (message) => log.step(message),
+    success: (message) => log.success(message),
+    message: (message) => log.message(message),
+    note: (message, title) => note(message, title),
     spinner: () => {
       const active = spinner({ output: process.stderr });
       return { start: (message) => active.start(message), stop: (message) => active.stop(message) };

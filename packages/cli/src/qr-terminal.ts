@@ -1,53 +1,44 @@
-import { createRequire } from "node:module";
+import { create } from "qrcode";
 
 /**
  * Terminal QR code, one renderer for every call site.
  *
- * The library's `{ type: "terminal", small: true }` output has two defects the
- * owner saw on a light Terminal theme (2026-09-09): it paints the field with
- * ANSI colour 7, which light themes draw as gray, and it walks module rows two
- * per text line from -1 to size, an odd count, so the last line is a lone
- * half-block row that looks like the code was cut off. This renderer keeps the
- * compact two-rows-per-line form, pads the module rows to an even count, and
- * names both colours from the fixed 256-colour cube (16 = black, 231 = white),
- * which no theme repaints.
+ * The shape is the `qrcode` package's own big-mode terminal renderer
+ * (node_modules/qrcode/lib/renderer/terminal/terminal.js:10-30, the shape
+ * `qrcode-terminal` prints too): every module is two spaces painted with a
+ * background colour, one text line per module row, and a one-module quiet zone
+ * on every edge. No half-block glyph is ever printed. A glyph does not fill the
+ * cell height in Terminal.app, so a renderer that walks two module rows per text
+ * line leaves a hairline gap through the middle of every row (owner, 2026-09-11:
+ * "weird white lines in the middle").
+ *
+ * The two colours are ours, not the library's. The library paints with ANSI 47
+ * and 40, which a light theme repaints gray (owner, 2026-09-09). 231 and 16 are
+ * fixed points of the 256-colour cube, which no theme moves.
  */
-const BACKGROUND = "[48;5;231m";
-const FOREGROUND = "[38;5;16m";
-const RESET = "[0m";
-export const QR_LINE_PREFIX = BACKGROUND + FOREGROUND;
+export const QR_LIGHT = "\u001B[48;5;231m";
+export const QR_DARK = "\u001B[48;5;16m";
+const RESET = "\u001B[0m";
+/** One module is two character cells wide, so the printed code is square. */
+const MODULE = "  ";
 
 interface QRModules { size: number; data: ArrayLike<number | boolean> }
 
-function qrModules(value: string): QRModules {
-  const qr = createRequire(import.meta.url)("qrcode") as { create(text: string): { modules: QRModules } };
-  return qr.create(value).modules;
-}
-
-/** Dark modules as rows, with a one-module light quiet zone and an even row count. */
+/** Dark modules as rows, with a one-module light quiet zone on every edge. */
 export function terminalQRGrid(value: string): boolean[][] {
-  const { size, data } = qrModules(value);
-  const width = size + 2;
-  const light = (): boolean[] => Array.from({ length: width }, () => false);
-  const rows: boolean[][] = [light()];
-  for (let y = 0; y < size; y++) {
-    rows.push([false, ...Array.from({ length: size }, (_, x) => Boolean(data[y * size + x])), false]);
-  }
-  rows.push(light());
-  if (rows.length % 2) rows.push(light());
-  return rows;
+  const { size, data } = create(value).modules as QRModules;
+  const quiet = (): boolean[] => Array.from({ length: size + 2 }, () => false);
+  return [
+    quiet(),
+    ...Array.from({ length: size }, (_, y) =>
+      [false, ...Array.from({ length: size }, (_, x) => Boolean(data[y * size + x])), false]),
+    quiet(),
+  ];
 }
 
-const BLOCKS = { "00": " ", "01": "▄", "10": "▀", "11": "█" } as const;
-
-/** Two module rows per text line; every line starts with the same explicit colours and ends with a reset. */
+/** One text line per module row, every module two background-coloured spaces. */
 export function renderTerminalQR(value: string): string {
-  const rows = terminalQRGrid(value);
-  const lines: string[] = [];
-  for (let y = 0; y < rows.length; y += 2) {
-    const top = rows[y] ?? []; const bottom = rows[y + 1] ?? [];
-    const cells = top.map((dark, x) => BLOCKS[`${dark ? 1 : 0}${bottom[x] ? 1 : 0}` as keyof typeof BLOCKS]);
-    lines.push(QR_LINE_PREFIX + cells.join("") + RESET);
-  }
-  return lines.join("\n") + "\n";
+  const lines = terminalQRGrid(value)
+    .map((row) => row.map((dark) => `${dark ? QR_DARK : QR_LIGHT}${MODULE}${RESET}`).join(""));
+  return `${lines.join("\n")}\n`;
 }
