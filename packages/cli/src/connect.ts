@@ -55,7 +55,7 @@ export const openclawPluginSpec = (version: string = packageVersion()): string =
 
 /** Vercel's `skills` sentence for a pipe with no target and no -y (src/add.ts:408-418), with our nouns. */
 export const NO_TTY_SENTENCE = "Interactive prompt required but stdin is not a TTY. Nothing was connected.";
-export const NO_TTY_NEXT_STEP = "Name an agent (or --all) and -y to run non-interactively.";
+export const NO_TTY_NEXT_STEP = "Name an agent and -y to run non-interactively.";
 
 export interface ConnectOptions {
   all?: boolean;
@@ -94,7 +94,7 @@ export interface ConnectDependencies {
   stderr(value: string): void;
   /** Absent means there is no terminal, so nothing may be asked. */
   prompts?: InteractivePrompts;
-  /** The coding agent this command is running inside, when one announced itself. */
+  /** The runtime this command is running inside, when one announced itself. */
   drivingAgent?: RuntimeId;
   sniff?: (context: RuntimeSniffContext) => Promise<RuntimeFound[]>;
   /** Runs one of the agent's own commands and waits for it. */
@@ -103,7 +103,7 @@ export interface ConnectDependencies {
   startCommand?: (file: string, args: readonly string[]) => Promise<number>;
   observer?: (token: string, apiURL: string) => TerminalObserver | undefined;
   /**
-   * Keeps answering this agent's Relay messages with the coding agent's own
+   * Keeps answering this agent's Relay messages with the runtime's own
    * headless command, until the person stops it. Codex reaches it over its
    * `app-server` (`kind: "codex"`, coding-agents/codex.ts); Cursor, Gemini CLI
    * and OpenCode reach it over the Agent Client Protocol (`kind: "acp"`,
@@ -156,7 +156,7 @@ export interface ConnectAgent {
 export const linkedLine = (handle: string): string => `Linked to @${handle}; run  connect --new  for another, or  --profile <handle>  to link a saved one`;
 export const SAY_HI = "Say hi from your phone";
 
-/** What one coding agent's part of the plan touches. */
+/** What one runtime's part of the plan touches. */
 export interface AgentPlan {
   agent: CodingAgentId;
   steps: string[];
@@ -830,14 +830,11 @@ const chooseAgents = async (
     }
     return [normalized];
   }
-  if (options.all === true) {
-    if (!found.length) {
-      throw new ConnectFailure(`No coding agent was found on this computer. Name one instead. ${supportedAgentsLine()}`, "npx relaymessenger connect <agent>");
-    }
-    return found;
-  }
   if (deps.drivingAgent) return [deps.drivingAgent];
-  if (!deps.prompts || options.json) throw new HeadlessPrompt(NO_TTY_SENTENCE, [], NO_TTY_NEXT_STEP);
+  if (!deps.prompts || options.json) {
+    if (options.json && options.dryRun && found.length === 0) throw new ConnectFailure("No runtime was found on this computer.", "npx relaymessenger connect <agent>", "no_runtime");
+    throw new HeadlessPrompt(NO_TTY_SENTENCE, [], NO_TTY_NEXT_STEP);
+  }
   // One question: the agents found on this computer first, in the order they
   // were found, the default the first of them; the rest after, dimmed, still
   // there to pick (_artifacts/cli-connect-design-20260912.md, item 1).
@@ -845,7 +842,7 @@ const chooseAgents = async (
     ...CODING_AGENTS.filter((agent) => found.includes(agent.id)).map((agent) => ({ value: agent.id, label: agent.label })),
     ...CODING_AGENTS.filter((agent) => !found.includes(agent.id)).map((agent) => ({ value: agent.id, label: agent.label, hint: "not found", dim: true })),
   ];
-  const picked = await deps.prompts.select("Which coding agent?", optionsList, optionsList[0]!.value);
+  const picked = await deps.prompts.select("Where does your agent run?", optionsList, optionsList[0]!.value);
   const chosen = normalizeAgentId(picked);
   if (!chosen) throw new InteractiveCancelled();
   return [chosen];
