@@ -28,7 +28,7 @@ it.each([undefined, "/fake/bin/opencode"])("connect drives OpenCode over ACP usi
     confirm: vi.fn(async () => true),
     password: vi.fn(async () => token),
     text: vi.fn(async (_message, initial) => initial),
-    info: vi.fn(), intro: vi.fn(), outro: vi.fn(), step: vi.fn(),
+    info: vi.fn(), intro: vi.fn(), outro: vi.fn(), step: vi.fn(), success: vi.fn(), message: vi.fn(), note: vi.fn(),
     spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
   };
   const errors: string[] = [];

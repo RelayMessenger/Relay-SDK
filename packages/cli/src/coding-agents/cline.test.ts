@@ -32,7 +32,10 @@ it("connect starts Cline over its ACP bridge", async () => {
     text: vi.fn(async (_message, initial) => initial),
     info: vi.fn(), intro: vi.fn(), outro: vi.fn(),
     step: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
-    spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
+    success: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
+    message: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
+    note: vi.fn((message: string, title: string) => { stdout.push(`${title}\n${message}\n`); }),
+    spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn((message: string) => { stdout.push(`${message}\n`); }) })),
   };
   expect(await runCLI(["connect", "cline", "--token", token, "--yes", "--no-skill"], {
     configContext: { env: { RELAY_CONFIG_PATH: join(home, "config.json"), PATH: "" }, home, platform: process.platform },

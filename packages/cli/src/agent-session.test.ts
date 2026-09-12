@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { runCLI } from "./program.js";
 import { emptyConfig, readConfig, writeConfig } from "./config.js";
 import { openSavedAgentSession, savedAgentShareURL } from "./agent-session.js";
+import { QR_DARK } from "./qr-terminal.js";
 import type { TerminalSessionOptions } from "./terminal-session.js";
 
 const base = "https://api.staging.relayapp.im";
@@ -55,7 +56,8 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
     // The owner saw two identical QR codes stacked in his terminal after
     // `agents create` (2026-09-08): the create screen printed one, then the
     // live view drew its own. Exactly one surface may draw it.
-    const qr = /[\u2580\u2584\u2588]/u; // half-block glyphs of a terminal QR
+    // A terminal QR is background-coloured cells now, never a half-block glyph.
+    const qr = new RegExp(QR_DARK.replace("[", "\\["), "u");
     const live = await fixture();
     live.terminalSession.mockImplementation(async () => exited);
     expect(await runCLI(["agents", "create"], live.deps)).toBe(0);

@@ -24,6 +24,7 @@ import { HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from ".
 import { CliError, type CliErrorCode } from "./error-codes.js";
 import { preparePrivateDestination, writePrivateDestination } from "./private-file.js";
 import { renderTerminalQR } from "./qr-terminal.js";
+import { dim, handle as markHandle, link } from "./ui-colour.js";
 import { safeMetadata } from "./output.js";
 import { spawnCommand } from "./spawn-command.js";
 import { runTerminalWatch, type TerminalObserver } from "./terminal-watch.js";
@@ -183,6 +184,9 @@ export interface PlanContext {
   start: boolean;
   /** The agents whose file already holds a token for someone else. */
   replacing?: Partial<Record<CodingAgentId, string>>;
+  /** How a command or a path is marked inside a step. Absent means unmarked, so
+   * every caller that prints the steps as data gets them byte for byte. */
+  mark?: (value: string) => string;
 }
 
 const paths = (context: { env: NodeJS.ProcessEnv; home: string; platform: NodeJS.Platform }): AgentPaths =>
@@ -275,6 +279,10 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
   const commands = agentCommands(agent, context).map((line) => line.join(" "));
   const files = agentFiles(agent, context);
   const replacing = context.replacing?.[agent];
+  // The steps show marked copies; `files` and `commands` go back to the caller
+  // plain, because a JSON answer carries them as data.
+  const mark = context.mark ?? ((value: string) => value);
+  const shown = { commands: commands.map(mark), files: files.map(mark) };
   const write = (path: string, names: string): string =>
     `${replacing ? "replace the token already in" : "write"}  ${path}  (${names})`;
   const method = codingAgent(agent).connect;
@@ -282,22 +290,22 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
   switch (method.kind) {
     case "claude-plugin":
       steps = [
-        `run  ${commands[0]}`,
-        `run  ${commands[1]}, then  ${commands[2]}`,
-        write(files[0]!, "token, API address, allowed senders"),
+        `run  ${shown.commands[0]}`,
+        `run  ${shown.commands[1]}, then  ${shown.commands[2]}`,
+        write(shown.files[0]!, "token, API address, allowed senders"),
         ...(context.start ? ["start Claude Code with Relay when you are ready"] : []),
       ];
       break;
     case "mcp-command":
       steps = [
-        `run  ${commands[0]}  (adds the Relay MCP server to ${files[0]})`,
+        `run  ${shown.commands[0]}  (adds the Relay MCP server to ${shown.files[0]})`,
         ...(context.start && codingAgent(agent).start?.kind === "bridge"
           ? [`keep running here, and answer your Relay messages with ${codingAgent(agent).label} from this folder`]
           : []),
       ];
       break;
     case "mcp-file":
-      steps = [`add  ${mcpRootKey(method.shape)}.${MCP_SERVER_NAME}  to  ${files[0]}  (every other entry kept)`];
+      steps = [`add  ${mcpRootKey(method.shape)}.${MCP_SERVER_NAME}  to  ${shown.files[0]}  (every other entry kept)`];
       break;
     case "acp-bridge":
       // Relay drives the agent over its own ACP server and hands Relay's MCP
@@ -306,16 +314,16 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
       break;
     case "hermes-plugin":
       steps = [
-        `run  ${commands[0]}`,
-        write(files[0]!, `token, API address, state folder${context.allow.length ? ", allowed contacts" : ""}`),
+        `run  ${shown.commands[0]}`,
+        write(shown.files[0]!, `token, API address, state folder${context.allow.length ? ", allowed contacts" : ""}`),
         ...(context.start ? ["start the Hermes gateway when you are ready:  hermes gateway run"] : []),
       ];
       break;
     case "openclaw-plugin":
       steps = [
-        `run  ${commands[0]}`,
-        write(files[0]!, "the token alone, owner-only"),
-        `add  channels.relay  to  ${files[1]}  (every other setting kept)`,
+        `run  ${shown.commands[0]}`,
+        write(shown.files[0]!, "the token alone, owner-only"),
+        `add  channels.relay  to  ${shown.files[1]}  (every other setting kept)`,
         ...(context.start ? ["restart the OpenClaw gateway when you are ready"] : []),
       ];
       break;
@@ -409,8 +417,20 @@ const defaultStartCommand = async (file: string, args: readonly string[]): Promi
 interface Screen {
   say(line: string): void;
   step(line: string): void;
+  /** A step that went well. */
+  success(line: string): void;
   /** A headline and its numbered steps, drawn as one block inside the gutter. */
   block(headline: string, steps: readonly string[]): void;
+  /** Work that takes a while: a spinner while it runs, its result when it stops. */
+  work<T>(pending: string, run: () => Promise<T>, done: (value: T) => string): Promise<T>;
+  /** The last line of an interactive run, on Clack's closing bar. */
+  outro(line: string): void;
+  /** A path or a command inside a sentence. */
+  dim(value: string): string;
+  /** A handle inside a sentence, always written with its @. */
+  handle(value: string): string;
+  /** An address a person can open. */
+  link(value: string): string;
   json: boolean;
 }
 
@@ -502,15 +522,36 @@ export const runConnect = async (
 ): Promise<void> => {
   const ui = options.nonInteractive ? undefined : deps.prompts;
   const json = options.json === true;
+  // Only a framed, interactive run marks values.
+  const marked = Boolean(ui) && !json;
   const screen: Screen = {
     json,
-    say: (line) => { if (!json) deps.stdout(`${line}\n`); },
+    say: (line) => { if (json) return; if (ui) ui.message(line); else deps.stdout(`${line}\n`); },
     step: (line) => { if (json) return; if (ui) ui.step(line); else deps.stdout(`${line}\n`); },
+    success: (line) => { if (json) return; if (ui) ui.success(line); else deps.stdout(`${line}\n`); },
     block: (headline, steps) => {
       if (json) return;
-      if (ui) ui.step([headline, ...steps].join("\n"));
+      if (ui) ui.note(steps.join("\n"), headline);
       else deps.stdout(`${[headline, ...steps].join("\n")}\n`);
     },
+    work: async (pending, run, done) => {
+      if (json || !ui) { const value = await run(); screen.step(done(value)); return value; }
+      const active = ui.spinner();
+      active.start(pending);
+      try {
+        const value = await run();
+        active.stop(done(value));
+        return value;
+      } catch (error) {
+        // The failure says what went wrong; the spinner only stops holding the line.
+        active.stop(pending);
+        throw error;
+      }
+    },
+    outro: (line) => { if (json) return; if (ui) ui.outro(line); else deps.stdout(`${line}\n`); },
+    dim: (value) => marked ? dim(value) : value,
+    handle: (value) => marked ? markHandle(value) : `@${value}`,
+    link: (value) => marked ? link(value) : value,
   };
   const platform = deps.platform ?? process.platform;
   const runtimes = await (deps.sniff ?? sniffRuntimes)({ env: deps.env, home: deps.home, platform });
@@ -520,7 +561,7 @@ export const runConnect = async (
   for (const target of targets) {
     const selected = runtimes.find((runtime) => runtime.id === target);
     screen.step(selected?.found
-      ? `${selected.label} found  ${selected.executable ?? selected.configPath ?? "on this computer"}`
+      ? `${selected.label} found  ${screen.dim(selected.executable ?? selected.configPath ?? "on this computer")}`
       // Named outright, so Relay goes on and lets the agent's own command say
       // what is wrong; it never claims to have found something it did not.
       : `${codingAgent(target).label} was not found on this computer; you named it, so Relay will try anyway`);
@@ -534,6 +575,7 @@ export const runConnect = async (
     handle: agent?.handle ?? options.handle ?? "<handle>",
     allow, start: options.start !== false,
     ...(replacing ? { replacing } : {}),
+    ...(marked ? { mark: dim } : {}),
   });
 
   if (options.dryRun === true) {
@@ -557,9 +599,10 @@ export const runConnect = async (
     return;
   }
 
-  const agent = await resolveAgent(options, deps);
+  const agent = await resolveAgent(options, deps, screen);
   const secrets = [agent.token];
-  screen.step(safeMetadata(`${agent.created ? "Created" : "That token is"} @${agent.handle}  token saved privately on this computer`, secrets));
+  // A created agent was announced by the spinner that created it.
+  if (!agent.created) screen.step(safeMetadata(`That token is ${screen.handle(agent.handle)}  token saved privately on this computer`, secrets));
 
   // A token already in a .env file belongs to whatever answers as that agent
   // today, so it is never replaced without being told to.
@@ -617,49 +660,49 @@ export const runConnect = async (
     if (method.kind === "claude-plugin") {
       const channelDir = claudeChannelDir(deps.env, deps.home);
       const envPath = join(channelDir, ".env");
-      await runAgentCommands(target, runtime, ctx, runCommand);
-      screen.step("Plugin installed");
+      await screen.work("Installing the plugin", () => runAgentCommands(target, runtime, ctx, runCommand), () => "Plugin installed");
       await writeChannelEnv(channelDir, { token: agent.token, baseURL: agent.apiURL, allowedSenders: allowed }, platform);
-      screen.step(`Config written, owner-only  ${envPath}`);
+      screen.step(`Config written, owner-only  ${screen.dim(envPath)}`);
       if (!allowed.length) {
         qrShown = true;
         const paired = await pairFirstSender(agent, deps, screen);
         if (paired) {
           allowed.push(paired);
           await writeChannelEnv(channelDir, { token: agent.token, baseURL: agent.apiURL, allowedSenders: allowed }, platform);
-          screen.step(`Allowed: @${paired}`);
+          screen.step(`Allowed: ${screen.handle(paired)}`);
         }
       }
       Object.assign(result, { env_path: envPath, plugin: CLAUDE_PLUGIN_ID, marketplace: claudeMarketplaceSource(version), allowed_senders: allowed });
     } else if (method.kind === "mcp-command") {
-      await runAgentCommands(target, runtime, ctx, runCommand);
-      screen.step(`Relay MCP server added to ${codingAgent(target).label}  ${planned.files[0]}`);
+      await screen.work(
+        `Adding the Relay MCP server to ${codingAgent(target).label}`,
+        () => runAgentCommands(target, runtime, ctx, runCommand),
+        () => `Relay MCP server added to ${codingAgent(target).label}  ${screen.dim(planned.files[0] ?? "")}`,
+      );
     } else if (method.kind === "mcp-file") {
       await writeMcpFileEntry(planned.files[0]!, method.shape, mcpServerSpec(ctx));
-      screen.step(`Relay MCP server added to ${codingAgent(target).label}  ${planned.files[0]}`);
+      screen.step(`Relay MCP server added to ${codingAgent(target).label}  ${screen.dim(planned.files[0] ?? "")}`);
     } else if (method.kind === "acp-bridge") {
       // Nothing is written: the Relay MCP server is handed to the agent's ACP
       // session, and this process drives the agent's turns (acp-bridge.ts).
       screen.step(`Relay drives ${codingAgent(target).label} over ACP; no mcp.json is written`);
     } else if (method.kind === "hermes-plugin") {
-      await runAgentCommands(target, runtime, ctx, runCommand);
-      screen.step("Plugin installed");
+      await screen.work("Installing the plugin", () => runAgentCommands(target, runtime, ctx, runCommand), () => "Plugin installed");
       await writeEnvFile(hermesEnvPath(ctx), {
         RELAY_AGENT_TOKEN: agent.token,
         RELAY_BASE_URL: agent.apiURL,
         RELAY_STATE_DIR: hermesStateDir(ctx),
         ...(allowed.length ? { RELAY_ALLOWED_CONTACTS: allowed.join(",") } : {}),
       }, "Hermes", platform);
-      screen.step(`Config written, owner-only  ${hermesEnvPath(ctx)}`);
+      screen.step(`Config written, owner-only  ${screen.dim(hermesEnvPath(ctx))}`);
       Object.assign(result, { env_path: hermesEnvPath(ctx), start_command: "hermes gateway run" });
     } else {
-      await runAgentCommands(target, runtime, ctx, runCommand);
-      screen.step("Plugin installed");
+      await screen.work("Installing the plugin", () => runAgentCommands(target, runtime, ctx, runCommand), () => "Plugin installed");
       const tokenPath = openclawTokenPath(ctx);
       const destination = await preparePrivateDestination(tokenPath, "OpenClaw secrets", platform);
       await writePrivateDestination(destination, ".relay-connect", `${agent.token}\n`);
       await writeOpenclawChannel(openclawConfigPath(ctx), { baseURL: agent.apiURL, tokenFile: tokenPath, allowFrom: allowed });
-      screen.step(`Config written  ${openclawConfigPath(ctx)}  token owner-only in  ${tokenPath}`);
+      screen.step(`Config written  ${screen.dim(openclawConfigPath(ctx))}  token owner-only in  ${screen.dim(tokenPath)}`);
       Object.assign(result, { token_file: tokenPath, config_path: openclawConfigPath(ctx) });
     }
     const start = definition.start;
@@ -691,7 +734,7 @@ export const runConnect = async (
         if (accepted) {
           starts.push({ command, args: start.args, label: definition.label });
         } else {
-          screen.say(`Start it yourself when you are ready:  ${commandLine}`);
+          screen.say(`Start it yourself when you are ready:  ${screen.dim(commandLine)}`);
         }
       }
     } else if (start?.kind === "restart" && !json) {
@@ -700,18 +743,19 @@ export const runConnect = async (
     done.push(result);
   }
 
+  const later = `Later:  ${screen.dim(`relay watch ${agent.handle}`)}  ·  ${screen.dim("relay doctor")}`;
   if (json) {
     deps.stdout(`${JSON.stringify(safeMetadata({
       ok: true, profile: agent.profile, handle: agent.handle, api_url: agent.apiURL, token: "stored", agents: done, proof: "skipped",
     }, secrets), null, 2)}\n`);
   } else {
-    screen.say(`Relay is ready for ${targets.map((target) => codingAgent(target).label).join(", ")}.`);
+    screen.success(`Relay is ready for ${targets.map((target) => codingAgent(target).label).join(", ")}.`);
     // Docker MCP's line after a connect (cmd/docker-mcp/client/connect.go:30).
     for (const target of targets) {
       if (!codingAgent(target).start && codingAgent(target).connect.kind === "mcp-file") screen.say(`You might have to restart '${codingAgent(target).label}'.`);
     }
     for (const start of starts) screen.say(`${start.label} opens next.`);
-    screen.say(`Later:  relay watch ${agent.handle}  ·  relay doctor`);
+    if (!ui) screen.say(later);
   }
   if (options.skill !== false && deps.offerSkill && !json) await deps.offerSkill();
   if (!json) {
@@ -741,11 +785,14 @@ export const runConnect = async (
           control.abort();
         }
       }
-      const reply = await proof;
-      screen.say(reply === undefined
-        ? `No reply yet. Run:  relay watch @${agent.handle}`
-        : `Answered from your phone: ${reply}`);
+      const said = (reply: string | undefined): string => reply === undefined
+        ? `No reply yet. Run:  ${screen.dim(`relay watch @${agent.handle}`)}`
+        : `Answered from your phone: ${reply}`;
+      // A started agent owns the terminal, so a spinner would fight it for the line.
+      if (starts.length) screen.say(said(await proof));
+      else await screen.work("Waiting for a reply", () => proof, said);
     }
+    if (ui) screen.outro(later);
   }
 };
 
@@ -846,7 +893,7 @@ const saveExistingAgent = async (
   return { profile, handle, displayName, apiURL, token, created: false, shareURL: savedAgentShareURL(apiURL, handle) };
 };
 
-const resolveAgent = async (options: ConnectOptions, deps: ConnectDependencies): Promise<ConnectAgent> => {
+const resolveAgent = async (options: ConnectOptions, deps: ConnectDependencies, screen: Screen): Promise<ConnectAgent> => {
   const apiURL = validateApiURL(options.apiUrl ?? deps.env.RELAY_API_URL ?? defaultCreationApiURL(deps.version));
   if (options.token !== undefined) return saveExistingAgent(options.token, apiURL, deps);
   if (options.new !== true) {
@@ -866,7 +913,7 @@ const resolveAgent = async (options: ConnectOptions, deps: ConnectDependencies):
   if (handle === undefined && deps.prompts && !options.json && options.yes !== true) {
     handle = (await deps.prompts.text("Handle  (press Enter and Relay picks one)", "")).trim() || undefined;
   }
-  const created = await createAgentWithPicture({
+  const created = await screen.work("Creating your agent", () => createAgentWithPicture({
     apiURL,
     ...(deps.profile ? { profile: deps.profile } : {}),
     ...(handle ? { handle } : {}),
@@ -875,7 +922,7 @@ const resolveAgent = async (options: ConnectOptions, deps: ConnectDependencies):
     ...(options.image ? { image: options.image } : {}),
     cwd: deps.cwd,
     home: deps.home,
-  }, deps.agents, deps.fetch);
+  }, deps.agents, deps.fetch), (result) => `Created ${screen.handle(result.result.handle)}  token saved privately on this computer`);
   if (created.image && created.image.status !== "updated") {
     throw new ConnectFailure(
       incompletePictureMessage(created.result.handle, created.result.profile, created.image, false),
@@ -907,10 +954,10 @@ const resolveAgent = async (options: ConnectOptions, deps: ConnectDependencies):
  */
 const showAddQR = (agent: ConnectAgent, deps: ConnectDependencies, screen: Screen): void => {
   const share = agent.shareURL || savedAgentShareURL(agent.apiURL, agent.handle);
-  screen.step(`Add @${agent.handle} from your phone`);
+  screen.step(`Add ${screen.handle(agent.handle)} from your phone`);
   if (share) {
-    try { deps.stdout(`${(deps.renderQR ?? renderTerminalQR)(share)}${share}\n`); }
-    catch { deps.stdout(`${share}\n`); }
+    try { deps.stdout(`${(deps.renderQR ?? renderTerminalQR)(share)}${screen.link(share)}\n`); }
+    catch { deps.stdout(`${screen.link(share)}\n`); }
   }
   screen.say("Open Relay, scan, add this agent, then send it any message.");
 };
