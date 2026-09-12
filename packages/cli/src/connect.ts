@@ -831,7 +831,10 @@ const chooseAgents = async (
     return [normalized];
   }
   if (deps.drivingAgent) return [deps.drivingAgent];
-  if (!deps.prompts || options.json) throw new HeadlessPrompt(NO_TTY_SENTENCE, [], NO_TTY_NEXT_STEP);
+  if (!deps.prompts || options.json) {
+    if (options.json && options.dryRun && found.length === 0) throw new ConnectFailure("No runtime was found on this computer.", "npx relaymessenger connect <agent>", "no_runtime");
+    throw new HeadlessPrompt(NO_TTY_SENTENCE, [], NO_TTY_NEXT_STEP);
+  }
   // One question: the agents found on this computer first, in the order they
   // were found, the default the first of them; the rest after, dimmed, still
   // there to pick (_artifacts/cli-connect-design-20260912.md, item 1).
