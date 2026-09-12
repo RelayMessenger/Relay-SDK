@@ -53,9 +53,9 @@ With no terminal, a command that needs an answer prints the flags that would
 have answered it and exits 2 rather than a usage block. With `--json`, every
 error is `{ "error": …, "next_step": … }`.
 
-`relay --help` puts the commands in three groups: Get started (`connect`), Every
-day (`watch`, `doctor`, `agents`), and Everything else behind one line. Every
-command has a description; run `relay help <command>` for any of them.
+`relay` and `relaymessenger` open with the Relay mark, version, usage, topics,
+and concise commands, like the Linq CLI. Run `relay help <command>` for the
+full options for any command.
 
 Before interactive creation or sign-in setup, the CLI may offer the Relay skill
 once if it is absent from the standard install locations. Declining skips skill

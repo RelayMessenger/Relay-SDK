@@ -74,15 +74,19 @@ try {
   const cli = (...args) => run(process.execPath, [bin, ...args], { cwd: consumer });
   const shim = (args, options = {}) => npm(['exec', '--offline', '--', 'relaymessenger', ...args], { cwd: consumer, ...options });
   const help = cli('--help');
-  // The shipped help shape (packages/cli/src/help-groups.ts): three groups, with
-  // `auth` named only on the "Everything else" line, never as a row of its own.
-  for (const command of ['connect', 'watch', 'doctor', 'agents']) assert.match(help, new RegExp(`^  ${command}(?: \\[|\\n| {2,})`, 'm'), `root help must list ${command} as a row`);
-  const everythingElse = /^Everything else:\n(?:.*\n)*?  ((?:[a-z-]+, )*auth(?:, [a-z-]+)*)\n/m.exec(help);
-  assert.ok(everythingElse, 'root help must name auth on the "Everything else" line');
-  assert.doesNotMatch(help, /^\s+(token|login|oauth|console)[ \[]/m);
+  // The shipped help shape (packages/cli/src/help-groups.ts) follows Linq:
+  // branded heading, VERSION, USAGE, TOPICS, then concise COMMANDS.
+  for (const section of ['VERSION', 'USAGE', 'TOPICS', 'COMMANDS']) {
+    assert.match(help, new RegExp(`^${section}$`, 'm'), `root help must include ${section}`);
+  }
+  for (const command of ['connect', 'watch', 'listen', 'doctor', 'agents', 'login', 'whoami', 'logout']) {
+    assert.match(help, new RegExp(`^  ${command}(?: \\[|\\n| {2,})`, 'm'), `root help must list ${command} as a row`);
+  }
+  assert.doesNotMatch(help, /^Everything else:/m);
+  assert.doesNotMatch(help, /^\s+(token|oauth|console)[ \[]/m);
   const hasAgentCommands = /^  agents(?: {2,}|\n)/m.test(help);
   assert.ok(hasAgentCommands, 'Canonical CLI must include agent commands');
-  report.helpShape = { rows: ['connect', 'watch', 'doctor', 'agents'], everythingElse: everythingElse[1] };
+  report.helpShape = { rows: ['connect', 'watch', 'listen', 'doctor', 'agents', 'login', 'whoami', 'logout'], sections: ['VERSION', 'USAGE', 'TOPICS', 'COMMANDS'] };
   report.agentCommands = hasAgentCommands ? 'available; tests pending below' : 'pending feature commits: no agent command in root help';
   // --version includes the canonical executable name (program.ts).
   const expectedVersion = `relaymessenger ${cliManifest.version}`;
