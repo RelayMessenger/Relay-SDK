@@ -170,11 +170,6 @@ describe("Relay v1 request shapes", () => {
       attachment_id: "attachment-id",
     });
     await client.messages.retrieve("message-id");
-    await client.messages.edit("message-id", {
-      part_index: 1,
-      text: "Corrected",
-    });
-    await client.messages.unsend("message-id");
     await client.messages.addReaction("message-id", {
       operation: "add",
       type: "love",
@@ -268,17 +263,11 @@ describe("Relay v1 request shapes", () => {
       first_name: "New Echo",
     });
 
-    const editMessage = calls.find((call) =>
-      call.method === "PATCH" && call.url.pathname === "/v1/messages/message-id")!;
-    expect(JSON.parse(String(editMessage.body))).toEqual({
-      part_index: 1,
-      text: "Corrected",
-    });
-
-    const unsendMessage = calls.find((call) =>
-      call.method === "DELETE"
-      && call.url.pathname === "/v1/messages/message-id")!;
-    expect(unsendMessage.body).toBeUndefined();
+    // Editing and unsending are retired from the developer API, so the client
+    // has no way to reach either verb on a Message.
+    expect(calls.some((call) =>
+      call.url.pathname === "/v1/messages/message-id"
+      && (call.method === "PATCH" || call.method === "DELETE"))).toBe(false);
 
     expect(calls.some((call) =>
       call.url.pathname === "/v1/websocket")).toBe(false);
@@ -358,10 +347,8 @@ describe("Relay v1 request shapes", () => {
     expect(methods(client.messages)).toEqual([
       "addReaction",
       "create",
-      "edit",
       "listMessagesThread",
       "retrieve",
-      "unsend",
     ]);
     expect(methods(client.chats.messages)).toEqual(["list", "send"]);
     expect(methods(client.chats.participants)).toEqual(["add", "remove"]);

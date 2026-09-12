@@ -9,7 +9,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "19bc597eee8369938354f4eac91fbf527bed3ee9e2084675173c5e5035bfb693";
+  "8adc196c22e9cb3c59ed28c13107835c8f1826e073fa53c36d1cbba304b2942a";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -119,13 +119,12 @@ describe("locked Relay Server contract", () => {
     expect(document.paths["/v1/messages/{messageId}"]).toHaveProperty(
       "get",
     );
-    // Edit and unsend joined the contract on Relay Server f14c368b. The
-    // adapter does not call either, because the Chat SDK has no operation
-    // for a Message the sender changed after sending it.
-    expect(document.paths["/v1/messages/{messageId}"]).toHaveProperty(
+    // Relay retired message editing and unsending from the developer API on
+    // Relay Server fc3077e9, so a Message carries only a read verb.
+    expect(document.paths["/v1/messages/{messageId}"]).not.toHaveProperty(
       "patch",
     );
-    expect(document.paths["/v1/messages/{messageId}"]).toHaveProperty(
+    expect(document.paths["/v1/messages/{messageId}"]).not.toHaveProperty(
       "delete",
     );
     const chatHandle = document.components.schemas.ChatHandle as {

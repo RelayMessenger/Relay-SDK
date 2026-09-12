@@ -1229,12 +1229,10 @@ export class RelayAdapter
         );
         return;
       }
-      // An edit, an unsend, and a failed hand-off all change a Message the
-      // Chat SDK has already been given. The Chat SDK has no operation for
-      // any of the three, so the adapter records nothing and dispatches
-      // nothing rather than inventing a second wire shape for a change.
-      case "message.edited":
-      case "message.unsent":
+      // A failed hand-off changes a Message the Chat SDK has already been
+      // given. The Chat SDK has no operation for that, so the adapter records
+      // nothing and dispatches nothing rather than inventing a second wire
+      // shape for a change.
       case "message.failed":
       case "participant.added":
       case "participant.removed":
