@@ -907,6 +907,15 @@ paths:
               - asc
               - desc
             default: asc
+        - name: thread_originator_message_id
+          in: query
+          description: Return one thread only, in time order, with no group-history events. The result is the Message that
+            opened the thread plus every Message whose `thread.originator_message_id` is that Message, so a reply to a reply is
+            included. Answers 404 when the Message is not in this Chat or the caller cannot see it. A cursor from a thread
+            list is only valid with the same thread.
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           description: Messages retrieved successfully
@@ -2736,6 +2745,11 @@ components:
           oneOf:
             - $ref: "#/components/schemas/ReplyTo"
             - type: "null"
+        thread:
+          description: The thread this Message belongs to, or null when it is not a reply.
+          oneOf:
+            - $ref: "#/components/schemas/ThreadOriginator"
+            - type: "null"
         is_from_me:
           type: boolean
           description: Whether this message was sent by the authenticated user
@@ -2955,6 +2969,11 @@ components:
               format: int32
               minimum: 0
               description: Index of the part being replied to
+        thread:
+          description: The thread this Message belongs to, or null when it is not a reply.
+          oneOf:
+            - $ref: "#/components/schemas/ThreadOriginator"
+            - type: "null"
     MessagePart:
       type: object
       required:
@@ -3189,6 +3208,24 @@ components:
         handle:
           type: string
           description: Relay Handle.
+    ThreadOriginator:
+      type: object
+      description: The Message and part that opened a thread. A reply to a reply names the same originator as the Message it
+        replied to, so every Message in one thread carries the same value. Withheld, as null on the Message, from a reader who
+        cannot see the originator.
+      required:
+        - originator_message_id
+        - originator_part_index
+      properties:
+        originator_message_id:
+          type: string
+          format: uuid
+          description: ID of the Message that opened the thread.
+        originator_part_index:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Index of the originator's part that opened the thread (0-based).
     ReplyTo:
       type: object
       description: Indicates this message is a threaded reply to another message
@@ -3520,6 +3557,11 @@ components:
         reply_to:
           oneOf:
             - $ref: "#/components/schemas/ReplyTo"
+            - type: "null"
+        thread:
+          description: The thread this Message belongs to, or null when it is not a reply.
+          oneOf:
+            - $ref: "#/components/schemas/ThreadOriginator"
             - type: "null"
     SetContactCardRequest:
       type: object
