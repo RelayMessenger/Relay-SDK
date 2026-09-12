@@ -75,6 +75,20 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}, sniffed: Ru
 const ranLines = (f: Awaited<ReturnType<typeof fixture>>): string[] =>
   f.runCommand.mock.calls.map(([file, args]) => [file, ...(args as string[])].join(" "));
 
+describe("nothing is created before the plan is taken", () => {
+  it("a bad --handle is refused before any question, with the same words", async () => {
+    const f = await fixture();
+    expect(await runCLI(["connect", "--handle", "ci_connectwalk3_1789195591"], f.deps)).toBe(1);
+    expect(f.stderr.join("")).toContain("Error: A handle looks like name.dev. The part before .dev must be 3 to 32 characters, start with a lowercase letter, and use only lowercase letters, numbers and underscores.");
+    expect(f.prompts.select).not.toHaveBeenCalled();
+    expect(f.prompts.confirm).not.toHaveBeenCalled();
+    expect(f.prompts.intro).not.toHaveBeenCalled();
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect(f.stdout.join("")).not.toContain("Creating your agent");
+  });
+
+});
+
 describe("the plan screen", () => {
   it("--dry-run prints the three plan lines, asks nothing, and changes nothing", async () => {
     const f = await fixture();
