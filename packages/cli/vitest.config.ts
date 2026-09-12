@@ -8,5 +8,11 @@ export const nativeTimeouts = (platform: NodeJS.Platform) =>
   platform === "win32" ? { testTimeout: 120_000, hookTimeout: 120_000 } : {};
 
 export default defineConfig({
-  test: nativeTimeouts(process.platform),
+  test: {
+    ...nativeTimeouts(process.platform),
+    // Output assertions read plain text. picocolors (and clack) colour whenever
+    // `CI` is set, so GitHub runs got escape codes the assertions never expect.
+    // NO_COLOR wins over CI and FORCE_COLOR in both libraries (no-color.org).
+    env: { NO_COLOR: "1" },
+  },
 });
