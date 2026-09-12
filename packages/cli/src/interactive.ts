@@ -1,7 +1,7 @@
 import { confirm, intro, isCancel, log, multiselect, note, outro, password, select, spinner, text } from "@clack/prompts";
 import type { AgentDependencies } from "./agents.js";
 import { listAgents } from "./agents.js";
-import { active, dim as dimColour, error as errorColour, relayBlue, success as successColour } from "./ui-colour.js";
+import { active, dim as dimColour, relayBlue, success as successColour } from "./ui-colour.js";
 import { DEFAULT_API_URL, DEFAULT_PROFILE, defaultCreationApiURL, validateApiURL } from "./config.js";
 
 export class InteractiveCancelled extends Error {
