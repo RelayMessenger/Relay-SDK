@@ -1,7 +1,7 @@
 """The native proof of `relaymessenger connect` on a real pseudo-terminal.
 
 It drives the installed CLI through the redesigned screens
-(_artifacts/cli-connect-design-20260912.md): the one question `Which coding agent?`
+(_artifacts/cli-connect-design-20260912.md): the one question `Where does your agent run?`
 answered with Enter, the plan of at most three lines, `Continue? (Y/n)` answered with
 Enter, one line per file written, `Say hi from your phone`, the share link and the QR,
 then the agent's first reply. Relay is loopback only (agent-cli-platforms-terminal-server.mjs);
@@ -56,9 +56,9 @@ def drain(fd, seconds):
             except OSError: break
     return out
 
-# The two questions of the redesign, both answered with Enter: the coding agent picker takes
+# The two questions of the redesign, both answered with Enter: the runtime picker takes
 # its default (the first agent found), and the confirm takes Yes.
-steps = [(b'Which coding agent?', b'\r'), (b'Continue? (Y/n)', b'\r')]
+steps = [(b'Where does your agent run?', b'\r'), (b'Continue? (Y/n)', b'\r')]
 # 24 and 32 rows have no room for a full-cell code; 60 rows has. All three are proved.
 modes = [('light', 80, 24), ('dark', 100, 32), ('tall', 100, 60)]
 for mode, columns, rows in modes:
