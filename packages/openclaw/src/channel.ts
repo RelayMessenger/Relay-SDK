@@ -198,13 +198,17 @@ const relaySetupAdapter = {
   },
 };
 
-export const relaySetupContract = defineChannelSetupContract({
+const RELAY_MISSING_TOKEN = `relay: account "default" has no Relay Agent Token`;
+
+const baseRelaySetupContract = defineChannelSetupContract({
   fields: {
     token: { kind: "string", sensitive: true, cli: { flags: "--token <token>", description: "Relay Agent Token" } },
     baseUrl: { kind: "string", cli: { flags: "--base-url <url>", description: "Relay API origin" } },
   },
   legacyAdapter: relaySetupAdapter,
 });
+
+export const relaySetupContract = { ...baseRelaySetupContract, parseInput: (input: unknown) => { const result = baseRelaySetupContract.parseInput(input); if (!result.ok || typeof (result.value as Record<string, unknown>).token !== "string" || !((result.value as Record<string, unknown>).token as string).trim()) return { ok: false as const, error: RELAY_MISSING_TOKEN }; return result; } };
 
 export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> =
   createChatChannelPlugin({
