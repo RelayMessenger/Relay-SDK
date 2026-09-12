@@ -39,7 +39,9 @@ for mode,columns,rows in modes:
   assert b'Install the Relay skill?' not in output
   # Inspect latest alternate-screen frame, not old prompts/history.
   frame=output.split(b'\x1b[H\x1b[2J')[-1]
-  assert b'Enlarge terminal' not in frame and ('▄'.encode() in frame or '▀'.encode() in frame),frame
+  # The QR is full cells: two background-coloured spaces per module (white 231 / black 16),
+  # one text line per module row, never half-block glyphs (they leave hairline gaps in Terminal.app).
+  assert b'Enlarge terminal' not in frame and b'\x1b[48;5;16m' in frame and b'\x1b[48;5;231m' in frame and '▄'.encode() not in frame and '▀'.encode() not in frame,frame
   assert b'https://staging.relayapp.im/' in output and b'Agent: not running yet' in output
   detail={'mode':mode,'size':[columns,rows],'inputSteps':stage,'installedShim':True,'skillNotOffered':True,'noExtraCreateConfirmation':True,'apexURL':True,'QRfits':True,'eventsVisible':True,'noTokenEcho':True}
   if mode=='tmux':
