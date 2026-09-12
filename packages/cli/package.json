@@ -1,6 +1,6 @@
 {
   "name": "relaymessenger",
-  "version": "0.1.6-staging.35",
+  "version": "0.1.6-staging.36",
   "description": "Official command-line client for Relay v1 resources.",
   "type": "module",
   "bin": {
@@ -30,7 +30,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",
     "@clack/prompts": "1.8.0",
-    "@relaymessenger/sdk": "0.3.3-staging.4",
+    "@relaymessenger/sdk": "0.3.3-staging.5",
     "@vercel/detect-agent": "1.2.5",
     "commander": "^15.0.0",
     "qrcode": "1.5.4",
