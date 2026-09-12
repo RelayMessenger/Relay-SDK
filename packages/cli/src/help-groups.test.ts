@@ -147,7 +147,7 @@ it("an agent driving the command is what @vercel/detect-agent says, mapped onto 
   expect(CLAUDE_CODE_HINT).toBe('<claude-code-hint v="1" type="plugin" value="relay@relay-messenger" />');
 });
 
-it("an agent driving the command gets no menu; inside Claude Code the plugin hint goes to stderr, and nothing else does", async () => {
+it("a bare command stays clean even when a runtime is driving it", async () => {
   const home = await mkdtemp(join(tmpdir(), "relay-driving-"));
   const select = vi.fn(async () => "exit");
   const stderr: string[] = [];
@@ -164,8 +164,8 @@ it("an agent driving the command gets no menu; inside Claude Code the plugin hin
   });
   expect(code).toBe(0);
   expect(select).not.toHaveBeenCalled();
-  expect(stderr.join("")).toBe(`${CLAUDE_CODE_HINT}\n●  claude-code  Agent detected — running non-interactively\nDocs: https://docs.relayapp.im/llms.txt\n`);
-  // Another agent: no menu, no hint, no banner.
+  expect(stderr.join("")).toBe("");
+  // Another runtime: no menu, no hint, no banner.
   const quiet: string[] = [];
   await runCLI([], {
     configContext: { env: { RELAY_CONFIG_PATH: join(home, "config.json") }, home },
@@ -173,7 +173,7 @@ it("an agent driving the command gets no menu; inside Claude Code the plugin hin
     detectAgent: async () => ({ isAgent: true, agent: { name: "codex" } }),
     stdout: () => undefined, stderr: (value) => quiet.push(value),
   });
-  expect(quiet.join("")).toBe("●  codex  Agent detected — running non-interactively\nDocs: https://docs.relayapp.im/llms.txt\n");
+  expect(quiet.join("")).toBe("");
   // --json keeps stderr as one document even inside Claude Code.
   const json: string[] = [];
   await runCLI(["--json", "agents", "list"], {

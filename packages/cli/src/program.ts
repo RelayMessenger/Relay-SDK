@@ -1439,6 +1439,10 @@ export const runCLI = async (
   const stderr = dependencies.stderr ?? ((value: string) => process.stderr.write(value));
   const env = dependencies.configContext?.env ?? process.env;
   const json = argv.includes("--json");
+  const helpRequested = argv.length === 0
+    || argv.includes("--help")
+    || argv.includes("-h")
+    || argv[0] === "help";
   // `-q` keeps stderr for errors alone: the agent line, the plugin hint, the
   // cancel note and the skill offer all stay silent (clig.dev, standard names).
   const quiet = argv.includes("-q") || argv.includes("--quiet");
@@ -1458,8 +1462,8 @@ export const runCLI = async (
   const interactive = interactiveAllowed(argv, dependencies.isInteractive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY && process.stderr.isTTY))
     && driver === undefined && !quiet;
   if (driver) {
-    if (driver.id === "claude-code" && !json) note(`${CLAUDE_CODE_HINT}\n`);
-    note(agentDetectedLines(driver));
+    if (!helpRequested && driver.id === "claude-code" && !json) note(`${CLAUDE_CODE_HINT}\n`);
+    if (!helpRequested) note(agentDetectedLines(driver));
   }
   if (driver?.id) dependencies = { ...dependencies, connect: { ...dependencies.connect, drivingAgent: driver.id } };
   const ui = interactive ? dependencies.prompts ?? clackPrompts((message) => note(`${message}\n`)) : undefined;
