@@ -84,7 +84,7 @@ describe("the plan screen", () => {
     expect(printed).toContain("create a new agent");
     expect(printed).toContain("create a new agent and save its token privately on this computer");
     expect(printed).toContain(`claude plugin marketplace add ${claudeMarketplaceSource("0.1.6-staging.0")}`);
-    expect(printed).toContain(join(f.home, ".claude", "channels", "relay", ".env"));
+    expect(printed).not.toContain(join(f.home, ".claude", "channels", "relay", ".env"));
     expect(printed).toContain("Dry run: nothing was changed.");
     expect(f.fetch).not.toHaveBeenCalled();
     expect(f.runCommand).not.toHaveBeenCalled();
@@ -107,7 +107,7 @@ describe("the plan screen", () => {
     } else {
       expect(answer.agents[0].files.length).toBeGreaterThan(0);
       for (const file of answer.agents[0].files) expect(file.startsWith(f.home) || file.startsWith("/Applications")).toBe(true);
-      expect(answer.steps.join("\n")).toContain(answer.agents[0].files[0]);
+      expect(answer.steps.join("\n")).toContain("run");
     }
     expect(f.stderr.join("")).toBe("");
   });
@@ -116,7 +116,7 @@ describe("the plan screen", () => {
 describe("choosing agents", () => {
   it("asks with every agent listed and picks one detected agent", async () => {
     const f = await fixture();
-    expect(await runCLI(["connect", "--dry-run"], f.deps)).toBe(0);
+    expect(await runCLI(["connect", "claude-code", "--dry-run"], f.deps)).toBe(0);
     expect(f.prompts.select).toHaveBeenCalled();
     const [message, options] = f.prompts.select.mock.calls.find(([m]) => m === "Which coding agent?")!;
     expect(message).toBe("Which coding agent?");

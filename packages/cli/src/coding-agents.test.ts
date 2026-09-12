@@ -104,12 +104,12 @@ it("the MCP agents run our server by npx, the staging tag on a staging build; th
 
 it("the composed plan counts every step of every chosen agent", () => {
   const plan = runtimeConnectPlan({ ...context({ start: true }), agents: ["claude-code", "cursor", "hermes"], agentStep: "create a new agent" });
-  expect(plan.headline).toBe("Continue?");
+  expect(plan.headline).toBe("Continue? (Y/n)");
   expect(plan.steps[0]).toContain("create a new agent");
   expect(plan.agents.map((entry) => entry.agent)).toEqual(["claude-code", "cursor", "hermes"]);
   expect(plan.steps.length).toBeLessThanOrEqual(3);
   expect(codingAgent("cursor").label).toBe("Cursor");
-  expect(runtimeConnectPlan({ ...context(), agents: ["cursor"] }).headline).toBe("Continue?");
+  expect(runtimeConnectPlan({ ...context(), agents: ["cursor"] }).headline).toBe("Continue? (Y/n)");
 });
 
 
