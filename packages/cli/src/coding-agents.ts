@@ -13,7 +13,7 @@ export { platformPath, claudeConfigDir, codexHome, hermesHome, openclawHome } fr
 
 
 /**
- * The nine coding agents `connect` knows, in the order the help lists them.
+ * The nine runtimes `connect` knows, in the order the help lists them.
  * This is the one table: detection, the "Supported agents" line, the prompt,
  * the plan and the tests all read it, so the list cannot drift between screens.
  *
@@ -88,7 +88,7 @@ export const codingAgent = (id: CodingAgentId): CodingAgent =>
   CODING_AGENTS.find((agent) => agent.id === id)!;
 
 /** The line the help prints under Usage, the way Docker MCP prints its clients. */
-export const supportedAgentsLine = (): string => `Supported agents: ${CODING_AGENT_IDS.join(" ")}`;
+export const supportedAgentsLine = (): string => `Runs in: ${CODING_AGENT_IDS.join(" ")}`;
 
 /** Accepts an id or one of its aliases, in any case, with spaces around it. */
 export const normalizeAgentId = (value: string): CodingAgentId | undefined => {

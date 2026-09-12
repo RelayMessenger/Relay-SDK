@@ -85,7 +85,7 @@ export interface ProgramDependencies {
    * nowhere else (owner ruling, 2026-09-09). */
   offerSkill?: () => Promise<void>;
   connect?: Partial<Pick<import("./connect.js").ConnectDependencies, "sniff" | "runCommand" | "startCommand" | "observer" | "bridge" | "renderQR" | "pairTimeoutMs" | "version" | "drivingAgent">>;
-  /** Which coding agent is driving this command; `@vercel/detect-agent` by default. */
+  /** Which runtime is driving this command; `@vercel/detect-agent` by default. */
   detectAgent?: () => Promise<import("@vercel/detect-agent").AgentResult>;
   terminalSession?: AgentSessionDependencies["session"];
   terminalIO?: AgentSessionDependencies["io"];
@@ -224,7 +224,7 @@ export const createProgram = (
     .option("-q, --quiet", "errors only")
     .option("--verbose", "print each request it makes to stderr, as METHOD path status ms")
     .option("--profile <name>", "which saved profile on this computer to use", (configContext.env ?? process.env).RELAY_PROFILE)
-    .option("--install-skills", "install the Relay skill for the coding agents on this computer");
+    .option("--install-skills", "install the Relay skill for the runtimes on this computer");
   program.exitOverride();
   // A usage error keeps commander's sentence and gains the Docs line; under
   // --json it prints nothing here, because runCLI prints the envelope (MCP's
@@ -275,10 +275,9 @@ export const createProgram = (
   program
     .command("connect")
     .usage(`[options] [agent]\n${supportedAgentsLine()}`)
-    .argument("[agent]", "Coding agent to connect (see Supported agents above)")
-    .description("connect a coding agent to Relay, new or by token, and wait for its first reply")
+    .argument("[agent]", "Runtime to connect (see Runs in above)")
+    .description("connect a runtime to Relay, new or by token, and wait for its first reply")
     .helpGroup(HELP_GROUPS.getStarted)
-    .option("--all", "connect every detected coding agent")
     .option("--new", "create a new agent instead of using one you already have")
     .option("--handle <handle>", "the .dev handle you want for a new agent; leave it out and Relay picks one")
     .option("--name <name>", "the name people see next to a new agent")
@@ -1391,7 +1390,7 @@ export const runCLI = async (
         const present = await (dependencies.skillPresent ?? (() => relaySkillPresent(cwd, dependencies.configContext?.home ?? homedir(), env)))();
         if (present !== false) return 0;
       }
-      if (!await ui.confirm("Install the Relay skill? The installer will ask which coding agents to install it for, and whether to install it for this folder or for you everywhere.")) return 0;
+      if (!await ui.confirm("Install the Relay skill? The installer will ask which runtimes to install it for, and whether to install it for this folder or for you everywhere.")) return 0;
       try {
         await (dependencies.skillInstaller ?? (() => installRelaySkill(cwd, env)))();
         inform("The Relay skill is installed.");

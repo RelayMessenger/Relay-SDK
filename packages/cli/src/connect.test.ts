@@ -29,9 +29,9 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}, sniffed: Ru
   const stdout: string[] = [];
   const stderr: string[] = [];
   const prompts = {
-    // Enter on every question: the coding agent picker takes its default, and
+    // Enter on every question: the runtime picker takes its default, and
     // "Which agent?" takes "New agent".
-    select: vi.fn(async (message: string, options: SelectOption[], initial?: string) => message === "Which coding agent?" ? initial ?? options[0]!.value : "new"),
+    select: vi.fn(async (message: string, options: SelectOption[], initial?: string) => message === "Where does your agent run?" ? initial ?? options[0]!.value : "new"),
     confirm: vi.fn(async () => true),
     password: vi.fn(async () => token),
     text: vi.fn(async (_message: string, initial: string) => initial),
@@ -122,7 +122,7 @@ describe("choosing agents", () => {
     expect(await runCLI(["connect", "--dry-run", "--yes"], f.deps)).toBe(0);
     expect(f.prompts.select).toHaveBeenCalledOnce();
     const [message, options, initial] = f.prompts.select.mock.calls[0]!;
-    expect(message).toBe("Which coding agent?");
+    expect(message).toBe("Where does your agent run?");
     expect(options.map((option) => option.value)).toEqual(["claude-code", "hermes", ...CODING_AGENT_IDS.filter((id) => id !== "claude-code" && id !== "hermes")]);
     expect(options.slice(0, 2).map((option) => option.dim)).toEqual([undefined, undefined]);
     expect(options.slice(2).every((option) => option.dim === true && option.hint === "not found")).toBe(true);
@@ -139,26 +139,16 @@ describe("choosing agents", () => {
     expect(none.prompts.info).not.toHaveBeenCalled();
   });
 
-  it("--all takes every detected agent and none other", async () => {
-    const f = await fixture();
-    expect(await runCLI(["connect", "--all", "--dry-run", "--json"], f.deps)).toBe(0);
-    expect(f.prompts.select).not.toHaveBeenCalled();
-    expect(JSON.parse(f.stdout.join("")).agents.map((entry: { agent: string }) => entry.agent)).toEqual(["claude-code", "hermes"]);
-    const none = await fixture({}, runtimes());
-    expect(await runCLI(["connect", "--all", "--dry-run", "--json"], none.deps)).toBe(1);
-    expect(JSON.parse(none.stderr.join("")).error).toContain("No coding agent was found on this computer");
-  });
-
   it("an unknown name is refused with the supported list", async () => {
     const f = await fixture({ isInteractive: false });
     expect(await runCLI(["--json", "connect", "nonsense"], f.deps)).toBe(2);
     const refusal = JSON.parse(f.stderr.join(""));
-    expect(refusal.error).toContain(`Unknown agent: nonsense. Supported agents: ${CODING_AGENT_IDS.join(" ")}`);
+    expect(refusal.error).toContain(`Unknown agent: nonsense. Runs in: ${CODING_AGENT_IDS.join(" ")}`);
     expect(refusal.code).toBe("usage");
     expect(refusal.next_step).toBe(NEXT_STEP.usage);
   });
 
-  it("inside a coding agent, that agent is pre-selected and the ● line says so once", async () => {
+  it("inside a runtime, that agent is pre-selected and the ● line says so once", async () => {
     const f = await fixture({ isInteractive: false, connect: undefined });
     f.deps.detectAgent = async () => ({ isAgent: true, agent: { name: "codex" } });
     f.deps.connect = { sniff: async () => claudeAndHermes, version: "0.1.6-staging.0", drivingAgent: "codex" };

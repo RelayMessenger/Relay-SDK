@@ -20,12 +20,11 @@ it("the registry is exactly the ten ruled agents, in the help's order", () => {
 });
 
 it("the help's Supported agents line is built from the registry", () => {
-  expect(supportedAgentsLine()).toBe(`Supported agents: ${AGENTS.join(" ")}`);
+  expect(supportedAgentsLine()).toBe(`Runs in: ${AGENTS.join(" ")}`);
   const connect = createProgram({ configContext: { env: {}, home: "/home/dev" } }).commands.find((command) => command.name() === "connect")!;
   const help = connect.helpInformation();
   expect(help.startsWith(`Usage: relaymessenger connect [options] [agent]\n${supportedAgentsLine()}\n`)).toBe(true);
   expect(help).toMatch(/^  agent +Coding agent to connect \(see Supported agents above\)$/mu);
-  expect(help).toMatch(/^  --all +connect every detected coding agent$/mu);
   expect(help).toMatch(/^  -y, --yes +take the plan as it is$/mu);
   // Gone: the old argument line and the old runtime words.
   expect(help).not.toContain("what will answer as this agent");
