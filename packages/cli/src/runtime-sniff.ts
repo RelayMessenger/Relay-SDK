@@ -10,6 +10,8 @@ export interface RuntimeSniffContext {
   env: NodeJS.ProcessEnv;
   home: string;
   platform?: NodeJS.Platform;
+  /** The folder connect runs in; the process's own when absent. */
+  cwd?: string;
 }
 
 export interface RuntimeFound {
@@ -58,7 +60,7 @@ const pathExists = async (path: string): Promise<boolean> => {
  */
 export const sniffRuntimes = async (context: RuntimeSniffContext): Promise<RuntimeFound[]> => {
   const platform = context.platform ?? process.platform;
-  const paths: AgentPaths = { env: context.env, home: context.home, platform };
+  const paths: AgentPaths = { env: context.env, home: context.home, platform, cwd: context.cwd ?? process.cwd() };
   const runtimes: RuntimeFound[] = [];
   for (const agent of CODING_AGENTS) {
     const executable = agent.command ? await findExecutable(agent.command, context.env, platform) : undefined;

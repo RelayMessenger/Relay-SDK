@@ -1,6 +1,8 @@
-import { confirm, intro, isCancel, log, multiselect, note, outro, password, select, spinner, text } from "@clack/prompts";
+import { isCancel } from "@clack/core";
 import type { AgentDependencies } from "./agents.js";
 import { listAgents } from "./agents.js";
+import { makeTheme, type SelectOption } from "./clack-theme.js";
+import { processPalette } from "./ui-colour.js";
 import { DEFAULT_API_URL, DEFAULT_PROFILE, defaultCreationApiURL, validateApiURL } from "./config.js";
 
 export class InteractiveCancelled extends Error {
@@ -20,11 +22,16 @@ export interface InteractiveSpinner {
   start(message: string): void;
   stop(message: string): void;
 }
+export type { SelectOption } from "./clack-theme.js";
+/**
+ * Every question is a single choice or a yes/no with a highlighted default,
+ * and Enter takes the default (the sixteen CLIs walked on 2026-09-12,
+ * _artifacts/cli-connect-design-20260912.md: "Nobody multi-selects").
+ */
 export interface InteractivePrompts {
-  select(message: string, options: Array<{ value: string; label: string }>): Promise<string>;
-  /** Several boxes, some ticked before the person touches them. */
-  multiselect(message: string, options: Array<{ value: string; label: string }>, initialValues: string[]): Promise<string[]>;
-  confirm(message: string): Promise<boolean>;
+  /** `initialValue` is the option Enter takes; the first one when absent. */
+  select(message: string, options: SelectOption[], initialValue?: string): Promise<string>;
+  confirm(message: string, options?: { initialValue?: boolean }): Promise<boolean>;
   password(message: string): Promise<string>;
   text(message: string, initialValue: string): Promise<string>;
   info(message: string): void;
@@ -33,38 +40,27 @@ export interface InteractivePrompts {
   outro(message: string): void;
   /** A finished step: the same diamond the prompts leave behind. */
   step(message: string): void;
-  /** A step that went well. */
-  success(message: string): void;
   /** A sentence inside the gutter that is neither a question nor a step. */
   message(message: string): void;
-  /** A titled block, drawn as one box inside the gutter (Clack's own example
-   * ends with `p.note(nextSteps, 'Next steps.')`, examples/basic/index.ts:88). */
-  note(message: string, title: string): void;
   spinner(): InteractiveSpinner;
 }
-function answer<T>(value: T | symbol): T {
-  if (isCancel(value)) throw new InteractiveCancelled();
+function answer<T>(value: T | symbol | undefined): T {
+  if (value === undefined || isCancel(value)) throw new InteractiveCancelled();
   return value as T;
 }
 export function clackPrompts(info: (message: string) => void): InteractivePrompts {
-  const io = { input: process.stdin, output: process.stderr };
+  const theme = makeTheme(processPalette(), { input: process.stdin, output: process.stderr });
   return {
-    select: async (message, options) => answer(await select({ message, options, ...io })),
-    multiselect: async (message, options, initialValues) => answer(await multiselect({ message, options, initialValues, required: false, ...io })),
-    confirm: async (message) => answer(await confirm({ message, initialValue: false, ...io })),
-    password: async (message) => answer(await password({ message, ...io })),
-    text: async (message, initialValue) => answer(await text({ message, initialValue, ...io })),
+    select: async (message, options, initialValue) => answer(await theme.select(message, options, initialValue)),
+    confirm: async (message, options) => answer(await theme.confirm(message, options?.initialValue ?? false)),
+    password: async (message) => answer(await theme.password(message)),
+    text: async (message, initialValue) => answer(await theme.text(message, initialValue)),
     info,
-    intro: (message) => intro(message),
-    outro: (message) => outro(message),
-    step: (message) => log.step(message),
-    success: (message) => log.success(message),
-    message: (message) => log.message(message),
-    note: (message, title) => note(message, title),
-    spinner: () => {
-      const active = spinner({ output: process.stderr });
-      return { start: (message) => active.start(message), stop: (message) => active.stop(message) };
-    },
+    intro: theme.intro,
+    outro: theme.outro,
+    step: theme.step,
+    message: theme.message,
+    spinner: theme.spinner,
   };
 }
 /**

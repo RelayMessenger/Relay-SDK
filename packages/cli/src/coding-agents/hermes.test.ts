@@ -46,6 +46,7 @@ it.each([undefined, "/fake/bin/hermes"])("resolves the Hermes executable (%s)", 
     },
   });
   expect(code).toBe(0);
-  expect(prompts.confirm).toHaveBeenCalledWith("Start Hermes Agent with Relay now?");
+  // The plan's last line said the gateway starts, and Continue took it; nothing asks again.
+  expect(prompts.confirm).not.toHaveBeenCalledWith("Start Hermes Agent with Relay now?");
   expect(startCommand).toHaveBeenCalledExactlyOnceWith(executable ?? "hermes", ["gateway", "run"]);
 });

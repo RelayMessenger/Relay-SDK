@@ -200,7 +200,7 @@ export const createProgram = (
 ): Command => {
   const stdout = dependencies.stdout ?? ((value: string) => process.stdout.write(value));
   const stderr = dependencies.stderr ?? ((value: string) => process.stderr.write(value));
-  const configContext = dependencies.configContext ?? {};
+  const configContext: ConfigContext = { ...(dependencies.configContext ?? {}), ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}) };
   const resolveClient = dependencies.resolveClient
     ?? ((profile?: string) => createClientContext(profile, configContext, dependencies.fetch));
   const output = (value: unknown): void => stdout(jsonText(value));

@@ -8,8 +8,10 @@ const agent: CodingAgent =
     aliases: [],
     command: "codex",
     installedIf: (paths) => [codexHome(paths.env, paths.home, paths.platform)],
-    // `codex mcp add` writes ~/.codex/config.toml (its own --config help names the file).
-    connect: { kind: "mcp-command", file: (paths) => platformPath(paths.platform).join(codexHome(paths.env, paths.home, paths.platform), "config.toml") },
+    // The folder's own `.codex/config.toml` is Codex's project layer; Codex
+    // loads it when the folder is trusted (codex-rs/core/src/config.rs). The
+    // token stays in Relay's global profile store; the file names the profile.
+    connect: { kind: "codex-project", file: (paths) => platformPath(paths.platform).join(paths.cwd, ".codex", "config.toml") },
     // Codex has no long-lived process that Relay can push a message into, so
     // connect stays running and answers over `codex app-server` (codex-bridge.ts).
     start: {

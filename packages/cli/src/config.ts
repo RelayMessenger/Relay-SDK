@@ -17,6 +17,7 @@ import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { resolveFolderAgent } from "./folder-link.js";
 
 export const DEFAULT_API_URL = "https://api.relayapp.im";
 export const DEFAULT_PROFILE = "default";
@@ -39,6 +40,7 @@ export interface RelayProfile {
 export interface RelayConfig {
   version: 1;
   current_profile: string;
+  defaultAgent?: string;
   profiles: Record<string, RelayProfile>;
 }
 
@@ -46,6 +48,8 @@ export interface ConfigContext {
   env?: NodeJS.ProcessEnv;
   home?: string;
   platform?: NodeJS.Platform;
+  /** The folder the command runs in: its link names the agent when no --profile does. */
+  cwd?: string;
 }
 
 export interface ResolvedAuth {
@@ -117,6 +121,7 @@ const parseConfig = (value: unknown): RelayConfig => {
   return {
     version: 1,
     current_profile: value.current_profile,
+    ...(typeof value.defaultAgent === "string" ? { defaultAgent: value.defaultAgent } : {}),
     profiles,
   };
 };
@@ -291,9 +296,11 @@ export const resolveAuth = async (
 ): Promise<ResolvedAuth> => {
   const env = contextEnv(context);
   const config = await readConfig(context);
-  const profile = validateProfileName(
-    requestedProfile ?? env.RELAY_PROFILE ?? config.current_profile,
-  );
+  // One agent per folder (_artifacts/cli-connect-design-20260912.md, item 2):
+  // with no --profile and no RELAY_PROFILE, the folder link decides, then
+  // RELAY_AGENT, then the last connected agent, then the current profile.
+  const folder = requestedProfile ?? env.RELAY_PROFILE ?? (await resolveFolderAgent(context.cwd ?? process.cwd(), env, config))?.profile;
+  const profile = validateProfileName(folder ?? config.current_profile);
   const selected = config.profiles[profile];
   if (!selected) throw new CliError(`Relay profile ${profile} does not exist.`, "not_found");
   const apiURL = validateApiURL(

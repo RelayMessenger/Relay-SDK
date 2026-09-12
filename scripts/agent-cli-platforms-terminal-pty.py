@@ -1,77 +1,127 @@
-import os,pty,subprocess,select,time,termios,fcntl,struct,json,tempfile,pathlib,shutil,signal,shlex
-if os.uname().sysname=='Linux' and not os.environ.get('RELAY_DAYTONA_SANDBOX_ID'): raise SystemExit('Linux PTY proof requires owned Daytona')
-root=pathlib.Path(tempfile.mkdtemp(prefix='relay-installed-terminal-')); dest=pathlib.Path(os.environ.get('RELAY_TERMINAL_EVIDENCE','/home/daytona/terminal-installed-evidence'));dest.mkdir(exist_ok=True,parents=True)
-node=os.environ.get('RELAY_TERMINAL_NODE','/usr/local/share/nvm/versions/node/v22.22.3/bin/node');shim=os.environ.get('RELAY_TERMINAL_SHIM','/home/daytona/terminal-installed/node_modules/.bin/relaymessenger');results=[]
-baseenv={k:v for k,v in os.environ.items() if k in ['PATH','LANG','LC_ALL','RELAY_TERMINAL_SOURCE']};baseenv['PATH']=str(pathlib.Path(node).parent)+':'+baseenv.get('PATH','/usr/bin:/bin')
-def drain(fd,seconds):
- end=time.monotonic()+seconds;out=b''
- while time.monotonic()<end:
-  if select.select([fd],[],[],min(.05,max(0,end-time.monotonic())))[0]:
-   try:out+=os.read(fd,65536)
-   except OSError:break
- return out
-# The `agents` door: "Create agent" is its first row, it never offers the skill, and it asks exactly
-# three optional questions (packages/cli/src/interactive.test.ts). The root menu is Connect/Watch/Exit since PR 176.
-steps=[(b'what would you like to do?',b'\r'),(b'Handle (optional)',b'\r'),(b'Name (optional)',b'\r'),(b'Image (optional)',b'\r')]
-# 24 and 32 rows have no room for a full-cell code; 60 rows has. Both sizes are proved here.
-modes=[('light',80,24),('dark',100,32),('tall',100,60)]+([('tmux',100,32)] if os.uname().sysname=='Linux' else [])
-for mode,columns,rows in modes:
- home=root/mode;home.mkdir();ready=home/'ready.json';report=home/'server.json';socket=home/'tmux.sock';env={**baseenv,'HOME':str(home),'TERM':'xterm-256color','COLORFGBG':'0;15' if mode=='light' else '15;0','RELAY_CONFIG_PATH':str(home/'config.json')}
- server=subprocess.Popen([node,str(pathlib.Path(__file__).with_name('agent-cli-platforms-terminal-server.mjs')),str(ready),str(report)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
- def tmux(*args,check=True):return subprocess.run(['tmux','-S',str(socket),'-f','/dev/null',*args],env=env,cwd=home,capture_output=True,text=True,check=check)
- master=slave=None;process=None;output=b''
- try:
-  end=time.monotonic()+5
-  while not ready.exists() and time.monotonic()<end:time.sleep(.05)
-  env['RELAY_API_URL']=json.loads(ready.read_text())['origin'];master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',rows,columns,0,0));before=termios.tcgetattr(slave)
-  if mode=='tmux':
-   tmux('new-session','-d','-s','terminal','-c',str(home),'-x',str(columns),'-y',str(rows),f'{shlex.quote(shim)} agents; sleep 10')
-   process=subprocess.Popen(['tmux','-S',str(socket),'attach-session','-t','terminal'],stdin=slave,stdout=slave,stderr=slave,env=env)
-  else:process=subprocess.Popen([shim,'agents'],stdin=slave,stdout=slave,stderr=slave,env=env,cwd=home)
-  stage=0;end=time.monotonic()+20
-  while time.monotonic()<end:
-   output+=drain(master,.08)
-   if stage<len(steps) and steps[stage][0] in output:os.write(master,steps[stage][1]);stage+=1
-   if stage==len(steps) and b'owned integrated observer event' in output:break
-   if process.poll() is not None:break
-  assert stage==len(steps) and b'owned integrated observer event' in output,{'mode':mode,'stage':stage,'exit':process.poll()}
-  state=json.loads(report.read_text());assert state['creates']==1 and state['observers']==1 and state['authConfirmed'] and state['queries']==['/v1/websocket?observe=true'] and state['frames']==[],state
-  assert b'Create a new agent at' not in output and b'rly_live_'+b'P'*43 not in output
-  assert b'Install the Relay skill?' not in output
-  # Inspect latest alternate-screen frame, not old prompts/history.
-  frame=output.split(b'\x1b[H\x1b[2J')[-1]
-  # The QR is size-aware (packages/cli/src/qr-terminal.ts): full cells, two background-coloured
-  # spaces per module (white 231 / black 16), while the whole code fits the window; the compact
-  # half-block form below that. Either one scans. What must never appear is a window that
-  # shows no whole code at all.
-  fullCells=b'\x1b[48;5;16m' in frame and b'\x1b[48;5;231m' in frame
-  halfBlocks=any(glyph.encode() in frame for glyph in '▀▄█')
-  assert b'Enlarge terminal' not in frame and b'QR unavailable' not in frame and (fullCells or halfBlocks),frame
-  # 60 rows fit one text line per module row, so that window gets the full cells and no glyph.
-  if rows>=60: assert fullCells and not halfBlocks,frame
-  assert b'https://staging.relayapp.im/' in output and b'Agent: not running yet' in output
-  detail={'mode':mode,'size':[columns,rows],'inputSteps':stage,'installedShim':True,'skillNotOffered':True,'noExtraCreateConfirmation':True,'apexURL':True,'QRfits':True,'QRform':'full' if fullCells and not halfBlocks else 'compact','eventsVisible':True,'noTokenEcho':True}
-  if mode=='tmux':
-   os.write(master,b'\x02d');output+=drain(master,.3);process.wait(timeout=3)
-   pre=json.loads(report.read_text())['eventsSent'];time.sleep(.8);post=json.loads(report.read_text())['eventsSent'];assert post>pre
-   process=subprocess.Popen(['tmux','-S',str(socket),'attach-session','-t','terminal'],stdin=slave,stdout=slave,stderr=slave,env=env);reattached=drain(master,.5);output+=reattached;assert b'owned integrated observer event' in reattached
-   detail.update(actualDetachReattach=True,eventsSentWhileDetached=post-pre)
-  os.write(master,b'q');output+=drain(master,.6)
-  if mode=='tmux':
-   pane=tmux('capture-pane','-p','-t','terminal').stdout;assert 'Stopped viewing' in pane
-   tmux('kill-session','-t','terminal')
-  assert process.wait(timeout=4)==0;assert termios.tcgetattr(slave)==before
-  state=json.loads(report.read_text());assert state['frames']==[];saved=(home/'config.json').read_bytes();assert b'rly_live_'+b'P'*43 in saved
-  # Same saved identity in real nonTTY command must exit, not open another observer.
-  nonTTY=subprocess.run([shim,'--profile','terminal_fixture.dev','auth','status'],env=env,cwd=home,input='',capture_output=True,text=True,timeout=5);assert nonTTY.returncode==0
-  assert json.loads(report.read_text())['observers']==1 and (home/'config.json').read_bytes()==saved
-  detail.update(rawRestored=True,configPreserved=True,nonTTYNoNewObserver=True,noACK=True,server=state);results.append(detail)
- finally:
-  (dest/(mode+'.ansi')).write_bytes(output.replace(b'rly_live_'+b'P'*43,b'[REDACTED]'))
-  if mode=='tmux':tmux('kill-server',check=False)
-  if process and process.poll() is None:process.terminate();process.wait(timeout=3)
-  server.terminate();server.wait(timeout=3)
-  if master is not None:os.close(master)
-  if slave is not None:os.close(slave)
+"""The native proof of `relaymessenger connect` on a real pseudo-terminal.
+
+It drives the installed CLI through the redesigned screens
+(_artifacts/cli-connect-design-20260912.md): the one question `Which coding agent?`
+answered with Enter, the plan of at most three lines, `Continue? (Y/n)` answered with
+Enter, one line per file written, `Say hi from your phone`, the share link and the QR,
+then the agent's first reply. Relay is loopback only (agent-cli-platforms-terminal-server.mjs);
+no deployed Server is touched. A fake `claude` on PATH stands in for Claude Code's own
+plugin commands, so the three-line plan (install, write, start) is the one proved.
+
+Run it locally, from the repository root, after `npm run build`:
+
+    RELAY_TERMINAL_SHIM=$PWD/packages/cli/dist/cli.js RELAY_TERMINAL_SOURCE=$PWD \
+    RELAY_TERMINAL_EVIDENCE=/tmp/<lane>/pty python3 scripts/agent-cli-platforms-terminal-pty.py
+
+The last line printed is the receipt; `"passed": true` is the verdict. On Linux it insists
+on an owned Daytona sandbox (RELAY_DAYTONA_SANDBOX_ID), because a PTY proof there is a
+sandbox's business, never a shared machine's.
+"""
+import json, os, pathlib, pty, re, select, shutil, struct, subprocess, sys, tempfile, termios, fcntl, time
+if os.uname().sysname == 'Linux' and not os.environ.get('RELAY_DAYTONA_SANDBOX_ID'):
+    raise SystemExit('Linux PTY proof requires owned Daytona')
+here = pathlib.Path(__file__).resolve().parent
+repo = here.parent
+root = pathlib.Path(tempfile.mkdtemp(prefix='relay-installed-terminal-'))
+dest = pathlib.Path(os.environ.get('RELAY_TERMINAL_EVIDENCE', str(root / 'evidence'))); dest.mkdir(exist_ok=True, parents=True)
+node = os.environ.get('RELAY_TERMINAL_NODE') or shutil.which('node')
+shim = os.environ.get('RELAY_TERMINAL_SHIM') or str(repo / 'packages' / 'cli' / 'dist' / 'cli.js')
+source = os.environ.get('RELAY_TERMINAL_SOURCE') or str(repo)
+if not node or not pathlib.Path(shim).exists():
+    raise SystemExit(f'node ({node}) or the built CLI ({shim}) is missing; run npm run build first')
+token = b'rly_live_' + b'P' * 43
+handle = 'terminal_fixture.dev'
+# A fake Claude Code: connect detects it on PATH, runs its three plugin commands and its
+# start command, and every one of them exits 0 and says nothing. The start command stays
+# up for a moment, the way the real one stays up for a session, so the agent's first reply
+# (the fixture's third event, 750 ms in) lands while Claude Code "runs"; connect ends its
+# reply wait the moment a started agent returns (packages/cli/src/connect.ts, waitForFirstReply).
+fakebin = root / 'bin'; fakebin.mkdir()
+(fakebin / 'claude').write_text('#!/bin/sh\ncase "$1" in plugin) exit 0;; esac\nsleep 2\nexit 0\n'); (fakebin / 'claude').chmod(0o755)
+baseenv = {k: v for k, v in os.environ.items() if k in ['LANG', 'LC_ALL']}
+baseenv['PATH'] = str(fakebin) + ':' + str(pathlib.Path(node).parent) + ':/usr/bin:/bin'
+baseenv['RELAY_TERMINAL_SOURCE'] = source
+results = []
+# clack's success hue, in the 16-colour set, its bright form, and the 256-cube cells that show the same way.
+GREEN = re.compile(rb'\x1b\[[0-9;]*?(?<![0-9])(32|92|38;5;(?:2|10|22|28|34|40|46))m')
+# Colour and cursor sequences sit inside the words ("Continue?" then a dimmed "(Y/n)"), so the words are matched on a stripped copy.
+SGR = re.compile(rb'\x1b\[[0-9;?]*[A-Za-z]')
+plain = lambda raw: SGR.sub(b'', raw)
+
+def drain(fd, seconds):
+    end = time.monotonic() + seconds; out = b''
+    while time.monotonic() < end:
+        if select.select([fd], [], [], min(.05, max(0, end - time.monotonic())))[0]:
+            try: out += os.read(fd, 65536)
+            except OSError: break
+    return out
+
+# The two questions of the redesign, both answered with Enter: the coding agent picker takes
+# its default (the first agent found), and the confirm takes Yes.
+steps = [(b'Which coding agent?', b'\r'), (b'Continue? (Y/n)', b'\r')]
+# 24 and 32 rows have no room for a full-cell code; 60 rows has. All three are proved.
+modes = [('light', 80, 24), ('dark', 100, 32), ('tall', 100, 60)]
+for mode, columns, rows in modes:
+    home = root / mode; home.mkdir(); ready = home / 'ready.json'; report = home / 'server.json'
+    # Claude Code is "found" the way runtime-sniff.ts finds it: its command on PATH, and its folder under home.
+    (home / '.claude').mkdir()
+    env = {**baseenv, 'HOME': str(home), 'TERM': 'xterm-256color', 'COLORFGBG': '0;15' if mode == 'light' else '15;0', 'RELAY_CONFIG_PATH': str(home / 'config.json')}
+    server = subprocess.Popen([node, str(here / 'agent-cli-platforms-terminal-server.mjs'), str(ready), str(report)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    master = slave = None; process = None; output = b''
+    try:
+        end = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < end: time.sleep(.05)
+        env['RELAY_API_URL'] = json.loads(ready.read_text())['origin']
+        master, slave = pty.openpty(); fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', rows, columns, 0, 0)); before = termios.tcgetattr(slave)
+        process = subprocess.Popen([node, shim, 'connect', '--allow', 'terminal_fixture_person', '--no-skill'], stdin=slave, stdout=slave, stderr=slave, env=env, cwd=home)
+        stage = 0; end = time.monotonic() + 30
+        while time.monotonic() < end:
+            output += drain(master, .08)
+            if stage < len(steps) and steps[stage][0] in plain(output): os.write(master, steps[stage][1]); stage += 1
+            if process.poll() is not None: output += drain(master, .3); break
+        assert stage == len(steps), {'mode': mode, 'stage': stage, 'exit': process.poll()}
+        assert process.wait(timeout=4) == 0, {'mode': mode, 'exit': process.returncode}
+        assert termios.tcgetattr(slave) == before
+        # The screens, in order: the wordmark, the one question, the three plan lines, the confirm, the files, the phone step, the reply.
+        order = [b'Relay', b'Which coding agent?', b'install  the Relay plugin for Claude Code', b'write  ', b'start Claude Code with Relay when you are ready',
+                 b'Continue? (Y/n)', b'wrote  ', b'Say hi from your phone', b'https://staging.relayapp.im/@' + handle.encode(), b'Answered from your phone: owned integrated agent reply']
+        text = plain(output); at = 0
+        for needle in order:
+            found = text.find(needle, at); assert found >= 0, {'mode': mode, 'missing': needle}; at = found
+        plan = text[text.find(b'install  the Relay plugin'):text.find(b'Continue? (Y/n)')]
+        planLines = [line for line in plan.split(b'\n') if re.search(rb'[A-Za-z]', line)]
+        assert len(planLines) == 3, {'mode': mode, 'plan': planLines}
+        for gone in [b'Which agent?', b'found on this computer', b'Handle', b'Install the Relay skill?', b'Relay is ready', b'Open Relay, scan', b'Later:', token]:
+            assert gone not in text, {'mode': mode, 'unexpected': gone}
+        assert not GREEN.search(output), {'mode': mode, 'green': GREEN.search(output).group(0)}
+        # The QR is size-aware (packages/cli/src/qr-terminal.ts): full cells, two background-coloured
+        # spaces per module (white 231 / black 16), while the whole code fits the window; the compact
+        # half-block form below that. Either one scans. What must never appear is a window that
+        # shows no whole code at all.
+        fullCells = b'\x1b[48;5;16m' in output and b'\x1b[48;5;231m' in output
+        halfBlocks = any(glyph.encode() in output for glyph in '▀▄█')
+        assert b'Enlarge terminal' not in output and b'QR unavailable' not in output and (fullCells or halfBlocks), output
+        # 60 rows fit one text line per module row, so that window gets the full cells and no glyph.
+        if rows >= 60: assert fullCells and not halfBlocks, output
+        state = json.loads(report.read_text())
+        assert state['creates'] == 1 and state['observers'] == 1 and state['authConfirmed'] and state['queries'] == ['/v1/websocket?observe=true'] and state['frames'] == [], state
+        # What was written: the folder link (a pointer, no token), the channel's .env (the token, owner-only), the profile.
+        link = json.loads((home / '.relay' / 'agent.json').read_bytes()); assert link == {'handle': handle, 'apiUrl': env['RELAY_API_URL']}, link
+        channel = (home / '.claude' / 'channels' / 'relay' / '.env').read_bytes(); assert token in channel and b'terminal_fixture_person' in channel
+        assert (home / '.claude' / 'channels' / 'relay' / '.env').stat().st_mode & 0o777 == 0o600
+        saved = (home / 'config.json').read_bytes(); assert token in saved
+        # Same saved identity in a real non-TTY command must exit, not open another watch connection.
+        nonTTY = subprocess.run([node, shim, '--profile', handle, 'auth', 'status'], env=env, cwd=home, input='', capture_output=True, text=True, timeout=10); assert nonTTY.returncode == 0, nonTTY
+        assert json.loads(report.read_text())['observers'] == 1 and (home / 'config.json').read_bytes() == saved
+        results.append({'mode': mode, 'size': [columns, rows], 'inputSteps': stage, 'installedShim': True, 'oneQuestion': True, 'planLines': len(planLines),
+                        'continueDefaultYes': True, 'folderLink': True, 'apexURL': True, 'QRfits': True, 'QRform': 'full' if fullCells and not halfBlocks else 'compact',
+                        'noGreenSGR': True, 'noTokenEcho': True, 'firstReply': True, 'rawRestored': True, 'nonTTYNoNewWatch': True, 'server': state})
+    finally:
+        (dest / (mode + '.ansi')).write_bytes(output.replace(token, b'[REDACTED]'))
+        if process and process.poll() is None: process.terminate(); process.wait(timeout=3)
+        server.terminate(); server.wait(timeout=3)
+        if master is not None: os.close(master)
+        if slave is not None: os.close(slave)
 shutil.rmtree(root)
-receipt={'passed':True,'scope':'actual installed CLI root menu, loopback HTTP/observer only; no deployed Server claim','results':results,'ownedFixturesRemoved':not root.exists(),'ownedSocketGone':not socket.exists()};(dest/'receipt.json').write_text(json.dumps(receipt,indent=2));print(json.dumps(receipt,indent=2))
+receipt = {'passed': True, 'scope': 'actual installed CLI connect, loopback HTTP/WS only, fake claude on PATH; no deployed Server claim', 'results': results, 'ownedFixturesRemoved': not root.exists()}
+(dest / 'receipt.json').write_text(json.dumps(receipt, indent=2)); print(json.dumps(receipt, indent=2))
