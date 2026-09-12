@@ -120,7 +120,7 @@ describe("locked Relay Server contract", () => {
       "get",
     );
     // Relay retired message editing and unsending from the developer API on
-    // Relay Server 603e8858, so a Message carries only a read verb.
+    // Relay Server fc3077e9, so a Message carries only a read verb.
     expect(document.paths["/v1/messages/{messageId}"]).not.toHaveProperty(
       "patch",
     );
