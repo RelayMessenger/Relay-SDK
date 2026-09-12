@@ -191,6 +191,8 @@ export interface PlanContext {
   start: boolean;
   /** The agents whose file already holds a token for someone else. */
   replacing?: Partial<Record<CodingAgentId, string>>;
+  /** Present when the plan creates a new agent: its handle, when one was asked for. */
+  create?: { handle?: string };
   /** How a command or a path is marked inside a step. Absent means unmarked, so
    * every caller that prints the steps as data gets them byte for byte. */
   mark?: (value: string) => string;
@@ -349,13 +351,20 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
   return { agent, steps, files, commands };
 };
 
+/** The plan's first line when an agent will be created. */
+export const createLine = (handle: string | undefined): string =>
+  `create a new agent  (${handle ? `@${handle}` : "Relay picks the name"})`;
+
 /**
  * Every file this command writes and every command it runs, for every chosen
  * agent, on one screen before anything changes.
  */
 export const runtimeConnectPlan = (input: PlanContext & { agents: readonly CodingAgentId[]; ask?: boolean }): ConnectPlan => {
   const agents = input.agents.map((agent) => agentPlan(agent, input));
-  const steps = agents.flatMap((plan) => plan.steps);
+  // A new agent is the first thing the plan makes, so it is the first line:
+  // nothing is created until the plan is taken (owner, 2026-09-12, after a No
+  // at Continue left a stray agent on staging).
+  const steps = [...(input.create ? [createLine(input.create.handle)] : []), ...agents.flatMap((plan) => plan.steps)];
   // With `--non-interactive` no one can answer, so the plan is a statement:
   // clig.dev, Interactivity: "If --no-input is passed, don't prompt or do
   // anything interactive" (ledger row P27, captures/relay/ni2.out).
@@ -570,12 +579,13 @@ export const runConnect = async (
 
   const version = deps.version ?? packageVersion();
   const allow = (options.allow ?? "").split(",").map((entry) => entry.trim().replace(/^@/u, "")).filter(Boolean);
-  const context = (agent: ConnectAgent | undefined, replacing?: PlanContext["replacing"]): PlanContext => ({
+  const context = (agent: ConnectAgent | PendingAgent | undefined, replacing?: PlanContext["replacing"]): PlanContext => ({
     env: deps.env, home: deps.home, platform, version, cwd: deps.cwd,
-    profile: agent?.profile ?? deps.profile ?? "<profile>",
+    profile: (agent && "profile" in agent ? agent.profile : undefined) ?? deps.profile ?? "<profile>",
     handle: agent?.handle ?? options.handle ?? "<handle>",
     allow, start: options.start !== false,
-    ...(agent ? { token: agent.token, apiURL: agent.apiURL } : {}),
+    ...(agent && "token" in agent ? { token: agent.token, apiURL: agent.apiURL } : {}),
+    ...(agent && "pending" in agent ? { apiURL: agent.apiURL, create: { ...(agent.handle ? { handle: agent.handle } : {}) } } : {}),
     ...(replacing ? { replacing } : {}),
     ...(marked ? { mark: dim } : {}),
   });
@@ -597,7 +607,50 @@ export const runConnect = async (
   }
 
   const linked = await readFolderLink(deps.cwd);
-  const agent = await resolveAgent(options, deps, screen, linked);
+  // Which agent: one that exists, or one the plan will create. Nothing is
+  // created here; every question comes before the plan, and the plan before
+  // anything is made.
+  const chosen = await resolveAgent(options, deps, screen, linked);
+  const known = "pending" in chosen ? undefined : chosen;
+
+  // A token already in a .env file belongs to whatever answers as that agent
+  // today, so it is never replaced without being told to.
+  const replacing: PlanContext["replacing"] = {};
+  for (const target of targets) {
+    const path = target === "claude-code" ? join(claudeChannelDir(deps.env, deps.home), ".env")
+      : target === "hermes" ? hermesEnvPath(context(chosen)) : undefined;
+    if (!path) continue;
+    let existing: string | undefined;
+    try { existing = readChannelEnv(await readFile(path, "utf8")).RELAY_AGENT_TOKEN; } catch { /* No file yet. */ }
+    if (!existing || existing === known?.token) continue;
+    const config = await deps.agents.read();
+    const owner = Object.entries(config.profiles).find(([, profile]) => profile.agent_token === existing)?.[0];
+    replacing[target] = owner ? `@${owner}` : "another agent";
+    if (options.yes === true) continue;
+    if (!ui || json) {
+      throw new HeadlessPrompt(`${path} already holds a token for ${replacing[target]}.`, ["--yes  to replace it with the agent you are connecting"]);
+    }
+    const answer = await ui.select(`${codingAgent(target).label} already has a Relay token for ${replacing[target]}. Keep it, or replace it with ${known ? `@${known.handle}` : "the new agent"}?`, [
+      { value: "keep", label: "Keep" },
+      { value: "replace", label: "Replace" },
+    ]);
+    if (answer !== "replace") {
+      screen.say(`Kept the token for ${replacing[target]}. Nothing was changed there. Your agent and its token are saved on this computer.`);
+      return;
+    }
+  }
+
+  const plan = runtimeConnectPlan({ ...context(chosen, replacing), agents: targets, ask: options.nonInteractive !== true });
+  screen.plan(plan.headline, plan.steps);
+  // One question, and Enter says yes (fly: "Would you like to sign in? (Y/n)").
+  // The plan named what starts, so nothing below asks again.
+  if (options.yes !== true) {
+    if (!ui || json) throw new HeadlessPrompt("Relay cannot ask you to confirm this plan.", ["--yes  to run the plan above"]);
+    if (!await ui.confirm("Continue?", { initialValue: true })) throw new InteractiveCancelled();
+  }
+
+  // The plan was taken: only now is an agent created and its token saved.
+  const agent = known ?? await createNewAgent(chosen as PendingAgent, options, deps, screen);
   // The folder points at its agent, like `vercel link`; the token stays in the
   // global profile store, and the last connected agent is the default elsewhere.
   const linkPath = await writeFolderLink(deps.cwd, { handle: agent.handle, apiUrl: agent.apiURL });
@@ -610,42 +663,6 @@ export const runConnect = async (
     await deps.agents.update((config) => { config.defaultAgent = agent.profile; });
   }
   const secrets = [agent.token];
-
-  // A token already in a .env file belongs to whatever answers as that agent
-  // today, so it is never replaced without being told to.
-  const replacing: PlanContext["replacing"] = {};
-  for (const target of targets) {
-    const path = target === "claude-code" ? join(claudeChannelDir(deps.env, deps.home), ".env")
-      : target === "hermes" ? hermesEnvPath(context(agent)) : undefined;
-    if (!path) continue;
-    let existing: string | undefined;
-    try { existing = readChannelEnv(await readFile(path, "utf8")).RELAY_AGENT_TOKEN; } catch { /* No file yet. */ }
-    if (!existing || existing === agent.token) continue;
-    const config = await deps.agents.read();
-    const owner = Object.entries(config.profiles).find(([, profile]) => profile.agent_token === existing)?.[0];
-    replacing[target] = owner ? `@${owner}` : "another agent";
-    if (options.yes === true) continue;
-    if (!ui || json) {
-      throw new HeadlessPrompt(`${path} already holds a token for ${replacing[target]}.`, ["--yes  to replace it with the agent you are connecting"]);
-    }
-    const answer = await ui.select(`${codingAgent(target).label} already has a Relay token for ${replacing[target]}. Keep it, or replace it with @${agent.handle}?`, [
-      { value: "keep", label: "Keep" },
-      { value: "replace", label: "Replace" },
-    ]);
-    if (answer !== "replace") {
-      screen.say(`Kept the token for ${replacing[target]}. Nothing was changed there. Your agent and its token are saved on this computer.`);
-      return;
-    }
-  }
-
-  const plan = runtimeConnectPlan({ ...context(agent, replacing), agents: targets, ask: options.nonInteractive !== true });
-  screen.plan(plan.headline, plan.steps);
-  // One question, and Enter says yes (fly: "Would you like to sign in? (Y/n)").
-  // The plan named what starts, so nothing below asks again.
-  if (options.yes !== true) {
-    if (!ui || json) throw new HeadlessPrompt("Relay cannot ask you to confirm this plan.", ["--yes  to run the plan above"]);
-    if (!await ui.confirm("Continue?", { initialValue: true })) throw new InteractiveCancelled();
-  }
 
   const runCommand = deps.runCommand ?? defaultRunCommand;
   const done: Array<Record<string, unknown>> = [];
@@ -895,12 +912,23 @@ const savedAgent = async (profile: string, deps: ConnectDependencies, apiURL: st
   return { profile, handle: profile, displayName: profile, apiURL: url, token: saved.agent_token, created: false, shareURL: savedAgentShareURL(url, profile) };
 };
 
+/** An agent the plan will create once it is taken. */
+interface PendingAgent {
+  pending: true;
+  apiURL: string;
+  handle?: string;
+}
+
+/**
+ * Which agent to connect: the one named by a token, a linked folder or an
+ * answer, or a pending creation. Nothing is created here.
+ */
 const resolveAgent = async (
   options: ConnectOptions,
   deps: ConnectDependencies,
   screen: Screen,
   linked: Awaited<ReturnType<typeof readFolderLink>>,
-): Promise<ConnectAgent> => {
+): Promise<ConnectAgent | PendingAgent> => {
   const apiURL = validateApiURL(options.apiUrl ?? deps.env.RELAY_API_URL ?? defaultCreationApiURL(deps.version));
   if (options.token !== undefined) return saveExistingAgent(options.token, apiURL, deps);
   if (options.new !== true) {
@@ -934,7 +962,17 @@ const resolveAgent = async (
       }
     }
   }
-  const handle = options.handle;
+  return { pending: true, apiURL, ...(options.handle ? { handle: options.handle } : {}) };
+};
+
+/** Creates the agent the plan named and saves its token; runs only after Continue. */
+const createNewAgent = async (
+  pending: PendingAgent,
+  options: ConnectOptions,
+  deps: ConnectDependencies,
+  screen: Screen,
+): Promise<ConnectAgent> => {
+  const { apiURL, handle } = pending;
   const created = await screen.work("Creating your agent", () => createAgentWithPicture({
     apiURL,
     ...(deps.profile ? { profile: deps.profile } : {}),

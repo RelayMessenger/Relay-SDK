@@ -87,6 +87,35 @@ describe("nothing is created before the plan is taken", () => {
     expect(f.stdout.join("")).not.toContain("Creating your agent");
   });
 
+  it("No at Continue creates nothing: no agent, no token, no link", async () => {
+    const f = await fixture();
+    f.prompts.confirm.mockResolvedValueOnce(false);
+    expect(await runCLI(["connect", "claude", "--new", "--handle", "calm_cangoo.dev", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    expect(f.prompts.confirm).toHaveBeenCalledWith("Continue?", { initialValue: true });
+    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect(f.runCommand).not.toHaveBeenCalled();
+    expect((await readConfig(f.deps.configContext)).profiles[card.handle]).toBeUndefined();
+    await expect(readFile(folderLinkPath(f.home))).rejects.toMatchObject({ code: "ENOENT" });
+    // The plan named the creation as its first line, and the creation never started.
+    const printed = f.stdout.join("");
+    expect(printed).toContain("create a new agent  (@calm_cangoo.dev)");
+    expect(printed).not.toContain("Creating your agent");
+    expect(printed).not.toContain("Created @");
+  });
+
+  it("Yes at Continue creates exactly one agent, after the plan", async () => {
+    const f = await fixture();
+    expect(await runCLI(["connect", "claude", "--new", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    expect(f.prompts.confirm).toHaveBeenCalledWith("Continue?", { initialValue: true });
+    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    const lines = f.stdout.join("").split("\n");
+    const plan = lines.findIndex((line) => line.includes("create a new agent  (Relay picks the name)"));
+    const created = lines.findIndex((line) => line.startsWith(`Created @${card.handle}`));
+    expect(plan).toBeGreaterThanOrEqual(0);
+    expect(created).toBeGreaterThan(plan);
+    expect((await readConfig(f.deps.configContext)).profiles[card.handle]?.agent_token).toBe(token);
+  });
 });
 
 describe("the plan screen", () => {
@@ -235,6 +264,10 @@ describe("the Claude Code path", () => {
     const { rm } = await import("node:fs/promises");
     await rm(join(f.home, ".relay"), { recursive: true });
     f.prompts.select.mockClear();
+    // "New agent" again: the .env still holds the first agent's token, and a new
+    // agent always gets its own, so the replace question is asked and answered.
+    f.prompts.select.mockImplementation(async (message: string, options: SelectOption[], initial?: string) =>
+      message === "Where does your agent run?" ? initial ?? options[0]!.value : message.startsWith("Claude Code already has") ? "replace" : "new");
     expect(await runCLI(["connect", "claude", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
     const asked = f.prompts.select.mock.calls.find(([message]) => message === "Which agent?");
     expect(asked).toBeDefined();
