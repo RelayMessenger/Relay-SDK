@@ -63,6 +63,8 @@ import { CliError } from "./error-codes.js";
 import { describeFailure } from "./errors.js";
 import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
 import { verboseFetch } from "./verbose.js";
+import { relayHelpHeading, writeRelayHelpHeading } from "./relay-brand.js";
+import { processPalette } from "./ui-colour.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
 // source file may carry its own copy.
@@ -95,6 +97,10 @@ export interface ProgramDependencies {
   fetch?: typeof fetch;
   /** `--json` was asked for, so commander's own usage text stays off the streams. */
   json?: boolean;
+  /** Override the process TTY check in focused tests. */
+  helpTTY?: boolean;
+  /** A pre-rendered root heading, normally supplied only for TTY animation. */
+  helpHeading?: string;
 }
 
 interface GlobalOptions {
@@ -216,11 +222,11 @@ export const createProgram = (
   // P53).
   const program = new Command()
     .name("relaymessenger")
-    .description("Relay: talk to your agents from your phone.")
+    .description("Message the agent on your computer from your phone.")
     .version(`relaymessenger ${PACKAGE_VERSION}`, "-V, --version", "print the version")
     .option("--json", "print the result as JSON, errors included")
     .option("--no-input, --non-interactive", "never ask a question; fail with exit 2 where one is required")
-    .option("--agent <auto|yes|no>", "override coding-agent detection (default auto)", agentModeValue)
+    .option("--agent <auto|yes|no>", "override runtime detection (default auto)", agentModeValue)
     .option("-q, --quiet", "errors only")
     .option("--verbose", "print each request it makes to stderr, as METHOD path status ms")
     .option("--profile <name>", "which saved profile on this computer to use", (configContext.env ?? process.env).RELAY_PROFILE)
@@ -239,7 +245,10 @@ export const createProgram = (
     outputError: usageError,
   });
   // gh's order: commands before flags, examples first, no wrapping (help-groups.ts).
-  program.configureHelp({ formatHelp: formatRelayHelp, minWidthToWrap: Number.POSITIVE_INFINITY });
+  program.configureHelp({
+    formatHelp: (command, helper) => formatRelayHelp(command, helper, dependencies.helpHeading),
+    minWidthToWrap: Number.POSITIVE_INFINITY,
+  });
   // Every help screen ends the same way (GNU 4.8.2; gh's LEARN MORE block).
   program.addHelpText("afterAll", (context) => helpFooter(context.command === program));
 
@@ -295,7 +304,7 @@ export const createProgram = (
     .option("--no-start", "skip the start offer, but still wait for the first reply")
     .option("--no-skill", "do not offer the Relay skill at the end")
     .option("--json", "print the result as JSON")
-    .option("--api-url <url>", "the Relay API address to use", validateApiURL)
+    .addOption(new Option("--api-url <url>", "the Relay API address to use").argParser(validateApiURL).hideHelp())
     .action(async (agent: string | undefined, options: ConnectRunOptions & { withToken?: boolean }, command: Command) => {
       const env = configContext.env ?? process.env;
       const home = configContext.home ?? homedir();
@@ -424,7 +433,7 @@ export const createProgram = (
     .helpGroup(HELP_GROUPS.everyDay);
   agents.command("create")
     .description("create an agent and save its token privately on this computer, with no account and no sign-in")
-    .option("--api-url <url>", "the Relay API address to use", validateApiURL)
+    .addOption(new Option("--api-url <url>", "the Relay API address to use").argParser(validateApiURL).hideHelp())
     .option("--token-name <name>", "a label for the new token, so you can tell it apart later")
     .option("--handle <handle>", "the .dev handle you want; leave it out and Relay picks one")
     .option("--name <name>", "the name people see next to this agent")
@@ -497,14 +506,10 @@ export const createProgram = (
   authCommands.configureOutput({
     outputError: usageError,
   });
-  authCommands.command("login")
-    .description("save a token for this computer, from a hidden prompt, a pipe, or RELAY_AGENT_TOKEN")
-    .option("--with-token", "read the token from a pipe instead of asking for it")
-    .option("--api-url <url>", "the Relay API address this profile uses")
-    .action(async (
-      options: { withToken?: boolean; apiUrl?: string },
-      command: Command,
-    ) => {
+  const authLogin = async (
+    options: { withToken?: boolean; apiUrl?: string },
+    command: Command,
+  ): Promise<void> => {
       const env = configContext.env ?? process.env;
       const config = await readConfig(configContext);
       const profile = validateProfileName(globals(command).profile ?? config.current_profile);
@@ -534,11 +539,8 @@ export const createProgram = (
       await writeConfig(config, configContext);
       output(safeMetadata({ ok: true, profile, api_url: apiURL, token: "stored" }, [token]));
       await showSavedAgent(command, { profile, apiURL, runtime: { ownership: "unknown", connection: "unknown" } });
-    });
-  authCommands
-    .command("status")
-    .description("show which token Relay would use, and where it comes from, without printing it")
-    .action(async (_options: object, command: Command) => {
+  };
+  const authStatus = async (_options: object, command: Command): Promise<void> => {
       const resolved = await resolveAuth(globals(command).profile, configContext);
       output({
         configured: true,
@@ -551,11 +553,8 @@ export const createProgram = (
       if (saved?.agent_token === resolved.token && validateApiURL(saved.api_url ?? DEFAULT_API_URL) === resolved.apiURL) {
         await showSavedAgent(command, { profile: resolved.profile, apiURL: resolved.apiURL });
       }
-    });
-  authCommands
-    .command("logout")
-    .description("remove the selected profile's stored token")
-    .action(async (_options: object, command: Command) => {
+  };
+  const authLogout = async (_options: object, command: Command): Promise<void> => {
       if (!globals(command).nonInteractive && !globals(command).json && dependencies.confirmLogout && !await dependencies.confirmLogout()) throw new InteractiveCancelled();
       const config = await readConfig(configContext);
       const profile = validateProfileName(
@@ -575,13 +574,50 @@ export const createProgram = (
       config.profiles[profile] = withoutToken;
       await writeConfig(config, configContext);
       output({ ok: true, profile, token: "removed" });
-    });
+  };
+  const addAuthLogin = (command: Command): void => {
+    command
+      .option("--with-token", "read the token from a pipe instead of asking for it")
+      .addOption(new Option("--api-url <url>", "the Relay API address this profile uses").hideHelp())
+      .action(authLogin);
+  };
+  const addAuthStatus = (command: Command): void => {
+    command.action(authStatus);
+  };
+  const addAuthLogout = (command: Command): void => {
+    command.action(authLogout);
+  };
+  const authLoginCommand = authCommands.command("login")
+    .description("save a token for this computer, from a hidden prompt, a pipe, or RELAY_AGENT_TOKEN");
+  addAuthLogin(authLoginCommand);
+  const authStatusCommand = authCommands.command("status")
+    .description("show which token Relay would use, and where it comes from, without printing it");
+  addAuthStatus(authStatusCommand);
+  const authLogoutCommand = authCommands.command("logout")
+    .description("remove the selected profile's stored token");
+  addAuthLogout(authLogoutCommand);
+
+  // Linq-style top-level names; the hidden `auth` tree remains compatible with
+  // existing scripts and is still the canonical implementation underneath.
+  const loginCommand = program.command("login")
+    .description("authenticate with a Relay agent token")
+    .helpGroup(HELP_GROUPS.everythingElse);
+  addAuthLogin(loginCommand);
+  const whoamiCommand = program.command("whoami")
+    .description("show the current Relay identity without printing its token")
+    .helpGroup(HELP_GROUPS.everythingElse);
+  addAuthStatus(whoamiCommand);
+  const logoutCommand = program.command("logout")
+    .description("remove the saved Relay agent token from this computer")
+    .helpGroup(HELP_GROUPS.everythingElse);
+  addAuthLogout(logoutCommand);
 
   const profiles = program.command("profiles", { hidden: true }).description("manage the saved profiles on this computer: add, choose, remove and list them").helpGroup(HELP_GROUPS.everythingElse);
   profiles
     .command("add")
     .argument("<name>", "profile name", validateProfileName)
-    .requiredOption("--api-url <url>", "the Relay API address this profile uses", validateApiURL)
+    .addOption(new Option("--api-url <url>", "the Relay API address this profile uses")
+      .argParser(validateApiURL).makeOptionMandatory().hideHelp())
     .description("add a profile without storing a token")
     .action(async (name: string, options: { apiUrl: string }) => {
       const config = await readConfig(configContext);
@@ -1352,6 +1388,7 @@ export const runCLI = async (
   argv: string[],
   dependencies: ProgramDependencies = {},
 ): Promise<number> => {
+  const stdout = dependencies.stdout ?? ((value: string) => process.stdout.write(value));
   const stderr = dependencies.stderr ?? ((value: string) => process.stderr.write(value));
   const env = dependencies.configContext?.env ?? process.env;
   const json = argv.includes("--json");
@@ -1423,14 +1460,33 @@ export const runCLI = async (
       if (!args.length) return EXIT_CODES.ok;
     }
     const entry = interactiveEntry(args);
-    if (ui && entry) {
+    if (ui && entry && entry.entry !== "root") {
       const selected = await chooseInteractiveCommand(entry.entry, entry.prefix, agentDeps, ui);
       if (!selected) return EXIT_CODES.ok;
       if (selected === "install-skill") return await skillOffer(true);
       args = selected;
     } else if (entry) args = [...args, "--help"];
+    const rootHelpRequested = args.length === 0
+      || (args.length === 1 && ["--help", "-h", "help"].includes(args[0]!));
+    let helpHeading: string | undefined;
+    if (rootHelpRequested && !json && !quiet) {
+      const helpTTY = dependencies.helpTTY
+        ?? Boolean(process.stdout.isTTY && process.stderr.isTTY);
+      if (helpTTY) {
+        await writeRelayHelpHeading(
+          stdout,
+          processPalette(),
+          true,
+        );
+        helpHeading = "";
+      } else {
+        helpHeading = relayHelpHeading(processPalette());
+      }
+    }
     await createProgram({
-      ...dependencies, agents: agentDeps, isInteractive: interactive, json, stderr, ...(quiet ? { stdout: () => undefined } : {}),
+      ...dependencies, agents: agentDeps, isInteractive: interactive, json, stderr,
+      ...(helpHeading !== undefined ? { helpHeading } : {}),
+      ...(quiet ? { stdout: () => undefined } : {}),
       ...(ui ? {
         prompts: ui,
         offerSkill: async () => { await skillOffer(); },

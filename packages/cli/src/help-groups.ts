@@ -1,5 +1,6 @@
 import type { Command, Help } from "commander";
-import { supportedAgentsLine } from "./coding-agents.js";
+import { processPalette } from "./ui-colour.js";
+import { relayHelpHeading } from "./relay-brand.js";
 
 /**
  * Three groups, the way gh and fly group theirs: the one thing a new person
@@ -34,8 +35,6 @@ export const EXAMPLES = [
   "  relaymessenger watch                  see messages arrive and the agent reply",
   "  relaymessenger agents create --json   create an agent from a script",
 ];
-
-export const ENV_SENTENCE = "No environment variables are needed. RELAY_AGENT_TOKEN is honored in scripts only.";
 
 export interface CommandRow {
   /** Space-separated path, for example `chats messages send`. */
@@ -86,19 +85,56 @@ export const everythingElseNames = (program: Command): string => program.command
  * first). Nothing wraps: gh and stripe print each row on one line whatever the
  * terminal width, and the page's rows run past 80 columns.
  */
-export const formatRelayHelp = (cmd: Command, helper: Help): string => {
+export const formatRelayHelp = (cmd: Command, helper: Help, heading?: string): string => {
   const root = cmd.parent === null;
   const termWidth = helper.padWidth(cmd, helper);
   const item = (term: string, description: string): string =>
     helper.formatItem(term, termWidth, description, helper);
-  const lines: string[] = [`${helper.styleTitle("Usage:")} ${helper.styleUsage(helper.commandUsage(cmd))}`, ""];
+  const lines: string[] = [];
+  if (root) {
+    lines.push((heading ?? relayHelpHeading(processPalette())).trimEnd(), "");
+    lines.push(helper.styleCommandDescription(helper.commandDescription(cmd)), "");
+    const version = (cmd.version() ?? "unknown").replace(/^relaymessenger\s+/u, "");
+    lines.push(helper.styleTitle("VERSION"), `  relaymessenger ${version}`, "");
+    lines.push(helper.styleTitle("USAGE"), `  ${cmd.name()} [COMMAND]`, "");
+  } else {
+    lines.push(`${helper.styleTitle("Usage:")} ${helper.styleUsage(helper.commandUsage(cmd))}`, "");
+  }
   const description = helper.commandDescription(cmd);
-  if (description) lines.push(helper.styleCommandDescription(description), "");
-  if (root) lines.push(...EXAMPLES, "");
+  if (!root && description) lines.push(helper.styleCommandDescription(description), "");
+  if (root) {
+    const topicNames = ["chats", "messages", "attachments", "blocked-handles", "webhooks", "contact-card", "profiles"];
+    const topics = topicNames
+      .map((name) => cmd.commands.find((candidate) => candidate.name() === name))
+      .filter((candidate): candidate is Command => candidate !== undefined);
+    if (topics.length) {
+      lines.push(helper.styleTitle("TOPICS"), ...topics.map((topic) => item(
+        helper.styleSubcommandTerm(topic.name()),
+        helper.styleSubcommandDescription(topic.description()),
+      )), "");
+    }
+    const commands = helper.visibleCommands(cmd).filter((command) => command.name() !== "help");
+    if (commands.length) {
+      lines.push(helper.styleTitle("COMMANDS"), ...commands.map((sub) => item(
+        helper.styleSubcommandTerm(helper.subcommandTerm(sub)),
+        helper.styleSubcommandDescription(helper.subcommandDescription(sub)),
+      )));
+      const helpCommand = cmd.commands.find((command) => command.name() === "help");
+      lines.push(item(
+        helper.styleSubcommandTerm(helpCommand ? helper.subcommandTerm(helpCommand) : "help [command]"),
+        helper.styleSubcommandDescription(helpCommand
+          ? helper.subcommandDescription(helpCommand)
+          : "show what a command does and the options it takes"),
+      ));
+      lines.push("");
+    }
+  }
   const argumentRows = helper.visibleArguments(cmd)
     .map((argument) => item(helper.styleArgumentTerm(helper.argumentTerm(argument)), helper.styleArgumentDescription(helper.argumentDescription(argument))));
   if (argumentRows.length) lines.push(helper.styleTitle("Arguments:"), ...argumentRows, "");
-  const commandGroups = helper.groupItems([...cmd.commands], helper.visibleCommands(cmd), (sub) => sub.helpGroup() || "Commands:");
+  const commandGroups = root
+    ? []
+    : helper.groupItems([...cmd.commands], helper.visibleCommands(cmd), (sub) => sub.helpGroup() || "Commands:");
   let listedCommands = false;
   for (const [group, commands] of commandGroups) {
     if (!commands.length) continue;
@@ -108,10 +144,10 @@ export const formatRelayHelp = (cmd: Command, helper: Help): string => {
     )));
     listedCommands = true;
   }
-  if (root) lines.push(`  ${everythingElseNames(cmd)}`);
   if (listedCommands) lines.push("");
-  if (root) lines.push(supportedAgentsLine(), "");
-  const optionGroups = helper.groupItems([...cmd.options], helper.visibleOptions(cmd), (option) => option.helpGroupHeading ?? "Options:");
+  const optionGroups = root
+    ? []
+    : helper.groupItems([...cmd.options], helper.visibleOptions(cmd), (option) => option.helpGroupHeading ?? "Options:");
   for (const [group, options] of optionGroups) {
     if (!options.length) continue;
     lines.push(helper.styleTitle(group), ...options.map((option) => item(
@@ -125,4 +161,4 @@ export const formatRelayHelp = (cmd: Command, helper: Help): string => {
 };
 
 /** What follows the built-in help on every screen; the root also states the environment rule first. */
-export const helpFooter = (root: boolean): string => root ? `${ENV_SENTENCE}\n${HELP_FOOTER}` : HELP_FOOTER;
+export const helpFooter = (_root: boolean): string => HELP_FOOTER;

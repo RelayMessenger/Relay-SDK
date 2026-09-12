@@ -59,7 +59,6 @@ export const NO_TTY_SENTENCE = "Interactive prompt required but stdin is not a T
 export const NO_TTY_NEXT_STEP = "Name an agent and -y to run non-interactively.";
 
 export interface ConnectOptions {
-  all?: boolean;
   new?: boolean;
   handle?: string;
   name?: string;
@@ -896,8 +895,8 @@ const waitForFirstReply = async (agent: ConnectAgent, deps: ConnectDependencies,
 };
 
 /**
- * Which agents to connect. A name on the command line decides; `--all` takes
- * every detected one; a terminal asks with the detected ones pre-selected; a
+ * Which runtime to connect. A name on the command line decides; a terminal
+ * asks with the detected ones pre-selected; a
  * pipe with nothing named exits 2 with the sentence and the next step. Detection
  * pre-selects and never chooses (Vercel's resolve.ts:73-86).
  */

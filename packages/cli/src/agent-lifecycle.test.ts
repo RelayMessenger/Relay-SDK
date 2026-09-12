@@ -143,6 +143,8 @@ it("exposes canonical auth login/status/logout without a token-import command", 
   const program = createProgram(deps);
   expect(program.commands.some((command) => command.name() === "token")).toBe(false);
   expect(program.commands.find((command) => command.name() === "auth")!.commands.map((command) => command.name())).toEqual(["login", "status", "logout"]);
+  expect(program.commands.map((command) => command.name())).toEqual(expect.arrayContaining(["login", "logout", "whoami"]));
+  expect(program.commands.find((command) => command.name() === "connect")!.helpInformation()).not.toContain("--api-url");
 });
 
 it("non-TTY login without a token fails without reading stdin, fetching, or changing config", async () => {

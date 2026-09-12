@@ -41,16 +41,27 @@ async function fixture() {
 }
 
 describe("interactive Commander adapter", { timeout: 120_000 }, () => {
-  it("offers the three root choices and exit does nothing", async () => {
+  it("bare launch prints complete branded root help without opening a menu", async () => {
     const f = await fixture();
     expect(await runCLI([], f.deps)).toBe(0);
-    const options = (f.prompts.select.mock.calls[0] as unknown as [string, Array<{ label: string }>])[1];
-    expect(options.map((option) => option.label)).toEqual(["Connect an agent", "Watch an agent", "Exit"]);
+    expect(f.stdout.join("")).toContain("TOPICS");
+    expect(f.stdout.join("")).toContain("COMMANDS");
+    expect(f.stdout.join("")).toContain("connect");
+    expect(f.stdout.join("")).toContain("Relay");
+    expect(f.prompts.select).not.toHaveBeenCalled();
     expect(f.fetch).not.toHaveBeenCalled(); expect(f.skillPresent).not.toHaveBeenCalled(); expect(f.skillInstaller).not.toHaveBeenCalled();
   });
-  it("cancelled root selection or optional field input performs no mutation", async () => {
-    const f = await fixture(); f.prompts.select.mockRejectedValueOnce(new InteractiveCancelled());
-    expect(await runCLI([], f.deps)).toBe(0);
+  it("bare TTY launch keeps the animated heading and complete root help in one flow", async () => {
+    const f = await fixture();
+    expect(await runCLI([], { ...f.deps, helpTTY: true })).toBe(0);
+    const output = f.stdout.join("");
+    expect(output).toContain("\u001b[?25l");
+    expect(output).toContain("\u001b[?25h");
+    expect(output).toContain("TOPICS");
+    expect(output).toContain("COMMANDS");
+  });
+  it("cancelled optional field input performs no mutation", async () => {
+    const f = await fixture();
     f.prompts.select.mockResolvedValueOnce("create");
     f.prompts.text.mockRejectedValueOnce(new InteractiveCancelled());
     expect(await runCLI(["agents"], f.deps)).toBe(0);
@@ -164,11 +175,11 @@ it("interactive creation collects optional fields; blanks keep server defaults",
   const f = await fixture(); f.prompts.select.mockResolvedValueOnce("create");
   f.prompts.text.mockResolvedValueOnce("custom_agent.dev").mockResolvedValueOnce("Custom Agent").mockResolvedValueOnce("https://images.example.test/photo.png");
   f.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-  expect(await runCLI([], f.deps)).toBe(0);
+  expect(await runCLI(["agents"], f.deps)).toBe(0);
   const post = f.fetch.mock.calls.find(([, init]) => init?.method === "POST")!;
   expect(JSON.parse(String(post[1]?.body))).toEqual({ handle: "custom_agent.dev", first_name: "Custom Agent", image_url: "https://images.example.test/photo.png" });
   const blank = await fixture(); blank.prompts.select.mockResolvedValueOnce("create"); blank.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-  expect(await runCLI([], blank.deps)).toBe(0);
+  expect(await runCLI(["agents"], blank.deps)).toBe(0);
   expect(JSON.parse(String(blank.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body))).toEqual({});
 });
 
@@ -196,7 +207,7 @@ it("preserves explicit telemetry opt-outs while keeping credentials out of insta
 
 it("Create selection needs no extra confirmation and has exactly three concise optional prompts", async () => {
   const f = await fixture(); f.skillPresent.mockResolvedValue(true); f.prompts.select.mockResolvedValueOnce("create");
-  expect(await runCLI([], f.deps)).toBe(0);
+  expect(await runCLI(["agents"], f.deps)).toBe(0);
   expect(f.prompts.text.mock.calls.map(([message]) => message)).toEqual(["Handle (optional)", "Name (optional)", "Image (optional)"]);
   expect(f.prompts.confirm).not.toHaveBeenCalled();
   expect(f.prompts.info).toHaveBeenCalledTimes(1);

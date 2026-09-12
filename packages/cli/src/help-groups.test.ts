@@ -47,7 +47,7 @@ it("every description is one lowercase sentence with no full stop in it", () => 
   }
 });
 
-it("the help is three groups, and Get started holds only connect", () => {
+it("the help keeps the existing command groups for focused command screens", () => {
   const root = program();
   const groups = new Map<string, string[]>();
   for (const command of root.commands) {
@@ -65,25 +65,27 @@ it("the help is three groups, and Get started holds only connect", () => {
   }
 });
 
-it("--help prints the three headings and the one line that replaces the rest", async () => {
+it("--help prints the branded Linq-style root sections", async () => {
   const help = await printedHelp();
-  expect(help).toContain("Get started:");
-  expect(help).toContain("Every day:");
-  expect(help).toContain("Everything else:");
-  expect(help).toContain("help [command]");
-  expect(help).toContain("No environment variables are needed.");
-  // The older name is described and reachable, and listed nowhere.
+  expect(help).toContain("Relay");
+  expect(help).toContain("VERSION");
+  expect(help).toContain("USAGE");
+  expect(help).toContain("TOPICS");
+  expect(help).toContain("COMMANDS");
+  expect(help).toContain("login");
+  expect(help).toContain("logout");
+  expect(help).toContain("whoami");
+  expect(help).not.toContain("--api-url");
   expect(help).not.toMatch(/^\s*events\b/mu);
   expect(help).not.toContain("contact-requests");
 });
 
-it("connect is the only thing a new person is shown first", () => {
+it("root help lists connect and keeps the command tree out of the first screen", () => {
   const help = program().helpInformation();
-  const getStarted = help.indexOf("Get started:");
-  const everyDay = help.indexOf("Every day:");
-  expect(getStarted).toBeGreaterThan(-1);
-  expect(help.slice(getStarted, everyDay)).toContain("connect");
-  expect(help.slice(getStarted, everyDay)).not.toContain("agents");
+  expect(help).toContain("connect");
+  expect(help).toContain("TOPICS");
+  expect(help).toContain("chats");
+  expect(help).not.toContain("Get started:");
 });
 
 it("the deleted surfaces are gone from the tree", () => {
@@ -96,7 +98,7 @@ it("the deleted surfaces are gone from the tree", () => {
   for (const removed of [
     "--connect", "--runtime-home", "--runtime-config", "--runtime-state-dir",
     "--runtime-account", "--runtime-brain", "--runtime-context",
-    "--confirm-configure", "--runtime-stopped",
+    "--confirm-configure", "--runtime-stopped", "--all",
   ]) {
     expect(flags, removed).not.toContain(removed);
   }
