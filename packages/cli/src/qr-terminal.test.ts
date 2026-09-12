@@ -2,7 +2,7 @@ import { stripVTControlCharacters } from "node:util";
 import { create } from "qrcode";
 import { expect, it } from "vitest";
 import {
-  QR_DARK, QR_GLYPH, QR_LIGHT, QR_LINE_PREFIX,
+  QR_DARK, QR_DARK_FG, QR_LIGHT, QR_LIGHT_FG,
   renderTerminalQR, terminalQRForm, terminalQRGrid, terminalQRLines, terminalQRRowsLeft,
 } from "./qr-terminal.js";
 
@@ -23,13 +23,18 @@ function readFull(painted: string): boolean[][] {
   });
 }
 
-/** The painted compact text read back as dark/light modules, two rows per line. */
+/**
+ * The painted compact text read back as dark/light modules, two rows per line:
+ * the foreground code is the top module, the background code the bottom one.
+ */
+const COMPACT_CELL = /\x1b\[38;5;(231|16)m\x1b\[48;5;(231|16)m▀/gu;
 function readCompact(painted: string): boolean[][] {
   const rows: boolean[][] = [];
   for (const line of painted.trimEnd().split("\n")) {
-    const glyphs = [...stripVTControlCharacters(line)];
-    rows.push(glyphs.map((glyph) => glyph === "█" || glyph === "▀"));
-    rows.push(glyphs.map((glyph) => glyph === "█" || glyph === "▄"));
+    const cells = [...line.matchAll(COMPACT_CELL)];
+    expect(cells.join("")).not.toBe("");
+    rows.push(cells.map((cell) => cell[1] === "16"));
+    rows.push(cells.map((cell) => cell[2] === "16"));
   }
   return rows;
 }
@@ -64,17 +69,46 @@ it("prints full cells when the rows are there: no half-block glyph, both cube co
   expect(full().length).toBe(terminalQRGrid(url).length);
 });
 
-it("prints the compact form below the threshold, painted and an even number of module rows", () => {
+it("prints the compact form below the threshold: every cell painted, an even number of module rows", () => {
   const painted = renderTerminalQR(url, { rows: FULL_LINES - 1 });
-  expect(painted).toMatch(/[▀▄█]/u);
-  // Every line carries the colour pair, so a line of spaces is a painted white
-  // quiet row, never a bare gap in the terminal's own background.
-  expect(compact().every((line) => line.startsWith(QR_LINE_PREFIX) && line.endsWith("[0m"))).toBe(true);
-  expect(compact().some((line) => stripVTControlCharacters(line).trim() === "")).toBe(true);
+  // Every cell is the upper half block with BOTH a foreground (top module) and
+  // a background (bottom module), so no pixel of the cell is left to the
+  // terminal's own colour: the line gap takes the bottom module's colour.
+  expect(compact().every((line) => line.endsWith("\x1b[0m"))).toBe(true);
+  for (const line of compact()) {
+    const cells = [...line.matchAll(COMPACT_CELL)];
+    expect(cells.length).toBe(terminalQRGrid(url)[0]!.length);
+    expect(cells.map((cell) => cell[0]).join("") + "\x1b[0m").toBe(line);
+  }
   // Two module rows per line, so the padded row count is even and nothing is cut off.
   expect(readCompact(painted).length % 2).toBe(0);
   expect(readCompact(painted).length).toBe(COMPACT_LINES * 2);
-  expect(QR_GLYPH).toBe("[38;5;16m");
+  expect(QR_DARK_FG).toBe("\x1b[38;5;16m");
+  expect(QR_LIGHT_FG).toBe("\x1b[38;5;231m");
+});
+
+it("paints each compact cell pair by colour, never by glyph shape", () => {
+  const grid = terminalQRGrid(url);
+  const cell = (y: number, x: number): string => {
+    const line = compact()[Math.floor(y / 2)]!;
+    return [...line.matchAll(COMPACT_CELL)][x]![0];
+  };
+  const pairs = { "11": QR_DARK_FG + QR_DARK + "▀", "00": QR_LIGHT_FG + QR_LIGHT + "▀",
+    "10": QR_DARK_FG + QR_LIGHT + "▀", "01": QR_LIGHT_FG + QR_DARK + "▀" };
+  const seen = new Set<string>();
+  for (let y = 0; y + 1 < grid.length; y += 2) {
+    for (let x = 0; x < grid[0]!.length; x += 1) {
+      const key = `${grid[y]![x] ? 1 : 0}${grid[y + 1]![x] ? 1 : 0}` as keyof typeof pairs;
+      seen.add(key);
+      expect(cell(y, x)).toBe(pairs[key]);
+    }
+  }
+  expect(seen.size).toBe(4);
+  // The old form drew dark glyphs on a light ground; a plain " ", "▄" or "█"
+  // reads as a gap or a glyph that does not fill its cell.
+  const text = renderTerminalQR(url, { rows: FULL_LINES - 1 });
+  expect(text).not.toMatch(/[ ▄█]/u);
+  expect(text).not.toMatch(/\x1b\[38;5;16m▀/u);
 });
 
 it("reproduces the encoder's own modules in both forms", () => {

@@ -6,32 +6,36 @@ import { create } from "qrcode";
  * Full cells are the `qrcode` package's own big-mode terminal shape
  * (node_modules/qrcode/lib/renderer/terminal/terminal.js:10-30, the shape
  * `qrcode-terminal` prints too): every module is two spaces painted with a
- * background colour, one text line per module row. It is the better form,
- * because a half-block glyph does not fill the cell height in Terminal.app and
- * leaves a hairline gap through every row (owner, 2026-09-11: "weird white
- * lines in the middle"). It is also twice as tall, and a code that runs off the
- * screen cannot be scanned at all.
+ * background colour, one text line per module row. It is twice as tall as
+ * compact, and a code that runs off the screen cannot be scanned at all, so it
+ * is used only while it fits the rows the caller has.
  *
- * Compact is that package's small mode: two module rows per text line drawn
- * with the half-block glyphs, half the height and half the width. It is what
- * this renderer falls back to, and only when the full code does not fit the
- * rows the caller has. Both forms carry the same one-module quiet zone and the
- * same two colours, so the only difference between them is size.
+ * Compact is two module rows per text line, the shape `qrencode -t ANSIUTF8`
+ * prints, and it paints the CELL, never the glyph: every cell is the `▀` glyph
+ * with the foreground set to the top module's colour and the background set to
+ * the bottom module's colour. A glyph does not fill the cell height, so the
+ * earlier compact form (dark `▀ ▄ █` glyphs on a light background) left a
+ * hairline of light background between every text line, through every dark
+ * module (owner, 2026-09-12: "really hard to scan because of the white lines
+ * on it"). With the cell painted, every pixel is either glyph or background,
+ * and the line gap takes the bottom module's colour, which is what belongs
+ * there. Both forms carry the same one-module quiet zone and the same two
+ * colours, so the only difference between them is size.
  *
  * The two colours are ours, not the library's. The library paints with ANSI 47
  * and 40, which a light theme repaints gray (owner, 2026-09-09). 231 and 16 are
  * fixed points of the 256-colour cube, which no theme moves.
  */
-export const QR_LIGHT = "[48;5;231m";
-export const QR_DARK = "[48;5;16m";
-/** Compact paints the glyph, not the cell: the same black, as a foreground. */
-export const QR_GLYPH = "[38;5;16m";
-/** Every compact line opens with the full colour pair, so no cell is left bare. */
-export const QR_LINE_PREFIX = QR_LIGHT + QR_GLYPH;
+export const QR_LIGHT = "\x1b[48;5;231m";
+export const QR_DARK = "\x1b[48;5;16m";
+/** The same two cube colours as foregrounds, for the top module of a compact cell. */
+export const QR_LIGHT_FG = "\x1b[38;5;231m";
+export const QR_DARK_FG = "\x1b[38;5;16m";
 const RESET = "[0m";
 /** One full-cell module is two character cells wide, so the printed code is square. */
 const MODULE = "  ";
-const BLOCKS = { "00": " ", "01": "▄", "10": "▀", "11": "█" } as const;
+/** Upper half block: the glyph paints the top module, the background paints the bottom one. */
+const UPPER_HALF = "▀";
 
 export type TerminalQRForm = "full" | "compact";
 export interface TerminalQROptions {
@@ -80,17 +84,20 @@ function renderFull(grid: readonly (readonly boolean[])[]): string {
 }
 
 /**
- * Two module rows per text line. The row count is padded even with a light row,
- * because an odd count ends the code on a lone half-block row that reads as cut
- * off (the defect the 2026-09-09 renderer fixed).
+ * Two module rows per text line, every cell painted with both colours: the
+ * foreground is the top module, the background is the bottom module. The row
+ * count is padded even with a light row, because an odd count ends the code on
+ * a lone half-block row that reads as cut off (the defect the 2026-09-09
+ * renderer fixed).
  */
 function renderCompact(grid: readonly (readonly boolean[])[]): string {
   const rows = grid.length % 2 ? [...grid, grid[0]!.map(() => false)] : [...grid];
   const lines: string[] = [];
   for (let y = 0; y < rows.length; y += 2) {
     const top = rows[y] ?? []; const bottom = rows[y + 1] ?? [];
-    const cells = top.map((dark, x) => BLOCKS[`${dark ? 1 : 0}${bottom[x] ? 1 : 0}` as keyof typeof BLOCKS]);
-    lines.push(QR_LINE_PREFIX + cells.join("") + RESET);
+    const cells = top.map((dark, x) =>
+      `${dark ? QR_DARK_FG : QR_LIGHT_FG}${bottom[x] ? QR_DARK : QR_LIGHT}${UPPER_HALF}`);
+    lines.push(cells.join("") + RESET);
   }
   return lines.join("\n");
 }
