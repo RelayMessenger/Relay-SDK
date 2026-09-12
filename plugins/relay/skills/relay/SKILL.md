@@ -9,14 +9,14 @@ Use the locked contract, not memory.
 
 ## Route
 
-- Contract, routes, fields, events: read `references/relay-v1-lock.json` and the
+- Contract, routes, fields, events: read [the locked reference](references/relay-v1-lock.json) and the
   locked `contracts/relay-v1-openapi.yaml` first. Report hash or source drift.
-- Messaging: read `references/messaging.md`.
-- Chats and contacts: read `references/chats-and-contacts.md`.
-- Webhooks, WebSocket, ACK, replay, and sync: read `references/agent-events.md`.
-- Tokens, environments, retries, and errors: read `references/sdk-and-auth.md`.
+- Messaging: read [messaging](references/messaging.md).
+- Chats and contacts: read [chats and contacts](references/chats-and-contacts.md).
+- Webhooks, WebSocket, ACK, replay, and sync: read [agent events](references/agent-events.md).
+- Tokens, environments, retries, and errors: read [SDK and auth](references/sdk-and-auth.md).
 - CLI setup, profiles, connection, or skill installation: read
-  `references/cli-and-skills.md`.
+  [CLI and skills](references/cli-and-skills.md).
 
 Read only the reference needed for the task. Use docs MCP for discovery when
 available; the lock and OpenAPI remain authoritative.
