@@ -2,8 +2,8 @@
 
 It drives the installed CLI through the redesigned screens
 (_artifacts/cli-connect-design-20260912.md): the one question `Where does your agent run?`
-answered with Enter, the plan of at most three lines, `Continue? (Y/n)` answered with
-Enter, one line per file written, `Say hi from your phone`, the share link and the QR,
+answered with Enter, the plan (`create a new agent` first, then at most three lines for the
+agent), `Continue? (Y/n)` answered with Enter, only then the agent created, one line per file written, `Say hi from your phone`, the share link and the QR,
 then the agent's first reply. Relay is loopback only (agent-cli-platforms-terminal-server.mjs);
 no deployed Server is touched. A fake `claude` on PATH stands in for Claude Code's own
 plugin commands, so the three-line plan (install, write, start) is the one proved.
@@ -82,9 +82,10 @@ for mode, columns, rows in modes:
         assert stage == len(steps), {'mode': mode, 'stage': stage, 'exit': process.poll()}
         assert process.wait(timeout=4) == 0, {'mode': mode, 'exit': process.returncode}
         assert termios.tcgetattr(slave) == before
-        # The screens, in order: the wordmark, the one question, the three plan lines, the confirm, the files, the phone step, the reply.
-        order = [b'Relay', b'Which coding agent?', b'install  the Relay plugin for Claude Code', b'write  ', b'start Claude Code with Relay when you are ready',
-                 b'Continue? (Y/n)', b'wrote  ', b'Say hi from your phone', b'https://staging.relayapp.im/@' + handle.encode(), b'Answered from your phone: owned integrated agent reply']
+        # The screens, in order: the wordmark, the one question, the create line and the three plan lines, the confirm,
+        # the agent created only after it, the files, the phone step, the reply.
+        order = [b'Relay', b'Where does your agent run?', b'create a new agent  (Relay picks the name)', b'install  the Relay plugin for Claude Code', b'write  ', b'start Claude Code with Relay when you are ready',
+                 b'Continue? (Y/n)', b'Created @' + handle.encode(), b'wrote  ', b'Say hi from your phone', b'https://staging.relayapp.im/@' + handle.encode(), b'Answered from your phone: owned integrated agent reply']
         text = plain(output); at = 0
         for needle in order:
             found = text.find(needle, at); assert found >= 0, {'mode': mode, 'missing': needle}; at = found
