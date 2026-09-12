@@ -165,8 +165,6 @@ export function isMessageEventType(
   | "message.received"
   | "message.read"
   | "message.delivered"
-  | "message.edited"
-  | "message.unsent"
   | "message.failed" {
   return value.startsWith("message.");
 }

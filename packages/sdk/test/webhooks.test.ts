@@ -9,9 +9,7 @@ import Relay, {
   type ChatRequestUpdatedWebhookEvent,
   type ContactAddedWebhookEvent,
   type ContactRemovedWebhookEvent,
-  type MessageEditedWebhook,
   type MessageFailedWebhook,
-  type MessageUnsentWebhook,
   type RelayWebhookEnvelope,
   type RelayWebhookEvent,
 } from "../src/index.js";
@@ -183,21 +181,6 @@ const envelope = <T>(
   data,
 });
 
-const editedData = {
-  chat,
-  direction: "inbound" as const,
-  edited_at: "2026-09-03T00:00:01.000Z",
-  id: "01993d50-b4ce-71e6-8e65-35d325d95dd0",
-  part: { index: 1, text: "Corrected" },
-  sender_handle: senderHandle,
-};
-const unsentData = {
-  chat,
-  direction: "inbound" as const,
-  id: "01993d50-b4ce-71e6-8e65-35d325d95dd0",
-  sender_handle: senderHandle,
-  unsent_at: "2026-09-03T00:00:02.000Z",
-};
 const failedData = {
   chat_id: chat.id,
   message_id: "01993d50-b4ce-71e6-8e65-35d325d95dd0",
@@ -218,38 +201,9 @@ describe("Message change events", () => {
     });
   };
 
-  it("parses and narrows message.edited", () => {
-    const event = unwrap(
-      envelope("message.edited", editedData) as MessageEditedWebhook,
-    );
-    expect(event.event_type).toBe("message.edited");
-    if (event.event_type !== "message.edited") throw new Error("not narrowed");
-    expect(event.data.part).toEqual({ index: 1, text: "Corrected" });
-    expect(event.data.edited_at).toBe("2026-09-03T00:00:01.000Z");
-    expect(event.data.direction).toBe("inbound");
-    expect(event.data.sender_handle?.handle).toBe("echo");
-    expect(event.data.chat.id).toBe(chat.id);
-  });
-
-  it("parses and narrows message.unsent as message.edited without part", () => {
-    const event = unwrap(
-      envelope("message.unsent", unsentData) as MessageUnsentWebhook,
-    );
-    expect(event.event_type).toBe("message.unsent");
-    if (event.event_type !== "message.unsent") throw new Error("not narrowed");
-    expect(event.data.unsent_at).toBe("2026-09-03T00:00:02.000Z");
-    expect("part" in event.data).toBe(false);
-    expect("edited_at" in event.data).toBe(false);
-    // The server writes the unsend payload as the edit payload minus `part`,
-    // with `unsent_at` where the edit carries `edited_at`.
-    expect(Object.keys(event.data).sort()).toEqual(
-      [
-        ...Object.keys(editedData).filter((key) =>
-          key !== "part" && key !== "edited_at"
-        ),
-        "unsent_at",
-      ].sort(),
-    );
+  it("no longer publishes message.edited or message.unsent", () => {
+    expect(RELAY_WEBHOOK_EVENT_TYPES).not.toContain("message.edited");
+    expect(RELAY_WEBHOOK_EVENT_TYPES).not.toContain("message.unsent");
   });
 
   it("parses and narrows message.failed", () => {

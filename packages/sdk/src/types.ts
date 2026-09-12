@@ -333,16 +333,6 @@ export interface MessageListParams {
 
 export type MessageThreadParams = MessageListParams;
 
-/**
- * `PATCH /v1/messages/{messageId}`. Only text parts can be edited, up to five
- * times, and only within 15 minutes of the original send.
- */
-export interface MessageEditParams {
-  /** Index of the Message part to edit. Defaults to 0. */
-  part_index?: number;
-  text: string;
-}
-
 export interface MessageAddReactionParams {
   operation: "add" | "remove";
   type: ReactionType;
@@ -672,36 +662,6 @@ export interface MessageWebhookData {
   reply_to?: ReplyTo | null;
 }
 
-/** The part an edit replaced, and its zero-based index in the Message. */
-export interface MessageEditedPart {
-  index: number;
-  text: string;
-}
-
-/**
- * `message.edited`. `direction` is relative to the receiving Agent:
- * `outbound` if the Agent sent the original Message, `inbound` otherwise.
- */
-export interface MessageEditedEvent {
-  chat: MessageEventChat;
-  direction: "inbound" | "outbound";
-  edited_at: string;
-  id: UUID;
-  part: MessageEditedPart;
-  sender_handle: ChatHandle | null;
-}
-
-/**
- * `message.unsent`. The `message.edited` shape without `part` -- an unsend
- * takes the whole Message, not one part of it -- carrying `unsent_at` where
- * the edit carries `edited_at`. Deriving it here keeps the two shapes from
- * drifting apart.
- */
-export interface MessageUnsentEvent
-  extends Omit<MessageEditedEvent, "edited_at" | "part"> {
-  unsent_at: string;
-}
-
 /**
  * `message.failed`. Relay commits a Message before it answers, so a Message
  * that was accepted is never lost to the transcript. This event says the
@@ -778,16 +738,6 @@ export type ChatRequestUpdatedWebhook = RelayWebhookEnvelope<
   "chat.request.updated"
 >;
 
-export type MessageEditedWebhook = RelayWebhookEnvelope<
-  MessageEditedEvent,
-  "message.edited"
->;
-
-export type MessageUnsentWebhook = RelayWebhookEnvelope<
-  MessageUnsentEvent,
-  "message.unsent"
->;
-
 export type MessageFailedWebhook = RelayWebhookEnvelope<
   MessageFailedEvent,
   "message.failed"
@@ -817,8 +767,6 @@ type OtherWebhookEventType = Exclude<
   | "contact.added"
   | "contact.removed"
   | "chat.request.updated"
-  | "message.edited"
-  | "message.unsent"
   | "message.failed"
 >;
 
@@ -828,8 +776,6 @@ export type RelayWebhookEvent =
     TypingIndicatorWebhookData,
     TypingIndicatorWebhookEventType
   >
-  | MessageEditedWebhook
-  | MessageUnsentWebhook
   | MessageFailedWebhook
   | ContactAddedWebhookEvent
   | ContactRemovedWebhookEvent

@@ -93,16 +93,6 @@ export const RELAY_V1_OPERATIONS = [
     "operationId": "getMessage"
   },
   {
-    "method": "PATCH",
-    "path": "/v1/messages/{messageId}",
-    "operationId": "editMessage"
-  },
-  {
-    "method": "DELETE",
-    "path": "/v1/messages/{messageId}",
-    "operationId": "unsendMessage"
-  },
-  {
     "method": "POST",
     "path": "/v1/messages/{messageId}/reactions",
     "operationId": "sendReaction"
@@ -189,8 +179,6 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "message.received",
   "message.read",
   "message.delivered",
-  "message.edited",
-  "message.unsent",
   "message.failed",
   "reaction.added",
   "reaction.removed",
