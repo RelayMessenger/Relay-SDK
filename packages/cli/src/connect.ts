@@ -23,7 +23,7 @@ import { configPath, defaultCreationApiURL, isStagingBuild, packageVersion, vali
 import { HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { CliError, type CliErrorCode } from "./error-codes.js";
 import { preparePrivateDestination, writePrivateDestination } from "./private-file.js";
-import { renderTerminalQR } from "./qr-terminal.js";
+import { renderTerminalQR, terminalQRRowsLeft, type TerminalQROptions } from "./qr-terminal.js";
 import { dim, handle as markHandle, link } from "./ui-colour.js";
 import { safeMetadata } from "./output.js";
 import { spawnCommand } from "./spawn-command.js";
@@ -124,7 +124,7 @@ export interface ConnectDependencies {
     cwd: string;
     say(line: string): void;
   }) => Promise<void>;
-  renderQR?: (url: string) => string;
+  renderQR?: (url: string, options?: TerminalQROptions) => string;
   pairTimeoutMs?: number;
   version?: string;
   fetch?: typeof globalThis.fetch;
@@ -956,7 +956,9 @@ const showAddQR = (agent: ConnectAgent, deps: ConnectDependencies, screen: Scree
   const share = agent.shareURL || savedAgentShareURL(agent.apiURL, agent.handle);
   screen.step(`Add ${screen.handle(agent.handle)} from your phone`);
   if (share) {
-    try { deps.stdout(`${(deps.renderQR ?? renderTerminalQR)(share)}${screen.link(share)}\n`); }
+    // The step above the code, the link and the sentence below it, and the line
+    // the shell takes back: the code gets what is left of the window.
+    try { deps.stdout(`${(deps.renderQR ?? renderTerminalQR)(share, { rows: terminalQRRowsLeft(process.stdout.rows, 4) })}${screen.link(share)}\n`); }
     catch { deps.stdout(`${screen.link(share)}\n`); }
   }
   screen.say("Open Relay, scan, add this agent, then send it any message.");

@@ -12,7 +12,7 @@ import { openAcpSessions } from "./acp-threads.js";
 import { sdkTerminalObserver } from "./terminal-watch.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
-import { renderTerminalQR } from "./qr-terminal.js";
+import { renderTerminalQR, terminalQRRowsLeft } from "./qr-terminal.js";
 import { agentDependencies, deleteAgent, listAgents, selectAgentAuth, type AgentDependencies } from "./agents.js";
 import { createRequire } from "node:module";
 import { readFile, stat } from "node:fs/promises";
@@ -457,8 +457,9 @@ export const createProgram = (
         stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\n`);
         const liveViewFollows = imageUpdate?.status !== "incomplete" && willShowSavedAgent(command);
         if (!liveViewFollows) {
-          // The QR code holds the public link, never the token.
-          try { stdout(renderTerminalQR(result.share_url)); }
+          // The QR code holds the public link, never the token. It gets what is
+          // left of the window under the four lines printed above it.
+          try { stdout(renderTerminalQR(result.share_url, { rows: terminalQRRowsLeft(process.stdout.rows, 5) })); }
           catch { stderr("Relay could not draw the QR code. Use the link above instead.\n"); }
         }
         if (imageUpdate?.status === "incomplete") output({ image: imageUpdate });
