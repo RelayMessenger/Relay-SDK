@@ -481,7 +481,8 @@ describe("connect first reply proof", () => {
     f.deps.connect!.observer = () => ({ semantics: "observational-no-ack", run });
     expect(await runCLI(["connect", target, "--token", token, "--yes", "--allow", "person", "--no-start", "--no-skill"], f.deps)).toBe(0);
     expect(run).toHaveBeenCalledOnce();
-    expect(f.stdout.join("")).toContain(`Say anything to @${card.handle} from your phone.`);
+    expect(f.stdout.join("")).toContain(`Add @${card.handle} from your phone`);
+    expect(f.stdout.join("")).toContain("Open Relay, scan, add this agent, then send it any message.");
     expect(f.stdout.join("")).toContain("Answered from your phone: first answer");
     expect(f.stdout.join("")).not.toMatch(/wrong agent|incoming|second answer|No reply yet/);
     expect(f.startCommand).not.toHaveBeenCalled();

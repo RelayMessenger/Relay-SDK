@@ -599,6 +599,7 @@ export const runConnect = async (
   const done: Array<Record<string, unknown>> = [];
   const allowed = [...allow];
   const starts: Array<{ command: string; args: string[]; label: string }> = [];
+  let qrShown = false;
   let bridge: {
     label: string;
     command: string;
@@ -621,6 +622,7 @@ export const runConnect = async (
       await writeChannelEnv(channelDir, { token: agent.token, baseURL: agent.apiURL, allowedSenders: allowed }, platform);
       screen.step(`Config written, owner-only  ${envPath}`);
       if (!allowed.length) {
+        qrShown = true;
         const paired = await pairFirstSender(agent, deps, screen);
         if (paired) {
           allowed.push(paired);
@@ -713,7 +715,7 @@ export const runConnect = async (
   }
   if (options.skill !== false && deps.offerSkill && !json) await deps.offerSkill();
   if (!json) {
-    screen.say(`Say anything to @${agent.handle} from your phone.`);
+    if (!qrShown) showAddQR(agent, deps, screen);
     if (bridge && deps.bridge) {
       screen.say(`${bridge.label} answers your Relay messages from ${deps.cwd}. Press Control-C to stop.`);
       await deps.bridge({
@@ -898,6 +900,21 @@ const resolveAgent = async (options: ConnectOptions, deps: ConnectDependencies):
   };
 };
 
+/**
+ * The step a person takes next on their phone: add the agent. The QR holds the
+ * agent's public link, never the token, and Relay's New Chat screen scans it.
+ * Every interactive connect ends here, so the person never types a handle.
+ */
+const showAddQR = (agent: ConnectAgent, deps: ConnectDependencies, screen: Screen): void => {
+  const share = agent.shareURL || savedAgentShareURL(agent.apiURL, agent.handle);
+  screen.step(`Add @${agent.handle} from your phone`);
+  if (share) {
+    try { deps.stdout(`${(deps.renderQR ?? renderTerminalQR)(share)}${share}\n`); }
+    catch { deps.stdout(`${share}\n`); }
+  }
+  screen.say("Open Relay, scan, add this agent, then send it any message.");
+};
+
 const pairFirstSender = async (
   agent: ConnectAgent,
   deps: ConnectDependencies,
@@ -909,14 +926,7 @@ const pairFirstSender = async (
       "--allow <handles>  the handles allowed to message this agent, separated by commas",
     ]);
   }
-  const share = agent.shareURL || savedAgentShareURL(agent.apiURL, agent.handle);
-  screen.step(`Add @${agent.handle} from your phone`);
-  if (share) {
-    // The QR holds the public link, never the token.
-    try { deps.stdout(`${(deps.renderQR ?? renderTerminalQR)(share)}${share}\n`); }
-    catch { deps.stdout(`${share}\n`); }
-  }
-  screen.say("Open Relay, scan, add this agent, then send it any message.");
+  showAddQR(agent, deps, screen);
   const observer = deps.observer?.(agent.token, agent.apiURL);
   if (!observer) {
     screen.say("Relay could not open its watch connection, so it did not wait for a first message.");
