@@ -1,4 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { defaultConsoleApiURL, emptyConfig, readConfig, writeConfig } from "./config.js";
 import { consoleLogin, organizationDefaults } from "./console-auth.js";
 
@@ -22,7 +24,7 @@ it("uses the identity name for public email providers", () => {
 });
 
 it("completes device login, bootstraps Personal setup, refreshes the session, and never prints secrets", async () => {
-  const root = await import("node:fs/promises").then(({ mkdtemp }) => mkdtemp("/tmp/relay-console-device-"));
+  const root = await import("node:fs/promises").then(({ mkdtemp }) => mkdtemp(join(tmpdir(), "relay-console-device-")));
   const configPath = `${root}/config.json`;
   const accessToken = `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 900 })).toString("base64url")}.`;
   const refreshedToken = `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url")}.`;
@@ -102,7 +104,7 @@ it("completes device login, bootstraps Personal setup, refreshes the session, an
 });
 
 it("round-trips a private Console session without printing or changing agent profiles", async () => {
-  const root = await import("node:fs/promises").then(({ mkdtemp }) => mkdtemp("/tmp/relay-console-auth-"));
+  const root = await import("node:fs/promises").then(({ mkdtemp }) => mkdtemp(join(tmpdir(), "relay-console-auth-")));
   const configPath = `${root}/config.json`;
   const context = { env: { RELAY_CONFIG_PATH: configPath } };
   const config = emptyConfig();
