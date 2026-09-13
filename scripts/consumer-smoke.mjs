@@ -113,7 +113,6 @@ try {
   assert.match(packedTypes, /export type AgentImageRecipe = AgentMonogramImageRecipe \| AgentEmojiImageRecipe \| AgentPhotoImageRecipe/);
   assert.deepEqual(interfaceFields("AgentCreateResponse"), ["agent", "secret", "share_url"]);
   assert.doesNotMatch(packedTypes, /\bContactRequestCreate(?:Params|Response)\b/u);
-  assert.deepEqual(interfaceFields("ChatRequestUpdatedEvent"), [
     "chat_id",
     "state",
     "updated_at",

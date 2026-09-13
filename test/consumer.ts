@@ -127,7 +127,6 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "chat.typing_indicator.stopped",
   "contact.added",
   "contact.removed",
-  "chat.request.updated",
 ];
 
 const envelope: RelayWebhookEnvelope = {

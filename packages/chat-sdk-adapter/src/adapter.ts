@@ -1243,7 +1243,6 @@ export class RelayAdapter
       case "chat.typing_indicator.stopped":
       case "contact.added":
       case "contact.removed":
-      case "chat.request.updated":
         return;
       default:
         return assertExhaustiveEvent(envelope.event_type);
