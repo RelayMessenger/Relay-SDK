@@ -1,4 +1,4 @@
-import { openSavedAgentSession, type AgentSessionInput, type AgentSessionDependencies } from "./agent-session.js";
+import { openSavedAgentSession, savedAgentShareURL, type AgentSessionInput, type AgentSessionDependencies } from "./agent-session.js";
 import { prepareAgentImage } from "./local-image.js";
 import { uploadAgentImage } from "./agent-image-upload.js";
 import { createAgentWithPicture, incompletePictureMessage } from "./agent-create.js";
@@ -42,7 +42,7 @@ import {
 } from "commander";
 import type { ClientContext } from "./client.js";
 import { createClientContext } from "./client.js";
-import type { ConfigContext, RelayProfile, ResolvedAuth } from "./config.js";
+import type { ConfigContext, RelayConsoleSession, RelayProfile, ResolvedAuth } from "./config.js";
 import {
   DEFAULT_API_URL,
   defaultCreationApiURL,
@@ -68,6 +68,7 @@ import { describeFailure } from "./errors.js";
 import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
 import { verboseFetch } from "./verbose.js";
 import { relayHelpHeading, writeRelayHelpHeading } from "./relay-brand.js";
+import { consoleLogin, consoleLoginOrReuse, consoleRequest, createConsoleAgent } from "./console-auth.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
 // source file may carry its own copy.
@@ -98,6 +99,9 @@ export interface ProgramDependencies {
   stdout?: (value: string) => void;
   stderr?: (value: string) => void;
   fetch?: typeof fetch;
+  /** Test/integration seam for the Console device-login flow. */
+  consoleLogin?: () => Promise<RelayConsoleSession>;
+  consoleRequest?: <T>(path: string, init?: RequestInit) => Promise<T>;
   /** `--json` was asked for, so commander's own usage text stays off the streams. */
   json?: boolean;
   /** Override the process TTY check in focused tests. */
@@ -377,6 +381,23 @@ export const createProgram = (
         },
         ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
         ...(dependencies.offerSkill ? { offerSkill: dependencies.offerSkill } : {}),
+        ...(dependencies.consoleLogin || (!dependencies.fetch ? {
+          consoleLogin: () => consoleLoginOrReuse({
+          context: configContext,
+          apiURL: defaultCreationApiURL(),
+          ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+          ...(dependencies.prompts ? { prompts: dependencies.prompts } : {}),
+          stderr,
+          nonInteractive: dependencies.isInteractive === false,
+          }),
+        } : {})),
+        ...(dependencies.consoleRequest || (!dependencies.fetch ? {
+          consoleRequest: (path: string, init?: RequestInit) => consoleRequest({
+          context: configContext,
+          apiURL: defaultCreationApiURL(),
+          ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+          }, path, init),
+        } : {})),
         ...dependencies.connect,
       });
     });
@@ -451,7 +472,7 @@ export const createProgram = (
     .description("create, list and delete the agents saved on this computer")
     .helpGroup(HELP_GROUPS.everyDay);
   agents.command("create")
-    .description("create an agent and save its token privately on this computer, with no account and no sign-in")
+    .description("create an agent and save its token privately on this computer")
     .addOption(new Option("--api-url <url>", "the Relay API address to use").argParser(validateApiURL).hideHelp())
     .option("--token-name <name>", "a label for the new token, so you can tell it apart later")
     .option("--handle <handle>", "the .dev handle you want; leave it out and Relay picks one")
@@ -465,41 +486,97 @@ export const createProgram = (
       if (options.image !== undefined && options.imageUrl !== undefined) throw new Error("Choose --image or --image-url, not both.");
       const imageRecipe: AgentImageRecipe | undefined = options.imageRecipe === undefined
         ? undefined : await readImageRecipe(options.imageRecipe);
-      const created = await createAgentWithPicture({
-        ...(program.getOptionValueSource("profile") === "cli" && globals(command).profile ? { profile: globals(command).profile } : {}),
-        ...(options.apiUrl ? { apiURL: options.apiUrl } : {}),
-        ...(options.tokenName === undefined ? {} : { tokenName: options.tokenName }),
-        ...(options.handle === undefined ? {} : { handle: options.handle }),
-        ...(options.name === undefined ? {} : { firstName: options.name }),
+      // Focused program tests inject the old Agent API boundary. Keep that
+      // boundary usable for fixtures and existing integrations; the shipped
+      // program uses the Console path below.
+      if (dependencies.agents || (dependencies.fetch && !dependencies.consoleLogin)) {
+        const created = await createAgentWithPicture({
+          ...(program.getOptionValueSource("profile") === "cli" && globals(command).profile ? { profile: globals(command).profile } : {}),
+          ...(options.apiUrl ? { apiURL: options.apiUrl } : {}),
+          ...(options.tokenName === undefined ? {} : { tokenName: options.tokenName }),
+          ...(options.handle === undefined ? {} : { handle: options.handle }),
+          ...(options.name === undefined ? {} : { firstName: options.name }),
+          ...(options.about === undefined ? {} : { about: options.about }),
+          ...(options.image === undefined ? {} : { image: options.image }),
+          ...(options.imageUrl === undefined ? {} : { imageURL: options.imageUrl }),
+          ...(imageRecipe === undefined ? {} : { imageRecipe }),
+          ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}),
+          ...(configContext.home ? { home: configContext.home } : {}),
+        }, agentDeps, dependencies.fetch);
+        const result = created.result;
+        const imageUpdate = created.image;
+        if (globals(command).json) output({ ...result, ...(imageUpdate ? { image: imageUpdate } : {}) });
+        else {
+          stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\n`);
+          const liveViewFollows = imageUpdate?.status !== "incomplete" && willShowSavedAgent(command);
+          if (!liveViewFollows) {
+            try { stdout(renderTerminalQR(result.share_url, { rows: terminalQRRowsLeft(process.stdout.rows, 5) })); }
+            catch { stderr("Relay could not draw the QR code. Use the link above instead.\n"); }
+          }
+          if (imageUpdate?.status === "incomplete") output({ image: imageUpdate });
+        }
+        if (imageUpdate?.status !== "incomplete") {
+          await showSavedAgent(command, {
+            profile: result.profile, handle: result.handle, apiURL: result.api_url, shareURL: result.share_url,
+            runtime: { ownership: "none", connection: "not-started" },
+          });
+        }
+        if (imageUpdate?.status === "incomplete") {
+          throw new Error(incompletePictureMessage(result.handle, result.profile, imageUpdate, imageRecipe !== undefined));
+        }
+        return;
+      }
+      const session = await consoleLoginOrReuse({
+        context: configContext,
+        apiURL: options.apiUrl ?? defaultCreationApiURL(),
+        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+        ...(dependencies.prompts ? { prompts: dependencies.prompts } : {}),
+        stderr,
+        nonInteractive: globals(command).nonInteractive === true || globals(command).json === true || dependencies.isInteractive === false,
+      });
+      const created = await createConsoleAgent({
+        context: configContext,
+        apiURL: options.apiUrl ?? defaultCreationApiURL(),
+        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+      }, {
+        ...(options.handle ? { handle: options.handle.replace(/\.dev$/u, "") } : {}),
+        displayName: options.name ?? "My Agent",
         ...(options.about === undefined ? {} : { about: options.about }),
-        ...(options.image === undefined ? {} : { image: options.image }),
-        ...(options.imageUrl === undefined ? {} : { imageURL: options.imageUrl }),
+        ...((options.image ?? options.imageUrl) === undefined ? {} : { image: options.image ?? options.imageUrl }),
         ...(imageRecipe === undefined ? {} : { imageRecipe }),
         ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}),
         ...(configContext.home ? { home: configContext.home } : {}),
-      }, agentDeps, dependencies.fetch);
-      const result = created.result;
-      const imageUpdate = created.image;
-      if (globals(command).json) output({ ...result, ...(imageUpdate ? { image: imageUpdate } : {}) });
+      });
+      const profile = created.agent.handle;
+      await agentDeps.update((config) => {
+        config.profiles[profile] = {
+          api_url: options.apiUrl ?? defaultCreationApiURL(),
+          agent_token: created.token,
+        };
+        config.defaultAgent = profile;
+      });
+      const result = {
+        profile,
+        handle: created.agent.handle,
+        display_name: created.agent.first_name,
+        image_url: created.agent.image_url,
+        api_url: options.apiUrl ?? defaultCreationApiURL(),
+        share_url: savedAgentShareURL(options.apiUrl ?? defaultCreationApiURL(), created.agent.handle),
+        organization_id: session.organization_id,
+        token: "stored" as const,
+      };
+      if (globals(command).json) output({ ...result, ...(created.image ? { image: created.image } : {}) });
       else {
         stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\n`);
-        const liveViewFollows = imageUpdate?.status !== "incomplete" && willShowSavedAgent(command);
-        if (!liveViewFollows) {
-          // The QR code holds the public link, never the token. It gets what is
-          // left of the window under the four lines printed above it.
-          try { stdout(renderTerminalQR(result.share_url, { rows: terminalQRRowsLeft(process.stdout.rows, 5) })); }
-          catch { stderr("Relay could not draw the QR code. Use the link above instead.\n"); }
-        }
-        if (imageUpdate?.status === "incomplete") output({ image: imageUpdate });
-      }
-      if (imageUpdate?.status !== "incomplete") {
+        try { stdout(renderTerminalQR(result.share_url, { rows: terminalQRRowsLeft(process.stdout.rows, 5) })); }
+        catch { stderr("Relay could not draw the QR code. Use the link above instead.\n"); }
         await showSavedAgent(command, {
           profile: result.profile, handle: result.handle, apiURL: result.api_url, shareURL: result.share_url,
           runtime: { ownership: "none", connection: "not-started" },
         });
       }
-      if (imageUpdate?.status === "incomplete") {
-        throw new Error(incompletePictureMessage(result.handle, result.profile, imageUpdate, imageRecipe !== undefined));
+      if (created.image?.status === "incomplete") {
+        throw new Error(incompletePictureMessage(result.handle, result.profile, created.image, imageRecipe !== undefined));
       }
     });
   agents.command("list")
@@ -619,9 +696,31 @@ export const createProgram = (
   // Linq-style top-level names; the hidden `auth` tree remains compatible with
   // existing scripts and is still the canonical implementation underneath.
   const loginCommand = program.command("login")
-    .description("authenticate with a Relay agent token")
+    .description("sign in to Relay Console from this computer")
     .helpGroup(HELP_GROUPS.everythingElse);
-  addAuthLogin(loginCommand);
+  loginCommand
+    .option("--organization-name <name>", "name for a new Personal organization")
+    .option("--namespace <namespace>", "namespace for a new Personal organization")
+    .option("--website <domain>", "optional website for a new Personal organization")
+    .action(async (options: { organizationName?: string; namespace?: string; website?: string }, command: Command) => {
+      const session = await consoleLogin({
+        context: configContext,
+        apiURL: defaultCreationApiURL(),
+        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+        ...(dependencies.prompts ? { prompts: dependencies.prompts } : {}),
+        stderr,
+        ...(options.organizationName ? { name: options.organizationName } : {}),
+        ...(options.namespace ? { namespace: options.namespace } : {}),
+        ...(options.website ? { website: options.website } : {}),
+        nonInteractive: globals(command).nonInteractive === true || globals(command).json === true || dependencies.isInteractive === false,
+      });
+      output({
+        ok: true,
+        user: session.user,
+        organization_id: session.organization_id,
+        token: "stored",
+      });
+    });
   const whoamiCommand = program.command("whoami")
     .description("show the current Relay identity without printing its token")
     .helpGroup(HELP_GROUPS.everythingElse);
@@ -630,6 +729,48 @@ export const createProgram = (
     .description("remove the saved Relay agent token from this computer")
     .helpGroup(HELP_GROUPS.everythingElse);
   addAuthLogout(logoutCommand);
+
+  const organization = program.command("organization")
+    .alias("org")
+    .description("manage the signed-in Relay organization")
+    .helpGroup(HELP_GROUPS.everythingElse);
+  organization.command("show")
+    .description("show the signed-in organization and plan")
+    .action(async () => {
+      output(await consoleRequest({
+        context: configContext,
+        apiURL: defaultCreationApiURL(),
+        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+      }, "/me"));
+    });
+  organization.command("update")
+    .description("change the organization name, namespace, or website")
+    .option("--name <name>", "organization display name")
+    .option("--namespace <namespace>", "organization namespace")
+    .option("--website <domain>", "organization website; use an empty value to clear it")
+    .action(async (options: { name?: string; namespace?: string; website?: string }) => {
+      if (options.name === undefined && options.namespace === undefined && options.website === undefined) {
+        throw new CliError("Choose --name, --namespace, or --website.", "usage");
+      }
+      const me = await consoleRequest<{ org: { id: string } }>({
+        context: configContext,
+        apiURL: defaultCreationApiURL(),
+        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+      }, "/me");
+      output(await consoleRequest({
+        context: configContext,
+        apiURL: defaultCreationApiURL(),
+        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+      }, `/orgs/${me.org.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(options.name === undefined ? {} : { name: options.name }),
+          ...(options.namespace === undefined ? {} : { handleNamespace: options.namespace }),
+          ...(options.website === undefined ? {} : { website: options.website }),
+        }),
+      }));
+    });
 
   const profiles = program.command("profiles", { hidden: true }).description("manage the saved profiles on this computer: add, choose, remove and list them").helpGroup(HELP_GROUPS.everythingElse);
   profiles
