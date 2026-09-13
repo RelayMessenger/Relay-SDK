@@ -86,8 +86,8 @@ const ranLines = (f: Awaited<ReturnType<typeof fixture>>): string[] =>
 describe("nothing is created before the plan is taken", () => {
   it("a bad --handle is refused before any question, with the same words", async () => {
     const f = await fixture();
-    expect(await runCLI(["connect", "--handle", "ci_connectwalk3_1789195591"], f.deps)).toBe(1);
-    expect(f.stderr.join("")).toContain("Error: Use the handle name only, such as assistant: 3 to 32 lowercase letters, numbers or underscores, starting with a letter. Relay adds your organization website.");
+    expect(await runCLI(["connect", "--handle", "ci_connectwalk3_1789195591.dev"], f.deps)).toBe(1);
+    expect(f.stderr.join("")).toContain("Error: A handle is one word using 3–32 lowercase letters, numbers, or underscores.");
     expect(f.prompts.select).not.toHaveBeenCalled();
     expect(f.prompts.confirm).not.toHaveBeenCalled();
     expect(f.prompts.intro).not.toHaveBeenCalled();
@@ -169,7 +169,7 @@ describe("the optional customize step", () => {
     expect(handleFromName("Calm Canada Goose")).toBe("calm_canada_goose");
     expect(textOptions(f, NAME_QUESTION).placeholder).toBe("Relay picks one");
     expect(textOptions(f, HANDLE_QUESTION).placeholder).toBe("calm_canada_goose");
-    expect(textOptions(f, HANDLE_QUESTION).validate!("Not")).toContain("Use the handle name only");
+    expect(textOptions(f, HANDLE_QUESTION).validate!("Not")).toContain("A handle is one word");
     expect(textOptions(f, HANDLE_QUESTION).validate!("")).toBeUndefined();
     expect(textOptions(f, ABOUT_QUESTION).placeholder).toBe("One sentence about what it does");
     expect(textOptions(f, AVATAR_QUESTION).placeholder).toBe("Path to a PNG or JPEG");

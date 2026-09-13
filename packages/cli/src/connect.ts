@@ -180,7 +180,7 @@ const AVATAR_EXTENSIONS = new Set([".png", ".jpg", ".jpeg"]);
 /**
  * The handle Relay's rule allows for a name (agents.ts, validateHandle): the
  * words lowercased and joined with underscores, a letter first, at most 32
- * characters. Console adds the selected organization's namespace.
+ * characters.
  * Undefined when nothing of the name survives the rule.
  */
 export const handleFromName = (name: string): string | undefined => {

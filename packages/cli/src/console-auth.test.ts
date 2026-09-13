@@ -12,14 +12,12 @@ it("maps staging and production API origins to their Console API origins", () =>
 it("uses a Workspace domain for the organization display default and no random suffix", () => {
   expect(organizationDefaults({ id: "user_1", email: "ada@acme.com", name: "Ada Lovelace" })).toEqual({
     name: "Acme",
-    namespace: "acme",
   });
 });
 
 it("uses the identity name for public email providers", () => {
   expect(organizationDefaults({ id: "user_1", email: "ada@gmail.com", name: "Ada Lovelace" })).toEqual({
     name: "Ada Lovelace",
-    namespace: "adalovelace",
   });
 });
 
@@ -80,7 +78,6 @@ it("completes device login, bootstraps organization setup, refreshes the session
     openBrowser: async (url) => { opened.push(url); },
     stderr: (value) => stderr.push(value),
     name: "Ada",
-    namespace: "ada",
     nonInteractive: true,
   });
 

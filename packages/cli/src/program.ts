@@ -295,7 +295,7 @@ export const createProgram = (
     .description("connect a runtime to Relay, new or by token, and wait for its first reply")
     .helpGroup(HELP_GROUPS.getStarted)
     .option("--new", "create a new agent instead of using one you already have")
-    .option("--handle <handle>", "the name for a new handle; Relay adds your organization namespace")
+    .option("--handle <handle>", "the agent's handle: one word, 3 to 32 lowercase letters, numbers or underscores")
     .option("--name <name>", "the name people see next to a new agent")
     .option("--about <text>", "the one line people see above your agent's first message", aboutText)
     .option("--image <path-or-url>", "a picture for a new agent: a file on this computer, or an https:// address")
@@ -465,7 +465,7 @@ export const createProgram = (
   agents.command("create")
     .description("create an agent and save its token privately on this computer")
     .addOption(new Option("--api-url <url>", "the Relay API address to use").argParser(validateApiURL).hideHelp())
-    .option("--handle <handle>", "the handle name; Relay adds your organization namespace")
+    .option("--handle <handle>", "the agent's handle: one word, 3 to 32 lowercase letters, numbers or underscores")
     .option("--name <name>", "the name people see next to this agent")
     .option("--about <text>", "the one line people see above your agent's first message", aboutText)
     .option("--image <path-or-url>", "a picture: a file on this computer, or an https:// address")
@@ -660,9 +660,8 @@ export const createProgram = (
   loginCommand
     .option("--with-token", "read an organization API key from a pipe")
     .option("--organization-name <name>", "name for a new organization")
-    .option("--namespace <namespace>", "namespace for a new organization")
     .option("--website <domain>", "optional website for a new organization")
-    .action(async (options: { withToken?: boolean; organizationName?: string; namespace?: string; website?: string }, command: Command) => {
+    .action(async (options: { withToken?: boolean; organizationName?: string; website?: string }, command: Command) => {
       if (options.withToken) {
         if (!dependencies.readStdin && process.stdin.isTTY) {
           throw new CliError("Pipe an organization API key into relay login --with-token.", "not_a_tty");

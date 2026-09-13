@@ -11,16 +11,16 @@ it("creation uses a local handle part and the existing 30-character name cap", (
   expect(handleFromName("My Agent")).toBe("my_agent");
   expect(validateFirstName(`  ${"N".repeat(30)}  `)).toBe("N".repeat(30));
   expect(() => validateFirstName("N".repeat(31))).toThrow("1 to 30");
-  for (const value of ["my_agent", "my_agent.acme", "@my_agent", "ab"]) {
-    expect(() => validateHandle(value)).toThrow("handle name only");
+  for (const value of ["my_agent.dev", "My_Agent", "@my_agent", "ab", `a${"b".repeat(32)}`]) {
+    expect(() => validateHandle(value)).toThrow("A handle is one word");
   }
 });
 
 it.each([
-  ["agents", "create", "--handle", "my_agent"],
   ["agents", "create", "--handle", "my_agent.acme"],
+  ["agents", "create", "--handle", "My_Agent"],
   ["agents", "create", "--name", "N".repeat(31)],
-  ["connect", "codex", "--new", "--yes", "--handle", "my_agent"],
+  ["connect", "codex", "--new", "--yes", "--handle", "My_Agent"],
   ["connect", "codex", "--new", "--yes", "--name", "N".repeat(31)],
 ])("rejects invalid creation input before OAuth/network: %j", async (...args) => {
   const home = await mkdtemp(join(tmpdir(), "relay-creation-contract-"));
@@ -45,8 +45,8 @@ it("does not advertise or accept the obsolete token-name option", async () => {
   const connect = program.commands.find(c => c.name() === "connect")!;
   expect(create.options.some(option => option.long === "--token-name")).toBe(false);
   expect(create.helpInformation()).not.toContain("--token-name");
-  expect(create.helpInformation()).toContain("organization website");
-  expect(connect.helpInformation()).not.toContain("");
+  expect(create.helpInformation()).toContain("one word, 3 to 32 lowercase letters");
+  expect(connect.helpInformation()).toContain("one word, 3 to 32 lowercase letters");
   const fetch = vi.fn(), consoleLogin = vi.fn();
   expect(await runCLI(["--json", "--no-input", "agents", "create", "--token-name", "old"], {
     fetch, consoleLogin, stdout: () => undefined, stderr: () => undefined,

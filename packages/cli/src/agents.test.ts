@@ -63,7 +63,7 @@ describe("pure agent command handlers", () => {
   it("rejects existing explicit profiles, qualified handles and long names before POST", async () => {
     const { deps } = setup();
     await expect(createAgent({ profile: "default" }, deps)).rejects.toThrow("exists");
-    await expect(createAgent({ handle: "assistant" }, deps)).rejects.toThrow("handle name only");
+    await expect(createAgent({ handle: "assistant.dev" }, deps)).rejects.toThrow("A handle is one word");
     await expect(createAgent({ firstName: "N".repeat(31) }, deps)).rejects.toThrow("1 to 30");
     expect(deps.provision).not.toHaveBeenCalled();
   });

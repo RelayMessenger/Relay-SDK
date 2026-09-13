@@ -75,7 +75,7 @@ const safeAPIFailure = (message: string, error: unknown): Error => error instanc
 /** The handle a person asked for, checked before anything is created or asked. */
 export const validateHandle = (handle: string): string => {
   if (!/^[a-z][a-z0-9_]{2,31}$/u.test(handle)) {
-    throw new Error("Use the handle name only, such as assistant: 3 to 32 lowercase letters, numbers or underscores, starting with a letter. Relay adds your organization namespace.");
+    throw new Error("A handle is one word using 3–32 lowercase letters, numbers, or underscores.");
   }
   return handle;
 };
