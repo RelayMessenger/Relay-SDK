@@ -21,7 +21,7 @@ describe("Codex start", () => {
   const home = await mkdtemp(join(scratch, "connect-"));
     const stdout: string[] = [];
     const stderr: string[] = [];
-    const configContext = { home, platform: "darwin" as const, env: { PATH: "", RELAY_CONFIG_PATH: join(home, "config.json") } };
+    const configContext = { home, platform: process.platform, env: { PATH: "", RELAY_CONFIG_PATH: join(home, "config.json") } };
     const console = consoleFixture(configContext, { handle: "codex_test.dev", first_name: "Codex", image_url: null });
     const code = await runCLI(["connect", "codex", "--new", "--yes", "--no-skill", "--json"], {
       configContext, consoleLogin: console.login,
