@@ -712,7 +712,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "package.json",
       "source_sha256": "271918f460e07d8f61106da4bfbda7e2190a6b61214c809bd880c3fc51cb6bcd",
-      "destination_sha256": "9a384ee1ad4c5f7286376aa9b2f5b4ba64fcee4c783007b084d22c50b14650c5",
+      "destination_sha256": "d91b23e8dabf5c73169297cc9bc87e4db1f5a618a230f90777114cc37a6631d1",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
