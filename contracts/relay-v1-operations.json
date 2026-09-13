@@ -8,8 +8,8 @@
     "sha256": "787e5dd583a2ba382931fe6799ecc7a421d1a4f94dce11a890fc6a1eeca4ea97"
   },
   "source_path_count": 23,
-  "source_schema_count": 114,
-  "callback_count": 17,
+  "source_schema_count": 112,
+  "callback_count": 16,
   "transport_decision": {
     "source": "contracts/agent-transport-decision.md",
     "sha256": "6140351159f830a4a6b4be67e2e6a9cce27eeb9a6cd83c67c54331df26d2fe74",

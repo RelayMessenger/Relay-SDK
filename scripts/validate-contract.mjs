@@ -100,11 +100,11 @@ assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 35);
 assert.equal(manifest.path_count, 22);
 assert.equal(manifest.source_path_count, 23);
-assert.equal(manifest.source_schema_count, 114);
-assert.equal(manifest.callback_count, 17);
+assert.equal(manifest.source_schema_count, 112);
+assert.equal(manifest.callback_count, 16);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 22);
 assert.equal(operationJSON.length, 35);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 17);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 16);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
@@ -388,7 +388,7 @@ const validateOpenAPI = () => {
   );
   assert.equal(
     Object.keys(document.components.schemas).length,
-    115,
+    113,
   );
   const excluded = new Set(
     sourceOnlyOperations.map((operation) =>
@@ -493,6 +493,7 @@ const validateOpenAPI = () => {
       "image_url",
       "about",
       "verified",
+      "is_contact",
     ],
   );
   assert.deepEqual(
@@ -509,7 +510,7 @@ const validateOpenAPI = () => {
       "image_url",
       "about",
       "verified",
-      "is_removable",
+      "is_contact",
     ],
   );
   assert.equal(
@@ -601,15 +602,6 @@ const validateOpenAPI = () => {
     document.components.schemas.MessageContent.properties
       .idempotency_key.maxLength,
     255,
-  );
-  assert.deepEqual(
-    ["chat_id", "state", "updated_at"],
-  );
-  assert.deepEqual(
-    ["accepted", "deleted"],
-  );
-  assert.equal(
-      .requestBody.content["application/json"].schema.$ref,
   );
   assert.deepEqual(
     document.components.schemas.ContactAddedEvent.required,
