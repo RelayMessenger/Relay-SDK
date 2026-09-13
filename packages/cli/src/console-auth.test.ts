@@ -46,6 +46,7 @@ it("completes device login, bootstraps Personal setup, refreshes the session, an
     if (url.endsWith("/auth/cli/device-code")) {
       poll += 1;
       if (poll === 1) return Response.json({ error: "authorization_pending" }, { status: 400 });
+      if (poll === 2) return Response.json({ error: "slow_down" }, { status: 400 });
       return Response.json({
         access_token: accessToken,
         refresh_token: "refresh-secret",
@@ -89,6 +90,7 @@ it("completes device login, bootstraps Personal setup, refreshes the session, an
     "https://console.staging.relayapp.im/api/auth/cli/device",
     "https://console.staging.relayapp.im/api/auth/cli/device-code",
     "https://console.staging.relayapp.im/api/auth/cli/device-code",
+    "https://console.staging.relayapp.im/api/auth/cli/device-code",
     "https://console.staging.relayapp.im/api/auth/cli/bootstrap",
     "https://api.workos.com/user_management/authenticate",
   ]);
@@ -101,6 +103,73 @@ it("completes device login, bootstraps Personal setup, refreshes the session, an
     refresh_token: "refresh-secret",
     organization_id: "org_personal",
   });
+});
+
+it.each([
+  ["access_denied", "Relay Console login was denied."],
+  ["expired_token", "Relay Console login expired."],
+  ["server_error", "Relay Console login failed (HTTP 400)."],
+])("reports device login %s without leaking response data", async (oauthError, message) => {
+  const root = await import("node:fs/promises").then(({ mkdtemp }) => mkdtemp(join(tmpdir(), "relay-console-error-")));
+  const fetch = vi.fn(async (input: string | URL | Request) => {
+    if (String(input).endsWith("/auth/cli/device")) {
+      return Response.json({
+        device_code: "private-device-code",
+        user_code: "PRIVATE-CODE",
+        verification_uri: "https://console.example.test/device",
+        expires_in: 60,
+        interval: 1,
+        client_id: "client",
+      });
+    }
+    return Response.json({ error: oauthError, error_description: "secret-response-detail" }, { status: 400 });
+  });
+  vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: (...args: never[]) => void) => {
+    callback();
+    return 0 as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout);
+  await expect(consoleLogin({
+    context: { env: { RELAY_CONFIG_PATH: `${root}/config.json` } },
+    apiURL: "https://api.staging.relayapp.im",
+    fetch,
+    openBrowser: async () => {},
+    stderr: () => {},
+  })).rejects.toThrow(message);
+  await expect(consoleLogin({
+    context: { env: { RELAY_CONFIG_PATH: `${root}/config.json` } },
+    apiURL: "https://api.staging.relayapp.im",
+    fetch,
+    openBrowser: async () => {},
+    stderr: () => {},
+  })).rejects.not.toThrow("private-device-code");
+});
+
+it("reuses the organization returned by Console without bootstrapping it again", async () => {
+  const root = await import("node:fs/promises").then(({ mkdtemp }) => mkdtemp(join(tmpdir(), "relay-console-existing-")));
+  const configPath = `${root}/config.json`;
+  const accessToken = `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 900 })).toString("base64url")}.`;
+  const fetch = vi.fn(async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/auth/cli/device")) return Response.json({
+      device_code: "device", user_code: "CODE", verification_uri: "https://console.example.test/device",
+      expires_in: 60, interval: 1, client_id: "client",
+    });
+    if (url.endsWith("/auth/cli/device-code")) return Response.json({
+      access_token: accessToken, refresh_token: "refresh", organization_id: "org_existing",
+      user: { id: "user", email: "ada@gmail.com", name: "Ada" },
+    });
+    throw new Error(`unexpected request ${url}`);
+  });
+  vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: (...args: never[]) => void) => {
+    callback();
+    return 0 as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout);
+  const session = await consoleLogin({
+    context: { env: { RELAY_CONFIG_PATH: configPath } }, apiURL: "https://api.staging.relayapp.im",
+    fetch, openBrowser: async () => {}, stderr: () => {},
+  });
+  expect(session.organization_id).toBe("org_existing");
+  expect(fetch.mock.calls.some(([input]) => String(input).endsWith("/auth/cli/bootstrap"))).toBe(false);
 });
 
 it("round-trips a private Console session without printing or changing agent profiles", async () => {

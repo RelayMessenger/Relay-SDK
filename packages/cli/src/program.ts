@@ -703,7 +703,7 @@ export const createProgram = (
     .option("--namespace <namespace>", "namespace for a new Personal organization")
     .option("--website <domain>", "optional website for a new Personal organization")
     .action(async (options: { organizationName?: string; namespace?: string; website?: string }, command: Command) => {
-      const session = await consoleLogin({
+      const session = await consoleLoginOrReuse({
         context: configContext,
         apiURL: defaultCreationApiURL(),
         ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
@@ -711,7 +711,7 @@ export const createProgram = (
         stderr,
         ...(options.organizationName ? { name: options.organizationName } : {}),
         ...(options.namespace ? { namespace: options.namespace } : {}),
-        ...(options.website ? { website: options.website } : {}),
+        ...(options.website === undefined ? {} : { website: options.website }),
         nonInteractive: globals(command).nonInteractive === true || globals(command).json === true || dependencies.isInteractive === false,
       });
       output({
