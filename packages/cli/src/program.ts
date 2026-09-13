@@ -14,7 +14,7 @@ import { dim, link } from "./ui-colour.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
 import { renderTerminalQR, terminalQRRowsLeft } from "./qr-terminal.js";
-import { agentDependencies, deleteAgent, listAgents, selectAgentAuth, type AgentDependencies } from "./agents.js";
+import { agentDependencies, deleteAgent, listAgents, selectAgentAuth, validateFirstName, validateHandle, type AgentDependencies } from "./agents.js";
 import { createRequire } from "node:module";
 import { readFile, stat } from "node:fs/promises";
 import Relay, {
@@ -68,7 +68,7 @@ import { describeFailure } from "./errors.js";
 import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
 import { verboseFetch } from "./verbose.js";
 import { relayHelpHeading, writeRelayHelpHeading } from "./relay-brand.js";
-import { consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, createConsoleAgent, deleteConsoleAgent } from "./console-auth.js";
+import { consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, deleteConsoleAgent } from "./console-auth.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
 // source file may carry its own copy.
@@ -295,7 +295,7 @@ export const createProgram = (
     .description("connect a runtime to Relay, new or by token, and wait for its first reply")
     .helpGroup(HELP_GROUPS.getStarted)
     .option("--new", "create a new agent instead of using one you already have")
-    .option("--handle <handle>", "the .dev handle you want for a new agent; leave it out and Relay picks one")
+    .option("--handle <handle>", "the name for a new handle; Relay adds your organization namespace")
     .option("--name <name>", "the name people see next to a new agent")
     .option("--about <text>", "the one line people see above your agent's first message", aboutText)
     .option("--image <path-or-url>", "a picture for a new agent: a file on this computer, or an https:// address")
@@ -465,15 +465,16 @@ export const createProgram = (
   agents.command("create")
     .description("create an agent and save its token privately on this computer")
     .addOption(new Option("--api-url <url>", "the Relay API address to use").argParser(validateApiURL).hideHelp())
-    .option("--token-name <name>", "a label for the new token, so you can tell it apart later")
-    .option("--handle <handle>", "the .dev handle you want; leave it out and Relay picks one")
+    .option("--handle <handle>", "the handle name; Relay adds your organization namespace")
     .option("--name <name>", "the name people see next to this agent")
     .option("--about <text>", "the one line people see above your agent's first message", aboutText)
     .option("--image <path-or-url>", "a picture: a file on this computer, or an https:// address")
     .option("--image-url <url>", "a picture at an https:// address (same as --image with a URL)")
     .option("--image-recipe <json-file>", "a Relay picture recipe file; needs --image or --image-url as well")
     .option("--json", "print the result as JSON")
-    .action(async (options: { apiUrl?: string; tokenName?: string; json?: boolean; handle?: string; name?: string; about?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
+    .action(async (options: { apiUrl?: string; json?: boolean; handle?: string; name?: string; about?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
+      if (options.handle !== undefined) validateHandle(options.handle);
+      if (options.name !== undefined) validateFirstName(options.name);
       if (options.image !== undefined && options.imageUrl !== undefined) throw new Error("Choose --image or --image-url, not both.");
       const imageRecipe: AgentImageRecipe | undefined = options.imageRecipe === undefined
         ? undefined : await readImageRecipe(options.imageRecipe);
@@ -497,7 +498,6 @@ export const createProgram = (
         makeDefault: true,
         ...(program.getOptionValueSource("profile") === "cli" && globals(command).profile ? { profile: globals(command).profile } : {}),
         apiURL: options.apiUrl ?? defaultCreationApiURL(),
-        ...(options.tokenName === undefined ? {} : { tokenName: options.tokenName }),
         ...(options.handle === undefined ? {} : { handle: options.handle }),
         ...(options.name === undefined ? {} : { firstName: options.name }),
         ...(options.about === undefined ? {} : { about: options.about }),

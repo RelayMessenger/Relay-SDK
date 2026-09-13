@@ -47,7 +47,6 @@ export const createAgentWithPicture = async (
   const result = await createAgent({
     ...(input.profile === undefined ? {} : { profile: input.profile }),
     ...(input.apiURL === undefined ? {} : { apiURL: input.apiURL }),
-    ...(input.tokenName === undefined ? {} : { tokenName: input.tokenName }),
     ...(input.handle === undefined ? {} : { handle: input.handle }),
     ...(input.firstName === undefined ? {} : { firstName: input.firstName }),
     ...(input.about === undefined ? {} : { about: input.about }),

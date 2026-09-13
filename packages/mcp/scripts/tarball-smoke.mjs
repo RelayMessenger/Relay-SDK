@@ -81,6 +81,10 @@ assert.equal(
   run(bin, ["--version"], { cwd: consumer }).stdout.trim(),
   sourceManifest.version,
 );
+for (const relativePath of ["README.md", "dist/generated-docs.js", "dist/search-docs.js"]) {
+  const text = await readFile(join(consumer, "node_modules", "@relaymessenger", "mcp", relativePath), "utf8");
+  assert.doesNotMatch(text, /Relay\.createAgent/u, `removed signup docs in packed ${relativePath}`);
+}
 
 const home = await mkdtemp(join(tmpdir(), "relay-mcp-installed-home-"));
 const transport = new StdioClientTransport({
@@ -105,6 +109,9 @@ try {
   const docs = await client.callTool({ name: "search_docs", arguments: { query: "contact card", language: "typescript" } });
   assert.notEqual(docs.isError, true);
   assert.match(JSON.stringify(docs), /client\.contactCard\.retrieve/);
+  const signup = await client.callTool({ name: "search_docs", arguments: { query: "anonymous agent signup", language: "typescript", detail: "verbose" } });
+  assert.notEqual(signup.isError, true);
+  assert.doesNotMatch(JSON.stringify(signup.structuredContent), /Relay\.createAgent|POST\s+\/v1\/agents(?:["\s]|$)/u);
   const executed = await client.callTool({ name: "execute", arguments: { code: "async function run(client) { return 6 * 7; }" } });
   assert.notEqual(executed.isError, true);
   assert.equal(executed.structuredContent.result, 42);

@@ -29,6 +29,24 @@ function setup(initial: RelayConfig = emptyConfig()) {
   return { deps, config: () => config, auth, remove, retrieve };
 }
 
+it("reports the real organization handle when private persistence fails", async () => {
+  const { deps } = setup();
+  vi.mocked(deps.provision).mockResolvedValue({ ...response, agent: { ...card, handle: "worker.acme_team" } });
+  vi.mocked(deps.update).mockRejectedValue(new Error(secret));
+  const error = await createAgent({ handle: "worker" }, deps).catch(error => error as Error);
+  expect(String(error)).toContain("@worker.acme_team");
+  expect(String(error)).not.toContain("(unavailable)");
+  expect(String(error)).not.toContain(secret);
+});
+
+it("directs uncertain creation to Console rather than the local profile list", async () => {
+  const { deps } = setup();
+  vi.mocked(deps.provision).mockRejectedValue(new TypeError("fetch failed"));
+  const error = await createAgent({ handle: "worker" }, deps).catch(error => error as Error);
+  expect(String(error)).toContain("Relay Console");
+  expect(String(error)).not.toContain("agents list");
+});
+
 describe("pure agent command handlers", () => {
   it("creates a named identity while preserving default and existing credentials", async () => {
     const test = setup();
@@ -42,11 +60,11 @@ describe("pure agent command handlers", () => {
     await createAgent({}, test.deps);
     expect(test.config().profiles[`${card.handle}-2`]?.agent_token).toBe(secret);
   });
-  it("rejects existing explicit profiles and invalid labels before POST", async () => {
+  it("rejects existing explicit profiles, qualified handles and long names before POST", async () => {
     const { deps } = setup();
     await expect(createAgent({ profile: "default" }, deps)).rejects.toThrow("exists");
-    await expect(createAgent({ tokenName: "" }, deps)).rejects.toThrow("1 to 80 characters");
-    await expect(createAgent({ tokenName: "label\ncontrol" }, deps)).rejects.toThrow("control characters");
+    await expect(createAgent({ handle: "assistant.dev" }, deps)).rejects.toThrow("handle name only");
+    await expect(createAgent({ firstName: "N".repeat(31) }, deps)).rejects.toThrow("1 to 30");
     expect(deps.provision).not.toHaveBeenCalled();
   });
   it("does not leak bootstrap or persistence errors or retry", async () => {
@@ -105,7 +123,7 @@ describe("agent CLI program", () => {
     const { deps } = setup();
     const stdout: string[] = []; const stderr: string[] = [];
     const options = { consoleLogin: async () => ({ type: "organization_key" as const, organization_key: "rel_org_test", organization_id: "org_fixture", console_api_url: "https://console.staging.relayapp.im/api" }), agents: deps, configContext: privateContext, stdout: (s: string) => stdout.push(s), stderr: (s: string) => stderr.push(s) };
-    expect(await runCLI(["--profile", "new-profile", "agents", "create", "--token-name", "Laptop", "--json"], options)).toBe(0);
+    expect(await runCLI(["--profile", "new-profile", "agents", "create", "--json"], options)).toBe(0);
     expect(deps.provision).toHaveBeenCalledWith({ displayName: "My Agent" }, { apiURL: creationOrigin });
     expect(await runCLI(["agents", "list", "--json"], options)).toBe(0);
     expect(await runCLI(["--profile", "default", "agents", "delete", card.handle, "--json"], options)).toBe(0);

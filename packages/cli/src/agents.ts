@@ -44,7 +44,6 @@ export const agentRecord = (card: Pick<ContactCardItem, "handle" | "first_name" 
 export interface CreateAgentInput {
   profile?: string;
   apiURL?: string;
-  tokenName?: string;
   handle?: string;
   firstName?: string;
   about?: string;
@@ -75,8 +74,8 @@ const safeAPIFailure = (message: string, error: unknown): Error => error instanc
 
 /** The handle a person asked for, checked before anything is created or asked. */
 export const validateHandle = (handle: string): string => {
-  if (!/^[a-z][a-z0-9_]{2,31}\.dev$/u.test(handle)) {
-    throw new Error("A handle looks like name.dev. The part before .dev must be 3 to 32 characters, start with a lowercase letter, and use only lowercase letters, numbers and underscores.");
+  if (!/^[a-z][a-z0-9_]{2,31}$/u.test(handle)) {
+    throw new Error("Use the handle name only, such as assistant: 3 to 32 lowercase letters, numbers or underscores, starting with a letter. Relay adds your organization namespace.");
   }
   return handle;
 };
@@ -84,8 +83,8 @@ export const validateHandle = (handle: string): string => {
 /** The name a person asked for, trimmed and checked the same way. */
 export const validateFirstName = (name: string): string => {
   const firstName = name.trim();
-  if (!firstName || firstName.length > 255 || /[\u0000-\u001f\u007f]/u.test(firstName)) {
-    throw new Error("The name must be 1 to 255 characters, with no control characters.");
+  if (!firstName || firstName.length > 30 || /[\u0000-\u001f\u007f]/u.test(firstName)) {
+    throw new Error("The name must be 1 to 30 characters, with no control characters.");
   }
   return firstName;
 };
@@ -96,12 +95,9 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     validateProfileName(input.profile);
     if (Object.hasOwn(before.profiles, input.profile)) throw new Error("Profile already exists; choose a new profile name.");
   }
-  if (input.tokenName !== undefined && (input.tokenName.length < 1 || input.tokenName.length > 80 || /[\u0000-\u001f\u007f]/u.test(input.tokenName))) {
-    throw new Error("The token name must be 1 to 80 characters, with no control characters.");
-  }
   const apiURL = validateApiURL(input.apiURL ?? deps.env.RELAY_API_URL
     ?? defaultCreationApiURL());
-  if (input.handle !== undefined) validateHandle(input.handle.endsWith(".dev") ? input.handle : `${input.handle}.dev`);
+  if (input.handle !== undefined) validateHandle(input.handle);
   const firstName = input.firstName === undefined ? undefined : validateFirstName(input.firstName);
   if (input.imageURL !== undefined) {
     let image: URL;
@@ -112,7 +108,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
   const body: ConsoleAgentCreateInput = {
     displayName: firstName ?? "My Agent",
     ...(input.about === undefined ? {} : { about: input.about.trim() }),
-    ...(input.handle === undefined ? {} : { handle: input.handle.replace(/\.dev$/u, "") }),
+    ...(input.handle === undefined ? {} : { handle: input.handle }),
   };
   if (Buffer.byteLength(JSON.stringify(body), "utf8") > 8192) throw new Error("These agent details are too long. Shorten the name, the handle or the picture address.");
   try { await deps.preflight(); } catch { throw new Error("Relay could not prepare a private file to save the token in, so it did not create the agent. Check the permissions on your Relay config folder."); }
@@ -121,11 +117,12 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     result = await deps.provision(body, { apiURL });
   } catch (error) {
     // The error body from Relay may hold a secret that is not yet in the redaction set.
-    const rejected = error instanceof RelayAPIError && error.status !== undefined
-      && error.status >= 400 && error.status < 500;
+    const rejected = (error instanceof RelayAPIError && error.status !== undefined
+      && error.status >= 400 && error.status < 500)
+      || (error instanceof CliError && error.code === "no_token");
     const message = rejected
       ? `Relay refused to create this agent.${apiFailure(error)} Relay did not try again.`
-      : `Relay did not answer, so this agent may or may not have been created.${apiFailure(error)} Relay did not try again. Run npx relaymessenger agents list to see what exists before you try once more.`;
+      : `Relay did not confirm creation, so this agent may or may not have been created.${apiFailure(error)} Relay did not try again. Check your organization's agents in Relay Console before trying again.`;
     throw safeAPIFailure(message, error);
   }
   try {
@@ -143,7 +140,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     });
     return safeMetadata({ profile, ...agentRecord(result.agent), share_url: savedAgentShareURL(apiURL, result.agent.handle), api_url: apiURL, token: "stored" as const }, [token]);
   } catch {
-    const rawHandle = typeof result.agent?.handle === "string" && /^[a-z][a-z0-9_]{2,31}\.dev$/u.test(result.agent.handle) ? result.agent.handle : "(unavailable)";
+    const rawHandle = typeof result.agent?.handle === "string" && /^[a-z][a-z0-9_]{2,31}(?:\.[a-z0-9][a-z0-9_-]{1,62})?$/u.test(result.agent.handle) ? result.agent.handle : "(unavailable)";
     const assigned = safeMetadata(rawHandle, typeof result.token === "string" ? [result.token] : []);
     let outcome = "Relay could not check whether its token was saved on this computer";
     let present = false;

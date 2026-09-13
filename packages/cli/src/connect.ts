@@ -180,11 +180,12 @@ const AVATAR_EXTENSIONS = new Set([".png", ".jpg", ".jpeg"]);
 /**
  * The handle Relay's rule allows for a name (agents.ts, validateHandle): the
  * words lowercased and joined with underscores, a letter first, at most 32
- * before `.dev`. Undefined when nothing of the name survives the rule.
+ * characters. Console adds the selected organization's namespace.
+ * Undefined when nothing of the name survives the rule.
  */
 export const handleFromName = (name: string): string | undefined => {
   const body = name.toLowerCase().replace(/[^a-z0-9]+/gu, "_").replace(/^[^a-z]+/u, "").replace(/_+$/u, "").slice(0, 32).replace(/_+$/u, "");
-  return body.length >= 3 ? `${body}.dev` : undefined;
+  return body.length >= 3 ? body : undefined;
 };
 
 /** The avatar's path when it is a PNG or JPEG that exists; undefined otherwise. */
@@ -1021,7 +1022,7 @@ const chooseIdentity = async (options: ConnectOptions, deps: ConnectDependencies
     // The placeholder is the handle Relay's rule gives the name, and Enter takes it.
     const derived = identity.name ? handleFromName(identity.name) : undefined;
     const typed = (await ui.text(HANDLE_QUESTION, "", {
-      placeholder: derived ?? NAME_PLACEHOLDER,
+      placeholder: derived ?? "assistant",
       validate: (value) => { try { if (value.trim()) validateHandle(value.trim()); return undefined; } catch (error) { return (error as Error).message; } },
     })).trim();
     if (typed) identity.handle = typed;

@@ -53,14 +53,22 @@ describe("approved two-tool MCP", () => {
     expect(r.isError).not.toBe(true); expect(text(r)).not.toContain(TOKEN); expect(text(r)).toContain("[REDACTED]");
   });
   it("indexes every HTTP operation and exposes only initialized client methods", () => {
-    expect(new Set(METHOD_DOCS.map(x=>`${x.httpMethod} ${x.path}`)).size).toBe(35);
-    expect(METHOD_DOCS.find(x=>x.method==="Relay.createAgent")?.executable).toBe(false);
+    expect(new Set(METHOD_DOCS.map(x=>`${x.httpMethod} ${x.path}`)).size).toBe(34);
+    expect(METHOD_DOCS.some(x=>x.method==="Relay.createAgent")).toBe(false);
+    expect(METHOD_DOCS.some(x=>x.httpMethod==="POST"&&x.path==="/v1/agents")).toBe(false);
     const relay=sdk().client;
     for (const row of METHOD_DOCS.filter(x=>x.executable)) {
       let value:unknown=relay;
       for (const part of row.method.split(".").slice(1)) value=(value as Record<string,unknown>)[part];
       expect(typeof value,row.method).toBe("function");
     }
+  });
+  it("does not advertise anonymous signup in documentation search", async () => {
+    const client=await connect();
+    const r=await client.callTool({name:"search_docs",arguments:{query:"anonymous agent signup",language:"typescript",detail:"verbose"}});
+    expect(r.isError).not.toBe(true);
+    expect(JSON.stringify(r.structuredContent)).not.toContain("Relay.createAgent");
+    expect(JSON.stringify(r.structuredContent)).not.toMatch(/POST\s+\/v1\/agents(?:["\s]|$)/);
   });
   it("runs TypeScript and captures return values and console output", async () => {
     const s=await ready(); const r=await s.execute('async function run(client) { const n: number = 2 + 2; console.log("answer", n); return { n, hasClient: !!client }; }');

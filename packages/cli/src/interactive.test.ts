@@ -175,7 +175,7 @@ it("installer args follow the build's environment without default agent/global f
 
 it("interactive creation collects optional fields; blanks keep server defaults", { timeout: 120_000 }, async () => {
   const f = await fixture(); f.prompts.select.mockResolvedValueOnce("create");
-  f.prompts.text.mockResolvedValueOnce("custom_agent.dev").mockResolvedValueOnce("Custom Agent").mockResolvedValueOnce("https://images.example.test/photo.png");
+  f.prompts.text.mockResolvedValueOnce("custom_agent").mockResolvedValueOnce("Custom Agent").mockResolvedValueOnce("https://images.example.test/photo.png");
   f.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   expect(await runCLI(["agents"], f.deps)).toBe(0);
   const post = f.fetch.mock.calls.find(([, init]) => init?.method === "POST")!;

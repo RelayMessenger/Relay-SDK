@@ -21,7 +21,7 @@ const config = join(temp,'private-cli-config.json');
 const recipe = join(temp,'recipe.json');writeFileSync(recipe,JSON.stringify({recipe:{image:{}}}),{mode:0o600});
 const runId = '20260908064002697'; // Explicit same-handle reattempt after definitive422 and main-confirmed deployment fix.
 assert.equal(process.env.RELAY_CUSTOM_PREVIOUS_OUTCOME, 'definitive-422-no-identity');
-const handle = `verify_${runId}.dev`;const name = `Verification Custom ${runId}`;
+const localHandle = `verify_${runId}`;const handle = `${localHandle}.dev`;const name = "Verification Custom";
 const manifest = JSON.parse(readFileSync(join(root,'packages/cli/package.json')));assert.equal(manifest.name,'relaymessenger');
 const env={...process.env,RELAY_CONFIG_PATH:config,RELAY_API_URL:api};delete env.RELAY_AGENT_TOKEN;delete env.RELAY_PROFILE;
 let secret;let owned=false;let deletionAttempted=false;
@@ -47,7 +47,7 @@ try {
  report.tarballs=files.map(file=>({file,sha256:createHash('sha256').update(readFileSync(file)).digest('hex')}));
  run('npm',['install','--ignore-scripts','--no-audit','--no-fund',...files],{cwd:consumer});
  shim=join(consumer,'node_modules/.bin/relaymessenger');
- const args=['agents','create','--api-url',api,'--handle',handle,'--name',name,'--image-url',inputImage,'--image-recipe',recipe,'--token-name',`verification-custom-${runId}`,'--json'];
+ const args=['agents','create','--api-url',api,'--handle',localHandle,'--name',name,'--image-url',inputImage,'--image-recipe',recipe,'--json'];
  report.createCommandsInvoked++;
  const created=JSON.parse(run(shim,args,{cwd:consumer}));
  const stored=JSON.parse(readFileSync(config));secret=stored.profiles[created.profile]?.agent_token;

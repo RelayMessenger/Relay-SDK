@@ -184,7 +184,7 @@ it("maps custom profile flags to canonical create fields and stores the server-r
     if (init?.method === "PATCH") return Response.json({ ...card, handle: "chosen_agent.dev", first_name: "My Agent", image_url: "https://api.staging.relayapp.im/images/copied.png" });
     return Response.json({ agent: { ...card, handle: "chosen_agent.dev", first_name: "My Agent", image_url: "https://api.staging.relayapp.im/images/copied.png" }, secret: "custom-token", share_url: "https://go.staging.relayapp.im/@chosen_agent.dev" }, { status: 201 });
   });
-  expect(await runCLI(["agents", "create", "--json", "--handle", "chosen_agent.dev", "--name", "  My Agent  ", "--image-url", "https://images.example.test/snapshot.png", "--image-recipe", path], deps)).toBe(0);
+  expect(await runCLI(["agents", "create", "--json", "--handle", "chosen_agent", "--name", "  My Agent  ", "--image-url", "https://images.example.test/snapshot.png", "--image-recipe", path], deps)).toBe(0);
   expect((await readConfig(deps.configContext)).profiles["chosen_agent.dev"]?.agent_token).toBe("custom-token");
   expect(fetch).toHaveBeenCalledTimes(2);
 });
@@ -201,7 +201,7 @@ it("rejects invalid options and recipe-without-snapshot before creating", async 
 it("a chosen-handle 409 leaves all profiles intact and never retries without the handle", async () => {
   const { deps, fetch } = await fixture(); const previous = await readConfig(deps.configContext);
   fetch.mockImplementation(async () => Response.json({ error: { code: 1005, message: "in use" } }, { status: 409 }));
-  expect(await runCLI(["agents", "create", "--json", "--handle", "chosen_agent.dev"], deps)).toBe(1);
+  expect(await runCLI(["agents", "create", "--json", "--handle", "chosen_agent"], deps)).toBe(1);
   expect(fetch).toHaveBeenCalledOnce();
   expect((await readConfig(deps.configContext)).profiles).toEqual(previous.profiles);
 });
