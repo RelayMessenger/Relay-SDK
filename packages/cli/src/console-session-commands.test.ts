@@ -82,7 +82,7 @@ it("logout clears the selected token and Console session but preserves other pro
 it("hidden auth logout remains an agent-token-only operation", async () => {
   const f = await fixture();
   expect(await runCLI(["--json", "--no-input", "auth", "logout"], f.dependencies)).toBe(0);
-  expect((await readConfig(f.configContext)).console?.access_token).toBe("private-access-fixture");
+  expect((await readConfig(f.configContext)).console).toMatchObject({ access_token: "private-access-fixture" });
 });
 
 it("an explicitly selected empty agent profile does not silently become a Console identity", async () => {

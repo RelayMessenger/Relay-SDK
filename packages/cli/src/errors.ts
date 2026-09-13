@@ -36,7 +36,7 @@ export const describeFailure = (error: unknown, secrets: readonly string[] = [])
   }
   // Commander's sentence, without its "error: " prefix: the envelope is the error.
   if (error instanceof InvalidArgumentError || error instanceof CommanderError) {
-    return named(error.message.replace(/^error: /u, "").replace(/rly_[A-Za-z0-9_-]+/gu, "[REDACTED]").trim(), "usage", secrets);
+    return named(error.message.replace(/^error: /u, "").replace(/(?:rly_|rel_org_)[A-Za-z0-9_-]+/gu, "[REDACTED]").trim(), "usage", secrets);
   }
   if (error instanceof RelayAPIError) {
     if (error.status === undefined) return named(error, "network", secrets);

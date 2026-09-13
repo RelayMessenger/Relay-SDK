@@ -68,7 +68,7 @@ import { describeFailure } from "./errors.js";
 import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
 import { verboseFetch } from "./verbose.js";
 import { relayHelpHeading, writeRelayHelpHeading } from "./relay-brand.js";
-import { consoleLogin, consoleLoginOrReuse, consoleRequest, createConsoleAgent } from "./console-auth.js";
+import { consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, createConsoleAgent, deleteConsoleAgent } from "./console-auth.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
 // source file may carry its own copy.
@@ -244,7 +244,7 @@ export const createProgram = (
   // protocol-error class obeys the same format as every other error; ledger
   // rows P05 and P49, captures/relay/exit-usage-badflag-json.txt).
   const usageError = (message: string, write: (value: string) => void): void => {
-    if (!dependencies.json) write(`${message.replace(/rly_[A-Za-z0-9_-]+/gu, "[REDACTED]")}${DOCS_LINE}\n`);
+    if (!dependencies.json) write(`${message.replace(/(?:rly_|rel_org_)[A-Za-z0-9_-]+/gu, "[REDACTED]")}${DOCS_LINE}\n`);
   };
   program.configureOutput({
     writeOut: stdout,
@@ -489,7 +489,7 @@ export const createProgram = (
       // Focused program tests inject the old Agent API boundary. Keep that
       // boundary usable for fixtures and existing integrations; the shipped
       // program uses the Console path below.
-      if (dependencies.agents || (dependencies.fetch && !dependencies.consoleLogin)) {
+      if (dependencies.agents || (dependencies.fetch && !dependencies.consoleLogin && !(await readConfig(configContext)).console)) {
         const created = await createAgentWithPicture({
           ...(program.getOptionValueSource("profile") === "cli" && globals(command).profile ? { profile: globals(command).profile } : {}),
           ...(options.apiUrl ? { apiURL: options.apiUrl } : {}),
@@ -526,6 +526,14 @@ export const createProgram = (
         }
         return;
       }
+      const requestedProfile = program.getOptionValueSource("profile") === "cli"
+        ? globals(command).profile : undefined;
+      if (requestedProfile) {
+        validateProfileName(requestedProfile);
+        if (Object.hasOwn((await agentDeps.read()).profiles, requestedProfile)) {
+          throw new Error("Profile already exists; choose a new profile name.");
+        }
+      }
       const session = await consoleLoginOrReuse({
         context: configContext,
         apiURL: options.apiUrl ?? defaultCreationApiURL(),
@@ -534,6 +542,7 @@ export const createProgram = (
         stderr,
         nonInteractive: globals(command).nonInteractive === true || globals(command).json === true || dependencies.isInteractive === false,
       });
+      await agentDeps.preflight();
       const created = await createConsoleAgent({
         context: configContext,
         apiURL: options.apiUrl ?? defaultCreationApiURL(),
@@ -547,13 +556,21 @@ export const createProgram = (
         ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}),
         ...(configContext.home ? { home: configContext.home } : {}),
       });
-      const profile = created.agent.handle;
-      await agentDeps.update((config) => {
-        config.profiles[profile] = {
+      const profile = await agentDeps.update((config) => {
+        // Console namespaces can make a Handle longer than a local profile.
+        // Keep the full Handle in API/output; local names retain their contract.
+        const base = validateProfileName(requestedProfile ?? created.agent.handle.slice(0, 64));
+        if (requestedProfile && Object.hasOwn(config.profiles, base)) throw new Error("Profile already exists.");
+        let name = base;
+        for (let suffix = 2; Object.hasOwn(config.profiles, name); suffix++) {
+          name = `${base.slice(0, 54)}-${suffix}`;
+        }
+        config.profiles[name] = {
           api_url: options.apiUrl ?? defaultCreationApiURL(),
           agent_token: created.token,
         };
-        config.defaultAgent = profile;
+        config.defaultAgent = name;
+        return name;
       });
       const result = {
         profile,
@@ -595,7 +612,13 @@ export const createProgram = (
     .option("--json", "print the result as JSON")
     .action(async (agentHandle: string, _options: object, command: Command) => {
       if (!globals(command).nonInteractive && !globals(command).json && dependencies.confirmDelete && !await dependencies.confirmDelete()) throw new InteractiveCancelled();
-      output(await deleteAgent(agentHandle, globals(command).profile, agentDeps));
+      output(await deleteAgent(agentHandle, globals(command).profile, {
+        ...agentDeps,
+        deleteConsole: (handle, apiURL, agentToken) => deleteConsoleAgent({
+          context: configContext, apiURL,
+          ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+        }, handle, agentToken),
+      }));
     });
 
   const authCommands = program.command("auth", { hidden: true }).description("save, check and remove the token this computer signs in with").helpGroup(HELP_GROUPS.everythingElse);
@@ -702,10 +725,26 @@ export const createProgram = (
     .description("sign in to Relay Console from this computer")
     .helpGroup(HELP_GROUPS.everythingElse);
   loginCommand
+    .option("--with-token", "read an organization API key from a pipe")
     .option("--organization-name <name>", "name for a new Personal organization")
     .option("--namespace <namespace>", "namespace for a new Personal organization")
     .option("--website <domain>", "optional website for a new Personal organization")
-    .action(async (options: { organizationName?: string; namespace?: string; website?: string }, command: Command) => {
+    .action(async (options: { withToken?: boolean; organizationName?: string; namespace?: string; website?: string }, command: Command) => {
+      if (options.withToken) {
+        if (!dependencies.readStdin && process.stdin.isTTY) {
+          throw new CliError("Pipe an organization API key into relay login --with-token.", "not_a_tty");
+        }
+        const session = await consoleLoginWithKey({
+          context: configContext,
+          apiURL: defaultCreationApiURL(),
+          ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+        }, await readStdinText());
+        output(safeMetadata(
+          { ok: true, type: session.type, organization_id: session.organization_id, token: "stored" },
+          [session.organization_key],
+        ));
+        return;
+      }
       const session = await consoleLoginOrReuse({
         context: configContext,
         apiURL: defaultCreationApiURL(),
@@ -719,7 +758,7 @@ export const createProgram = (
       });
       output({
         ok: true,
-        user: session.user,
+        ...(session.type === "organization_key" ? { type: session.type } : { user: session.user }),
         organization_id: session.organization_id,
         token: "stored",
       });
@@ -728,6 +767,16 @@ export const createProgram = (
     .description("show the current Relay identity without printing its token")
     .helpGroup(HELP_GROUPS.everythingElse);
   whoamiCommand.action(async (options: object, command: Command) => {
+    const current = (await readConfig(configContext)).console;
+    if (current?.type === "organization_key" && !globals(command).profile) {
+      const me = await consoleRequest<{ org: { id: string } }>({
+        context: configContext,
+        apiURL: defaultCreationApiURL(),
+        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+      }, "/me");
+      output({ type: current.type, organization_id: me.org.id });
+      return;
+    }
     try {
       await authStatus(options, command);
     } catch (error) {
@@ -1701,7 +1750,7 @@ export const runCLI = async (
       }
     }
     await createProgram({
-      ...dependencies, agents: agentDeps, isInteractive: interactive, json, stderr,
+      ...dependencies, isInteractive: interactive, json, stderr,
       ...(helpHeading !== undefined ? { helpHeading } : {}),
       ...(quiet ? { stdout: () => undefined } : {}),
       ...(ui ? {

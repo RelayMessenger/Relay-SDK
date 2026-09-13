@@ -12,6 +12,7 @@ export interface AgentDependencies {
   bootstrap: typeof Relay.createAgent;
   client: (token: string, apiURL: string) => Pick<Relay, "contactCard" | "agents">;
   auth: (profile?: string) => Promise<ResolvedAuth>;
+  deleteConsole?: (handle: string, apiURL: string, agentToken: string) => Promise<boolean>;
   env: NodeJS.ProcessEnv;
 }
 
@@ -211,7 +212,9 @@ export async function selectAgentAuth(handle: string, profile: string | undefine
 export async function deleteAgent(handle: string, profile: string | undefined, deps: AgentDependencies) {
   const auth = await selectAgentAuth(handle, profile, deps);
   try {
-    await deps.client(auth.token, auth.apiURL).agents.delete(handle, { maxRetries: 0 });
+    if (!await deps.deleteConsole?.(handle, auth.apiURL, auth.token)) {
+      await deps.client(auth.token, auth.apiURL).agents.delete(handle, { maxRetries: 0 });
+    }
   } catch (error) {
     throw safeAPIFailure(`Relay could not confirm this agent was deleted, so the token saved on this computer is unchanged.${apiFailure(error)}`, error);
   }
