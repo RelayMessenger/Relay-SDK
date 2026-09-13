@@ -2692,7 +2692,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "test/workerd/worker.test.ts",
       "source_sha256": "d336ad240a8a2d71a7740f82bab8bd5b463566fdd64dab61a4d78fab93246230",
-      "destination_sha256": "cde7c3ef9b6d07bcb419364b17d99fe48c59979a5b69e0c733084eac1f731484",
+      "destination_sha256": "c85947ec6481aed889b0401336cef7d46d543213e2741af9d6655f05e451a76b",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2890,7 +2890,7 @@
       "commit": "0177a9184c9005651688a7e9f42903952991b20f",
       "source": "examples/webhook-receiver/test/inbox.test.ts",
       "source_sha256": "81698e5f06e9b2c8831aad62b6f5c90d3eba2041fc1f24c0913c0c8f85372407",
-      "destination_sha256": "91d380df277a4775c7b371c11e2c5c418c33f06f8e5f2b63f6bf2cc02108d555",
+      "destination_sha256": "c0445d2f4b5a3485922fadf0c50b8d845a50e14cbce0e1ccad0ffdcc92b42225",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2901,7 +2901,7 @@
       "commit": "0177a9184c9005651688a7e9f42903952991b20f",
       "source": "examples/webhook-receiver/test/processor.test.ts",
       "source_sha256": "f07230e0f236b565eca579c4301401fa506d8e7623a3e282603836de37f40f66",
-      "destination_sha256": "c4630fdc2181e4f0344c552577b8a3dfa2cc61cc0dad72a7073e71d83f6c06c7",
+      "destination_sha256": "362e5131fce636149f9bac292e3564622fcd622276ca9002900fe04e2fee9291",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -3055,7 +3055,7 @@
       "commit": "0177a9184c9005651688a7e9f42903952991b20f",
       "source": "examples/websocket-worker/test/processor.test.ts",
       "source_sha256": "b8913b9d3480b7d013755ade242786ffa417b86d6a3db16776c8aaf3e7dd61f8",
-      "destination_sha256": "2f7cd8953004e23da753f240087fae2a2ae769bf0707963c52506ad0e1076bc0",
+      "destination_sha256": "7514d1e477169ed21ffa1662f0ac28037e4de8948e75a2f0944134a95b34d630",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -3066,7 +3066,7 @@
       "commit": "0177a9184c9005651688a7e9f42903952991b20f",
       "source": "examples/websocket-worker/test/runner.test.ts",
       "source_sha256": "7430c8e3368c32c610d4bb35b450f72736b8e2e12743d2fccad2ee35f7f7cfea",
-      "destination_sha256": "f6011957791607a557a6b33a3d173d61e9446596f3af7a19537777de8c3d5b4b",
+      "destination_sha256": "80d767c02721aec131f9b634605f39ffd120b00d95b588c122142c30e0390425",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -3077,7 +3077,7 @@
       "commit": "0177a9184c9005651688a7e9f42903952991b20f",
       "source": "examples/websocket-worker/test/store.test.ts",
       "source_sha256": "bbd6e068e50c35b21c419eaea931aad62183e0f001081318608b426139607bf5",
-      "destination_sha256": "a065e102a5ed644a51ab1b3857a71c78893f077b6b89b677b8624a87008a9d20",
+      "destination_sha256": "fb27c60a66f8081ad78bc006d60e20f72c4dc9dd8457948fe0b5dd296e8cfca8",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
