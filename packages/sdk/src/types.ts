@@ -34,7 +34,8 @@ interface ChatHandleBase {
   image_url: string | null;
   about: string | null;
   verified: boolean;
-  is_removable?: boolean;
+  /** True when the caller holds this Handle as a Contact. */
+  is_contact: boolean;
 }
 
 export interface UserChatHandle extends ChatHandleBase {

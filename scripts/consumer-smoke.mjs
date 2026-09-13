@@ -97,7 +97,7 @@ try {
     "image_url",
     "about",
     "verified",
-    "is_removable",
+    "is_contact",
   ]);
   assert.deepEqual(interfaceFields("UserChatHandle"), [
     "kind",
@@ -113,10 +113,6 @@ try {
   assert.match(packedTypes, /export type AgentImageRecipe = AgentMonogramImageRecipe \| AgentEmojiImageRecipe \| AgentPhotoImageRecipe/);
   assert.deepEqual(interfaceFields("AgentCreateResponse"), ["agent", "secret", "share_url"]);
   assert.doesNotMatch(packedTypes, /\bContactRequestCreate(?:Params|Response)\b/u);
-    "chat_id",
-    "state",
-    "updated_at",
-  ]);
   assert.deepEqual(interfaceFields("MessageContent"), [
     "parts",
     "reply_to",
