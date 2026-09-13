@@ -1,3 +1,4 @@
+import { consoleFixture } from "../test/console-fixture.js";
 import { NEXT_STEP } from "./error-codes.js";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -61,12 +62,14 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}, sniffed: Ru
   // and returns, the way Control-C ends it for a person.
   const bridge = vi.fn(async (input: { say(line: string): void }) => { input.say("Codex answered nothing here."); });
   const observer: TerminalObserver = { semantics: "observational-no-ack", run: async () => undefined };
+  const console = consoleFixture({ env, home }, card);
   const deps: ProgramDependencies = {
     configContext: { env, home, platform: process.platform },
     cwd: home,
     isInteractive: true,
     prompts,
-    fetch,
+    fetch: console.wrap(fetch),
+    consoleLogin: console.login,
     skillPresent: async () => true,
     skillInstaller: async () => undefined,
     stdout: (value) => stdout.push(value),
@@ -145,7 +148,7 @@ describe("the optional customize step", () => {
     expect(f.prompts.confirm.mock.calls.map(([message]) => message)).toEqual([CUSTOMIZE_QUESTION, "Continue?"]);
     expect(f.prompts.select.mock.invocationCallOrder[0]).toBeLessThan(f.prompts.confirm.mock.invocationCallOrder[0]!);
     expect(f.prompts.text).not.toHaveBeenCalled();
-    expect(posted(f)).toEqual({});
+    expect(posted(f)).toEqual({ handle: "my_agent.dev", displayName: "My Agent", isPremiumHandle: false });
     expect(f.stdout.join("")).toContain("create a new agent  (Relay picks the name)");
     // Yes, then Enter on all four, is the same run: same request, same screen.
     const yes = await fixture();
@@ -170,7 +173,7 @@ describe("the optional customize step", () => {
     expect(textOptions(f, HANDLE_QUESTION).validate!("")).toBeUndefined();
     expect(textOptions(f, ABOUT_QUESTION).placeholder).toBe("One sentence about what it does");
     expect(textOptions(f, AVATAR_QUESTION).placeholder).toBe("Path to a PNG or JPEG");
-    expect(posted(f)).toEqual({ handle: "calm_canada_goose.dev", first_name: "Calm Canada Goose" });
+    expect(posted(f)).toEqual({ handle: "calm_canada_goose.dev", displayName: "Calm Canada Goose", isPremiumHandle: false });
     expect(f.stdout.join("")).toContain('create @calm_canada_goose.dev  "Calm Canada Goose"');
   });
 
@@ -180,7 +183,7 @@ describe("the optional customize step", () => {
     expect(await runCLI([...argv, "--name", "Calm Canada Goose", "--handle", "calm_cangoo.dev", "--about", "Answers the mail.", "--avatar", face], f.deps)).toBe(0);
     expect(f.prompts.confirm.mock.calls.map(([message]) => message)).toEqual(["Continue?"]);
     expect(f.prompts.text).not.toHaveBeenCalled();
-    expect(posted(f)).toEqual({ handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", about: "Answers the mail." });
+    expect(posted(f)).toEqual({ handle: "calm_cangoo.dev", displayName: "Calm Canada Goose", about: "Answers the mail.", isPremiumHandle: false });
     expect(f.stdout.join("")).toContain('create @calm_cangoo.dev  "Calm Canada Goose"  about: Answers the mail.  avatar: face.png');
     expect(f.fetch.mock.calls.some(([input]) => String(input).includes("/attachments"))).toBe(true);
   });
@@ -208,7 +211,7 @@ describe("the optional customize step", () => {
     expect(validate!(join(f.home, "notes.txt"))).toBe(NOT_AN_IMAGE);
     expect(validate!(await png(f.home))).toBeUndefined();
     expect(validate!("")).toBeUndefined();
-    expect(posted(f)).toEqual({});
+    expect(posted(f)).toEqual({ handle: "my_agent.dev", displayName: "My Agent", isPremiumHandle: false });
     expect(f.fetch.mock.calls.some(([input]) => String(input).includes("/attachments"))).toBe(false);
   });
 

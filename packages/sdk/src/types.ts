@@ -785,25 +785,3 @@ export interface AgentPhotoImageRecipe {
   background?: never;
 }
 export type AgentImageRecipe = AgentMonogramImageRecipe | AgentEmojiImageRecipe | AgentPhotoImageRecipe;
-
-/** POST /v1/agents optional identity fields; omissions retain server defaults. */
-export interface AgentCreateProfileParams {
-  /** Server contract 3097dda: trimmed about text, 1 to 60 characters. */
-  about?: string;
-  token_name?: string;
-  /** Full lowercase developer handle, including .dev. */
-  handle?: string;
-  /** Display name; the server trims surrounding whitespace. */
-  first_name?: string;
-}
-/** A recipe is redraw metadata, not a renderer: supply its HTTPS snapshot URL. */
-export type AgentCreateParams = AgentCreateProfileParams & (
-  | { image_url?: string; image_recipe?: never }
-  | { image_url: string; image_recipe: AgentImageRecipe }
-);
-
-export interface AgentCreateResponse {
-  agent: ContactCardItem;
-  secret: string;
-  share_url: string;
-}

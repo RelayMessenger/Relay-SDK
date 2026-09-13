@@ -76,7 +76,7 @@ required_markers = [
     "contactRequests.create",
     "npx relaymessenger@staging",
     "auth login --with-token",
-    "Relay.createAgent",
+    "login --with-token",
     "agent.agents.delete",
     "relay.chats.messages.send",
     "relay.chats.markAsRead",
@@ -90,6 +90,7 @@ for marker in required_markers:
 # Construct retired terms so the validator does not reintroduce them into the
 # repository it scans.
 retired_terms = [
+    "Relay." + "createAgent(",
     "po" + "lling",
     "conversa" + "tions",
     "long" + " poll",

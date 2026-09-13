@@ -1,3 +1,4 @@
+import { installedConsoleFixture } from "../../../scripts/agent-cli-console-fixture.mjs";
 // Exercises the installed SDK and CLI program, never workspace imports.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -8,7 +9,7 @@ import { pathToFileURL } from "node:url";
 const [consumer, home] = process.argv.slice(2);
 const require = createRequire(join(consumer, "package.json"));
 const { default: Relay } = await import(pathToFileURL(require.resolve("@relaymessenger/sdk")));
-assert.equal(typeof Relay.createAgent, "function");
+assert.equal("createAgent" in Relay, false);
 assert.equal(typeof new Relay({ apiKey: "existing-test-key" }).agents.delete, "function");
 const { runCLI } = await import(pathToFileURL(join(consumer, "node_modules/relaymessenger/dist/program.js")));
 const token = "tarball-one-time-agent-credential";
@@ -25,15 +26,18 @@ const deps = {
   fetch: async (url, init) => {
     calls.push({ url: String(url), init });
     if (init.method === "POST") {
-      assert.equal(new Headers(init.headers).has("authorization"), false);
-      assert.equal(init.body, "{}");
+      assert.equal(new Headers(init.headers).get("authorization"), "Bearer rel_org_installedFixtureOnly");
+      assert.deepEqual(JSON.parse(init.body), { handle: "my_agent.dev", displayName: "My Agent", isPremiumHandle: false });
       return Response.json({ agent: card, secret: token, share_url: `https://go.test/@${card.handle}` }, { status: 201 });
     }
-    assert.equal(new Headers(init.headers).get("authorization"), `Bearer ${token}`);
+    assert.equal(new Headers(init.headers).get("authorization"), init.method === "DELETE" ? "Bearer rel_org_installedFixtureOnly" : `Bearer ${token}`);
     if (init.method === "DELETE") return deleteStatus === 204 ? new Response(null, { status: 204 }) : Response.json({ error: { message: "pending events" } }, { status: deleteStatus });
     return Response.json({ contact_cards: [card] });
   },
 };
+const consoleAuth = await installedConsoleFixture(consumer, deps.configContext, card);
+deps.consoleLogin = consoleAuth.login;
+deps.fetch = consoleAuth.wrap(deps.fetch);
 assert.equal(await runCLI(["agents", "create", "--json"], deps), 0);
 assert.equal(JSON.parse(output[0]).handle, card.handle);
 assert.equal(JSON.parse(output[0]).token, "stored");

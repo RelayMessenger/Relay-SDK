@@ -1,3 +1,4 @@
+import { consoleFixture } from "../../test/console-fixture.js";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,17 +21,19 @@ describe("Codex start", () => {
   const home = await mkdtemp(join(scratch, "connect-"));
     const stdout: string[] = [];
     const stderr: string[] = [];
+    const configContext = { home, platform: "darwin" as const, env: { PATH: "", RELAY_CONFIG_PATH: join(home, "config.json") } };
+    const console = consoleFixture(configContext, { handle: "codex_test.dev", first_name: "Codex", image_url: null });
     const code = await runCLI(["connect", "codex", "--new", "--yes", "--no-skill", "--json"], {
-      configContext: { home, platform: "darwin", env: { PATH: "", RELAY_CONFIG_PATH: join(home, "config.json") } },
+      configContext, consoleLogin: console.login,
       cwd: home,
       isInteractive: false,
       stdout: (value) => stdout.push(value),
       stderr: (value) => stderr.push(value),
-      fetch: vi.fn(async () => Response.json({
+      fetch: console.wrap(vi.fn(async () => Response.json({
         agent: { handle: "codex_test.dev", first_name: "Codex", last_name: null, image_url: null, kind: "agent", is_active: true },
         secret: `rel_token_${"C".repeat(43)}`,
         share_url: "https://relayapp.im/@codex_test.dev",
-      }, { status: 201 })),
+      }, { status: 201 }))),
       connect: {
         sniff: async () => [{ id: "codex", label: "Codex", found: true, ...(executable ? { executable } : {}) }],
         runCommand: vi.fn(async () => ({ code: 0, stdout: "", stderr: "" })),

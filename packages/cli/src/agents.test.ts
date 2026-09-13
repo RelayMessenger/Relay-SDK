@@ -12,7 +12,7 @@ const secret = "one-time-secret-not-for-output";
 // Creation targets the origin the version under test selects (see config.ts).
 const creationOrigin = defaultCreationApiURL();
 const card = { handle: "brave_cangoo.dev", first_name: "Brave Canada Goose", last_name: null, image_url: null, is_active: true, kind: "agent" as const };
-const response = { agent: card, secret, share_url: "https://go.test/@brave_cangoo.dev" };
+const response = { agent: card, token: secret, share_url: "https://staging.relayapp.im/@brave_cangoo.dev" };
 function setup(initial: RelayConfig = emptyConfig()) {
   let config = structuredClone(initial);
   const auth: ResolvedAuth = { profile: "default", apiURL: initial.profiles.default?.api_url ?? creationOrigin, token: secret, tokenSource: "profile", configPath: "/not-used" };
@@ -22,7 +22,7 @@ function setup(initial: RelayConfig = emptyConfig()) {
     read: vi.fn(async () => structuredClone(config)),
     preflight: vi.fn(async () => undefined),
     update: vi.fn(async (change) => { const next = structuredClone(config); const result = change(next); config = next; return result; }),
-    bootstrap: vi.fn(async () => response),
+    provision: vi.fn(async () => response),
     client: vi.fn(() => ({ contactCard: { retrieve }, agents: { delete: remove } }) as unknown as Relay),
     auth: vi.fn(async () => auth), env: {},
   };
@@ -47,16 +47,16 @@ describe("pure agent command handlers", () => {
     await expect(createAgent({ profile: "default" }, deps)).rejects.toThrow("exists");
     await expect(createAgent({ tokenName: "" }, deps)).rejects.toThrow("1 to 80 characters");
     await expect(createAgent({ tokenName: "label\ncontrol" }, deps)).rejects.toThrow("control characters");
-    expect(deps.bootstrap).not.toHaveBeenCalled();
+    expect(deps.provision).not.toHaveBeenCalled();
   });
   it("does not leak bootstrap or persistence errors or retry", async () => {
     const { deps } = setup();
-    vi.mocked(deps.bootstrap).mockRejectedValueOnce(new Error(secret));
+    vi.mocked(deps.provision).mockRejectedValueOnce(new Error(secret));
     await expect(createAgent({}, deps)).rejects.toThrow("may or may not have been created");
-    expect(deps.bootstrap).toHaveBeenCalledTimes(1);
+    expect(deps.provision).toHaveBeenCalledTimes(1);
     vi.mocked(deps.update).mockRejectedValueOnce(new Error(secret));
     await expect(createAgent({}, deps)).rejects.toThrow("could not be saved");
-    expect(deps.bootstrap).toHaveBeenCalledTimes(2);
+    expect(deps.provision).toHaveBeenCalledTimes(2);
   });
   it("uses saved credentials and origins, not one ENV override, for inventory", async () => {
     const config = emptyConfig();
@@ -104,9 +104,9 @@ describe("agent CLI program", () => {
   it("routes create/list/delete with JSON output and no secret", async () => {
     const { deps } = setup();
     const stdout: string[] = []; const stderr: string[] = [];
-    const options = { agents: deps, configContext: privateContext, stdout: (s: string) => stdout.push(s), stderr: (s: string) => stderr.push(s) };
+    const options = { consoleLogin: async () => ({ type: "organization_key" as const, organization_key: "rel_org_test", organization_id: "org_fixture", console_api_url: "https://console.staging.relayapp.im/api" }), agents: deps, configContext: privateContext, stdout: (s: string) => stdout.push(s), stderr: (s: string) => stderr.push(s) };
     expect(await runCLI(["--profile", "new-profile", "agents", "create", "--token-name", "Laptop", "--json"], options)).toBe(0);
-    expect(deps.bootstrap).toHaveBeenCalledWith({ token_name: "Laptop" }, { baseURL: creationOrigin, maxRetries: 0 });
+    expect(deps.provision).toHaveBeenCalledWith({ displayName: "My Agent" }, { apiURL: creationOrigin });
     expect(await runCLI(["agents", "list", "--json"], options)).toBe(0);
     expect(await runCLI(["--profile", "default", "agents", "delete", card.handle, "--json"], options)).toBe(0);
     expect(stdout.join("")).not.toContain(secret);
@@ -115,7 +115,7 @@ describe("agent CLI program", () => {
   });
   it("prints the public link and QR code, and never the token, in human mode", async () => {
     const { deps } = setup(); const stdout: string[] = [];
-    expect(await runCLI(["agents", "create"], { agents: deps, configContext: privateContext, stdout: (s) => stdout.push(s) })).toBe(0);
+    expect(await runCLI(["agents", "create"], { consoleLogin: async () => ({ type: "organization_key" as const, organization_key: "rel_org_test", organization_id: "org_fixture", console_api_url: "https://console.staging.relayapp.im/api" }), agents: deps, configContext: privateContext, stdout: (s) => stdout.push(s) })).toBe(0);
     expect(stdout.join("")).toContain(response.share_url);
     expect(stdout.join("")).not.toContain(secret);
     expect(stdout.length).toBeGreaterThan(1);
@@ -125,18 +125,18 @@ describe("agent CLI program", () => {
 it("reports safe rate-limit status/code without reflecting a server message", async () => {
   const { RelayAPIError } = await import("@relaymessenger/sdk");
   const { deps } = setup();
-  vi.mocked(deps.bootstrap).mockRejectedValue(new RelayAPIError(secret, { status: 429, code: 2008, retryAfter: 60 }));
+  vi.mocked(deps.provision).mockRejectedValue(new RelayAPIError(secret, { status: 429, code: 2008, retryAfter: 60 }));
   const error = await createAgent({}, deps).catch((error: Error) => error);
   expect(String(error)).toContain("Relay said: error 429, code 2008.");
   expect(String(error)).toContain("code 2008");
   expect(String(error)).toContain("Try again in 60 seconds.");
   expect(String(error)).not.toContain(secret);
-  expect(deps.bootstrap).toHaveBeenCalledOnce();
+  expect(deps.provision).toHaveBeenCalledOnce();
 });
 
 it("never reflects a newly issued credential even inside unexpected response metadata", async () => {
   const { deps } = setup();
-  vi.mocked(deps.bootstrap).mockResolvedValue({ ...response, agent: { ...card, first_name: secret }, share_url: `https://go.test/?unexpected=${secret}` });
+  vi.mocked(deps.provision).mockResolvedValue({ ...response, agent: { ...card, first_name: secret }, share_url: `https://go.test/?unexpected=${secret}` });
   const result = await createAgent({}, deps);
   expect(JSON.stringify(result)).not.toContain(secret);
   expect(result.handle).toBe(card.handle);
@@ -146,7 +146,7 @@ it("never reflects a newly issued credential even inside unexpected response met
 it("storage preflight rejection sends no creation request", async () => {
   const { deps } = setup(); vi.mocked(deps.preflight).mockRejectedValue(new Error("unwritable"));
   await expect(createAgent({}, deps)).rejects.toThrow("it did not create the agent");
-  expect(deps.bootstrap).not.toHaveBeenCalled(); expect(deps.update).not.toHaveBeenCalled();
+  expect(deps.provision).not.toHaveBeenCalled(); expect(deps.update).not.toHaveBeenCalled();
 });
 
 it("post-create storage failure reports assigned handle and actual local outcome, never the secret", async () => {
@@ -157,7 +157,7 @@ it("post-create storage failure reports assigned handle and actual local outcome
   second.deps.update = async (change) => { await write(change); throw new Error("final security verification failed"); };
   const saved = await createAgent({}, second.deps).catch((error: Error) => error.message);
   expect(saved).toContain(`@${card.handle}`); expect(saved).toContain("is in your Relay config file"); expect(saved).not.toContain(secret);
-  expect(second.deps.bootstrap).toHaveBeenCalledOnce();
+  expect(second.deps.provision).toHaveBeenCalledOnce();
 });
 
 

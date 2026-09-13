@@ -1,3 +1,4 @@
+import { consoleFixture } from "../test/console-fixture.js";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,14 +19,15 @@ async function fixture() {
   const output: string[] = [];
   const calls: string[] = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
-    const url = new URL(input instanceof Request ? input.url : String(input)); expect(url.origin).toBe(base);
+    const url = new URL(input instanceof Request ? input.url : String(input)); expect([base, "https://console.staging.relayapp.im"]).toContain(url.origin);
     calls.push(`${init?.method ?? "GET"} ${url.pathname}`);
-    if (init?.method === "POST" && url.pathname === "/v1/agents") return Response.json({ agent: card, secret: token, share_url: `https://staging.relayapp.im/@${card.handle}` }, { status: 201 });
+    if (init?.method === "POST" && url.pathname === "/api/orgs/org_fixture/agents") return Response.json({ agent: card, secret: token, share_url: `https://staging.relayapp.im/@${card.handle}` }, { status: 201 });
     expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
     return Response.json({ contact_cards: [card] });
   };
   const terminalSession = vi.fn(async (_options: TerminalSessionOptions) => exited);
-  const deps = { configContext, fetch, terminalSession, isInteractive: true, skillPresent: async () => true,
+  const console = consoleFixture(configContext, card);
+  const deps = { configContext, fetch: console.wrap(fetch), consoleLogin: console.login, terminalSession, isInteractive: true, skillPresent: async () => true,
     stdout: (s: string) => output.push(s), stderr: (s: string) => output.push(s),
   };
   return { home, configContext, deps, terminalSession, output, calls };
@@ -49,7 +51,7 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
     // The suite timeout does not extend vi.waitFor's separate one-second default.
     await vi.waitFor(() => expect(close).toBeDefined(), { timeout: process.platform === "win32" ? 90_000 : 1_000 }); expect(finished).toBe(false);
     close!(); expect(await pending).toBe(0);
-    expect(f.calls.filter((call) => call === "POST /v1/agents")).toHaveLength(1);
+    expect(f.calls.filter((call) => call === "POST /api/orgs/org_fixture/agents")).toHaveLength(1);
     expect(f.output.join("")).not.toMatch(/unrelated-env-token|(?:rel|rly)_live_[A-Za-z0-9]{43}/u);
   });
   it("draws the QR code once: the live view owns it when it opens, the create screen owns it otherwise", async () => {

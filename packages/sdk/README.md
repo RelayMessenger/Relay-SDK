@@ -33,33 +33,26 @@ for await (const chat of chats) {
 Chat pages expose `.chats`, message pages expose `.messages`, and both expose `.hasNextPage()` and
 `.getNextPage()`. `.data` remains an alias for generic consumers.
 
-## Bootstrap and delete a developer-managed agent
+## Provision agents in Relay Console
 
-```ts
-const created = await Relay.createAgent(
-  { token_name: "Relay CLI" },
-  { baseURL: "https://api.staging.relayapp.im" },
-);
-// Save created.secret in private credential storage; never log the response.
-const agent = new Relay({
-  apiKey: created.secret,
-  baseURL: "https://api.staging.relayapp.im",
-});
-await agent.agents.delete(created.agent.handle);
+Create agents through authenticated Relay Console, including the CLI:
+
+```sh
+relay login
+relay agents create
 ```
 
-Optional bootstrap fields are `handle` (full `.dev` handle), `first_name`, and
-`image_url`. `image_recipe` uses `AgentImageRecipe` and requires the rendered
-`image_url`; it is redraw metadata, not an image-rendering API. Omitted fields
-retain server defaults. An occupied custom handle returns a conflict without
-retrying or selecting a different handle.
+For automation, pipe an organization key into `relay login --with-token`, then
+use the same `relay agents create` command. The SDK uses an existing Agent
+Token; it does not register agents anonymously.
 
-`Relay.createAgent(body?, options?)` is unauthenticated and never retries an
-uncertain POST. It returns `AgentCreateResponse` (`agent: ContactCardItem`,
-`secret`, `share_url`). Options support a custom origin/fetch, timeout, headers,
-and cancellation signal. Ordinary `new Relay({ apiKey })` authentication remains
-required. Deletion requires HTTP 204 and is not automatically retried, so an
-uncertain response cannot masquerade as confirmed credential cleanup.
+Existing developer-managed agents retain authenticated deletion:
+
+```ts
+await relay.agents.delete("existing_agent.dev");
+```
+
+Deletion requires HTTP 204 and is not automatically retried.
 
 ## Send
 

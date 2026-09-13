@@ -10,7 +10,6 @@ export {
   WebhookEvents,
   WebhookSubscriptions,
   type RelayOptions,
-  type AgentCreateOptions,
 } from "./client.js";
 export {
   RelayAPIError,

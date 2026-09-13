@@ -21877,10 +21877,7 @@ var Transport = class {
       const timeoutSignal = AbortSignal.timeout(timeout);
       const signal = request.options?.signal ? AbortSignal.any([request.options.signal, timeoutSignal]) : timeoutSignal;
       const headers = new Headers(request.options?.headers);
-      if (this.#apiKey)
-        headers.set("authorization", `Bearer ${this.#apiKey}`);
-      else
-        headers.delete("authorization");
+      headers.set("authorization", `Bearer ${this.#apiKey}`);
       headers.set("accept", "application/json");
       if (request.body !== void 0)
         headers.set("content-type", "application/json");
@@ -22325,17 +22322,6 @@ var Agents = class {
   }
 };
 var Relay = class {
-  /** Bootstrap a new identity. The one-time secret is never retried/replayed. */
-  static createAgent(body = {}, options = {}) {
-    const { apiKey: _ignored, ...transportOptions } = options;
-    return new Transport(transportOptions).request({
-      method: "POST",
-      path: "/v1/agents",
-      body,
-      options,
-      expectedStatus: 201
-    });
-  }
   agents;
   baseURL;
   chats;

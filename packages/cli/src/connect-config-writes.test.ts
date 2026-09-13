@@ -1,3 +1,4 @@
+import { consoleFixture } from "../test/console-fixture.js";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,12 +35,14 @@ async function connect(agent: "codex" | "opencode", args: string[], executable: 
   const home = await mkdtemp(join(scratch, "connect-"));
   const stderr: string[] = [];
   const configContext = { env: { RELAY_CONFIG_PATH: join(home, "config.json"), PATH: "" }, home, platform: "win32" as const };
+  const console = consoleFixture(configContext, card);
+  if (args.includes("--new")) { await console.login(); vi.mocked(inspectWindowsAcl).mockClear(); }
   const code = await runCLI(["connect", agent, ...args, "--yes", "--no-skill", "--json"], {
-    configContext, cwd: home, isInteractive: false,
+    configContext, consoleLogin: async () => console.session, cwd: home, isInteractive: false,
     stdout: () => undefined, stderr: (value) => stderr.push(value),
-    fetch: vi.fn(async (_input: string | URL | Request, init?: RequestInit) => init?.method === "POST"
+    fetch: console.wrap(vi.fn(async (_input: string | URL | Request, init?: RequestInit) => init?.method === "POST"
       ? Response.json({ agent: card, secret: token, share_url: `https://relayapp.im/@${card.handle}` }, { status: 201 })
-      : Response.json({ contact_cards: [card] })),
+      : Response.json({ contact_cards: [card] }))),
     connect: {
       sniff: async () => [{ id: agent, label: agent, found: true, ...(executable ? { executable } : {}) }],
       runCommand: vi.fn(async () => ({ code: 0, stdout: "", stderr: "" })),
@@ -63,7 +66,7 @@ describe("connect writes the config once, with the Windows branch forced", () =>
     // (config-windows.test.ts, "protects the empty temp before any secret bytes and
     // inspects final ACL"). A created agent's preflight protects a temp too, so the
     // temp count is not the write count; the final inspection is.
-    expect(vi.mocked(inspectWindowsAcl).mock.calls.filter(([path]) => path === configContext.env.RELAY_CONFIG_PATH)).toHaveLength(1);
+    expect(vi.mocked(inspectWindowsAcl).mock.calls.filter(([path]) => path === configContext.env.RELAY_CONFIG_PATH)).toHaveLength(args.includes("--new") ? 3 : 1);
     const saved = await readConfig(configContext);
     expect(saved.defaultAgent).toBe(card.handle);
     expect(saved.profiles[card.handle]?.agent_token).toBe(token);

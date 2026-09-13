@@ -1,7 +1,9 @@
 import { describeFailure } from "./errors.js";
 import { safeMetadata } from "./output.js";
+import { createConsoleAgent, type ConsoleAgentCreateInput, type ConsoleAgentCreateResult } from "./console-auth.js";
+import { savedAgentShareURL } from "./agent-session.js";
 import { CliError } from "./error-codes.js";
-import Relay, { RelayAPIError, type AgentCreateParams, type AgentImageRecipe, type ContactCardItem } from "@relaymessenger/sdk";
+import Relay, { RelayAPIError, type AgentImageRecipe, type ContactCardItem } from "@relaymessenger/sdk";
 import type { ConfigContext, RelayConfig, ResolvedAuth } from "./config.js";
 import { defaultCreationApiURL, mutateConfig, preflightConfigDestination, readConfig, resolveAuth, validateApiURL, validateProfileName, validateToken } from "./config.js";
 
@@ -10,7 +12,7 @@ export interface AgentDependencies {
   read: () => Promise<RelayConfig>;
   preflight: () => Promise<void>;
   update: <T>(change: (config: RelayConfig) => T) => Promise<T>;
-  bootstrap: typeof Relay.createAgent;
+  provision: (input: ConsoleAgentCreateInput, options: { apiURL: string }) => Promise<ConsoleAgentCreateResult>;
   client: (token: string, apiURL: string) => Pick<Relay, "contactCard" | "agents">;
   auth: (profile?: string) => Promise<ResolvedAuth>;
   deleteConsole?: (handle: string, apiURL: string, agentToken: string) => Promise<boolean>;
@@ -21,7 +23,7 @@ export const agentDependencies = (context: ConfigContext = {}, fetch?: typeof gl
   read: () => readConfig(context),
   preflight: () => preflightConfigDestination(context),
   update: (change) => mutateConfig(change, context),
-  bootstrap: (body, options) => Relay.createAgent(body, { ...options, ...(fetch ? { fetch } : {}) }),
+  provision: (input, { apiURL }) => createConsoleAgent({ context, apiURL, ...(fetch ? { fetch } : {}) }, input),
   client: (apiKey, baseURL) => new Relay({ apiKey, baseURL, ...(fetch ? { fetch } : {}) }),
   auth: (profile) => resolveAuth(profile, context),
   env: context.env ?? process.env,
@@ -35,7 +37,7 @@ export const agentDependencies = (context: ConfigContext = {}, fetch?: typeof gl
  * Whitelisted fields only: never serialize an SDK response containing the secret.
  */
 export interface AgentRecord { handle: string; display_name: string; image_url: string | null }
-export const agentRecord = (card: ContactCardItem): AgentRecord => ({
+export const agentRecord = (card: Pick<ContactCardItem, "handle" | "first_name" | "image_url">): AgentRecord => ({
   handle: card.handle, display_name: card.first_name, image_url: card.image_url,
 });
 
@@ -99,7 +101,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
   }
   const apiURL = validateApiURL(input.apiURL ?? deps.env.RELAY_API_URL
     ?? defaultCreationApiURL());
-  if (input.handle !== undefined) validateHandle(input.handle);
+  if (input.handle !== undefined) validateHandle(input.handle.endsWith(".dev") ? input.handle : `${input.handle}.dev`);
   const firstName = input.firstName === undefined ? undefined : validateFirstName(input.firstName);
   if (input.imageURL !== undefined) {
     let image: URL;
@@ -107,21 +109,16 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     if (image.protocol !== "https:" || image.username || image.password) throw new Error("Image URL must start with https:// and must not contain a user name or password.");
   }
   if (input.imageRecipe !== undefined && input.imageURL === undefined) throw new Error("An image recipe also needs the finished picture. Pass --image or --image-url with it; this command does not draw pictures.");
-  const picture = input.imageRecipe === undefined
-    ? (input.imageURL === undefined ? {} : { image_url: input.imageURL })
-    : { image_url: input.imageURL!, image_recipe: input.imageRecipe };
-  const body: AgentCreateParams = {
+  const body: ConsoleAgentCreateInput = {
+    displayName: firstName ?? "My Agent",
     ...(input.about === undefined ? {} : { about: input.about.trim() }),
-    ...(input.tokenName === undefined ? {} : { token_name: input.tokenName }),
-    ...(input.handle === undefined ? {} : { handle: input.handle }),
-    ...(firstName === undefined ? {} : { first_name: firstName }),
-    ...picture,
+    ...(input.handle === undefined ? {} : { handle: input.handle.replace(/\.dev$/u, "") }),
   };
   if (Buffer.byteLength(JSON.stringify(body), "utf8") > 8192) throw new Error("These agent details are too long. Shorten the name, the handle or the picture address.");
   try { await deps.preflight(); } catch { throw new Error("Relay could not prepare a private file to save the token in, so it did not create the agent. Check the permissions on your Relay config folder."); }
   let result;
   try {
-    result = await deps.bootstrap(body, { baseURL: apiURL, maxRetries: 0 });
+    result = await deps.provision(body, { apiURL });
   } catch (error) {
     // The error body from Relay may hold a secret that is not yet in the redaction set.
     const rejected = error instanceof RelayAPIError && error.status !== undefined
@@ -132,9 +129,9 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     throw safeAPIFailure(message, error);
   }
   try {
-    const token = validateToken(result.secret);
+    const token = validateToken(result.token);
     const profile = await deps.update((config) => {
-      const base = validateProfileName(input.profile ?? result.agent.handle);
+      const base = validateProfileName(input.profile ?? result.agent.handle.slice(0, 64));
       let profile = base;
       if (input.profile && Object.hasOwn(config.profiles, profile)) throw new Error("Profile already exists.");
       for (let suffix = 2; Object.hasOwn(config.profiles, profile); suffix++) {
@@ -144,15 +141,15 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
       if (input.makeDefault) config.defaultAgent = profile;
       return profile;
     });
-    return safeMetadata({ profile, ...agentRecord(result.agent), share_url: result.share_url, api_url: apiURL, token: "stored" as const }, [token]);
+    return safeMetadata({ profile, ...agentRecord(result.agent), share_url: savedAgentShareURL(apiURL, result.agent.handle), api_url: apiURL, token: "stored" as const }, [token]);
   } catch {
     const rawHandle = typeof result.agent?.handle === "string" && /^[a-z][a-z0-9_]{2,31}\.dev$/u.test(result.agent.handle) ? result.agent.handle : "(unavailable)";
-    const assigned = safeMetadata(rawHandle, typeof result.secret === "string" ? [result.secret] : []);
+    const assigned = safeMetadata(rawHandle, typeof result.token === "string" ? [result.token] : []);
     let outcome = "Relay could not check whether its token was saved on this computer";
     let present = false;
     try {
       const saved = await deps.read();
-      present = typeof result.secret === "string" && Object.values(saved.profiles).some((profile) => profile.agent_token === result.secret && validateApiURL(profile.api_url ?? defaultCreationApiURL()) === apiURL);
+      present = typeof result.token === "string" && Object.values(saved.profiles).some((profile) => profile.agent_token === result.token && validateApiURL(profile.api_url ?? defaultCreationApiURL()) === apiURL);
       outcome = present ? "its token is in your Relay config file, but Relay could not confirm the file is private" : "its token could not be saved";
     } catch { /* The outcome remains explicitly unverified. */ }
     throw new Error(`Agent @${assigned} was created, but ${outcome}. ${present ? "Relay did not try again. Check the permissions on your Relay config file before you continue." : "Relay did not try again, and it cannot get that token back. Delete this agent and create a new one."}`);

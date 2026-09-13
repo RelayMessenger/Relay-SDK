@@ -107,11 +107,7 @@ try {
   ]);
   assert.doesNotMatch(packedTypes, /\bavatar_url\b/u);
   assert.doesNotMatch(packedTypes, /\btagline\b/u);
-  assert.deepEqual(interfaceFields("AgentCreateProfileParams"), ["about", "token_name", "handle", "first_name"]);
-  assert.match(packedTypes, /export type AgentCreateParams = AgentCreateProfileParams/);
-  assert.deepEqual(interfaceFields("AgentImageBackground"), ["linearGradient"]);
-  assert.match(packedTypes, /export type AgentImageRecipe = AgentMonogramImageRecipe \| AgentEmojiImageRecipe \| AgentPhotoImageRecipe/);
-  assert.deepEqual(interfaceFields("AgentCreateResponse"), ["agent", "secret", "share_url"]);
+  assert.doesNotMatch(packedTypes, /AgentCreate(?:ProfileParams|Params|Response)/);
   assert.doesNotMatch(packedTypes, /\bContactRequestCreate(?:Params|Response)\b/u);
   assert.deepEqual(interfaceFields("MessageContent"), [
     "parts",
@@ -136,7 +132,7 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 35);
+      assert.equal(RELAY_V1_OPERATIONS.length, 34);
       assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 16);
       const allowedOperations = new Set([
         "POST /v1/chats",
@@ -172,7 +168,6 @@ try {
         "GET /v1/contact_card",
         "POST /v1/contact_card",
         "PATCH /v1/contact_card",
-        "POST /v1/agents",
         "DELETE /v1/agents/{handle}",
       ]);
       assert.deepEqual(
@@ -208,7 +203,7 @@ try {
         Object.getOwnPropertyNames(Object.getPrototypeOf(value))
           .filter((name) => name !== "constructor")
           .sort();
-      assert.equal(typeof Relay.createAgent, "function");
+      assert.equal("createAgent" in Relay, false);
       assert.deepEqual(methods(client.agents), ["delete"]);
       assert.deepEqual(methods(client.chats), [
         "create",

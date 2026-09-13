@@ -17,7 +17,7 @@ security:
 tags:
   - name: Agents
     x-page-title: Agents
-    description: Create and delete developer-managed agents.
+    description: Delete existing developer-managed agents.
   - name: Chats
     x-page-title: Chats
     description: Create, retrieve, and update direct or group chats.
@@ -47,83 +47,6 @@ tags:
   - name: Contacts
     description: Request a user Contact.
 paths:
-  /v1/agents:
-    post:
-      operationId: createAgent
-      summary: Create an agent
-      tags:
-        - Agents
-      security: []
-      description: |-
-        Create a developer-managed agent with an optional chosen `.dev` Handle,
-        display name, and image. Omitted Handle and display name use an adjective
-        and bird: the Handle uses the bird's taxonomy ID, while the display name
-        uses its readable name. A color can resolve a generated-name collision.
-        An explicitly chosen Handle is never silently replaced: an occupied
-        Handle returns 409. Omitted image uses a handle-deterministic monogram recipe and its rendered PNG.
-
-        Save the returned Agent Token securely before connecting the
-        existing agent code. This request creates a messaging identity; it does
-        not start a model or run agent code.
-
-        This bootstrap request does not require a bearer token. It is limited
-        to 10 creations per caller address per day. On 429, respect Retry-After.
-        Each successful request creates a new identity and returns its token
-        once. Do not automatically retry an uncertain creation response.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateAgentRequest"
-            example:
-              token_name: Relay CLI
-      responses:
-        "201":
-          description: Agent created; save the returned Agent Token.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                const: no-store
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CreateAgentResponse"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "409":
-          description: The explicitly chosen Handle is already in use.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "413":
-          description: Request body exceeds 8192 bytes.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "429":
-          description: Agent creation limit reached.
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying.
-              schema:
-                type: integer
-                minimum: 1
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-        "503":
-          description: An available Agent Handle could not be allocated.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
   /v1/agents/{handle}:
     delete:
       operationId: deleteAgent
@@ -2084,51 +2007,6 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/ContactAddedEvent"
-    CreateAgentRequest:
-      type: object
-      additionalProperties: false
-      dependentRequired:
-        image_recipe:
-          - image_url
-      properties:
-        about:
-          type: string
-          minLength: 1
-          maxLength: 60
-          description: About text. Surrounding whitespace is trimmed.
-        token_name:
-          type: string
-          minLength: 1
-          maxLength: 80
-          pattern: '^[^\u0000-\u001f\u007f]+$'
-          default: Relay CLI
-          description: A label for the issued token, not an agent name or owner identity.
-        handle:
-          type: string
-          pattern: '^[a-z][a-z0-9_]{2,31}\.dev$'
-          description: >-
-            An available developer Handle, including .dev. Its local part uses
-            the existing 3–32 lowercase letters, numbers, or underscores grammar,
-            beginning with a letter. Omit for an assigned adjective/bird-ID Handle.
-        first_name:
-          type: string
-          minLength: 1
-          maxLength: 30
-          pattern: '^[^\u0000-\u001f\u007f]+$'
-          description: Display name. Surrounding whitespace is trimmed. Omit for an assigned adjective/bird name.
-        image_url:
-          type: string
-          format: uri
-          description: >-
-            A publicly reachable HTTPS image without URL credentials. Relay uses
-            its existing image ingestion and permanent-image storage. Omit for
-            a handle-deterministic monogram recipe and its rendered PNG.
-        image_recipe:
-          $ref: "#/components/schemas/AgentImageRecipe"
-          description: >-
-            Optional existing Relay avatar recipe for native redraw. Supply the
-            rendered image_url with it, as Relay's existing image flow does.
-            A recipe alone is not an image-rendering service.
     AgentImageRecipe:
       oneOf:
         - $ref: "#/components/schemas/AgentMonogramImageRecipe"
@@ -2213,30 +2091,6 @@ components:
             image:
               type: object
               additionalProperties: false
-    CreateAgentResponse:
-      type: object
-      additionalProperties: false
-      required:
-        - agent
-        - secret
-        - share_url
-      properties:
-        agent:
-          allOf:
-            - $ref: "#/components/schemas/ContactCardItem"
-            - type: object
-              properties:
-                kind:
-                  const: agent
-        secret:
-          type: string
-          pattern: '^rel_token_[A-Za-z0-9]{43}$'
-          description: The Agent Token, returned only in this creation response.
-          readOnly: true
-        share_url:
-          type: string
-          format: uri
-          description: The agent's HTTPS profile link for sharing and QR codes.
     ContactCardItem:
       type: object
       required:
