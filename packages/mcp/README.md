@@ -1,125 +1,110 @@
 # Relay MCP
 
-`@relaymessenger/mcp` is a local MCP v2 stdio server for current Relay v1
-Agent tools. It uses `@modelcontextprotocol/server@2` and delegates every
-Relay request and response type to `@relaymessenger/sdk`.
+Local MCP v2 stdio server with exactly two tools:
 
-Source is maintained in
-[`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/staging/packages/mcp)
-under `packages/mcp`.
+| Tool | Use |
+| --- | --- |
+| `search_docs` | Find Relay SDK methods, signatures, parameters, and contract descriptions in the packaged documentation. |
+| `execute` | Run TypeScript or JavaScript against the configured Agent's SDK client. |
 
-## Transport and security status
+There is no `talk` tool and no per-operation `relay_*` tool list.
 
-**Implemented:** local process-spawned stdio, including MCP v2 modern-era
-negotiation and legacy client compatibility.
+## Start
 
-**Not implemented:** remote HTTP transport and remote OAuth. The package does
-not open a port, publish a web address, or claim to sign anyone in remotely.
-Those stay out until Relay has a secure authorization, audience, scope,
-session, origin, revocation, and deployment design with hosted tests.
-
-The stdio host is the security boundary. Only configure this server in a
-trusted local MCP client.
-
-## Install and configure
+Requires Node.js 22.22.3 or newer.
 
 ```sh
-npm install --global @relaymessenger/mcp
-relay-mcp --version
+npx --yes @relaymessenger/mcp@staging --api-url https://api.staging.relayapp.im
 ```
 
-The server resolves an Agent Token locally; it never exposes a token as an MCP
-tool argument.
+Agent authentication is unchanged: `RELAY_AGENT_TOKEN`, or the selected Relay
+CLI profile. Select a profile with `--profile`. The API origin resolves from
+`--api-url`, `RELAY_API_URL`, the selected profile, then the package environment:
+`-staging` prereleases use the staging API; plain releases use production.
+An explicit origin is preserved.
+Do not put a token in a tool argument or submitted code. Configure it in the
+server's environment or private Relay profile instead.
 
-Resolution order:
+The server remains local stdio. It does not add HTTP, OAuth, a hosted executor,
+or a new authentication flow.
 
-1. `RELAY_AGENT_TOKEN`, `RELAY_API_URL`, and `RELAY_PROFILE`;
-2. `${XDG_CONFIG_HOME:-~/.config}/relay/config.json`, shared with
-   `relaymessenger`;
-3. `https://api.relayapp.im` as the default API URL.
+## `search_docs`
 
-Example client configuration:
+```json
+{"query":"send message idempotency","language":"typescript","detail":"default"}
+```
+
+- `query` is required.
+- `language`: `typescript` (default), `javascript`, or `http`.
+- `detail`: `default` or `verbose`.
+
+Search is local and does not need a token. Its method index is generated from
+`packages/sdk/src/client.ts`, SDK types, and the canonical
+`contracts/relay-v1-openapi.yaml`. It returns the source contract hash. It does
+not proxy the hosted documentation MCP or invent methods from a search result.
+
+## `execute`
 
 ```json
 {
-  "mcpServers": {
-    "relay": {
-      "command": "relay-mcp",
-      "env": {
-        "RELAY_PROFILE": "default"
-      }
-    }
-  }
+  "code":"async function run(client) { return await client.contactCard.retrieve(); }",
+  "intent":"Read this agent's contact card"
 }
 ```
 
-For automation, inject `RELAY_AGENT_TOKEN` from the host's secret manager.
-Do not put the token in MCP config checked into source control.
+Define a top-level `run(client)` function. `intent` is optional and does not
+change execution. TypeScript syntax is transpiled; the packaged SDK signatures
+are available through `search_docs`.
 
-Optional non-secret process flags:
+The result includes `result` and `logs`. `console.log`, `info`, `warn`, `error`,
+and `debug` are captured. SDK and execution failures return `isError: true`.
+Each call starts fresh; variables do not persist between calls.
 
-```sh
-relay-mcp --profile staging
-relay-mcp --profile local --api-url http://127.0.0.1:8787
-```
+The supplied client exposes the SDK's initialized-client HTTP methods. SDK
+pagination supports `hasNextPage()`, `getNextPage()`, and async iteration over
+an awaited page. Static `Relay.createAgent` is setup documentation, not an
+initialized-client method. WebSocket callbacks and raw attachment upload
+streams are not exposed by this JSON call bridge.
 
-There is deliberately no token flag.
+Execution uses a separate QuickJS WebAssembly runtime, not Node's `vm` or host
+`eval`. Submitted code cannot access the host filesystem, process, environment,
+imports, shell, or arbitrary `fetch`. Only calls to the generated SDK method
+list cross the boundary. The actual SDK client and its Agent Token stay on the
+host. API arguments and results cross as JSON; known local tokens are redacted
+from returned values, logs, and errors.
 
-## Tools
-
-The server exposes explicit tools rather than a generic HTTP or operation
-proxy:
-
-| Capability | Tools |
-| --- | --- |
-| Read | `relay_list_chats`, `relay_get_chat`, `relay_list_messages`, `relay_get_message`, `relay_get_message_thread` |
-| Send | `relay_send_message`, `relay_send_message_to_chat` |
-| Reactions | `relay_react_to_message` |
-| Typing/read state | `relay_start_typing`, `relay_stop_typing`, `relay_mark_chat_read` |
-| Contact Card | `relay_get_contact_card`, `relay_set_contact_card`, `relay_update_contact_card`, `relay_share_contact_card` |
-
-Message-send tools require a caller-supplied idempotency key. Tool schemas do
-not contain Agent Tokens, raw authorization headers, URLs for arbitrary Relay
-routes, or copied OpenAPI response definitions.
-
-Relay Chats contain at most one human user and one or more agents; agent-to-agent
-Chats are also supported. Agents and users have the same generic Chat API
-permissions. Creating or reusing a user-containing Chat requires every agent
-to be that user's added, unblocked Contact, including an agent sender. Participant
-additions check the new target and any acting agent; an agent removing others
-must remain an added, unblocked Contact. Self-leave keeps its existing rules.
-This is admission eligibility, not a new membership-history or un-add revocation
-lifecycle: removing a Contact does not imply removal from all groups. Known-Chat
-sends retain existing membership and messaging rules. Contacts eligibility does
-not require conversational approval or company-policy tables.
-Agent-only messaging keeps its existing behavior, with no new per-agent
-mutual-Add requirement. Chats allow at most 7 total participants including the
-sender; `relay_send_message` accepts at most 6 `recipients`.
-
-Contact Card tools
-configure and share the authenticated agent's card. There is no add request:
-an agent's first Message to a user who never wrote to it, or accepted it,
-waits as a message request until the user accepts it, and the agent learns
-the answer from the `contact.added` event. These are not human contact sharing or invitations:
-the server exposes no phone address-book, mutual-contact, human discovery, or
-human invite-link tools.
-
-## Errors and secrets
-
-Tool failures return MCP error results with sanitized text. Environment and
-locally configured Agent Tokens are redacted from tool errors and stderr.
-Successful SDK objects are returned as both JSON text and structured content.
+Calls are limited to 30 seconds, 64 MiB of guest memory, and 1 MiB of accumulated
+SDK/output text. Outstanding SDK requests receive cancellation when a call
+ends. These limits do not undo a request that the API has already accepted.
+Always await SDK calls and reuse a stable idempotency key for the same logical
+message send. `execute` is not read-only: submitted SDK calls can change the
+configured account.
 
 ## Development
 
-All Linux execution happens in a fresh Daytona sandbox:
+From the monorepo root, in Daytona for Linux:
 
 ```sh
 npm ci
-npm run validate
+npm run build --workspace @relaymessenger/sdk
+npm run docs:generate --workspace @relaymessenger/mcp
+npm run validate:mcp
 ```
 
-Validation includes type checking, unit and negative tests, the pinned SDK
-contract hash, an MCP v2 modern protocol spawn test, MCP Inspector v2
-`tools/list --strict`, package packing, isolated tarball installation, and an
-installed-bin protocol test.
+`docs:check` proves the packaged method index still matches canonical source.
+The protocol, Inspector, and installed-tarball tests require the exact two-tool
+list and exercise both tools. Unit tests cover real SDK dispatch through
+fixtures, pagination, auth errors, token redaction, guest isolation, and limits.
+
+## Reference semantics
+
+The two-tool workflow and `async function run(client)` shape follow Linq's
+primary MCP source at `linq-team/linq-node` commit
+`9f7ada2cf20fde604855dd69eef7d4df5c2f5b48`:
+`packages/mcp-server/src/docs-search-tool.ts`, `code-tool.ts`, and
+`local-docs-search.ts`. Linq's implementation uses Deno; Relay uses QuickJS and
+states its narrower JSON/HTTP boundary above.
+
+Photon's `photon-hq/mcp` source at
+`61e3f2a9814b5a2cbe75f843d1cd9a67ae29ac90` documents a different, 67-tool surface.
+Its per-operation list and additional iMessage powers are not copied here.
