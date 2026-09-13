@@ -23,6 +23,7 @@ const ownerHandle: ChatHandle = {
   image_url: null,
   about: null,
   verified: false,
+  is_contact: true,
 };
 
 function facts(
@@ -82,6 +83,7 @@ function unmentionedGroupEvent(): RelayWebhookEvent {
         image_url: null,
         about: null,
         verified: false,
+        is_contact: true,
       },
       parts: [
         {

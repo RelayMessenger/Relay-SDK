@@ -36,9 +36,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "7588db1e0cfbce423fd34505b92198b946543aa7",
+    commit: "935a558ee806aeb0d231460a6bd79dc54786ba96",
     path: "contracts/developer/openapi.yaml",
-    sha256: "049c4e5d9606af2781601e510952845d85c4ab5aeaaf00272566e3ba1d1b3c69",
+    sha256: "787e5dd583a2ba382931fe6799ecc7a421d1a4f94dce11a890fc6a1eeca4ea97",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -100,11 +100,11 @@ assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 35);
 assert.equal(manifest.path_count, 22);
 assert.equal(manifest.source_path_count, 23);
-assert.equal(manifest.source_schema_count, 114);
-assert.equal(manifest.callback_count, 17);
+assert.equal(manifest.source_schema_count, 112);
+assert.equal(manifest.callback_count, 16);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 22);
 assert.equal(operationJSON.length, 35);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 17);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 16);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
@@ -388,7 +388,7 @@ const validateOpenAPI = () => {
   );
   assert.equal(
     Object.keys(document.components.schemas).length,
-    115,
+    113,
   );
   const excluded = new Set(
     sourceOnlyOperations.map((operation) =>
@@ -493,6 +493,7 @@ const validateOpenAPI = () => {
       "image_url",
       "about",
       "verified",
+      "is_contact",
     ],
   );
   assert.deepEqual(
@@ -509,7 +510,7 @@ const validateOpenAPI = () => {
       "image_url",
       "about",
       "verified",
-      "is_removable",
+      "is_contact",
     ],
   );
   assert.equal(
@@ -553,8 +554,6 @@ const validateOpenAPI = () => {
     document.components.schemas.ChatHandle.properties.verified.type,
     "boolean",
   );
-  assert.equal(document.components.schemas.ChatHandle.properties.is_removable.type, "boolean");
-  assert.match(declaredTypes, /is_removable\?: boolean;/u);
   for (const privateField of [
     "greeting_message",
     "is_default",
@@ -571,12 +570,6 @@ const validateOpenAPI = () => {
   assert.equal("/v1/contact_requests" in document.paths, false);
   assert.equal("CreateContactRequest" in document.components.schemas, false);
   assert.equal("CreateContactRequestResult" in document.components.schemas, false);
-  assert.deepEqual(
-    document.components.schemas.Chat.properties.request_state.enum,
-    ["pending", "accepted", "deleted"],
-  );
-  assert.equal(document.components.schemas.Chat.required.includes("request_state"), false);
-  assert.match(declaredTypes, /request_state\?: ChatRequestState;/u);
   for (const path of [
     "/v1/chats",
     "/v1/messages",
@@ -609,19 +602,6 @@ const validateOpenAPI = () => {
     document.components.schemas.MessageContent.properties
       .idempotency_key.maxLength,
     255,
-  );
-  assert.deepEqual(
-    document.components.schemas.ChatRequestUpdatedEvent.required,
-    ["chat_id", "state", "updated_at"],
-  );
-  assert.deepEqual(
-    document.components.schemas.ChatRequestUpdatedEvent.properties.state.enum,
-    ["accepted", "deleted"],
-  );
-  assert.equal(
-    document["x-relay-webhooks"]["chat.request.updated.v2026-08-30"].post
-      .requestBody.content["application/json"].schema.$ref,
-    "#/components/schemas/ChatRequestUpdatedWebhook",
   );
   assert.deepEqual(
     document.components.schemas.ContactAddedEvent.required,

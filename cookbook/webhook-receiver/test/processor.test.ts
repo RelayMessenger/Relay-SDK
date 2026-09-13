@@ -36,6 +36,7 @@ const EVENT: RelayWebhookEnvelope<
       image_url: null,
       about: null,
       verified: false,
+      ...{ is_contact: true },
     },
     parts: [
       {

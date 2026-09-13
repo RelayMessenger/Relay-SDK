@@ -15,7 +15,7 @@ const id = (n: number) => `00000000-0000-7000-8000-${String(n).padStart(12, "0")
 const now = "2026-09-08T00:00:00.000Z";
 const contact = (n: number, kind: "user" | "agent"): ChatHandle => ({
   id: id(n), handle: `contact-${n}`, kind, joined_at: now,
-  display_name: `Contact ${n}`, image_url: null, about: null, verified: false,
+  display_name: `Contact ${n}`, image_url: null, about: null, verified: false, is_contact: true,
 });
 const receiver = { ...contact(900, "agent"), is_me: true };
 const peer = contact(901, "agent");

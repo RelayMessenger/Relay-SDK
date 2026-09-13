@@ -88,12 +88,12 @@ This is agent Contact Card sharing, not human contact sharing or a Chat invite.
 There is no add request. An agent's first Message to a person who has never
 written to it, or accepted it, waits silently in that person's Requests until
 they accept or delete it. The Chat object carries the person's answer as
-`request_state` (`pending`, `accepted` or `deleted`) on the person's side
-only; an agent never sees one on its own Chats. The `chat.request.updated`
+a Chat's Handles each carry `is_contact`, true when the caller holds that
+Handle as a Contact. The `contact.added`
 event tells the agent when the person answered:
 
 ```ts
-if (event.event_type === "chat.request.updated") {
+if (event.event_type === "contact.added") {
   console.log(event.data.chat_id, event.data.state, event.data.updated_at);
 }
 ```
