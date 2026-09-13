@@ -2,7 +2,7 @@ import { describeFailure } from "./errors.js";
 import { safeMetadata } from "./output.js";
 import Relay, { RelayAPIError, type AgentCreateParams, type AgentImageRecipe, type ContactCardItem } from "@relaymessenger/sdk";
 import type { ConfigContext, RelayConfig, ResolvedAuth } from "./config.js";
-import { DEFAULT_API_URL, defaultCreationApiURL, mutateConfig, preflightConfigDestination, readConfig, resolveAuth, validateApiURL, validateProfileName, validateToken } from "./config.js";
+import { defaultCreationApiURL, mutateConfig, preflightConfigDestination, readConfig, resolveAuth, validateApiURL, validateProfileName, validateToken } from "./config.js";
 
 /** Injected SDK and persistence boundaries keep command logic independently testable. */
 export interface AgentDependencies {
@@ -149,7 +149,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     let present = false;
     try {
       const saved = await deps.read();
-      present = typeof result.secret === "string" && Object.values(saved.profiles).some((profile) => profile.agent_token === result.secret && validateApiURL(profile.api_url ?? DEFAULT_API_URL) === apiURL);
+      present = typeof result.secret === "string" && Object.values(saved.profiles).some((profile) => profile.agent_token === result.secret && validateApiURL(profile.api_url ?? defaultCreationApiURL()) === apiURL);
       outcome = present ? "its token is in your Relay config file, but Relay could not confirm the file is private" : "its token could not be saved";
     } catch { /* The outcome remains explicitly unverified. */ }
     throw new Error(`Agent @${assigned} was created, but ${outcome}. ${present ? "Relay did not try again. Check the permissions on your Relay config file before you continue." : "Relay did not try again, and it cannot get that token back. Delete this agent and create a new one."}`);
@@ -160,7 +160,7 @@ export async function listAgents(deps: AgentDependencies, onFailure?: (error: Er
   const config = await deps.read();
   const agents = [];
   for (const [profile, saved] of Object.entries(config.profiles)) {
-    const apiURL = validateApiURL(saved.api_url ?? DEFAULT_API_URL);
+    const apiURL = validateApiURL(saved.api_url ?? defaultCreationApiURL());
     if (!saved.agent_token) continue;
     try {
       // Deliberately not resolveAuth: a token in the environment must not stand in for every profile.
@@ -190,7 +190,7 @@ export async function selectAgentAuth(handle: string, profile: string | undefine
   let unavailable = false;
   for (const [name, saved] of Object.entries(config.profiles)) {
     if (!saved.agent_token) continue;
-    const apiURL = validateApiURL(saved.api_url ?? DEFAULT_API_URL);
+    const apiURL = validateApiURL(saved.api_url ?? defaultCreationApiURL());
     if (requestedOrigin !== undefined && apiURL !== requestedOrigin) continue;
     try {
       const cards = await deps.client(saved.agent_token, apiURL).contactCard.retrieve();
@@ -220,7 +220,7 @@ export async function deleteAgent(handle: string, profile: string | undefined, d
     removed = await deps.update((config) => {
       const saved = config.profiles[auth.profile];
       // A token from the environment may have nothing to do with the profile's saved token.
-      if (saved?.agent_token === auth.token && validateApiURL(saved.api_url ?? DEFAULT_API_URL) === auth.apiURL) {
+      if (saved?.agent_token === auth.token && validateApiURL(saved.api_url ?? defaultCreationApiURL()) === auth.apiURL) {
         delete saved.agent_token;
         return true;
       }

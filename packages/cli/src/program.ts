@@ -646,11 +646,11 @@ export const createProgram = (
         config_path: resolved.configPath,
       });
       const saved = (await agentDeps.read()).profiles[resolved.profile];
-      if (saved?.agent_token === resolved.token && validateApiURL(saved.api_url ?? DEFAULT_API_URL) === resolved.apiURL) {
+      if (saved?.agent_token === resolved.token && validateApiURL(saved.api_url ?? defaultCreationApiURL()) === resolved.apiURL) {
         await showSavedAgent(command, { profile: resolved.profile, apiURL: resolved.apiURL });
       }
   };
-  const authLogout = async (_options: object, command: Command): Promise<void> => {
+  const authLogout = async (_options: object, command: Command, clearConsole = false): Promise<void> => {
       if (!globals(command).nonInteractive && !globals(command).json && dependencies.confirmLogout && !await dependencies.confirmLogout()) throw new InteractiveCancelled();
       const config = await readConfig(configContext);
       const profile = validateProfileName(
@@ -658,18 +658,21 @@ export const createProgram = (
       );
       const selected = config.profiles[profile];
       if (!selected) throw new CliError(`Relay profile ${profile} does not exist.`, "not_found");
+      const clearedConsole = clearConsole && config.console !== undefined;
+      if (clearedConsole) delete config.console;
       // clig.dev, Output: "If you change state, tell the user" — and only when
       // it changed. With nothing saved there is nothing to remove, so the
       // file is left alone and the answer says so (ledger row P14).
       if (selected.agent_token === undefined) {
-        output({ ok: true, profile, token: "none" });
-        if (!globals(command).json && !globals(command).quiet) stderr(`No token was saved for profile ${profile}.\n`);
+        if (clearedConsole) await writeConfig(config, configContext);
+        output({ ok: true, profile, token: "none", ...(clearedConsole ? { console: "removed" } : {}) });
+        if (!clearedConsole && !globals(command).json && !globals(command).quiet) stderr(`No token was saved for profile ${profile}.\n`);
         return;
       }
       const { agent_token: _removed, ...withoutToken } = selected;
       config.profiles[profile] = withoutToken;
       await writeConfig(config, configContext);
-      output({ ok: true, profile, token: "removed" });
+      output({ ok: true, profile, token: "removed", ...(clearedConsole ? { console: "removed" } : {}) });
   };
   const addAuthLogin = (command: Command): void => {
     command
@@ -724,11 +727,35 @@ export const createProgram = (
   const whoamiCommand = program.command("whoami")
     .description("show the current Relay identity without printing its token")
     .helpGroup(HELP_GROUPS.everythingElse);
-  addAuthStatus(whoamiCommand);
+  whoamiCommand.action(async (options: object, command: Command) => {
+    try {
+      await authStatus(options, command);
+    } catch (error) {
+      // A successful Console login does not create an Agent Token. Preserve
+      // existing agent/profile behavior, but report that signed-in identity
+      // rather than telling a Console-only user to paste another token.
+      if (!(error instanceof CliError) || error.code !== "no_token") throw error;
+      if (globals(command).profile) throw error;
+      const config = await readConfig(configContext);
+      if (!config.console) throw error;
+      const me = await consoleRequest<{
+        user: { id: string; email: string; name?: string };
+        org: { id: string };
+      }>({
+        context: configContext,
+        apiURL: defaultCreationApiURL(),
+        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+      }, "/me");
+      output({
+        user: { id: me.user.id, email: me.user.email, ...(me.user.name ? { name: me.user.name } : {}) },
+        organization_id: me.org.id,
+      });
+    }
+  });
   const logoutCommand = program.command("logout")
-    .description("remove the saved Relay agent token from this computer")
+    .description("remove saved Relay sign-in credentials from this computer")
     .helpGroup(HELP_GROUPS.everythingElse);
-  addAuthLogout(logoutCommand);
+  logoutCommand.action((options: object, command: Command) => authLogout(options, command, true));
 
   const organization = program.command("organization")
     .alias("org")
@@ -821,7 +848,7 @@ export const createProgram = (
         profiles: Object.entries(config.profiles).map(([name, profile]) => ({
           name,
           current: name === config.current_profile,
-          api_url: profile.api_url ?? DEFAULT_API_URL,
+          api_url: profile.api_url ?? defaultCreationApiURL(),
           has_token: Boolean(profile.agent_token),
         })),
       });

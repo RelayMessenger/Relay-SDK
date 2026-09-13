@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   configPath,
+  defaultCreationApiURL,
   inspectConfigPermissions,
   emptyConfig,
   readConfig,
@@ -25,6 +26,44 @@ const context = async () => {
 };
 
 describe("local config", { timeout: 120_000 }, () => {
+  it("uses the package environment for an empty staging or release config", () => {
+    expect(emptyConfig("0.1.6-staging.43").profiles.default?.api_url)
+      .toBe("https://api.staging.relayapp.im");
+    expect(emptyConfig("0.1.6").profiles.default?.api_url)
+      .toBe("https://api.relayapp.im");
+  });
+
+  it("uses the staging package default for environment tokens on a fresh install", async () => {
+    const ctx = await context();
+    const resolved = await resolveAuth(undefined, {
+      ...ctx,
+      env: { ...ctx.env, RELAY_AGENT_TOKEN: "fresh-install-fixture" },
+    });
+    expect(resolved.apiURL).toBe(defaultCreationApiURL());
+    expect(resolved.tokenSource).toBe("environment");
+  });
+
+  it("uses the package default when a saved profile omits an origin", async () => {
+    const ctx = await context();
+    const config = emptyConfig();
+    config.profiles.default = { agent_token: "saved-without-origin" };
+    await writeConfig(config, ctx);
+    expect((await resolveAuth(undefined, ctx)).apiURL)
+      .toBe(defaultCreationApiURL());
+  });
+
+  it("preserves an explicitly saved origin instead of rewriting it for staging", async () => {
+    const ctx = await context();
+    const config = emptyConfig();
+    config.profiles.default = {
+      agent_token: "explicit-origin-fixture",
+      api_url: "https://api.relayapp.im",
+    };
+    await writeConfig(config, ctx);
+    expect((await resolveAuth(undefined, ctx)).apiURL)
+      .toBe("https://api.relayapp.im");
+  });
+
   it("writes owner-only profile storage and never serializes environment tokens", async () => {
     const testContext = await context();
     const config = emptyConfig();

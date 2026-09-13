@@ -95,11 +95,13 @@ export const configPath = (context: ConfigContext = {}): string => {
   return resolve(root, "relay", "config.json");
 };
 
-export const emptyConfig = (): RelayConfig => ({
+export const emptyConfig = (
+  version: string = packageVersion(),
+): RelayConfig => ({
   version: 1,
   current_profile: DEFAULT_PROFILE,
   profiles: {
-    [DEFAULT_PROFILE]: { api_url: DEFAULT_API_URL },
+    [DEFAULT_PROFILE]: { api_url: defaultCreationApiURL(version) },
   },
 });
 
@@ -389,7 +391,7 @@ export const resolveAuth = async (
   const selected = config.profiles[profile];
   if (!selected) throw new CliError(`Relay profile ${profile} does not exist.`, "not_found");
   const apiURL = validateApiURL(
-    env.RELAY_API_URL ?? selected.api_url ?? DEFAULT_API_URL,
+    env.RELAY_API_URL ?? selected.api_url ?? defaultCreationApiURL(),
   );
   const envToken = env.RELAY_AGENT_TOKEN;
   const token = envToken === undefined
