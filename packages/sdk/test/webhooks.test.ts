@@ -142,6 +142,7 @@ const senderHandle = {
   image_url: null,
   about: null,
   verified: true,
+  is_contact: true,
 };
 
 const envelope = <T>(

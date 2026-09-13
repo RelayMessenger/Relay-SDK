@@ -40,6 +40,7 @@ export const USER_HANDLE: RelayChatHandle = {
   status: "active",
   about: null,
   verified: false,
+  is_contact: true,
 };
 
 export const AGENT_HANDLE: RelayChatHandle = {
@@ -53,6 +54,7 @@ export const AGENT_HANDLE: RelayChatHandle = {
   status: "active",
   about: "Helpful",
   verified: true,
+  is_contact: true,
 };
 
 export function webhookMessage(

@@ -21343,7 +21343,7 @@ var RELAY_WEBHOOK_EVENT_TYPES = [
   "chat.typing_indicator.started",
   "chat.typing_indicator.stopped",
   "contact.added",
-  "contact.removed",
+  "contact.removed"
 ];
 
 // node_modules/@relaymessenger/sdk/dist/websocket.js

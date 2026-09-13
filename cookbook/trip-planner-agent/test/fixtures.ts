@@ -14,6 +14,7 @@ export const AGENT_HANDLE = {
   image_url: null,
   about: null,
   verified: false,
+  is_contact: true,
   is_me: true,
 };
 
@@ -26,6 +27,7 @@ export const ALICE = {
   image_url: null,
   about: null,
   verified: false,
+  is_contact: true,
 };
 
 /**

@@ -56,6 +56,7 @@ const EVENT = {
       image_url: null,
       about: null,
       verified: false,
+      is_contact: true,
     },
     parts: [],
   },

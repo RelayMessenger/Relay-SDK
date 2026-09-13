@@ -187,6 +187,7 @@ const userHandle: ChatHandle = {
   image_url: null,
   about: null,
   verified: false,
+  is_contact: true,
 };
 void userHandle;
 const agentHandle: ChatHandle = {
@@ -198,6 +199,7 @@ const agentHandle: ChatHandle = {
   image_url: "https://cdn.relayapp.im/echo.png",
   about: "Weather when you need it",
   verified: true,
+  is_contact: true,
 };
 void agentHandle;
 // @ts-expect-error Greetings are not part of Relay Add.

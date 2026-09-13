@@ -54,6 +54,8 @@ export interface RelayChatHandle {
   status?: "active" | "left" | "removed" | null;
   about: string | null;
   verified: boolean;
+  /** True when the caller holds this Handle as a Contact. */
+  is_contact: boolean;
 }
 
 export type RelayReactionType =
