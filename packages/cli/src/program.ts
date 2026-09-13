@@ -646,7 +646,7 @@ export const createProgram = (
         config_path: resolved.configPath,
       });
       const saved = (await agentDeps.read()).profiles[resolved.profile];
-      if (saved?.agent_token === resolved.token && validateApiURL(saved.api_url ?? DEFAULT_API_URL) === resolved.apiURL) {
+      if (saved?.agent_token === resolved.token && validateApiURL(saved.api_url ?? defaultCreationApiURL()) === resolved.apiURL) {
         await showSavedAgent(command, { profile: resolved.profile, apiURL: resolved.apiURL });
       }
   };
@@ -821,7 +821,7 @@ export const createProgram = (
         profiles: Object.entries(config.profiles).map(([name, profile]) => ({
           name,
           current: name === config.current_profile,
-          api_url: profile.api_url ?? DEFAULT_API_URL,
+          api_url: profile.api_url ?? defaultCreationApiURL(),
           has_token: Boolean(profile.agent_token),
         })),
       });

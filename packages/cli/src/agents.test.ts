@@ -15,7 +15,7 @@ const card = { handle: "brave_cangoo.dev", first_name: "Brave Canada Goose", las
 const response = { agent: card, secret, share_url: "https://go.test/@brave_cangoo.dev" };
 function setup(initial: RelayConfig = emptyConfig()) {
   let config = structuredClone(initial);
-  const auth: ResolvedAuth = { profile: "default", apiURL: "https://api.relayapp.im", token: secret, tokenSource: "profile", configPath: "/not-used" };
+  const auth: ResolvedAuth = { profile: "default", apiURL: initial.profiles.default?.api_url ?? creationOrigin, token: secret, tokenSource: "profile", configPath: "/not-used" };
   const remove = vi.fn(async () => undefined);
   const retrieve = vi.fn(async () => ({ contact_cards: [card] }));
   const deps: AgentDependencies = {

@@ -3,7 +3,7 @@ import { uploadAgentImage, type AgentImageUploadResult } from "./agent-image-upl
 import { agentRecord, createAgent, type AgentDependencies, type CreateAgentInput } from "./agents.js";
 import { safeMetadata } from "./output.js";
 import Relay, { type AgentImageRecipe } from "@relaymessenger/sdk";
-import { DEFAULT_API_URL, validateApiURL } from "./config.js";
+import { defaultCreationApiURL, validateApiURL } from "./config.js";
 
 /**
  * One creation path for every caller. `agents create` and `connect` both make an
@@ -61,7 +61,7 @@ export const createAgentWithPicture = async (
     // The agent and its token are already saved. Never use a token from the
     // environment for a just-created agent's picture upload.
     const saved = (await deps.read()).profiles[result.profile];
-    if (!saved?.agent_token || validateApiURL(saved.api_url ?? DEFAULT_API_URL) !== result.api_url) throw new Error("Saved identity changed.");
+    if (!saved?.agent_token || validateApiURL(saved.api_url ?? defaultCreationApiURL()) !== result.api_url) throw new Error("Saved identity changed.");
     const client = new Relay({ apiKey: saved.agent_token, baseURL: result.api_url, ...(fetchImplementation ? { fetch: fetchImplementation } : {}) });
     const outcome = await uploadAgentImage({ handle: result.handle, image: localImage }, client,
       (attachmentID) => client.contactCard.update({
