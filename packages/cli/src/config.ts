@@ -41,7 +41,8 @@ export interface RelayProfile {
   local_webhook_secret?: string;
 }
 
-export interface RelayConsoleSession {
+export interface RelayConsoleOAuthSession {
+  type?: "oauth";
   access_token: string;
   refresh_token: string;
   expires_at: number;
@@ -53,6 +54,15 @@ export interface RelayConsoleSession {
     name?: string;
   };
 }
+
+export interface RelayConsoleOrganizationKey {
+  type: "organization_key";
+  organization_key: string;
+  organization_id: string;
+  console_api_url: string;
+}
+
+export type RelayConsoleSession = RelayConsoleOAuthSession | RelayConsoleOrganizationKey;
 
 export interface RelayConfig {
   version: 1;
@@ -148,7 +158,9 @@ const parseConfig = (value: unknown): RelayConfig => {
     current_profile: value.current_profile,
     ...(typeof value.defaultAgent === "string" ? { defaultAgent: value.defaultAgent } : {}),
     profiles,
-    ...(isRecord(value.console)
+    ...(isRecord(value.console) && value.console.type === "organization_key"
+      ? { console: parseOrganizationKey(value.console) }
+      : isRecord(value.console)
       && typeof value.console.access_token === "string"
       && typeof value.console.refresh_token === "string"
       && typeof value.console.expires_at === "number"
@@ -175,6 +187,30 @@ const parseConfig = (value: unknown): RelayConfig => {
           },
         }
       : {}),
+  };
+};
+
+export const validateOrganizationKey = (raw: string): string => {
+  const key = validateToken(raw);
+  if (!/^(?:rel_org_|rly_org_)\S+$/u.test(key)) {
+    throw new CliError("Pipe an organization API key into relay login --with-token. Nothing was changed.", "usage");
+  }
+  return key;
+};
+
+const parseOrganizationKey = (value: Record<string, unknown>): RelayConsoleOrganizationKey => {
+  if (typeof value.organization_key !== "string"
+    || typeof value.organization_id !== "string" || !value.organization_id
+    || typeof value.console_api_url !== "string") {
+    throw new Error("The saved organization API key configuration is incomplete. Sign in again.");
+  }
+  const api = new URL(value.console_api_url);
+  validateApiURL(api.origin);
+  return {
+    type: "organization_key",
+    organization_key: validateOrganizationKey(value.organization_key),
+    organization_id: value.organization_id,
+    console_api_url: api.toString().replace(/\/$/, ""),
   };
 };
 
@@ -426,5 +462,7 @@ export const collectConfiguredTokens = async (
     .filter((token): token is string => Boolean(token));
   const envToken = contextEnv(context).RELAY_AGENT_TOKEN;
   if (envToken) tokens.push(envToken);
+  if (config.console?.type === "organization_key") tokens.push(config.console.organization_key);
+  else if (config.console) tokens.push(config.console.access_token, config.console.refresh_token);
   return [...new Set(tokens)];
 };

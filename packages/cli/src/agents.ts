@@ -1,5 +1,6 @@
 import { describeFailure } from "./errors.js";
 import { safeMetadata } from "./output.js";
+import { CliError } from "./error-codes.js";
 import Relay, { RelayAPIError, type AgentCreateParams, type AgentImageRecipe, type ContactCardItem } from "@relaymessenger/sdk";
 import type { ConfigContext, RelayConfig, ResolvedAuth } from "./config.js";
 import { defaultCreationApiURL, mutateConfig, preflightConfigDestination, readConfig, resolveAuth, validateApiURL, validateProfileName, validateToken } from "./config.js";
@@ -12,6 +13,7 @@ export interface AgentDependencies {
   bootstrap: typeof Relay.createAgent;
   client: (token: string, apiURL: string) => Pick<Relay, "contactCard" | "agents">;
   auth: (profile?: string) => Promise<ResolvedAuth>;
+  deleteConsole?: (handle: string, apiURL: string, agentToken: string) => Promise<boolean>;
   env: NodeJS.ProcessEnv;
 }
 
@@ -66,7 +68,8 @@ const safeAPIFailure = (message: string, error: unknown): Error => error instanc
   ? new RelayAPIError(message, {
     ...(error.status === undefined ? {} : { status: error.status }),
     ...(error.code === undefined ? {} : { code: error.code }),
-  }) : new Error(message);
+  }) : error instanceof CliError && error.code === "no_token"
+    ? new CliError(message, "no_token") : new Error(message);
 
 /** The handle a person asked for, checked before anything is created or asked. */
 export const validateHandle = (handle: string): string => {
@@ -211,7 +214,9 @@ export async function selectAgentAuth(handle: string, profile: string | undefine
 export async function deleteAgent(handle: string, profile: string | undefined, deps: AgentDependencies) {
   const auth = await selectAgentAuth(handle, profile, deps);
   try {
-    await deps.client(auth.token, auth.apiURL).agents.delete(handle, { maxRetries: 0 });
+    if (!await deps.deleteConsole?.(handle, auth.apiURL, auth.token)) {
+      await deps.client(auth.token, auth.apiURL).agents.delete(handle, { maxRetries: 0 });
+    }
   } catch (error) {
     throw safeAPIFailure(`Relay could not confirm this agent was deleted, so the token saved on this computer is unchanged.${apiFailure(error)}`, error);
   }

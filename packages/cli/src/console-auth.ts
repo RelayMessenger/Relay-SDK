@@ -7,9 +7,12 @@ import {
   defaultCreationApiURL,
   readConfig,
   writeConfig,
+  validateOrganizationKey,
   type ConfigContext,
   type RelayConfig,
   type RelayConsoleSession,
+  type RelayConsoleOAuthSession,
+  type RelayConsoleOrganizationKey,
 } from "./config.js";
 import { HeadlessPrompt, type InteractivePrompts } from "./interactive.js";
 import { CliError } from "./error-codes.js";
@@ -73,6 +76,10 @@ const httpFetch = (deps: ConsoleAuthDependencies | ConsoleRequestDependencies): 
   deps.fetch ?? globalThis.fetch;
 
 const json = async <T>(response: Response): Promise<T> => {
+  if (response.status === 401) {
+    throw new CliError("Relay Console returned HTTP 401. Run relay login.", "no_token");
+  }
+  if (response.status === 204) return undefined as T;
   const text = await response.text();
   let value: unknown;
   try { value = JSON.parse(text); } catch { throw new Error(`Relay Console returned HTTP ${response.status}.`); }
@@ -198,7 +205,7 @@ const bootstrap = async (
   return value.organization_id;
 };
 
-const refresh = async (deps: ConsoleRequestDependencies, session: RelayConsoleSession): Promise<RelayConsoleSession> => {
+const refresh = async (deps: ConsoleRequestDependencies, session: RelayConsoleOAuthSession): Promise<RelayConsoleOAuthSession> => {
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     client_id: session.client_id,
@@ -220,7 +227,7 @@ const refresh = async (deps: ConsoleRequestDependencies, session: RelayConsoleSe
   };
 };
 
-export const consoleLogin = async (deps: ConsoleAuthDependencies): Promise<RelayConsoleSession> => {
+export const consoleLogin = async (deps: ConsoleAuthDependencies): Promise<RelayConsoleOAuthSession> => {
   const stderr = deps.stderr ?? ((value) => process.stderr.write(value));
   const start = await postDeviceStart(deps);
   const verification = start.verification_uri_complete ?? start.verification_uri;
@@ -241,7 +248,7 @@ export const consoleLogin = async (deps: ConsoleAuthDependencies): Promise<Relay
   // the Personal organization case; repeating it can create duplicate orgs.
   const organizationId = token.organization_id
     ?? await bootstrap(deps, token, { name, namespace });
-  let session: RelayConsoleSession = {
+  let session: RelayConsoleOAuthSession = {
     access_token: token.access_token,
     refresh_token: token.refresh_token,
     expires_at: expiryFromAccessToken(token.access_token),
@@ -268,6 +275,35 @@ export const consoleLogin = async (deps: ConsoleAuthDependencies): Promise<Relay
   return session;
 };
 
+/** Validate the real key with Console before replacing any saved credentials. */
+export const consoleLoginWithKey = async (
+  deps: ConsoleRequestDependencies,
+  raw: string,
+): Promise<RelayConsoleOrganizationKey> => {
+  const key = validateOrganizationKey(raw);
+  const api = defaultConsoleApiURL(deps.apiURL ?? defaultCreationApiURL(), deps.context.env ?? process.env);
+  let me: { org: { id: string } };
+  try {
+    me = await json(await httpFetch(deps)(`${api}/me`, {
+      headers: { Authorization: `Bearer ${key}`, "X-Relay-CLI": "1" },
+    }));
+    if (typeof me?.org?.id !== "string" || !me.org.id) throw new Error("Missing organization");
+  } catch (error) {
+    if (error instanceof CliError && error.code === "no_token") {
+      throw new CliError("Relay Console rejected this organization API key. Nothing was changed. Run relay login --with-token.", "no_token");
+    }
+    throw new Error("Relay Console could not validate this organization API key. Nothing was changed.");
+  }
+  const session: RelayConsoleOrganizationKey = {
+    type: "organization_key",
+    organization_key: key,
+    organization_id: me.org.id,
+    console_api_url: api,
+  };
+  await saveSession(deps.context, session);
+  return session;
+};
+
 export const consoleLoginOrReuse = async (
   deps: ConsoleAuthDependencies,
 ): Promise<RelayConsoleSession> => {
@@ -291,7 +327,9 @@ export const consoleLoginOrReuse = async (
         );
       }
       return session;
-    } catch {
+    } catch (error) {
+      // A key is an explicit headless credential, never a browser-login hint.
+      if (current.type === "organization_key") throw error;
       // A stale or revoked session falls through to the browser flow.
     }
   }
@@ -336,7 +374,10 @@ export const createConsoleAgent = async (
   const me = await consoleRequest<{ org: { id: string; handleNamespace: string } }>(deps, "/me");
   const base = (input.handle ?? (input.displayName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^[^a-z]+/u, "").replace(/_+$/u, "").slice(0, 32).replace(/_+$/u, "") || "assistant"));
   const handle = `${base}.${me.org.handleNamespace}`;
-  const created = await consoleRequest<ConsoleAgentCreateResult>(deps, `/orgs/${me.org.id}/agents`, {
+  const response = await consoleRequest<{
+    agent: { handle: string; displayName: string; avatarUrl: string | null };
+    token: string;
+  }>(deps, `/orgs/${me.org.id}/agents`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -349,6 +390,14 @@ export const createConsoleAgent = async (
       ...(input.about === undefined ? {} : { about: input.about }),
     }),
   });
+  const created: ConsoleAgentCreateResult = {
+    token: response.token,
+    agent: {
+      handle: response.agent.handle,
+      first_name: response.agent.displayName,
+      image_url: response.agent.avatarUrl,
+    },
+  };
   if (!imageURL && !localImage) return created;
 
   const client = new Relay({
@@ -396,26 +445,77 @@ export const consoleRequest = async <T>(
   init: RequestInit = {},
 ): Promise<T> => {
   const config = await readConfig(deps.context);
-  let session = config.console;
+  const session = config.console;
   if (!session) throw new CliError("Relay Console is not signed in. Run relay login.", "not_a_tty");
-  if (session.expires_at <= Date.now() + 30_000) {
-    session = await refresh(deps, session);
-    await saveSession(deps.context, session);
-  }
   const api = defaultConsoleApiURL(deps.apiURL ?? defaultCreationApiURL(), deps.context.env ?? process.env);
+  if (session.type === "organization_key") {
+    if (api !== session.console_api_url) {
+      throw new Error("This organization API key was saved for a different Console. Run relay login --with-token for this Console.");
+    }
+    try {
+      const response = await httpFetch(deps)(`${api}${path}`, {
+        ...init,
+        headers: {
+          ...(init.headers ?? {}),
+          Authorization: `Bearer ${session.organization_key}`,
+          "X-Relay-CLI": "1",
+        },
+      });
+      return safeMetadata(await json<T>(response), [session.organization_key]);
+    } catch (error) {
+      // Even network errors can contain the request's Authorization header.
+      const message = safeMetadata(
+        error instanceof Error ? error.message : "Relay Console request failed.",
+        [session.organization_key],
+      );
+      if (error instanceof CliError && error.code === "no_token") throw new CliError(message, "no_token");
+      throw new Error(message);
+    }
+  }
+  let oauth = session;
+  if (oauth.expires_at <= Date.now() + 30_000) {
+    oauth = await refresh(deps, oauth);
+    await saveSession(deps.context, oauth);
+  }
   const request = () => httpFetch(deps)(`${api}${path}`, {
     ...init,
     headers: {
       ...(init.headers ?? {}),
-      Authorization: `Bearer ${session!.access_token}`,
+      Authorization: `Bearer ${oauth.access_token}`,
       "X-Relay-CLI": "1",
     },
   });
   let response = await request();
   if (response.status === 401) {
-    session = await refresh(deps, session);
-    await saveSession(deps.context, session);
+    oauth = await refresh(deps, oauth);
+    await saveSession(deps.context, oauth);
     response = await request();
   }
   return json<T>(response);
+};
+
+/** Console owns organization Agents; the SDK delete route owns developer Agents. */
+export const deleteConsoleAgent = async (
+  deps: ConsoleRequestDependencies,
+  handle: string,
+  agentToken: string,
+): Promise<boolean> => {
+  if (!(await readConfig(deps.context)).console) return false;
+  const me = await consoleRequest<{ org: { id: string } }>(deps, "/me");
+  const path = `/orgs/${encodeURIComponent(me.org.id)}/agents`;
+  const agents = await consoleRequest<Array<{ id: string; handle: string }>>(deps, path);
+  const agent = agents.find((entry) => entry.handle === handle);
+  if (!agent) return false;
+  // Explicit --profile must not delete one Agent and clear another's token.
+  const client = new Relay({
+    apiKey: agentToken,
+    baseURL: deps.apiURL ?? defaultCreationApiURL(),
+    ...(deps.fetch ? { fetch: deps.fetch } : {}),
+  });
+  const cards = await client.contactCard.retrieve();
+  if (!cards.contact_cards.some((card) => card.handle === handle && card.kind === "agent")) {
+    throw new Error("The selected profile belongs to another agent. Nothing was deleted.");
+  }
+  await consoleRequest(deps, `${path}/${encodeURIComponent(agent.id)}`, { method: "DELETE" });
+  return true;
 };
