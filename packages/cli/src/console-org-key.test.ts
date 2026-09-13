@@ -88,7 +88,8 @@ it.each([401, 403, 500])("failed validation HTTP %s preserves existing OAuth and
   await writeConfig(config, f.context);
   const before = await readFile(f.context.env.RELAY_CONFIG_PATH, "utf8");
   const fetch = vi.fn(async () => Response.json({ error: key }, { status }));
-  expect(await runCLI(["--json", "--no-input", "login", "--with-token"], { ...f.cli, fetch })).not.toBe(0);
+  expect(await runCLI(["--json", "--no-input", "login", "--with-token"], { ...f.cli, fetch })).toBe(status === 401 ? 4 : 1);
+  expect(JSON.parse(f.err.join("")).code).toBe(status === 401 ? "no_token" : "refused");
   expect(await readFile(f.context.env.RELAY_CONFIG_PATH, "utf8")).toBe(before);
   expect(fetch).toHaveBeenCalledOnce();
   expect(f.err.join("")).not.toContain(key);
@@ -135,7 +136,10 @@ it.each([["login"], ["whoami"], ["agents", "create", "--name", "Rejected"]])(
     const f = await fixture();
     await consoleLoginWithKey(f.deps, key);
     const fetch = vi.fn(async () => Response.json({ error: key }, { status: 401 }));
-    expect(await runCLI(["--json", "--no-input", ...args], { ...f.cli, fetch })).not.toBe(0);
+    const before = await readFile(f.context.env.RELAY_CONFIG_PATH, "utf8");
+    expect(await runCLI(["--json", "--no-input", ...args], { ...f.cli, fetch })).toBe(4);
+    expect(JSON.parse(f.err.join("")).code).toBe("no_token");
+    expect(await readFile(f.context.env.RELAY_CONFIG_PATH, "utf8")).toBe(before);
     expect(fetch).toHaveBeenCalledExactlyOnceWith(`${api}/me`, expect.objectContaining({
       headers: expect.objectContaining({ Authorization: `Bearer ${key}` }),
     }));
@@ -143,6 +147,40 @@ it.each([["login"], ["whoami"], ["agents", "create", "--name", "Rejected"]])(
     expect(Object.values((await readConfig(f.context)).profiles).every(p => !p.agent_token)).toBe(true);
   },
 );
+
+it.each([["login", "--with-token"], ["whoami"]])("non-JSON HTTP 401 exits 4 for %j", async (...args) => {
+  const f = await fixture();
+  await consoleLoginWithKey(f.deps, key);
+  const before = await readFile(f.context.env.RELAY_CONFIG_PATH, "utf8");
+  const fetch = vi.fn(async () => new Response(`Unauthorized ${key}`, { status: 401 }));
+  expect(await runCLI(["--json", "--no-input", ...args], { ...f.cli, fetch })).toBe(4);
+  expect(JSON.parse(f.err.join("")).code).toBe("no_token");
+  expect(f.err.join("")).not.toContain(key);
+  expect(await readFile(f.context.env.RELAY_CONFIG_PATH, "utf8")).toBe(before);
+  expect(fetch).toHaveBeenCalledOnce();
+});
+
+it.each([["login", "--with-token"], ["login"], ["whoami"], ["agents", "create"]])(
+  "network failure stays exit 1 for %j and retains credentials without OAuth",
+  async (...args) => {
+    const f = await fixture();
+    await consoleLoginWithKey(f.deps, key);
+    const before = await readFile(f.context.env.RELAY_CONFIG_PATH, "utf8");
+    const fetch = vi.fn(async () => { throw new TypeError(`fetch failed ${key}`); });
+    expect(await runCLI(["--json", "--no-input", ...args], { ...f.cli, fetch })).toBe(1);
+    expect(JSON.parse(f.err.join("")).code).not.toBe("no_token");
+    expect(f.err.join("")).not.toContain(key);
+    expect(await readFile(f.context.env.RELAY_CONFIG_PATH, "utf8")).toBe(before);
+    expect(fetch).toHaveBeenCalledOnce();
+  },
+);
+
+it("whoami without credentials exits 4 without any request", async () => {
+  const f = await fixture();
+  expect(await runCLI(["--json", "--no-input", "whoami"], f.cli)).toBe(4);
+  expect(JSON.parse(f.err.join("")).code).toBe("no_token");
+  expect(f.fetch).not.toHaveBeenCalled();
+});
 
 it.each([true, false])("OAuth refresh stays functional (expired=%s)", async (expired) => {
   const f = await fixture();
@@ -183,7 +221,8 @@ it.each([401, 403, 500])("Console deletion HTTP %s keeps profile and never tries
     expect(init?.method).toBe("DELETE");
     return Response.json({ error: key }, { status });
   });
-  expect(await runCLI(["--json", "--no-input", "--profile", "test", "agents", "delete", "test.fixture"], { ...f.cli, fetch })).not.toBe(0);
+  expect(await runCLI(["--json", "--no-input", "--profile", "test", "agents", "delete", "test.fixture"], { ...f.cli, fetch })).toBe(status === 401 ? 4 : 1);
+  expect(f.err.join("")).not.toContain(key);
   expect(calls.filter(url => url.startsWith(api))).toEqual([`${api}/me`, `${api}/orgs/org_fixture/agents`, `${api}/orgs/org_fixture/agents/uuid_fixture`]);
   expect((await readConfig(f.context)).profiles.test?.agent_token).toBe("agent-private-token");
 });

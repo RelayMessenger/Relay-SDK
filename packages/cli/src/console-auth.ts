@@ -76,6 +76,9 @@ const httpFetch = (deps: ConsoleAuthDependencies | ConsoleRequestDependencies): 
   deps.fetch ?? globalThis.fetch;
 
 const json = async <T>(response: Response): Promise<T> => {
+  if (response.status === 401) {
+    throw new CliError("Relay Console returned HTTP 401. Run relay login.", "no_token");
+  }
   if (response.status === 204) return undefined as T;
   const text = await response.text();
   let value: unknown;
@@ -285,7 +288,10 @@ export const consoleLoginWithKey = async (
       headers: { Authorization: `Bearer ${key}`, "X-Relay-CLI": "1" },
     }));
     if (typeof me?.org?.id !== "string" || !me.org.id) throw new Error("Missing organization");
-  } catch {
+  } catch (error) {
+    if (error instanceof CliError && error.code === "no_token") {
+      throw new CliError("Relay Console rejected this organization API key. Nothing was changed. Run relay login --with-token.", "no_token");
+    }
     throw new Error("Relay Console could not validate this organization API key. Nothing was changed.");
   }
   const session: RelayConsoleOrganizationKey = {
@@ -458,10 +464,12 @@ export const consoleRequest = async <T>(
       return safeMetadata(await json<T>(response), [session.organization_key]);
     } catch (error) {
       // Even network errors can contain the request's Authorization header.
-      throw new Error(safeMetadata(
+      const message = safeMetadata(
         error instanceof Error ? error.message : "Relay Console request failed.",
         [session.organization_key],
-      ));
+      );
+      if (error instanceof CliError && error.code === "no_token") throw new CliError(message, "no_token");
+      throw new Error(message);
     }
   }
   let oauth = session;

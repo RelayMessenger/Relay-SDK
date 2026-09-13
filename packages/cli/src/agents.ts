@@ -1,5 +1,6 @@
 import { describeFailure } from "./errors.js";
 import { safeMetadata } from "./output.js";
+import { CliError } from "./error-codes.js";
 import Relay, { RelayAPIError, type AgentCreateParams, type AgentImageRecipe, type ContactCardItem } from "@relaymessenger/sdk";
 import type { ConfigContext, RelayConfig, ResolvedAuth } from "./config.js";
 import { defaultCreationApiURL, mutateConfig, preflightConfigDestination, readConfig, resolveAuth, validateApiURL, validateProfileName, validateToken } from "./config.js";
@@ -67,7 +68,8 @@ const safeAPIFailure = (message: string, error: unknown): Error => error instanc
   ? new RelayAPIError(message, {
     ...(error.status === undefined ? {} : { status: error.status }),
     ...(error.code === undefined ? {} : { code: error.code }),
-  }) : new Error(message);
+  }) : error instanceof CliError && error.code === "no_token"
+    ? new CliError(message, "no_token") : new Error(message);
 
 /** The handle a person asked for, checked before anything is created or asked. */
 export const validateHandle = (handle: string): string => {
