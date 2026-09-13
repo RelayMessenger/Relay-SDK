@@ -14,7 +14,7 @@ There is no `talk` tool and no per-operation `relay_*` tool list.
 Requires Node.js 22.22.3 or newer.
 
 ```sh
-npx --yes @relaymessenger/mcp@staging --api-url https://api.staging.relayapp.im
+npx --yes @relaymessenger/mcp@staging
 ```
 
 Agent authentication is unchanged: `RELAY_AGENT_TOKEN`, or the selected Relay
