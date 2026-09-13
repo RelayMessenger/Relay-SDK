@@ -13,7 +13,7 @@ const home = async (): Promise<{ env: NodeJS.ProcessEnv }> => {
   return { env: { RELAY_CONFIG_DIR: folder } };
 };
 
-const owner = { apiURL: "https://api.relayapp.im", handle: "agent.dev" };
+const owner = { apiURL: "https://api.relayapp.im", handle: "agent" };
 
 describe("where the ACP session ids live", () => {
   it("keeps them beside the profile that owns the agent, apart from Codex's", async () => {
@@ -23,10 +23,10 @@ describe("where the ACP session ids live", () => {
   });
 
   it("gives the same chat on two Relays, or two agents, two different sessions", () => {
-    expect(acpSessionKey(owner, "chat-1")).toBe("https://api.relayapp.im|agent.dev|chat-1");
+    expect(acpSessionKey(owner, "chat-1")).toBe("https://api.relayapp.im|agent|chat-1");
     expect(acpSessionKey({ ...owner, apiURL: "https://api.staging.relayapp.im" }, "chat-1"))
       .not.toBe(acpSessionKey(owner, "chat-1"));
-    expect(acpSessionKey({ ...owner, handle: "other.dev" }, "chat-1"))
+    expect(acpSessionKey({ ...owner, handle: "other" }, "chat-1"))
       .not.toBe(acpSessionKey(owner, "chat-1"));
   });
 });
@@ -44,10 +44,10 @@ describe("keeping a session id", () => {
   it("leaves another agent's sessions in the file alone", async () => {
     const context = await home();
     const mine = await openAcpSessions(owner, context);
-    const theirs = await openAcpSessions({ ...owner, handle: "other.dev" }, context);
+    const theirs = await openAcpSessions({ ...owner, handle: "other" }, context);
     await theirs.set("chat-1", "their-session");
     await mine.set("chat-1", "my-session");
-    const reopened = await openAcpSessions({ ...owner, handle: "other.dev" }, context);
+    const reopened = await openAcpSessions({ ...owner, handle: "other" }, context);
     expect(reopened.get("chat-1")).toBe("their-session");
     expect((await openAcpSessions(owner, context)).get("chat-1")).toBe("my-session");
   });
@@ -58,7 +58,7 @@ describe("keeping a session id", () => {
     await sessions.set("chat-1", "session-1");
     expect(JSON.parse(await readFile(acpSessionsPath(context), "utf8")) as unknown).toEqual({
       version: 1,
-      sessions: { "https://api.relayapp.im|agent.dev|chat-1": "session-1" },
+      sessions: { "https://api.relayapp.im|agent|chat-1": "session-1" },
     });
   });
 

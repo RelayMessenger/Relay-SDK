@@ -295,16 +295,15 @@ it("logout removes only selected agent credentials and key; hidden auth logout l
   expect(f.out.join("") + f.err.join("")).not.toContain(key);
 });
 
-it.each(["fixture", "n".repeat(60)])("headless key create → local list → Console UUID delete (namespace %s)", async (namespace) => {
+it.each(["cli_test", `cli_${"n".repeat(28)}`])("headless key create → local list → Console UUID delete (handle %s)", async (handle) => {
   const f = await fixture();
   await consoleLoginWithKey(f.deps, key);
   const calls: Array<{ url: string; method: string; bearer: string | null }> = [];
-  const handle = `cli_test.${namespace}`;
   const card = { handle, first_name: "CLI Test", image_url: null, kind: "agent", is_active: true };
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input), method = init?.method ?? "GET";
     calls.push({ url, method, bearer: new Headers(init?.headers).get("authorization") });
-    if (url === `${api}/me`) return Response.json({ org: { id: "org_fixture", handleNamespace: namespace } });
+    if (url === `${api}/me`) return Response.json({ org: { id: "org_fixture" } });
     if (url === `${api}/orgs/org_fixture/agents` && method === "POST") {
       expect(JSON.parse(String(init?.body))).toMatchObject({ handle, displayName: "CLI Test" });
       return Response.json({ agent: { id: "agent-uuid", handle, displayName: "CLI Test", avatarUrl: null }, token: "created-agent-token" }, { status: 201 });
@@ -314,7 +313,7 @@ it.each(["fixture", "n".repeat(60)])("headless key create → local list → Con
     if (url.endsWith("/v1/contact_card")) return Response.json({ contact_cards: [card] });
     throw new Error(`unexpected fixture request ${method} ${url}`);
   });
-  expect(await runCLI(["--json", "--no-input", "agents", "create", "--name", "CLI Test", "--handle", "cli_test"], { ...f.cli, fetch }), f.err.join("")).toBe(0);
+  expect(await runCLI(["--json", "--no-input", "agents", "create", "--name", "CLI Test", "--handle", handle], { ...f.cli, fetch }), f.err.join("")).toBe(0);
   const created = JSON.parse(f.out.pop()!);
   expect(created).toMatchObject({ handle, display_name: "CLI Test", image_url: null, organization_id: "org_fixture", token: "stored" });
   expect(created.profile.length).toBeLessThanOrEqual(64);
@@ -337,19 +336,19 @@ it.each([undefined, "requested"])("Console create preserves profile naming and c
   const f = await fixture();
   await consoleLoginWithKey(f.deps, key);
   const config = await readConfig(f.context);
-  const handle = `cli_test.${"n".repeat(60)}`;
-  config.profiles[handle.slice(0, 64)] = { agent_token: "unrelated-token" };
+  const handle = `cli_test${"n".repeat(24)}`;
+  config.profiles[handle] = { agent_token: "unrelated-token" };
   await writeConfig(config, f.context);
   const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
     init?.method === "POST"
       ? Response.json({ agent: { handle, displayName: "CLI Test", avatarUrl: null }, token: "created-token" })
-      : Response.json({ org: { id: "org_fixture", handleNamespace: "n".repeat(60) } }));
+      : Response.json({ org: { id: "org_fixture" } }));
   const args = ["--json", "--no-input", ...(requested ? ["--profile", requested] : []), "agents", "create"];
   expect(await runCLI(args, { ...f.cli, fetch })).toBe(0);
   const saved = await readConfig(f.context);
-  expect(saved.profiles[handle.slice(0, 64)]?.agent_token).toBe("unrelated-token");
+  expect(saved.profiles[handle]?.agent_token).toBe("unrelated-token");
   const created = JSON.parse(f.out.pop()!);
-  expect(created.profile).toBe(requested ?? `${handle.slice(0, 54)}-2`);
+  expect(created.profile).toBe(requested ?? `${handle}-2`);
   expect(saved.profiles[created.profile]?.agent_token).toBe("created-token");
   if (requested) {
     fetch.mockClear();

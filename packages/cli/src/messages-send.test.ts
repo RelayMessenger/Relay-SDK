@@ -29,10 +29,10 @@ async function send(args: string[]) {
 
 describe("messages send recipients", () => {
   it.each([
-    [["--to", "alice.dev"], ["alice.dev"]],
-    [["--to", "alice.dev", "bob.dev"], ["alice.dev", "bob.dev"]],
-    [["--to", "alice.dev", "--to", "bob.dev"], ["alice.dev", "bob.dev"]],
-    [["--to", "alice.dev, bob.dev"], ["alice.dev", "bob.dev"]],
+    [["--to", "alice"], ["alice"]],
+    [["--to", "alice", "bob"], ["alice", "bob"]],
+    [["--to", "alice", "--to", "bob"], ["alice", "bob"]],
+    [["--to", "alice, bob"], ["alice", "bob"]],
     [["--to", "a,b", "c", "--to", "d,e,f"], ["a", "b", "c", "d", "e", "f"]],
   ])("sends %j to the handles named", async (args, to) => {
     const result = await send(args);
@@ -58,21 +58,21 @@ describe("messages send identity", () => {
     const linked = `rel_token_${"L".repeat(43)}`;
     const other = `rel_token_${"O".repeat(43)}`;
     await writeFile(join(home, "config.json"), JSON.stringify({
-      version: 1, current_profile: "other.dev",
-      profiles: { "other.dev": { api_url: "https://api.relayapp.im", agent_token: other }, "linked.dev": { api_url: "https://api.relayapp.im", agent_token: linked } },
+      version: 1, current_profile: "other",
+      profiles: { "other": { api_url: "https://api.relayapp.im", agent_token: other }, "linked": { api_url: "https://api.relayapp.im", agent_token: linked } },
     }), { mode: 0o600 });
-    await writeFolderLink(folder, { handle: "linked.dev", apiUrl: "https://api.relayapp.im" });
+    await writeFolderLink(folder, { handle: "linked", apiUrl: "https://api.relayapp.im" });
     const sent: string[] = [];
     const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       sent.push(String(new Headers(init?.headers).get("authorization")));
       return Response.json({ chat_id: "chat-1" });
     });
-    const run = (args: string[]) => runCLI(["messages", "send", ...args, "--to", "alice.dev", "--text", "Hello", "--idempotency-key", "k"], {
+    const run = (args: string[]) => runCLI(["messages", "send", ...args, "--to", "alice", "--text", "Hello", "--idempotency-key", "k"], {
       configContext: { env: { RELAY_CONFIG_PATH: join(home, "config.json") }, home, platform: process.platform },
       cwd: folder, fetch, stdout: () => {}, stderr: () => {},
     });
     expect(await run([])).toBe(0);
-    expect(await run(["--profile", "other.dev"])).toBe(0);
+    expect(await run(["--profile", "other"])).toBe(0);
     expect(sent).toEqual([`Bearer ${linked}`, `Bearer ${other}`]);
   });
 });

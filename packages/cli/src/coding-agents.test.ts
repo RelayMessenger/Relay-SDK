@@ -11,7 +11,7 @@ const AGENTS = ["claude-code", "codex", "cursor", "opencode", "cline", "vscode",
 
 const context = (overrides: Partial<PlanContext> = {}): PlanContext => ({
   env: {}, home: "/home/dev", platform: "linux", version: "0.1.6-staging.3", cwd: "/home/dev/project",
-  profile: "calm_cangoo.dev", handle: "calm_cangoo.dev", allow: [], start: false, ...overrides,
+  profile: "calm_cangoo", handle: "calm_cangoo", allow: [], start: false, ...overrides,
 });
 
 it("the registry is exactly the ten ruled agents, in the help's order", () => {

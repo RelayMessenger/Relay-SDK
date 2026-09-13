@@ -123,7 +123,7 @@ export async function chooseInteractiveCommand(
     return chosen ? ["--profile", chosen.profile, "watch", chosen.handle] : undefined;
   }
   if (action === "create") {
-    ui.info("Press Enter to skip any of these. Enter only the local handle name; Relay adds your organization namespace. A picture can be a file on this computer or an https:// address.");
+    ui.info("Press Enter to skip any of these. Enter the handle: one word, 3 to 32 lowercase letters, numbers or underscores. A picture can be a file on this computer or an https:// address.");
     const chosenHandle = (await ui.text("Handle (optional)", "")).trim();
     const displayName = (await ui.text("Name (optional)", "")).trim();
     const image = (await ui.text("Image (optional)", "")).trim();

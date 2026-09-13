@@ -11,7 +11,7 @@ import type { TerminalSessionOptions } from "./terminal-session.js";
 
 const base = "https://api.staging.relayapp.im";
 const token = `rel_token_${"V".repeat(43)}`;
-const card = { handle: "view_agent.dev", first_name: "View Agent", last_name: null, image_url: `${base}/assets/relay.png`, is_active: true, kind: "agent" as const };
+const card = { handle: "view_agent", first_name: "View Agent", last_name: null, image_url: `${base}/assets/relay.png`, is_active: true, kind: "agent" as const };
 const exited = { reason: "quit" as const, observedEvents: 0, observerStopped: true };
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), "relay-persistent-view-"));

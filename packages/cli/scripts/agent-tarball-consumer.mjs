@@ -17,7 +17,7 @@ const configPath = join(home, "agent-config.json");
 const configModule = await import(pathToFileURL(join(consumer, "node_modules/relaymessenger/dist/config.js")));
 const aclModule = process.platform === "win32" ? await import(pathToFileURL(join(consumer, "node_modules/relaymessenger/dist/runtime-connect/windows-acl.js"))) : undefined;
 const originalParentACL = aclModule ? (await aclModule.inspectWindowsAcl(home)).sddl : undefined;
-const card = { handle: "brave_cangoo.dev", first_name: "Brave Canada Goose", last_name: null, image_url: null, is_active: true, kind: "agent" };
+const card = { handle: "brave_cangoo", first_name: "Brave Canada Goose", last_name: null, image_url: null, is_active: true, kind: "agent" };
 const output = []; const errors = []; const calls = [];
 let deleteStatus = 409;
 const deps = {
@@ -27,7 +27,7 @@ const deps = {
     calls.push({ url: String(url), init });
     if (init.method === "POST") {
       assert.equal(new Headers(init.headers).get("authorization"), "Bearer rel_org_installedFixtureOnly");
-      assert.deepEqual(JSON.parse(init.body), { handle: "my_agent.dev", displayName: "My Agent", isPremiumHandle: false });
+      assert.deepEqual(JSON.parse(init.body), { handle: "my_agent", displayName: "My Agent" });
       return Response.json({ agent: card, secret: token, share_url: `https://go.test/@${card.handle}` }, { status: 201 });
     }
     assert.equal(new Headers(init.headers).get("authorization"), init.method === "DELETE" ? "Bearer rel_org_installedFixtureOnly" : `Bearer ${token}`);

@@ -27,7 +27,7 @@ beforeEach(() => {
 });
 
 const token = `rel_token_${"C".repeat(43)}`;
-const card = { handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
+const card = { handle: "calm_cangoo", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
 
 async function connect(agent: "codex" | "opencode", args: string[], executable: string | undefined) {
   const scratch = join(tmpdir(), "relay-config-writes-test");

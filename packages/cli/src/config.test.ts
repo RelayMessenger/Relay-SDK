@@ -132,11 +132,11 @@ it("serializes concurrent profile mutations without losing either credential", a
   const { mutateConfig } = await import("./config.js");
   const testContext = await context();
   await Promise.all(Array.from({ length: 8 }, (_, index) => mutateConfig((config) => {
-    config.profiles[`agent-${index}.dev`] = { agent_token: `test-credential-${index}` };
+    config.profiles[`agent-${index}`] = { agent_token: `test-credential-${index}` };
   }, testContext)));
   const config = await readConfig(testContext);
   for (let index = 0; index < 8; index++) {
-    expect(config.profiles[`agent-${index}.dev`]?.agent_token).toBe(`test-credential-${index}`);
+    expect(config.profiles[`agent-${index}`]?.agent_token).toBe(`test-credential-${index}`);
   }
 });
 
@@ -144,10 +144,10 @@ it("rejects stale legacy writes instead of overwriting a newly saved agent", asy
   const { mutateConfig } = await import("./config.js");
   const testContext = await context();
   const stale = await readConfig(testContext);
-  await mutateConfig((config) => { config.profiles["new.dev"] = { agent_token: "new-credential" }; }, testContext);
+  await mutateConfig((config) => { config.profiles["new"] = { agent_token: "new-credential" }; }, testContext);
   stale.profiles.default!.agent_token = "old-command-credential";
   await expect(writeConfig(stale, testContext)).rejects.toThrow("Another Relay command changed the config file");
-  expect((await readConfig(testContext)).profiles["new.dev"]?.agent_token).toBe("new-credential");
+  expect((await readConfig(testContext)).profiles["new"]?.agent_token).toBe("new-credential");
 });
 
 it("doctor checks real native file permissions and updates preserve parent permissions", async () => {

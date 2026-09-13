@@ -1,7 +1,7 @@
 import type Relay from "@relaymessenger/sdk";
 import { expect, it, vi } from "vitest";
 import { uploadAgentImage } from "./agent-image-upload.js";
-const card = { handle: "local_photo.dev", first_name: "Local Photo", last_name: null, image_url: "https://api.staging.relayapp.im/images/photo.png", kind: "agent" as const, is_active: true };
+const card = { handle: "local_photo", first_name: "Local Photo", last_name: null, image_url: "https://api.staging.relayapp.im/images/photo.png", kind: "agent" as const, is_active: true };
 const image = { path: "/unused.png", filename: "photo.png", contentType: "image/png", size: 3, data: new Uint8Array([1, 2, 3]) };
 function fixture() {
   const methods = {
@@ -35,6 +35,6 @@ it("resumes promotion of a complete owned attachment without allocating or uploa
 });
 it("does not upload using a credential for another identity", async () => {
   const { methods, client } = fixture();
-  const result = await uploadAgentImage({ handle: "other.dev", image }, client, methods.promote);
+  const result = await uploadAgentImage({ handle: "other", image }, client, methods.promote);
   expect(result).toMatchObject({ status: "incomplete", phase: "agent" }); expect(methods.allocate).not.toHaveBeenCalled();
 });

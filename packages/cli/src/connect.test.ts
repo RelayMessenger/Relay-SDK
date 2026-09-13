@@ -19,7 +19,7 @@ import type { TerminalObserver } from "./terminal-watch.js";
 import { expectOwnerOnly } from "./private-file.test.js";
 
 const token = `rel_token_${"C".repeat(43)}`;
-const card = { handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
+const card = { handle: "calm_cangoo", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
 
 const runtimes = (found: Partial<Record<RuntimeFound["id"], Partial<RuntimeFound>>> = {}): RuntimeFound[] =>
   CODING_AGENT_IDS.map((id) => ({ id, label: id, found: false, ...found[id] }));
@@ -87,7 +87,7 @@ describe("nothing is created before the plan is taken", () => {
   it("a bad --handle is refused before any question, with the same words", async () => {
     const f = await fixture();
     expect(await runCLI(["connect", "--handle", "ci_connectwalk3_1789195591.dev"], f.deps)).toBe(1);
-    expect(f.stderr.join("")).toContain("Error: Use the handle name only, such as assistant: 3 to 32 lowercase letters, numbers or underscores, starting with a letter. Relay adds your organization namespace.");
+    expect(f.stderr.join("")).toContain("Error: A handle is one word using 3–32 lowercase letters, numbers, or underscores.");
     expect(f.prompts.select).not.toHaveBeenCalled();
     expect(f.prompts.confirm).not.toHaveBeenCalled();
     expect(f.prompts.intro).not.toHaveBeenCalled();
@@ -148,7 +148,7 @@ describe("the optional customize step", () => {
     expect(f.prompts.confirm.mock.calls.map(([message]) => message)).toEqual([CUSTOMIZE_QUESTION, "Continue?"]);
     expect(f.prompts.select.mock.invocationCallOrder[0]).toBeLessThan(f.prompts.confirm.mock.invocationCallOrder[0]!);
     expect(f.prompts.text).not.toHaveBeenCalled();
-    expect(posted(f)).toEqual({ handle: "my_agent.dev", displayName: "My Agent", isPremiumHandle: false });
+    expect(posted(f)).toEqual({ handle: "my_agent", displayName: "My Agent" });
     expect(f.stdout.join("")).toContain("create a new agent  (Relay picks the name)");
     // Yes, then Enter on all four, is the same run: same request, same screen.
     const yes = await fixture();
@@ -169,11 +169,11 @@ describe("the optional customize step", () => {
     expect(handleFromName("Calm Canada Goose")).toBe("calm_canada_goose");
     expect(textOptions(f, NAME_QUESTION).placeholder).toBe("Relay picks one");
     expect(textOptions(f, HANDLE_QUESTION).placeholder).toBe("calm_canada_goose");
-    expect(textOptions(f, HANDLE_QUESTION).validate!("Not.dev")).toContain("Use the handle name only");
+    expect(textOptions(f, HANDLE_QUESTION).validate!("Not")).toContain("A handle is one word");
     expect(textOptions(f, HANDLE_QUESTION).validate!("")).toBeUndefined();
     expect(textOptions(f, ABOUT_QUESTION).placeholder).toBe("One sentence about what it does");
     expect(textOptions(f, AVATAR_QUESTION).placeholder).toBe("Path to a PNG or JPEG");
-    expect(posted(f)).toEqual({ handle: "calm_canada_goose.dev", displayName: "Calm Canada Goose", isPremiumHandle: false });
+    expect(posted(f)).toEqual({ handle: "calm_canada_goose", displayName: "Calm Canada Goose" });
     expect(f.stdout.join("")).toContain('create @calm_canada_goose  "Calm Canada Goose"');
   });
 
@@ -183,7 +183,7 @@ describe("the optional customize step", () => {
     expect(await runCLI([...argv, "--name", "Calm Canada Goose", "--handle", "calm_cangoo", "--about", "Answers the mail.", "--avatar", face], f.deps)).toBe(0);
     expect(f.prompts.confirm.mock.calls.map(([message]) => message)).toEqual(["Continue?"]);
     expect(f.prompts.text).not.toHaveBeenCalled();
-    expect(posted(f)).toEqual({ handle: "calm_cangoo.dev", displayName: "Calm Canada Goose", about: "Answers the mail.", isPremiumHandle: false });
+    expect(posted(f)).toEqual({ handle: "calm_cangoo", displayName: "Calm Canada Goose", about: "Answers the mail." });
     expect(f.stdout.join("")).toContain('create @calm_cangoo  "Calm Canada Goose"  about: Answers the mail.  avatar: face.png');
     expect(f.fetch.mock.calls.some(([input]) => String(input).includes("/attachments"))).toBe(true);
   });
@@ -211,7 +211,7 @@ describe("the optional customize step", () => {
     expect(validate!(join(f.home, "notes.txt"))).toBe(NOT_AN_IMAGE);
     expect(validate!(await png(f.home))).toBeUndefined();
     expect(validate!("")).toBeUndefined();
-    expect(posted(f)).toEqual({ handle: "my_agent.dev", displayName: "My Agent", isPremiumHandle: false });
+    expect(posted(f)).toEqual({ handle: "my_agent", displayName: "My Agent" });
     expect(f.fetch.mock.calls.some(([input]) => String(input).includes("/attachments"))).toBe(false);
   });
 
@@ -719,7 +719,7 @@ describe("connect first reply proof", () => {
     const run = vi.fn(async (input: Parameters<TerminalObserver["run"]>[0]) => {
       for (const [kind, handle, text] of [
         ["message.received", "person", "incoming"],
-        ["message.sent", "another.dev", "wrong agent"],
+        ["message.sent", "another", "wrong agent"],
         ["message.sent", card.handle, "first answer"],
         ["message.sent", card.handle, "second answer"],
       ]) input.onEvent({ event_type: kind, data: { sender_handle: { handle }, parts: [{ type: "text", value: text }] } } as never);

@@ -83,7 +83,7 @@ it("writes a Windows Hermes state directory that the shipped runtime reader pres
   const { parseEnvFile } = await import("../../claude-code/src/config.js");
   const { hermesStateDir } = await import("./connect.js");
   const original = String.raw`C:\Users\x\AppData\Roaming\hermes\relay`;
-  const value = hermesStateDir({ env: { HERMES_HOME: String.raw`C:\Users\x\AppData\Roaming\hermes` }, home: String.raw`C:\Users\x`, platform: "win32", version: "0.1.6-staging.3", profile: "default", handle: "test.dev", allow: [], start: false });
+  const value = hermesStateDir({ env: { HERMES_HOME: String.raw`C:\Users\x\AppData\Roaming\hermes` }, home: String.raw`C:\Users\x`, platform: "win32", version: "0.1.6-staging.3", profile: "default", handle: "test", allow: [], start: false });
   const directory = await channel();
   const written = await writeEnvFile(join(directory, ".env"), { RELAY_STATE_DIR: value }, "Hermes");
   const parsed = parseEnvFile(await readFile(written.path, "utf8"));

@@ -9,7 +9,7 @@ import { InteractiveCancelled, interactiveAllowed, type InteractivePrompts } fro
 import { installerEnvironment, RELAY_SKILL_INSTALL_ARGS, relaySkillInstallArgs, relaySkillPresent, relaySkillSourceBranch } from "./skill-offer.js";
 
 const token = `rel_token_${"I".repeat(43)}`;
-const card = { handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
+const card = { handle: "calm_cangoo", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), "relay-interactive-"));
   const env: NodeJS.ProcessEnv = { RELAY_CONFIG_PATH: join(home, "config.json"), RELAY_API_URL: "https://api.staging.relayapp.im" };
@@ -179,10 +179,10 @@ it("interactive creation collects optional fields; blanks keep server defaults",
   f.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   expect(await runCLI(["agents"], f.deps)).toBe(0);
   const post = f.fetch.mock.calls.find(([, init]) => init?.method === "POST")!;
-  expect(JSON.parse(String(post[1]?.body))).toEqual({ handle: "custom_agent.dev", displayName: "Custom Agent", isPremiumHandle: false });
+  expect(JSON.parse(String(post[1]?.body))).toEqual({ handle: "custom_agent", displayName: "Custom Agent" });
   const blank = await fixture(); blank.prompts.select.mockResolvedValueOnce("create"); blank.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   expect(await runCLI(["agents"], blank.deps)).toBe(0);
-  expect(JSON.parse(String(blank.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body))).toEqual({ handle: "my_agent.dev", displayName: "My Agent", isPremiumHandle: false });
+  expect(JSON.parse(String(blank.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body))).toEqual({ handle: "my_agent", displayName: "My Agent" });
 });
 
 it.each(["CODEX_HOME", "CLAUDE_CONFIG_DIR", "HERMES_HOME"])("preserves and detects the installer's selected %s", async (key) => {
