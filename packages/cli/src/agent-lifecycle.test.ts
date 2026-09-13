@@ -12,7 +12,7 @@ import { STAGING_API_URL, defaultCreationApiURL, emptyConfig, readConfig, writeC
 // so every creation expectation reads from the version under test.
 const creationOrigin = defaultCreationApiURL();
 
-const handle = "brave_cangoo.dev";
+const handle = "brave_cangoo";
 const card = { handle, first_name: "Brave Canada Goose", last_name: null, image_url: null, is_active: true, kind: "agent" };
 async function fixture() {
   const home = await realpath(await mkdtemp(join(tmpdir(), "relay agent lifecycle-")));
@@ -60,7 +60,7 @@ describe("real persisted agent selection", { timeout: 120_000 }, () => {
     config.profiles.laptop = { api_url: "https://one.staging.test", agent_token: "first-token" };
     config.profiles.other = { api_url: "https://two.staging.test", agent_token: "second-token" };
     await writeConfig(config, deps.configContext);
-    fetch.mockImplementation(async (_url, init) => init?.method === "DELETE" ? new Response(null, { status: 204 }) : Response.json({ contact_cards: [{ ...card, handle: new Headers(init?.headers).get("authorization") === "Bearer first-token" ? handle : "other.dev" }] }));
+    fetch.mockImplementation(async (_url, init) => init?.method === "DELETE" ? new Response(null, { status: 204 }) : Response.json({ contact_cards: [{ ...card, handle: new Headers(init?.headers).get("authorization") === "Bearer first-token" ? handle : "other" }] }));
     expect(await runCLI(["agents", "delete", handle], deps)).toBe(0);
     const saved = await readConfig(deps.configContext);
     expect(saved.profiles.laptop?.agent_token).toBeUndefined();
@@ -179,20 +179,20 @@ it("maps custom profile flags to canonical create fields and stores the server-r
   const recipe = { recipe: { emoji: { emoji: "🦆" } }, background: { linearGradient: { colors: ["2596A6", "116A79"] } } };
   const path = join(home, "recipe.json"); await writeFile(path, JSON.stringify(recipe));
   fetch.mockImplementation(async (_input, init) => {
-    if (init?.method === "POST") expect(JSON.parse(String(init?.body))).toEqual({ handle: "chosen_agent.dev", displayName: "My Agent", isPremiumHandle: false });
+    if (init?.method === "POST") expect(JSON.parse(String(init?.body))).toEqual({ handle: "chosen_agent", displayName: "My Agent" });
     else if (init?.method === "PATCH") expect(JSON.parse(String(init?.body))).toEqual({ image_url: "https://images.example.test/snapshot.png", image_recipe: recipe });
-    if (init?.method === "PATCH") return Response.json({ ...card, handle: "chosen_agent.dev", first_name: "My Agent", image_url: "https://api.staging.relayapp.im/images/copied.png" });
-    return Response.json({ agent: { ...card, handle: "chosen_agent.dev", first_name: "My Agent", image_url: "https://api.staging.relayapp.im/images/copied.png" }, secret: "custom-token", share_url: "https://go.staging.relayapp.im/@chosen_agent.dev" }, { status: 201 });
+    if (init?.method === "PATCH") return Response.json({ ...card, handle: "chosen_agent", first_name: "My Agent", image_url: "https://api.staging.relayapp.im/images/copied.png" });
+    return Response.json({ agent: { ...card, handle: "chosen_agent", first_name: "My Agent", image_url: "https://api.staging.relayapp.im/images/copied.png" }, secret: "custom-token", share_url: "https://go.staging.relayapp.im/@chosen_agent" }, { status: 201 });
   });
   expect(await runCLI(["agents", "create", "--json", "--handle", "chosen_agent", "--name", "  My Agent  ", "--image-url", "https://images.example.test/snapshot.png", "--image-recipe", path], deps)).toBe(0);
-  expect((await readConfig(deps.configContext)).profiles["chosen_agent.dev"]?.agent_token).toBe("custom-token");
+  expect((await readConfig(deps.configContext)).profiles["chosen_agent"]?.agent_token).toBe("custom-token");
   expect(fetch).toHaveBeenCalledTimes(2);
 });
 
 it("rejects invalid options and recipe-without-snapshot before creating", async () => {
   const { deps, fetch, home } = await fixture();
   const recipe = join(home, "recipe.json"); await writeFile(recipe, '{"recipe":{"image":{}}}');
-  for (const flags of [["--handle", "Not.dev"], ["--handle", "ab.dev"], ["--name", "   "], ["--image-url", "http://images.example.test/a.png"], ["--image-url", "https://user:password@images.example.test/a.png"], ["--image-recipe", recipe]]) {
+  for (const flags of [["--handle", "Not"], ["--handle", "ab"], ["--name", "   "], ["--image-url", "http://images.example.test/a.png"], ["--image-url", "https://user:password@images.example.test/a.png"], ["--image-recipe", recipe]]) {
     expect(await runCLI(["agents", "create", "--json", ...flags], deps)).toBe(1);
   }
   expect(fetch).not.toHaveBeenCalled();

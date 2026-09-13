@@ -11,16 +11,16 @@ it("creation uses a local handle part and the existing 30-character name cap", (
   expect(handleFromName("My Agent")).toBe("my_agent");
   expect(validateFirstName(`  ${"N".repeat(30)}  `)).toBe("N".repeat(30));
   expect(() => validateFirstName("N".repeat(31))).toThrow("1 to 30");
-  for (const value of ["my_agent.dev", "my_agent.acme", "@my_agent", "ab"]) {
+  for (const value of ["my_agent", "my_agent.acme", "@my_agent", "ab"]) {
     expect(() => validateHandle(value)).toThrow("handle name only");
   }
 });
 
 it.each([
-  ["agents", "create", "--handle", "my_agent.dev"],
+  ["agents", "create", "--handle", "my_agent"],
   ["agents", "create", "--handle", "my_agent.acme"],
   ["agents", "create", "--name", "N".repeat(31)],
-  ["connect", "codex", "--new", "--yes", "--handle", "my_agent.dev"],
+  ["connect", "codex", "--new", "--yes", "--handle", "my_agent"],
   ["connect", "codex", "--new", "--yes", "--name", "N".repeat(31)],
 ])("rejects invalid creation input before OAuth/network: %j", async (...args) => {
   const home = await mkdtemp(join(tmpdir(), "relay-creation-contract-"));
@@ -45,8 +45,8 @@ it("does not advertise or accept the obsolete token-name option", async () => {
   const connect = program.commands.find(c => c.name() === "connect")!;
   expect(create.options.some(option => option.long === "--token-name")).toBe(false);
   expect(create.helpInformation()).not.toContain("--token-name");
-  expect(create.helpInformation()).toContain("organization namespace");
-  expect(connect.helpInformation()).not.toContain(".dev");
+  expect(create.helpInformation()).toContain("organization website");
+  expect(connect.helpInformation()).not.toContain("");
   const fetch = vi.fn(), consoleLogin = vi.fn();
   expect(await runCLI(["--json", "--no-input", "agents", "create", "--token-name", "old"], {
     fetch, consoleLogin, stdout: () => undefined, stderr: () => undefined,

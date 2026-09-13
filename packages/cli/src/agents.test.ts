@@ -11,8 +11,8 @@ const privateContext = { env: { RELAY_CONFIG_PATH: join(mkdtempSync(join(tmpdir(
 const secret = "one-time-secret-not-for-output";
 // Creation targets the origin the version under test selects (see config.ts).
 const creationOrigin = defaultCreationApiURL();
-const card = { handle: "brave_cangoo.dev", first_name: "Brave Canada Goose", last_name: null, image_url: null, is_active: true, kind: "agent" as const };
-const response = { agent: card, token: secret, share_url: "https://staging.relayapp.im/@brave_cangoo.dev" };
+const card = { handle: "brave_cangoo", first_name: "Brave Canada Goose", last_name: null, image_url: null, is_active: true, kind: "agent" as const };
+const response = { agent: card, token: secret, share_url: "https://staging.relayapp.im/@brave_cangoo" };
 function setup(initial: RelayConfig = emptyConfig()) {
   let config = structuredClone(initial);
   const auth: ResolvedAuth = { profile: "default", apiURL: initial.profiles.default?.api_url ?? creationOrigin, token: secret, tokenSource: "profile", configPath: "/not-used" };
@@ -63,7 +63,7 @@ describe("pure agent command handlers", () => {
   it("rejects existing explicit profiles, qualified handles and long names before POST", async () => {
     const { deps } = setup();
     await expect(createAgent({ profile: "default" }, deps)).rejects.toThrow("exists");
-    await expect(createAgent({ handle: "assistant.dev" }, deps)).rejects.toThrow("handle name only");
+    await expect(createAgent({ handle: "assistant" }, deps)).rejects.toThrow("handle name only");
     await expect(createAgent({ firstName: "N".repeat(31) }, deps)).rejects.toThrow("1 to 30");
     expect(deps.provision).not.toHaveBeenCalled();
   });

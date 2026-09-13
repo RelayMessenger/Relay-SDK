@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { folderLinkPath, readFolderLink, resolveFolderAgent, writeFolderLink } from "./folder-link.js";
 
-const link = { handle: "calm_cangoo.dev", apiUrl: "https://api.staging.relayapp.im" };
+const link = { handle: "calm_cangoo", apiUrl: "https://api.staging.relayapp.im" };
 
 describe("the folder link", () => {
   it("writes .relay/agent.json as a pointer with no token, owner-only", async () => {
@@ -48,14 +48,14 @@ describe("the folder link", () => {
 
   it("resolves the folder link, then RELAY_AGENT, then the last connected agent", async () => {
     const root = await mkdtemp(join(tmpdir(), "relay-folder-link-"));
-    const config = { profiles: { "f.dev": { agent_token: "t" }, "e.dev": { agent_token: "t" }, "d.dev": { agent_token: "t" }, empty: {} }, defaultAgent: "d.dev" };
-    expect(await resolveFolderAgent(root, {}, config)).toEqual({ profile: "d.dev", source: "default" });
-    expect(await resolveFolderAgent(root, { RELAY_AGENT: "e.dev" }, config)).toEqual({ profile: "e.dev", source: "env" });
-    await writeFolderLink(root, { handle: "f.dev", apiUrl: link.apiUrl });
-    expect(await resolveFolderAgent(root, { RELAY_AGENT: "e.dev" }, config)).toEqual({ profile: "f.dev", source: "folder" });
+    const config = { profiles: { "f": { agent_token: "t" }, "e": { agent_token: "t" }, "d": { agent_token: "t" }, empty: {} }, defaultAgent: "d" };
+    expect(await resolveFolderAgent(root, {}, config)).toEqual({ profile: "d", source: "default" });
+    expect(await resolveFolderAgent(root, { RELAY_AGENT: "e" }, config)).toEqual({ profile: "e", source: "env" });
+    await writeFolderLink(root, { handle: "f", apiUrl: link.apiUrl });
+    expect(await resolveFolderAgent(root, { RELAY_AGENT: "e" }, config)).toEqual({ profile: "f", source: "folder" });
     // A link to a handle this computer does not hold falls through.
-    await writeFolderLink(root, { handle: "gone.dev", apiUrl: link.apiUrl });
-    expect(await resolveFolderAgent(root, {}, config)).toEqual({ profile: "d.dev", source: "default" });
+    await writeFolderLink(root, { handle: "gone", apiUrl: link.apiUrl });
+    expect(await resolveFolderAgent(root, {}, config)).toEqual({ profile: "d", source: "default" });
     expect(await resolveFolderAgent(root, { RELAY_AGENT: "empty" }, { profiles: config.profiles })).toBeUndefined();
   });
 });

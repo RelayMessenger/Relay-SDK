@@ -68,7 +68,7 @@ it("no-input aliases non-interactive and changes the piped plan", async () => {
   }
 });
 it("about validates before any creation request", async () => {
-  for (const command of [["agents", "create"], ["connect", "codex", "--new"], ["contact-card", "set", "--handle", "test.dev"]]) {
+  for (const command of [["agents", "create"], ["connect", "codex", "--new"], ["contact-card", "set", "--handle", "test"]]) {
     for (const about of ["   ", "a".repeat(61)]) expect((await run([...command, "--about", about, "--json"])).code).toBe(2);
   }
 });
@@ -92,11 +92,11 @@ it("agent creation forwards trimmed about and omits it when absent", async () =>
     const home = await privateHome("cli-principles-20260910-about-");
     let body: Record<string, unknown> = {};
     const context = { home, env: { RELAY_CONFIG_PATH: join(home, "config.json") } };
-    const console = consoleFixture(context, { handle: "calendar.dev", first_name: "Calendar", image_url: null });
+    const console = consoleFixture(context, { handle: "calendar", first_name: "Calendar", image_url: null });
     await console.login();
     const deps = agentDependencies(context, console.wrap(async (_url, init) => {
       body = JSON.parse(String(init?.body));
-      return Response.json({ agent: { handle: "calendar.dev", first_name: "Calendar", image_url: null }, secret: "rly_test_about_0123456789", share_url: "https://relayapp.im/calendar.dev" }, { status: 201 });
+      return Response.json({ agent: { handle: "calendar", first_name: "Calendar", image_url: null }, secret: "rly_test_about_0123456789", share_url: "https://relayapp.im/calendar" }, { status: 201 });
     }));
     await createAgentWithPicture({ apiURL: "https://api.staging.relayapp.im", ...(about === undefined ? {} : { about }) }, deps);
     if (about === undefined) expect(body).not.toHaveProperty("about");
@@ -106,7 +106,7 @@ it("agent creation forwards trimmed about and omits it when absent", async () =>
 it("contact-card set sends the trimmed about field", async () => {
   const home = await privateHome("cli-principles-20260910-card-");
   let body: Record<string, unknown> = {};
-  expect(await runCLI(["--agent", "no", "contact-card", "set", "--handle", "calendar.dev", "--about", "  Helps you plan  "], {
+  expect(await runCLI(["--agent", "no", "contact-card", "set", "--handle", "calendar", "--about", "  Helps you plan  "], {
     configContext: { home, env: { RELAY_CONFIG_PATH: join(home, "config.json"), RELAY_AGENT_TOKEN: "rly_test_about_0123456789", RELAY_API_URL: "https://api.staging.relayapp.im" } },
     isInteractive: false, stdout: () => undefined, stderr: () => undefined,
     fetch: async (_url, init) => { body = JSON.parse(String(init?.body)); return Response.json({}); },

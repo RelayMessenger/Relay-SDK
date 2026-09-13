@@ -62,7 +62,7 @@ const fakeAppServer = async (settings: {
 const traffic = (log: FakeLine[]): string[] =>
   log.map((line) => line.in ?? `out ${line.out ?? ""}`);
 
-const received = (eventId: string, chatId: string, text: string, sender = "alice.dev"): RelayWebhookEvent => ({
+const received = (eventId: string, chatId: string, text: string, sender = "alice"): RelayWebhookEvent => ({
   api_version: "v1", webhook_version: "2026-08-30", event_type: "message.received",
   event_id: eventId, created_at: "2026-09-11T00:00:00.000Z", trace_id: "trace", agent_id: "agent",
   data: {
@@ -173,13 +173,13 @@ describe("the app-server the bridge starts", () => {
     const turn = (await codex.log()).find((line) => line.in === "turn/start");
     expect(turn?.params).toEqual({
       threadId: "thread-1",
-      input: [{ type: "text", text: codexPrompt("alice.dev", "Hey, what's up") }],
+      input: [{ type: "text", text: codexPrompt("alice", "Hey, what's up") }],
     });
   });
 
   it("tells Codex the answer travels back on its own", () => {
-    expect(codexPrompt("alice.dev", "Hey, what's up")).toContain("@alice.dev sent you this message on Relay:");
-    expect(codexPrompt("alice.dev", "Hey, what's up")).toContain("do not send it yourself");
+    expect(codexPrompt("alice", "Hey, what's up")).toContain("@alice sent you this message on Relay:");
+    expect(codexPrompt("alice", "Hey, what's up")).toContain("do not send it yourself");
   });
 
   it("takes the message that arrived as the key, so one message is answered once", () => {
@@ -219,14 +219,14 @@ describe("the codex the bridge starts", () => {
 describe("which messages the bridge answers", () => {
   it("answers an inbound message that has text", () => {
     expect(bridgeTurn(received("event-1", "chat-1", "Hey, what's up"))).toEqual({
-      eventId: "event-1", chatId: "chat-1", sender: "alice.dev", text: "Hey, what's up",
+      eventId: "event-1", chatId: "chat-1", sender: "alice", text: "Hey, what's up",
     });
   });
 
   it.each([
     ["its own message coming back", { event_type: "message.sent" }],
-    ["an outbound message", { data: { chat: { id: "chat-1" }, direction: "outbound", sender_handle: { handle: "alice.dev" }, parts: [{ type: "text", value: "hi" }] } }],
-    ["a message with no text", { data: { chat: { id: "chat-1" }, direction: "inbound", sender_handle: { handle: "alice.dev" }, parts: [] } }],
+    ["an outbound message", { data: { chat: { id: "chat-1" }, direction: "outbound", sender_handle: { handle: "alice" }, parts: [{ type: "text", value: "hi" }] } }],
+    ["a message with no text", { data: { chat: { id: "chat-1" }, direction: "inbound", sender_handle: { handle: "alice" }, parts: [] } }],
   ])("leaves %s alone", (_name, override) => {
     expect(bridgeTurn({ ...received("event-1", "chat-1", "hi"), ...override } as RelayWebhookEvent)).toBeUndefined();
   });
@@ -242,7 +242,7 @@ describe("what the bridge sends back", () => {
       key: "codex-bridge-event-1",
     }]);
     expect(relay.typing).toEqual(["start chat-1", "stop chat-1"]);
-    expect(said).toEqual(["@alice.dev  Hey, what's up", "Sent the answer to @alice.dev."]);
+    expect(said).toEqual(["@alice  Hey, what's up", "Sent the answer to @alice."]);
   });
 
   it("sends the final answer, not what Codex said on the way to it", async () => {
@@ -262,7 +262,7 @@ describe("what the bridge sends back", () => {
     const { said, relay } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "Hey, what's up")] });
     expect(relay.sent).toEqual([]);
     expect(relay.typing).toEqual(["start chat-1", "stop chat-1"]);
-    expect(said.at(-1)).toBe("Codex gave no answer to @alice.dev, so nothing was sent.");
+    expect(said.at(-1)).toBe("Codex gave no answer to @alice, so nothing was sent.");
   });
 
   it("keeps answering after a send Relay would not take", async () => {
@@ -304,11 +304,11 @@ describe("one thread for each chat", () => {
     const context = { env: { RELAY_CONFIG_DIR: home } };
     await runBridge({
       ...codex, events: [received("event-1", "chat-1", "first")],
-      threads: await openCodexThreads({ apiURL: "https://api.relayapp.im", handle: "agent.dev" }, context),
+      threads: await openCodexThreads({ apiURL: "https://api.relayapp.im", handle: "agent" }, context),
     });
     await runBridge({
       ...codex, events: [received("event-2", "chat-1", "second")],
-      threads: await openCodexThreads({ apiURL: "https://api.relayapp.im", handle: "agent.dev" }, context),
+      threads: await openCodexThreads({ apiURL: "https://api.relayapp.im", handle: "agent" }, context),
     });
     expect(traffic(await codex.log()).filter((line) => line.startsWith("thread/")))
       .toEqual(["thread/start", "thread/resume"]);
@@ -322,13 +322,13 @@ describe("one thread for each chat", () => {
     const codex = await fakeAppServer();
     const home = await scratch("threads-lost");
     const context = { env: { RELAY_CONFIG_DIR: home } };
-    const store = await openCodexThreads({ apiURL: "https://api.relayapp.im", handle: "agent.dev" }, context);
+    const store = await openCodexThreads({ apiURL: "https://api.relayapp.im", handle: "agent" }, context);
     await store.set("chat-1", "thread-nobody-has");
     const { said } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "first")], threads: store });
     expect(traffic(await codex.log()).filter((line) => line.startsWith("thread/")))
       .toEqual(["thread/resume", "thread/start"]);
     expect(said).toContain("Codex no longer has this chat's thread. It starts a new one.");
-    const kept = await openCodexThreads({ apiURL: "https://api.relayapp.im", handle: "agent.dev" }, context);
+    const kept = await openCodexThreads({ apiURL: "https://api.relayapp.im", handle: "agent" }, context);
     expect(kept.get("chat-1")).toBe("thread-1");
   });
 });
@@ -345,7 +345,7 @@ describe("when turns run", () => {
     // running is stopped first, and only then does the next one start.
     expect(traffic(await codex.log()).filter((line) => line.includes("turn/")))
       .toEqual(["turn/start", "turn/interrupt", "out turn/completed", "turn/start", "out turn/completed"]);
-    expect(said).toContain("A newer message came in, so the answer to @alice.dev was dropped.");
+    expect(said).toContain("A newer message came in, so the answer to @alice was dropped.");
     // Nothing is sent for the turn that was stopped.
     expect(relay.sent.map((message) => message.key)).toEqual(["codex-bridge-event-2"]);
   });

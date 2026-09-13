@@ -13,7 +13,7 @@ const home = async (): Promise<{ env: NodeJS.ProcessEnv }> => {
   return { env: { RELAY_CONFIG_DIR: folder } };
 };
 
-const owner = { apiURL: "https://api.relayapp.im", handle: "agent.dev" };
+const owner = { apiURL: "https://api.relayapp.im", handle: "agent" };
 
 describe("where the thread ids live", () => {
   it("keeps them beside the profile that owns the agent", async () => {
@@ -23,10 +23,10 @@ describe("where the thread ids live", () => {
   });
 
   it("gives the same chat on two Relays, or two agents, two different threads", () => {
-    expect(codexThreadKey(owner, "chat-1")).toBe("https://api.relayapp.im|agent.dev|chat-1");
+    expect(codexThreadKey(owner, "chat-1")).toBe("https://api.relayapp.im|agent|chat-1");
     expect(codexThreadKey({ ...owner, apiURL: "https://api.staging.relayapp.im" }, "chat-1"))
       .not.toBe(codexThreadKey(owner, "chat-1"));
-    expect(codexThreadKey({ ...owner, handle: "other.dev" }, "chat-1"))
+    expect(codexThreadKey({ ...owner, handle: "other" }, "chat-1"))
       .not.toBe(codexThreadKey(owner, "chat-1"));
   });
 });
@@ -57,10 +57,10 @@ describe("keeping a thread id", () => {
   it("leaves another agent's threads in the file alone", async () => {
     const context = await home();
     const mine = await openCodexThreads(owner, context);
-    const theirs = await openCodexThreads({ ...owner, handle: "other.dev" }, context);
+    const theirs = await openCodexThreads({ ...owner, handle: "other" }, context);
     await theirs.set("chat-1", "their-thread");
     await mine.set("chat-1", "my-thread");
-    const reopened = await openCodexThreads({ ...owner, handle: "other.dev" }, context);
+    const reopened = await openCodexThreads({ ...owner, handle: "other" }, context);
     expect(reopened.get("chat-1")).toBe("their-thread");
     expect((await openCodexThreads(owner, context)).get("chat-1")).toBe("my-thread");
   });
@@ -71,7 +71,7 @@ describe("keeping a thread id", () => {
     await threads.set("chat-1", "01a0-thread");
     expect(JSON.parse(await readFile(codexThreadsPath(context), "utf8")) as unknown).toEqual({
       version: 1,
-      threads: { "https://api.relayapp.im|agent.dev|chat-1": "01a0-thread" },
+      threads: { "https://api.relayapp.im|agent|chat-1": "01a0-thread" },
     });
   });
 

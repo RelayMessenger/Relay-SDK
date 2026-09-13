@@ -6,7 +6,7 @@ import {
   renderTerminalQR, terminalQRForm, terminalQRGrid, terminalQRLines, terminalQRRowsLeft,
 } from "./qr-terminal.js";
 
-const url = "https://go.staging.relaymessenger.com/owned.dev";
+const url = "https://go.staging.relaymessenger.com/owned";
 /** Measured, not assumed: 33 modules and a one-module quiet zone on each edge. */
 const FULL_LINES = 35;
 const COMPACT_LINES = 18;

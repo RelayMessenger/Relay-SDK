@@ -43,7 +43,7 @@ interface FakeLine {
 }
 
 /** The Relay MCP server connect would build, reduced to what the bridge passes on. */
-const RELAY_MCP = { command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", "calm.dev"], env: {} as Record<string, string> };
+const RELAY_MCP = { command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", "calm"], env: {} as Record<string, string> };
 
 /**
  * An agent whose ACP command is the script beside this test. It is started
@@ -78,7 +78,7 @@ const fakeAcpAgent = async (settings: {
 const traffic = (log: FakeLine[]): string[] =>
   log.map((line) => line.in ?? `out ${line.out ?? ""}`);
 
-const received = (eventId: string, chatId: string, text: string, sender = "alice.dev"): RelayWebhookEvent => ({
+const received = (eventId: string, chatId: string, text: string, sender = "alice"): RelayWebhookEvent => ({
   api_version: "v1", webhook_version: "2026-08-30", event_type: "message.received",
   event_id: eventId, created_at: "2026-09-11T00:00:00.000Z", trace_id: "trace", agent_id: "agent",
   data: {
@@ -185,7 +185,7 @@ describe("the ACP agent the bridge starts", () => {
       cwd: acp.cwd,
       mcpServers: [{
         name: "relay", command: "npx",
-        args: ["-y", "@relaymessenger/mcp@staging", "--profile", "calm.dev"], env: [],
+        args: ["-y", "@relaymessenger/mcp@staging", "--profile", "calm"], env: [],
       }],
     });
   });
@@ -196,13 +196,13 @@ describe("the ACP agent the bridge starts", () => {
     const prompt = (await acp.log()).find((line) => line.in === "session/prompt");
     expect(prompt?.params).toEqual({
       sessionId: "session-1",
-      prompt: [{ type: "text", text: acpPrompt("alice.dev", "Hey, what's up") }],
+      prompt: [{ type: "text", text: acpPrompt("alice", "Hey, what's up") }],
     });
   });
 
   it("tells the agent the answer travels back on its own", () => {
-    expect(acpPrompt("alice.dev", "Hey, what's up")).toContain("@alice.dev sent you this message on Relay:");
-    expect(acpPrompt("alice.dev", "Hey, what's up")).toContain("do not send it yourself");
+    expect(acpPrompt("alice", "Hey, what's up")).toContain("@alice sent you this message on Relay:");
+    expect(acpPrompt("alice", "Hey, what's up")).toContain("do not send it yourself");
   });
 
   it("takes the message that arrived as the key, so one message is answered once", () => {
@@ -249,7 +249,7 @@ describe("what the bridge sends back", () => {
       key: "acp-bridge-event-1",
     }]);
     expect(relay.typing).toEqual(["start chat-1", "stop chat-1"]);
-    expect(said).toEqual(["@alice.dev  Hey, what's up", "Sent the answer to @alice.dev."]);
+    expect(said).toEqual(["@alice  Hey, what's up", "Sent the answer to @alice."]);
   });
 
   it("sends nothing when the agent answers with nothing, and says so", async () => {
@@ -257,7 +257,7 @@ describe("what the bridge sends back", () => {
     const { said, relay } = await runBridge({ ...acp, events: [received("event-1", "chat-1", "Hey, what's up")] });
     expect(relay.sent).toEqual([]);
     expect(relay.typing).toEqual(["start chat-1", "stop chat-1"]);
-    expect(said.at(-1)).toBe("Cursor gave no answer to @alice.dev, so nothing was sent.");
+    expect(said.at(-1)).toBe("Cursor gave no answer to @alice, so nothing was sent.");
   });
 
   it("keeps answering after a send Relay would not take", async () => {
@@ -312,11 +312,11 @@ describe("one session for each chat", () => {
     const context = { env: { RELAY_CONFIG_DIR: home } };
     await runBridge({
       ...acp, events: [received("event-1", "chat-1", "first")],
-      sessions: await openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent.dev" }, context),
+      sessions: await openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent" }, context),
     });
     await runBridge({
       ...acp, events: [received("event-2", "chat-1", "second")],
-      sessions: await openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent.dev" }, context),
+      sessions: await openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent" }, context),
     });
     expect(traffic(await acp.log()).filter((line) => line.startsWith("session/") && line !== "session/prompt"))
       .toEqual(["session/new", "session/load"]);
@@ -328,13 +328,13 @@ describe("one session for each chat", () => {
     const acp = await fakeAcpAgent();
     const home = await scratch("sessions-lost");
     const context = { env: { RELAY_CONFIG_DIR: home } };
-    const store = await openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent.dev" }, context);
+    const store = await openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent" }, context);
     await store.set("chat-1", "session-nobody-has");
     const { said } = await runBridge({ ...acp, events: [received("event-1", "chat-1", "first")], sessions: store });
     expect(traffic(await acp.log()).filter((line) => line.startsWith("session/") && line !== "session/prompt"))
       .toEqual(["session/load", "session/new"]);
     expect(said).toContain("Cursor no longer has this chat's session. It starts a new one.");
-    const kept = await openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent.dev" }, context);
+    const kept = await openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent" }, context);
     expect(kept.get("chat-1")).toBe("session-1");
   });
 
@@ -342,7 +342,7 @@ describe("one session for each chat", () => {
     const acp = await fakeAcpAgent({ loadSession: false });
     const home = await scratch("sessions-noload");
     const context = { env: { RELAY_CONFIG_DIR: home } };
-    const store = await openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent.dev" }, context);
+    const store = await openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent" }, context);
     await store.set("chat-1", "session-saved");
     await runBridge({ ...acp, events: [received("event-1", "chat-1", "first")], sessions: store });
     // A session/load is never even tried when the agent did not advertise it.
@@ -363,7 +363,7 @@ describe("when turns run", () => {
     // running is cancelled first, and only then does the next one start.
     expect(traffic(await acp.log()).filter((line) => line.includes("session/prompt") || line.includes("session/cancel")))
       .toEqual(["session/prompt", "session/cancel", "session/prompt"]);
-    expect(said).toContain("A newer message came in, so the answer to @alice.dev was dropped.");
+    expect(said).toContain("A newer message came in, so the answer to @alice was dropped.");
     // Nothing is sent for the turn that was cancelled.
     expect(relay.sent.map((message) => message.key)).toEqual(["acp-bridge-event-2"]);
   });

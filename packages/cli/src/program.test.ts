@@ -242,10 +242,10 @@ describe("CLI command routing", () => {
   });
 
   it("preserves generic participant commands and agent Contact Card sharing", async () => {
-    expect(await run(["chats", "participants", "add", "chat-1", "research.dev"])).toBe(0);
-    expect(fake.methods.addParticipant).toHaveBeenCalledWith("chat-1", { handle: "research.dev" });
-    expect(await run(["chats", "participants", "remove", "chat-1", "research.dev"])).toBe(0);
-    expect(fake.methods.removeParticipant).toHaveBeenCalledWith("chat-1", { handle: "research.dev" });
+    expect(await run(["chats", "participants", "add", "chat-1", "research"])).toBe(0);
+    expect(fake.methods.addParticipant).toHaveBeenCalledWith("chat-1", { handle: "research" });
+    expect(await run(["chats", "participants", "remove", "chat-1", "research"])).toBe(0);
+    expect(fake.methods.removeParticipant).toHaveBeenCalledWith("chat-1", { handle: "research" });
     expect(await run(["contact-card", "share", "chat-1"])).toBe(0);
     expect(fake.methods.shareCard).toHaveBeenCalledWith("chat-1");
   });
@@ -254,9 +254,9 @@ describe("CLI command routing", () => {
     ["--hide-history", true],
     ["--no-hide-history", false],
   ] as const)("passes %s to the SDK without losing false", async (flag, hideHistory) => {
-    expect(await run(["chats", "participants", "add", "chat-1", "research.dev", flag])).toBe(0);
+    expect(await run(["chats", "participants", "add", "chat-1", "research", flag])).toBe(0);
     expect(fake.methods.addParticipant).toHaveBeenCalledWith("chat-1", {
-      handle: "research.dev",
+      handle: "research",
       hide_history: hideHistory,
     });
   });
@@ -382,7 +382,7 @@ describe("auth commands", { timeout: 120_000 }, () => {
       {
         configContext,
         readStdin: async () => secret,
-        fetch: async () => Response.json({ contact_cards: [{ handle: "test_agent.dev", first_name: "Test", last_name: null, image_url: null, kind: "agent", is_active: true }] }),
+        fetch: async () => Response.json({ contact_cards: [{ handle: "test_agent", first_name: "Test", last_name: null, image_url: null, kind: "agent", is_active: true }] }),
         stdout: (value) => stdout.push(value),
         stderr: (value) => stdout.push(value),
       },

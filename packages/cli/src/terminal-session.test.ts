@@ -13,7 +13,7 @@ function fixture(rows = 40) {
   const text = () => output.write.mock.calls.map(([value]) => value).join("");
   return { input, output, signals, text, renderQR: vi.fn(async () => "██ QR ██\n██ QR ██") };
 }
-const options = { interactive: true, agent: { handle: "owned.dev", shareUrl: "https://go.staging.relaymessenger.com/owned.dev" }, runtime: { ownership: "external" as const, connection: "unknown" as const } };
+const options = { interactive: true, agent: { handle: "owned", shareUrl: "https://go.staging.relaymessenger.com/owned" }, runtime: { ownership: "external" as const, connection: "unknown" as const } };
 const turn = () => new Promise(resolve => setTimeout(resolve, 80));
 it("persists QR with a real observer adapter, separates runtime readiness, restores terminal on quit", async () => {
   const f = fixture(); let stopped = false;
