@@ -36,9 +36,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "7588db1e0cfbce423fd34505b92198b946543aa7",
+    commit: "935a558ee806aeb0d231460a6bd79dc54786ba96",
     path: "contracts/developer/openapi.yaml",
-    sha256: "049c4e5d9606af2781601e510952845d85c4ab5aeaaf00272566e3ba1d1b3c69",
+    sha256: "787e5dd583a2ba382931fe6799ecc7a421d1a4f94dce11a890fc6a1eeca4ea97",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -553,8 +553,6 @@ const validateOpenAPI = () => {
     document.components.schemas.ChatHandle.properties.verified.type,
     "boolean",
   );
-  assert.equal(document.components.schemas.ChatHandle.properties.is_removable.type, "boolean");
-  assert.match(declaredTypes, /is_removable\?: boolean;/u);
   for (const privateField of [
     "greeting_message",
     "is_default",
@@ -571,7 +569,6 @@ const validateOpenAPI = () => {
   assert.equal("/v1/contact_requests" in document.paths, false);
   assert.equal("CreateContactRequest" in document.components.schemas, false);
   assert.equal("CreateContactRequestResult" in document.components.schemas, false);
-  assert.deepEqual(
   for (const path of [
     "/v1/chats",
     "/v1/messages",

@@ -1261,24 +1261,6 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "403":
-          description: |-
-            The Handle cannot be blocked. A user blocking Relay's house agent,
-            whose Contact is not removable, is rejected with error code `2029`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                agent_not_removable:
-                  summary: The house agent's seat is permanent
-                  value:
-                    error:
-                      status: 403
-                      code: 2029
-                      message: This agent is not removable.
-                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2029
-                    success: false
         "404":
           description: The Handle is not a registered Relay Handle that can be blocked (error code `2001`).
           content:
@@ -1311,8 +1293,7 @@ paths:
         `message.delivered` fires when at least one recipient was delivered.
 
         Blocking does not delete existing Chats or history. It only stops new
-        traffic. Relay's house agent cannot be blocked by a user (`403`, error
-        code `2029`): its Contact is not removable.
+        traffic.
 
         Chat membership is where a block is refused out loud: adding a Handle
         that has blocked, or is blocked by, the Chat's user is rejected with
@@ -1807,17 +1788,6 @@ components:
           type: boolean
           description: Whether this is a group chat
           default: false
-        request_state:
-          type: string
-          enum:
-            - pending
-            - accepted
-            - deleted
-          description: >-
-            The caller's side of a message request on this Chat: `pending`
-            while a sender with no Contact edge to the caller wrote to them
-            and they have not answered, `accepted` or `deleted` once they
-            have. Absent when the caller was never asked; an agent never is.
         created_at:
           type: string
           format: date-time
@@ -1860,17 +1830,6 @@ components:
           type: boolean
           description: Whether this is a group chat
           default: false
-        request_state:
-          type: string
-          enum:
-            - pending
-            - accepted
-            - deleted
-          description: >-
-            The caller's side of a message request on this Chat: `pending`
-            while a sender with no Contact edge to the caller wrote to them
-            and they have not answered, `accepted` or `deleted` once they
-            have. Absent when the caller was never asked; an agent never is.
         created_at:
           type: string
           format: date-time
@@ -1973,6 +1932,7 @@ components:
         - image_url
         - about
         - verified
+        - is_contact
       properties:
         id:
           type: string
@@ -2034,13 +1994,12 @@ components:
         verified:
           type: boolean
           description: Whether Relay has verified this agent.
-        is_removable:
+        is_contact:
           type: boolean
           description: >-
-            Whether a user may remove this Contact. False only for Relay's
-            house agent, whose Chat is a permanent seat in every user's list:
-            it cannot be removed from Contacts, blocked, or left, and deleting
-            its Chat clears the history without hiding the Chat.
+            Whether the caller holds this member as a Contact. A direct Chat
+            whose other member is not a Contact is a message request to the
+            caller; a person's reply, or adding the agent, makes it one.
     ChatInfo:
       type: object
       required:
@@ -2117,40 +2076,6 @@ components:
           type: string
           format: uuid
           description: Direct Chat created or reused for this Contact.
-    ChatRequestUpdatedEvent:
-      type: object
-      additionalProperties: false
-      required:
-        - chat_id
-        - state
-        - updated_at
-      properties:
-        chat_id:
-          type: string
-          format: uuid
-          description: The Chat the person answered on.
-        state:
-          type: string
-          enum:
-            - accepted
-            - deleted
-          description: >-
-            `accepted`: the person added you; your Messages land in their
-            inbox from now on. `deleted`: the person removed the request and
-            left the Chat; a later Message to them opens a fresh Chat, which
-            is a fresh request.
-        updated_at:
-          type: string
-          format: date-time
-          description: When the person answered.
-    ChatRequestUpdatedWebhook:
-      description: Complete webhook payload for chat.request.updated events. A person's reply accepts the request.
-      allOf:
-        - $ref: "#/components/schemas/WebhookEnvelopeBase"
-        - type: object
-          properties:
-            data:
-              $ref: "#/components/schemas/ChatRequestUpdatedEvent"
     ContactAddedWebhook:
       description: Complete webhook payload for contact.added events.
       allOf:
@@ -4207,7 +4132,6 @@ components:
         - chat.typing_indicator.stopped
         - contact.added
         - contact.removed
-        - chat.request.updated
     WebhookEventsResult:
       type: object
       required:
@@ -4741,7 +4665,7 @@ x-relay-webhooks:
         - 2026-08-30
       operationId: webhookContactAddedV20260830
       summary: Contact added
-      description: A user added the receiving agent, by writing to it first or by accepting its message request. The direct Chat between them is created or reused.
+      description: A person wrote to your agent for the first time, replied to its message, or added your agent. The direct Chat between them is created or reused.
       requestBody:
         required: true
         content:
@@ -4764,27 +4688,6 @@ x-relay-webhooks:
           application/json:
             schema:
               $ref: "#/components/schemas/ContactRemovedWebhook"
-      responses:
-        "200":
-          description: Webhook received successfully
-  chat.request.updated.v2026-08-30:
-    post:
-      tags:
-        - 2026-08-30
-      operationId: webhookChatRequestUpdatedV20260830
-      summary: Message request answered
-      description: >-
-        A person answered the message request your first Message opened:
-        accepted it by replying, or deleted it. Nobody adds anyone; the first Message is
-        the request, and until it is accepted the person holds the Chat in
-        their message requests with no notification. An agent is never asked
-        and never receives this for its own inbox.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ChatRequestUpdatedWebhook"
       responses:
         "200":
           description: Webhook received successfully
