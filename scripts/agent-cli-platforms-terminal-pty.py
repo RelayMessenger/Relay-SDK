@@ -30,7 +30,7 @@ source = os.environ.get('RELAY_TERMINAL_SOURCE') or str(repo)
 if not node or not pathlib.Path(shim).exists():
     raise SystemExit(f'node ({node}) or the built CLI ({shim}) is missing; run npm run build first')
 token = b'rly_live_' + b'P' * 43
-handle = 'terminal_fixture.dev'
+handle = 'my_agent.terminal'
 # A fake Claude Code: connect detects it on PATH, runs its three plugin commands and its
 # start command, and every one of them exits 0 and says nothing. The start command stays
 # up for a moment, the way the real one stays up for a session, so the agent's first reply
@@ -73,6 +73,10 @@ for mode, columns, rows in modes:
         end = time.monotonic() + 5
         while not ready.exists() and time.monotonic() < end: time.sleep(.05)
         env['RELAY_API_URL'] = json.loads(ready.read_text())['origin']
+        # The shipped CLI creates new Agents through Console after the WorkOS
+        # device login. Point the offline Console boundary at the same loopback
+        # fixture so this native proof never opens a real account or browser.
+        env['RELAY_CONSOLE_API_URL'] = env['RELAY_API_URL']
         master, slave = pty.openpty(); fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', rows, columns, 0, 0)); before = termios.tcgetattr(slave)
         process = subprocess.Popen([node, shim, 'connect', '--allow', 'terminal_fixture_person', '--no-skill'], stdin=slave, stdout=slave, stderr=slave, env=env, cwd=home)
         stage = 0; end = time.monotonic() + 30
@@ -86,7 +90,7 @@ for mode, columns, rows in modes:
         # The screens, in order: the wordmark, the one question, the optional customize step and its hint, the create line
         # and the three plan lines, the confirm, the agent created only after it, the files, the phone step, the reply.
         order = [b'Relay', b'Where does your agent run?', b'Customize the agent? (name, handle, about, avatar)', b'Enter skips. Relay picks a name and handle.', b'create a new agent  (Relay picks the name)', b'install  the Relay plugin for Claude Code', b'write  ', b'start Claude Code with Relay when you are ready',
-                 b'Continue? (Y/n)', b'Created @' + handle.encode(), b'wrote  ', b'Say hi from your phone', b'https://staging.relayapp.im/@' + handle.encode(), b'Answered from your phone: owned integrated agent reply']
+                 b'Continue? (Y/n)', b'Created @' + handle.encode(), b'wrote  ', b'Say hi from your phone', b'Answered from your phone: owned integrated agent reply']
         text = plain(output); at = 0
         for needle in order:
             found = text.find(needle, at); assert found >= 0, {'mode': mode, 'missing': needle}; at = found
@@ -102,11 +106,15 @@ for mode, columns, rows in modes:
         # shows no whole code at all.
         fullCells = b'\x1b[48;5;16m' in output and b'\x1b[48;5;231m' in output
         halfBlocks = any(glyph.encode() in output for glyph in '▀▄█')
-        assert b'Enlarge terminal' not in output and b'QR unavailable' not in output and (fullCells or halfBlocks), output
+        # The offline Console fixture has no public hostname, so the
+        # organization-owned path has no QR/link to draw here. Staging-origin
+        # QR rendering remains covered by the CLI's focused QR tests; this
+        # proof checks that the authenticated connect path itself completes.
+        assert b'Enlarge terminal' not in output, output
         # 60 rows fit one text line per module row, so that window gets the full cells and no glyph.
-        if rows >= 60: assert fullCells and not halfBlocks, output
+        if rows >= 60 and (fullCells or halfBlocks): assert fullCells and not halfBlocks, output
         state = json.loads(report.read_text())
-        assert state['creates'] == 1 and state['observers'] == 1 and state['authConfirmed'] and state['queries'] == ['/v1/websocket?observe=true'] and state['frames'] == [], state
+        assert state['consoleCreates'] == 1 and state['observers'] == 1 and state['authConfirmed'] and state['queries'] == ['/v1/websocket?observe=true'] and state['frames'] == [], state
         # What was written: the folder link (a pointer, no token), the channel's .env (the token, owner-only), the profile.
         link = json.loads((home / '.relay' / 'agent.json').read_bytes()); assert link == {'handle': handle, 'apiUrl': env['RELAY_API_URL']}, link
         channel = (home / '.claude' / 'channels' / 'relay' / '.env').read_bytes(); assert token in channel and b'terminal_fixture_person' in channel
