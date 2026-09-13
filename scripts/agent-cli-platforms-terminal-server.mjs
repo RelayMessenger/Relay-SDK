@@ -4,13 +4,19 @@ import { writeFileSync } from 'node:fs';
 const require = createRequire((process.env.RELAY_TERMINAL_SOURCE ?? '/home/daytona/terminal-session') + '/package.json');
 const { WebSocketServer } = require('ws');
 const [readyPath, receiptPath] = process.argv.slice(2);
-const token = 'rly_live_' + 'P'.repeat(43); const handle = 'terminal_fixture.dev';
+const token = 'rly_live_' + 'P'.repeat(43); const handle = 'my_agent.terminal';
 const card = { handle, first_name: 'Terminal Fixture', last_name: null, image_url: 'https://api.staging.relayapp.im/assets/fixture.png', is_active: true, kind: 'agent' };
-const report = { scope: 'real installed CLI + loopback HTTP/WS, not live Server', creates: 0, contactCards: 0, observers: 0, eventsSent: 0, frames: [], queries: [], authConfirmed: true, requestPaths: [] };
+const report = { scope: 'real installed CLI + loopback HTTP/WS, not live Server', creates: 0, consoleCreates: 0, contactCards: 0, observers: 0, eventsSent: 0, frames: [], queries: [], authConfirmed: true, requestPaths: [] };
 const save = () => writeFileSync(receiptPath, JSON.stringify(report));
+let devicePolls = 0;
 const server = createServer((req, res) => {
  report.requestPaths.push(`${req.method} ${req.url}`);res.setHeader('content-type', 'application/json');
- if (req.method === 'POST' && req.url === '/v1/agents') {report.creates++;res.writeHead(201);res.end(JSON.stringify({agent:card,secret:token,share_url:`https://staging.relayapp.im/@${handle}`}));}
+ if (req.method === 'POST' && req.url === '/auth/cli/device') {res.end(JSON.stringify({device_code:'terminal-device',user_code:'TERM-CODE',verification_uri:'http://127.0.0.1/device',expires_in:60,interval:1,client_id:'terminal-client'}));}
+ else if (req.method === 'POST' && req.url === '/auth/cli/device-code') {devicePolls++; if (devicePolls === 1) {res.writeHead(400);res.end(JSON.stringify({error:'authorization_pending'}));} else res.end(JSON.stringify({access_token:'terminal-console-access',refresh_token:'terminal-console-refresh',organization_id:'org_terminal',user:{id:'user_terminal',email:'terminal@example.com',name:'Terminal Fixture'}}));}
+ else if (req.method === 'POST' && req.url === '/auth/cli/bootstrap') {res.writeHead(200);res.end(JSON.stringify({organization_id:'org_terminal',created:false}));}
+ else if (req.method === 'GET' && req.url === '/me') {res.end(JSON.stringify({org:{id:'org_terminal',handleNamespace:'terminal'}}));}
+ else if (req.method === 'POST' && req.url === '/orgs/org_terminal/agents') {report.consoleCreates++;res.writeHead(201);res.end(JSON.stringify({agent:{handle,first_name:'Terminal Fixture',image_url:card.image_url},token}));}
+ else if (req.method === 'POST' && req.url === '/v1/agents') {report.creates++;res.writeHead(201);res.end(JSON.stringify({agent:card,secret:token,share_url:`https://staging.relayapp.im/@${handle}`}));}
  else if (req.method === 'GET' && req.url === '/v1/contact_card') {report.contactCards++;report.authConfirmed &&= req.headers.authorization===`Bearer ${token}`;res.end(JSON.stringify({contact_cards:[card]}));}
  else {res.writeHead(404);res.end('{}');}save();
 });
