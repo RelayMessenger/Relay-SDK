@@ -2142,7 +2142,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "scripts/validate.py",
       "source_sha256": "4e04663cf3f31890989d6e12b6a735344d0b10e2ec6791c70d61e72e7bf4180b",
-      "destination_sha256": "346abb64c4f7eb2ce898d62ecc84f17541af4536d0681c9833a0cb489f51c343",
+      "destination_sha256": "6b1cc1240744b2a3a9af4a52e1b13dfaee72c266a56486095f5554888ed39d15",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -2263,7 +2263,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/distribution/scripts/validate-distribution.mjs",
       "source_sha256": "0650184ddae2ef362e2e362c5651ae4bd9208f421f185413e6a55ce52c3771a5",
-      "destination_sha256": "d343a06ce00dc11c98685b9edbbdb7d315d0632d2926242003455ff322e2fdb4",
+      "destination_sha256": "57e283e36e25d29949165e53963755c25dd20a9f73997a2deeae4096aa15cc40",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
