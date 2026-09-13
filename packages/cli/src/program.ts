@@ -685,7 +685,6 @@ export const createProgram = (
         ...(dependencies.prompts ? { prompts: dependencies.prompts } : {}),
         stderr,
         ...(options.organizationName ? { name: options.organizationName } : {}),
-        ...(options.namespace ? { namespace: options.namespace } : {}),
         ...(options.website === undefined ? {} : { website: options.website }),
         nonInteractive: globals(command).nonInteractive === true || globals(command).json === true || dependencies.isInteractive === false,
       });
@@ -753,13 +752,12 @@ export const createProgram = (
       }, "/me"));
     });
   organization.command("update")
-    .description("change the organization name, namespace, or website")
+    .description("change the organization name or website")
     .option("--name <name>", "organization display name")
-    .option("--namespace <namespace>", "organization namespace")
     .option("--website <domain>", "organization website; use an empty value to clear it")
-    .action(async (options: { name?: string; namespace?: string; website?: string }) => {
-      if (options.name === undefined && options.namespace === undefined && options.website === undefined) {
-        throw new CliError("Choose --name, --namespace, or --website.", "usage");
+    .action(async (options: { name?: string; website?: string }) => {
+      if (options.name === undefined && options.website === undefined) {
+        throw new CliError("Choose --name or --website.", "usage");
       }
       const me = await consoleRequest<{ org: { id: string } }>({
         context: configContext,
@@ -775,7 +773,6 @@ export const createProgram = (
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...(options.name === undefined ? {} : { name: options.name }),
-          ...(options.namespace === undefined ? {} : { handleNamespace: options.namespace }),
           ...(options.website === undefined ? {} : { website: options.website }),
         }),
       }));
