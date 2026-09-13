@@ -718,8 +718,6 @@ export type ContactRemovedWebhook = RelayWebhookEnvelope<
   "contact.removed"
 >;
 
->;
-
 export type MessageFailedWebhook = RelayWebhookEnvelope<
   MessageFailedEvent,
   "message.failed"
