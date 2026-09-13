@@ -41,11 +41,25 @@ export interface RelayProfile {
   local_webhook_secret?: string;
 }
 
+export interface RelayConsoleSession {
+  access_token: string;
+  refresh_token: string;
+  expires_at: number;
+  client_id: string;
+  organization_id?: string;
+  user: {
+    id: string;
+    email: string;
+    name?: string;
+  };
+}
+
 export interface RelayConfig {
   version: 1;
   current_profile: string;
   defaultAgent?: string;
   profiles: Record<string, RelayProfile>;
+  console?: RelayConsoleSession;
 }
 
 export interface ConfigContext {
@@ -132,7 +146,46 @@ const parseConfig = (value: unknown): RelayConfig => {
     current_profile: value.current_profile,
     ...(typeof value.defaultAgent === "string" ? { defaultAgent: value.defaultAgent } : {}),
     profiles,
+    ...(isRecord(value.console)
+      && typeof value.console.access_token === "string"
+      && typeof value.console.refresh_token === "string"
+      && typeof value.console.expires_at === "number"
+      && typeof value.console.client_id === "string"
+      && isRecord(value.console.user)
+      && typeof value.console.user.id === "string"
+      && typeof value.console.user.email === "string"
+      ? {
+          console: {
+            access_token: value.console.access_token,
+            refresh_token: value.console.refresh_token,
+            expires_at: value.console.expires_at,
+            client_id: value.console.client_id,
+            ...(typeof value.console.organization_id === "string"
+              ? { organization_id: value.console.organization_id }
+              : {}),
+            user: {
+              id: value.console.user.id,
+              email: value.console.user.email,
+              ...(typeof value.console.user.name === "string"
+                ? { name: value.console.user.name }
+                : {}),
+            },
+          },
+        }
+      : {}),
   };
+};
+
+export const defaultConsoleApiURL = (
+  apiURL: string = defaultCreationApiURL(),
+  env: NodeJS.ProcessEnv = process.env,
+): string => {
+  const configured = env.RELAY_CONSOLE_API_URL?.trim();
+  if (configured) return new URL(configured).toString().replace(/\/$/, "");
+  const host = new URL(apiURL).hostname;
+  if (host === "api.staging.relayapp.im") return "https://console.staging.relayapp.im/api";
+  if (host === "api.relayapp.im") return "https://console.relayapp.im/api";
+  throw new Error("Relay Console is unavailable for this API origin.");
 };
 
 const revisions = new WeakMap<RelayConfig, string>();

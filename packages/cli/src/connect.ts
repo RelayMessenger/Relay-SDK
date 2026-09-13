@@ -21,7 +21,7 @@ import { claudeChannelDir, sniffRuntimes, type RuntimeFound, type RuntimeId, typ
 import { readChannelEnv, writeChannelEnv, writeEnvFile } from "./claude-channel.js";
 import { readFolderLink, writeFolderLink } from "./folder-link.js";
 import { writeCodexProjectMcpServer } from "./coding-agents/codex-project-config.js";
-import { configPath, defaultCreationApiURL, isStagingBuild, packageVersion, validateApiURL, validateProfileName, validateToken } from "./config.js";
+import { configPath, defaultCreationApiURL, isStagingBuild, packageVersion, validateApiURL, validateProfileName, validateToken, type RelayConsoleSession } from "./config.js";
 import { HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { CliError, type CliErrorCode } from "./error-codes.js";
 import { renderTerminalQR, terminalQRRowsLeft, type TerminalQROptions } from "./qr-terminal.js";
@@ -29,6 +29,7 @@ import { dim, handle as markHandle, link } from "./ui-colour.js";
 import { safeMetadata } from "./output.js";
 import { spawnCommand } from "./spawn-command.js";
 import { runTerminalWatch, type TerminalObserver } from "./terminal-watch.js";
+import { createConsoleAgent } from "./console-auth.js";
 
 /** The plugin, and the marketplace it comes from, exactly as Claude Code names
  * them (.claude-plugin/marketplace.json: marketplace "relay-messenger", plugin "relay"). */
@@ -131,6 +132,10 @@ export interface ConnectDependencies {
   version?: string;
   fetch?: typeof globalThis.fetch;
   offerSkill?: () => Promise<void>;
+  /** Authenticated Console session used when a new organization Agent is created. */
+  consoleLogin?: () => Promise<RelayConsoleSession>;
+  /** Console API request boundary for organization-owned Agent creation. */
+  consoleRequest?: <T>(path: string, init?: RequestInit) => Promise<T>;
 }
 
 /**
@@ -711,7 +716,11 @@ export const runConnect = async (
   }
 
   // The plan was taken: only now is an agent created and its token saved.
-  const agent = known ?? await createNewAgent(chosen as PendingAgent, options, deps, screen);
+  let consoleSession: RelayConsoleSession | undefined;
+  if (!known && deps.consoleLogin && deps.consoleRequest) {
+    consoleSession = await deps.consoleLogin();
+  }
+  const agent = known ?? await createNewAgent(chosen as PendingAgent, options, deps, screen, consoleSession);
   // The folder points at its agent, like `vercel link`; the token stays in the
   // global profile store, and the last connected agent is the default elsewhere.
   const linkPath = await writeFolderLink(deps.cwd, { handle: agent.handle, apiUrl: agent.apiURL });
@@ -1080,24 +1089,78 @@ const createNewAgent = async (
   options: ConnectOptions,
   deps: ConnectDependencies,
   screen: Screen,
+  consoleSession?: RelayConsoleSession,
 ): Promise<ConnectAgent> => {
   const { apiURL, handle, identity } = pending;
-  const image = identity.avatar ?? options.image;
   // The picture goes up through the same upload `contact-card update --image`
   // uses (agent-image-upload.ts), after the agent exists and before "Say hi".
-  const created = await screen.work("Creating your agent", () => createAgentWithPicture({
-    apiURL,
-    ...(deps.profile ? { profile: deps.profile } : {}),
-    ...(handle ? { handle } : {}),
-    ...(identity.name ? { firstName: identity.name } : {}),
-    ...(identity.about === undefined ? {} : { about: identity.about }),
-    ...(image ? { image } : {}),
-    cwd: deps.cwd,
-    home: deps.home,
-    makeDefault: true,
-  }, deps.agents, deps.fetch), (result) => `Created ${screen.handle(result.result.handle)}  token saved privately on this computer`);
-  if (created.image && created.image.status !== "updated") {
-    // A picture that did not go through never undoes the connect: one dim line, then on.
+  if (!consoleSession?.organization_id || !deps.consoleRequest) {
+    const image = identity.avatar ?? options.image;
+    const created = await screen.work("Creating your agent", () => createAgentWithPicture({
+      apiURL,
+      ...(deps.profile ? { profile: deps.profile } : {}),
+      ...(handle ? { handle } : {}),
+      ...(identity.name ? { firstName: identity.name } : {}),
+      ...(identity.about === undefined ? {} : { about: identity.about }),
+      ...(image ? { image } : {}),
+      cwd: deps.cwd,
+      home: deps.home,
+      makeDefault: true,
+    }, deps.agents, deps.fetch), (result) => `Created ${screen.handle(result.result.handle)}  token saved privately on this computer`);
+    if (created.image && created.image.status !== "updated") {
+      screen.say(screen.dim(`avatar not set: ${incompletePictureMessage(created.result.handle, created.result.profile, created.image, false)}`));
+    }
+    const saved = (await deps.agents.read()).profiles[created.result.profile];
+    if (!saved?.agent_token) {
+      throw new ConnectFailure(
+        "The agent was created but its token was not saved on this computer, so Relay wrote no configuration.",
+        "npx relaymessenger agents list",
+      );
+    }
+    return {
+      profile: created.result.profile,
+      handle: created.result.handle,
+      displayName: created.result.display_name,
+      apiURL: created.result.api_url,
+      shareURL: created.result.share_url,
+      token: saved.agent_token,
+      created: true,
+    };
+  }
+  const displayName = identity.name ?? "My Agent";
+  const created = await screen.work("Creating your agent", async () => {
+    const result = await createConsoleAgent(
+      { context: { env: deps.env, home: deps.home, cwd: deps.cwd }, apiURL, ...(deps.fetch ? { fetch: deps.fetch } : {}) },
+      {
+        displayName,
+        ...(handle ? { handle: handle.replace(/\.dev$/u, "") } : {}),
+        ...(identity.about === undefined ? {} : { about: identity.about }),
+        ...((identity.avatar ?? options.image) === undefined ? {} : { image: identity.avatar ?? options.image }),
+        ...(deps.cwd ? { cwd: deps.cwd } : {}),
+        ...(deps.home ? { home: deps.home } : {}),
+      },
+    );
+    const profile = result.agent.handle;
+    await deps.agents.update((config) => {
+      config.profiles[profile] = {
+        api_url: apiURL,
+        agent_token: result.token,
+      };
+      config.defaultAgent = profile;
+    });
+    return {
+      result: {
+        profile,
+        handle: result.agent.handle,
+        display_name: result.agent.first_name,
+        image_url: result.agent.image_url,
+        api_url: apiURL,
+        share_url: savedAgentShareURL(apiURL, result.agent.handle),
+      },
+      ...(result.image ? { image: result.image } : {}),
+    };
+  }, (result) => `Created ${screen.handle(result.result.handle)}  token saved privately on this computer`);
+  if (created.image?.status === "incomplete") {
     screen.say(screen.dim(`avatar not set: ${incompletePictureMessage(created.result.handle, created.result.profile, created.image, false)}`));
   }
   const saved = (await deps.agents.read()).profiles[created.result.profile];
