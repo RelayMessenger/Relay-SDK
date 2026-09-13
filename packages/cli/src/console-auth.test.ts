@@ -90,6 +90,7 @@ it("completes device login, bootstraps Personal setup, refreshes the session, an
     "https://console.staging.relayapp.im/api/auth/cli/device",
     "https://console.staging.relayapp.im/api/auth/cli/device-code",
     "https://console.staging.relayapp.im/api/auth/cli/device-code",
+    "https://console.staging.relayapp.im/api/auth/cli/device-code",
     "https://console.staging.relayapp.im/api/auth/cli/bootstrap",
     "https://api.workos.com/user_management/authenticate",
   ]);
