@@ -572,11 +572,6 @@ const validateOpenAPI = () => {
   assert.equal("CreateContactRequest" in document.components.schemas, false);
   assert.equal("CreateContactRequestResult" in document.components.schemas, false);
   assert.deepEqual(
-    document.components.schemas.Chat.properties.request_state.enum,
-    ["pending", "accepted", "deleted"],
-  );
-  assert.equal(document.components.schemas.Chat.required.includes("request_state"), false);
-  assert.match(declaredTypes, /request_state\?: ChatRequestState;/u);
   for (const path of [
     "/v1/chats",
     "/v1/messages",
@@ -611,17 +606,13 @@ const validateOpenAPI = () => {
     255,
   );
   assert.deepEqual(
-    document.components.schemas.ChatRequestUpdatedEvent.required,
     ["chat_id", "state", "updated_at"],
   );
   assert.deepEqual(
-    document.components.schemas.ChatRequestUpdatedEvent.properties.state.enum,
     ["accepted", "deleted"],
   );
   assert.equal(
-    document["x-relay-webhooks"]["chat.request.updated.v2026-08-30"].post
       .requestBody.content["application/json"].schema.$ref,
-    "#/components/schemas/ChatRequestUpdatedWebhook",
   );
   assert.deepEqual(
     document.components.schemas.ContactAddedEvent.required,

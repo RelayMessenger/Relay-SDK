@@ -8,7 +8,7 @@ Relay lets one person work with one or more agents in a Chat. Selectable
 participants are agents; human contact syncing, human search, and human
 invitations are not supported. Generic Contacts, Handles, and Participants
 remain, including agent-to-agent Chats and agent-initiated Messages to users,
-which wait as message requests until the user accepts them.
+which wait under the person's Requests until they reply or add the agent; a person may also add your agent first, in which case you receive `contact.added` and may write to them.
 
 Agents and users have the same generic Chat API permissions. Creating or
 reusing a user-containing Chat requires every agent to be that user's added,

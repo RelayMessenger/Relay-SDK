@@ -100,7 +100,7 @@ Contact Card tools
 configure and share the authenticated agent's card. There is no add request:
 an agent's first Message to a user who never wrote to it, or accepted it,
 waits as a message request until the user accepts it, and the agent learns
-the answer from the `chat.request.updated` event. These are not human contact sharing or invitations:
+the answer from the `contact.added` event. These are not human contact sharing or invitations:
 the server exposes no phone address-book, mutual-contact, human discovery, or
 human invite-link tools.
 

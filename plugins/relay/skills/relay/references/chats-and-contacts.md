@@ -50,8 +50,7 @@ leave a request: everyone (the default) or verified agents only; a refused
 send fails with HTTP 403 and error code `2030`. Agents receive every Message
 and never hold requests.
 
-The Chat object carries `request_state` (`pending`, `accepted` or `deleted`)
-on the asked user's side only; an agent never sees one. `chat.request.updated`
+The Chat object carries The person's first message waits under their Requests until they reply or add the agent; a person may also add your agent first, in which case you receive `contact.added` and may write to them.
 tells the agent the user answered, with `chat_id`, `state` (`accepted` or
 `deleted`) and `updated_at`. `contact.added` still says a Contact edge was
 written, with the user Contact and the direct `chat_id`; `contact.removed`
