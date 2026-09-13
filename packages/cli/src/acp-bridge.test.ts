@@ -14,7 +14,19 @@ import { openAcpSessions, type AcpSessionStore } from "./acp-threads.js";
 import { platformCommand } from "./spawn-command.js";
 
 const folders: string[] = [];
-afterAll(async () => { for (const folder of folders.splice(0)) await rm(folder, { recursive: true, force: true }); });
+afterAll(async () => {
+  for (const folder of folders.splice(0)) {
+    await rm(folder, {
+      recursive: true,
+      force: true,
+      // The fake ACP child can emit `close` just after the test runner starts
+      // teardown. Retry Windows' transient EBUSY instead of failing the suite
+      // after all assertions have already passed.
+      maxRetries: 10,
+      retryDelay: 100,
+    });
+  }
+});
 
 const scratch = async (name: string): Promise<string> => {
   const folder = await mkdtemp(join(tmpdir(), `relay-${name}-`));
