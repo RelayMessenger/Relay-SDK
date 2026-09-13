@@ -107,7 +107,11 @@ const skillPath = join(root, skillRoot, "SKILL.md");
 assert.ok(existsSync(skillPath));
 const skill = readFileSync(skillPath, "utf8");
 assert.match(skill, /name: relay/);
-assert.match(skill, /locked Relay v1 contract/);
+assert.equal(
+  sha256(join(skillRoot, "SKILL.md")),
+  provenance.source_files["skills/relay/SKILL.md"],
+  "generated skill must match the canonical source bytes",
+);
 
 const references = [
   ...skill.matchAll(/\]\((references\/[^)]+)\)/g),
@@ -158,10 +162,14 @@ for (const directory of ["channels", "commands", "hooks", "rules", "runtime"]) {
   assert.ok(!existsSync(join(root, directory)), `runtime content found: ${directory}`);
 }
 
-const examplePackage = json("examples/send-message/package.json");
+// The example has its own canonical pin; the lock records a separately
+// verified SDK source version. Preserve both rather than rewriting either.
 assert.equal(
-  examplePackage.dependencies["@relaymessenger/sdk"],
-  lock.sdk.version,
+  sha256("examples/send-message/package.json"),
+  provenance.source_files[
+    "tooling/skills-distributions/src/distribution/examples/send-message/package.json"
+  ],
+  "generated example manifest must match the canonical source bytes",
 );
 
 console.log(`validated ${host} generated content and locked Relay v1 markers`);
