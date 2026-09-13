@@ -137,7 +137,7 @@ try {
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
       assert.equal(RELAY_V1_OPERATIONS.length, 35);
-      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 17);
+      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 16);
       const allowedOperations = new Set([
         "POST /v1/chats",
         "GET /v1/chats",
