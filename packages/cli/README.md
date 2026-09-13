@@ -108,6 +108,16 @@ typed carries on afterwards.
 `docs` prints `https://docs.relayapp.im/llms.txt`: its contents when there is no
 terminal, and its address when there is one or when Relay cannot reach it.
 
+## Authentication
+
+`relay login` signs this computer into Relay Console using a browser/device
+flow. It stores the Console session locally and creates or reuses the signed-in
+Personal organization. Use `--organization-name`, `--namespace`, and optional
+`--website` when a new Personal organization needs explicit setup.
+
+For legacy integrations, `relay auth login --with-token` keeps the explicit
+Agent Token import path. The token is read from stdin and is never printed.
+
 ## Agent Token authentication
 
 Use `agents create` for a new agent, or import an existing Agent Token. Tokens

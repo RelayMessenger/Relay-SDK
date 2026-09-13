@@ -77,9 +77,9 @@ const json = async <T>(response: Response): Promise<T> => {
   let value: unknown;
   try { value = JSON.parse(text); } catch { throw new Error(`Relay Console returned HTTP ${response.status}.`); }
   if (!response.ok) {
-    const message = value && typeof value === "object" && "error" in value && typeof value.error === "string"
-      ? value.error : `Relay Console returned HTTP ${response.status}.`;
-    throw new Error(message);
+    // Console errors are not a safe place to echo arbitrary response text:
+    // an upstream error can contain a bearer or refresh token.
+    throw new Error(`Relay Console returned HTTP ${response.status}.`);
   }
   return value as T;
 };
@@ -173,7 +173,7 @@ const pollDevice = async (deps: ConsoleAuthDependencies, start: DeviceStart): Pr
     if (error === "slow_down") { interval += 5_000; continue; }
     if (error === "access_denied") throw new CliError("Relay Console login was denied.", "refused");
     if (error === "expired_token") throw new CliError("Relay Console login expired. Run relay login again.", "refused");
-    throw new Error(typeof value.error_description === "string" ? value.error_description : `Relay Console login failed (HTTP ${response.status}).`);
+    throw new Error(`Relay Console login failed (HTTP ${response.status}).`);
   }
   throw new CliError("Relay Console login expired. Run relay login again.", "refused");
 };
@@ -237,7 +237,10 @@ export const consoleLogin = async (deps: ConsoleAuthDependencies): Promise<Relay
   } else if (!token.organization_id && deps.nonInteractive && (deps.name === undefined || deps.namespace === undefined)) {
     throw new HeadlessPrompt("Relay needs organization setup after login.", ["--organization-name <name>", "--namespace <namespace>"]);
   }
-  const organizationId = await bootstrap(deps, token, { name, namespace });
+  // WorkOS may already select an organization for the user. Bootstrap only
+  // the Personal organization case; repeating it can create duplicate orgs.
+  const organizationId = token.organization_id
+    ?? await bootstrap(deps, token, { name, namespace });
   let session: RelayConsoleSession = {
     access_token: token.access_token,
     refresh_token: token.refresh_token,
@@ -275,7 +278,19 @@ export const consoleLoginOrReuse = async (
         { context: deps.context, ...(deps.apiURL ? { apiURL: deps.apiURL } : {}), ...(deps.fetch ? { fetch: deps.fetch } : {}) },
         "/me",
       );
-      return (await readConfig(deps.context)).console ?? current;
+      const session = (await readConfig(deps.context)).console ?? current;
+      if (deps.website !== undefined) {
+        await consoleRequest(
+          { context: deps.context, ...(deps.apiURL ? { apiURL: deps.apiURL } : {}), ...(deps.fetch ? { fetch: deps.fetch } : {}) },
+          `/orgs/${session.organization_id}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ website: deps.website }),
+          },
+        );
+      }
+      return session;
     } catch {
       // A stale or revoked session falls through to the browser flow.
     }
