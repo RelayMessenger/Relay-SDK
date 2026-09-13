@@ -2626,7 +2626,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "test/contracts.test.ts",
       "source_sha256": "df01e9d14ea13e0779e8a820a40111eb057f68c2bd355dc5a29030e33a95e01f",
-      "destination_sha256": "c8bb78f74a1b6a2dd18c17b4597a425093f26f1d03f70ae45eb1564c2466048d",
+      "destination_sha256": "54c0edd67a1fd331b14c974106289e7640b54f165ec7b5627e05639df319ef69",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

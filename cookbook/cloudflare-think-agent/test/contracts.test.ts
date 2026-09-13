@@ -8,11 +8,11 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const RELAY_SERVER_SHA =
-  "82711170439c6b557e43de55c152eac6b6b661ac";
+  "d4dc62372194bf929801229740346cdacfe2d5c9";
 const RELAY_CHAT_SDK_SHA =
   "eecf94a4d38bc021917e54dfed57e268657c17af";
 const RELAY_OPENAPI_SHA256 =
-  "8bdc20c1877a3afbd5da24132a343cf14bf531dd2edf1f4fa42dca7823ae096e";
+  "81d23529476ae77b3b7f7dfc931d2e0e421d3c91e20c59136e2deef9123f722e";
 const RELAY_ADAPTER_INTEGRITY =
   "sha512-aslkL6r5pj/frh/3QgJ0sqPoxHK2wTSmZ2OeFsfEBfyJGsWiljlhjzTjW+rAcGmy2vy0oE4x94agvnuaMZ/PzA==";
 
@@ -41,6 +41,8 @@ describe("locked runtime contracts", () => {
     const openapiText = openapi.toString("utf8");
     expect(createHash("sha256").update(openapi).digest("hex"))
       .toBe(RELAY_OPENAPI_SHA256);
+    expect(openapiText).not.toMatch(/^  \/v1\/agents:$/mu);
+    expect(openapiText).not.toContain("operationId: createAgent");
     expect(openapiText).toContain("\n        - image_url\n");
     expect(openapiText).toContain("\n        - about\n");
     expect(openapiText).toContain("\n        image_url:\n");
