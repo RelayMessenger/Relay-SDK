@@ -1,3 +1,4 @@
+import { consoleFixture } from "../test/console-fixture.js";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,17 +26,19 @@ async function fixture() {
   } satisfies InteractivePrompts;
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
-    expect(url.origin).toBe("https://api.staging.relayapp.im");
+    expect(["https://api.staging.relayapp.im", "https://console.staging.relayapp.im"]).toContain(url.origin);
     if (init?.method === "POST") {
-      expect(new Headers(init.headers).has("authorization")).toBe(false);
+      expect(new Headers(init.headers).get("authorization")).toBe("Bearer rel_org_fixtureOnlyNotARealKey");
       return Response.json({ agent: card, secret: token, share_url: `https://go.staging.relayapp.im/@${card.handle}` }, { status: 201 });
     }
     if (init?.method === "DELETE") return new Response(null, { status: 204 });
+    if (init?.method === "PATCH") return Response.json(card);
     return Response.json({ contact_cards: [card] });
   });
   const skillInstaller = vi.fn(async () => undefined);
   const skillPresent = vi.fn(async (): Promise<boolean | "unknown"> => false);
-  const deps = { configContext: { env, home }, cwd: home, isInteractive: true, prompts, fetch, skillInstaller, skillPresent,
+  const console = consoleFixture({ env, home }, card);
+  const deps = { configContext: { env, home }, cwd: home, isInteractive: true, prompts, fetch: console.wrap(fetch), consoleLogin: console.login, skillInstaller, skillPresent,
     stdout: (s: string) => stdout.push(s), stderr: (s: string) => stderr.push(s) };
   return { deps, env, home, prompts, fetch, skillInstaller, skillPresent, stdout, stderr };
 }
@@ -172,14 +175,14 @@ it("installer args follow the build's environment without default agent/global f
 
 it("interactive creation collects optional fields; blanks keep server defaults", { timeout: 120_000 }, async () => {
   const f = await fixture(); f.prompts.select.mockResolvedValueOnce("create");
-  f.prompts.text.mockResolvedValueOnce("custom_agent.dev").mockResolvedValueOnce("Custom Agent").mockResolvedValueOnce("https://images.example.test/photo.png");
+  f.prompts.text.mockResolvedValueOnce("custom_agent").mockResolvedValueOnce("Custom Agent").mockResolvedValueOnce("https://images.example.test/photo.png");
   f.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   expect(await runCLI(["agents"], f.deps)).toBe(0);
   const post = f.fetch.mock.calls.find(([, init]) => init?.method === "POST")!;
-  expect(JSON.parse(String(post[1]?.body))).toEqual({ handle: "custom_agent.dev", first_name: "Custom Agent", image_url: "https://images.example.test/photo.png" });
+  expect(JSON.parse(String(post[1]?.body))).toEqual({ handle: "custom_agent.dev", displayName: "Custom Agent", isPremiumHandle: false });
   const blank = await fixture(); blank.prompts.select.mockResolvedValueOnce("create"); blank.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   expect(await runCLI(["agents"], blank.deps)).toBe(0);
-  expect(JSON.parse(String(blank.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body))).toEqual({});
+  expect(JSON.parse(String(blank.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body))).toEqual({ handle: "my_agent.dev", displayName: "My Agent", isPremiumHandle: false });
 });
 
 it.each(["CODEX_HOME", "CLAUDE_CONFIG_DIR", "HERMES_HOME"])("preserves and detects the installer's selected %s", async (key) => {

@@ -35,5 +35,5 @@ export function searchDocs(input: { query: string; language: "typescript" | "jav
     };
   });
   return { query: input.query, language: input.language, contractSha256: DOCS_SOURCE.contract,
-    note: "In execute, use the supplied client. Do not import the SDK, construct clients, or supply credentials. Static Relay.createAgent is SDK setup documentation, not an initialized-client method.", results };
+    note: "In execute, use the supplied authenticated client. Do not import the SDK, construct clients, or supply credentials.", results };
 }

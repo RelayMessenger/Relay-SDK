@@ -99,14 +99,13 @@ copy. Server and CLI use separate directories in the owned sandbox.
 ## Prepared staging HTTP smoke (run only after main confirms deployment)
 
 `node scripts/agent-cli-platforms-staging.mjs` is plan-only and sends **zero**
-requests. Its six protocol-fixture unit tests do not prove a live deployment.
-The executable fixes the origin to `https://api.staging.relayapp.im`; no origin
-override or production polling exists. It creates at most two identities with
-`verification-agent-cli-<run-id>-a/b` token labels, reads their own cards as the
-local fixture inventory (there is no GET-list route), checks missing/invalid auth
-and cross-fixture card/deletion isolation, then deletes only identities minted
-by that run and checks revocation. No messages, operator profiles, existing
-agents, or event acknowledgements are involved.
+requests. Its protocol-fixture unit tests do not prove a live deployment.
+Live execution reads the existing private CLI config at `RELAY_CONFIG_PATH`,
+requires its organization-key credential to target staging Console, and creates
+at most two named Console-owned fixtures. It reads each Agent's own Contact Card,
+checks missing/invalid Agent authentication and cross-fixture card isolation,
+then deletes only the Console Agent UUIDs created by this run and verifies token
+revocation. Existing agents and profiles are not migrated or deleted.
 
 After main provides the deployed Server SHA, execute **inside Daytona**:
 
@@ -127,7 +126,7 @@ run's one-time credentials, is created exclusively with mode 0600, and is remove
 only when fixture deletion/revocation is confirmed. Uncertain creation, deletion,
 or 409 preserves recovery state for main's review. The script never retries
 creation/deletion or acknowledges pending events. A failed run is not permission
-to rerun blindly (the contract's bootstrap limit still applies).
+to rerun blindly.
 
 This HTTP proof does **not** claim final CLI `agents list` environment-isolation,
 installed package behavior, or runtime handoff. Those tests follow the delivered
@@ -135,7 +134,7 @@ feature commands and native matrix against exact feature SHAs.
 
 The staging smoke requires `--canonical-spec` for live execution. Transfer
 main's exact canonical file from
-`_worktrees/agent-management-server-20260908/contracts/developer/openapi.yaml`
+`_worktrees/server-remove-anonymous-registration-20260913/contracts/developer/openapi.yaml`
 to the above remote path; do not substitute an older SDK copy. Plan-only mode
 can also accept this flag to validate the declared operations/auth/body and
 record a SHA-256 without making requests. The live receipt preserves this

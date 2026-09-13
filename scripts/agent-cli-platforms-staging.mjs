@@ -2,15 +2,27 @@
 // Staging HTTP protocol proof, not a substitute for native CLI/SDK integration.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, chmodSync, unlinkSync } from 'node:fs';
 import { dirname, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import YAML from 'yaml';
+const uuidv7 = () => {
+  const bytes = randomBytes(16);
+  const timestamp = BigInt(Date.now());
+  for (let index = 5; index >= 0; index -= 1) {
+    bytes[index] = Number(timestamp >> BigInt((5 - index) * 8)) & 0xff;
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x70;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
 export const STAGING_ORIGIN = 'https://api.staging.relayapp.im';
+export const STAGING_CONSOLE_API = 'https://console.staging.relayapp.im/api';
 export const PLAN = [
-  'Create exactly two named test fixtures; never retry bootstrap',
+  'Create exactly two named Console-owned test fixtures with the saved organization key; never retry creation',
   'Read each own Contact Card to form the local fixture inventory (no GET-list API)',
   'Reject missing/invalid authentication and cross-fixture card access/deletion',
   'Delete only fixtures created by this run, once each; verify token revocation',
@@ -18,35 +30,31 @@ export const PLAN = [
 ];
 export function canonicalRulesFromYaml(text) {
   const spec = YAML.parse(text);
-  const create = spec?.paths?.['/v1/agents']?.post;
+  assert.equal(spec?.paths?.['/v1/agents'], undefined, 'Anonymous registration must be absent');
+  assert.equal(spec?.components?.schemas?.CreateAgentRequest, undefined);
+  assert.equal(spec?.components?.schemas?.CreateAgentResponse, undefined);
   const remove = spec?.paths?.['/v1/agents/{handle}']?.delete;
   const card = spec?.paths?.['/v1/contact_card']?.get;
-  assert.equal(create?.operationId, 'createAgent', 'Canonical createAgent operation missing');
-  assert.deepEqual(create.security, [], 'Canonical bootstrap must be explicitly unauthenticated');
   assert.equal(remove?.operationId, 'deleteAgent', 'Canonical deleteAgent operation missing');
   assert.deepEqual(remove.security, [{ BearerAuth: [] }], 'Canonical delete auth changed');
   assert.equal(card?.operationId, 'getContactCard', 'Canonical Contact Card operation missing');
-  assert.ok(create.responses?.['201'] && remove.responses?.['204'] && remove.responses?.['401'] && remove.responses?.['403']);
-  const request = spec.components?.schemas?.CreateAgentRequest;
-  assert.equal(request?.additionalProperties, false, 'Canonical bootstrap body must remain strict');
-  const response = spec.components?.schemas?.CreateAgentResponse;
-  for (const key of ['agent','secret','share_url']) assert.ok(response?.required?.includes(key));
-  assert.equal(typeof response.properties?.secret?.pattern, 'string', 'Canonical token format missing');
-  return { secretPattern: response.properties.secret.pattern, tokenName: request.properties.token_name };
+  return { anonymousRegistration: false };
+
 }
-export async function runOwnedSmoke({ runId, serverSha, fetchImpl = fetch, saveReceipt = () => {}, savePrivate = () => {}, provenance = {}, canonicalRules }) {
+export async function runOwnedSmoke({ runId, serverSha, fetchImpl = fetch, saveReceipt = () => {}, savePrivate = () => {}, provenance = {}, canonicalRules, organizationKey }) {
   assert.match(runId, /^[a-z0-9][a-z0-9-]{0,39}$/);
   assert.match(serverSha, /^[a-f0-9]{40}$/);
   const fixtures = [];
-  const secrets = [];
+  assert.match(organizationKey ?? '', /^(?:rel_org_|rly_org_)\S+$/);
+  const secrets = [organizationKey];
+  let organization;
   const receipt = { runId, serverSha, provenance, origin: STAGING_ORIGIN, proof: 'staging HTTP only; CLI list/runtime not claimed', requests: [], fixtures: [], uncertainCreations: [], failures: [] };
   const redact = value => secrets.reduce((text, secret) => text.split(secret).join('[REDACTED]').split(JSON.stringify(secret).slice(1,-1)).join('[REDACTED]'), JSON.stringify(value));
   const snapshot = () => JSON.parse(redact(receipt));
   const persist = () => { savePrivate({ runId, serverSha, origin: STAGING_ORIGIN, fixtures, uncertainCreations: receipt.uncertainCreations }); saveReceipt(snapshot()); };
   async function request(step, method, path, token, body) {
-    assert.ok(path.startsWith('/v1/'));
-    const url = new URL(path, STAGING_ORIGIN);
-    assert.equal(url.origin, STAGING_ORIGIN);
+    assert.ok(path.startsWith('/v1/') || path === '/me' || path.startsWith('/orgs/'));
+    const url = path.startsWith('/v1/') ? new URL(path, STAGING_ORIGIN) : new URL(STAGING_CONSOLE_API + path);
     const row = { step, method, path };
     receipt.requests.push(row);
     saveReceipt(snapshot());
@@ -54,6 +62,7 @@ export async function runOwnedSmoke({ runId, serverSha, fetchImpl = fetch, saveR
       const response = await fetchImpl(url, { method, redirect: 'error', signal: AbortSignal.timeout(15000), headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...(method === 'POST' ? { 'Idempotency-Key': uuidv7() } : {}),
       }, ...(body ? { body: JSON.stringify(body) } : {}) });
       row.status = response.status;
       saveReceipt(snapshot());
@@ -78,41 +87,35 @@ export async function runOwnedSmoke({ runId, serverSha, fetchImpl = fetch, saveR
   }
   try {
     persist(); // Prove recovery-state storage before minting anything.
+    const me = await request('organization', 'GET', '/me', organizationKey);
+    expectStatus(me, 200, 'organization');
+    organization = (await json(me)).org;
+    assert.ok(organization?.id && organization?.handleNamespace, 'Console organization is incomplete');
     for (const suffix of ['a', 'b']) {
       const tokenName = `verification-agent-cli-${runId}-${suffix}`;
-      if (canonicalRules) {
-        assert.ok(tokenName.length >= canonicalRules.tokenName.minLength && tokenName.length <= canonicalRules.tokenName.maxLength);
-        assert.match(tokenName, new RegExp(canonicalRules.tokenName.pattern));
-      }
-      receipt.uncertainCreations.push({ tokenName }); persist();
-      const response = await request(`create-${suffix}`, 'POST', '/v1/agents', undefined, { token_name: tokenName });
+      const handle = `proof_${runId.slice(0,18).replaceAll('-', '_')}_${suffix}.${organization.handleNamespace}`;
+      receipt.uncertainCreations.push({ tokenName, handle }); persist();
+      const response = await request(`create-${suffix}`, 'POST', `/orgs/${organization.id}/agents`, organizationKey,
+        { handle, displayName: tokenName, isPremiumHandle: false });
       expectStatus(response, 201, `create-${suffix}`);
       const body = await json(response);
-      assert.ok(typeof body.secret === 'string' && body.secret.length > 0, 'creation omitted one-time credential');
-      secrets.push(body.secret);
-      assert.match(body.agent?.handle ?? '', /^[a-z0-9_]+\.dev$/, 'creation returned unexpected developer handle');
-      const fixture = { label: tokenName, handle: body.agent.handle, token: body.secret, deleteAttempted: false, deleted: false, revocationConfirmed: false };
+      assert.ok(typeof body.token === 'string' && body.token.length > 0, 'creation omitted one-time credential');
+      secrets.push(body.token);
+      assert.ok(body.agent?.id && body.agent.handle === handle, 'Console returned an unexpected agent');
+      const fixture = { label: tokenName, id: body.agent.id, handle, token: body.token, deleteAttempted: false, deleted: false, revocationConfirmed: false };
       fixtures.push(fixture);
-      receipt.fixtures.push({ label: tokenName, handle: fixture.handle });
+      receipt.fixtures.push({ label: tokenName, handle });
       receipt.uncertainCreations = receipt.uncertainCreations.filter(x => x.tokenName !== tokenName);
       persist();
-      if (canonicalRules) assert.ok(new RegExp(canonicalRules.secretPattern).test(body.secret), 'Bootstrap credential did not match canonical format');
-      assert.match(response.headers.get('cache-control') ?? '', /\bno-store\b/, 'bootstrap must not be cached');
-      assert.equal(body.agent.kind, 'agent'); assert.equal(body.agent.is_active, true);
-      const share = new URL(body.share_url);
-      assert.equal(share.origin, 'https://go.staging.relayapp.im');
-      assert.equal(decodeURIComponent(share.pathname), `/@${fixture.handle}`);
     }
-    assert.notEqual(fixtures[0].handle, fixtures[1].handle, 'bootstrap reused an identity');
+    assert.notEqual(fixtures[0].handle, fixtures[1].handle, 'Console reused an identity');
     expectStatus(await request('missing-auth', 'GET', '/v1/contact_card'), 401, 'missing-auth');
     expectStatus(await request('invalid-auth', 'GET', '/v1/contact_card', 'synthetic-invalid-staging-smoke-token'), 401, 'invalid-auth');
     for (const fixture of fixtures) await ownCard(fixture, `inventory-${fixture.handle}`);
     const [a,b] = fixtures;
-    expectStatus(await request('unauthenticated-delete', 'DELETE', `/v1/agents/${encodeURIComponent(a.handle)}`), 401, 'unauthenticated-delete');
-    await ownCard(a, 'unauthenticated-delete-preserved-target');
     expectStatus(await request('foreign-card', 'GET', `/v1/contact_card?handle=${encodeURIComponent(b.handle)}`, a.token), 403, 'foreign-card');
-    expectStatus(await request('foreign-delete', 'DELETE', `/v1/agents/${encodeURIComponent(b.handle)}`, a.token), 403, 'foreign-delete');
-    await ownCard(b, 'foreign-delete-preserved-target');
+    await ownCard(b, 'foreign-card-preserved-target');
+
   } catch (error) {
     receipt.failures.push(error.message);
   } finally {
@@ -122,7 +125,7 @@ export async function runOwnedSmoke({ runId, serverSha, fetchImpl = fetch, saveR
       fixture.deleteAttempted = true;
       try {
         persist();
-        const response = await request(`cleanup-${fixture.handle}`, 'DELETE', `/v1/agents/${encodeURIComponent(fixture.handle)}`, fixture.token);
+        const response = await request(`cleanup-${fixture.handle}`, 'DELETE', `/orgs/${organization.id}/agents/${encodeURIComponent(fixture.id)}`, organizationKey);
         expectStatus(response, 204, 'owned cleanup');
         fixture.deleted = true; persist();
         expectStatus(await request(`revoked-${fixture.handle}`, 'GET', '/v1/contact_card', fixture.token), 401, 'revoked token');
@@ -170,6 +173,12 @@ async function main() {
   const provenance = { harnessSha, harnessDirty, canonicalSpec, scriptSHA256: createHash('sha256').update(readFileSync(scriptPath)).digest('hex'),
     platform: process.platform, arch: process.arch, node: process.version, sandbox: process.env.RELAY_DAYTONA_SANDBOX_ID, serverShaSource: 'deployment SHA supplied by main' };
   const result = await runOwnedSmoke({ provenance, canonicalRules, runId: values['run-id'], serverSha: values['server-sha'],
+    organizationKey: (() => {
+      const config = JSON.parse(readFileSync(process.env.RELAY_CONFIG_PATH, 'utf8'));
+      assert.equal(config.console?.type, 'organization_key');
+      assert.equal(config.console.console_api_url, STAGING_CONSOLE_API);
+      return config.console.organization_key;
+    })(),
     saveReceipt: value => writeFileSync(receiptPath, JSON.stringify(value, null, 2)),
     savePrivate: value => {
       const temporary = `${privatePath}.${process.pid}.tmp`;

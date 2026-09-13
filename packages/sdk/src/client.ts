@@ -2,8 +2,6 @@ import { RelayAPIError, isAbortError } from "./errors.js";
 import { ChatsPage, MessagesPage } from "./pagination.js";
 import type {
   AcceptedResponse,
-  AgentCreateParams,
-  AgentCreateResponse,
   Attachment,
   AttachmentCreateParams,
   AttachmentCreateResponse,
@@ -64,8 +62,6 @@ export interface RelayOptions {
   fetch?: FetchLike;
 }
 
-export type AgentCreateOptions = Omit<RelayOptions, "apiKey" | "webhookSecret"> & RequestOptions;
-
 interface InternalRequest {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
@@ -103,13 +99,13 @@ const pathID = (value: string): string => encodeURIComponent(value);
 
 class Transport {
   readonly baseURL: string;
-  readonly #apiKey: string | undefined;
+  readonly #apiKey: string;
   readonly #fetch: FetchLike;
   readonly #maxRetries: number;
   readonly #timeout: number;
   readonly #retryBaseDelayMs: number;
 
-  constructor(options: Omit<RelayOptions, "apiKey"> & { apiKey?: string }) {
+  constructor(options: RelayOptions) {
     this.baseURL = (options.baseURL ?? "https://api.relayapp.im").replace(/\/+$/, "");
     this.#apiKey = options.apiKey;
     const selectedFetch = options.fetch ?? globalThis.fetch;
@@ -142,8 +138,7 @@ class Transport {
         ? AbortSignal.any([request.options.signal, timeoutSignal])
         : timeoutSignal;
       const headers = new Headers(request.options?.headers);
-      if (this.#apiKey) headers.set("authorization", `Bearer ${this.#apiKey}`);
-      else headers.delete("authorization");
+      headers.set("authorization", `Bearer ${this.#apiKey}`);
       headers.set("accept", "application/json");
       if (request.body !== undefined) headers.set("content-type", "application/json");
       if (request.idempotencyKey) {
@@ -723,14 +718,6 @@ export class Agents {
 }
 
 export class Relay {
-  /** Bootstrap a new identity. The one-time secret is never retried/replayed. */
-  static createAgent(body: AgentCreateParams = {}, options: AgentCreateOptions = {}): Promise<AgentCreateResponse> {
-    const { apiKey: _ignored, ...transportOptions } = options as AgentCreateOptions & { apiKey?: string };
-    return new Transport(transportOptions).request({
-      method: "POST", path: "/v1/agents", body, options, expectedStatus: 201,
-    });
-  }
-
   readonly agents: Agents;
   readonly baseURL: string;
   readonly chats: Chats;

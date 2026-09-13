@@ -200,7 +200,7 @@ Messages to users remain supported subject to Contacts eligibility and blocking.
 There are no add-request, phone address-book, mutual-contact, human discovery, or
 human invite-link commands.
 
-## Developer-managed agents
+## Organization creation and saved agents
 
 ```sh
 relay agents create
@@ -213,7 +213,7 @@ Creation stores the one-time Agent Token in a new named profile and prints only
 public metadata, a share link, and a terminal QR. JSON output includes
 `token: "stored"`, never the secret. Use an explicit `--profile <new-name>` to
 choose a new profile name; existing profiles and the current profile selection
-are preserved. `--token-name` labels the token, not a machine identity.
+are preserved. New agents are provisioned in the signed-in Console organization.
 
 `agents list` shows the agents saved on this computer, not every agent on your
 account. Each row is `profile`, `handle`, `display_name`, `image_url`, `api_url`
@@ -241,13 +241,14 @@ agent, and it never overwrites a token that is already there.
 
 ```sh
 relay agents create \
-  --handle my_helper.dev --name "My Helper" \
+  --handle my_helper --name "My Helper" \
   --image-url https://images.example.com/helper.png
 ```
 
-Omit any option to keep the server's assigned handle/readable bird name/default
-image. Custom handles are full lowercase `.dev` handles; a collision is an error,
-never a request for a random replacement. Interactive creation asks `Handle (optional)`, `Name (optional)`, and `Image
+Creation takes only the local handle part, such as `my_helper`; Console adds
+the selected organization namespace. Qualified handles such as `my_helper.dev`
+are rejected, not reinterpreted. Names are at most 30 characters. A collision is
+an error, never a request for a different handle. Interactive creation asks `Handle (optional)`, `Name (optional)`, and `Image
 (optional)` with a single help line; blank answers preserve defaults. Selecting
 Create already expresses intent, so no second create confirmation is shown.
 Recipe files remain an advanced `--image-recipe` flag, not another setup question.

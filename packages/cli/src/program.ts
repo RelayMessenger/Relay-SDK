@@ -14,7 +14,7 @@ import { dim, link } from "./ui-colour.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
 import { renderTerminalQR, terminalQRRowsLeft } from "./qr-terminal.js";
-import { agentDependencies, deleteAgent, listAgents, selectAgentAuth, type AgentDependencies } from "./agents.js";
+import { agentDependencies, deleteAgent, listAgents, selectAgentAuth, validateFirstName, validateHandle, type AgentDependencies } from "./agents.js";
 import { createRequire } from "node:module";
 import { readFile, stat } from "node:fs/promises";
 import Relay, {
@@ -68,7 +68,7 @@ import { describeFailure } from "./errors.js";
 import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
 import { verboseFetch } from "./verbose.js";
 import { relayHelpHeading, writeRelayHelpHeading } from "./relay-brand.js";
-import { consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, createConsoleAgent, deleteConsoleAgent } from "./console-auth.js";
+import { consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, deleteConsoleAgent } from "./console-auth.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
 // source file may carry its own copy.
@@ -124,7 +124,7 @@ const agentModeValue = (value: string): string => {
   return value;
 };
 
-// Relay-Server 3097dda, CreateAgentRequest and UpdateContactCardRequest: trim, 1–60.
+// Console about text and the retained Contact Card update contract: trim, 1–60.
 const aboutText = (value: string): string => {
   const text = value.trim();
   if (!text || [...text].length > 60) throw new InvalidArgumentError("About must be 1 to 60 characters.");
@@ -295,7 +295,7 @@ export const createProgram = (
     .description("connect a runtime to Relay, new or by token, and wait for its first reply")
     .helpGroup(HELP_GROUPS.getStarted)
     .option("--new", "create a new agent instead of using one you already have")
-    .option("--handle <handle>", "the .dev handle you want for a new agent; leave it out and Relay picks one")
+    .option("--handle <handle>", "the name for a new handle; Relay adds your organization namespace")
     .option("--name <name>", "the name people see next to a new agent")
     .option("--about <text>", "the one line people see above your agent's first message", aboutText)
     .option("--image <path-or-url>", "a picture for a new agent: a file on this computer, or an https:// address")
@@ -381,23 +381,14 @@ export const createProgram = (
         },
         ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
         ...(dependencies.offerSkill ? { offerSkill: dependencies.offerSkill } : {}),
-        ...(dependencies.consoleLogin || (!dependencies.fetch ? {
-          consoleLogin: () => consoleLoginOrReuse({
+        consoleLogin: dependencies.consoleLogin ?? (() => consoleLoginOrReuse({
           context: configContext,
           apiURL: defaultCreationApiURL(),
           ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
           ...(dependencies.prompts ? { prompts: dependencies.prompts } : {}),
           stderr,
           nonInteractive: dependencies.isInteractive === false,
-          }),
-        } : {})),
-        ...(dependencies.consoleRequest || (!dependencies.fetch ? {
-          consoleRequest: (path: string, init?: RequestInit) => consoleRequest({
-          context: configContext,
-          apiURL: defaultCreationApiURL(),
-          ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
-          }, path, init),
-        } : {})),
+        })),
         ...dependencies.connect,
       });
     });
@@ -474,58 +465,19 @@ export const createProgram = (
   agents.command("create")
     .description("create an agent and save its token privately on this computer")
     .addOption(new Option("--api-url <url>", "the Relay API address to use").argParser(validateApiURL).hideHelp())
-    .option("--token-name <name>", "a label for the new token, so you can tell it apart later")
-    .option("--handle <handle>", "the .dev handle you want; leave it out and Relay picks one")
+    .option("--handle <handle>", "the handle name; Relay adds your organization namespace")
     .option("--name <name>", "the name people see next to this agent")
     .option("--about <text>", "the one line people see above your agent's first message", aboutText)
     .option("--image <path-or-url>", "a picture: a file on this computer, or an https:// address")
     .option("--image-url <url>", "a picture at an https:// address (same as --image with a URL)")
     .option("--image-recipe <json-file>", "a Relay picture recipe file; needs --image or --image-url as well")
     .option("--json", "print the result as JSON")
-    .action(async (options: { apiUrl?: string; tokenName?: string; json?: boolean; handle?: string; name?: string; about?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
+    .action(async (options: { apiUrl?: string; json?: boolean; handle?: string; name?: string; about?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
+      if (options.handle !== undefined) validateHandle(options.handle);
+      if (options.name !== undefined) validateFirstName(options.name);
       if (options.image !== undefined && options.imageUrl !== undefined) throw new Error("Choose --image or --image-url, not both.");
       const imageRecipe: AgentImageRecipe | undefined = options.imageRecipe === undefined
         ? undefined : await readImageRecipe(options.imageRecipe);
-      // Focused program tests inject the old Agent API boundary. Keep that
-      // boundary usable for fixtures and existing integrations; the shipped
-      // program uses the Console path below.
-      if (dependencies.agents || (dependencies.fetch && !dependencies.consoleLogin && !(await readConfig(configContext)).console)) {
-        const created = await createAgentWithPicture({
-          ...(program.getOptionValueSource("profile") === "cli" && globals(command).profile ? { profile: globals(command).profile } : {}),
-          ...(options.apiUrl ? { apiURL: options.apiUrl } : {}),
-          ...(options.tokenName === undefined ? {} : { tokenName: options.tokenName }),
-          ...(options.handle === undefined ? {} : { handle: options.handle }),
-          ...(options.name === undefined ? {} : { firstName: options.name }),
-          ...(options.about === undefined ? {} : { about: options.about }),
-          ...(options.image === undefined ? {} : { image: options.image }),
-          ...(options.imageUrl === undefined ? {} : { imageURL: options.imageUrl }),
-          ...(imageRecipe === undefined ? {} : { imageRecipe }),
-          ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}),
-          ...(configContext.home ? { home: configContext.home } : {}),
-        }, agentDeps, dependencies.fetch);
-        const result = created.result;
-        const imageUpdate = created.image;
-        if (globals(command).json) output({ ...result, ...(imageUpdate ? { image: imageUpdate } : {}) });
-        else {
-          stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\n`);
-          const liveViewFollows = imageUpdate?.status !== "incomplete" && willShowSavedAgent(command);
-          if (!liveViewFollows) {
-            try { stdout(renderTerminalQR(result.share_url, { rows: terminalQRRowsLeft(process.stdout.rows, 5) })); }
-            catch { stderr("Relay could not draw the QR code. Use the link above instead.\n"); }
-          }
-          if (imageUpdate?.status === "incomplete") output({ image: imageUpdate });
-        }
-        if (imageUpdate?.status !== "incomplete") {
-          await showSavedAgent(command, {
-            profile: result.profile, handle: result.handle, apiURL: result.api_url, shareURL: result.share_url,
-            runtime: { ownership: "none", connection: "not-started" },
-          });
-        }
-        if (imageUpdate?.status === "incomplete") {
-          throw new Error(incompletePictureMessage(result.handle, result.profile, imageUpdate, imageRecipe !== undefined));
-        }
-        return;
-      }
       const requestedProfile = program.getOptionValueSource("profile") === "cli"
         ? globals(command).profile : undefined;
       if (requestedProfile) {
@@ -534,66 +486,47 @@ export const createProgram = (
           throw new Error("Profile already exists; choose a new profile name.");
         }
       }
-      const session = await consoleLoginOrReuse({
+      const session = await (dependencies.consoleLogin?.() ?? consoleLoginOrReuse({
         context: configContext,
         apiURL: options.apiUrl ?? defaultCreationApiURL(),
         ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
         ...(dependencies.prompts ? { prompts: dependencies.prompts } : {}),
         stderr,
         nonInteractive: globals(command).nonInteractive === true || globals(command).json === true || dependencies.isInteractive === false,
-      });
-      await agentDeps.preflight();
-      const created = await createConsoleAgent({
-        context: configContext,
+      }));
+      const created = await createAgentWithPicture({
+        makeDefault: true,
+        ...(program.getOptionValueSource("profile") === "cli" && globals(command).profile ? { profile: globals(command).profile } : {}),
         apiURL: options.apiUrl ?? defaultCreationApiURL(),
-        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
-      }, {
-        ...(options.handle ? { handle: options.handle.replace(/\.dev$/u, "") } : {}),
-        displayName: options.name ?? "My Agent",
+        ...(options.handle === undefined ? {} : { handle: options.handle }),
+        ...(options.name === undefined ? {} : { firstName: options.name }),
         ...(options.about === undefined ? {} : { about: options.about }),
-        ...((options.image ?? options.imageUrl) === undefined ? {} : { image: options.image ?? options.imageUrl }),
+        ...(options.image === undefined ? {} : { image: options.image }),
+        ...(options.imageUrl === undefined ? {} : { imageURL: options.imageUrl }),
         ...(imageRecipe === undefined ? {} : { imageRecipe }),
         ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}),
         ...(configContext.home ? { home: configContext.home } : {}),
-      });
-      const profile = await agentDeps.update((config) => {
-        // Console namespaces can make a Handle longer than a local profile.
-        // Keep the full Handle in API/output; local names retain their contract.
-        const base = validateProfileName(requestedProfile ?? created.agent.handle.slice(0, 64));
-        if (requestedProfile && Object.hasOwn(config.profiles, base)) throw new Error("Profile already exists.");
-        let name = base;
-        for (let suffix = 2; Object.hasOwn(config.profiles, name); suffix++) {
-          name = `${base.slice(0, 54)}-${suffix}`;
-        }
-        config.profiles[name] = {
-          api_url: options.apiUrl ?? defaultCreationApiURL(),
-          agent_token: created.token,
-        };
-        config.defaultAgent = name;
-        return name;
-      });
-      const result = {
-        profile,
-        handle: created.agent.handle,
-        display_name: created.agent.first_name,
-        image_url: created.agent.image_url,
-        api_url: options.apiUrl ?? defaultCreationApiURL(),
-        share_url: savedAgentShareURL(options.apiUrl ?? defaultCreationApiURL(), created.agent.handle),
-        organization_id: session.organization_id,
-        token: "stored" as const,
-      };
-      if (globals(command).json) output({ ...result, ...(created.image ? { image: created.image } : {}) });
+      }, agentDeps, dependencies.fetch);
+      const result = { ...created.result, organization_id: session.organization_id };
+      const imageUpdate = created.image;
+      if (globals(command).json) output({ ...result, ...(imageUpdate ? { image: imageUpdate } : {}) });
       else {
         stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\n`);
-        try { stdout(renderTerminalQR(result.share_url, { rows: terminalQRRowsLeft(process.stdout.rows, 5) })); }
-        catch { stderr("Relay could not draw the QR code. Use the link above instead.\n"); }
+        const liveViewFollows = imageUpdate?.status !== "incomplete" && willShowSavedAgent(command);
+        if (!liveViewFollows) {
+          try { stdout(renderTerminalQR(result.share_url, { rows: terminalQRRowsLeft(process.stdout.rows, 5) })); }
+          catch { stderr("Relay could not draw the QR code. Use the link above instead.\n"); }
+        }
+        if (imageUpdate?.status === "incomplete") output({ image: imageUpdate });
+      }
+      if (imageUpdate?.status !== "incomplete") {
         await showSavedAgent(command, {
           profile: result.profile, handle: result.handle, apiURL: result.api_url, shareURL: result.share_url,
           runtime: { ownership: "none", connection: "not-started" },
         });
       }
-      if (created.image?.status === "incomplete") {
-        throw new Error(incompletePictureMessage(result.handle, result.profile, created.image, imageRecipe !== undefined));
+      if (imageUpdate?.status === "incomplete") {
+        throw new Error(incompletePictureMessage(result.handle, result.profile, imageUpdate, imageRecipe !== undefined));
       }
     });
   agents.command("list")

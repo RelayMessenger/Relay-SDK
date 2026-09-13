@@ -62,8 +62,7 @@ Each call starts fresh; variables do not persist between calls.
 
 The supplied client exposes the SDK's initialized-client HTTP methods. SDK
 pagination supports `hasNextPage()`, `getNextPage()`, and async iteration over
-an awaited page. Static `Relay.createAgent` is setup documentation, not an
-initialized-client method. WebSocket callbacks and raw attachment upload
+an awaited page. WebSocket callbacks and raw attachment upload
 streams are not exposed by this JSON call bridge.
 
 Execution uses a separate QuickJS WebAssembly runtime, not Node's `vm` or host

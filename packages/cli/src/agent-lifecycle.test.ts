@@ -1,3 +1,4 @@
+import { consoleFixture } from "../test/console-fixture.js";
 import { mkdtemp, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,13 +22,15 @@ async function fixture() {
   const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     if (init?.method === "POST") return Response.json({ agent: card, secret: "created-private-token", share_url: `https://go.test/@${handle}` }, { status: 201 });
     if (init?.method === "DELETE") return new Response(null, { status: 204 });
+    if (init?.method === "PATCH") return Response.json(card);
     return Response.json({ contact_cards: [card] });
   });
-  const deps = { configContext: { env, home }, skillPresent: async () => true, fetch: async (input: string | URL | Request, init?: RequestInit) => {
+  const console = consoleFixture({ env, home }, card);
+  const deps = { consoleLogin: console.login, configContext: { env, home }, skillPresent: async () => true, fetch: console.wrap(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
-    expect([creationOrigin, STAGING_API_URL].includes(url.origin) || url.hostname.endsWith(".staging.test")).toBe(true);
+    expect([creationOrigin, STAGING_API_URL].includes(url.origin) || url.hostname.endsWith(".staging.test") || url.hostname === "console.staging.relayapp.im").toBe(true);
     return fetch(input, init);
-  }, stdout: (s: string) => output.push(s), stderr: (s: string) => output.push(s) };
+  }), stdout: (s: string) => output.push(s), stderr: (s: string) => output.push(s) };
   return { deps, env, fetch, output, home };
 }
 
@@ -48,7 +51,7 @@ describe("real persisted agent selection", { timeout: 120_000 }, () => {
     expect(await runCLI(["agents", "list", "--json"], deps)).toBe(0);
     expect(JSON.parse(output.pop()!).agents).toEqual([]);
     const deletion = fetch.mock.calls.find(([, init]) => init?.method === "DELETE")!;
-    expect(new Headers(deletion[1]?.headers).get("authorization")).toBe("Bearer created-private-token");
+    expect(new Headers(deletion[1]?.headers).get("authorization")).toBe("Bearer rel_org_fixtureOnlyNotARealKey");
     expect(output.join("")).not.toContain("created-private-token");
   });
   it("matches actual Contact Cards rather than profile names and preserves others", async () => {
@@ -71,7 +74,7 @@ describe("real persisted agent selection", { timeout: 120_000 }, () => {
     await writeConfig(config, deps.configContext);
     expect(await runCLI(["agents", "delete", handle], deps)).toBe(1);
     expect(fetch.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(0);
-    expect(await readConfig(deps.configContext)).toEqual(config);
+    expect((await readConfig(deps.configContext)).profiles).toEqual(config.profiles);
     expect(await runCLI(["--profile", "one", "agents", "delete", handle], deps)).toBe(0);
     expect((await readConfig(deps.configContext)).profiles.two?.agent_token).toBe("two-token");
   });
@@ -108,7 +111,7 @@ it("new creation ignores a tokenless legacy production default without rewriting
   const legacy = emptyConfig();
   await writeConfig(legacy, deps.configContext);
   expect(await runCLI(["agents", "create", "--json"], deps)).toBe(0);
-  expect(String(fetch.mock.calls.find(([, init]) => init?.method === "POST")![0])).toBe(`${creationOrigin}/v1/agents`);
+  expect(String(fetch.mock.calls.find(([, init]) => init?.method === "POST")![0])).toBe("https://console.staging.relayapp.im/api/orgs/org_fixture/agents");
   const after = await readConfig(deps.configContext);
   expect(after.profiles.default).toEqual(legacy.profiles.default);
   expect(after.profiles[handle]?.api_url).toBe(creationOrigin);
@@ -133,7 +136,7 @@ it("auth login validates through the agent API and retains healthy credentials o
   env.RELAY_AGENT_TOKEN = "invalid-supplied-token";
   fetch.mockImplementation(async () => Response.json({ error: { message: "invalid-supplied-token" } }, { status: 401 }));
   expect(await runCLI(["--profile", "saved", "auth", "login", "--api-url", "https://api.staging.relayapp.im"], deps)).toBe(1);
-  expect(await readConfig(deps.configContext)).toEqual(config);
+  expect((await readConfig(deps.configContext)).profiles).toEqual(config.profiles);
   expect(fetch.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
 });
 
@@ -176,12 +179,14 @@ it("maps custom profile flags to canonical create fields and stores the server-r
   const recipe = { recipe: { emoji: { emoji: "🦆" } }, background: { linearGradient: { colors: ["2596A6", "116A79"] } } };
   const path = join(home, "recipe.json"); await writeFile(path, JSON.stringify(recipe));
   fetch.mockImplementation(async (_input, init) => {
-    expect(JSON.parse(String(init?.body))).toEqual({ handle: "chosen_agent.dev", first_name: "My Agent", image_url: "https://images.example.test/snapshot.png", image_recipe: recipe });
+    if (init?.method === "POST") expect(JSON.parse(String(init?.body))).toEqual({ handle: "chosen_agent.dev", displayName: "My Agent", isPremiumHandle: false });
+    else if (init?.method === "PATCH") expect(JSON.parse(String(init?.body))).toEqual({ image_url: "https://images.example.test/snapshot.png", image_recipe: recipe });
+    if (init?.method === "PATCH") return Response.json({ ...card, handle: "chosen_agent.dev", first_name: "My Agent", image_url: "https://api.staging.relayapp.im/images/copied.png" });
     return Response.json({ agent: { ...card, handle: "chosen_agent.dev", first_name: "My Agent", image_url: "https://api.staging.relayapp.im/images/copied.png" }, secret: "custom-token", share_url: "https://go.staging.relayapp.im/@chosen_agent.dev" }, { status: 201 });
   });
-  expect(await runCLI(["agents", "create", "--json", "--handle", "chosen_agent.dev", "--name", "  My Agent  ", "--image-url", "https://images.example.test/snapshot.png", "--image-recipe", path], deps)).toBe(0);
+  expect(await runCLI(["agents", "create", "--json", "--handle", "chosen_agent", "--name", "  My Agent  ", "--image-url", "https://images.example.test/snapshot.png", "--image-recipe", path], deps)).toBe(0);
   expect((await readConfig(deps.configContext)).profiles["chosen_agent.dev"]?.agent_token).toBe("custom-token");
-  expect(fetch).toHaveBeenCalledOnce();
+  expect(fetch).toHaveBeenCalledTimes(2);
 });
 
 it("rejects invalid options and recipe-without-snapshot before creating", async () => {
@@ -196,8 +201,9 @@ it("rejects invalid options and recipe-without-snapshot before creating", async 
 it("a chosen-handle 409 leaves all profiles intact and never retries without the handle", async () => {
   const { deps, fetch } = await fixture(); const previous = await readConfig(deps.configContext);
   fetch.mockImplementation(async () => Response.json({ error: { code: 1005, message: "in use" } }, { status: 409 }));
-  expect(await runCLI(["agents", "create", "--json", "--handle", "chosen_agent.dev"], deps)).toBe(1);
-  expect(fetch).toHaveBeenCalledOnce(); expect(await readConfig(deps.configContext)).toEqual(previous);
+  expect(await runCLI(["agents", "create", "--json", "--handle", "chosen_agent"], deps)).toBe(1);
+  expect(fetch).toHaveBeenCalledOnce();
+  expect((await readConfig(deps.configContext)).profiles).toEqual(previous.profiles);
 });
 
 describe("creation storage preflight", { timeout: 120_000 }, () => {
@@ -233,5 +239,5 @@ it("--image URL aliases existing image_url while invalid local files send no cre
   expect(await runCLI(["agents", "create", "--json", "--image", join(home, "not-image.png")], deps)).toBe(1);
   expect(fetch).not.toHaveBeenCalled();
   expect(await runCLI(["agents", "create", "--json", "--image", "https://images.example.test/image.png"], deps)).toBe(0);
-  expect(JSON.parse(String(fetch.mock.calls[0]![1]?.body)).image_url).toBe("https://images.example.test/image.png");
+  expect(JSON.parse(String(fetch.mock.calls.find(([, init]) => init?.method === "PATCH")![1]?.body)).image_url).toBe("https://images.example.test/image.png");
 });

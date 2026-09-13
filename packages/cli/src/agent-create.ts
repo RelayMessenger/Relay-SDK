@@ -47,7 +47,6 @@ export const createAgentWithPicture = async (
   const result = await createAgent({
     ...(input.profile === undefined ? {} : { profile: input.profile }),
     ...(input.apiURL === undefined ? {} : { apiURL: input.apiURL }),
-    ...(input.tokenName === undefined ? {} : { tokenName: input.tokenName }),
     ...(input.handle === undefined ? {} : { handle: input.handle }),
     ...(input.firstName === undefined ? {} : { firstName: input.firstName }),
     ...(input.about === undefined ? {} : { about: input.about }),
@@ -55,7 +54,7 @@ export const createAgentWithPicture = async (
     ...(input.imageRecipe === undefined || localImage ? {} : { imageRecipe: input.imageRecipe }),
     ...(input.makeDefault ? { makeDefault: true } : {}),
   }, deps);
-  if (!localImage) return { result };
+  if (!localImage && !imageURL) return { result };
   let image: AgentImageUploadResult;
   try {
     // The agent and its token are already saved. Never use a token from the
@@ -63,12 +62,19 @@ export const createAgentWithPicture = async (
     const saved = (await deps.read()).profiles[result.profile];
     if (!saved?.agent_token || validateApiURL(saved.api_url ?? defaultCreationApiURL()) !== result.api_url) throw new Error("Saved identity changed.");
     const client = new Relay({ apiKey: saved.agent_token, baseURL: result.api_url, ...(fetchImplementation ? { fetch: fetchImplementation } : {}) });
-    const outcome = await uploadAgentImage({ handle: result.handle, image: localImage }, client,
-      (attachmentID) => client.contactCard.update({
-        handle: result.handle,
-        attachment_id: attachmentID,
+    if (imageURL) {
+      const card = await client.contactCard.update({
+        handle: result.handle, image_url: imageURL,
         ...(input.imageRecipe ? { image_recipe: input.imageRecipe } : {}),
-      }, { maxRetries: 0 }));
+      }, { maxRetries: 0 });
+      Object.assign(result, safeMetadata(agentRecord(card), [saved.agent_token]));
+      return { result };
+    }
+    const outcome = await uploadAgentImage({ handle: result.handle, image: localImage! }, client,
+          (attachmentID) => client.contactCard.update({
+            handle: result.handle, attachment_id: attachmentID,
+            ...(input.imageRecipe ? { image_recipe: input.imageRecipe } : {}),
+          }, { maxRetries: 0 }));
     image = safeMetadata(outcome, [saved.agent_token]);
     if (image.status === "updated") Object.assign(result, agentRecord(image.agent));
   } catch {

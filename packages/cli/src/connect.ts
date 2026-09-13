@@ -29,7 +29,7 @@ import { dim, handle as markHandle, link } from "./ui-colour.js";
 import { safeMetadata } from "./output.js";
 import { spawnCommand } from "./spawn-command.js";
 import { runTerminalWatch, type TerminalObserver } from "./terminal-watch.js";
-import { createConsoleAgent } from "./console-auth.js";
+import { consoleLoginOrReuse } from "./console-auth.js";
 
 /** The plugin, and the marketplace it comes from, exactly as Claude Code names
  * them (.claude-plugin/marketplace.json: marketplace "relay-messenger", plugin "relay"). */
@@ -180,11 +180,12 @@ const AVATAR_EXTENSIONS = new Set([".png", ".jpg", ".jpeg"]);
 /**
  * The handle Relay's rule allows for a name (agents.ts, validateHandle): the
  * words lowercased and joined with underscores, a letter first, at most 32
- * before `.dev`. Undefined when nothing of the name survives the rule.
+ * characters. Console adds the selected organization's namespace.
+ * Undefined when nothing of the name survives the rule.
  */
 export const handleFromName = (name: string): string | undefined => {
   const body = name.toLowerCase().replace(/[^a-z0-9]+/gu, "_").replace(/^[^a-z]+/u, "").replace(/_+$/u, "").slice(0, 32).replace(/_+$/u, "");
-  return body.length >= 3 ? `${body}.dev` : undefined;
+  return body.length >= 3 ? body : undefined;
 };
 
 /** The avatar's path when it is a PNG or JPEG that exists; undefined otherwise. */
@@ -717,8 +718,15 @@ export const runConnect = async (
 
   // The plan was taken: only now is an agent created and its token saved.
   let consoleSession: RelayConsoleSession | undefined;
-  if (!known && deps.consoleLogin && deps.consoleRequest) {
-    consoleSession = await deps.consoleLogin();
+  if (!known) {
+    consoleSession = await (deps.consoleLogin?.() ?? consoleLoginOrReuse({
+      context: { env: deps.env, home: deps.home, cwd: deps.cwd },
+      apiURL: chosen.apiURL,
+      ...(deps.fetch ? { fetch: deps.fetch } : {}),
+      ...(ui ? { prompts: ui } : {}),
+      stderr: deps.stderr,
+      nonInteractive: !ui || json,
+    }));
   }
   const agent = known ?? await createNewAgent(chosen as PendingAgent, options, deps, screen, consoleSession);
   // The folder points at its agent, like `vercel link`; the token stays in the
@@ -1014,7 +1022,7 @@ const chooseIdentity = async (options: ConnectOptions, deps: ConnectDependencies
     // The placeholder is the handle Relay's rule gives the name, and Enter takes it.
     const derived = identity.name ? handleFromName(identity.name) : undefined;
     const typed = (await ui.text(HANDLE_QUESTION, "", {
-      placeholder: derived ?? NAME_PLACEHOLDER,
+      placeholder: derived ?? "assistant",
       validate: (value) => { try { if (value.trim()) validateHandle(value.trim()); return undefined; } catch (error) { return (error as Error).message; } },
     })).trim();
     if (typed) identity.handle = typed;
@@ -1094,73 +1102,22 @@ const createNewAgent = async (
   const { apiURL, handle, identity } = pending;
   // The picture goes up through the same upload `contact-card update --image`
   // uses (agent-image-upload.ts), after the agent exists and before "Say hi".
-  if (!consoleSession?.organization_id || !deps.consoleRequest) {
-    const image = identity.avatar ?? options.image;
-    const created = await screen.work("Creating your agent", () => createAgentWithPicture({
-      apiURL,
-      ...(deps.profile ? { profile: deps.profile } : {}),
-      ...(handle ? { handle } : {}),
-      ...(identity.name ? { firstName: identity.name } : {}),
-      ...(identity.about === undefined ? {} : { about: identity.about }),
-      ...(image ? { image } : {}),
-      cwd: deps.cwd,
-      home: deps.home,
-      makeDefault: true,
-    }, deps.agents, deps.fetch), (result) => `Created ${screen.handle(result.result.handle)}  token saved privately on this computer`);
-    if (created.image && created.image.status !== "updated") {
-      screen.say(screen.dim(`avatar not set: ${incompletePictureMessage(created.result.handle, created.result.profile, created.image, false)}`));
-    }
-    const saved = (await deps.agents.read()).profiles[created.result.profile];
-    if (!saved?.agent_token) {
-      throw new ConnectFailure(
-        "The agent was created but its token was not saved on this computer, so Relay wrote no configuration.",
-        "npx relaymessenger agents list",
-      );
-    }
-    return {
-      profile: created.result.profile,
-      handle: created.result.handle,
-      displayName: created.result.display_name,
-      apiURL: created.result.api_url,
-      shareURL: created.result.share_url,
-      token: saved.agent_token,
-      created: true,
-    };
+  if (!consoleSession?.organization_id) {
+    throw new CliError("Relay Console is not signed in. Run relay login.", "no_token");
   }
-  const displayName = identity.name ?? "My Agent";
-  const created = await screen.work("Creating your agent", async () => {
-    const result = await createConsoleAgent(
-      { context: { env: deps.env, home: deps.home, cwd: deps.cwd }, apiURL, ...(deps.fetch ? { fetch: deps.fetch } : {}) },
-      {
-        displayName,
-        ...(handle ? { handle: handle.replace(/\.dev$/u, "") } : {}),
-        ...(identity.about === undefined ? {} : { about: identity.about }),
-        ...((identity.avatar ?? options.image) === undefined ? {} : { image: identity.avatar ?? options.image }),
-        ...(deps.cwd ? { cwd: deps.cwd } : {}),
-        ...(deps.home ? { home: deps.home } : {}),
-      },
-    );
-    const profile = result.agent.handle;
-    await deps.agents.update((config) => {
-      config.profiles[profile] = {
-        api_url: apiURL,
-        agent_token: result.token,
-      };
-      config.defaultAgent = profile;
-    });
-    return {
-      result: {
-        profile,
-        handle: result.agent.handle,
-        display_name: result.agent.first_name,
-        image_url: result.agent.image_url,
-        api_url: apiURL,
-        share_url: savedAgentShareURL(apiURL, result.agent.handle),
-      },
-      ...(result.image ? { image: result.image } : {}),
-    };
-  }, (result) => `Created ${screen.handle(result.result.handle)}  token saved privately on this computer`);
-  if (created.image?.status === "incomplete") {
+  const image = identity.avatar ?? options.image;
+  const created = await screen.work("Creating your agent", () => createAgentWithPicture({
+    apiURL,
+    ...(deps.profile ? { profile: deps.profile } : {}),
+    ...(handle ? { handle } : {}),
+    ...(identity.name ? { firstName: identity.name } : {}),
+    ...(identity.about === undefined ? {} : { about: identity.about }),
+    ...(image ? { image } : {}),
+    cwd: deps.cwd,
+    home: deps.home,
+    makeDefault: true,
+  }, deps.agents, deps.fetch), (result) => `Created ${screen.handle(result.result.handle)}  token saved privately on this computer`);
+  if (created.image && created.image.status !== "updated") {
     screen.say(screen.dim(`avatar not set: ${incompletePictureMessage(created.result.handle, created.result.profile, created.image, false)}`));
   }
   const saved = (await deps.agents.read()).profiles[created.result.profile];

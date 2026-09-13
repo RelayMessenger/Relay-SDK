@@ -204,10 +204,9 @@ describe("Relay v1 request shapes", () => {
       handle: "echo",
       first_name: "New Echo",
     });
-    await Relay.createAgent({}, { baseURL: "https://api.example.test", fetch: responder(calls) });
     await client.agents.delete("agent.dev");
 
-    expect([...calls.slice(-2), ...calls.slice(0, -2)].map((call) => [call.method, call.url.pathname])).toEqual(
+    expect([...calls.slice(-1), ...calls.slice(0, -1)].map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
         operation.method,
         operation.path
