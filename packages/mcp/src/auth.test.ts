@@ -4,12 +4,55 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   collectLocalTokens,
+  defaultApiURL,
   relayConfigPath,
   resolveAgentAuth,
   validateApiURL,
 } from "./auth.js";
 
 describe("local Agent Token resolver", () => {
+  it("matches package environment for staging and plain release versions", () => {
+    expect(defaultApiURL("0.1.3-staging.7")).toBe("https://api.staging.relayapp.im");
+    expect(defaultApiURL("0.1.3-staging")).toBe("https://api.staging.relayapp.im");
+    expect(defaultApiURL("0.1.3")).toBe("https://api.relayapp.im");
+  });
+
+  it("uses staging with only an environment Agent Token and a fresh home", async () => {
+    const home = await mkdtemp(join(tmpdir(), "relay-mcp-staging-default-"));
+    const resolved = await resolveAgentAuth({
+      home,
+      env: { RELAY_AGENT_TOKEN: "rly_environment_secret" },
+    });
+    expect(resolved.apiURL).toBe("https://api.staging.relayapp.im");
+    expect(resolved.source).toBe("environment");
+  });
+
+  it("preserves explicit profile, environment, and command origins in precedence order", async () => {
+    const home = await mkdtemp(join(tmpdir(), "relay-mcp-origin-precedence-"));
+    const path = join(home, "config.json");
+    await writeFile(path, JSON.stringify({
+      version: 1, current_profile: "default",
+      profiles: { default: { api_url: "https://api.relayapp.im", agent_token: "profile-secret" } },
+    }));
+    const env = { RELAY_CONFIG_PATH: path, RELAY_AGENT_TOKEN: "env-secret" };
+    expect((await resolveAgentAuth({ env })).apiURL).toBe("https://api.relayapp.im");
+    expect((await resolveAgentAuth({ env: { ...env, RELAY_API_URL: "http://127.0.0.1:8787" } })).apiURL).toBe("http://127.0.0.1:8787");
+    expect((await resolveAgentAuth({
+      env: { ...env, RELAY_API_URL: "http://127.0.0.1:8787" },
+      apiURL: "https://api.staging.relayapp.im",
+    })).apiURL).toBe("https://api.staging.relayapp.im");
+  });
+
+  it("uses the package origin when a selected profile omits api_url", async () => {
+    const home = await mkdtemp(join(tmpdir(), "relay-mcp-profile-default-"));
+    const path = join(home, "config.json");
+    await writeFile(path, JSON.stringify({
+      version: 1, current_profile: "default",
+      profiles: { default: { agent_token: "profile-secret" } },
+    }));
+    expect((await resolveAgentAuth({ env: { RELAY_CONFIG_PATH: path } })).apiURL).toBe("https://api.staging.relayapp.im");
+  });
+
   it("reads the Relay CLI profile format", async () => {
     const home = await mkdtemp(join(tmpdir(), "relay-mcp-auth-"));
     const context = {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { callMcp, searchRelay } from "./mcp-client.mjs";
+import { assertSearchOrigin, callMcp, searchRelay } from "./mcp-client.mjs";
 
 const initialized = await callMcp("initialize", {
   protocolVersion: "2025-06-18",
@@ -18,7 +18,7 @@ assert.ok(search, "search_relay is not exposed");
 assert.equal(search.annotations.readOnlyHint, true);
 
 const result = await searchRelay("Relay API authentication Agent Token");
-assert.match(result, /https:\/\/docs\.relayapp\.im\//);
+assertSearchOrigin(result);
 assert.match(result, /Relay/i);
 
 console.log("verified Relay docs MCP initialization, tools, and search call");

@@ -134,12 +134,12 @@ try {
 
     assert.equal(packageJSON.version, ${JSON.stringify(expectedVersion)});
     assert.deepEqual(Object.keys(sdk).sort(), [
+      "Agents",
       "Attachments",
       "BlockedHandles",
       "Chats",
       "ChatsPage",
       "ContactCard",
-      "ContactRequests",
       "Messages",
       "MessagesPage",
       "RELAY_V1_OPERATIONS",
@@ -155,6 +155,7 @@ try {
       "Webhooks",
       "default",
       "runWebSocket",
+      "signWebhookHeaders",
       "verifyWebhookSignature",
     ].sort());
     for (const privateName of [
