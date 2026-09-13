@@ -23,7 +23,7 @@ it("uses the identity name for public email providers", () => {
   });
 });
 
-it("completes device login, bootstraps Personal setup, refreshes the session, and never prints secrets", async () => {
+it("completes device login, bootstraps organization setup, refreshes the session, and never prints secrets", async () => {
   const root = await import("node:fs/promises").then(({ mkdtemp }) => mkdtemp(join(tmpdir(), "relay-console-device-")));
   const configPath = `${root}/config.json`;
   const accessToken = `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 900 })).toString("base64url")}.`;

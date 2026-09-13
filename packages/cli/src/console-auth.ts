@@ -245,7 +245,7 @@ export const consoleLogin = async (deps: ConsoleAuthDependencies): Promise<Relay
     throw new HeadlessPrompt("Relay needs organization setup after login.", ["--organization-name <name>", "--namespace <namespace>"]);
   }
   // WorkOS may already select an organization for the user. Bootstrap only
-  // the Personal organization case; repeating it can create duplicate orgs.
+  // the first-organization case; repeating it can create duplicate orgs.
   const organizationId = token.organization_id
     ?? await bootstrap(deps, token, { name, namespace });
   let session: RelayConsoleOAuthSession = {

@@ -659,9 +659,9 @@ export const createProgram = (
     .helpGroup(HELP_GROUPS.everythingElse);
   loginCommand
     .option("--with-token", "read an organization API key from a pipe")
-    .option("--organization-name <name>", "name for a new Personal organization")
-    .option("--namespace <namespace>", "namespace for a new Personal organization")
-    .option("--website <domain>", "optional website for a new Personal organization")
+    .option("--organization-name <name>", "name for a new organization")
+    .option("--namespace <namespace>", "namespace for a new organization")
+    .option("--website <domain>", "optional website for a new organization")
     .action(async (options: { withToken?: boolean; organizationName?: string; namespace?: string; website?: string }, command: Command) => {
       if (options.withToken) {
         if (!dependencies.readStdin && process.stdin.isTTY) {
@@ -744,7 +744,7 @@ export const createProgram = (
     .description("manage the signed-in Relay organization")
     .helpGroup(HELP_GROUPS.everythingElse);
   organization.command("show")
-    .description("show the signed-in organization and plan")
+    .description("show the signed-in organization")
     .action(async () => {
       output(await consoleRequest({
         context: configContext,
