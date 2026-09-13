@@ -12,9 +12,9 @@ if (platform() === 'linux' && !process.env.RELAY_DAYTONA_SANDBOX_ID) throw Error
 const receipts = resolve(process.env.RELAY_PLATFORM_RECEIPTS ?? join(root, '.release-tmp', 'agent-cli-platforms', `${platform()}-${arch()}`));
 mkdirSync(receipts, { recursive: true });
 const scratch = mkdtempSync(join(tmpdir(), 'relay-platform-'));
-const token = `rly_live_${'V'.repeat(43)}`;
-const invalidToken = `rly_live_${'X'.repeat(43)}`;
-const syntheticTokens = [token, invalidToken, `rly_live_${'I'.repeat(43)}`, `rly_live_${'P'.repeat(43)}`];
+const token = `rel_token_${'V'.repeat(43)}`;
+const invalidToken = `rel_token_${'X'.repeat(43)}`;
+const syntheticTokens = [token, invalidToken, `rel_token_${'I'.repeat(43)}`, `rel_token_${'P'.repeat(43)}`];
 let tokenServer;
 const env = { ...process.env, RELAY_CONFIG_PATH: join(scratch, 'config.json'), RELAY_API_URL: 'http://127.0.0.1:1', CI: 'true' };
 for (const key of ['RELAY_AGENT_TOKEN', 'RELAY_PROFILE', 'NODE_AUTH_TOKEN', 'NPM_TOKEN']) delete env[key];

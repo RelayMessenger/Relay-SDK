@@ -5,8 +5,8 @@ import { expect, it } from "vitest";
 import { inspectChannelEnv, readChannelEnv, renderChannelEnv, writeChannelEnv, writeEnvFile } from "./claude-channel.js";
 import { expectOwnerOnly } from "./private-file.test.js";
 
-const token = `rly_live_${"A".repeat(43)}`;
-const other = `rly_live_${"B".repeat(43)}`;
+const token = `rel_token_${"A".repeat(43)}`;
+const other = `rel_token_${"B".repeat(43)}`;
 const channel = async (): Promise<string> => join(await mkdtemp(join(tmpdir(), "relay-channel-")), "channels", "relay");
 
 it("writes the three names the channel reads, owner-only, in an owner-only folder", async () => {

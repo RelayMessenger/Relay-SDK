@@ -20,7 +20,7 @@ it.each([undefined, "/fake/bin/openclaw"])("connect resolves the gateway executa
   const home = await mkdtemp(join(scratch, "connect-"));
   const stdout: string[] = [];
   const startCommand = vi.fn(async () => 0);
-  const code = await runCLI(["connect", "openclaw", "--token", `rly_live_${"C".repeat(43)}`, "--yes", "--no-skill", "--json", "--non-interactive"], {
+  const code = await runCLI(["connect", "openclaw", "--token", `rel_token_${"C".repeat(43)}`, "--yes", "--no-skill", "--json", "--non-interactive"], {
     configContext: { home, env: { RELAY_CONFIG_PATH: join(home, "config.json"), PATH: "" }, platform: process.platform },
     cwd: home,
     isInteractive: false,

@@ -12,7 +12,7 @@ if (process.platform === 'win32') {
   const { protectWindowsPath } = await import(pathToFileURL(join(consumer, 'node_modules/relaymessenger/dist/runtime-connect/windows-acl.js')));
   await protectWindowsPath(home, true);
 }
-const secret = `rly_live_${'I'.repeat(43)}`;
+const secret = `rel_token_${'I'.repeat(43)}`;
 const base = 'https://api.staging.relayapp.im';
 const handle = 'installed_image.dev';
 const attachment = '019a2123-1234-7890-abcd-123456789abc';

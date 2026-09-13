@@ -4,7 +4,7 @@ import { writeFileSync } from 'node:fs';
 const require = createRequire((process.env.RELAY_TERMINAL_SOURCE ?? '/home/daytona/terminal-session') + '/package.json');
 const { WebSocketServer } = require('ws');
 const [readyPath, receiptPath] = process.argv.slice(2);
-const token = 'rly_live_' + 'P'.repeat(43); const handle = 'my_agent.terminal';
+const token = 'rel_token_' + 'P'.repeat(43); const handle = 'my_agent.terminal';
 const card = { handle, first_name: 'Terminal Fixture', last_name: null, image_url: 'https://api.staging.relayapp.im/assets/fixture.png', is_active: true, kind: 'agent' };
 const report = { scope: 'real installed CLI + loopback HTTP/WS, not live Server', creates: 0, consoleCreates: 0, contactCards: 0, observers: 0, eventsSent: 0, frames: [], queries: [], authConfirmed: true, requestPaths: [] };
 const save = () => writeFileSync(receiptPath, JSON.stringify(report));

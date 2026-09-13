@@ -29,7 +29,7 @@ shim = os.environ.get('RELAY_TERMINAL_SHIM') or str(repo / 'packages' / 'cli' / 
 source = os.environ.get('RELAY_TERMINAL_SOURCE') or str(repo)
 if not node or not pathlib.Path(shim).exists():
     raise SystemExit(f'node ({node}) or the built CLI ({shim}) is missing; run npm run build first')
-token = b'rly_live_' + b'P' * 43
+token = b'rel_token_' + b'P' * 43
 handle = 'my_agent.terminal'
 # A fake Claude Code: connect detects it on PATH, runs its three plugin commands and its
 # start command, and every one of them exits 0 and says nothing. The start command stays

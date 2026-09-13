@@ -20,7 +20,7 @@ it.each([undefined, "/fake/bin/opencode"])("connect drives OpenCode over ACP usi
   const scratch = join(tmpdir(), "relay-target-start-test");
   await mkdir(scratch, { recursive: true });
   const home = await mkdtemp(join(scratch, "connect-"));
-  const token = `rly_live_${"C".repeat(43)}`;
+  const token = `rel_token_${"C".repeat(43)}`;
   const bridge = vi.fn(async (input: { say(line: string): void }) => { input.say("stopped"); });
   const prompts: InteractivePrompts = {
     select: vi.fn(async () => "new"),

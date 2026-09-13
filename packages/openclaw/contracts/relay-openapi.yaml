@@ -2230,7 +2230,7 @@ components:
                   const: agent
         secret:
           type: string
-          pattern: '^rly_live_[A-Za-z0-9]{43}$'
+          pattern: '^rel_token_[A-Za-z0-9]{43}$'
           description: The Agent Token, returned only in this creation response.
           readOnly: true
         share_url:

@@ -26,7 +26,7 @@ export interface TerminalWatchInput {
 /** Single-line terminal output: never interpret event/metadata escape sequences or token values. */
 export function terminalText(value: unknown, secrets: readonly string[] = [], limit = 240): string {
   if (typeof value !== "string") return "";
-  const redacted = redactText(value, secrets).replace(/rly_live_[A-Za-z0-9]{43}/gu, "[REDACTED]");
+  const redacted = redactText(value, secrets).replace(/(?:rel|rly)_live_[A-Za-z0-9]{43}/gu, "[REDACTED]");
   return stripVTControlCharacters(redacted)
     .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu, " ")
     .replace(/\s+/gu, " ").trim().slice(0, limit);

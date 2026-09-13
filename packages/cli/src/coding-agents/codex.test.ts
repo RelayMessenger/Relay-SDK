@@ -28,7 +28,7 @@ describe("Codex start", () => {
       stderr: (value) => stderr.push(value),
       fetch: vi.fn(async () => Response.json({
         agent: { handle: "codex_test.dev", first_name: "Codex", last_name: null, image_url: null, kind: "agent", is_active: true },
-        secret: `rly_live_${"C".repeat(43)}`,
+        secret: `rel_token_${"C".repeat(43)}`,
         share_url: "https://relayapp.im/@codex_test.dev",
       }, { status: 201 })),
       connect: {

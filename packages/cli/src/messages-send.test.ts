@@ -55,8 +55,8 @@ describe("messages send identity", () => {
     const home = await mkdtemp(join(tmpdir(), "relay-send-link-"));
     const folder = join(home, "project");
     await mkdir(folder);
-    const linked = `rly_live_${"L".repeat(43)}`;
-    const other = `rly_live_${"O".repeat(43)}`;
+    const linked = `rel_token_${"L".repeat(43)}`;
+    const other = `rel_token_${"O".repeat(43)}`;
     await writeFile(join(home, "config.json"), JSON.stringify({
       version: 1, current_profile: "other.dev",
       profiles: { "other.dev": { api_url: "https://api.relayapp.im", agent_token: other }, "linked.dev": { api_url: "https://api.relayapp.im", agent_token: linked } },

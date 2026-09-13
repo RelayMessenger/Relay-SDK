@@ -25,7 +25,7 @@ beforeEach(() => {
   vi.mocked(protectWindowsPath).mockResolvedValue(acl());
 });
 
-const token = `rly_live_${"C".repeat(43)}`;
+const token = `rel_token_${"C".repeat(43)}`;
 const card = { handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
 
 async function connect(agent: "codex" | "opencode", args: string[], executable: string | undefined) {

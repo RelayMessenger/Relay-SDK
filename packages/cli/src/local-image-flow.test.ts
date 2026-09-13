@@ -9,7 +9,7 @@ import { protectWindowsPath } from "./runtime-connect/windows-acl.js";
 
 const base = "https://api.staging.relayapp.im";
 const handle = "local_picture.dev";
-const secret = `rly_live_${"L".repeat(43)}`;
+const secret = `rel_token_${"L".repeat(43)}`;
 const attachmentID = "019a2123-1234-7890-abcd-123456789abc";
 const original = { handle, first_name: "Local Picture", last_name: null, image_url: `${base}/assets/default.png`, is_active: true, kind: "agent" as const };
 const permanent = { ...original, image_url: `${base}/images/copied.png` };

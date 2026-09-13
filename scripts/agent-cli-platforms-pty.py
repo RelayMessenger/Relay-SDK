@@ -3,7 +3,7 @@ import argparse, fcntl, json, os, pty, re, select, struct, subprocess, termios, 
 from pathlib import Path
 p=argparse.ArgumentParser();p.add_argument('--shim',required=True);p.add_argument('--origin',required=True);p.add_argument('--scratch',required=True);p.add_argument('--receipt',required=True);a=p.parse_args()
 if os.uname().sysname=='Linux' and not os.environ.get('RELAY_DAYTONA_SANDBOX_ID'): raise SystemExit('Linux PTY proof requires owned Daytona')
-secret='rly_live_'+'V'*43
+secret='rel_token_'+'V'*43
 report={'platform':os.uname().sysname,'kernel':os.uname().release,'shim':a.shim,'size':[30,120],'cases':[],'windowsInteractiveClaim':False}
 ansi=re.compile(rb'\x1b\[[0-?]*[ -/]*[@-~]')
 def exercise(name, menu=False, cancel=False):

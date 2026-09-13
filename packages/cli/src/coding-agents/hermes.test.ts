@@ -29,7 +29,7 @@ it.each([undefined, "/fake/bin/hermes"])("resolves the Hermes executable (%s)", 
     info: vi.fn(), intro: vi.fn(), outro: vi.fn(), step: vi.fn(), success: vi.fn(), message: vi.fn(), note: vi.fn(),
     spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
   } satisfies InteractivePrompts;
-  const code = await runCLI(["connect", "hermes", "--token", `rly_live_${"C".repeat(43)}`, "--yes", "--no-skill"], {
+  const code = await runCLI(["connect", "hermes", "--token", `rel_token_${"C".repeat(43)}`, "--yes", "--no-skill"], {
     configContext: { home, env: { RELAY_CONFIG_PATH: join(home, "config.json"), PATH: "" }, platform: process.platform },
     cwd: home,
     isInteractive: true,

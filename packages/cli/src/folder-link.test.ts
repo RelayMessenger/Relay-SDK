@@ -9,7 +9,7 @@ const link = { handle: "calm_cangoo.dev", apiUrl: "https://api.staging.relayapp.
 describe("the folder link", () => {
   it("writes .relay/agent.json as a pointer with no token, owner-only", async () => {
     const root = await mkdtemp(join(tmpdir(), "relay-folder-link-"));
-    const path = await writeFolderLink(root, { ...link, token: "rly_live_never" } as never);
+    const path = await writeFolderLink(root, { ...link, token: "rel_token_never" } as never);
     expect(path).toBe(folderLinkPath(root));
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual(link);
     if (process.platform !== "win32") expect((await stat(path)).mode & 0o777).toBe(0o600);

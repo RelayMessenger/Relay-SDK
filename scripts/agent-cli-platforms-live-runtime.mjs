@@ -22,12 +22,12 @@ const liveFile = process.env.RELAY_LIVE_AGENT_FILE;
 const stopFile = process.env.RELAY_LIVE_STOP_FILE;
 if (!liveFile || !stopFile) throw Error("Explicit private fixture and owned stop-marker paths are required");
 let live; try { live = JSON.parse(readFileSync(liveFile, "utf8")); } catch { throw Error("Private fixture could not be parsed; contents suppressed"); }
-if (live.origin !== "https://api.staging.relayapp.im" || live.server_commit !== "9f0a023c65dc52515d2916d1d8f90118fd0bf790" || !/^rly_live_[A-Za-z0-9]{43}$/.test(live.secret) || live.agent?.handle !== "clear_lusowl1.dev") throw Error("Assigned private fixture validation failed; contents suppressed");
+if (live.origin !== "https://api.staging.relayapp.im" || live.server_commit !== "9f0a023c65dc52515d2916d1d8f90118fd0bf790" || !/^(?:rel|rly)_live_[A-Za-z0-9]{43}$/.test(live.secret) || live.agent?.handle !== "clear_lusowl1.dev") throw Error("Assigned private fixture validation failed; contents suppressed");
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = join(workspace, "packages/openclaw");
 const receiptPath = resolve(process.env.RELAY_RUNTIME_PROOF_RECEIPT ?? join(workspace, ".release-tmp", "agent-cli-runtime-proof.json"));
 mkdirSync(dirname(receiptPath), { recursive: true });
-const redact = value => String(value).replace(/rly_live_[A-Za-z0-9]{43}/g, "[REDACTED_FIXTURE_TOKEN]");
+const redact = value => String(value).replace(/(?:rel|rly)_live_[A-Za-z0-9]{43}/g, "[REDACTED_FIXTURE_TOKEN]");
 const receipt = { platform: process.platform, arch: process.arch, node: process.version, sandbox: process.env.RELAY_DAYTONA_SANDBOX_ID, coverage: "LIVE staging Agent Token -> installed canonical auth login -> actual OpenClaw; local deterministic model; phone evidence required", serverCommit: live.server_commit, handle: live.agent.handle, shareUrl: live.share_url, liveBootstrapCalls: 0, commands: [] };
 function execFileSync(command, args, options = {}) {
   const row = { command: [command, ...args], cwd: options.cwd }; receipt.commands.push(row);

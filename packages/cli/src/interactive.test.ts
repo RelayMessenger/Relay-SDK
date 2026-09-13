@@ -7,7 +7,7 @@ import { STAGING_API_URL, defaultCreationApiURL, emptyConfig, packageVersion, re
 import { InteractiveCancelled, interactiveAllowed, type InteractivePrompts } from "./interactive.js";
 import { installerEnvironment, RELAY_SKILL_INSTALL_ARGS, relaySkillInstallArgs, relaySkillPresent, relaySkillSourceBranch } from "./skill-offer.js";
 
-const token = `rly_live_${"I".repeat(43)}`;
+const token = `rel_token_${"I".repeat(43)}`;
 const card = { handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), "relay-interactive-"));

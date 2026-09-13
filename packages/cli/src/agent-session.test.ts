@@ -9,7 +9,7 @@ import { QR_DARK } from "./qr-terminal.js";
 import type { TerminalSessionOptions } from "./terminal-session.js";
 
 const base = "https://api.staging.relayapp.im";
-const token = `rly_live_${"V".repeat(43)}`;
+const token = `rel_token_${"V".repeat(43)}`;
 const card = { handle: "view_agent.dev", first_name: "View Agent", last_name: null, image_url: `${base}/assets/relay.png`, is_active: true, kind: "agent" as const };
 const exited = { reason: "quit" as const, observedEvents: 0, observerStopped: true };
 async function fixture() {
@@ -50,7 +50,7 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
     await vi.waitFor(() => expect(close).toBeDefined(), { timeout: process.platform === "win32" ? 90_000 : 1_000 }); expect(finished).toBe(false);
     close!(); expect(await pending).toBe(0);
     expect(f.calls.filter((call) => call === "POST /v1/agents")).toHaveLength(1);
-    expect(f.output.join("")).not.toMatch(/unrelated-env-token|rly_live_[A-Za-z0-9]{43}/u);
+    expect(f.output.join("")).not.toMatch(/unrelated-env-token|(?:rel|rly)_live_[A-Za-z0-9]{43}/u);
   });
   it("draws the QR code once: the live view owns it when it opens, the create screen owns it otherwise", async () => {
     // The owner saw two identical QR codes stacked in his terminal after

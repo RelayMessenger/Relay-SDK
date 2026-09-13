@@ -19,7 +19,7 @@ it("connect prints the VS Code restart instruction and waits for the bounded rep
   await mkdir(scratch, { recursive: true });
   const home = await mkdtemp(join(scratch, "connect-"));
   const stdout: string[] = [];
-  const token = `rly_live_${"C".repeat(43)}`;
+  const token = `rel_token_${"C".repeat(43)}`;
   const startCommand = vi.fn(async () => 0);
   const instruction = "Restart VS Code to load Relay, then ask it to read your Relay messages.";
   const prompts = {

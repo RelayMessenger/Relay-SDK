@@ -155,7 +155,7 @@ const server = http.createServer(async (req, res) => {
     if (token || req.headers.authorization) { json(res, 400, { error: { message: "bootstrap must be new and unauthenticated" } }); return; }
     const input = await body(req);
     if (!input?.token_name?.startsWith("verification-runtime-")) { json(res, 400, {}); return; }
-    token = "rly_live_" + randomBytes(32).toString("hex").slice(0,43);
+    token = "rel_token_" + randomBytes(32).toString("hex").slice(0,43);
     res.setHeader("Cache-Control", "no-store");
     json(res, 201, { agent: createdCard, secret: token, share_url: `https://go.staging.relayapp.im/@${createdHandle}` });
     return;

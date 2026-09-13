@@ -17,7 +17,7 @@ import type { RuntimeFound } from "./runtime-sniff.js";
 import type { TerminalObserver } from "./terminal-watch.js";
 import { expectOwnerOnly } from "./private-file.test.js";
 
-const token = `rly_live_${"C".repeat(43)}`;
+const token = `rel_token_${"C".repeat(43)}`;
 const card = { handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
 
 const runtimes = (found: Partial<Record<RuntimeFound["id"], Partial<RuntimeFound>>> = {}): RuntimeFound[] =>
@@ -397,7 +397,7 @@ describe("the Claude Code path", () => {
 
   it("a token already there for another agent is kept unless the person replaces it", async () => {
     const f = await fixture();
-    const kept = `rly_live_${"D".repeat(43)}`;
+    const kept = `rel_token_${"D".repeat(43)}`;
     await mkdir(f.channel, { recursive: true });
     await writeFile(join(f.channel, ".env"), `RELAY_AGENT_TOKEN="${kept}"\n`, { mode: 0o600 });
     f.prompts.select.mockResolvedValueOnce("keep");
@@ -526,7 +526,7 @@ describe("Hermes and OpenClaw", () => {
   it("Hermes keeps a token already there unless told to replace it", async () => {
     const f = await fixture({ isInteractive: false }, runtimes());
     await mkdir(join(f.home, ".hermes"), { recursive: true });
-    await writeFile(join(f.home, ".hermes", ".env"), `RELAY_AGENT_TOKEN="rly_live_${"E".repeat(43)}"\nOTHER=1\n`, { mode: 0o600 });
+    await writeFile(join(f.home, ".hermes", ".env"), `RELAY_AGENT_TOKEN="rel_token_${"E".repeat(43)}"\nOTHER=1\n`, { mode: 0o600 });
     expect(await runCLI(["connect", "hermes", "--token", token, "--no-skill"], f.deps)).toBe(2);
     expect(f.stderr.join("")).toContain("--yes  to replace it");
     expect(await readFile(join(f.home, ".hermes", ".env"), "utf8")).toContain("E".repeat(43));

@@ -22,7 +22,7 @@ const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = join(workspace, "packages/openclaw");
 const receiptPath = resolve(process.env.RELAY_RUNTIME_PROOF_RECEIPT ?? join(workspace, ".release-tmp", "agent-cli-runtime-proof.json"));
 mkdirSync(dirname(receiptPath), { recursive: true });
-const redact = value => String(value).replace(/rly_live_[A-Za-z0-9]{43}/g, "[REDACTED_FIXTURE_TOKEN]");
+const redact = value => String(value).replace(/(?:rel|rly)_live_[A-Za-z0-9]{43}/g, "[REDACTED_FIXTURE_TOKEN]");
 const receipt = { platform: process.platform, arch: process.arch, node: process.version, sandbox: process.env.RELAY_DAYTONA_SANDBOX_ID, coverage: "new installed CLI identity -> native config -> actual OpenClaw process against loopback Relay/model fixtures; NOT live staging", commands: [] };
 function execFileSync(command, args, options = {}) {
   const row = { command: [command, ...args], cwd: options.cwd }; receipt.commands.push(row);
@@ -271,7 +271,7 @@ try {
   assert.equal(created.token, "stored"); assert.equal(created.connect.status, "configured"); assert.equal(created.connect.connected, false);
   const privateProfile = JSON.parse(readFileSync(cliConfig, "utf8")).profiles[created.profile];
   const configured = JSON.parse(readFileSync(configPath, "utf8"));
-  assert.match(privateProfile.agent_token, /^rly_live_[A-Za-z0-9]{43}$/);
+  assert.match(privateProfile.agent_token, /^(?:rel|rly)_live_[A-Za-z0-9]{43}$/);
   assert.equal(configured.channels.relay.accounts.work.token, privateProfile.agent_token);
   const expectedConfig = structuredClone(originalConfig);
   expectedConfig.channels.relay.accounts.work.token = privateProfile.agent_token;
