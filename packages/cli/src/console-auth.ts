@@ -61,7 +61,6 @@ export interface ConsoleAuthDependencies {
   stderr?: (value: string) => void;
   openBrowser?: (url: string) => Promise<void>;
   name?: string;
-  namespace?: string;
   website?: string;
   nonInteractive?: boolean;
 }
@@ -116,14 +115,13 @@ const publicMailDomains = new Set([
 ]);
 
 /** WorkOS AuthKit returns the verified email; use a Workspace domain only as a display hint. */
-export const organizationDefaults = (user: DeviceToken["user"]): { name: string; namespace: string } => {
+export const organizationDefaults = (user: DeviceToken["user"]): { name: string } => {
   const emailDomain = user.email.split("@")[1]?.toLowerCase();
   const company = emailDomain && !publicMailDomains.has(emailDomain)
     ? emailDomain.split(".")[0]!.replace(/[-_]+/g, " ").trim()
     : "";
   const name = company ? company.replace(/\b\w/g, (value) => value.toUpperCase()) : userName(user);
-  const namespace = name.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 63) || "personal";
-  return { name: name.slice(0, 80), namespace };
+  return { name: name.slice(0, 80) };
 };
 
 const expiryFromAccessToken = (token: string): number => {
@@ -188,7 +186,7 @@ const pollDevice = async (deps: ConsoleAuthDependencies, start: DeviceStart): Pr
 const bootstrap = async (
   deps: ConsoleAuthDependencies,
   token: DeviceToken,
-  setup: { name: string; namespace: string },
+  setup: { name: string },
 ): Promise<string> => {
   const api = defaultConsoleApiURL(deps.apiURL ?? defaultCreationApiURL(), deps.context.env ?? process.env);
   const response = await httpFetch(deps)(`${api}/auth/cli/bootstrap`, {
@@ -198,7 +196,7 @@ const bootstrap = async (
       "X-Relay-CLI": "1",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ name: setup.name, handleNamespace: setup.namespace }),
+    body: JSON.stringify({ name: setup.name }),
   });
   const value = await json<{ organization_id?: string; error?: string }>(response);
   if (!value.organization_id) throw new Error("Relay Console did not return an organization.");
@@ -237,17 +235,15 @@ export const consoleLogin = async (deps: ConsoleAuthDependencies): Promise<Relay
   const token = await pollDevice(deps, start);
   const defaults = organizationDefaults(token.user);
   let name = deps.name ?? defaults.name;
-  let namespace = deps.namespace ?? defaults.namespace;
   if (!token.organization_id && deps.prompts && !deps.nonInteractive) {
     name = (await deps.prompts.text("Organization name", name)).trim() || name;
-    namespace = (await deps.prompts.text("Namespace", namespace)).trim().toLowerCase() || namespace;
-  } else if (!token.organization_id && deps.nonInteractive && (deps.name === undefined || deps.namespace === undefined)) {
-    throw new HeadlessPrompt("Relay needs organization setup after login.", ["--organization-name <name>", "--namespace <namespace>"]);
+  } else if (!token.organization_id && deps.nonInteractive && (deps.name === undefined)) {
+    throw new HeadlessPrompt("Relay needs organization setup after login.", ["--organization-name <name>"]);
   }
   // WorkOS may already select an organization for the user. Bootstrap only
   // the first-organization case; repeating it can create duplicate orgs.
   const organizationId = token.organization_id
-    ?? await bootstrap(deps, token, { name, namespace });
+    ?? await bootstrap(deps, token, { name });
   let session: RelayConsoleOAuthSession = {
     access_token: token.access_token,
     refresh_token: token.refresh_token,
@@ -371,9 +367,9 @@ export const createConsoleAgent = async (
   if (input.imageRecipe !== undefined && imageURL === undefined && !localImage) {
     throw new Error("--image-recipe requires its rendered --image or --image-url.");
   }
-  const me = await consoleRequest<{ org: { id: string; handleNamespace: string } }>(deps, "/me");
+  const me = await consoleRequest<{ org: { id: string } }>(deps, "/me");
   const base = (input.handle ?? (input.displayName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^[^a-z]+/u, "").replace(/_+$/u, "").slice(0, 32).replace(/_+$/u, "") || "assistant"));
-  const handle = `${base}.${me.org.handleNamespace}`;
+  const handle = base;
   const response = await consoleRequest<{
     agent: { handle: string; displayName: string; avatarUrl: string | null };
     token: string;
@@ -386,7 +382,6 @@ export const createConsoleAgent = async (
     body: JSON.stringify({
       handle,
       displayName: input.displayName,
-      isPremiumHandle: false,
       ...(input.about === undefined ? {} : { about: input.about }),
     }),
   });
