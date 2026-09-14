@@ -4,12 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runCLI } from "./program.js";
-import { emptyConfig, readConfig, writeConfig } from "./config.js";
+import { defaultCreationApiURL, emptyConfig, readConfig, writeConfig } from "./config.js";
 import { openSavedAgentSession, savedAgentShareURL } from "./agent-session.js";
 import { QR_DARK } from "./qr-terminal.js";
 import type { TerminalSessionOptions } from "./terminal-session.js";
 
-const base = "https://api.staging.relayapp.im";
+// The origin this build creates on: a `-staging` version picks staging, a plain
+// release picks production (config.ts). The release job runs this suite with the
+// version rewritten to plain, so the fixture must read the same source the code does.
+const base = defaultCreationApiURL();
 const token = `rel_token_${"V".repeat(43)}`;
 const card = { handle: "view_agent", first_name: "View Agent", last_name: null, image_url: `${base}/assets/relay.png`, is_active: true, kind: "agent" as const };
 const exited = { reason: "quit" as const, observedEvents: 0, observerStopped: true };
@@ -21,7 +24,7 @@ async function fixture() {
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input)); expect([base, "https://console.staging.relayapp.im"]).toContain(url.origin);
     calls.push(`${init?.method ?? "GET"} ${url.pathname}`);
-    if (init?.method === "POST" && url.pathname === "/api/orgs/org_fixture/agents") return Response.json({ agent: card, secret: token, share_url: `https://staging.relayapp.im/@${card.handle}` }, { status: 201 });
+    if (init?.method === "POST" && url.pathname === "/api/orgs/org_fixture/agents") return Response.json({ agent: card, secret: token, share_url: savedAgentShareURL(base, card.handle) }, { status: 201 });
     expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
     return Response.json({ contact_cards: [card] });
   };
@@ -38,7 +41,7 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
     let close: (() => void) | undefined;
     f.terminalSession.mockImplementation(async (options) => {
       expect((await readConfig(f.configContext)).profiles[card.handle]?.agent_token).toBe(token);
-      expect(options.agent).toEqual({ handle: card.handle, name: card.first_name, profile: card.handle, shareUrl: `https://staging.relayapp.im/@${card.handle}` });
+      expect(options.agent).toEqual({ handle: card.handle, name: card.first_name, profile: card.handle, shareUrl: savedAgentShareURL(base, card.handle) });
       expect(options.runtime).toEqual({ ownership: "none", connection: "not-started" });
       expect(options.observer?.semantics).toBe("observational-no-ack");
       expect(options.secrets).toEqual([token]);
@@ -82,7 +85,7 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
     expect(await runCLI(["--profile", "saved", "auth", "status"], f.deps)).toBe(0);
     expect(f.terminalSession).toHaveBeenCalledOnce();
     const options = f.terminalSession.mock.calls[0]![0]; expect(options.runtime).toEqual({ ownership: "unknown", connection: "unknown" });
-    expect(options.agent.shareUrl).toBe(`https://staging.relayapp.im/@${card.handle}`);
+    expect(options.agent.shareUrl).toBe(savedAgentShareURL(base, card.handle));
     expect(f.calls.some((call) => call.startsWith("POST"))).toBe(false);
     expect((await readConfig(f.configContext)).profiles.saved?.agent_token).toBe(token);
   });

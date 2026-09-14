@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import Relay, { RelayAPIError } from "@relaymessenger/sdk";
+import { savedAgentShareURL } from "./agent-session.js";
 import { createAgent, deleteAgent, listAgents, type AgentDependencies } from "./agents.js";
 import { defaultCreationApiURL, emptyConfig, type RelayConfig, type ResolvedAuth } from "./config.js";
 import { runCLI } from "./program.js";
@@ -12,7 +13,8 @@ const secret = "one-time-secret-not-for-output";
 // Creation targets the origin the version under test selects (see config.ts).
 const creationOrigin = defaultCreationApiURL();
 const card = { handle: "brave_cangoo", first_name: "Brave Canada Goose", last_name: null, image_url: null, is_active: true, kind: "agent" as const };
-const response = { agent: card, token: secret, share_url: "https://staging.relayapp.im/@brave_cangoo" };
+// The share link is derived from the creation origin, never taken from the response.
+const response = { agent: card, token: secret, share_url: savedAgentShareURL(creationOrigin, card.handle) };
 function setup(initial: RelayConfig = emptyConfig()) {
   let config = structuredClone(initial);
   const auth: ResolvedAuth = { profile: "default", apiURL: initial.profiles.default?.api_url ?? creationOrigin, token: secret, tokenSource: "profile", configPath: "/not-used" };

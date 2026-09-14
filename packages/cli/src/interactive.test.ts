@@ -12,7 +12,7 @@ const token = `rel_token_${"I".repeat(43)}`;
 const card = { handle: "calm_cangoo", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), "relay-interactive-"));
-  const env: NodeJS.ProcessEnv = { RELAY_CONFIG_PATH: join(home, "config.json"), RELAY_API_URL: "https://api.staging.relayapp.im" };
+  const env: NodeJS.ProcessEnv = { RELAY_CONFIG_PATH: join(home, "config.json"), RELAY_API_URL: defaultCreationApiURL() };
   const stdout: string[] = []; const stderr: string[] = [];
   const prompts = {
     select: vi.fn(async () => "exit"), multiselect: vi.fn(async (_m: string, _o: unknown, initial: string[]) => initial), confirm: vi.fn(async () => false),
@@ -26,7 +26,7 @@ async function fixture() {
   } satisfies InteractivePrompts;
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
-    expect(["https://api.staging.relayapp.im", "https://console.staging.relayapp.im"]).toContain(url.origin);
+    expect([defaultCreationApiURL(), "https://console.staging.relayapp.im"]).toContain(url.origin);
     if (init?.method === "POST") {
       expect(new Headers(init.headers).get("authorization")).toBe("Bearer rel_org_fixtureOnlyNotARealKey");
       return Response.json({ agent: card, secret: token, share_url: `https://go.staging.relayapp.im/@${card.handle}` }, { status: 201 });
@@ -118,7 +118,7 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
     expect(f.skillPresent).toHaveBeenCalledOnce();
   });
   it("interactive delete declines safely; non-interactive delete needs no --yes", async () => {
-    const f = await fixture(); const config = emptyConfig(); config.profiles.saved = { api_url: "https://api.staging.relayapp.im", agent_token: token };
+    const f = await fixture(); const config = emptyConfig(); config.profiles.saved = { api_url: defaultCreationApiURL(), agent_token: token };
     await writeConfig(config, f.deps.configContext);
     expect(await runCLI(["--profile", "saved", "agents", "delete", card.handle], f.deps)).toBe(0);
     expect(f.fetch).not.toHaveBeenCalled(); expect((await readConfig(f.deps.configContext)).profiles.saved?.agent_token).toBe(token);
