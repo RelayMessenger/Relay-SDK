@@ -4,11 +4,14 @@ import { mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { readConfig, resolveAuth } from "./config.js";
+import { defaultCreationApiURL, readConfig, resolveAuth } from "./config.js";
 import { runCLI } from "./program.js";
 import { protectWindowsPath } from "./runtime-connect/windows-acl.js";
 
-const base = "https://api.staging.relayapp.im";
+// The origin this build creates on: a `-staging` version picks staging, a plain
+// release picks production (config.ts). The release job runs this suite with the
+// version rewritten to plain, so the fixture must read the same source the code does.
+const base = defaultCreationApiURL();
 const handle = "local_picture";
 const secret = `rel_token_${"L".repeat(43)}`;
 const attachmentID = "019a2123-1234-7890-abcd-123456789abc";
