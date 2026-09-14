@@ -1,6 +1,7 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import Relay from "@relaymessenger/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { defaultApiURL } from "./auth.js";
 import { createRelayMcpServer, PACKAGE_VERSION, type RelayMcpServerOptions } from "./server.js";
 import { METHOD_DOCS } from "./generated-docs.js";
 import pkg from "../package.json" with { type: "json" };
@@ -114,11 +115,13 @@ describe("approved two-tool MCP", () => {
     const r=await client.callTool({name:"execute",arguments:{code:"async function run(client) { return 4; }"}});
     expect(r.isError).toBe(true); expect(text(r)).toContain("No Agent Token");
   });
-  it("guards production before network with only an environment token in a staging build", async () => {
+  it("guards the other environment before network with only an environment token", async () => {
+    // The build's own origin (staging for a -staging.N version, production for
+    // the plain version the release job writes); any other origin is a leak.
     const requests: string[] = [];
     const fetch = vi.fn(async (input: unknown) => {
       const url = String(input); requests.push(url);
-      if (new URL(url).origin === "https://api.relayapp.im") throw new Error("PRODUCTION BLOCKED BEFORE NETWORK");
+      if (new URL(url).origin !== defaultApiURL()) throw new Error("OTHER ENVIRONMENT BLOCKED BEFORE NETWORK");
       return Response.json({ handle: "fixture.dev" });
     });
     vi.stubGlobal("fetch", fetch);
@@ -131,7 +134,7 @@ describe("approved two-tool MCP", () => {
       expect(docs.isError).not.toBe(true); expect(requests).toEqual([]);
       const r = await client.callTool({name:"execute",arguments:{code:"async function run(client) { return await client.contactCard.retrieve(); }"}});
       expect(r.isError).not.toBe(true);
-      expect(requests).toEqual(["https://api.staging.relayapp.im/v1/contact_card"]);
+      expect(requests).toEqual([`${defaultApiURL()}/v1/contact_card`]);
     } finally { vi.unstubAllGlobals(); }
   });
   it("does not expose process, shell, filesystem, arbitrary fetch, or host constructors", async () => {

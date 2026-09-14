@@ -17,13 +17,15 @@ describe("local Agent Token resolver", () => {
     expect(defaultApiURL("0.1.3")).toBe("https://api.relayapp.im");
   });
 
-  it("uses staging with only an environment Agent Token and a fresh home", async () => {
-    const home = await mkdtemp(join(tmpdir(), "relay-mcp-staging-default-"));
+  it("uses the package origin with only an environment Agent Token and a fresh home", async () => {
+    const home = await mkdtemp(join(tmpdir(), "relay-mcp-package-default-"));
     const resolved = await resolveAgentAuth({
       home,
       env: { RELAY_AGENT_TOKEN: "rly_environment_secret" },
     });
-    expect(resolved.apiURL).toBe("https://api.staging.relayapp.im");
+    // The build's own origin: staging for a -staging.N version, production for
+    // a plain one (the release job rewrites the version before it tests).
+    expect(resolved.apiURL).toBe(defaultApiURL());
     expect(resolved.source).toBe("environment");
   });
 
@@ -50,7 +52,7 @@ describe("local Agent Token resolver", () => {
       version: 1, current_profile: "default",
       profiles: { default: { agent_token: "profile-secret" } },
     }));
-    expect((await resolveAgentAuth({ env: { RELAY_CONFIG_PATH: path } })).apiURL).toBe("https://api.staging.relayapp.im");
+    expect((await resolveAgentAuth({ env: { RELAY_CONFIG_PATH: path } })).apiURL).toBe(defaultApiURL());
   });
 
   it("reads the Relay CLI profile format", async () => {
