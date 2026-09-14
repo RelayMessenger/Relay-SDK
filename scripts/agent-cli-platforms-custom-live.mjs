@@ -21,12 +21,12 @@ const config = join(temp,'private-cli-config.json');
 const recipe = join(temp,'recipe.json');writeFileSync(recipe,JSON.stringify({recipe:{image:{}}}),{mode:0o600});
 const runId = '20260908064002697'; // Explicit same-handle reattempt after definitive422 and main-confirmed deployment fix.
 assert.equal(process.env.RELAY_CUSTOM_PREVIOUS_OUTCOME, 'definitive-422-no-identity');
-const handle = `verify_${runId}.dev`;const name = `Verification Custom ${runId}`;
+const localHandle = `verify_${runId}`;const handle = `${localHandle}.dev`;const name = "Verification Custom";
 const manifest = JSON.parse(readFileSync(join(root,'packages/cli/package.json')));assert.equal(manifest.name,'relaymessenger');
 const env={...process.env,RELAY_CONFIG_PATH:config,RELAY_API_URL:api};delete env.RELAY_AGENT_TOKEN;delete env.RELAY_PROFILE;
 let secret;let owned=false;let deletionAttempted=false;
 const report={serverSha,canonicalHash,runId,handle,name,platform:process.platform,node:process.version,sandbox:process.env.RELAY_DAYTONA_SANDBOX_ID,commands:[],createCommandsInvoked:0,privateConfig:config,recipeAccepted:false};
-const redact=x=>String(x).replace(/rly_live_[A-Za-z0-9]{43}/g,'[REDACTED]');
+const redact=x=>String(x).replace(/(?:rel|rly)_live_[A-Za-z0-9]{43}/g,'[REDACTED]');
 const save=()=>writeFileSync(receiptPath,redact(JSON.stringify(report,null,2)));
 function run(command,args,options={}) {
  const result=spawnSync(command,args,{cwd:root,env,encoding:'utf8',timeout:180000,maxBuffer:16*1024*1024,...options});
@@ -47,11 +47,11 @@ try {
  report.tarballs=files.map(file=>({file,sha256:createHash('sha256').update(readFileSync(file)).digest('hex')}));
  run('npm',['install','--ignore-scripts','--no-audit','--no-fund',...files],{cwd:consumer});
  shim=join(consumer,'node_modules/.bin/relaymessenger');
- const args=['agents','create','--api-url',api,'--handle',handle,'--name',name,'--image-url',inputImage,'--image-recipe',recipe,'--token-name',`verification-custom-${runId}`,'--json'];
+ const args=['agents','create','--api-url',api,'--handle',localHandle,'--name',name,'--image-url',inputImage,'--image-recipe',recipe,'--json'];
  report.createCommandsInvoked++;
  const created=JSON.parse(run(shim,args,{cwd:consumer}));
  const stored=JSON.parse(readFileSync(config));secret=stored.profiles[created.profile]?.agent_token;
- assert.ok(typeof secret==='string' && /^rly_live_[A-Za-z0-9]{43}$/.test(secret));owned=true;
+ assert.ok(typeof secret==='string' && /^(?:rel|rly)_live_[A-Za-z0-9]{43}$/.test(secret));owned=true;
  assert.equal(created.handle,handle);assert.equal(created.display_name,name);assert.equal(created.token,'stored');assert.equal(created.agent,undefined);assert.equal(created.share_url,`https://go.staging.relayapp.im/@${handle}`);
  const permanent=new URL(created.image_url);assert.equal(permanent.href,inputImage,'Exact trusted immutable bundled asset must be retained without remote ingestion');assert.equal(permanent.search,'');assert.equal(permanent.username,'');assert.equal(permanent.password,'');
  report.created={profile:created.profile,handle,name,shareUrl:created.share_url,imageUrl:permanent.href};report.recipeAccepted=true;save();

@@ -43,6 +43,7 @@ const agent: ChatHandle = {
   image_url: null,
   about: null,
   verified: false,
+  is_contact: true,
 };
 const senderA: ChatHandle = {
   id: USER_A,
@@ -53,6 +54,7 @@ const senderA: ChatHandle = {
   image_url: null,
   about: null,
   verified: false,
+  is_contact: true,
 };
 const senderB: ChatHandle = {
   ...senderA,

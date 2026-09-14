@@ -21332,8 +21332,6 @@ var RELAY_WEBHOOK_EVENT_TYPES = [
   "message.received",
   "message.read",
   "message.delivered",
-  "message.edited",
-  "message.unsent",
   "message.failed",
   "reaction.added",
   "reaction.removed",
@@ -21879,10 +21877,7 @@ var Transport = class {
       const timeoutSignal = AbortSignal.timeout(timeout);
       const signal = request.options?.signal ? AbortSignal.any([request.options.signal, timeoutSignal]) : timeoutSignal;
       const headers = new Headers(request.options?.headers);
-      if (this.#apiKey)
-        headers.set("authorization", `Bearer ${this.#apiKey}`);
-      else
-        headers.delete("authorization");
+      headers.set("authorization", `Bearer ${this.#apiKey}`);
       headers.set("accept", "application/json");
       if (request.body !== void 0)
         headers.set("content-type", "application/json");
@@ -22127,31 +22122,6 @@ var Messages = class {
       options
     });
   }
-  /**
-   * Edits the text of one part of a Message this Agent sent. Only text parts
-   * can be edited, five times at most, and only within 15 minutes of the
-   * original send.
-   */
-  edit(messageID, body, options) {
-    return this.transport.request({
-      method: "PATCH",
-      path: `/v1/messages/${pathID(messageID)}`,
-      body,
-      options
-    });
-  }
-  /**
-   * Unsends a Message this Agent sent, for up to 2 minutes after sending it.
-   * The Message keeps its place in both transcripts and carries no parts from
-   * here on.
-   */
-  unsend(messageID, options) {
-    return this.transport.request({
-      method: "DELETE",
-      path: `/v1/messages/${pathID(messageID)}`,
-      options
-    });
-  }
   addReaction(messageID, body, options) {
     return this.transport.request({
       method: "POST",
@@ -22289,20 +22259,6 @@ var ContactCard = class {
     });
   }
 };
-var ContactRequests = class {
-  transport;
-  constructor(transport2) {
-    this.transport = transport2;
-  }
-  create({ handle }, options) {
-    return this.transport.request({
-      method: "POST",
-      path: "/v1/contact_requests",
-      body: { handle },
-      options
-    });
-  }
-};
 var BlockedHandles = class {
   transport;
   constructor(transport2) {
@@ -22366,17 +22322,6 @@ var Agents = class {
   }
 };
 var Relay = class {
-  /** Bootstrap a new identity. The one-time secret is never retried/replayed. */
-  static createAgent(body = {}, options = {}) {
-    const { apiKey: _ignored, ...transportOptions } = options;
-    return new Transport(transportOptions).request({
-      method: "POST",
-      path: "/v1/agents",
-      body,
-      options,
-      expectedStatus: 201
-    });
-  }
   agents;
   baseURL;
   chats;
@@ -22385,7 +22330,6 @@ var Relay = class {
   webhookEvents;
   webhookSubscriptions;
   contactCard;
-  contactRequests;
   blockedHandles;
   websocket;
   webhooks;
@@ -22401,7 +22345,6 @@ var Relay = class {
     this.webhookEvents = new WebhookEvents(transport2);
     this.webhookSubscriptions = new WebhookSubscriptions(transport2);
     this.contactCard = new ContactCard(transport2);
-    this.contactRequests = new ContactRequests(transport2);
     this.blockedHandles = new BlockedHandles(transport2);
     this.websocket = new WebSocket2(transport2);
     this.webhooks = new Webhooks(options.webhookSecret ?? null);
@@ -22514,6 +22457,25 @@ function positiveInteger(value, fallback, name) {
   if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new Error(`${name} must be a positive integer`);
   return parsed;
 }
+function linkedAgent(cwd) {
+  let dir = resolve(cwd);
+  while (true) {
+    const path = join(dir, ".relay", "agent.json");
+    try {
+      const value = JSON.parse(readFileSync(path, "utf8"));
+      if (typeof value.handle === "string" && typeof value.apiUrl === "string") return { handle: value.handle, apiUrl: value.apiUrl, path };
+    } catch (error2) {
+      if (error2.code !== "ENOENT") throw new Error(`Relay folder link is not readable: ${path}`);
+    }
+    const parent = resolve(dir, "..");
+    if (parent === dir) return void 0;
+    dir = parent;
+  }
+}
+function profilePath(env) {
+  if (env.RELAY_CONFIG_PATH) return resolve(env.RELAY_CONFIG_PATH);
+  return resolve(env.RELAY_CONFIG_DIR ?? env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "relay", "config.json");
+}
 function loadConfig(env = process.env) {
   const channelDir = defaultChannelDir(env);
   mkdirSync(channelDir, { recursive: true, mode: 448 });
@@ -22522,7 +22484,22 @@ function loadConfig(env = process.env) {
   } catch {
   }
   const file = loadFileEnvironment(channelDir);
-  const value = (name) => actualValue(env[name]) ?? actualValue(file[name]);
+  const cwd = resolve(env.PWD ?? process.cwd());
+  const link = linkedAgent(cwd);
+  let linkedProfile;
+  if (link) {
+    try {
+      linkedProfile = JSON.parse(readFileSync(profilePath(env), "utf8")).profiles?.[link.handle];
+    } catch (error2) {
+      if (error2.code !== "ENOENT") throw error2;
+    }
+    if (!linkedProfile?.agent_token) throw new Error(`Relay profile ${link.handle} is missing; run npx relaymessenger connect`);
+  }
+  const value = (name) => {
+    if (link && name === "RELAY_AGENT_TOKEN") return actualValue(linkedProfile?.agent_token);
+    if (link && name === "RELAY_BASE_URL") return actualValue(link.apiUrl);
+    return actualValue(env[name]) ?? actualValue(file[name]);
+  };
   const agentToken = value("RELAY_AGENT_TOKEN") ?? "";
   if (!agentToken) throw new Error(`RELAY_AGENT_TOKEN is not configured (see ${join(channelDir, ".env")})`);
   if (agentToken.length > 4096 || /[\r\n\u0000]/u.test(agentToken)) {
@@ -23873,7 +23850,7 @@ var RelayStateStore = class {
 };
 
 // server.ts
-var VERSION = true ? "0.3.3-staging.1" : createRequire(import.meta.url)("./package.json").version;
+var VERSION = true ? "0.3.4-staging.10" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);

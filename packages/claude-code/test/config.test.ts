@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -37,6 +37,16 @@ describe("Relay channel configuration", () => {
     expect(senderIsAllowed(allowed, { id: uuid, handle: "@Owner", kind: "unknown" })).toBe(false);
     expect(senderIsAllowed(allowed, { id: "other", handle: "@owner", kind: "agent" })).toBe(false);
     expect(senderIsAllowed(allowed, { id: "other", handle: "@owner", kind: "user" })).toBe(false);
+  });
+
+  it("resolves a linked folder profile and walks parents", () => {
+    const root = mkdtempSync(join(tmpdir(), "relay-link-")); cleanups.push(root);
+    const cwd = join(root, "child"); mkdirSync(join(root, ".relay"), { recursive: true }); mkdirSync(cwd);
+    writeFileSync(join(root, ".relay", "agent.json"), JSON.stringify({ handle: "@wren.dev", apiUrl: "https://linked.example" }));
+    const configDir = join(root, "config"); mkdirSync(join(configDir, "relay"), { recursive: true });
+    writeFileSync(join(configDir, "relay", "config.json"), JSON.stringify({ version: 1, current_profile: "default", profiles: { default: {}, "@wren.dev": { agent_token: "rly_linked_abcdefghijklmnop", api_url: "https://linked.example" } } }));
+    const config = loadConfig({ PWD: cwd, RELAY_CONFIG_DIR: configDir, RELAY_CHANNEL_DIR: join(root, "channel"), RELAY_AGENT_TOKEN: "rly_global_abcdefghijklmnop", RELAY_ALLOWED_SENDERS: "@owner", RELAY_NOTIFICATION_RETRY_MS: "30000" });
+    expect(config.agentToken).toBe("rly_linked_abcdefghijklmnop"); expect(config.baseURL).toBe("https://linked.example");
   });
 
   it("loads owner-only .env fallback while real environment wins", () => {

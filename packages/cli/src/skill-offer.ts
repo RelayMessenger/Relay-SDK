@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { stripVTControlCharacters } from "node:util";
+import { spawnCommand } from "./spawn-command.js";
 import { access, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
@@ -173,22 +174,53 @@ export async function resolveNpx(env: NodeJS.ProcessEnv, platform: NodeJS.Platfo
   }
   throw new Error("Relay could not find npx on this computer. Install Node.js, which includes npm and npx, then run this command again.");
 }
-export async function installRelaySkill(cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
+/** `--global --yes --agent <name>…`: the same installer, told where to go, for
+ * `--install-skills`, where nobody is there to answer its questions. */
+export const relaySkillGlobalArgs = (
+  targets: readonly string[],
+  version?: string,
+): readonly string[] => [
+  ...relaySkillInstallArgs(version ?? packageVersion()),
+  "--global", "--yes",
+  ...targets.flatMap((target) => ["--agent", target]),
+];
+
+/**
+ * `headless`: nobody is watching a terminal, or stdout is spoken for by
+ * `--json`. The vendored installer then runs with NO_COLOR=1 (no-color.org:
+ * "when present and not an empty string ... prevents the addition of ANSI
+ * color") and everything it prints goes to stderr, so a pipe never sees its
+ * banner, its 15 escapes or its spinner (ledger rows P12, P15, P17; captures/
+ * relay/is5.out and is.out). Its own non-interactive flags come in `args`.
+ */
+export async function installRelaySkill(cwd: string, env: NodeJS.ProcessEnv, args: readonly string[] = RELAY_SKILL_INSTALL_ARGS, headless = false): Promise<void> {
   const executable = await resolveNpx(env);
-  const windows = process.platform === "win32";
-  const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(windows ? quote(executable) : executable, windows ? RELAY_SKILL_INSTALL_ARGS.map(quote) : [...RELAY_SKILL_INSTALL_ARGS], {
-      cwd, env: installerEnvironment(env), stdio: "inherit", shell: windows, windowsHide: true,
+    // Windows runs the `npx.cmd` shim npm installs through its shell (spawn-command.ts).
+    const child = spawnCommand(executable, args, {
+      cwd, env: headless ? { ...installerEnvironment(env), NO_COLOR: "1" } : installerEnvironment(env),
+      stdio: headless ? ["ignore", "pipe", "pipe"] : "inherit",
     });
+    // skills@1.5.25 emits literal ANSI even with NO_COLOR=1 (measured 2026-09-10).
+    // Decision row 9 requires plain diagnostics, so render its headless output once.
+    const chunks: Buffer[] = [];
+    if (headless) {
+      child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+      child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
+    }
     let finished = false;
     const interrupted = () => { child.kill("SIGINT"); };
     process.on("SIGINT", interrupted);
     const finish = (ok: boolean) => {
       if (finished) return; finished = true; process.removeListener("SIGINT", interrupted);
+      if (headless) process.stderr.write(plainInstallerOutput(Buffer.concat(chunks).toString("utf8")));
       if (ok) resolve(); else reject(new Error("The Relay skill was not installed. Your agent and your saved token are unchanged."));
     };
     child.once("error", () => finish(false));
     child.once("close", (code) => finish(code === 0));
   });
 }
+
+export const plainInstallerOutput = (text: string): string => stripVTControlCharacters(text)
+  .replace(/[◒◐◓◑][^\r\n◇●]*/gu, "")
+  .replaceAll("\r", "");

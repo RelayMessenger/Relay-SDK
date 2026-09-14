@@ -23,6 +23,7 @@ const sender: ChatHandle = {
   image_url: null,
   about: null,
   verified: false,
+  is_contact: true,
 };
 
 const agent: ChatHandle = {
@@ -35,6 +36,7 @@ const agent: ChatHandle = {
   image_url: null,
   about: null,
   verified: false,
+  is_contact: true,
 };
 
 function event(

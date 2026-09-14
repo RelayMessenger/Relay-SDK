@@ -81,6 +81,10 @@ assert.equal(
   run(bin, ["--version"], { cwd: consumer }).stdout.trim(),
   sourceManifest.version,
 );
+for (const relativePath of ["README.md", "dist/generated-docs.js", "dist/search-docs.js"]) {
+  const text = await readFile(join(consumer, "node_modules", "@relaymessenger", "mcp", relativePath), "utf8");
+  assert.doesNotMatch(text, /Relay\.createAgent/u, `removed signup docs in packed ${relativePath}`);
+}
 
 const home = await mkdtemp(join(tmpdir(), "relay-mcp-installed-home-"));
 const transport = new StdioClientTransport({
@@ -89,6 +93,8 @@ const transport = new StdioClientTransport({
     HOME: home,
     PATH: process.env.PATH ?? "",
     XDG_CONFIG_HOME: join(home, ".config"),
+    RELAY_API_URL: "http://127.0.0.1:1",
+    RELAY_AGENT_TOKEN: "mcp-pack-fixture-not-a-real-token",
   },
   stderr: "pipe",
 });
@@ -99,7 +105,16 @@ const client = new Client(
 try {
   await client.connect(transport, { timeout: 10_000 });
   assert.equal(client.getProtocolEra(), "modern");
-  assert.equal((await client.listTools()).tools.length, 16);
+  assert.deepEqual((await client.listTools()).tools.map(tool => tool.name).sort(), ["execute", "search_docs"]);
+  const docs = await client.callTool({ name: "search_docs", arguments: { query: "contact card", language: "typescript" } });
+  assert.notEqual(docs.isError, true);
+  assert.match(JSON.stringify(docs), /client\.contactCard\.retrieve/);
+  const signup = await client.callTool({ name: "search_docs", arguments: { query: "anonymous agent signup", language: "typescript", detail: "verbose" } });
+  assert.notEqual(signup.isError, true);
+  assert.doesNotMatch(JSON.stringify(signup.structuredContent), /Relay\.createAgent|POST\s+\/v1\/agents(?:["\s]|$)/u);
+  const executed = await client.callTool({ name: "execute", arguments: { code: "async function run(client) { return 6 * 7; }" } });
+  assert.notEqual(executed.isError, true);
+  assert.equal(executed.structuredContent.result, 42);
 } finally {
   await client.close().catch(() => {});
 }

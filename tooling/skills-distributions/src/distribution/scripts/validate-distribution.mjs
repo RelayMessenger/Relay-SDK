@@ -96,10 +96,10 @@ for (const [path, digest] of Object.entries(provenance.generated_files)) {
 
 assert.deepEqual(lock, provenance.relay_v1_lock);
 assert.equal(lock.sdk.version, "0.3.1-staging.1");
-assert.equal(lock.api.commit, "1a2245dd775f781b57e0d1f6f3146ebd384c90c3");
+assert.equal(lock.api.commit, "d4dc62372194bf929801229740346cdacfe2d5c9");
 assert.equal(
   lock.api.openapi_sha256,
-  "5458497fe8db4ee7dfe6bef67f2803137575d3ea4d835748290a5c9f8d906791",
+  "81d23529476ae77b3b7f7dfc931d2e0e421d3c91e20c59136e2deef9123f722e",
 );
 assert.equal(lock.docs.commit, "79e5abe98860840a12fc46ae70ad3a42131283aa");
 
@@ -107,7 +107,11 @@ const skillPath = join(root, skillRoot, "SKILL.md");
 assert.ok(existsSync(skillPath));
 const skill = readFileSync(skillPath, "utf8");
 assert.match(skill, /name: relay/);
-assert.match(skill, /locked Relay v1 contract/);
+assert.equal(
+  sha256(join(skillRoot, "SKILL.md")),
+  provenance.source_files["skills/relay/SKILL.md"],
+  "generated skill must match the canonical source bytes",
+);
 
 const references = [
   ...skill.matchAll(/\]\((references\/[^)]+)\)/g),
@@ -158,10 +162,14 @@ for (const directory of ["channels", "commands", "hooks", "rules", "runtime"]) {
   assert.ok(!existsSync(join(root, directory)), `runtime content found: ${directory}`);
 }
 
-const examplePackage = json("examples/send-message/package.json");
+// The example has its own canonical pin; the lock records a separately
+// verified SDK source version. Preserve both rather than rewriting either.
 assert.equal(
-  examplePackage.dependencies["@relaymessenger/sdk"],
-  lock.sdk.version,
+  sha256("examples/send-message/package.json"),
+  provenance.source_files[
+    "tooling/skills-distributions/src/distribution/examples/send-message/package.json"
+  ],
+  "generated example manifest must match the canonical source bytes",
 );
 
 console.log(`validated ${host} generated content and locked Relay v1 markers`);

@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { writeFileSync, renameSync } from 'node:fs';
 const [readyFile, logFile] = process.argv.slice(2);
 if (!readyFile || !logFile) throw Error('Private fixture ready/log paths are required');
-const token = `rly_live_${'V'.repeat(43)}`; // Deliberately synthetic, accepted only by this process.
+const token = `rel_token_${'V'.repeat(43)}`; // Deliberately synthetic, accepted only by this process.
 const requests = [];
 const server = createServer((request, response) => {
   const path = new URL(request.url, 'http://127.0.0.1').pathname;

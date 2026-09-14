@@ -43,6 +43,7 @@ const inboundEvent = {
       image_url: null,
       about: null,
       verified: false,
+      is_contact: true,
     },
     parts: [{ type: "text", value: "hello from Relay", reactions: null }],
     sent_at: new Date().toISOString(),

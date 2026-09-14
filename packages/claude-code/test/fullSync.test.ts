@@ -25,6 +25,7 @@ const sender = {
   image_url: null,
   about: null,
   verified: false,
+  is_contact: true,
 };
 const agent = {
   id: AGENT_ID,
@@ -36,6 +37,7 @@ const agent = {
   image_url: null,
   about: null,
   verified: false,
+  is_contact: true,
 };
 const chat: Chat = {
   id: CHAT_ID,

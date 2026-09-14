@@ -1377,6 +1377,40 @@ describe("direct and group routing", () => {
     });
   });
 
+  it.each([
+    { mentions: [{ id: AGENT_HANDLE.id, handle: AGENT_HANDLE.handle, is_me: true, range: [0, 5] as [number, number] }], expected: 1 },
+    { mentions: [{ id: "other", handle: "other", is_me: false, range: [0, 5] as [number, number] }], expected: 0 },
+    { mentions: null, expected: 0 },
+  ])("routes structured mentions by recipient identity: %j", async ({ mentions, expected }) => {
+    const { chat, direct, mention } = routingHarness();
+    const message = webhookMessage({
+      chat: {
+        id: IDS.chat,
+        is_group: true,
+        owner_handle: AGENT_HANDLE,
+      },
+      parts: [
+        {
+          mentions,
+          mention: AGENT_HANDLE.handle,
+          mention_range: [0, AGENT_HANDLE.handle.length],
+          type: "text",
+          value: "Relay Agent please help",
+        },
+      ],
+    });
+    await chat.webhooks.relay(
+      await signedRequest(
+        envelope(
+          "message.received",
+          message as unknown as Record<string, unknown>,
+        ),
+      ),
+    );
+    expect(direct).not.toHaveBeenCalled();
+    expect(mention).toHaveBeenCalledTimes(expected);
+  });
+
   it("does not invoke on an unmentioned group message", async () => {
     const { chat, direct, mention } = routingHarness();
     const message = webhookMessage({

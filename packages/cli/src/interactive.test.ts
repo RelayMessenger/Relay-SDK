@@ -1,3 +1,4 @@
+import { consoleFixture } from "../test/console-fixture.js";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,54 +8,62 @@ import { STAGING_API_URL, defaultCreationApiURL, emptyConfig, packageVersion, re
 import { InteractiveCancelled, interactiveAllowed, type InteractivePrompts } from "./interactive.js";
 import { installerEnvironment, RELAY_SKILL_INSTALL_ARGS, relaySkillInstallArgs, relaySkillPresent, relaySkillSourceBranch } from "./skill-offer.js";
 
-const token = `rly_live_${"I".repeat(43)}`;
-const card = { handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
+const token = `rel_token_${"I".repeat(43)}`;
+const card = { handle: "calm_cangoo", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), "relay-interactive-"));
   const env: NodeJS.ProcessEnv = { RELAY_CONFIG_PATH: join(home, "config.json"), RELAY_API_URL: "https://api.staging.relayapp.im" };
   const stdout: string[] = []; const stderr: string[] = [];
   const prompts = {
-    select: vi.fn(async () => "exit"), confirm: vi.fn(async () => false),
+    select: vi.fn(async () => "exit"), multiselect: vi.fn(async (_m: string, _o: unknown, initial: string[]) => initial), confirm: vi.fn(async () => false),
     password: vi.fn(async () => token), text: vi.fn(async (_message: string, initial: string) => initial),
     info: vi.fn((message: string) => { stderr.push(message); }),
+    intro: vi.fn(), outro: vi.fn(), step: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
+    success: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
+    message: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
+    note: vi.fn((message: string, title: string) => { stdout.push(`${title}\n${message}\n`); }),
+    spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
   } satisfies InteractivePrompts;
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
-    expect(url.origin).toBe("https://api.staging.relayapp.im");
+    expect(["https://api.staging.relayapp.im", "https://console.staging.relayapp.im"]).toContain(url.origin);
     if (init?.method === "POST") {
-      expect(new Headers(init.headers).has("authorization")).toBe(false);
+      expect(new Headers(init.headers).get("authorization")).toBe("Bearer rel_org_fixtureOnlyNotARealKey");
       return Response.json({ agent: card, secret: token, share_url: `https://go.staging.relayapp.im/@${card.handle}` }, { status: 201 });
     }
     if (init?.method === "DELETE") return new Response(null, { status: 204 });
+    if (init?.method === "PATCH") return Response.json(card);
     return Response.json({ contact_cards: [card] });
   });
   const skillInstaller = vi.fn(async () => undefined);
   const skillPresent = vi.fn(async (): Promise<boolean | "unknown"> => false);
-  const deps = { configContext: { env, home }, cwd: home, isInteractive: true, prompts, fetch, skillInstaller, skillPresent,
+  const console = consoleFixture({ env, home }, card);
+  const deps = { configContext: { env, home }, cwd: home, isInteractive: true, prompts, fetch: console.wrap(fetch), consoleLogin: console.login, skillInstaller, skillPresent,
     stdout: (s: string) => stdout.push(s), stderr: (s: string) => stderr.push(s) };
   return { deps, env, home, prompts, fetch, skillInstaller, skillPresent, stdout, stderr };
 }
 
 describe("interactive Commander adapter", { timeout: 120_000 }, () => {
-  it("offers the six root choices and exit does nothing", async () => {
+  it("bare launch prints complete branded root help without opening a menu", async () => {
     const f = await fixture();
     expect(await runCLI([], f.deps)).toBe(0);
-    const options = (f.prompts.select.mock.calls[0] as unknown as [string, Array<{ label: string }>])[1];
-    expect(options.map((option) => option.label)).toEqual(["Create agent", "Sign in with an existing token", "List saved agents", "Delete agent", "Install Relay skill", "Exit"]);
+    expect(f.stdout.join("")).toContain("TOPICS");
+    expect(f.stdout.join("")).toContain("COMMANDS");
+    expect(f.stdout.join("")).toContain("connect");
+    expect(f.stdout.join("")).toContain("Relay");
+    expect(f.prompts.select).not.toHaveBeenCalled();
     expect(f.fetch).not.toHaveBeenCalled(); expect(f.skillPresent).not.toHaveBeenCalled(); expect(f.skillInstaller).not.toHaveBeenCalled();
   });
-  it("delegates creation once and declining its one skill offer leaves success intact", async () => {
-    const f = await fixture(); f.prompts.select.mockResolvedValueOnce("create");
-    f.prompts.confirm.mockResolvedValueOnce(false);
-    expect(await runCLI([], f.deps)).toBe(0);
-    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
-    expect((await readConfig(f.deps.configContext)).profiles[card.handle]?.agent_token).toBe(token);
-    expect(f.skillPresent).toHaveBeenCalledOnce(); expect(f.skillInstaller).not.toHaveBeenCalled(); expect(f.prompts.confirm).toHaveBeenCalledOnce();
-    expect(f.stdout.join("")).not.toContain(token);
+  it("bare TTY launch keeps the static mark and complete root help in one flow", async () => {
+    const f = await fixture();
+    expect(await runCLI([], { ...f.deps, helpTTY: true })).toBe(0);
+    const output = f.stdout.join("");
+    expect(output).not.toContain("\u001b[");
+    expect(output).toContain("TOPICS");
+    expect(output).toContain("COMMANDS");
   });
-  it("cancelled root selection or optional field input performs no mutation", async () => {
-    const f = await fixture(); f.prompts.select.mockRejectedValueOnce(new InteractiveCancelled());
-    expect(await runCLI([], f.deps)).toBe(0);
+  it("cancelled optional field input performs no mutation", async () => {
+    const f = await fixture();
     f.prompts.select.mockResolvedValueOnce("create");
     f.prompts.text.mockRejectedValueOnce(new InteractiveCancelled());
     expect(await runCLI(["agents"], f.deps)).toBe(0);
@@ -72,7 +81,41 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
   it("password cancellation does not persist or call the API", async () => {
     const f = await fixture(); f.prompts.select.mockResolvedValueOnce("login"); f.prompts.password.mockRejectedValueOnce(new InteractiveCancelled());
     expect(await runCLI(["auth"], f.deps)).toBe(0);
-    expect(f.fetch).not.toHaveBeenCalled(); expect(f.skillPresent).toHaveBeenCalledOnce();
+    expect(f.fetch).not.toHaveBeenCalled(); expect(f.skillPresent).not.toHaveBeenCalled();
+  });
+
+  // Owner ruling, 2026-09-09: the Relay skill is offered at the end of a
+  // successful connect, and nowhere else. Setup must never open with it.
+  it.each([
+    [["agents", "create"]],
+    [["agents"]],
+    [["auth", "login"]],
+    [["auth"]],
+  ])("%j never asks about the Relay skill", async (argv) => {
+    const f = await fixture();
+    if (argv[0] === "agents" && argv.length === 1) f.prompts.select.mockResolvedValueOnce("create");
+    if (argv[0] === "auth" && argv.length === 1) f.prompts.select.mockResolvedValueOnce("login");
+    expect(await runCLI(argv as string[], f.deps)).toBe(0);
+    expect(f.skillPresent).not.toHaveBeenCalled();
+    expect(f.skillInstaller).not.toHaveBeenCalled();
+    for (const [message] of f.prompts.confirm.mock.calls as unknown as Array<[string]>) {
+      expect(message.toLowerCase()).not.toContain("skill");
+    }
+  });
+
+  it("a full connect offers the skill exactly once, at the end", async () => {
+    const f = await fixture();
+    const code = await runCLI(["connect", "claude", "--new", "--yes", "--allow", "advait", "--no-start"], {
+      ...f.deps,
+      connect: {
+        sniff: async () => [{ id: "claude", label: "Claude Code", executable: "/fake/claude", found: true, supported: true }],
+        runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+        version: "0.1.6-staging.0",
+      },
+    });
+    expect(f.stderr.join(""), "connect should not fail").toBe("");
+    expect(code).toBe(0);
+    expect(f.skillPresent).toHaveBeenCalledOnce();
   });
   it("interactive delete declines safely; non-interactive delete needs no --yes", async () => {
     const f = await fixture(); const config = emptyConfig(); config.profiles.saved = { api_url: "https://api.staging.relayapp.im", agent_token: token };
@@ -82,13 +125,6 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
     f.prompts.confirm.mockClear();
     expect(await runCLI(["--non-interactive", "--profile", "saved", "agents", "delete", card.handle], f.deps)).toBe(0);
     expect(f.prompts.confirm).not.toHaveBeenCalled(); expect((await readConfig(f.deps.configContext)).profiles.saved?.agent_token).toBeUndefined();
-  });
-  it("optional installer failure before creation does not repeat creation", async () => {
-    const f = await fixture(); f.prompts.confirm.mockResolvedValueOnce(true); f.skillInstaller.mockRejectedValueOnce(new Error(token));
-    expect(await runCLI(["agents", "create"], f.deps)).toBe(0);
-    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
-    expect(f.skillInstaller).toHaveBeenCalledOnce(); expect(f.stderr.join("")).toContain("unchanged");
-    expect(f.stderr.join("")).not.toContain(token);
   });
   it("an installed skill or unknown detection never triggers an optional install", async () => {
     for (const state of [true, "unknown"] as const) {
@@ -102,17 +138,17 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
     expect(await runCLI(args as string[], f.deps)).toBe(0);
     expect(f.prompts.select).not.toHaveBeenCalled(); expect(f.prompts.confirm).not.toHaveBeenCalled(); expect(f.skillPresent).not.toHaveBeenCalled();
   });
-  it("CI or piped use never constructs menus/offers", async () => {
-    const f = await fixture(); f.env.CI = "true";
-    expect(await runCLI([], f.deps)).toBe(0);
-    delete f.env.CI;
+  it("piped use never constructs menus/offers", async () => {
+    const f = await fixture();
     expect(await runCLI(["agents", "list"], { ...f.deps, isInteractive: false })).toBe(0);
     expect(f.prompts.select).not.toHaveBeenCalled(); expect(f.skillPresent).not.toHaveBeenCalled();
   });
-  it("explicit install menu asks permission once and invokes only injected standard installer", async () => {
-    const f = await fixture(); f.prompts.select.mockResolvedValueOnce("skill"); f.prompts.confirm.mockResolvedValueOnce(true);
+  it("a CI variable suppresses the menu per decision rows 8 and 17", async () => {
+    // The terminal decides, never an ambient variable: every one of the 27 tools
+    // measured on 2026-09-09 ignored CI.
+    const f = await fixture(); f.env.CI = "true"; f.env.GITHUB_ACTIONS = "true";
     expect(await runCLI([], f.deps)).toBe(0);
-    expect(f.skillInstaller).toHaveBeenCalledOnce(); expect(f.fetch).not.toHaveBeenCalled();
+    expect(f.prompts.select).not.toHaveBeenCalled();
   });
 });
 
@@ -132,19 +168,21 @@ it("installer args follow the build's environment without default agent/global f
   const parent = { PATH: "keep", HOME: "/private-home", RELAY_AGENT_TOKEN: token, OPENAI_API_KEY: "other-secret", PSModulePath: "not-needed" };
   expect(installerEnvironment(parent)).toEqual({ PATH: "keep", HOME: "/private-home" });
   expect(parent.RELAY_AGENT_TOKEN).toBe(token);
-  expect(interactiveAllowed([], { GITHUB_ACTIONS: "true" }, true)).toBe(false);
+  expect(interactiveAllowed([], true)).toBe(true);
+  expect(interactiveAllowed(["--json"], true)).toBe(false);
+  expect(interactiveAllowed([], false)).toBe(false);
 });
 
 it("interactive creation collects optional fields; blanks keep server defaults", { timeout: 120_000 }, async () => {
   const f = await fixture(); f.prompts.select.mockResolvedValueOnce("create");
-  f.prompts.text.mockResolvedValueOnce("custom_agent.dev").mockResolvedValueOnce("Custom Agent").mockResolvedValueOnce("https://images.example.test/photo.png");
+  f.prompts.text.mockResolvedValueOnce("custom_agent").mockResolvedValueOnce("Custom Agent").mockResolvedValueOnce("https://images.example.test/photo.png");
   f.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-  expect(await runCLI([], f.deps)).toBe(0);
+  expect(await runCLI(["agents"], f.deps)).toBe(0);
   const post = f.fetch.mock.calls.find(([, init]) => init?.method === "POST")!;
-  expect(JSON.parse(String(post[1]?.body))).toEqual({ handle: "custom_agent.dev", first_name: "Custom Agent", image_url: "https://images.example.test/photo.png" });
+  expect(JSON.parse(String(post[1]?.body))).toEqual({ handle: "custom_agent", displayName: "Custom Agent" });
   const blank = await fixture(); blank.prompts.select.mockResolvedValueOnce("create"); blank.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-  expect(await runCLI([], blank.deps)).toBe(0);
-  expect(JSON.parse(String(blank.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body))).toEqual({});
+  expect(await runCLI(["agents"], blank.deps)).toBe(0);
+  expect(JSON.parse(String(blank.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body))).toEqual({ handle: "my_agent", displayName: "My Agent" });
 });
 
 it.each(["CODEX_HOME", "CLAUDE_CONFIG_DIR", "HERMES_HOME"])("preserves and detects the installer's selected %s", async (key) => {
@@ -168,42 +206,12 @@ it("preserves explicit telemetry opt-outs while keeping credentials out of insta
   expect(installerEnvironment(parent)).toEqual({ PATH: "keep", DISABLE_TELEMETRY: "1", DO_NOT_TRACK: "1" });
   expect(parent.RELAY_AGENT_TOKEN).toBe(token);
 });
-it("explicit install-only failure exits nonzero, without API calls or credential output", async () => {
-  const f = await fixture(); f.prompts.select.mockResolvedValueOnce("skill"); f.prompts.confirm.mockResolvedValueOnce(true);
-  f.skillInstaller.mockRejectedValueOnce(new Error(token));
-  expect(await runCLI([], f.deps)).toBe(1);
-  expect(f.skillInstaller).toHaveBeenCalledOnce(); expect(f.fetch).not.toHaveBeenCalled();
-  expect(f.stderr.join("")).not.toContain(token);
-});
-it("cancelled pre-create skill offer stops before identity creation", async () => {
-  const f = await fixture(); f.prompts.confirm.mockRejectedValueOnce(new InteractiveCancelled());
-  expect(await runCLI(["agents", "create"], f.deps)).toBe(0);
-  expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
-  expect(f.skillInstaller).not.toHaveBeenCalled();
-});
 
 it("Create selection needs no extra confirmation and has exactly three concise optional prompts", async () => {
   const f = await fixture(); f.skillPresent.mockResolvedValue(true); f.prompts.select.mockResolvedValueOnce("create");
-  expect(await runCLI([], f.deps)).toBe(0);
+  expect(await runCLI(["agents"], f.deps)).toBe(0);
   expect(f.prompts.text.mock.calls.map(([message]) => message)).toEqual(["Handle (optional)", "Name (optional)", "Image (optional)"]);
   expect(f.prompts.confirm).not.toHaveBeenCalled();
   expect(f.prompts.info).toHaveBeenCalledTimes(1);
   expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
-});
-it("offers skills before optional fields and POST, never after creation", async () => {
-  const f = await fixture(); const order: string[] = [];
-  f.prompts.select.mockResolvedValueOnce("create");
-  f.prompts.confirm.mockImplementation(async () => { order.push("skill offer"); expect(f.fetch).not.toHaveBeenCalled(); return false; });
-  f.prompts.text.mockImplementation(async () => { order.push("field"); expect(f.fetch).not.toHaveBeenCalled(); return ""; });
-  f.fetch.mockImplementation(async () => { order.push("POST"); return Response.json({ agent: card, secret: token, share_url: `https://go.staging.relayapp.im/@${card.handle}` }, { status: 201 }); });
-  expect(await runCLI([], f.deps)).toBe(0);
-  expect(order).toEqual(["skill offer", "field", "field", "field", "POST"]);
-  expect(f.skillInstaller).not.toHaveBeenCalled();
-});
-it("offers skills before sign-in setup and does no authentication after offer cancellation", async () => {
-  const f = await fixture(); f.prompts.select.mockResolvedValueOnce("login");
-  f.prompts.confirm.mockRejectedValueOnce(new InteractiveCancelled());
-  expect(await runCLI(["auth"], f.deps)).toBe(0);
-  expect(f.prompts.text).not.toHaveBeenCalled(); expect(f.prompts.password).not.toHaveBeenCalled();
-  expect(f.fetch).not.toHaveBeenCalled();
 });

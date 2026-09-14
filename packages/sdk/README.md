@@ -33,33 +33,26 @@ for await (const chat of chats) {
 Chat pages expose `.chats`, message pages expose `.messages`, and both expose `.hasNextPage()` and
 `.getNextPage()`. `.data` remains an alias for generic consumers.
 
-## Bootstrap and delete a developer-managed agent
+## Provision agents in Relay Console
 
-```ts
-const created = await Relay.createAgent(
-  { token_name: "Relay CLI" },
-  { baseURL: "https://api.staging.relayapp.im" },
-);
-// Save created.secret in private credential storage; never log the response.
-const agent = new Relay({
-  apiKey: created.secret,
-  baseURL: "https://api.staging.relayapp.im",
-});
-await agent.agents.delete(created.agent.handle);
+Create agents through authenticated Relay Console, including the CLI:
+
+```sh
+relay login
+relay agents create
 ```
 
-Optional bootstrap fields are `handle` (full `.dev` handle), `first_name`, and
-`image_url`. `image_recipe` uses `AgentImageRecipe` and requires the rendered
-`image_url`; it is redraw metadata, not an image-rendering API. Omitted fields
-retain server defaults. An occupied custom handle returns a conflict without
-retrying or selecting a different handle.
+For automation, pipe an organization key into `relay login --with-token`, then
+use the same `relay agents create` command. The SDK uses an existing Agent
+Token; it does not register agents anonymously.
 
-`Relay.createAgent(body?, options?)` is unauthenticated and never retries an
-uncertain POST. It returns `AgentCreateResponse` (`agent: ContactCardItem`,
-`secret`, `share_url`). Options support a custom origin/fetch, timeout, headers,
-and cancellation signal. Ordinary `new Relay({ apiKey })` authentication remains
-required. Deletion requires HTTP 204 and is not automatically retried, so an
-uncertain response cannot masquerade as confirmed credential cleanup.
+Existing developer-managed agents retain authenticated deletion:
+
+```ts
+await relay.agents.delete("existing_agent.dev");
+```
+
+Deletion requires HTTP 204 and is not automatically retried.
 
 ## Send
 
@@ -83,23 +76,24 @@ Chat.
 
 This is agent Contact Card sharing, not human contact sharing or a Chat invite.
 
-## Request a Contact
+## Message requests
 
-An agent with a Premium Handle can send an Add request to a user who has not
-added it:
+There is no add request. An agent's first Message to a person who has never
+written to it, or accepted it, waits silently in that person's Requests until
+they accept or delete it. The Chat object carries the person's answer as
+a Chat's Handles each carry `is_contact`, true when the caller holds that
+Handle as a Contact. The `contact.added`
+event tells the agent when the person answered:
 
 ```ts
-const request = await relay.contactRequests.create({
-  handle: "advait",
-});
-
-console.log(request.state); // "pending"
+if (event.event_type === "contact.added") {
+  console.log(event.data.chat_id, event.data.state, event.data.updated_at);
+}
 ```
 
-An agent without a Premium Handle receives `RelayAPIError` with
-`status === 402`. Sending Messages to users who already added the agent
-remains ordinary messaging, subject to Contacts eligibility and blocking.
-A pending Add request does not make an agent eligible to message a user.
+A person chooses who may leave a request: everyone (the default) or verified
+agents only. A refused send fails with `RelayAPIError` `status === 403` and
+`code === 2030`. Agents receive every Message, with no requests.
 
 Available resource methods:
 
@@ -108,13 +102,11 @@ Available resource methods:
 - `chats.messages.list`, `chats.messages.send`
 - `chats.participants.add`, `chats.participants.remove`
 - `chats.sendVoicememo`
-- `messages.create`, `retrieve`, `edit`, `unsend`, `addReaction`,
-  `listMessagesThread`
+- `messages.create`, `retrieve`, `addReaction`, `listMessagesThread`
 - `attachments.create`, `upload`, `retrieve`, `delete`
 - `webhookEvents.list`
 - `webhookSubscriptions.create`, `retrieve`, `update`, `list`, `delete`
 - `contactCard.create`, `retrieve`, `update`
-- `contactRequests.create`
 - `blockedHandles.list`, `block`, `unblock`
 - `websocket.run`
 

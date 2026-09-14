@@ -1,3 +1,4 @@
+import { consoleFixture } from "../test/console-fixture.js";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,11 +6,12 @@ import { describe, expect, it, vi } from "vitest";
 import { runCLI } from "./program.js";
 import { emptyConfig, readConfig, writeConfig } from "./config.js";
 import { openSavedAgentSession, savedAgentShareURL } from "./agent-session.js";
+import { QR_DARK } from "./qr-terminal.js";
 import type { TerminalSessionOptions } from "./terminal-session.js";
 
 const base = "https://api.staging.relayapp.im";
-const token = `rly_live_${"V".repeat(43)}`;
-const card = { handle: "view_agent.dev", first_name: "View Agent", last_name: null, image_url: `${base}/assets/relay.png`, is_active: true, kind: "agent" as const };
+const token = `rel_token_${"V".repeat(43)}`;
+const card = { handle: "view_agent", first_name: "View Agent", last_name: null, image_url: `${base}/assets/relay.png`, is_active: true, kind: "agent" as const };
 const exited = { reason: "quit" as const, observedEvents: 0, observerStopped: true };
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), "relay-persistent-view-"));
@@ -17,14 +19,15 @@ async function fixture() {
   const output: string[] = [];
   const calls: string[] = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
-    const url = new URL(input instanceof Request ? input.url : String(input)); expect(url.origin).toBe(base);
+    const url = new URL(input instanceof Request ? input.url : String(input)); expect([base, "https://console.staging.relayapp.im"]).toContain(url.origin);
     calls.push(`${init?.method ?? "GET"} ${url.pathname}`);
-    if (init?.method === "POST" && url.pathname === "/v1/agents") return Response.json({ agent: card, secret: token, share_url: `https://staging.relayapp.im/@${card.handle}` }, { status: 201 });
+    if (init?.method === "POST" && url.pathname === "/api/orgs/org_fixture/agents") return Response.json({ agent: card, secret: token, share_url: `https://staging.relayapp.im/@${card.handle}` }, { status: 201 });
     expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
     return Response.json({ contact_cards: [card] });
   };
   const terminalSession = vi.fn(async (_options: TerminalSessionOptions) => exited);
-  const deps = { configContext, fetch, terminalSession, isInteractive: true, skillPresent: async () => true,
+  const console = consoleFixture(configContext, card);
+  const deps = { configContext, fetch: console.wrap(fetch), consoleLogin: console.login, terminalSession, isInteractive: true, skillPresent: async () => true,
     stdout: (s: string) => output.push(s), stderr: (s: string) => output.push(s),
   };
   return { home, configContext, deps, terminalSession, output, calls };
@@ -48,14 +51,15 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
     // The suite timeout does not extend vi.waitFor's separate one-second default.
     await vi.waitFor(() => expect(close).toBeDefined(), { timeout: process.platform === "win32" ? 90_000 : 1_000 }); expect(finished).toBe(false);
     close!(); expect(await pending).toBe(0);
-    expect(f.calls.filter((call) => call === "POST /v1/agents")).toHaveLength(1);
-    expect(f.output.join("")).not.toMatch(/unrelated-env-token|rly_live_[A-Za-z0-9]{43}/u);
+    expect(f.calls.filter((call) => call === "POST /api/orgs/org_fixture/agents")).toHaveLength(1);
+    expect(f.output.join("")).not.toMatch(/unrelated-env-token|(?:rel|rly)_live_[A-Za-z0-9]{43}/u);
   });
   it("draws the QR code once: the live view owns it when it opens, the create screen owns it otherwise", async () => {
     // The owner saw two identical QR codes stacked in his terminal after
     // `agents create` (2026-09-08): the create screen printed one, then the
     // live view drew its own. Exactly one surface may draw it.
-    const qr = /[\u2580\u2584\u2588]/u; // half-block glyphs of a terminal QR
+    // A terminal QR is background-coloured cells now, never a half-block glyph.
+    const qr = new RegExp(QR_DARK.replace("[", "\\["), "u");
     const live = await fixture();
     live.terminalSession.mockImplementation(async () => exited);
     expect(await runCLI(["agents", "create"], live.deps)).toBe(0);

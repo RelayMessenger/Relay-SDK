@@ -18,6 +18,7 @@ const sender: ChatHandle = {
   image_url: null,
   about: null,
   verified: false,
+  is_contact: true,
 };
 
 function event(
@@ -45,6 +46,7 @@ function event(
           image_url: null,
           about: null,
           verified: false,
+          is_contact: true,
         },
       },
       id: "00000000-0000-7000-8000-000000000005",
@@ -91,6 +93,7 @@ describe("Relay inbound Message mapping", () => {
         image_url: null,
         about: null,
         verified: false,
+        is_contact: true,
       },
       replyToId: "00000000-0000-7000-8000-000000000006",
       timestamp: Date.parse("2026-09-01T00:00:01.000Z"),

@@ -1,3 +1,4 @@
+import { consoleFixture } from "../test/console-fixture.js";
 import Relay from "@relaymessenger/sdk";
 import { mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,8 +9,8 @@ import { runCLI } from "./program.js";
 import { protectWindowsPath } from "./runtime-connect/windows-acl.js";
 
 const base = "https://api.staging.relayapp.im";
-const handle = "local_picture.dev";
-const secret = `rly_live_${"L".repeat(43)}`;
+const handle = "local_picture";
+const secret = `rel_token_${"L".repeat(43)}`;
 const attachmentID = "019a2123-1234-7890-abcd-123456789abc";
 const original = { handle, first_name: "Local Picture", last_name: null, image_url: `${base}/assets/default.png`, is_active: true, kind: "agent" as const };
 const permanent = { ...original, image_url: `${base}/images/copied.png` };
@@ -25,12 +26,12 @@ async function fixture() {
   let current = original;
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
-    expect(url.origin).toBe(base);
+    expect([base, "https://console.staging.relayapp.im"]).toContain(url.origin);
     const method = init?.method ?? "GET";
     const body = typeof init?.body === "string" ? JSON.parse(init.body) as unknown : undefined;
     calls.push({ method, path: url.pathname, ...(body ? { body } : {}) });
-    if (method === "POST" && url.pathname === "/v1/agents") {
-      expect(new Headers(init?.headers).has("authorization")).toBe(false);
+    if (method === "POST" && url.pathname === "/api/orgs/org_fixture/agents") {
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer rel_org_fixtureOnlyNotARealKey");
       expect(body).not.toHaveProperty("image_recipe"); expect(body).not.toHaveProperty("image_url");
       return Response.json({ agent: original, secret, share_url: `https://go.staging.relayapp.im/@${handle}` }, { status: 201 });
     }
@@ -58,7 +59,8 @@ async function fixture() {
     }
     throw new Error("Unexpected test request");
   };
-  const deps = { configContext, fetch, isInteractive: false, stdout: (value: string) => out.push(value), stderr: (value: string) => out.push(value),
+  const console = consoleFixture(configContext, current);
+  const deps = { configContext, fetch: console.wrap(fetch), consoleLogin: console.login, isInteractive: false, stdout: (value: string) => out.push(value), stderr: (value: string) => out.push(value),
     resolveClient: async (profile?: string) => {
       const auth = await resolveAuth(profile, configContext);
       return { auth, client: new Relay({ apiKey: auth.token, baseURL: auth.apiURL, fetch, maxRetries: 0 }) };
@@ -72,7 +74,7 @@ describe("saved-agent local image promotion", { timeout: 120_000 }, () => {
     f.deps.configContext.env.RELAY_AGENT_TOKEN = "unrelated-env-identity";
     expect(await runCLI(["agents", "create", "--image", f.path, "--json"], f.deps)).toBe(0);
     expect(f.calls.map(({ method, path }) => `${method} ${path}`)).toEqual([
-      "POST /v1/agents", "GET /v1/contact_card", "POST /v1/attachments", "PUT /fixture/upload", `GET /v1/attachments/${attachmentID}`, "PATCH /v1/contact_card",
+      "POST /api/orgs/org_fixture/agents", "GET /v1/contact_card", "POST /v1/attachments", "PUT /fixture/upload", `GET /v1/attachments/${attachmentID}`, "PATCH /v1/contact_card",
     ]);
     const output = JSON.parse(f.out[0]!);
     expect(output.image_url).toBe(permanent.image_url); expect(output.agent).toBeUndefined(); expect(output.image.status).toBe("updated");
@@ -88,7 +90,7 @@ describe("saved-agent local image promotion", { timeout: 120_000 }, () => {
     f.setFailure(undefined);
     const args = failure === "upload" ? ["--image", f.path] : ["--attachment-id", attachmentID];
     expect(await runCLI(["--profile", handle, "contact-card", "update", "--handle", handle, ...args], f.deps)).toBe(0);
-    expect(f.calls.filter(({ method, path }) => method === "POST" && path === "/v1/agents")).toHaveLength(1);
+    expect(f.calls.filter(({ method, path }) => method === "POST" && path === "/api/orgs/org_fixture/agents")).toHaveLength(1);
     if (failure !== "upload") expect(f.calls.filter(({ path }) => path === "/fixture/upload")).toHaveLength(1);
   });
   it("uses a local rendered snapshot with advanced recipe metadata only on promotion", async () => {

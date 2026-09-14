@@ -31,7 +31,7 @@ async function dispatch(allowFrom: string[], contactId = approvedId, handle = "r
         owner_handle: { id: "00000000-0000-7000-8000-000000000001", handle: "relay", kind: "agent", is_me: true },
       },
       direction: options.direction ?? "inbound",
-      sender_handle: { id: contactId, handle, kind: options.senderKind ?? "user", display_name: "Review Sender", joined_at: "2026-09-08T00:00:00.000Z", image_url: null, about: null, verified: false },
+      sender_handle: { id: contactId, handle, kind: options.senderKind ?? "user", display_name: "Review Sender", joined_at: "2026-09-08T00:00:00.000Z", image_url: null, about: null, verified: false, is_contact: true },
       parts: [{ type: "text", value: "@relay owned offline ingress test", ...(options.mention ? { mention: options.mention } : {}) }],
       ...(options.replyToAgent === undefined ? {} : { reply_to: { message_id: "00000000-0000-7000-8000-000000000010" } }),
     },

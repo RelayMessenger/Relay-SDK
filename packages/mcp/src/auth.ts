@@ -1,8 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import pkg from "../package.json" with { type: "json" };
 
 export const DEFAULT_API_URL = "https://api.relayapp.im";
+export const STAGING_API_URL = "https://api.staging.relayapp.im";
+export const defaultApiURL = (version: string = pkg.version): string =>
+  /-staging(?:\.|$)/u.test(version) ? STAGING_API_URL : DEFAULT_API_URL;
 export const DEFAULT_PROFILE = "default";
 
 interface RelayProfile {
@@ -166,7 +170,7 @@ export const resolveAgentAuth = async (
     context.apiURL
       ?? env.RELAY_API_URL
       ?? selected?.api_url
-      ?? DEFAULT_API_URL,
+      ?? defaultApiURL(),
   );
   const environmentToken = env.RELAY_AGENT_TOKEN;
   const token = environmentToken ?? selected?.agent_token;

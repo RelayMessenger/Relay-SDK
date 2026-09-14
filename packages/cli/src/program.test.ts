@@ -1,4 +1,5 @@
 import type Relay from "@relaymessenger/sdk";
+import { verifyWebhookSignature } from "@relaymessenger/sdk";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,12 +19,12 @@ const makeClient = () => {
     sendToHandles: vi.fn(async () => ({ chat_id: "chat-1" })),
     react: vi.fn(async () => ({ status: "accepted" })),
     getCard: vi.fn(async () => ({ contact_cards: [] })),
-    createRequest: vi.fn(async () => ({ state: "pending" })),
     shareCard: vi.fn(async () => undefined),
     addParticipant: vi.fn(async () => ({ status: "accepted" })),
     removeParticipant: vi.fn(async () => ({ status: "accepted" })),
     webhookEvents: vi.fn(async () => ({ events: [], doc_url: "https://docs.relayapp.im" })),
     listMessages: vi.fn(async () => ({ messages: [], nextCursor: null })),
+    retrieveMessage: vi.fn(async () => ({ id: "message-1", silent: true })),
   };
   const client = {
     chats: {
@@ -39,9 +40,12 @@ const makeClient = () => {
         remove: methods.removeParticipant,
       },
     },
-    messages: { addReaction: methods.react, create: methods.sendToHandles },
+    messages: {
+      addReaction: methods.react,
+      create: methods.sendToHandles,
+      retrieve: methods.retrieveMessage,
+    },
     contactCard: { retrieve: methods.getCard },
-    contactRequests: { create: methods.createRequest },
     webhookEvents: { list: methods.webhookEvents },
   } as unknown as Relay;
   return { client, methods };
@@ -126,7 +130,60 @@ describe("CLI command routing", () => {
     ])).not.toBe(0);
   });
 
-  it("routes reactions, Contact Cards, requests, and webhook metadata", async () => {
+  it("--silent marks a Chat send silent, and its absence leaves the body alone", async () => {
+    expect(await run([
+      "chats", "messages", "send", "chat-1",
+      "--text", "hello", "--idempotency-key", "send-silent", "--silent",
+    ])).toBe(0);
+    expect(fake.methods.sendMessage).toHaveBeenCalledWith("chat-1", {
+      message: {
+        parts: [{ type: "text", value: "hello" }],
+        idempotency_key: "send-silent",
+        silent: true,
+      },
+    });
+    expect(await run([
+      "chats", "messages", "send", "chat-1",
+      "--text", "hello", "--idempotency-key", "send-loud",
+    ])).toBe(0);
+    expect(fake.methods.sendMessage).toHaveBeenLastCalledWith("chat-1", {
+      message: {
+        parts: [{ type: "text", value: "hello" }],
+        idempotency_key: "send-loud",
+      },
+    });
+  });
+
+  it("--silent marks a handle send silent, and its absence leaves the body alone", async () => {
+    expect(await run([
+      "messages", "send", "--to", "advait",
+      "--text", "hello", "--idempotency-key", "handles-silent", "--silent",
+    ])).toBe(0);
+    expect(fake.methods.sendToHandles).toHaveBeenCalledWith(expect.objectContaining({
+      message: {
+        parts: [{ type: "text", value: "hello" }],
+        idempotency_key: "handles-silent",
+        silent: true,
+      },
+    }));
+    expect(await run([
+      "messages", "send", "--to", "advait",
+      "--text", "hello", "--idempotency-key", "handles-loud",
+    ])).toBe(0);
+    expect(fake.methods.sendToHandles).toHaveBeenLastCalledWith(expect.objectContaining({
+      message: {
+        parts: [{ type: "text", value: "hello" }],
+        idempotency_key: "handles-loud",
+      },
+    }));
+  });
+
+  it("messages get shows silent when the Message carries it", async () => {
+    expect(await run(["messages", "get", "message-1"])).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({ silent: true });
+  });
+
+  it("routes reactions, Contact Cards, and webhook metadata", async () => {
     expect(await run([
       "messages",
       "react",
@@ -142,8 +199,6 @@ describe("CLI command routing", () => {
     });
     expect(await run(["contact-card", "get"])).toBe(0);
     expect(fake.methods.getCard).toHaveBeenCalledWith({});
-    expect(await run(["contact-requests", "create", "advait"])).toBe(0);
-    expect(fake.methods.createRequest).toHaveBeenCalledWith({ handle: "advait" });
     expect(await run(["webhooks", "events"])).toBe(0);
     expect(fake.methods.webhookEvents).toHaveBeenCalledOnce();
   });
@@ -187,10 +242,10 @@ describe("CLI command routing", () => {
   });
 
   it("preserves generic participant commands and agent Contact Card sharing", async () => {
-    expect(await run(["chats", "participants", "add", "chat-1", "research.dev"])).toBe(0);
-    expect(fake.methods.addParticipant).toHaveBeenCalledWith("chat-1", { handle: "research.dev" });
-    expect(await run(["chats", "participants", "remove", "chat-1", "research.dev"])).toBe(0);
-    expect(fake.methods.removeParticipant).toHaveBeenCalledWith("chat-1", { handle: "research.dev" });
+    expect(await run(["chats", "participants", "add", "chat-1", "research"])).toBe(0);
+    expect(fake.methods.addParticipant).toHaveBeenCalledWith("chat-1", { handle: "research" });
+    expect(await run(["chats", "participants", "remove", "chat-1", "research"])).toBe(0);
+    expect(fake.methods.removeParticipant).toHaveBeenCalledWith("chat-1", { handle: "research" });
     expect(await run(["contact-card", "share", "chat-1"])).toBe(0);
     expect(fake.methods.shareCard).toHaveBeenCalledWith("chat-1");
   });
@@ -199,16 +254,16 @@ describe("CLI command routing", () => {
     ["--hide-history", true],
     ["--no-hide-history", false],
   ] as const)("passes %s to the SDK without losing false", async (flag, hideHistory) => {
-    expect(await run(["chats", "participants", "add", "chat-1", "research.dev", flag])).toBe(0);
+    expect(await run(["chats", "participants", "add", "chat-1", "research", flag])).toBe(0);
     expect(fake.methods.addParticipant).toHaveBeenCalledWith("chat-1", {
-      handle: "research.dev",
+      handle: "research",
       hide_history: hideHistory,
     });
   });
 
   it("explains agent-only selection without renaming participant commands", async () => {
     expect(await run(["chats", "participants", "--help"])).toBe(0);
-    expect(stdout.join("")).toContain("Add or remove agents in a chat");
+    expect(stdout.join("")).toContain("add or remove agents in a chat");
     const help = stdout.join("").replace(/\s+/gu, " ");
     expect(help).toContain("the agent you add and the agent doing the adding must both be that person's contacts and not blocked");
     expect(help).toContain("The same holds for an agent that removes another");
@@ -247,6 +302,60 @@ describe("CLI command routing", () => {
     expect(resolveClient).toHaveBeenCalledTimes(1);
   });
 
+  it("listen forwards signed events to a loopback route and prints the secret once", async () => {
+    const posts: Array<{ body: string; headers: Record<string, string> }> = [];
+    (fake.client as unknown as { websocket: unknown }).websocket = {
+      run: async (options: { onEvent(event: unknown, context: { sequence: string }): Promise<void> }) => {
+        for (const id of ["evt-1", "evt-2"]) {
+          await options.onEvent({
+            api_version: "v1", webhook_version: "2026-02-03", event_type: "message.received", event_id: id,
+            created_at: "2026-09-01T00:00:00.000Z", trace_id: "trace", agent_id: "agent", data: {},
+          }, { sequence: id });
+        }
+      },
+    } as never;
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      posts.push({ body: init!.body as string, headers: init!.headers as Record<string, string> });
+      return new Response(null, { status: 204 });
+    });
+    expect(await runCLI(["listen", "--forward-to", "http://localhost:3000/relay-events"], {
+      resolveClient,
+      fetch: fetchMock as unknown as typeof fetch,
+      stdout: (value) => stdout.push(value),
+      stderr: (value) => stderr.push(value),
+      configContext: { env: { RELAY_CONFIG_PATH: privatePath } },
+    })).toBe(0);
+    const notes = stderr.join("");
+    expect(notes).toContain("Forwarding events to http://localhost:3000/relay-events");
+    expect(notes).toContain("Events read here count as delivered; a deployed webhook for this agent does not get them.");
+    const secretLines = notes.split("\n").filter((line) => line.includes("Local signing secret"));
+    expect(secretLines).toHaveLength(1);
+    const secret = /whsec_[A-Za-z0-9+/=]+/u.exec(secretLines[0]!)![0];
+    expect(secretLines[0]).toContain("(set RELAY_WEBHOOK_SECRET to it while you develop)");
+    expect(posts).toHaveLength(2);
+    for (const post of posts) expect(() => verifyWebhookSignature(secret, post.body, post.headers)).not.toThrow();
+    expect(stdout.join("")).toContain("message.received · evt-1");
+    // The secret is saved with the profile, so a second run prints the same one.
+    stderr.length = 0;
+    expect(await runCLI(["listen", "--forward-to", "http://localhost:3000/relay-events"], {
+      resolveClient, fetch: fetchMock as unknown as typeof fetch,
+      stdout: (value) => stdout.push(value), stderr: (value) => stderr.push(value),
+      configContext: { env: { RELAY_CONFIG_PATH: privatePath } },
+    })).toBe(0);
+    expect(stderr.join("")).toContain(secret);
+  });
+
+  it("listen refuses an address off this computer and needs --forward-to", async () => {
+    expect(await run(["listen", "--forward-to", "http://example.com/relay-events"])).not.toBe(0);
+    expect(stderr.join("")).toContain("must be on this computer");
+    stderr.length = 0;
+    expect(await run(["listen"])).not.toBe(0);
+    expect(stderr.join("")).toContain("required option '--forward-to <url>' not specified");
+    stderr.length = 0;
+    expect(await run(["listen", "--help"])).toBe(0);
+    expect(stdout.join("")).toContain("forward each event to a route on this computer, signed like a webhook, while you develop");
+  });
+
   it("redacts a token from thrown errors", async () => {
     resolveClient = vi.fn(async () => {
       throw new Error("upstream echoed rly_test_secret");
@@ -273,7 +382,7 @@ describe("auth commands", { timeout: 120_000 }, () => {
       {
         configContext,
         readStdin: async () => secret,
-        fetch: async () => Response.json({ contact_cards: [{ handle: "test_agent.dev", first_name: "Test", last_name: null, image_url: null, kind: "agent", is_active: true }] }),
+        fetch: async () => Response.json({ contact_cards: [{ handle: "test_agent", first_name: "Test", last_name: null, image_url: null, kind: "agent", is_active: true }] }),
         stdout: (value) => stdout.push(value),
         stderr: (value) => stdout.push(value),
       },

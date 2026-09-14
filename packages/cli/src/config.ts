@@ -1,4 +1,4 @@
-import { inspectWindowsAcl, privateWindowsAcl, protectWindowsPath } from "./runtime-connect/windows-acl.js";
+import { inspectPrivateFile, openPrivateTemp, preparePrivateDestination, removeTemp, verifyPrivateACL, writePrivateDestination, type PrivateFileReport } from "./private-file.js";
 import {
   access,
   chmod,
@@ -11,15 +11,20 @@ import {
   unlink,
 } from "node:fs/promises";
 import { constants } from "node:fs";
+import { CliError } from "./error-codes.js";
 import type { FileHandle } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { resolveFolderAgent } from "./folder-link.js";
 
 export const DEFAULT_API_URL = "https://api.relayapp.im";
 export const DEFAULT_PROFILE = "default";
 export const STAGING_API_URL = "https://api.staging.relayapp.im";
+/** Relay-Auth, the one account per person; `relay login` runs its device flow. */
+export const DEFAULT_AUTH_URL = "https://auth.relayapp.im";
+export const STAGING_AUTH_URL = "https://auth.staging.relayapp.im";
 /** This package's own version as published (`X.Y.Z` or `X.Y.Z-staging.N`). */
 export const packageVersion = (): string =>
   createRequire(import.meta.url)("../package.json").version;
@@ -29,22 +34,62 @@ export const isStagingBuild = (version: string): boolean =>
 export const defaultCreationApiURL = (
   version: string = packageVersion(),
 ): string => isStagingBuild(version) ? STAGING_API_URL : DEFAULT_API_URL;
+/** RELAY_AUTH_URL overrides, the way RELAY_CONSOLE_API_URL overrides the Console. */
+export const defaultAuthURL = (
+  env: NodeJS.ProcessEnv = process.env,
+  version: string = packageVersion(),
+): string => {
+  const configured = env.RELAY_AUTH_URL?.trim();
+  if (configured) return new URL(configured).toString().replace(/\/$/, "");
+  return isStagingBuild(version) ? STAGING_AUTH_URL : DEFAULT_AUTH_URL;
+};
 
 export interface RelayProfile {
   api_url?: string;
   agent_token?: string;
+  /** The `whsec_` secret `listen` signs local forwards with. Made once per
+   * profile and kept, the way Stripe keeps one per account, so a restart does
+   * not force the developer to change RELAY_WEBHOOK_SECRET again. */
+  local_webhook_secret?: string;
 }
+
+/** A Relay-Auth session token from the device flow. It has no refresh: the
+ * token lives 30 days and `relay login` renews it. */
+export interface RelayConsoleOAuthSession {
+  type?: "oauth";
+  access_token: string;
+  expires_at: number;
+  organization_id?: string;
+  user: {
+    id: string;
+    email: string;
+    name?: string;
+  };
+}
+
+export interface RelayConsoleOrganizationKey {
+  type: "organization_key";
+  organization_key: string;
+  organization_id: string;
+  console_api_url: string;
+}
+
+export type RelayConsoleSession = RelayConsoleOAuthSession | RelayConsoleOrganizationKey;
 
 export interface RelayConfig {
   version: 1;
   current_profile: string;
+  defaultAgent?: string;
   profiles: Record<string, RelayProfile>;
+  console?: RelayConsoleSession;
 }
 
 export interface ConfigContext {
   env?: NodeJS.ProcessEnv;
   home?: string;
   platform?: NodeJS.Platform;
+  /** The folder the command runs in: its link names the agent when no --profile does. */
+  cwd?: string;
 }
 
 export interface ResolvedAuth {
@@ -72,11 +117,13 @@ export const configPath = (context: ConfigContext = {}): string => {
   return resolve(root, "relay", "config.json");
 };
 
-export const emptyConfig = (): RelayConfig => ({
+export const emptyConfig = (
+  version: string = packageVersion(),
+): RelayConfig => ({
   version: 1,
   current_profile: DEFAULT_PROFILE,
   profiles: {
-    [DEFAULT_PROFILE]: { api_url: DEFAULT_API_URL },
+    [DEFAULT_PROFILE]: { api_url: defaultCreationApiURL(version) },
   },
 });
 
@@ -105,9 +152,14 @@ const parseConfig = (value: unknown): RelayConfig => {
     if (token !== undefined && typeof token !== "string") {
       throw new Error(`Profile ${name} has a token that is not text. Fix it in the Relay config file, or sign in again.`);
     }
+    const localSecret = profile.local_webhook_secret;
+    if (localSecret !== undefined && !isLocalWebhookSecret(localSecret)) {
+      throw new Error(`Profile ${name} has a local signing secret that is not readable. Remove local_webhook_secret from the Relay config file and run listen again.`);
+    }
     profiles[name] = {
       ...(apiURL === undefined ? {} : { api_url: validateApiURL(apiURL) }),
       ...(token === undefined ? {} : { agent_token: validateToken(token) }),
+      ...(localSecret === undefined ? {} : { local_webhook_secret: localSecret }),
     };
   }
   if (!profiles[value.current_profile]) {
@@ -116,8 +168,74 @@ const parseConfig = (value: unknown): RelayConfig => {
   return {
     version: 1,
     current_profile: value.current_profile,
+    ...(typeof value.defaultAgent === "string" ? { defaultAgent: value.defaultAgent } : {}),
     profiles,
+    ...(isRecord(value.console) && value.console.type === "organization_key"
+      ? { console: parseOrganizationKey(value.console) }
+      : isRecord(value.console)
+      && typeof value.console.access_token === "string"
+      // An older session (refresh_token, client_id) is signed out: its
+      // token is not a Relay-Auth token. Run relay login.
+      && value.console.refresh_token === undefined
+      && value.console.client_id === undefined
+      && typeof value.console.expires_at === "number"
+      && isRecord(value.console.user)
+      && typeof value.console.user.id === "string"
+      && typeof value.console.user.email === "string"
+      ? {
+          console: {
+            access_token: value.console.access_token,
+            expires_at: value.console.expires_at,
+            ...(typeof value.console.organization_id === "string"
+              ? { organization_id: value.console.organization_id }
+              : {}),
+            user: {
+              id: value.console.user.id,
+              email: value.console.user.email,
+              ...(typeof value.console.user.name === "string"
+                ? { name: value.console.user.name }
+                : {}),
+            },
+          },
+        }
+      : {}),
   };
+};
+
+export const validateOrganizationKey = (raw: string): string => {
+  const key = validateToken(raw);
+  if (!/^(?:rel_org_|rly_org_)\S+$/u.test(key)) {
+    throw new CliError("Pipe an organization API key into relay login --with-token. Nothing was changed.", "usage");
+  }
+  return key;
+};
+
+const parseOrganizationKey = (value: Record<string, unknown>): RelayConsoleOrganizationKey => {
+  if (typeof value.organization_key !== "string"
+    || typeof value.organization_id !== "string" || !value.organization_id
+    || typeof value.console_api_url !== "string") {
+    throw new Error("The saved organization API key configuration is incomplete. Sign in again.");
+  }
+  const api = new URL(value.console_api_url);
+  validateApiURL(api.origin);
+  return {
+    type: "organization_key",
+    organization_key: validateOrganizationKey(value.organization_key),
+    organization_id: value.organization_id,
+    console_api_url: api.toString().replace(/\/$/, ""),
+  };
+};
+
+export const defaultConsoleApiURL = (
+  apiURL: string = defaultCreationApiURL(),
+  env: NodeJS.ProcessEnv = process.env,
+): string => {
+  const configured = env.RELAY_CONSOLE_API_URL?.trim();
+  if (configured) return new URL(configured).toString().replace(/\/$/, "");
+  const host = new URL(apiURL).hostname;
+  if (host === "api.staging.relayapp.im") return "https://console.staging.relayapp.im/api";
+  if (host === "api.relayapp.im") return "https://console.relayapp.im/api";
+  throw new Error("Relay Console is unavailable for this API origin.");
 };
 
 const revisions = new WeakMap<RelayConfig, string>();
@@ -147,83 +265,11 @@ export const readConfig = async (
   }
 };
 
-interface ConfigDestination {
-  path: string;
-  directory: string;
-  windows: boolean;
-  existingACL?: string;
-}
-
-// Shared by preflight and the final write: no credential bytes are changed here.
-const prepareConfigDestination = async (context: ConfigContext): Promise<ConfigDestination> => {
-  const path = configPath(context);
-  const directory = dirname(path);
-  const windows = (context.platform ?? process.platform) === "win32";
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const directoryInfo = await lstat(directory);
-  if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()) throw new Error("The Relay config folder is a link or a file, not a folder. Move it aside and sign in again.");
-  if ((directoryInfo.mode & 0o222) === 0) throw new Error("You do not have permission to write in the Relay config folder.");
-  await access(directory, constants.W_OK);
-  if (!windows) await chmod(directory, 0o700);
-  else if (!privateWindowsAcl(await inspectWindowsAcl(directory), true)) {
-    throw new Error("Other Windows accounts can write in the Relay config folder. Limit it to your account; Relay changed nothing.");
-  }
-  let existingACL: string | undefined;
-  try {
-    const existing = await lstat(path);
-    if (!existing.isFile() || existing.isSymbolicLink() || existing.nlink !== 1) throw new Error("The Relay config must be a regular file, not a link, and it must not be hard-linked from anywhere else.");
-    if (!windows && (existing.mode & 0o077) !== 0) throw new Error("Other people on this computer can read the Relay config file. Make it readable by you alone.");
-    if ((existing.mode & 0o444) === 0) throw new Error("You do not have permission to read the Relay config file.");
-    if ((existing.mode & 0o222) === 0) throw new Error("You do not have permission to write the Relay config file.");
-    // Opening with r+ proves the operating system allows reading and writing,
-    // without emptying the file or writing to it.
-    const probe = await open(path, "r+"); await probe.close();
-    if (windows) {
-      const acl = await inspectWindowsAcl(path);
-      if (!privateWindowsAcl(acl)) throw new Error("Windows permissions on the Relay config file let other accounts read or write it. Limit it to your account before saving a token.");
-      existingACL = acl.sddl;
-    }
-  } catch (error) {
-    if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
-  }
-  return { path, directory, windows, ...(existingACL === undefined ? {} : { existingACL }) };
-};
-
-const privateConfigTemp = async (destination: ConfigDestination): Promise<{ path: string; handle: FileHandle }> => {
-  const path = join(destination.directory, `.config.${process.pid}.${randomUUID()}.tmp`);
-  const handle = await open(path, "wx", 0o600);
-  try {
-    if (destination.windows) {
-      const acl = await protectWindowsPath(path, false, destination.existingACL);
-      if (!privateWindowsAcl(acl) || (destination.existingACL !== undefined && acl.sddl !== destination.existingACL)) {
-        throw new Error("Relay could not limit the new config file to your Windows account, so it did not save the token.");
-      }
-    } else await handle.chmod(0o600);
-    return { path, handle };
-  } catch (error) {
-    await handle.close(); await unlink(path); throw error;
-  }
-};
-const verifyConfigACL = async (path: string, destination: ConfigDestination): Promise<void> => {
-  if (!destination.windows) return;
-  const acl = await inspectWindowsAcl(path);
-  if (!privateWindowsAcl(acl) || (destination.existingACL !== undefined && acl.sddl !== destination.existingACL)) {
-    throw new Error("Relay saved the config file but could not confirm that only your Windows account can read it. Check its permissions.");
-  }
-};
-const removeTemp = async (path: string): Promise<void> => {
-  await unlink(path).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; });
-};
+const CONFIG_WHAT = "Relay config";
 const writeConfigUnlocked = async (config: RelayConfig, context: ConfigContext = {}): Promise<void> => {
   const normalized = parseConfig(config);
-  const destination = await prepareConfigDestination(context);
-  const temporary = await privateConfigTemp(destination);
-  try {
-    try { await temporary.handle.writeFile(`${JSON.stringify(normalized, null, 2)}\n`, "utf8"); await temporary.handle.sync(); }
-    finally { await temporary.handle.close(); }
-    await rename(temporary.path, destination.path);
-    await verifyConfigACL(destination.path, destination);
-  } finally { await removeTemp(temporary.path); }
+  const destination = await preparePrivateDestination(configPath(context), CONFIG_WHAT, context.platform ?? process.platform);
+  await writePrivateDestination(destination, ".config", `${JSON.stringify(normalized, null, 2)}\n`);
 };
 
 /** Probe private creation, writing, syncing, renaming and ACL inspection without
@@ -231,14 +277,14 @@ const writeConfigUnlocked = async (config: RelayConfig, context: ConfigContext =
 export const preflightConfigDestination = async (context: ConfigContext = {}): Promise<void> => {
   await withConfigLock(context, async () => {
     await readConfig(context);
-    const destination = await prepareConfigDestination(context);
-    const temporary = await privateConfigTemp(destination);
+    const destination = await preparePrivateDestination(configPath(context), CONFIG_WHAT, context.platform ?? process.platform);
+    const temporary = await openPrivateTemp(destination, ".config");
     const renamed = `${temporary.path}.probe`;
     try {
       try { await temporary.handle.writeFile("Relay private config preflight\n", "utf8"); await temporary.handle.sync(); }
       finally { await temporary.handle.close(); }
       await rename(temporary.path, renamed);
-      await verifyConfigACL(renamed, destination);
+      await verifyPrivateACL(renamed, destination);
     } finally { await removeTemp(temporary.path); await removeTemp(renamed); }
   });
 };
@@ -348,6 +394,29 @@ export const validateForwardURL = (input: string): string => {
   return url.toString();
 };
 
+const LOCAL_WEBHOOK_SECRET_PREFIX = "whsec_";
+const isLocalWebhookSecret = (value: unknown): value is string =>
+  typeof value === "string"
+  && value.startsWith(LOCAL_WEBHOOK_SECRET_PREFIX)
+  && /^[A-Za-z0-9+/]+=*$/u.test(value.slice(LOCAL_WEBHOOK_SECRET_PREFIX.length));
+
+/** A Standard Webhooks secret: `whsec_` and 32 random bytes in base64, the
+ * shape Relay's own subscriptions use, so the receiver's verify code is the
+ * same one it runs deployed. */
+export const newLocalWebhookSecret = (): string =>
+  `${LOCAL_WEBHOOK_SECRET_PREFIX}${randomBytes(32).toString("base64")}`;
+
+/** The saved local signing secret for a profile, made on first use and kept. */
+export const localWebhookSecret = async (
+  profile: string,
+  context: ConfigContext = {},
+): Promise<string> => mutateConfig((config) => {
+  const name = validateProfileName(profile);
+  const saved = config.profiles[name] ??= {};
+  saved.local_webhook_secret ??= newLocalWebhookSecret();
+  return saved.local_webhook_secret;
+}, context);
+
 export const validateToken = (value: string): string => {
   const token = value.trim();
   if (!token || /[\u0000-\u001f\u007f]/u.test(token)) {
@@ -362,21 +431,25 @@ export const resolveAuth = async (
 ): Promise<ResolvedAuth> => {
   const env = contextEnv(context);
   const config = await readConfig(context);
-  const profile = validateProfileName(
-    requestedProfile ?? env.RELAY_PROFILE ?? config.current_profile,
-  );
+  // One agent per folder (_artifacts/cli-connect-design-20260912.md, item 2):
+  // with no --profile and no RELAY_PROFILE, the folder link decides, then
+  // RELAY_AGENT, then the last connected agent, then the current profile.
+  const folder = requestedProfile ?? env.RELAY_PROFILE ?? (await resolveFolderAgent(context.cwd ?? process.cwd(), env, config))?.profile;
+  const profile = validateProfileName(folder ?? config.current_profile);
   const selected = config.profiles[profile];
-  if (!selected) throw new Error(`Relay profile ${profile} does not exist.`);
+  if (!selected) throw new CliError(`Relay profile ${profile} does not exist.`, "not_found");
   const apiURL = validateApiURL(
-    env.RELAY_API_URL ?? selected.api_url ?? DEFAULT_API_URL,
+    env.RELAY_API_URL ?? selected.api_url ?? defaultCreationApiURL(),
   );
   const envToken = env.RELAY_AGENT_TOKEN;
   const token = envToken === undefined
     ? selected.agent_token
     : validateToken(envToken);
   if (!token) {
-    throw new Error(
+    // `no_token` is the one code that exits 4 (gh's "requires authentication").
+    throw new CliError(
       `Profile ${profile} has no saved token. Run npx relaymessenger auth login --with-token to save one.`,
+      "no_token",
     );
   }
   return {
@@ -388,38 +461,9 @@ export const resolveAuth = async (
   };
 };
 
-export const inspectConfigPermissions = async (
+export const inspectConfigPermissions = (
   context: ConfigContext = {},
-): Promise<{ exists: boolean; secure: boolean; mode?: number; aclChecked?: boolean }> => {
-  try {
-    const info = await stat(configPath(context));
-    const mode = info.mode & 0o777;
-    if ((context.platform ?? process.platform) === "win32") {
-      try {
-        const path = configPath(context);
-        const file = await lstat(path);
-        const parent = await lstat(dirname(path));
-        const acl = await inspectWindowsAcl(path);
-        const parentACL = await inspectWindowsAcl(dirname(path));
-        return { exists: true, secure: file.isFile() && !file.isSymbolicLink() && file.nlink === 1
-          && parent.isDirectory() && !parent.isSymbolicLink()
-          && privateWindowsAcl(acl) && privateWindowsAcl(parentACL, true), mode, aclChecked: true };
-      } catch {
-        return { exists: true, secure: false, mode, aclChecked: false };
-      }
-    }
-    return { exists: true, secure: (mode & 0o077) === 0, mode };
-  } catch (error) {
-    if (
-      error instanceof Error
-      && "code" in error
-      && error.code === "ENOENT"
-    ) {
-      return { exists: false, secure: true };
-    }
-    throw error;
-  }
-};
+): Promise<PrivateFileReport> => inspectPrivateFile(configPath(context), context.platform ?? process.platform);
 
 export const collectConfiguredTokens = async (
   context: ConfigContext = {},
@@ -430,5 +474,7 @@ export const collectConfiguredTokens = async (
     .filter((token): token is string => Boolean(token));
   const envToken = contextEnv(context).RELAY_AGENT_TOKEN;
   if (envToken) tokens.push(envToken);
+  if (config.console?.type === "organization_key") tokens.push(config.console.organization_key);
+  else if (config.console) tokens.push(config.console.access_token);
   return [...new Set(tokens)];
 };

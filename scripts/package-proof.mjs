@@ -134,12 +134,12 @@ try {
 
     assert.equal(packageJSON.version, ${JSON.stringify(expectedVersion)});
     assert.deepEqual(Object.keys(sdk).sort(), [
+      "Agents",
       "Attachments",
       "BlockedHandles",
       "Chats",
       "ChatsPage",
       "ContactCard",
-      "ContactRequests",
       "Messages",
       "MessagesPage",
       "RELAY_V1_OPERATIONS",
@@ -155,6 +155,7 @@ try {
       "Webhooks",
       "default",
       "runWebSocket",
+      "signWebhookHeaders",
       "verifyWebhookSignature",
     ].sort());
     for (const privateName of [
@@ -195,9 +196,6 @@ try {
         if (url.pathname === "/v1/chats") {
           return Response.json({ chats: [], next_cursor: null });
         }
-        if (url.pathname === "/v1/contact_requests") {
-          return Response.json({ state: "pending" }, { status: 201 });
-        }
         return Response.json({ accepted: true }, { status: 202 });
       },
     });
@@ -210,13 +208,6 @@ try {
         idempotency_key: "package-proof-message",
       },
     });
-    assert.deepEqual(
-      await relay.contactRequests.create({
-        handle: "advait",
-        "Idempotency-Key": "must-not-be-forwarded",
-      }),
-      { state: "pending" },
-    );
     assert.deepEqual(requests, [
       {
         url: "https://api.staging.relayapp.im/v1/chats?limit=1",
@@ -236,15 +227,6 @@ try {
             parts: [{ type: "text", value: "Hello" }],
             idempotency_key: "package-proof-message",
           },
-        },
-      },
-      {
-        url: "https://api.staging.relayapp.im/v1/contact_requests",
-        method: "POST",
-        authorization: "Bearer package-proof-token",
-        idempotencyKey: null,
-        body: {
-          handle: "advait",
         },
       },
     ]);
@@ -340,7 +322,6 @@ try {
     added.data.chat_id satisfies string;
     declare const removed: ContactRemovedWebhookEvent;
     removed.data.contact.handle satisfies string;
-    void relay.contactRequests.create({ handle: "advait" });
     void relay.chats.participants.add("chat", { handle: "research.agent" });
     void relay.chats.participants.add("chat", { handle: "research.agent", hide_history: true });
     void relay.chats.participants.add("chat", { handle: "research.agent", hide_history: false });
@@ -352,11 +333,6 @@ try {
     void relay.chats.participants.add("chat", { handle: "research.agent", is_hidden: true });
     // @ts-expect-error History boundaries are private.
     void relay.chats.participants.add("chat", { handle: "research.agent", truncated_at: 123 });
-    relay.contactRequests.create({
-      handle: "advait",
-      // @ts-expect-error Contact requests accept only a handle.
-      "Idempotency-Key": "contact-request-key",
-    });
     void relay.messages.create({
       to: ["advait"],
       message: {
@@ -365,8 +341,8 @@ try {
       },
       "Idempotency-Key": "message-header-key",
     });
-    // @ts-expect-error user Contact request listing is private.
-    relay.contactRequests.list();
+    // @ts-expect-error add requests are gone; the first Message is the request.
+    relay.contactRequests;
     // @ts-expect-error polling is not part of Relay.
     relay.pollEvents();
     // @ts-expect-error private user routes are not SDK resources.

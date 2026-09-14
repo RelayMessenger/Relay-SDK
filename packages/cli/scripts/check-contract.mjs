@@ -34,8 +34,8 @@ assert.equal(
   expected,
   "The SDK v1 operation contract changed; review the public contract before refreshing this hash.",
 );
-assert.equal(RELAY_V1_OPERATIONS.length, 38);
-assert.ok(RELAY_V1_OPERATIONS.some((op) => op.method === "POST" && op.path === "/v1/agents" && op.operationId === "createAgent"));
+assert.equal(RELAY_V1_OPERATIONS.length, 34);
+assert.equal(RELAY_V1_OPERATIONS.some((op) => op.method === "POST" && op.path === "/v1/agents"), false);
 assert.ok(RELAY_V1_OPERATIONS.some((op) => op.method === "DELETE" && op.path === "/v1/agents/{handle}" && op.operationId === "deleteAgent"));
 assert.match(sdkTypes, /\bimage_url: string \| null;/u);
 assert.match(sdkTypes, /\babout: string \| null;/u);

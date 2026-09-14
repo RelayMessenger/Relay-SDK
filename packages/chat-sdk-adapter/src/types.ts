@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 1a2245dd775f781b57e0d1f6f3146ebd384c90c3
- * OpenAPI 5458497fe8db4ee7dfe6bef67f2803137575d3ea4d835748290a5c9f8d906791
+ * Relay Server d4dc62372194bf929801229740346cdacfe2d5c9
+ * OpenAPI 81d23529476ae77b3b7f7dfc931d2e0e421d3c91e20c59136e2deef9123f722e
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -14,8 +14,6 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "message.received",
   "message.read",
   "message.delivered",
-  "message.edited",
-  "message.unsent",
   "message.failed",
   "reaction.added",
   "reaction.removed",
@@ -56,6 +54,8 @@ export interface RelayChatHandle {
   status?: "active" | "left" | "removed" | null;
   about: string | null;
   verified: boolean;
+  /** True when the caller holds this Handle as a Contact. */
+  is_contact: boolean;
 }
 
 export type RelayReactionType =
@@ -98,6 +98,16 @@ export type RelayOutgoingPart =
   | RelayLinkPart;
 
 export interface RelayTextPartResponse extends RelayTextPart {
+  mentions?: Array<{
+    id: string;
+    handle: string;
+    is_me: boolean;
+    range: [number, number];
+  }> | null;
+  /** @deprecated Use mentions instead. */
+  mention?: string | null;
+  /** @deprecated Use mentions instead. */
+  mention_range?: [number, number] | null;
   reactions?: RelayReaction[] | null;
 }
 
@@ -149,6 +159,7 @@ export interface RelayMessage {
   read_at?: string | null;
   reply_to?: RelayReplyTo | null;
   sent_at?: string | null;
+  silent?: boolean;
   system_event?: Record<string, unknown> | null;
   updated_at: string;
 }
@@ -170,6 +181,7 @@ export interface RelayWebhookMessageEvent {
   reply_to?: RelayReplyTo | null;
   sender_handle: RelayChatHandle;
   sent_at?: string | null;
+  silent?: boolean;
 }
 
 export interface RelaySentMessage {
@@ -183,6 +195,7 @@ export interface RelaySentMessage {
   >;
   reply_to?: RelayReplyTo | null;
   sent_at: string | null;
+  silent?: boolean;
 }
 
 export interface RelaySendMessageResponse {

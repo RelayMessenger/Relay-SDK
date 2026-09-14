@@ -1,272 +1,174 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import type Relay from "@relaymessenger/sdk";
+import Relay from "@relaymessenger/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRelayMcpServer } from "./server.js";
-
-const CHAT_ID = "01993d50-754d-7f51-a51b-5da552024fd1";
-const MESSAGE_ID = "01993d50-4133-7178-8e16-7c1455c91d43";
-
-const fakeRelay = () => {
-  const calls = {
-    listChats: vi.fn(async () => ({
-      chats: [{ id: CHAT_ID }],
-      nextCursor: null,
-    })),
-    listMessages: vi.fn(async () => ({
-      messages: [{ id: MESSAGE_ID }],
-      nextCursor: null,
-    })),
-    send: vi.fn(async () => ({
-      chat_id: CHAT_ID,
-      message: { id: MESSAGE_ID },
-    })),
-    react: vi.fn(async () => ({ status: "accepted" })),
-    requestContact: vi.fn(async () => ({ state: "pending" })),
-    shareCard: vi.fn(async () => undefined),
-    sendToUser: vi.fn(async () => ({ chat_id: CHAT_ID })),
-  };
-  const client = {
-    chats: {
-      listChats: calls.listChats,
-      messages: { send: calls.send, list: calls.listMessages },
-      shareContactCard: calls.shareCard,
-    },
-    messages: { addReaction: calls.react, create: calls.sendToUser },
-    contactRequests: { create: calls.requestContact },
-  } as unknown as Relay;
-  return { client, calls };
-};
-
+import { createRelayMcpServer, PACKAGE_VERSION, type RelayMcpServerOptions } from "./server.js";
+import { METHOD_DOCS } from "./generated-docs.js";
+import pkg from "../package.json" with { type: "json" };
+const TOKEN = "rel_token_mcp_test_secret_never_given_to_guest";
+const CHAT = "01993d50-754d-7f51-a51b-5da552024fd1";
 const sessions: Array<{ client: Client; server: ReturnType<typeof createRelayMcpServer> }> = [];
+function sdk(fetch = vi.fn(async () => Response.json({ id: CHAT, handle: "fixture.dev" }))) {
+  return { fetch, client: new Relay({ apiKey: TOKEN, baseURL: "http://127.0.0.1:1", maxRetries: 0, fetch }) };
+}
+async function connect(options: RelayMcpServerOptions = {}) {
+  const [a,b] = InMemoryTransport.createLinkedPair();
+  const server = createRelayMcpServer(options);
+  const client = new Client({ name: "relay-two-tool-test", version: "1.0.0" });
+  await Promise.all([server.connect(b), client.connect(a)]);
+  sessions.push({client,server}); return client;
+}
+async function ready(overrides: RelayMcpServerOptions = {}, fixture = sdk()) {
+  const client = await connect({ resolveClient: async () => ({ client: fixture.client, secrets: [TOKEN] }), collectSecrets: async () => [TOKEN], ...overrides });
+  return { client, fixture, execute: (code: string) => client.callTool({ name: "execute", arguments: { code } }) };
+}
+const text = (r: unknown) => JSON.stringify(r);
+const result = (r: unknown) => (r as { structuredContent?: { result?: unknown } }).structuredContent?.result;
+afterEach(async () => { await Promise.all(sessions.splice(0).map(async s => { await s.client.close(); await s.server.close(); })); });
 
-const connect = async (relay: Relay, secrets: string[] = []) => {
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const server = createRelayMcpServer({
-    resolveClient: async () => ({ client: relay, secrets }),
-    collectSecrets: async () => secrets,
+describe("approved two-tool MCP", () => {
+  it("advertises exactly search_docs and execute, without credential arguments or talk", async () => {
+    const client = await connect(); const tools = (await client.listTools()).tools;
+    expect(tools.map(x=>x.name).sort()).toEqual(["execute","search_docs"]);
+    expect(tools.some(x=>JSON.stringify(x.inputSchema).includes("token"))).toBe(false);
+    expect(tools.find(x=>x.name==="search_docs")?.annotations?.readOnlyHint).toBe(true);
+    expect(tools.find(x=>x.name==="execute")?.annotations?.readOnlyHint).toBe(false);
+    expect(PACKAGE_VERSION).toBe(pkg.version);
+    for (const name of ["relay_list_chats", "relay_send_message", "talk"]) await expect(client.callTool({ name, arguments:{} })).rejects.toThrow(/not found/i);
   });
-  const client = new Client({ name: "relay-mcp-unit", version: "1.0.0" });
-  await Promise.all([
-    server.connect(serverTransport),
-    client.connect(clientTransport),
-  ]);
-  sessions.push({ client, server });
-  return client;
-};
-
-afterEach(async () => {
-  await Promise.all(
-    sessions.splice(0).map(async ({ client, server }) => {
-      await client.close().catch(() => {});
-      await server.close().catch(() => {});
-    }),
-  );
-});
-
-describe("explicit Relay MCP tools", () => {
-  it("lists the complete explicit surface without auth arguments", async () => {
-    const fake = fakeRelay();
-    const client = await connect(fake.client);
-    const tools = (await client.listTools()).tools;
-    expect(tools.map((tool) => tool.name).sort()).toEqual([
-      "relay_create_contact_request",
-      "relay_get_chat",
-      "relay_get_contact_card",
-      "relay_get_message",
-      "relay_get_message_thread",
-      "relay_list_chats",
-      "relay_list_messages",
-      "relay_mark_chat_read",
-      "relay_react_to_message",
-      "relay_send_message",
-      "relay_send_message_to_chat",
-      "relay_set_contact_card",
-      "relay_share_contact_card",
-      "relay_start_typing",
-      "relay_stop_typing",
-      "relay_update_contact_card",
-    ]);
-    expect(JSON.stringify(tools).toLowerCase()).not.toContain("agent_token");
-    expect(JSON.stringify(tools).toLowerCase()).not.toContain("authorization");
+  it("searches the shipped SDK/contract locally without credentials", async () => {
+    const resolveClient = vi.fn(async () => { throw new Error("must not resolve auth for search"); });
+    const client = await connect({resolveClient});
+    const r = await client.callTool({name:"search_docs",arguments:{query:"send message",language:"typescript"}});
+    expect(r.isError).not.toBe(true); expect(text(r)).toContain("client.chats.messages.send");
+    expect(text(r)).toContain("idempotency_key"); expect(text(r)).toContain("MessageSendParams");
+    expect(resolveClient).not.toHaveBeenCalled();
   });
-
-  it("routes reads and idempotent sends through SDK methods", async () => {
-    const fake = fakeRelay();
-    const client = await connect(fake.client);
-    const listed = await client.callTool({
-      name: "relay_list_chats",
-      arguments: { limit: 20 },
-    });
-    expect(listed.isError).not.toBe(true);
-    expect(fake.calls.listChats).toHaveBeenCalledWith({ limit: 20 });
-
-    const sent = await client.callTool({
-      name: "relay_send_message_to_chat",
-      arguments: {
-        chat_id: CHAT_ID,
-        text: "Hello",
-        idempotency_key: "logical-send-1",
-      },
-    });
-    expect(sent.isError).not.toBe(true);
-    expect(fake.calls.send).toHaveBeenCalledWith(CHAT_ID, {
-      message: {
-        parts: [{ type: "text", value: "Hello" }],
-        idempotency_key: "logical-send-1",
-      },
-    });
+  it("returns no fabricated method for an unrelated query", async () => {
+    const client = await connect(); const r=await client.callTool({name:"search_docs",arguments:{query:"zzzzzzzzunknownxyz",language:"http"}});
+    expect((r.structuredContent as {results:unknown[]}).results).toEqual([]);
   });
-
-  it("passes order through relay_list_messages and rejects other values", async () => {
-    const fake = fakeRelay();
-    const client = await connect(fake.client);
-    const listed = await client.callTool({
-      name: "relay_list_messages",
-      arguments: { chat_id: CHAT_ID, limit: 10, order: "desc" },
-    });
-    expect(listed.isError).not.toBe(true);
-    expect(fake.calls.listMessages).toHaveBeenCalledWith(CHAT_ID, {
-      limit: 10,
-      order: "desc",
-    });
-    const rejected = await client.callTool({
-      name: "relay_list_messages",
-      arguments: { chat_id: CHAT_ID, order: "newest" },
-    });
-    expect(rejected.isError).toBe(true);
-    expect(fake.calls.listMessages).toHaveBeenCalledTimes(1);
+  it("redacts a known token accidentally pasted into a documentation query", async () => {
+    const s=await ready();
+    const r=await s.client.callTool({name:"search_docs",arguments:{query:TOKEN}});
+    expect(r.isError).not.toBe(true); expect(text(r)).not.toContain(TOKEN); expect(text(r)).toContain("[REDACTED]");
   });
-
-  it("rejects invalid inputs before Relay mutations", async () => {
-    const fake = fakeRelay();
-    const client = await connect(fake.client);
-    const result = await client.callTool({
-      name: "relay_react_to_message",
-      arguments: {
-        message_id: MESSAGE_ID,
-        operation: "add",
-        type: "custom",
-      },
-    });
-    expect(result.isError).toBe(true);
-    expect(JSON.stringify(result)).toMatch(/invalid/i);
-    expect(fake.calls.react).not.toHaveBeenCalled();
-  });
-
-  it("preserves agent card sharing, add requests, and Messages to an eligible user", async () => {
-    const fake = fakeRelay();
-    const client = await connect(fake.client);
-    const shared = await client.callTool({
-      name: "relay_share_contact_card",
-      arguments: { chat_id: CHAT_ID },
-    });
-    expect(shared.isError).not.toBe(true);
-    expect(fake.calls.shareCard).toHaveBeenCalledWith(CHAT_ID);
-
-    const requested = await client.callTool({
-      name: "relay_create_contact_request",
-      arguments: { handle: "advait" },
-    });
-    expect(requested.isError).not.toBe(true);
-    expect(fake.calls.requestContact).toHaveBeenCalledWith({ handle: "advait" });
-
-    const sent = await client.callTool({
-      name: "relay_send_message",
-      arguments: { recipients: ["advait"], text: "Hello", idempotency_key: "agent-send-1" },
-    });
-    expect(sent.isError).not.toBe(true);
-    expect(fake.calls.sendToUser).toHaveBeenCalledWith({
-      to: ["advait"],
-      message: {
-        parts: [{ type: "text", value: "Hello" }],
-        idempotency_key: "agent-send-1",
-      },
-    });
-  });
-
-  it("describes Contacts eligibility without a separate approval tool", async () => {
-    const client = await connect(fakeRelay().client);
-    const tools = (await client.listTools()).tools;
-    for (const name of ["relay_send_message", "relay_send_message_to_chat"]) {
-      const tool = tools.find((entry) => entry.name === name)!;
-      expect(tool.description).toContain("Agent-only messaging keeps its existing behavior");
+  it("indexes every HTTP operation and exposes only initialized client methods", () => {
+    expect(new Set(METHOD_DOCS.map(x=>`${x.httpMethod} ${x.path}`)).size).toBe(34);
+    expect(METHOD_DOCS.some(x=>x.method==="Relay.createAgent")).toBe(false);
+    expect(METHOD_DOCS.some(x=>x.httpMethod==="POST"&&x.path==="/v1/agents")).toBe(false);
+    const relay=sdk().client;
+    for (const row of METHOD_DOCS.filter(x=>x.executable)) {
+      let value:unknown=relay;
+      for (const part of row.method.split(".").slice(1)) value=(value as Record<string,unknown>)[part];
+      expect(typeof value,row.method).toBe("function");
     }
-    expect(tools.find((entry) => entry.name === "relay_send_message")!.description)
-      .toContain("Agents and users have the same generic Chat API permissions");
-    expect(tools.find((entry) => entry.name === "relay_send_message")!.description)
-      .toContain("Creating or reusing a user-containing Chat requires every agent to be that user's added, unblocked Contact");
-    expect(tools.find((entry) => entry.name === "relay_send_message_to_chat")!.description)
-      .toContain("Existing membership and messaging rules apply");
-    expect(tools.find((entry) => entry.name === "relay_create_contact_request")!.description)
-      .toContain("A pending Add request does not grant messaging eligibility");
-    expect(tools.some((entry) => /approval|mutual|policy/i.test(entry.name))).toBe(false);
   });
-
-  it("preserves agent-only messaging without Contact-request preflights", async () => {
-    const fake = fakeRelay();
-    const client = await connect(fake.client);
-    const recipients = ["research.dev", "planner.dev"];
-    const result = await client.callTool({
-      name: "relay_send_message",
-      arguments: { recipients, text: "Hello agents", idempotency_key: "agent-only-1" },
-    });
-    expect(result.isError).not.toBe(true);
-    expect(fake.calls.sendToUser).toHaveBeenCalledWith({
-      to: recipients,
-      message: {
-        parts: [{ type: "text", value: "Hello agents" }],
-        idempotency_key: "agent-only-1",
-      },
-    });
-    expect(fake.calls.requestContact).not.toHaveBeenCalled();
+  it("does not advertise anonymous signup in documentation search", async () => {
+    const client=await connect();
+    const r=await client.callTool({name:"search_docs",arguments:{query:"anonymous agent signup",language:"typescript",detail:"verbose"}});
+    expect(r.isError).not.toBe(true);
+    expect(JSON.stringify(r.structuredContent)).not.toContain("Relay.createAgent");
+    expect(JSON.stringify(r.structuredContent)).not.toMatch(/POST\s+\/v1\/agents(?:["\s]|$)/);
   });
-
-  it("accepts six recipients and rejects seven before sending", async () => {
-    const fake = fakeRelay();
-    const client = await connect(fake.client);
-    const recipients = Array.from({ length: 6 }, (_, i) => `agent${i}`);
-    const tools = (await client.listTools()).tools;
-    const send = tools.find((entry) => entry.name === "relay_send_message")!;
-    expect(send.inputSchema.properties?.recipients).toMatchObject({ minItems: 1, maxItems: 6 });
-    const accepted = await client.callTool({
-      name: "relay_send_message",
-      arguments: { recipients, text: "Seven total", idempotency_key: "cap-six" },
-    });
-    expect(accepted.isError).not.toBe(true);
-    expect(fake.calls.sendToUser).toHaveBeenCalledOnce();
-    expect(fake.calls.sendToUser).toHaveBeenCalledWith({
-      to: recipients,
-      message: {
-        parts: [{ type: "text", value: "Seven total" }],
-        idempotency_key: "cap-six",
-      },
-    });
-    const rejected = await client.callTool({
-      name: "relay_send_message",
-      arguments: {
-        recipients: [...recipients, "agent6"],
-        text: "Eight total",
-        idempotency_key: "cap-seven",
-      },
-    });
-    expect(rejected.isError).toBe(true);
-    expect(fake.calls.sendToUser).toHaveBeenCalledOnce();
-    expect(fake.calls.requestContact).not.toHaveBeenCalled();
+  it("runs TypeScript and captures return values and console output", async () => {
+    const s=await ready(); const r=await s.execute('async function run(client) { const n: number = 2 + 2; console.log("answer", n); return { n, hasClient: !!client }; }');
+    expect(r.isError).not.toBe(true); expect(result(r)).toEqual({n:4,hasClient:true}); expect(text(r)).toContain("answer 4"); expect(s.fixture.fetch).not.toHaveBeenCalled();
   });
-
-  it("redacts Agent Tokens from tool failures", async () => {
-    const token = "rly_tool_secret_012345";
-    const fake = fakeRelay();
-    fake.calls.listChats.mockRejectedValueOnce(
-      new Error(`upstream echoed ${token}`),
-    );
-    const client = await connect(fake.client, [token]);
-    const result = await client.callTool({
-      name: "relay_list_chats",
-      arguments: {},
+  it("executes the real SDK with the existing Agent Token only on the host", async () => {
+    const s=await ready(); const r=await s.execute('async function run(client) { return await client.contactCard.retrieve(); }');
+    expect(r.isError).not.toBe(true); expect(result(r)).toEqual({id:CHAT,handle:"fixture.dev"});
+    const request=s.fixture.fetch.mock.calls[0] as unknown as [string,RequestInit];
+    expect(String(request[0])).toBe("http://127.0.0.1:1/v1/contact_card");
+    expect(new Headers(request[1].headers).get("authorization")).toBe(`Bearer ${TOKEN}`);
+    expect(text(r)).not.toContain(TOKEN);
+  });
+  it("chains SDK calls and preserves idempotency and typed parameters", async () => {
+    const fetch=vi.fn(async () => Response.json({chat_id:CHAT,message:{id:"sent"}}, {status:202})); const s=await ready({},sdk(fetch));
+    const r=await s.execute(`async function run(client) { return await client.chats.messages.send(${JSON.stringify(CHAT)}, {message:{parts:[{type:"text",value:"fixture only"}],idempotency_key:"mcp-two-tools-test"}}); }`);
+    expect(r.isError).not.toBe(true); const req=fetch.mock.calls[0] as unknown as [string,RequestInit];
+    expect(String(req[0])).toContain(`/v1/chats/${CHAT}/messages`); expect(new Headers(req[1].headers).get("idempotency-key")).toBe("mcp-two-tools-test");
+  });
+  it("preserves SDK pagination methods and async iteration", async () => {
+    const fetch=vi.fn(async (url: unknown) => Response.json(String(url).includes("cursor=next") ? {chats:[{id:"second"}],next_cursor:null} : {chats:[{id:"first"}],next_cursor:"next"}));
+    const s=await ready({},sdk(fetch)); const r=await s.execute('async function run(client) { const page = await client.chats.listChats(); const next = page.hasNextPage(); const ids = []; for await (const item of page) ids.push(item.id); return {next,ids}; }');
+    expect(r.isError).not.toBe(true); expect(result(r)).toEqual({next:true,ids:["first","second"]}); expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it("returns backend errors for invalid tokens and redacts collected credentials", async () => {
+    const fetch=vi.fn(async () => Response.json({error:{message:`Denied ${TOKEN}`,code:2004,status:401}}, {status:401})); const s=await ready({},sdk(fetch));
+    const r=await s.execute('async function run(client) { return await client.contactCard.retrieve(); }');
+    expect(r.isError).toBe(true); expect(text(r)).toContain("[REDACTED]"); expect(text(r)).not.toContain(TOKEN);
+  });
+  it("preserves HTTP status when submitted code handles an SDK error", async () => {
+    const fetch=vi.fn(async () => Response.json({error:{message:"Denied",status:401}}, {status:401})); const s=await ready({},sdk(fetch));
+    const r=await s.execute('async function run(client) { try { await client.contactCard.retrieve(); } catch (error) { return {status:error.status}; } }');
+    expect(result(r)).toEqual({status:401});
+  });
+  it("keeps tokens out of reflected client state, results, logs, and errors", async () => {
+    const s=await ready(); const r=await s.execute('async function run(client) { console.log(client); return {hasKey: "apiKey" in client, hasTransport: "transport" in client.chats, constructor: typeof client.constructor}; }');
+    expect(result(r)).toEqual({hasKey:false,hasTransport:false,constructor:"undefined"}); expect(text(r)).not.toContain(TOKEN);
+    const echoed=await s.execute(`async function run(client) { console.log(${JSON.stringify(TOKEN)}); return ${JSON.stringify(TOKEN)}; }`);
+    expect(text(echoed)).not.toContain(TOKEN); expect(text(echoed)).toContain("[REDACTED]");
+  });
+  it("uses the same missing-token error without inventing credentials", async () => {
+    const client=await connect({authContext:{env:{RELAY_CONFIG_PATH:"/tmp/relay-mcp-definitely-absent-profile-two-tools.json",RELAY_API_URL:"http://127.0.0.1:1"}}});
+    const r=await client.callTool({name:"execute",arguments:{code:"async function run(client) { return 4; }"}});
+    expect(r.isError).toBe(true); expect(text(r)).toContain("No Agent Token");
+  });
+  it("guards production before network with only an environment token in a staging build", async () => {
+    const requests: string[] = [];
+    const fetch = vi.fn(async (input: unknown) => {
+      const url = String(input); requests.push(url);
+      if (new URL(url).origin === "https://api.relayapp.im") throw new Error("PRODUCTION BLOCKED BEFORE NETWORK");
+      return Response.json({ handle: "fixture.dev" });
     });
-    expect(result.isError).toBe(true);
-    expect(JSON.stringify(result)).not.toContain(token);
-    expect(JSON.stringify(result)).toContain("[REDACTED]");
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const client = await connect({ authContext: { env: {
+        RELAY_AGENT_TOKEN: TOKEN,
+        RELAY_CONFIG_PATH: "/tmp/relay-mcp-fresh-only-token-absent.json",
+      } } });
+      const docs = await client.callTool({name:"search_docs",arguments:{query:"contact card"}});
+      expect(docs.isError).not.toBe(true); expect(requests).toEqual([]);
+      const r = await client.callTool({name:"execute",arguments:{code:"async function run(client) { return await client.contactCard.retrieve(); }"}});
+      expect(r.isError).not.toBe(true);
+      expect(requests).toEqual(["https://api.staging.relayapp.im/v1/contact_card"]);
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it("does not expose process, shell, filesystem, arbitrary fetch, or host constructors", async () => {
+    const s=await ready(); const r=await s.execute('async function run(client) { return [typeof process, typeof require, typeof fetch, typeof Deno, typeof Buffer, console.log.constructor("return typeof process")()]; }');
+    expect(result(r)).toEqual(Array(6).fill("undefined"));
+    for (const code of ['async function run(client) { return require("node:fs"); }','async function run(client) { return client.chats.constructor.constructor("return process")(); }']) expect((await s.execute(code)).isError).toBe(true);
+  });
+  it("rejects imports, missing run, bad syntax, and invented SDK methods", async () => {
+    const s=await ready();
+    for (const code of ['import fs from "node:fs"; async function run(client) {}','const n = 1;','async function run(client) { let = ; }','async function run(client) { return client.talk(); }']) expect((await s.execute(code)).isError,code).toBe(true);
+  });
+  it("does not persist guest globals between calls", async () => {
+    const s=await ready(); await s.execute('async function run(client) { globalThis.saved = 42; return 42; }');
+    expect(result(await s.execute('async function run(client) { return typeof globalThis.saved; }'))).toBe("undefined");
+  });
+  it("interrupts infinite loops and unresolved promises", async () => {
+    const s=await ready({executionLimits:{timeoutMs:75}});
+    for (const code of ['async function run(client) { while (true) {} }','async function run(client) { await new Promise(() => {}); }']) { const r=await s.execute(code); expect(r.isError).toBe(true); expect(text(r)).toMatch(/timed out|interrupt/i); }
+  });
+  it("bounds output and still accepts a later execution", async () => {
+    const s=await ready({executionLimits:{outputBytes:512}});
+    expect((await s.execute('async function run(client) { return "x".repeat(5000); }')).isError).toBe(true);
+    expect(result(await s.execute('async function run(client) { return 4; }'))).toBe(4);
+  });
+  it("bounds guest memory without breaking a later runtime", async () => {
+    const s=await ready({executionLimits:{memoryBytes:2*1024*1024}});
+    expect((await s.execute('async function run(client) { return "x".repeat(10_000_000); }')).isError).toBe(true);
+    expect(result(await s.execute('async function run(client) { return 4; }'))).toBe(4);
+  });
+  it("cancels pending SDK requests when the execution ends", async () => {
+    let cancelled = false;
+    const fetch=vi.fn(async (_input: unknown, options: RequestInit | undefined) => new Promise<Response>((_resolve,reject) => {
+      options?.signal?.addEventListener("abort", () => { cancelled=true; reject(new Error("cancelled")); }, {once:true});
+    }));
+    const s=await ready({executionLimits:{timeoutMs:75}},sdk(fetch));
+    expect((await s.execute('async function run(client) { return await client.contactCard.retrieve(); }')).isError).toBe(true);
+    await new Promise(resolve=>setTimeout(resolve,10));
+    expect(cancelled).toBe(true);
   });
 });

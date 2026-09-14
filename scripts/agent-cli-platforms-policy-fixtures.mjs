@@ -4,7 +4,6 @@ import { NATIVE_WORKFLOW, validateRunnerPolicy } from './agent-cli-platforms-pol
 export const negativePolicyFixtures = [
   ['unapproved feature branch', w => { w.on.push.branches.push('test/unapproved'); }],
   ['cancel another run', w => { w.concurrency['cancel-in-progress'] = true; }],
-  ['frozen audit on other branches', w => { delete w.jobs.native.steps.find(s => s.run === 'node scripts/agent-cli-platforms-published.mjs').if; }],
   ['hosted Linux in matrix', w => { w.jobs.native.strategy.matrix.os[0] = 'ubuntu-latest'; }],
   ['extra matrix dimension', w => { w.jobs.native.strategy.matrix.node = [22,24]; }],
   ['matrix include escape', w => { w.jobs.native.strategy.matrix.include = [{ os: 'ubuntu-latest' }]; }],

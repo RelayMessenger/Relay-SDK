@@ -1,3 +1,4 @@
+import { installedConsoleFixture } from "./agent-cli-console-fixture.mjs";
 // Installed CLI/SDK image regression derived from src/local-image-flow.test.ts.
 // The injected fetch never reaches a network endpoint.
 import assert from 'node:assert/strict';
@@ -12,7 +13,7 @@ if (process.platform === 'win32') {
   const { protectWindowsPath } = await import(pathToFileURL(join(consumer, 'node_modules/relaymessenger/dist/runtime-connect/windows-acl.js')));
   await protectWindowsPath(home, true);
 }
-const secret = `rly_live_${'I'.repeat(43)}`;
+const secret = `rel_token_${'I'.repeat(43)}`;
 const base = 'https://api.staging.relayapp.im';
 const handle = 'installed_image.dev';
 const attachment = '019a2123-1234-7890-abcd-123456789abc';
@@ -28,12 +29,12 @@ const deps = {
   isInteractive: false, stdout: text => output.push(text), stderr: text => output.push(text),
   fetch: async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
-    assert.equal(url.origin, base);
+    assert.ok([base, "https://console.staging.relayapp.im"].includes(url.origin));
     const method = init?.method ?? 'GET';
     calls.push(`${method} ${url.pathname}`);
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
-    if (method === 'POST' && url.pathname === '/v1/agents') {
-      assert.equal(new Headers(init.headers).has('authorization'), false);
+    if (method === 'POST' && url.pathname === '/api/orgs/org_fixture/agents') {
+      assert.equal(new Headers(init.headers).get('authorization'), 'Bearer rel_org_installedFixtureOnly');
       assert.equal(body.image_url, undefined);
       return Response.json({ agent: card, secret, share_url: `https://staging.relayapp.im/@${handle}` }, { status: 201 });
     }
@@ -57,8 +58,11 @@ const deps = {
     throw Error('Unexpected injected fixture request');
   },
 };
+const consoleAuth = await installedConsoleFixture(consumer, deps.configContext, card);
+deps.consoleLogin = consoleAuth.login;
+deps.fetch = consoleAuth.wrap(deps.fetch);
 assert.equal(await runCLI(['agents', 'create', '--image', image, '--json'], deps), 0);
-assert.deepEqual(calls, ['POST /v1/agents', 'GET /v1/contact_card', 'POST /v1/attachments', 'PUT /fixture/upload', `GET /v1/attachments/${attachment}`, 'PATCH /v1/contact_card']);
+assert.deepEqual(calls, ['POST /api/orgs/org_fixture/agents', 'GET /v1/contact_card', 'POST /v1/attachments', 'PUT /fixture/upload', `GET /v1/attachments/${attachment}`, 'PATCH /v1/contact_card']);
 assert.equal(JSON.parse(output[0]).image_url, promoted.image_url);
 assert.equal(JSON.parse(output[0]).image.status, 'updated');
 assert.ok(!output.join('').includes(secret) && !output.join('').includes('unrelated-env-identity'));

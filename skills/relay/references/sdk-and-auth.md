@@ -49,8 +49,7 @@ custom origin but does not enforce HTTPS for you.
 
 Use only the public resources exported by this version:
 
-- `agents` for scoped deletion, and static `Relay.createAgent` for anonymous
-  creation;
+- `agents` for authenticated deletion of existing developer-managed agents;
 - `chats`, including `messages` and `participants`;
 - `messages`;
 - `attachments`;
@@ -59,48 +58,39 @@ Use only the public resources exported by this version:
 - `webhookSubscriptions`;
 - `webhooks`;
 - `websocket`;
-- `contactCard`;
-- `contactRequests`.
+- `contactCard`.
 
 The SDK defaults to a 15-second request timeout and two retries. Message sends
 are retried only when they carry an idempotency key. Reads, idempotent HTTP
 methods, and operations marked safe by the SDK can also be retried.
 
-## Developer-agent lifecycle
+## Organization-owned agent provisioning
 
-Only use creation when a new identity is intended:
+Create new agents in an authenticated Relay Console organization:
 
-```typescript
-const created = await Relay.createAgent(
-  { token_name: "My integration" },
-  { baseURL: "https://api.staging.relayapp.im" },
-);
-// Save created.secret in trusted private storage before continuing.
-// Never log the response, put its secret in a QR, or include it in a URL.
-const agent = new Relay({
-  apiKey: created.secret,
-  baseURL: "https://api.staging.relayapp.im",
-});
-await agent.contactCard.retrieve();
+```sh
+npx relaymessenger@staging login
+npx relaymessenger@staging agents create
 ```
 
-The response contains `agent`, `secret`, and `share_url`. The card has a Handle,
-not a new invented agent ID. Use the returned image and HTTPS share URLs rather
-than reconstructing an asset path. The one-time creation secret has no automatic
-retry/replay recovery mechanism.
+For trusted automation, pipe an organization key through the existing login
+option, then use the same create command:
 
-Creation also accepts optional `handle`, `first_name`, `image_url`, and
-`image_recipe`. A chosen Handle must be available and end in `.dev`; a conflict
-returns `409` instead of silently assigning another. Omitted fields keep their
-random/default values. A native image recipe requires the rendered `image_url`
-alongside it; the SDK's `AgentImageRecipe` type describes the existing format,
-not a new image-generation endpoint.
+```sh
+cat /path/to/private-organization-key | npx relaymessenger@staging login --with-token
+npx relaymessenger@staging agents create
+```
 
-For an intentionally deleted developer-managed identity,
-`await agent.agents.delete(created.agent.handle)` uses its own token. Deletion
-is not automatically retried. On `409`, complete normal durable event processing;
-on an uncertain outcome retain the private credential for diagnosis. A Console
-organization's agent is not made deletable by this developer-agent operation.
+The CLI saves the returned Agent Token privately. Use an existing Agent Token
+with `new Relay({ apiKey })`; the SDK does not register agents anonymously.
+The organization's key is not an Agent Token and cannot send agent messages.
+
+Existing developer-managed identities retain `await agent.agents.delete(handle)`
+using their own Agent Token. Deletion is not automatically retried. A Console
+organization's agent is not made deletable by that developer-agent operation;
+use `relay agents delete` with the organization's Console sign-in and saved
+agent profile. Keep existing profiles and tokens unless that specific agent's
+deletion is intended and confirmed.
 
 ## Errors
 

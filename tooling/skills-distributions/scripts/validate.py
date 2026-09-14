@@ -76,7 +76,7 @@ required_markers = [
     "contactRequests.create",
     "npx relaymessenger@staging",
     "auth login --with-token",
-    "Relay.createAgent",
+    "login --with-token",
     "agent.agents.delete",
     "relay.chats.messages.send",
     "relay.chats.markAsRead",
@@ -90,6 +90,7 @@ for marker in required_markers:
 # Construct retired terms so the validator does not reintroduce them into the
 # repository it scans.
 retired_terms = [
+    "Relay." + "createAgent(",
     "po" + "lling",
     "conversa" + "tions",
     "long" + " poll",
@@ -130,7 +131,7 @@ if claude.get("mcpServers", {}).get("relayDocs", {}).get("url") != (
 
 lock = json_object(LOCK_PATH)
 if lock.get("api", {}).get("commit") != (
-    "1a2245dd775f781b57e0d1f6f3146ebd384c90c3"
+    "d4dc62372194bf929801229740346cdacfe2d5c9"
 ):
     fail("Relay Server lock commit drifted")
 if lock.get("docs", {}).get("commit") != (

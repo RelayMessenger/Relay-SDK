@@ -1,7 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
-import Relay, { RelayAPIError } from "../src/index.js";
+import Relay, { RelayAPIError, type TextPartResponse } from "../src/index.js";
 
 describe("Relay transport", () => {
+  it.each([
+    [{ id: "contact-1", handle: "relay", is_me: true, range: [0, 5] }],
+    null,
+  ] satisfies Array<TextPartResponse["mentions"]>)(
+    "preserves structured mentions on a message read: %j",
+    async (mentions) => {
+      const part: TextPartResponse = {
+        type: "text", value: "relay hello", reactions: null, mentions,
+      };
+      const client = new Relay({
+        apiKey: "token",
+        fetch: async () => Response.json({ id: "message-1", parts: [part] }),
+      });
+      const message = await client.messages.retrieve("message-1");
+      expect(message.parts[0]).toEqual(part);
+      if (message.parts[0]?.type !== "text") throw new Error("Expected text");
+      expect(message.parts[0].mentions).toEqual(mentions);
+    },
+  );
+
   it("preserves the global receiver required by Workers fetch", async () => {
     let receiver: unknown;
     vi.stubGlobal("fetch", async function (
@@ -107,54 +127,6 @@ describe("Relay transport", () => {
       docURL: "https://docs.relayapp.im/error",
       retryable: false,
     });
-  });
-
-  it("uses RelayAPIError for paid-agent HTTP 402 responses", async () => {
-    const client = new Relay({
-      apiKey: "free-agent-token",
-      maxRetries: 3,
-      retryBaseDelayMs: 0,
-      fetch: async () => Response.json({
-        error: {
-          status: 402,
-          code: 2402,
-          message: "A paid Handle is required to Add a user first.",
-          doc_url: "https://docs.relayapp.im/errors/paid-handle-required",
-        },
-        trace_id: "trace-paid-handle-required",
-      }, { status: 402 }),
-    });
-
-    const error = await client.contactRequests
-      .create({ handle: "advait" })
-      .catch((value: unknown) => value);
-    expect(error).toBeInstanceOf(RelayAPIError);
-    expect(error).toMatchObject({
-      status: 402,
-      code: 2402,
-      traceId: "trace-paid-handle-required",
-      docURL: "https://docs.relayapp.im/errors/paid-handle-required",
-      retryable: false,
-    });
-  });
-
-  it("does not retry Add requests", async () => {
-    let calls = 0;
-    const client = new Relay({
-      apiKey: "paid-agent-token",
-      maxRetries: 3,
-      retryBaseDelayMs: 0,
-      fetch: async () => {
-        calls += 1;
-        return Response.json(
-          { error: { message: "later" } },
-          { status: 503 },
-        );
-      },
-    });
-    await expect(client.contactRequests.create({ handle: "advait" }))
-      .rejects.toBeInstanceOf(RelayAPIError);
-    expect(calls).toBe(1);
   });
 
   it("uploads raw bytes without Relay authorization", async () => {

@@ -105,6 +105,7 @@ function handle(id: string, handleName: string) {
     kind: "user",
     about: null,
     verified: false,
+    ...{ is_contact: true },
   };
 }
 

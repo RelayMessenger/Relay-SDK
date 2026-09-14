@@ -2,8 +2,6 @@ import { RelayAPIError, isAbortError } from "./errors.js";
 import { ChatsPage, MessagesPage } from "./pagination.js";
 import type {
   AcceptedResponse,
-  AgentCreateParams,
-  AgentCreateResponse,
   Attachment,
   AttachmentCreateParams,
   AttachmentCreateResponse,
@@ -23,14 +21,11 @@ import type {
   ContactCardRetrieveParams,
   ContactCardRetrieveResponse,
   ContactCardUpdateParams,
-  ContactRequestCreateParams,
-  ContactRequestCreateResponse,
   Message,
   MessageAddReactionParams,
   MessageAddReactionResponse,
   MessageCreateParams,
   MessageCreateResponse,
-  MessageEditParams,
   MessageListParams,
   MessageSendParams,
   MessageSendResponse,
@@ -66,8 +61,6 @@ export interface RelayOptions {
   retryBaseDelayMs?: number;
   fetch?: FetchLike;
 }
-
-export type AgentCreateOptions = Omit<RelayOptions, "apiKey" | "webhookSecret"> & RequestOptions;
 
 interface InternalRequest {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -106,13 +99,13 @@ const pathID = (value: string): string => encodeURIComponent(value);
 
 class Transport {
   readonly baseURL: string;
-  readonly #apiKey: string | undefined;
+  readonly #apiKey: string;
   readonly #fetch: FetchLike;
   readonly #maxRetries: number;
   readonly #timeout: number;
   readonly #retryBaseDelayMs: number;
 
-  constructor(options: Omit<RelayOptions, "apiKey"> & { apiKey?: string }) {
+  constructor(options: RelayOptions) {
     this.baseURL = (options.baseURL ?? "https://api.relayapp.im").replace(/\/+$/, "");
     this.#apiKey = options.apiKey;
     const selectedFetch = options.fetch ?? globalThis.fetch;
@@ -145,8 +138,7 @@ class Transport {
         ? AbortSignal.any([request.options.signal, timeoutSignal])
         : timeoutSignal;
       const headers = new Headers(request.options?.headers);
-      if (this.#apiKey) headers.set("authorization", `Bearer ${this.#apiKey}`);
-      else headers.delete("authorization");
+      headers.set("authorization", `Bearer ${this.#apiKey}`);
       headers.set("accept", "application/json");
       if (request.body !== undefined) headers.set("content-type", "application/json");
       if (request.idempotencyKey) {
@@ -469,37 +461,6 @@ export class Messages {
     });
   }
 
-  /**
-   * Edits the text of one part of a Message this Agent sent. Only text parts
-   * can be edited, five times at most, and only within 15 minutes of the
-   * original send.
-   */
-  edit(
-    messageID: string,
-    body: MessageEditParams,
-    options?: RequestOptions,
-  ): Promise<Message> {
-    return this.transport.request({
-      method: "PATCH",
-      path: `/v1/messages/${pathID(messageID)}`,
-      body,
-      options,
-    });
-  }
-
-  /**
-   * Unsends a Message this Agent sent, for up to 2 minutes after sending it.
-   * The Message keeps its place in both transcripts and carries no parts from
-   * here on.
-   */
-  unsend(messageID: string, options?: RequestOptions): Promise<void> {
-    return this.transport.request({
-      method: "DELETE",
-      path: `/v1/messages/${pathID(messageID)}`,
-      options,
-    });
-  }
-
   addReaction(
     messageID: string,
     body: MessageAddReactionParams,
@@ -689,22 +650,6 @@ export class ContactCard {
   }
 }
 
-export class ContactRequests {
-  constructor(private readonly transport: Transport) {}
-
-  create(
-    { handle }: ContactRequestCreateParams,
-    options?: RequestOptions,
-  ): Promise<ContactRequestCreateResponse> {
-    return this.transport.request({
-      method: "POST",
-      path: "/v1/contact_requests",
-      body: { handle },
-      options,
-    });
-  }
-}
-
 export class BlockedHandles {
   constructor(private readonly transport: Transport) {}
 
@@ -773,14 +718,6 @@ export class Agents {
 }
 
 export class Relay {
-  /** Bootstrap a new identity. The one-time secret is never retried/replayed. */
-  static createAgent(body: AgentCreateParams = {}, options: AgentCreateOptions = {}): Promise<AgentCreateResponse> {
-    const { apiKey: _ignored, ...transportOptions } = options as AgentCreateOptions & { apiKey?: string };
-    return new Transport(transportOptions).request({
-      method: "POST", path: "/v1/agents", body, options, expectedStatus: 201,
-    });
-  }
-
   readonly agents: Agents;
   readonly baseURL: string;
   readonly chats: Chats;
@@ -789,7 +726,6 @@ export class Relay {
   readonly webhookEvents: WebhookEvents;
   readonly webhookSubscriptions: WebhookSubscriptions;
   readonly contactCard: ContactCard;
-  readonly contactRequests: ContactRequests;
   readonly blockedHandles: BlockedHandles;
   readonly websocket: WebSocket;
   readonly webhooks: Webhooks;
@@ -805,7 +741,6 @@ export class Relay {
     this.webhookEvents = new WebhookEvents(transport);
     this.webhookSubscriptions = new WebhookSubscriptions(transport);
     this.contactCard = new ContactCard(transport);
-    this.contactRequests = new ContactRequests(transport);
     this.blockedHandles = new BlockedHandles(transport);
     this.websocket = new WebSocket(transport);
     this.webhooks = new Webhooks(options.webhookSecret ?? null);

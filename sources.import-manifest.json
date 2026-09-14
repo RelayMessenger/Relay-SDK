@@ -41,7 +41,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/README.md",
       "source_sha256": "65d47fc483027964b289b70c9f928a6c8532a1f43d94218ab275e2c3a1a7e93a",
-      "destination_sha256": "e619e02ece7796b254cd8f3b76f905e84010715838a34b15b7856805ad99e5eb",
+      "destination_sha256": "0ef17d3fb08b58cee45cd49522c94157e7a379a01cdb8d7c9ea40a47de1f64a3",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -52,7 +52,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/package.json",
       "source_sha256": "b9d0f5bba2c5ba5eea904ca4ad490795c01b0a67bd5592d7fdbea50a7ed8b29b",
-      "destination_sha256": "a924c092b8cbd5490360575edc3175014d370e70d85fd80e3ae18e2a32b1a32e",
+      "destination_sha256": "7d24b2c1dc5f56b60286c15527c94af8eeda03a35628b289f942d1707bb10bac",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -63,7 +63,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/src/client.ts",
       "source_sha256": "25aff139821b261b9f6edcc77e41c11d0ac0b594258ea401099be9877c5c6dd6",
-      "destination_sha256": "d69939d3d0aa7b4072f56ff76ea8aecb1d73cbf8a19d7c6e2e4586caf4d21d44",
+      "destination_sha256": "634b70902d0d41303172a8baf82ff3fd128519dbaf0a5ec1a693c1f57272bba2",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -85,7 +85,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/src/index.ts",
       "source_sha256": "10779947a299636b36b91a638a4434aeb99bbcafdbf5f9ad495e45ddb71213d0",
-      "destination_sha256": "2a6e557f00af1e7931665b1277cc4a0c6ce27ccf74a23351ecee1755f15465dd",
+      "destination_sha256": "b2cda41e2f314893ca179aab793e8df69f7fbceb44b7f1efe8d32ad9c64adaf9",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -96,7 +96,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/src/operations.ts",
       "source_sha256": "317b413b75f333da657357a7e876a472bc7dc38115e1dc742818cae39b16840d",
-      "destination_sha256": "03a4c2403970881a8af419a7e92aebdb867294826666d723e5c484bc78701eb1",
+      "destination_sha256": "f42971c9db1824bbcb356874afc175cd0b88800fdcef969ac6b8947b92805eed",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -118,7 +118,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/src/types.ts",
       "source_sha256": "4251e87db881e038ec58aba45537842e83fea2fe3436019b8859cd3bcb1d9847",
-      "destination_sha256": "dfbf57b7969f6abe53152474701212a15bc40d98ebc819439970db7f52609718",
+      "destination_sha256": "76dfb9f303ec685adb215f6fe20d7ecd27e270b68d5fe7aa8fef21097ffc13b6",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -129,10 +129,10 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/src/webhooks.ts",
       "source_sha256": "163d40541967de3e030fe153fda1bc0153b55578545dd1416b299e497fff3ae0",
-      "destination_sha256": "163d40541967de3e030fe153fda1bc0153b55578545dd1416b299e497fff3ae0",
+      "destination_sha256": "de418791d4c28dccabfd6c8a27629c23c84766795614cce6e1db98bada028d46",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/sdk/src/websocket.ts",
@@ -151,7 +151,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/test/client.test.ts",
       "source_sha256": "1ab2a6b95b2263703e0e8dc986011e78a47a40e1d633be1034eaea43e7c91281",
-      "destination_sha256": "3338c053fa1268fb7ad4969164e8fbe8d1f9b691f05e8eebde614273314464b6",
+      "destination_sha256": "6a6404a7cd5db2b8a78e977cf950210ba9ccff64ca487e10799e7745fe3982db",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -195,7 +195,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/test/request-shapes.test.ts",
       "source_sha256": "2bf2720f298f464364763c00a84da295fb37fc09f40ec397a51a5ff21fdb02a6",
-      "destination_sha256": "c249ecac0c71b59a7388c2d5fa8cfd45cce03819588da1ab7f4ae805a405a716",
+      "destination_sha256": "0edb43a18c88728e61dc5e2916c8900760d6d255ec28f9aa3fe51519b8093811",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -206,7 +206,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/test/webhooks.test.ts",
       "source_sha256": "188669bcba05c6b1b25f67d123730974b80cfdb3962a90ad5a327c14d66f9eb2",
-      "destination_sha256": "78739da4528c050327e13d62065494a7e4534e92aff8d2930f146e898fe10892",
+      "destination_sha256": "69acc5e18cb682b86e34a077d003ba8d5e1b0c98ae8a1982f10afcbbf5291d4b",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -217,7 +217,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/test/websocket.test.ts",
       "source_sha256": "a6277cb7a4ce043709c5540b61af06da9050b28bda7b6dd1e0090e32fbbc781e",
-      "destination_sha256": "c04d5dbbab2e69a0098a6d2d049971f10167b41af2ee9d3223e63bc9ae33e930",
+      "destination_sha256": "c3a35856955dc477ed279de8278a96f30f8b4926d3c0e64588b7fa8484ffb1ff",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -283,7 +283,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "README.md",
       "source_sha256": "331f55b569eb2f908b35f4fe7fec03c421d16e8f79e4a81f0a8ad0a5f4b4a621",
-      "destination_sha256": "2ac5dfd57650ce24f3ddc6070fa26bd34157dd234d2bf7ef99d61ac39d7564e8",
+      "destination_sha256": "5a44d1b7382fd6dd1babc7417f4ab38b1b2b9708acdd465791f0368215bdbbe3",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -294,7 +294,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "contracts/README.md",
       "source_sha256": "90f808583f160394d5d2b692702b8ad898c17dca96ba2f92a60ce91eeba78e6c",
-      "destination_sha256": "496d94d076983da5f99b2b5cddfa414866c917a9a8ec6be41855e15741ae0f1e",
+      "destination_sha256": "567d17dc07036eca26cd7bac11b5d1c089acfd71fd69207ff48d525694d8e9a1",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -305,7 +305,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "contracts/relay-openapi.yaml",
       "source_sha256": "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5",
-      "destination_sha256": "5458497fe8db4ee7dfe6bef67f2803137575d3ea4d835748290a5c9f8d906791",
+      "destination_sha256": "81d23529476ae77b3b7f7dfc931d2e0e421d3c91e20c59136e2deef9123f722e",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -327,7 +327,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "package.json",
       "source_sha256": "7096ce19bf4b960b3d1e15de735dd9b045d1e8a42495f25d1852fe69c4b29452",
-      "destination_sha256": "d9169ab9d26e7439a42283fc5e5061b3f811ecc7f2f2506866c78c2adce21391",
+      "destination_sha256": "c1cb8b51f3c667271e8d55cbb9cf8576feee2ec2fef8b25bfeaee8caf120bba7",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -349,7 +349,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "src/adapter.ts",
       "source_sha256": "5cf9ae13db199cdffa265b7499712a250cdaf0b28fcf47f8435806245fbeb8d2",
-      "destination_sha256": "adc148cb5f4c40790168500d22b6670a13ab6410e510fe23342affee1032dfb0",
+      "destination_sha256": "4b01518ce19e874fb39645a3b10efa14015fd150b3ec4e951e0058d4c6bfd0ef",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -448,7 +448,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "src/types.ts",
       "source_sha256": "0e5078cc7f101bcab83f6bf6574a94e9ceb2d97d032084c373cecff56e978bd8",
-      "destination_sha256": "1828fe7e0ba6489e89bce9069ca4cd33c873d72327301fa73f7f1ebd3c0dafa3",
+      "destination_sha256": "6c812342f21fc11e5ce26c9d1e4e84699b51cdaea38d6bbdc79c5f7ea0849274",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -459,7 +459,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "src/webhook.ts",
       "source_sha256": "d01b0d345d36e030449d62af553a6f972e9451eb50162cd0b03def556211258d",
-      "destination_sha256": "f0c4fd730f9de7d425218e9670ed8cb7e166ad78563377fd0ca435c59dc1c6de",
+      "destination_sha256": "606e8ac21d421879d9ebe606cedfd8eac9c1007a3c9bfe6711f19e69df723711",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -470,7 +470,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "test/adapter.test.ts",
       "source_sha256": "e9ba85c37bd36735cb391a56728cd7b22f21839072366e8ee2b5b834e95cd9b8",
-      "destination_sha256": "1fabbc18b3016bb35fa62f702a7c2e990563a30605391cf6606327a8e1ccb2e6",
+      "destination_sha256": "a0f3d1f39b8e9b47328e8851cd1e1a18964e0aefc08673fcc9105884dc7979a8",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -503,7 +503,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "test/contract.test.ts",
       "source_sha256": "488cb6a1ccfed304a1903b3677d0ac54a25510d20f5d08bf89c0c45c06bbfcf9",
-      "destination_sha256": "f7b6d754c470914c296f7ae8b68523e279bad0f9b231d5d13fd336f174aec646",
+      "destination_sha256": "0a8b51b323641dbbe8d9506cad48599511560c9906cce93cc88c46814c246d17",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -525,7 +525,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "test/helpers.ts",
       "source_sha256": "a9fa5c03a4dbef3ddfe180c10546c9313d51cda88e89c94a15961ae5b5d4729e",
-      "destination_sha256": "176fa27e7855a7ff315d960c71fe561a56d811f4a56d6d62e9a51a52573af629",
+      "destination_sha256": "6c6a0586b884097ae71f8c7b8026f18ce0b8d6f62dc16cc829658ebc80bc0244",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -690,7 +690,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "README.md",
       "source_sha256": "506f934920fcdd120f9802f4a465ee326aff5c051a99238e53115624398814a9",
-      "destination_sha256": "79dbc0e459f1913407d32c370a69cc9e244945d59303931aeacd435daa3381c7",
+      "destination_sha256": "001221f8fef05c6d77373653c9d56b00a65307d761da7dbd981457e64f501d5d",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -701,7 +701,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "contracts/sdk-v1-operations.sha256",
       "source_sha256": "837dfc17fc5477a14f0b0751149302146bd77221c0c471e6ea4ff90faa0c12e2",
-      "destination_sha256": "7b9e3591e1d3defe238232b2234564ee255b248a31b3ec0fd2e808fd67255caa",
+      "destination_sha256": "6cfe8798e77388bfba3af1c1a79cc4c6cc7f5da121f2dad5c0fab40df21da262",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -712,7 +712,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "package.json",
       "source_sha256": "271918f460e07d8f61106da4bfbda7e2190a6b61214c809bd880c3fc51cb6bcd",
-      "destination_sha256": "a46fff7b91a330f081ed7215587cbd3ef9b2c2ead35e69bf42a281b08a6f5ec9",
+      "destination_sha256": "94cad77652ed65c0d57b2dd91765b94dc0bdf546249f46e21682b6e214a6292f",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -723,10 +723,10 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "scripts/check-boundaries.mjs",
       "source_sha256": "6c8de7555076e2bab49e613089cf9cfefef005f1ac4461cbdceb1a5ed623c05a",
-      "destination_sha256": "6c8de7555076e2bab49e613089cf9cfefef005f1ac4461cbdceb1a5ed623c05a",
+      "destination_sha256": "78a98809a8e85452025082c11f2debf5c2b3c0bbcdaf4c46fd69d4ac6fcdffdd",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/cli/scripts/check-contract.mjs",
@@ -734,7 +734,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "scripts/check-contract.mjs",
       "source_sha256": "cd9961f8f6f19fdaafcf0b3cfb47fdf0f6f21426741f91bb3f0e3ca57170cb5b",
-      "destination_sha256": "431e9a17a556b781bd961c8cad8536e2b723c9db99ebfc98af1b429d3bdaa2d9",
+      "destination_sha256": "6558f2138795f29a56a36c616f36c77d470f85ca2daae98dd84993b428e3c20c",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -745,7 +745,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "scripts/tarball-smoke.mjs",
       "source_sha256": "b3ac7e97b05aebfcafc403e8dd300bd5c0ebed5be2b1c5c482ca4c8e416e31be",
-      "destination_sha256": "2663ea1bcf44c76d6fb1e0f16db510dc1233c1dd9a0de7dadc81a67c72d99038",
+      "destination_sha256": "fcb683f84bd91ed192659fb05d1c1a90799ed6f8a63f769908b652e7fa5fb039",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -756,10 +756,10 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/cli.ts",
       "source_sha256": "a03cf34f836287cf6a5874e54c5ac213f84ad986f446cee279f1fe91838348bb",
-      "destination_sha256": "a03cf34f836287cf6a5874e54c5ac213f84ad986f446cee279f1fe91838348bb",
+      "destination_sha256": "292d78677ab26b8fc6ce9dac9f8dbe479ad684a658c64f9b319a2cb4c6f86cf4",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/cli/src/client.ts",
@@ -767,10 +767,10 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/client.ts",
       "source_sha256": "cd72317cb52815117197d0b74c7e2e75b276663353dd351d8dba64639000b568",
-      "destination_sha256": "cd72317cb52815117197d0b74c7e2e75b276663353dd351d8dba64639000b568",
+      "destination_sha256": "ce6ae9c36f96be44bc10cd8b890fab5d3df02370ddb2bfd089e47735151769b2",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/cli/src/config.test.ts",
@@ -778,7 +778,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/config.test.ts",
       "source_sha256": "7122c4d4989b618f61c5cc320c6dd319fd0d4698e5f643a3c24c4f3ecab612da",
-      "destination_sha256": "b57d1899ff9f669362becc6e929f4cf8f87168f093391e059058d132ece19553",
+      "destination_sha256": "18195582400e482d0dceae27c7c3d408b657e8fdc55314ebbe2b56e1405cd09d",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -789,7 +789,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/config.ts",
       "source_sha256": "4b641e37fda663f328c994b4b32e755425c38b5005827439db188550553ce49f",
-      "destination_sha256": "6d51b7a83711d60b945dbabd93814543010e1de1f47aaf81d7f25a74f560907b",
+      "destination_sha256": "56259500ecefef90260a51854f9839773d516168017374acb9f987829f10e7cc",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -811,7 +811,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/event-listen.test.ts",
       "source_sha256": "f19bfc95724e7a5c1d30724c52fd6e5b23378239f6bdf0210bc4a9b1dc5b0bc2",
-      "destination_sha256": "f4198934f67e565a783a8e1965b21177c6371a36e22f6bd3e224ead9a12abbb0",
+      "destination_sha256": "1cc3e5457c1688ebe8d488165ac5be9b1d5d44a0ae41bfa80b3b87848de5d680",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -822,7 +822,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/event-listen.ts",
       "source_sha256": "c413174f9910ee40cda7d549ad26896dbcf3b417c694f62fb19c5ff1f76fe39f",
-      "destination_sha256": "541c6735e69977e87107f09a92b576df331ae85949fc72158826a4404e82427a",
+      "destination_sha256": "cbc53420fc7775a723e1f71665731f3b4b8206232b1deffdbb59a3f88ebaa893",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -855,7 +855,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/program.test.ts",
       "source_sha256": "0e524e2853cfd994c31e8bc4be37fe22d2dab8b3dc8b51d1378f054e25c2a203",
-      "destination_sha256": "dfff88bd937c9485eb2ea33a7f3d0b3663249059a2443c34dcf635765000c193",
+      "destination_sha256": "c4705de217c189fe7be6a57459ddc817f6f5bbeca682b086c60c05f42ab5c597",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -866,7 +866,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "src/program.ts",
       "source_sha256": "518b2a0b33539c4599832e0de3e62902e558879b1a7f5ed4ceac9877e3caed91",
-      "destination_sha256": "1ea553779f7f398044a74196b4d59ea4270c173766f6498c43f8f5b557bc1c3d",
+      "destination_sha256": "25a07f2a686d61150bb19fad4aa20d47a5f6d9a058438897e2a8540585065824",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -921,7 +921,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "README.md",
       "source_sha256": "2fea2139f9c71bdf6b69ce14d193a2daed0418418b66c859f699d4f28e333d17",
-      "destination_sha256": "75c0b27420a49ba850da005d562bf1fd8c489438756629e1a3c41e6e0217ae23",
+      "destination_sha256": "53c7da5551dab7f3f575a280d01458d316ea845ad35c5b8db6c05e3e2f752eb7",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -932,7 +932,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "contracts/sdk-v1-operations.sha256",
       "source_sha256": "837dfc17fc5477a14f0b0751149302146bd77221c0c471e6ea4ff90faa0c12e2",
-      "destination_sha256": "7b9e3591e1d3defe238232b2234564ee255b248a31b3ec0fd2e808fd67255caa",
+      "destination_sha256": "6cfe8798e77388bfba3af1c1a79cc4c6cc7f5da121f2dad5c0fab40df21da262",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -943,7 +943,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "package.json",
       "source_sha256": "5d526432c2b28b9f79b11a6e3231c7b4e0e772b731ac1aae1514ee88bb41f2cf",
-      "destination_sha256": "4073aada55fb60ccd137b53fc770a53f6898ee660524df920eb1badccd02b423",
+      "destination_sha256": "5206aeec4cc8853fed62366a9d08f1185028fe0ef0fa09ff571e650604c0f824",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -954,10 +954,10 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "scripts/check-boundaries.mjs",
       "source_sha256": "3fecd55653559db980c67bbbe1b90ac478d14aada578fad544179720c4e1aac7",
-      "destination_sha256": "3fecd55653559db980c67bbbe1b90ac478d14aada578fad544179720c4e1aac7",
+      "destination_sha256": "4b13ec50520ea7330a05cb2f2763430096619678c648f2bc6cb6904554ac1108",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/mcp/scripts/check-contract.mjs",
@@ -965,7 +965,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "scripts/check-contract.mjs",
       "source_sha256": "cd9961f8f6f19fdaafcf0b3cfb47fdf0f6f21426741f91bb3f0e3ca57170cb5b",
-      "destination_sha256": "2128e6872f50cb6b68351256e06c4564bc247ebf6635c3f5a893807dcabbc89c",
+      "destination_sha256": "fa44e1584cf03d5518e66491c8aaad2fb5b7df665d187f2f50fd9e3a0cab0aa5",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -976,7 +976,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "scripts/inspector-smoke.mjs",
       "source_sha256": "d8a0118dffe62b093864ee45b9ea7a00325ca160c5f88b608403a29e798409a8",
-      "destination_sha256": "1db93edd1aa83235cca82f17d6dec45d9223de05e3b867cbc2d286a779ad502b",
+      "destination_sha256": "700805d6f41833b7833bf2adcfeb65a89dfc5ad366f17c48d4b7c34cb3a01a60",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -987,10 +987,10 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "scripts/protocol-smoke.mjs",
       "source_sha256": "f9a5840f9ae4b3024533d6c2eb0b78c6dd41e76d9289b8f8ddf5033bbdfa0064",
-      "destination_sha256": "f9a5840f9ae4b3024533d6c2eb0b78c6dd41e76d9289b8f8ddf5033bbdfa0064",
+      "destination_sha256": "fbadeb00e5b22aa385eff6c46255e192aa012a83b2dda6084cff4a7f4b7af24d",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/mcp/scripts/tarball-smoke.mjs",
@@ -998,7 +998,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "scripts/tarball-smoke.mjs",
       "source_sha256": "f267c240da6f25c731d832ffdc0038655ea23476ed048d0e84d81ba0f59ccc8f",
-      "destination_sha256": "6067c8569049d31f3998f60cac0d0fcde1186b469a22943d808b75e6468d85dd",
+      "destination_sha256": "4f2efbba6dd26c5d73d0c15ca30241cbfebd7335c1394d096bf7426cfa712655",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1009,7 +1009,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/auth.test.ts",
       "source_sha256": "82d1bb9a7c1eeaa662a6d3a61a67f9e746fbe150432a796a2b6c212d0186ab0b",
-      "destination_sha256": "c4eeedfb9948ec65566dcec4eca6142a3b5a2ea3da708649afede1289ed8c292",
+      "destination_sha256": "537b375d4580e76867ab24d5d012b3c129dc6b9593d31b29d1a0adf51c3d9b77",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1020,7 +1020,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/auth.ts",
       "source_sha256": "feea504dcc1c51ee491e55279c8adbf5257628d197b918db5d848b2eacb8a5b9",
-      "destination_sha256": "25bf45c724ab3c5a080caff4da380e143b43dcb702c3c25965cd34a07bd26040",
+      "destination_sha256": "b75fadd28db98d64ba18730bd9c7151e5bc41c1dd6703ce675c40434e26d4423",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1064,7 +1064,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/server.test.ts",
       "source_sha256": "139f264949013c31d667e8e2ef72619ab2a5ead79ce5a896ecf909c10de80dcd",
-      "destination_sha256": "bf656e82df79b3f6b9bbcf48170c1a55894243faa4451febfad0a11bc67102d4",
+      "destination_sha256": "80429fe585f39d5d1cf17be8c8b176baebc99831bc746dc06e65d1a842ef520b",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1075,7 +1075,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/server.ts",
       "source_sha256": "6040d775b0546cbabe46206f2a87b4b3d67f624163ce2de4c0ec0428dff49156",
-      "destination_sha256": "444746d6a18497657d912c68706adfc79ab948fc5ed907194d177d53feb3d403",
+      "destination_sha256": "92bb8405fab5ff1044b3c54511e64637c58d0b783b2f64a80382139803ef7255",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1086,10 +1086,10 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "tsconfig.json",
       "source_sha256": "1445dd8db045a3fbb54e3d11bd1bde3ac2f0993edb130d479e8a32fb11add94d",
-      "destination_sha256": "1445dd8db045a3fbb54e3d11bd1bde3ac2f0993edb130d479e8a32fb11add94d",
+      "destination_sha256": "a74040aa3597451a18a7f628d9dbed97401e05affaa49220f96614814665b997",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/openclaw/.gitignore",
@@ -1119,7 +1119,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "README.md",
       "source_sha256": "37378dff5e8813fa293b810e73bdae667c9b92610992b7b2917fad0a4a58dda2",
-      "destination_sha256": "022604b8d9f9653203f5405ab986c10565a17362a0f266c57d5a3443e09788f2",
+      "destination_sha256": "9bb7eca3e37d4bc543bcc6d5dbe195863efe8648fbf7569a2255194169f8f482",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1130,7 +1130,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "contracts/relay-openapi.yaml",
       "source_sha256": "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5",
-      "destination_sha256": "5458497fe8db4ee7dfe6bef67f2803137575d3ea4d835748290a5c9f8d906791",
+      "destination_sha256": "81d23529476ae77b3b7f7dfc931d2e0e421d3c91e20c59136e2deef9123f722e",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1141,7 +1141,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "contracts/relay-v1.lock.json",
       "source_sha256": "b4bcb46233c3d140128638aea8b290e963bf9d8949fad2c1d6609c412fd5784d",
-      "destination_sha256": "2b32ef11dd139869ff690c537f51773041914b61a58c322d9d53ea4defff8d91",
+      "destination_sha256": "18b64ac859551c1f70b29f304dbba34cec87a35b4a42c760004e131fb7a37a4d",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1152,7 +1152,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "harness/mock-relay-server.mjs",
       "source_sha256": "589317732fd49b9544cd8c49b048444e5f3757214189107ab95259e67315476c",
-      "destination_sha256": "ac60b1a6a2f27738c639ba02020b396e95fa0a688d072c69380fa18d72d7d413",
+      "destination_sha256": "aa0237c38d5be4bbb1da99871673283629995182a61f49337face245078a41ff",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1185,7 +1185,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "package.json",
       "source_sha256": "29b497316ffdc37e35c1f72b8be7a625f2597f704e4e5f390b21d370ef2540a4",
-      "destination_sha256": "9e839ac866f34d5c7a1b99feb9fc658e2c74097ed1eee81c7a4a82c262fa0c89",
+      "destination_sha256": "0a7acd67fbdde812bcdd23c9f1fd27a8b5a224145df9836c910ae08c475d9a93",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1295,10 +1295,10 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "src/channel.ts",
       "source_sha256": "8bee333306d155d5cb407a6560d8cd01aeceea835400626afe942114478760ab",
-      "destination_sha256": "8bee333306d155d5cb407a6560d8cd01aeceea835400626afe942114478760ab",
+      "destination_sha256": "08ff9b062191f6bc1ec3f4534d3bb2c948cbe1f7a578ee7db23d0e1b139c7a1b",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/openclaw/src/dispatch.test.ts",
@@ -1306,7 +1306,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "src/dispatch.test.ts",
       "source_sha256": "183e4d136dc4bb5c355181724afb7ba147b6ceb02c7344ac583ca1b20b09dbfe",
-      "destination_sha256": "8d4181f97df46e914b027c4405e50af8c6bc230c0045711643f9ae48c1848807",
+      "destination_sha256": "a5ffea0f3a9783705c12087b2f85874a10e28f539736631a12927b533c51d331",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1372,7 +1372,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "src/inbound.test.ts",
       "source_sha256": "d4e4933493e8968e5d62abaf244aea0143b7e5c712918f4d6c627164866b580d",
-      "destination_sha256": "a7fb2eeb225236b2b1f7031b738d05de6dd7ab73c8e1794dfed688aca36a92bd",
+      "destination_sha256": "5156da2f42872a5038a1483f0bcebf7150c06ec16e3425db84724ae7c6ebe0fc",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1471,7 +1471,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "test/contracts.test.mjs",
       "source_sha256": "7f34f5cc839cb8be852fe69c3c692b14d4de99e84122472f6ddedd0d06f9642d",
-      "destination_sha256": "1af519f7b9f5d4d09efba362ebbfe0b093e8bbf0b37d5a8f604eb67e6b80bf97",
+      "destination_sha256": "12e85045cd1f835f79902be77a8b8b23006a89600fae7b85702e10c8cf069b1e",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1515,7 +1515,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": ".claude-plugin/marketplace.json",
       "source_sha256": "6e71333fe92fde3a1593562c798290dea11e3ead076dc61895c2b17ce174a35d",
-      "destination_sha256": "7ee34780a1f10731ad892e3b01f3c8e6831a243830219bc419f5679fd514317f",
+      "destination_sha256": "c7700d1b6358f7a1889c834bc0270d9e99f1364e16104d8e9dc9291b604a78ae",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1526,7 +1526,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": ".claude-plugin/plugin.json",
       "source_sha256": "c2c3ddd7d2fe931077f0b6e5eb41295e5f020720b0a11fea8ae3c9346f666b04",
-      "destination_sha256": "9583531bc0bff9dee7708224293c0699212d23120f57dba8a492eb316853f03e",
+      "destination_sha256": "075ea8ed08a191f7140601e7f4d4770c42af7c4d25c29c23dc5a02877a8f6fbf",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1592,7 +1592,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "README.md",
       "source_sha256": "b0cd5bc3680e80ab411715f147b5cd4165158e6e442989e1061d62daf9fa7b36",
-      "destination_sha256": "e66bb95ee97a5e0b25908ea9ba6320657a24e4a47f170810aa42ae3ed7e30863",
+      "destination_sha256": "4002a5c598a91ff669ccfb34ca958552e13530be7bee488cfc36d8ae3ae96a93",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1625,7 +1625,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "contracts/relay-v1.lock.json",
       "source_sha256": "7eb2d40831ff4ba4dfd9c169e46da260e23396e42a92adc912ecb1f84475eb60",
-      "destination_sha256": "6b9d6dcbd61786b73ce108f3370739ad2e711f30d91fd03a63d1d3aa32717387",
+      "destination_sha256": "538cce5d036d1242e4473d0545c9c4e9492ac0130aa4e1a3c88b368a99a61a94",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1636,7 +1636,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "package.json",
       "source_sha256": "bd3bcfb7d722786d37cb471dbb72a157081b62b0d710b1e2122fa783a89fc31f",
-      "destination_sha256": "885aabf4573b1a3d93e7bc65ffc650662810e22c8d8e9cf5761ef67d7b952f0e",
+      "destination_sha256": "860c563ae18cc1d97e3470b69754542e0f1d757f51cf378aa84c9d7c9cf99fdc",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1647,7 +1647,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "plugin/.claude-plugin/plugin.json",
       "source_sha256": "c2c3ddd7d2fe931077f0b6e5eb41295e5f020720b0a11fea8ae3c9346f666b04",
-      "destination_sha256": "9583531bc0bff9dee7708224293c0699212d23120f57dba8a492eb316853f03e",
+      "destination_sha256": "075ea8ed08a191f7140601e7f4d4770c42af7c4d25c29c23dc5a02877a8f6fbf",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1691,7 +1691,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "plugin/README.md",
       "source_sha256": "b0cd5bc3680e80ab411715f147b5cd4165158e6e442989e1061d62daf9fa7b36",
-      "destination_sha256": "e66bb95ee97a5e0b25908ea9ba6320657a24e4a47f170810aa42ae3ed7e30863",
+      "destination_sha256": "4002a5c598a91ff669ccfb34ca958552e13530be7bee488cfc36d8ae3ae96a93",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1713,7 +1713,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "plugin/contracts/relay-v1.lock.json",
       "source_sha256": "7eb2d40831ff4ba4dfd9c169e46da260e23396e42a92adc912ecb1f84475eb60",
-      "destination_sha256": "6b9d6dcbd61786b73ce108f3370739ad2e711f30d91fd03a63d1d3aa32717387",
+      "destination_sha256": "538cce5d036d1242e4473d0545c9c4e9492ac0130aa4e1a3c88b368a99a61a94",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1724,7 +1724,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "plugin/runtime/server.mjs",
       "source_sha256": "cf0664163b787715525c91d5907e6ae4de61b7c85ec67a3009ba21e3bcc52025",
-      "destination_sha256": "9729d64fdb3fc9aae0dc0f0c0e170ccd33c2f5dcebf5ae83fc86320be4864079",
+      "destination_sha256": "6cc0ff218b8f665ac835262035aae56b496180441f126e676252226a9eae6f72",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -1735,7 +1735,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "runtime/server.mjs",
       "source_sha256": "cf0664163b787715525c91d5907e6ae4de61b7c85ec67a3009ba21e3bcc52025",
-      "destination_sha256": "9729d64fdb3fc9aae0dc0f0c0e170ccd33c2f5dcebf5ae83fc86320be4864079",
+      "destination_sha256": "6cc0ff218b8f665ac835262035aae56b496180441f126e676252226a9eae6f72",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -1768,7 +1768,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "scripts/contract-check.mjs",
       "source_sha256": "6a8ca923959afdf7c66b84ad98a2e0d1398a85c47d9951c487cbce8a5b3e5ae4",
-      "destination_sha256": "7842de2757de54aa53c4e403524b6aa2a08288b53ca198046b1d9f4d38f024a2",
+      "destination_sha256": "344790823a844aaa5ffbd6d70620e0811f8959c786b6898bc1391d7d43c3da00",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1834,7 +1834,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "src/config.ts",
       "source_sha256": "e5b799679eab8340d71e0e2078e720b90f5ea44966c814acdcad497dde054ef0",
-      "destination_sha256": "a47a7bb4a1f206801c966ba738e3a08d5c7d284f31816fe7bbc1daf592a3a20a",
+      "destination_sha256": "2ff5fd84fc09c254aabfc849f0928c49f7e3096f3804f078e88e649f8ab0cc55",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1889,7 +1889,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "test/bridge.test.ts",
       "source_sha256": "eecf6a76f6594675f89277519dce64dd1641945db2abd0292d2644a7a99e3dd5",
-      "destination_sha256": "f67641d4a93dedf628ca3d0053f26178ba16232a5ac6e933872454d6898a59f3",
+      "destination_sha256": "bb7fc51e7e58c4bd159142243fe17a4678be0227f3765a608cab0673e4d558f9",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1900,7 +1900,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "test/channel.test.ts",
       "source_sha256": "4a4f192569ddf953ffc65aa488f6f13dc7342801f5e6c0ae05655bcda4dea034",
-      "destination_sha256": "75f97cc6d00e1f08eafd4067f155be8ad80d91adaea5098347d6c44e6809a745",
+      "destination_sha256": "9426ed725b0be0ee0203df0137ab03f527f96c2d5a38b0f914c84110d37e6905",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1911,7 +1911,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "test/config.test.ts",
       "source_sha256": "0b62295fe94fa6b54fa209b2e876542b50e8ee23bd1906f288380dc0b29ef60c",
-      "destination_sha256": "0d327d1e3b136d35f7412182b3b7a9cb2964f134cad3a3ac8cd4648b22a74638",
+      "destination_sha256": "91dec01aa95d95b174e5ac1f038bc67554be391ba12787e216a5dee90682f59f",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1922,7 +1922,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "test/contracts.test.ts",
       "source_sha256": "bd7f32fbaab18d8529688b87c73664e583b77aabc9fcee15dbcd67c35ecaed14",
-      "destination_sha256": "9634b34423bb47e358eafd0e96e469fc1f6f3ace2cd583173b1bca73f4483cef",
+      "destination_sha256": "6bea7f404971af86788e9fd5b6aaaef733a9db755659911800d5d8df63ff97ce",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1933,7 +1933,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "test/fullSync.test.ts",
       "source_sha256": "6eaa08003f3953782ec974bea0ef9f9fe7f99d89e0ba3d86ec298ed4bea16e91",
-      "destination_sha256": "377d46f6eca76905d350032528b5d8bc5e78499309f169415a29f855bda24740",
+      "destination_sha256": "528209556d8cfbe5dc530cd04168c0d1ddd43cdc99e60db6d801502c99136b76",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1944,7 +1944,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "test/protocol.test.ts",
       "source_sha256": "5dbed20478bee730f00badd7c01cb658991494270a8b28c4695b72772a303bd8",
-      "destination_sha256": "c1f56a424e80ae1d17ef830ebfb9345c5a2bc412c10f18a8c296d6d635480e28",
+      "destination_sha256": "02280123fc5160d3e85984c7ed4bfbbd73564ff91c0d82271d08b405ee935b3e",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1977,7 +1977,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/SKILL.md",
       "source_sha256": "b7158ecddc77ce389cb3ae456ae0b1ab82e0a4ac6c5cd10d16f652ecdfacca84",
-      "destination_sha256": "0f288a49cfe025fc934843f9d52a54a5425b5ac0331ce5ec5422d85be1e9b997",
+      "destination_sha256": "02c872529b78d7029cc38077c8bf7d3743d9e66a7506c0c729bf2cd725197609",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2010,7 +2010,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/chats-and-contacts.md",
       "source_sha256": "1f501d8433e208816c22707f92e734d0639967659691e532b77fab7c48cc9ca6",
-      "destination_sha256": "4c9bc3b3bc64770a2d9c1cd7ac79c8cf5620f2751d0f5a6b1951e27255da706f",
+      "destination_sha256": "5ac8d32a451283fa9c31e9d08b3c575c8d7e1582830f7ee3443ecb8fd2bbd1cc",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2032,7 +2032,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/relay-v1-lock.json",
       "source_sha256": "c18b70f1edfed7cfc6a396ed86c609e667975396d4c3ff57c00a49c0ad7e4ab4",
-      "destination_sha256": "169f18d10eec736013c194886e32dc74daf8fdacb0f80a4cc6bd2612aaff517e",
+      "destination_sha256": "f18ddb2039561aaa701578f309a7f435aa362ed96bf94c34420aef77b53a2eaa",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2043,7 +2043,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/sdk-and-auth.md",
       "source_sha256": "cd328a6b4d60f932404ce1a30b88e61cc0cb6e5dbdbcdc485f53ad2e0b3b50c4",
-      "destination_sha256": "3eb3987196bd8520224c5e6a84041fc5bfde970403529c03378b849326f712c7",
+      "destination_sha256": "a9fe1219608b26a37f5c3ebda6df4611eac5b6945a2b629d026984a80c9252e3",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2087,7 +2087,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "README.md",
       "source_sha256": "525c1508a32e2e839013fc5e70fbbb1c7bacdf4e8b1feb8cc452aef125d38f82",
-      "destination_sha256": "f47e1cd3f13485f0555dd2bd8372a7e02fb235c02473a23c15e9ddec55e98bfb",
+      "destination_sha256": "429574b9e82979a9e9209fe4f293cf18666ab6194be4f9b4051d9a8a5087e3ac",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2142,7 +2142,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "scripts/validate.py",
       "source_sha256": "4e04663cf3f31890989d6e12b6a735344d0b10e2ec6791c70d61e72e7bf4180b",
-      "destination_sha256": "aaac5e56a0a262efde0a301cb051eaf95a648078af2336153d4d571b46d81083",
+      "destination_sha256": "cf0a7c030e5626f028790f0479cce1cf4b443946b3ed7ff3b91fb2a4fdaa7532",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -2208,7 +2208,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/distribution/scripts/mcp-client.mjs",
       "source_sha256": "0954ee5084b7837f88ba1bf453aa29ffe04c71b13dfb85389cea270a8895d5dc",
-      "destination_sha256": "54bf4f503d58e2a6e444f61590b85e30e6f2002c9c40cc4ef94113deafb1a38a",
+      "destination_sha256": "d56dc53763cb2d43a8b66cae3fee0a3c137e43ecde345bddaeea0a9ca7e7bb91",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -2252,10 +2252,10 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/distribution/scripts/test-mcp-search.mjs",
       "source_sha256": "c78795c6da5592a07c868f5b6a1d5962ece7bd4950be9093664f6f4d4c03e74b",
-      "destination_sha256": "c78795c6da5592a07c868f5b6a1d5962ece7bd4950be9093664f6f4d4c03e74b",
+      "destination_sha256": "5440bd48aad835a97bb8918f43767a9e83ada14d10cf69a4334dc168d65383dc",
       "source_mode": "100755",
       "destination_mode": "100755",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "tooling/skills-distributions/src/distribution/scripts/validate-distribution.mjs",
@@ -2263,7 +2263,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/distribution/scripts/validate-distribution.mjs",
       "source_sha256": "0650184ddae2ef362e2e362c5651ae4bd9208f421f185413e6a55ce52c3771a5",
-      "destination_sha256": "e56c23927338c6a49c4d645dbf0b17cb168722c70e6022f7b7eb66a0c2434142",
+      "destination_sha256": "207d75ac368804d2b66d90f2a884b95a2bd3222a5e1ff42926bb2dc18cfdcf80",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -2274,7 +2274,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/distribution/scripts/verify-contract-lock.mjs",
       "source_sha256": "fe31801dfd7ae08caaf1181a22f4eab38bff928d328f10ce1178b2e3e5fe3365",
-      "destination_sha256": "e3f807d842aae9b4eac4a6027f4ae829ffef27d72e0ac3c3c43fa61b4e138740",
+      "destination_sha256": "00016fe2652aa1bb845c047d7af161cf962695d1094f06083737f7af58c2dbf0",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -2351,7 +2351,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "src/plugins/codex/plugin.json",
       "source_sha256": "899d8c48af8ae1942bec696594398f4ae13e7e6455ec1ba98ca650fe00da2308",
-      "destination_sha256": "51bcb009b142e778fb8d8554b633e37fd122f6b184f37ed63798677627708328",
+      "destination_sha256": "e44e8496d494abe93b4941ba7bf3eb4b2c74d447cc1c9d5573173888f6cba723",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2494,7 +2494,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "README.md",
       "source_sha256": "79d7016a436a9388e3f4044f106132fe9232c225eabcc956c8a737f0f39d37aa",
-      "destination_sha256": "740bb8004aec6208bc7999d2df016962a6a748296d4b7986700572d33cc16340",
+      "destination_sha256": "e2bbef3d34d73541fe785478a54bb963d4d6a273b11795ee6a6a69d715751a36",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2505,7 +2505,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "contracts/README.md",
       "source_sha256": "85e8faed87d97504a858540caa1005056c387c78bcbb84ebf882737f40512323",
-      "destination_sha256": "64193ed3744c6578cdb53029e939b7be6b201ff4dba5e50af8512f8f4ba6acc5",
+      "destination_sha256": "bc53c248b3681ac920ca161f607ffca468a1a6772ebfb4fc5bb908e12bd6fdf8",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2516,7 +2516,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "contracts/relay-openapi.yaml",
       "source_sha256": "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5",
-      "destination_sha256": "5458497fe8db4ee7dfe6bef67f2803137575d3ea4d835748290a5c9f8d906791",
+      "destination_sha256": "81d23529476ae77b3b7f7dfc931d2e0e421d3c91e20c59136e2deef9123f722e",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2626,7 +2626,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "test/contracts.test.ts",
       "source_sha256": "df01e9d14ea13e0779e8a820a40111eb057f68c2bd355dc5a29030e33a95e01f",
-      "destination_sha256": "777503d13cfea6a431588089253776b3dacb6dffebea8f0165325f7e13f39272",
+      "destination_sha256": "54c0edd67a1fd331b14c974106289e7640b54f165ec7b5627e05639df319ef69",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2637,10 +2637,10 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "test/deploy.test.ts",
       "source_sha256": "c97763411c138409caf91a228752ab717ff75687151890d72055d2df63dbe9cc",
-      "destination_sha256": "c97763411c138409caf91a228752ab717ff75687151890d72055d2df63dbe9cc",
+      "destination_sha256": "2931437dadde4446af2dca917358e956e18c664b2d55a133c9eff81b7a89f3e1",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "cookbook/cloudflare-think-agent/test/env.d.ts",
@@ -2692,7 +2692,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "test/workerd/worker.test.ts",
       "source_sha256": "d336ad240a8a2d71a7740f82bab8bd5b463566fdd64dab61a4d78fab93246230",
-      "destination_sha256": "af5b5cd65c890f81478e0f04a1f5ed10c775ae63a6ce77f5ac38e3b4e45fa933",
+      "destination_sha256": "c85947ec6481aed889b0401336cef7d46d543213e2741af9d6655f05e451a76b",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2890,7 +2890,7 @@
       "commit": "0177a9184c9005651688a7e9f42903952991b20f",
       "source": "examples/webhook-receiver/test/inbox.test.ts",
       "source_sha256": "81698e5f06e9b2c8831aad62b6f5c90d3eba2041fc1f24c0913c0c8f85372407",
-      "destination_sha256": "45c6e699fe30a9ab5630bb42daf736ef50f36f2b8691abada9c9cdf752423153",
+      "destination_sha256": "c0445d2f4b5a3485922fadf0c50b8d845a50e14cbce0e1ccad0ffdcc92b42225",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2901,7 +2901,7 @@
       "commit": "0177a9184c9005651688a7e9f42903952991b20f",
       "source": "examples/webhook-receiver/test/processor.test.ts",
       "source_sha256": "f07230e0f236b565eca579c4301401fa506d8e7623a3e282603836de37f40f66",
-      "destination_sha256": "bb1f578373a5c718833e328d89421bc318b58e8d08f3ccdb2263dc09c85c5c82",
+      "destination_sha256": "362e5131fce636149f9bac292e3564622fcd622276ca9002900fe04e2fee9291",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -3055,7 +3055,7 @@
       "commit": "0177a9184c9005651688a7e9f42903952991b20f",
       "source": "examples/websocket-worker/test/processor.test.ts",
       "source_sha256": "b8913b9d3480b7d013755ade242786ffa417b86d6a3db16776c8aaf3e7dd61f8",
-      "destination_sha256": "cc96e70bca803f88cab62a6b2515b27639595a1d2e8bdace402118d09bf19dd1",
+      "destination_sha256": "7514d1e477169ed21ffa1662f0ac28037e4de8948e75a2f0944134a95b34d630",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -3066,7 +3066,7 @@
       "commit": "0177a9184c9005651688a7e9f42903952991b20f",
       "source": "examples/websocket-worker/test/runner.test.ts",
       "source_sha256": "7430c8e3368c32c610d4bb35b450f72736b8e2e12743d2fccad2ee35f7f7cfea",
-      "destination_sha256": "9094b59f59026f0082dae367bfeb55460cd010ca068b6b4ccf9fb14b08ae543f",
+      "destination_sha256": "80d767c02721aec131f9b634605f39ffd120b00d95b588c122142c30e0390425",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -3077,7 +3077,7 @@
       "commit": "0177a9184c9005651688a7e9f42903952991b20f",
       "source": "examples/websocket-worker/test/store.test.ts",
       "source_sha256": "bbd6e068e50c35b21c419eaea931aad62183e0f001081318608b426139607bf5",
-      "destination_sha256": "a884f49f8c2df490dea782f8d096fe89fd5deb0ecd421ac5432d045ee8297dd9",
+      "destination_sha256": "fb27c60a66f8081ad78bc006d60e20f72c4dc9dd8457948fe0b5dd296e8cfca8",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

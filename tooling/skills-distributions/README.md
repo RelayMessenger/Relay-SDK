@@ -6,7 +6,7 @@ skill is [`../../skills/relay`](../../skills/relay/SKILL.md).
 
 The Relay skill teaches the locked Relay v1 contract: Agent Tokens, signed
 Webhooks, acknowledged WebSocket delivery, Chats, Messages, ordered parts,
-Attachments, receipts, groups, Add requests, retries, and errors.
+Attachments, receipts, groups, message requests, retries, and errors.
 
 Relay-SDK is the canonical source. The dedicated Codex and Cursor repositories
 are generated from it so their host-specific layouts never become independent

@@ -127,7 +127,7 @@ existing Attachments API. PUT completes transfer; verify status before PATCHing
 `contactCard.update({handle, attachment_id})`. The server checks caller ownership
 and completed transfer, then copies bytes to immutable public image storage.
 
-Never put `attachment_id` in anonymous creation. If upload or promotion is not
+Use `attachment_id` only in the authenticated Contact Card update. If upload or promotion is not
 confirmed, preserve the new identity/token and report the incomplete image phase.
 Retry only the existing profile:
 
@@ -156,9 +156,8 @@ Do not run `agents create` again to retry an image. A Contact Card update accept
 }
 ```
 
-The rendered picture must accompany the recipe: a URL for anonymous creation,
-or a local image/completed owned attachment for authenticated Contact Card
-updates. A null URL is not a picture. The CLI does not invent an image-rendering service. Omitted Handle/name/image values preserve server defaults. Render the image
+The rendered picture must accompany the recipe: a URL, a local image, or a
+completed owned attachment for authenticated Contact Card updates. A null URL is not a picture. The CLI does not invent an image-rendering service. Omitted Handle/name/image values preserve server defaults. Render the image
 in the user's application and supply its URL or local snapshot. Use the API's
 `AgentImageRecipe` and `AgentImageBackground` definitions for emoji/photo cases
 and the seven supported gradient pairs; do not invent fonts or additional recipe

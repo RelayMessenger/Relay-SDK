@@ -3,6 +3,13 @@ import assert from "node:assert/strict";
 const endpoint =
   process.env.RELAY_DOCS_MCP_URL ?? "https://docs.staging.relayapp.im/mcp";
 
+export const assertSearchOrigin = (result, url = endpoint) => {
+  assert.ok(
+    result.includes(`Link: ${new URL(url).origin}/`),
+    "MCP search must return a link on the configured docs origin",
+  );
+};
+
 const decode = (body) => {
   const payloads = body
     .split("\n")

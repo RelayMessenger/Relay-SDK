@@ -21,7 +21,7 @@
   "interface": {
     "displayName": "Relay",
     "shortDescription": "Build Relay v1 messaging integrations.",
-    "longDescription": "Teach Codex to implement and review Relay v1 Agent Token, Webhook, WebSocket, Chat, Message, Attachment, receipt, and Add request integrations from the locked public contract.",
+    "longDescription": "Teach Codex to implement and review Relay v1 Agent Token, Webhook, WebSocket, Chat, Message, Attachment, receipt, and message request integrations from the locked public contract.",
     "developerName": "Relay",
     "category": "Productivity",
     "capabilities": [

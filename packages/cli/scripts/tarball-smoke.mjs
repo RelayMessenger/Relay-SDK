@@ -93,7 +93,7 @@ const env = {
   PATH: `${binDirectory}${delimiter}${process.env.PATH ?? ""}`,
 };
 const version = run(relay, ["--version"], { cwd: consumer, env });
-assert.equal(version.stdout.trim(), sourceManifest.version);
+assert.equal(version.stdout.trim(), `relaymessenger ${sourceManifest.version}`);
 const aliasVersion = run(alias, ["--version"], { cwd: consumer, env });
 assert.equal(aliasVersion.stdout, version.stdout);
 const agentsHelp = run(relay, ["agents", "--help"], { cwd: consumer, env });

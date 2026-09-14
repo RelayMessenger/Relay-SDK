@@ -4,14 +4,12 @@ export {
   BlockedHandles,
   Chats,
   ContactCard,
-  ContactRequests,
   Messages,
   Relay,
   WebSocket,
   WebhookEvents,
   WebhookSubscriptions,
   type RelayOptions,
-  type AgentCreateOptions,
 } from "./client.js";
 export {
   RelayAPIError,
@@ -33,6 +31,7 @@ export {
 export {
   Webhooks,
   WebhookVerificationError,
+  signWebhookHeaders,
   verifyWebhookSignature,
   type WebhookHeaders,
 } from "./webhooks.js";

@@ -34,7 +34,8 @@ interface ChatHandleBase {
   image_url: string | null;
   about: string | null;
   verified: boolean;
-  is_removable?: boolean;
+  /** True when the caller holds this Handle as a Contact. */
+  is_contact: boolean;
 }
 
 export interface UserChatHandle extends ChatHandleBase {
@@ -75,6 +76,16 @@ export interface LinkPart {
 export type MessagePart = TextPart | MediaPart | LinkPart;
 
 export interface TextPartResponse extends TextPart {
+  mentions?: Array<{
+    id: string;
+    handle: string;
+    is_me: boolean;
+    range: [number, number];
+  }> | null;
+  /** @deprecated Use mentions instead. */
+  mention?: string | null;
+  /** @deprecated Use mentions instead. */
+  mention_range?: [number, number] | null;
   reactions: Reaction[] | null;
 }
 
@@ -146,6 +157,12 @@ export interface MessageContent {
   parts: MessagePart[];
   reply_to?: ReplyTo;
   idempotency_key?: string;
+  /**
+   * Send the Message with no banner and no sound on the recipient's device.
+   * The Message still arrives, still counts as unread, and still moves the
+   * Chat to the top of the list. Defaults to `false`.
+   */
+  silent?: boolean;
 }
 
 /**
@@ -165,6 +182,11 @@ export interface SentMessage {
   delivery_status: DeliveryStatus;
   from_handle?: ChatHandle | null;
   reply_to?: ReplyTo | null;
+  /**
+   * Whether the sender sent this Message silently, so the recipient's device
+   * showed no banner and played no sound.
+   */
+  silent?: boolean;
   is_system_message: false;
 }
 
@@ -191,6 +213,11 @@ export interface Message {
    * place in the transcript and carries no parts.
    */
   unsent_at?: string | null;
+  /**
+   * Whether the sender sent this Message silently, so the recipient's device
+   * showed no banner and played no sound.
+   */
+  silent?: boolean;
   deliveries?: MessageDelivery[];
 }
 
@@ -206,9 +233,17 @@ export interface Chat {
   group_chat_icon?: string | null;
   handles: ChatHandle[];
   is_group: boolean;
+  /**
+   * The caller's side of a message request on this Chat: `pending` while a
+   * sender with no Contact edge to the caller wrote to them and they have not
+   * answered, `accepted` or `deleted` once they have. Absent when the caller
+   * was never asked; an agent never is.
+   */
   created_at: string;
   updated_at: string;
 }
+
+export type ChatRequestState = "pending" | "accepted" | "deleted";
 
 export interface ChatCreateParams {
   from: string;
@@ -297,16 +332,6 @@ export interface MessageListParams {
 }
 
 export type MessageThreadParams = MessageListParams;
-
-/**
- * `PATCH /v1/messages/{messageId}`. Only text parts can be edited, up to five
- * times, and only within 15 minutes of the original send.
- */
-export interface MessageEditParams {
-  /** Index of the Message part to edit. Defaults to 0. */
-  part_index?: number;
-  text: string;
-}
 
 export interface MessageAddReactionParams {
   operation: "add" | "remove";
@@ -507,6 +532,8 @@ export interface ContactCardRetrieveResponse {
 }
 
 export interface ContactCardUpdateParams {
+  /** Server contract 3097dda: trimmed about text, 1 to 60 characters. */
+  about?: string;
   handle: string;
   first_name?: string;
   last_name?: string | null;
@@ -515,14 +542,6 @@ export interface ContactCardUpdateParams {
   attachment_id?: UUID;
   /** Existing redraw metadata; requires an image URL or completed upload. */
   image_recipe?: AgentImageRecipe;
-}
-
-export interface ContactRequestCreateParams {
-  handle: string;
-}
-
-export interface ContactRequestCreateResponse {
-  state: "pending";
 }
 
 export interface BlockedHandle {
@@ -635,37 +654,12 @@ export interface MessageWebhookData {
   sent_at?: string | null;
   delivered_at?: string | null;
   read_at?: string | null;
+  /**
+   * Whether the sender sent this Message silently, so the recipient's device
+   * showed no banner and played no sound.
+   */
+  silent?: boolean;
   reply_to?: ReplyTo | null;
-}
-
-/** The part an edit replaced, and its zero-based index in the Message. */
-export interface MessageEditedPart {
-  index: number;
-  text: string;
-}
-
-/**
- * `message.edited`. `direction` is relative to the receiving Agent:
- * `outbound` if the Agent sent the original Message, `inbound` otherwise.
- */
-export interface MessageEditedEvent {
-  chat: MessageEventChat;
-  direction: "inbound" | "outbound";
-  edited_at: string;
-  id: UUID;
-  part: MessageEditedPart;
-  sender_handle: ChatHandle | null;
-}
-
-/**
- * `message.unsent`. The `message.edited` shape without `part` -- an unsend
- * takes the whole Message, not one part of it -- carrying `unsent_at` where
- * the edit carries `edited_at`. Deriving it here keeps the two shapes from
- * drifting apart.
- */
-export interface MessageUnsentEvent
-  extends Omit<MessageEditedEvent, "edited_at" | "part"> {
-  unsent_at: string;
 }
 
 /**
@@ -725,16 +719,6 @@ export type ContactRemovedWebhook = RelayWebhookEnvelope<
   "contact.removed"
 >;
 
-export type MessageEditedWebhook = RelayWebhookEnvelope<
-  MessageEditedEvent,
-  "message.edited"
->;
-
-export type MessageUnsentWebhook = RelayWebhookEnvelope<
-  MessageUnsentEvent,
-  "message.unsent"
->;
-
 export type MessageFailedWebhook = RelayWebhookEnvelope<
   MessageFailedEvent,
   "message.failed"
@@ -761,8 +745,6 @@ type OtherWebhookEventType = Exclude<
   | TypingIndicatorWebhookEventType
   | "contact.added"
   | "contact.removed"
-  | "message.edited"
-  | "message.unsent"
   | "message.failed"
 >;
 
@@ -772,8 +754,6 @@ export type RelayWebhookEvent =
     TypingIndicatorWebhookData,
     TypingIndicatorWebhookEventType
   >
-  | MessageEditedWebhook
-  | MessageUnsentWebhook
   | MessageFailedWebhook
   | ContactAddedWebhookEvent
   | ContactRemovedWebhookEvent
@@ -805,23 +785,3 @@ export interface AgentPhotoImageRecipe {
   background?: never;
 }
 export type AgentImageRecipe = AgentMonogramImageRecipe | AgentEmojiImageRecipe | AgentPhotoImageRecipe;
-
-/** POST /v1/agents optional identity fields; omissions retain server defaults. */
-export interface AgentCreateProfileParams {
-  token_name?: string;
-  /** Full lowercase developer handle, including .dev. */
-  handle?: string;
-  /** Display name; the server trims surrounding whitespace. */
-  first_name?: string;
-}
-/** A recipe is redraw metadata, not a renderer: supply its HTTPS snapshot URL. */
-export type AgentCreateParams = AgentCreateProfileParams & (
-  | { image_url?: string; image_recipe?: never }
-  | { image_url: string; image_recipe: AgentImageRecipe }
-);
-
-export interface AgentCreateResponse {
-  agent: ContactCardItem;
-  secret: string;
-  share_url: string;
-}

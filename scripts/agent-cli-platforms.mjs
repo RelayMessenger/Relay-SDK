@@ -12,9 +12,9 @@ if (platform() === 'linux' && !process.env.RELAY_DAYTONA_SANDBOX_ID) throw Error
 const receipts = resolve(process.env.RELAY_PLATFORM_RECEIPTS ?? join(root, '.release-tmp', 'agent-cli-platforms', `${platform()}-${arch()}`));
 mkdirSync(receipts, { recursive: true });
 const scratch = mkdtempSync(join(tmpdir(), 'relay-platform-'));
-const token = `rly_live_${'V'.repeat(43)}`;
-const invalidToken = `rly_live_${'X'.repeat(43)}`;
-const syntheticTokens = [token, invalidToken, `rly_live_${'I'.repeat(43)}`, `rly_live_${'P'.repeat(43)}`];
+const token = `rel_token_${'V'.repeat(43)}`;
+const invalidToken = `rel_token_${'X'.repeat(43)}`;
+const syntheticTokens = [token, invalidToken, `rel_token_${'I'.repeat(43)}`, `rel_token_${'P'.repeat(43)}`];
 let tokenServer;
 const env = { ...process.env, RELAY_CONFIG_PATH: join(scratch, 'config.json'), RELAY_API_URL: 'http://127.0.0.1:1', CI: 'true' };
 for (const key of ['RELAY_AGENT_TOKEN', 'RELAY_PROFILE', 'NODE_AUTH_TOKEN', 'NPM_TOKEN']) delete env[key];
@@ -74,12 +74,22 @@ try {
   const cli = (...args) => run(process.execPath, [bin, ...args], { cwd: consumer });
   const shim = (args, options = {}) => npm(['exec', '--offline', '--', 'relaymessenger', ...args], { cwd: consumer, ...options });
   const help = cli('--help');
-  assert.match(help, /^\s+auth[ \[]/m);
-  assert.doesNotMatch(help, /^\s+(token|login|oauth|console)[ \[]/m);
-  const hasAgentCommands = /^  agent(?:s)?[ \[]/m.test(help);
+  // The shipped help shape (packages/cli/src/help-groups.ts) follows Linq:
+  // branded heading, VERSION, USAGE, TOPICS, then concise COMMANDS.
+  for (const section of ['VERSION', 'USAGE', 'TOPICS', 'COMMANDS']) {
+    assert.match(help, new RegExp(`^${section}$`, 'm'), `root help must include ${section}`);
+  }
+  for (const command of ['connect', 'watch', 'listen', 'doctor', 'agents', 'login', 'whoami', 'logout']) {
+    assert.match(help, new RegExp(`^  ${command}(?: \\[|\\n| {2,})`, 'm'), `root help must list ${command} as a row`);
+  }
+  assert.doesNotMatch(help, /^Everything else:/m);
+  assert.doesNotMatch(help, /^\s+(token|oauth|console)[ \[]/m);
+  const hasAgentCommands = /^  agents(?: {2,}|\n)/m.test(help);
   assert.ok(hasAgentCommands, 'Canonical CLI must include agent commands');
+  report.helpShape = { rows: ['connect', 'watch', 'listen', 'doctor', 'agents', 'login', 'whoami', 'logout'], sections: ['VERSION', 'USAGE', 'TOPICS', 'COMMANDS'] };
   report.agentCommands = hasAgentCommands ? 'available; tests pending below' : 'pending feature commits: no agent command in root help';
-  const expectedVersion = cliManifest.version;
+  // --version includes the canonical executable name (program.ts).
+  const expectedVersion = `relaymessenger ${cliManifest.version}`;
   assert.equal(cli('--version').trim(), expectedVersion);
   for (const executable of Object.keys(cliManifest.bin)) {
     assert.equal(npm(['exec', '--offline', '--', executable, '--version'], { cwd: consumer }).trim(), expectedVersion);
@@ -120,13 +130,13 @@ try {
   assert.equal(envStatus.token_source, 'environment');
   shim(['auth', 'logout']);
   assert.equal(JSON.parse(readFileSync(env.RELAY_CONFIG_PATH)).profiles.verification.agent_token, undefined);
-  run(process.execPath, [bin, 'auth', 'status'], { cwd: consumer, expectedExit: 1 });
-  run(process.execPath, [bin, 'chats', 'list'], { cwd: consumer, expectedExit: 1 });
+  run(process.execPath, [bin, 'auth', 'status'], { cwd: consumer, expectedExit: 4 });
+  run(process.execPath, [bin, 'chats', 'list'], { cwd: consumer, expectedExit: 4 });
   cli('profiles', 'use', 'default');
   cli('profiles', 'remove', 'verification');
-  shim(['token', 'status'], { expectedExit: 1 });
+  shim(['token', 'status'], { expectedExit: 2 });
   assert.match(report.commands.at(-1).output, /unknown command/i, 'No token namespace is allowed');
-  shim(['auth', 'login'], { expectedExit: 1, timeout: 5000 });
+  shim(['auth', 'login'], { expectedExit: 2, timeout: 5000 });
   assert.match(report.commands.at(-1).output, /non-interactive|--with-token/i);
   report.authProof = 'actual installed shim: stdin --with-token, invalid-token preservation, environment, status/logout, nonTTY no-flag failure; interactive PTY is separate';
   report.tokenHTTP = JSON.parse(readFileSync(httpLog));
@@ -137,7 +147,8 @@ try {
     const agentHelp = cli('agents', '--help');
     assert.match(agentHelp, /create/);
     assert.doesNotMatch(agentHelp, /^\s+setup[ \[]/m, 'Owner approved exactly create/list/delete under agents');
-    assert.match(cli('agents', 'create', '--help'), /token-name/);
+    assert.doesNotMatch(cli('agents', 'create', '--help'), /token-name/);
+    assert.match(cli('agents', 'create', '--help'), /--handle <handle>/);
     assert.match(cli('agents', 'delete', '--help'), /handle/);
     const inventory = JSON.parse(cli('agents', 'list', '--json'));
     assert.ok(inventory.agents.every(item => item.token === 'missing'));

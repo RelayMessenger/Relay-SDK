@@ -1,4 +1,4 @@
-// Derived from packages/openclaw/harness/mock-relay-server.mjs; owned bootstrap fixture, never staging.
+// Derived from packages/openclaw/harness/mock-relay-server.mjs; owned authenticated Console fixture, never staging.
 import { existsSync, readdirSync } from "node:fs";
 import http from "node:http";
 import { randomBytes } from "node:crypto";
@@ -44,6 +44,7 @@ const inboundEvent = {
       image_url: null,
       about: null,
       verified: false,
+      is_contact: true,
     },
     parts: [{ type: "text", value: "hello from Relay", reactions: null }],
     sent_at: new Date().toISOString(),
@@ -148,15 +149,19 @@ const server = http.createServer(async (req, res) => {
     console.log("[mock-relay] post-reattach event sent"); json(res, 200, { sockets: sockets.clients.size }); return;
   }
 
-  if (req.method === "POST" && url.pathname === "/v1/agents") {
+  if (req.method === "GET" && url.pathname === "/me") {
+    if (req.headers.authorization !== "Bearer rel_org_runtimeFixtureOnly") { json(res, 401, {}); return; }
+    json(res, 200, { org: { id: "org_runtime", handleNamespace: "dev" } }); return;
+  }
+  if (req.method === "POST" && url.pathname === "/orgs/org_runtime/agents") {
     createCount += 1;
-    console.log(`[mock-relay] Bootstrap create count=${createCount}`);
-    if (token || req.headers.authorization) { json(res, 400, { error: { message: "bootstrap must be new and unauthenticated" } }); return; }
+    console.log(`[mock-relay] Console create count=${createCount}`);
+    if (token || req.headers.authorization !== "Bearer rel_org_runtimeFixtureOnly") { json(res, 400, { error: { message: "a fresh fixture and an organization key are required" } }); return; }
     const input = await body(req);
-    if (!input?.token_name?.startsWith("verification-runtime-")) { json(res, 400, {}); return; }
-    token = "rly_live_" + randomBytes(32).toString("hex").slice(0,43);
+    if (input?.handle !== createdHandle) { json(res, 400, {}); return; }
+    token = "rel_token_" + randomBytes(32).toString("hex").slice(0,43);
     res.setHeader("Cache-Control", "no-store");
-    json(res, 201, { agent: createdCard, secret: token, share_url: `https://go.staging.relayapp.im/@${createdHandle}` });
+    json(res, 201, { agent: { id: agentId, handle: createdHandle, displayName: createdCard.first_name, avatarUrl: null }, token });
     return;
   }
 

@@ -40,9 +40,6 @@ const responder = (calls: Captured[]) => async (
   if (method === "GET" && url.pathname === "/v1/chats") {
     return Response.json({ chats: [], next_cursor: null });
   }
-  if (method === "POST" && url.pathname === "/v1/contact_requests") {
-    return Response.json({ state: "pending" }, { status: 201 });
-  }
   if (
     method === "GET"
     && (
@@ -173,11 +170,6 @@ describe("Relay v1 request shapes", () => {
       attachment_id: "attachment-id",
     });
     await client.messages.retrieve("message-id");
-    await client.messages.edit("message-id", {
-      part_index: 1,
-      text: "Corrected",
-    });
-    await client.messages.unsend("message-id");
     await client.messages.addReaction("message-id", {
       operation: "add",
       type: "love",
@@ -212,14 +204,9 @@ describe("Relay v1 request shapes", () => {
       handle: "echo",
       first_name: "New Echo",
     });
-    const contactRequest = await client.contactRequests.create({
-      handle: "advait",
-    });
-    expect(contactRequest).toEqual({ state: "pending" });
-    await Relay.createAgent({}, { baseURL: "https://api.example.test", fetch: responder(calls) });
     await client.agents.delete("agent.dev");
 
-    expect([...calls.slice(-2), ...calls.slice(0, -2)].map((call) => [call.method, call.url.pathname])).toEqual(
+    expect([...calls.slice(-1), ...calls.slice(0, -1)].map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
         operation.method,
         operation.path
@@ -275,23 +262,11 @@ describe("Relay v1 request shapes", () => {
       first_name: "New Echo",
     });
 
-    const editMessage = calls.find((call) =>
-      call.method === "PATCH" && call.url.pathname === "/v1/messages/message-id")!;
-    expect(JSON.parse(String(editMessage.body))).toEqual({
-      part_index: 1,
-      text: "Corrected",
-    });
-
-    const unsendMessage = calls.find((call) =>
-      call.method === "DELETE"
-      && call.url.pathname === "/v1/messages/message-id")!;
-    expect(unsendMessage.body).toBeUndefined();
-
-    const createContactRequest = calls.find((call) => call.url.pathname === "/v1/contact_requests")!;
-    expect(createContactRequest.headers.get("idempotency-key")).toBeNull();
-    expect(JSON.parse(String(createContactRequest.body))).toEqual({
-      handle: "advait",
-    });
+    // Editing and unsending are retired from the developer API, so the client
+    // has no way to reach either verb on a Message.
+    expect(calls.some((call) =>
+      call.url.pathname === "/v1/messages/message-id"
+      && (call.method === "PATCH" || call.method === "DELETE"))).toBe(false);
 
     expect(calls.some((call) =>
       call.url.pathname === "/v1/websocket")).toBe(false);
@@ -349,7 +324,6 @@ describe("Relay v1 request shapes", () => {
       "blockedHandles",
       "chats",
       "contactCard",
-      "contactRequests",
       "messages",
       "webhookEvents",
       "webhookSubscriptions",
@@ -372,10 +346,8 @@ describe("Relay v1 request shapes", () => {
     expect(methods(client.messages)).toEqual([
       "addReaction",
       "create",
-      "edit",
       "listMessagesThread",
       "retrieve",
-      "unsend",
     ]);
     expect(methods(client.chats.messages)).toEqual(["list", "send"]);
     expect(methods(client.chats.participants)).toEqual(["add", "remove"]);
@@ -398,7 +370,6 @@ describe("Relay v1 request shapes", () => {
       "retrieve",
       "update",
     ]);
-    expect(methods(client.contactRequests)).toEqual(["create"]);
     expect(methods(client.blockedHandles)).toEqual([
       "block",
       "list",

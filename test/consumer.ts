@@ -1,8 +1,5 @@
 import Relay, {
   RELAY_WEBHOOK_EVENT_TYPES,
-  type AgentCreateParams,
-  type AgentCreateResponse,
-  type AgentCreateOptions,
   type Chat,
   type ChatHandle,
   type ChatSendVoicememoResponse,
@@ -13,14 +10,14 @@ import Relay, {
   type MessageContent,
   type MessageCreateResponse,
   type MessageDelivery,
-  type MessageEditedWebhook,
   type MessageFailedWebhook,
-  type MessageUnsentWebhook,
   type Reaction,
   type RelayWebhookEnvelope,
   type RelayWebhookEvent,
   type SentMessage,
   type TypingIndicatorWebhookData,
+  type TextPartResponse,
+  type TextPart,
   type WebSocketDisconnectFrame,
 } from "@relaymessenger/sdk";
 
@@ -50,15 +47,11 @@ await relay.chats.participants.remove("chat-id", { handle: "research.agent", hid
 await relay.chats.participants.add("chat-id", { handle: "research.agent", is_hidden: true });
 // @ts-expect-error Private history boundaries are not public API parameters.
 await relay.chats.participants.add("chat-id", { handle: "research.agent", truncated_at: 123 });
-(await relay.messages.edit("message-id", { text: "Corrected" })) satisfies
-  Message;
-(await relay.messages.edit("message-id", {
-  part_index: 1,
-  text: "Corrected",
-})) satisfies Message;
-// @ts-expect-error An edit replaces the text of a part; there is nothing else to send.
-await relay.messages.edit("message-id", { parts: [] });
-(await relay.messages.unsend("message-id")) satisfies void;
+// Relay retired message editing and unsending from the developer API.
+// @ts-expect-error A Message cannot be edited through the Relay API.
+await relay.messages.edit("message-id", { text: "Corrected" });
+// @ts-expect-error A Message cannot be unsent through the Relay API.
+await relay.messages.unsend("message-id");
 // A group photo is set from either form the contract accepts, and cleared with
 // null. Neither form is a distinct type: both are plain strings.
 await relay.chats.update("chat-id", {
@@ -98,15 +91,6 @@ await relay.webhookSubscriptions.create({
   target_url: "https://receiver.test/webhook",
   subscribed_events: ["message.received"],
 });
-const addRequest = await relay.contactRequests.create({
-  handle: "advait",
-});
-addRequest.state satisfies "pending";
-relay.contactRequests.create({
-  handle: "advait",
-  // @ts-expect-error Contact requests accept only a handle.
-  "Idempotency-Key": "contact-request-key",
-});
 await relay.messages.create({
   to: ["advait"],
   message: {
@@ -128,8 +112,6 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "message.received",
   "message.read",
   "message.delivered",
-  "message.edited",
-  "message.unsent",
   "message.failed",
   "reaction.added",
   "reaction.removed",
@@ -178,10 +160,8 @@ relay.messages.poll;
 relay.socketMode;
 // @ts-expect-error Private user Contact operations are not in the Agent SDK.
 relay.contacts;
-// @ts-expect-error The Agent SDK cannot list private user Contact requests.
-relay.contactRequests.list();
-// @ts-expect-error The Agent SDK cannot ignore private user Contact requests.
-relay.contactRequests.ignore({ handle: "echo" });
+// @ts-expect-error Add requests are gone; the first Message is the request.
+relay.contactRequests;
 const withService: MessageContent = {
   parts: [{ type: "text", value: "No" }],
   // @ts-expect-error Relay messages have no service discriminator.
@@ -204,6 +184,7 @@ const userHandle: ChatHandle = {
   image_url: null,
   about: null,
   verified: false,
+  is_contact: true,
 };
 void userHandle;
 const agentHandle: ChatHandle = {
@@ -215,6 +196,7 @@ const agentHandle: ChatHandle = {
   image_url: "https://cdn.relayapp.im/echo.png",
   about: "Weather when you need it",
   verified: true,
+  is_contact: true,
 };
 void agentHandle;
 // @ts-expect-error Greetings are not part of Relay Add.
@@ -263,25 +245,6 @@ removed.data.contact.handle satisfies string;
 // @ts-expect-error contact.removed does not disclose a Chat ID.
 removed.data.chat_id;
 
-declare const edited: MessageEditedWebhook;
-edited.event_type satisfies "message.edited";
-edited.data.edited_at satisfies string;
-edited.data.part.index satisfies number;
-edited.data.part.text satisfies string;
-edited.data.direction satisfies "inbound" | "outbound";
-edited.data.sender_handle satisfies ChatHandle | null;
-edited.data.chat.id satisfies string;
-
-declare const unsent: MessageUnsentWebhook;
-unsent.event_type satisfies "message.unsent";
-unsent.data.unsent_at satisfies string;
-unsent.data.direction satisfies "inbound" | "outbound";
-unsent.data.chat.id satisfies string;
-// @ts-expect-error An unsend takes the whole Message, not one part of it.
-unsent.data.part;
-// @ts-expect-error An unsend carries unsent_at where an edit carries edited_at.
-unsent.data.edited_at;
-
 declare const failed: MessageFailedWebhook;
 failed.event_type satisfies "message.failed";
 failed.data.code satisfies number;
@@ -292,10 +255,6 @@ failed.data.detail_code satisfies number | null | undefined;
 // branch from RelayWebhookEvent and this stops compiling.
 const summarize = (event: RelayWebhookEvent): string => {
   switch (event.event_type) {
-    case "message.edited":
-      return `${event.data.id} ${event.data.part.text}`;
-    case "message.unsent":
-      return `${event.data.id} ${event.data.unsent_at}`;
     case "message.failed":
       return `${event.data.code} ${event.data.failed_at}`;
     default:
@@ -308,17 +267,23 @@ declare const message2: Message;
 message2.edited_at satisfies string | null | undefined;
 message2.unsent_at satisfies string | null | undefined;
 
-const bootstrapParams: AgentCreateParams = { token_name: "Relay CLI" };
-const bootstrapOptions: AgentCreateOptions = { baseURL: "https://api.example.test", signal: new AbortController().signal };
-(await Relay.createAgent(bootstrapParams, bootstrapOptions)) satisfies AgentCreateResponse;
+// Existing agents retain authenticated deletion; registration is Console-owned.
 (await relay.agents.delete("brave_cangoo.dev")) satisfies void;
-await Relay.createAgent({ handle: "chosen.dev", first_name: "Chosen Agent" });
-await Relay.createAgent({ image_url: "https://images.example.test/snapshot.png", image_recipe: { recipe: { monogram: { initials: "CA" } }, background: { linearGradient: { colors: ["5B9BFA", "0B52C0"] } } } });
-// @ts-expect-error A recipe requires the rendered snapshot URL.
-await Relay.createAgent({ image_recipe: { recipe: { image: {} } } });
-// @ts-expect-error Existing palettes do not permit arbitrary gradient pairs.
-await Relay.createAgent({ image_url: "https://images.example.test/snapshot.png", image_recipe: { recipe: { emoji: { emoji: "🦆" } }, background: { linearGradient: { colors: ["FFFFFF", "000000"] } } } });
-// @ts-expect-error Bootstrap does not need or accept a fake API key.
-await Relay.createAgent({}, { apiKey: "fake" });
-// @ts-expect-error Authenticated instances still require an API key.
+// @ts-expect-error Anonymous SDK registration has been removed.
+Relay.createAgent;
+// @ts-expect-error Authenticated instances require an API key.
 new Relay({ baseURL: "https://api.example.test" });
+
+// Structured mentions are a read contract, not an outgoing message field.
+const readText: TextPartResponse = {
+  type: "text", value: "relay", reactions: null,
+  mentions: [{ id: "contact-1", handle: "relay", is_me: true, range: [0, 5] }],
+};
+const readRange: [number, number] | undefined = readText.mentions?.[0]?.range;
+const noMentions: TextPartResponse = { ...readText, mentions: null };
+const sendText: TextPart = {
+  type: "text", value: "relay",
+  // @ts-expect-error Structured mentions are only returned on reads.
+  mentions: [],
+};
+void [readRange, noMentions, sendText];

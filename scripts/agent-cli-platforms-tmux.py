@@ -3,7 +3,7 @@ import argparse, hashlib, json, os, pty, select, shlex, shutil, signal, struct, 
 from pathlib import Path
 p=argparse.ArgumentParser();p.add_argument('--shim',required=True);p.add_argument('--origin',required=True);p.add_argument('--workspace',required=True);p.add_argument('--receipt',required=True);a=p.parse_args()
 if os.uname().sysname!='Linux' or not os.environ.get('RELAY_DAYTONA_SANDBOX_ID'):raise SystemExit('tmux proof requires actual owned Daytona Linux')
-root=Path(tempfile.mkdtemp(prefix='rly-tmux-'));sock=root/'socket';secret='rly_live_'+'V'*43
+root=Path(tempfile.mkdtemp(prefix='rly-tmux-'));sock=root/'socket';secret='rel_token_'+'V'*43
 base=os.environ.copy()
 for key in ['TMUX','TMUX_PANE','RELAY_AGENT_TOKEN','RELAY_PROFILE','CI','GITHUB_ACTIONS','GITLAB_CI','CIRCLECI','BUILDKITE','TF_BUILD']:base.pop(key,None)
 base['TERM']='xterm-256color';report={'platform':os.uname().sysname,'socket':str(sock),'privateRoot':str(root),'tmuxVersion':subprocess.check_output(['tmux','-V'],text=True).strip(),'commands':[],'cases':[],'broadNoLossClaim':False};runtime_pane_pid=None

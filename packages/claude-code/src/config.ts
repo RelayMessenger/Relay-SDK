@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, hostname } from "node:os";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 export const DEFAULT_BASE_URL = "https://api.relayapp.im";
@@ -132,6 +133,25 @@ function positiveInteger(value: string | undefined, fallback: number, name: stri
   return parsed;
 }
 
+function linkedAgent(cwd: string): { handle: string; apiUrl: string; path: string } | undefined {
+  let dir = resolve(cwd);
+  while (true) {
+    const path = join(dir, ".relay", "agent.json");
+    try {
+      const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      if (typeof value.handle === "string" && typeof value.apiUrl === "string") return { handle: value.handle, apiUrl: value.apiUrl, path };
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error(`Relay folder link is not readable: ${path}`); }
+    const parent = resolve(dir, "..");
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
+function profilePath(env: NodeJS.ProcessEnv): string {
+  if (env.RELAY_CONFIG_PATH) return resolve(env.RELAY_CONFIG_PATH);
+  return resolve(env.RELAY_CONFIG_DIR ?? env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "relay", "config.json");
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayChannelConfig {
   const channelDir = defaultChannelDir(env);
   mkdirSync(channelDir, { recursive: true, mode: 0o700 });
@@ -141,7 +161,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RelayChannelCo
     // POSIX modes are best effort on Windows.
   }
   const file = loadFileEnvironment(channelDir);
-  const value = (name: string): string | undefined => actualValue(env[name]) ?? actualValue(file[name]);
+  const cwd = resolve(env.PWD ?? process.cwd());
+  const link = linkedAgent(cwd);
+  let linkedProfile: Record<string, unknown> | undefined;
+  if (link) {
+    try { linkedProfile = (JSON.parse(readFileSync(profilePath(env), "utf8")) as { profiles?: Record<string, Record<string, unknown>> }).profiles?.[link.handle]; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    if (!linkedProfile?.agent_token) throw new Error(`Relay profile ${link.handle} is missing; run npx relaymessenger connect`);
+  }
+  const value = (name: string): string | undefined => {
+    if (link && name === "RELAY_AGENT_TOKEN") return actualValue(linkedProfile?.agent_token as string);
+    if (link && name === "RELAY_BASE_URL") return actualValue(link.apiUrl);
+    return actualValue(env[name]) ?? actualValue(file[name]);
+  };
   const agentToken = value("RELAY_AGENT_TOKEN") ?? "";
   if (!agentToken) throw new Error(`RELAY_AGENT_TOKEN is not configured (see ${join(channelDir, ".env")})`);
   if (agentToken.length > 4096 || /[\r\n\u0000]/u.test(agentToken)) {

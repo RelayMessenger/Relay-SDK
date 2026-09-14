@@ -15,14 +15,14 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createServer } from "node:net";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 if (process.platform !== "linux" || !process.env.RELAY_DAYTONA_SANDBOX_ID) throw Error("Run this Linux process proof inside owned Daytona only");
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = join(workspace, "packages/openclaw");
 const receiptPath = resolve(process.env.RELAY_RUNTIME_PROOF_RECEIPT ?? join(workspace, ".release-tmp", "agent-cli-runtime-proof.json"));
 mkdirSync(dirname(receiptPath), { recursive: true });
-const redact = value => String(value).replace(/rly_live_[A-Za-z0-9]{43}/g, "[REDACTED_FIXTURE_TOKEN]");
+const redact = value => String(value).replace(/(?:rel|rly)_live_[A-Za-z0-9]{43}/g, "[REDACTED_FIXTURE_TOKEN]");
 const receipt = { platform: process.platform, arch: process.arch, node: process.version, sandbox: process.env.RELAY_DAYTONA_SANDBOX_ID, coverage: "new installed CLI identity -> native config -> actual OpenClaw process against loopback Relay/model fixtures; NOT live staging", commands: [] };
 function execFileSync(command, args, options = {}) {
   const row = { command: [command, ...args], cwd: options.cwd }; receipt.commands.push(row);
@@ -266,19 +266,26 @@ try {
 
   const originalConfig = JSON.parse(readFileSync(configPath, "utf8"));
   assert.equal(gateway, undefined, "the isolated runtime must really be stopped before Relay writes its configuration");
-  const createArgs = [cliBin, "agents", "create", "--api-url", `http://127.0.0.1:${relayPort}`, "--token-name", `verification-runtime-${process.pid}`, "--connect", "openclaw", "--runtime-config", configPath, "--runtime-state-dir", stateDir, "--runtime-account", "work", "--confirm-configure", "--runtime-stopped", "--json"];
-  const created = JSON.parse(execFileSync(process.execPath, createArgs, { cwd: consumer, encoding: "utf8", env: { ...env, RELAY_CONFIG_PATH: cliConfig, RELAY_AGENT_TOKEN: "synthetic-wrong-environment-token" } }));
-  assert.equal(created.token, "stored"); assert.equal(created.connect.status, "configured"); assert.equal(created.connect.connected, false);
+  const consoleURL = `http://127.0.0.1:${relayPort}`;
+  writeFileSync(cliConfig, JSON.stringify({ version: 1, current_profile: "default", profiles: { default: { api_url: consoleURL } }, console: {
+    type: "organization_key", organization_key: "rel_org_runtimeFixtureOnly", organization_id: "org_runtime", console_api_url: consoleURL,
+  }}), { mode: 0o600 });
+  const createArgs = [cliBin, "agents", "create", "--api-url", consoleURL, "--handle", "verification_bird", "--name", "Verification Bird", "--json", "--no-input"];
+  const created = JSON.parse(execFileSync(process.execPath, createArgs, { cwd: consumer, encoding: "utf8", env: { ...env, RELAY_CONSOLE_API_URL: consoleURL, RELAY_CONFIG_PATH: cliConfig, RELAY_AGENT_TOKEN: "synthetic-wrong-environment-token" } }));
+  assert.equal(created.token, "stored");
   const privateProfile = JSON.parse(readFileSync(cliConfig, "utf8")).profiles[created.profile];
-  const configured = JSON.parse(readFileSync(configPath, "utf8"));
-  assert.match(privateProfile.agent_token, /^rly_live_[A-Za-z0-9]{43}$/);
-  assert.equal(configured.channels.relay.accounts.work.token, privateProfile.agent_token);
+  // This is the harness's stopped, disposable account, not a claimed CLI flag.
   const expectedConfig = structuredClone(originalConfig);
   expectedConfig.channels.relay.accounts.work.token = privateProfile.agent_token;
-  expectedConfig.channels.relay.accounts.work.baseUrl = `http://127.0.0.1:${relayPort}`;
-  assert.deepEqual(configured, expectedConfig, "connecting must preserve every unrelated runtime setting and account");
-  receipt.connect = { profile: created.profile, handle: created.agent.handle, status: created.connect.status, connectedBeforeLaunch: created.connect.connected, preservedOtherSettings: true };
-  console.log("Installed CLI create handed its new credential to selected stopped native account; other settings preserved");
+  expectedConfig.channels.relay.accounts.work.baseUrl = consoleURL;
+  writeFileSync(configPath, JSON.stringify(expectedConfig), { mode: 0o600 });
+  const configured = JSON.parse(readFileSync(configPath, "utf8"));
+  assert.match(privateProfile.agent_token, /^rel_token_[A-Za-z0-9]{43}$/);
+  assert.equal(configured.channels.relay.accounts.work.token, privateProfile.agent_token);
+  assert.deepEqual(configured, expectedConfig, "fixture setup must preserve every unrelated runtime setting and account");
+  receipt.connect = { profile: created.profile, handle: created.handle, status: "configured", configuredBy: "explicit fixture setup", connectedBeforeLaunch: false, preservedOtherSettings: true };
+
+  console.log("Authenticated CLI creation succeeded; harness wired its new token into only the disposable stopped account");
 
   gateway = spawn(process.execPath, [
     openclaw,

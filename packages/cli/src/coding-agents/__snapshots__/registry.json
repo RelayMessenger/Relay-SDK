@@ -1,0 +1,191 @@
+[
+  {
+    "id": "claude-code",
+    "label": "Claude Code",
+    "aliases": [
+      "claude",
+      "claudecode"
+    ],
+    "command": "claude",
+    "installedIf": "(paths) => [claudeConfigDir(paths.env, paths.home, paths.platform)]",
+    "connect": {
+      "kind": "claude-plugin"
+    },
+    "start": {
+      "kind": "command",
+      "command": "claude",
+      "args": [
+        "--dangerously-load-development-channels",
+        "plugin:relay@relay-messenger"
+      ],
+      "prompt": "Start Claude Code with Relay now?"
+    },
+    "detectedAs": [
+      "claude"
+    ]
+  },
+  {
+    "id": "codex",
+    "label": "Codex",
+    "aliases": [],
+    "command": "codex",
+    "installedIf": "(paths) => [codexHome(paths.env, paths.home, paths.platform)]",
+    "connect": {
+      "kind": "codex-project",
+      "file": "(paths) => platformPath(paths.platform).join(paths.cwd, \".codex\", \"config.toml\")"
+    },
+    "start": {
+      "kind": "bridge",
+      "command": "codex",
+      "prompt": "Answer Relay messages with Codex from this folder?"
+    },
+    "detectedAs": [
+      "codex"
+    ]
+  },
+  {
+    "id": "cursor",
+    "label": "Cursor",
+    "aliases": [],
+    "command": "cursor-agent",
+    "installedIf": "(paths) => [platformPath(paths.platform).join(paths.home, \".cursor\")]",
+    "connect": {
+      "kind": "acp-bridge"
+    },
+    "start": {
+      "kind": "acp-bridge",
+      "command": "cursor-agent",
+      "args": [
+        "acp"
+      ],
+      "prompt": "Answer Relay messages with Cursor from this folder?"
+    },
+    "detectedAs": [
+      "cursor",
+      "cursor-cli"
+    ]
+  },
+  {
+    "id": "opencode",
+    "label": "OpenCode",
+    "aliases": [],
+    "command": "opencode",
+    "installedIf": "(paths) => [platformPath(paths.platform).join(configHome(paths), \"opencode\")]",
+    "connect": {
+      "kind": "acp-bridge"
+    },
+    "start": {
+      "kind": "acp-bridge",
+      "command": "opencode",
+      "args": [
+        "acp"
+      ],
+      "prompt": "Answer Relay messages with OpenCode from this folder?"
+    },
+    "detectedAs": [
+      "opencode"
+    ]
+  },
+  {
+    "id": "cline",
+    "label": "Cline",
+    "aliases": [],
+    "command": "cline",
+    "installedIf": "(paths) => [platformPath(paths.platform).join(paths.home, \".cline\")]",
+    "connect": {
+      "kind": "acp-bridge"
+    },
+    "start": {
+      "kind": "acp-bridge",
+      "command": "cline",
+      "args": [
+        "--acp"
+      ],
+      "prompt": "Answer Relay messages with Cline from this folder?"
+    },
+    "detectedAs": []
+  },
+  {
+    "id": "vscode",
+    "label": "VS Code",
+    "aliases": [
+      "vs-code",
+      "code"
+    ],
+    "installedIf": "(paths) => [\n      platformPath(paths.platform).join(configHome(paths), \"Code\"),\n      win32.join(appData(paths), \"Code\"),\n      \"/Applications/Visual Studio Code.app\",\n    ]",
+    "connect": {
+      "kind": "mcp-file",
+      "file": "(paths) => byPlatform(paths, {\n        darwin: posix.join(appSupport(paths), \"Code\", \"User\", \"mcp.json\"),\n        win32: win32.join(appData(paths), \"Code\", \"User\", \"mcp.json\"),\n        linux: posix.join(paths.home, \".config\", \"Code\", \"User\", \"mcp.json\"),\n      })",
+      "shape": "vscode"
+    },
+    "start": {
+      "kind": "restart",
+      "instruction": "Restart VS Code to load Relay, then ask it to read your Relay messages."
+    },
+    "detectedAs": []
+  },
+  {
+    "id": "gemini-cli",
+    "label": "Gemini CLI",
+    "aliases": [
+      "gemini"
+    ],
+    "command": "gemini",
+    "installedIf": "(paths) => [platformPath(paths.platform).join(paths.home, \".gemini\")]",
+    "connect": {
+      "kind": "acp-bridge"
+    },
+    "start": {
+      "kind": "acp-bridge",
+      "command": "gemini",
+      "args": [
+        "--experimental-acp"
+      ],
+      "prompt": "Answer Relay messages with Gemini CLI from this folder?"
+    },
+    "detectedAs": [
+      "gemini"
+    ]
+  },
+  {
+    "id": "hermes",
+    "label": "Hermes",
+    "aliases": [],
+    "command": "hermes",
+    "installedIf": "(paths) => [hermesHome(paths.env, paths.home, paths.platform)]",
+    "connect": {
+      "kind": "hermes-plugin"
+    },
+    "start": {
+      "kind": "command",
+      "command": "hermes",
+      "args": [
+        "gateway",
+        "run"
+      ],
+      "prompt": "Start Hermes Agent with Relay now?"
+    },
+    "detectedAs": []
+  },
+  {
+    "id": "openclaw",
+    "label": "OpenClaw",
+    "aliases": [
+      "open-claw"
+    ],
+    "command": "openclaw",
+    "installedIf": "(paths) => [openclawHome(paths.home, paths.platform), platformPath(paths.platform).join(paths.home, \".clawdbot\"), platformPath(paths.platform).join(paths.home, \".moltbot\")]",
+    "connect": {
+      "kind": "openclaw-plugin"
+    },
+    "start": {
+      "kind": "command",
+      "command": "openclaw",
+      "args": [
+        "gateway"
+      ],
+      "prompt": "Start OpenClaw with Relay now?"
+    },
+    "detectedAs": []
+  }
+]
