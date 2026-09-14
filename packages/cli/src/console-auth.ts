@@ -73,6 +73,16 @@ export interface ConsoleRequestDependencies {
 const httpFetch = (deps: ConsoleAuthDependencies | ConsoleRequestDependencies): typeof globalThis.fetch =>
   deps.fetch ?? globalThis.fetch;
 
+/** The Console's own name for a refused create whose handle is taken
+ * (Relay-Console apps/api/src/error-copy.ts, HANDLE_TAKEN_CODE). */
+export const HANDLE_TAKEN = "handle_taken";
+
+/** A Console refusal, carrying its status and the Console's short code and
+ * nothing else from the body: an upstream message can hold a token. */
+export class ConsoleRefusal extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) { super(message); }
+}
+
 const json = async <T>(response: Response): Promise<T> => {
   if (response.status === 401) {
     throw new CliError("Relay Console returned HTTP 401. Run relay login.", "no_token");
@@ -83,8 +93,11 @@ const json = async <T>(response: Response): Promise<T> => {
   try { value = JSON.parse(text); } catch { throw new Error(`Relay Console returned HTTP ${response.status}.`); }
   if (!response.ok) {
     // Console errors are not a safe place to echo arbitrary response text:
-    // an upstream error can contain a bearer or refresh token.
-    throw new Error(`Relay Console returned HTTP ${response.status}.`);
+    // an upstream error can contain a bearer or refresh token. Only a short
+    // code in the Console's own vocabulary travels with the status.
+    const code = typeof value === "object" && value !== null && "code" in value && typeof value.code === "string" && /^[a-z_]{1,40}$/u.test(value.code)
+      ? value.code : undefined;
+    throw new ConsoleRefusal(`Relay Console returned HTTP ${response.status}.`, response.status, code);
   }
   return value as T;
 };
@@ -334,6 +347,18 @@ export interface ConsoleAgentCreateResult {
 export const inventedHandle = (displayName: string): string =>
   displayName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^[^a-z]+/u, "").replace(/_+$/u, "").slice(0, 32).replace(/_+$/u, "") || "assistant";
 
+/**
+ * Handles are one flat namespace, so an invented handle is taken as soon as
+ * anyone has one. The handles the CLI tries for an identity it invented: the
+ * plain one, then one with 4 random lowercase letters or digits, then one with
+ * 6, inside Relay's 32-character limit. A typed handle is tried once.
+ */
+const RANDOM_HANDLE_LETTERS = "abcdefghijklmnopqrstuvwxyz0123456789";
+const randomHandleSuffix = (length: number): string =>
+  Array.from(randomBytes(length), (byte) => RANDOM_HANDLE_LETTERS[byte % RANDOM_HANDLE_LETTERS.length]!).join("");
+export const inventedHandleAttempts = (base: string): string[] =>
+  [base, ...[4, 6].map((length) => `${base.slice(0, 32 - length - 1)}_${randomHandleSuffix(length)}`)];
+
 export const createConsoleAgent = async (
   deps: ConsoleRequestDependencies,
   input: ConsoleAgentCreateInput,
@@ -354,22 +379,30 @@ export const createConsoleAgent = async (
     throw new Error("--image-recipe requires its rendered --image or --image-url.");
   }
   const me = await consoleRequest<{ org: { id: string } }>(deps, "/me");
-  const handle = input.handle ?? inventedHandle(input.displayName);
-  const response = await consoleRequest<{
-    agent: { handle: string; displayName: string; avatarUrl: string | null };
-    token: string;
-  }>(deps, `/orgs/${me.org.id}/agents`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Idempotency-Key": uuidv7(),
-    },
-    body: JSON.stringify({
-      handle,
-      displayName: input.displayName,
-      ...(input.about === undefined ? {} : { about: input.about }),
-    }),
-  });
+  const attempts = input.handle === undefined ? inventedHandleAttempts(inventedHandle(input.displayName)) : [input.handle];
+  let response: { agent: { handle: string; displayName: string; avatarUrl: string | null }; token: string } | undefined;
+  for (const [attempt, handle] of attempts.entries()) {
+    try {
+      response = await consoleRequest<NonNullable<typeof response>>(deps, `/orgs/${me.org.id}/agents`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // A new key per attempt: the refused one names an agent that does not exist.
+          "Idempotency-Key": uuidv7(),
+        },
+        body: JSON.stringify({
+          handle,
+          displayName: input.displayName,
+          ...(input.about === undefined ? {} : { about: input.about }),
+        }),
+      });
+      break;
+    } catch (error) {
+      const taken = error instanceof ConsoleRefusal && error.status === 409 && error.code === HANDLE_TAKEN;
+      if (!taken || attempt === attempts.length - 1) throw error;
+    }
+  }
+  if (!response) throw new Error("Relay Console did not create the agent.");
   const created: ConsoleAgentCreateResult = {
     token: response.token,
     agent: {
@@ -449,6 +482,7 @@ export const consoleRequest = async <T>(
         [session.organization_key],
       );
       if (error instanceof CliError && error.code === "no_token") throw new CliError(message, "no_token");
+      if (error instanceof ConsoleRefusal) throw new ConsoleRefusal(message, error.status, error.code);
       throw new Error(message);
     }
   }
