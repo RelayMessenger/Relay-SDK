@@ -68,7 +68,7 @@ import { describeFailure } from "./errors.js";
 import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
 import { verboseFetch } from "./verbose.js";
 import { relayHelpHeading, writeRelayHelpHeading } from "./relay-brand.js";
-import { consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, deleteConsoleAgent } from "./console-auth.js";
+import { consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, consoleSignOut, deleteConsoleAgent } from "./console-auth.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
 // source file may carry its own copy.
@@ -615,7 +615,12 @@ export const createProgram = (
       const selected = config.profiles[profile];
       if (!selected) throw new CliError(`Relay profile ${profile} does not exist.`, "not_found");
       const clearedConsole = clearConsole && config.console !== undefined;
-      if (clearedConsole) delete config.console;
+      // End the Relay-Auth session on the server before the local copy goes;
+      // a server miss still removes the local session (the token expires by itself).
+      if (clearedConsole) {
+        await consoleSignOut({ context: configContext, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) });
+        delete config.console;
+      }
       // clig.dev, Output: "If you change state, tell the user" — and only when
       // it changed. With nothing saved there is nothing to remove, so the
       // file is left alone and the answer says so (ledger row P14).

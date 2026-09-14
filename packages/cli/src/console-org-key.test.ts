@@ -81,7 +81,7 @@ it.each([401, 403, 500])("failed validation HTTP %s preserves existing OAuth and
   const f = await fixture();
   const config = emptyConfig();
   config.console = {
-    access_token: "private-access", refresh_token: "private-refresh", client_id: "client",
+    access_token: "private-access",
     expires_at: Date.now() + 3600_000, organization_id: "old_org",
     user: { id: "user", email: "owner@example.invalid" },
   };
@@ -182,28 +182,20 @@ it("whoami without credentials exits 4 without any request", async () => {
   expect(f.fetch).not.toHaveBeenCalled();
 });
 
-it.each([true, false])("OAuth refresh stays functional (expired=%s)", async (expired) => {
+it("a saved Relay-Auth session is reused as a bearer and never refreshed", async () => {
   const f = await fixture();
   const config = emptyConfig();
   config.console = {
-    access_token: "old-access", refresh_token: "old-refresh", client_id: "client_fixture",
-    expires_at: expired ? 0 : Date.now() + 3600_000,
+    access_token: "session-access", expires_at: Date.now() + 3600_000,
     organization_id: "org_fixture", user: { id: "user", email: "user@example.invalid" },
   };
   await writeConfig(config, f.context);
-  const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-    if (String(input) === "https://api.workos.com/user_management/authenticate") {
-      expect(String(init?.body)).toContain("refresh_token=old-refresh");
-      return Response.json({ access_token: "fresh-access", refresh_token: "fresh-refresh" });
-    }
-    return new Headers(init?.headers).get("authorization") === "Bearer fresh-access"
+  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
+    new Headers(init?.headers).get("authorization") === "Bearer session-access"
       ? Response.json({ org: { id: "org_fixture" } })
-      : Response.json({ error: "expired" }, { status: 401 });
-  });
-  expect(await consoleLoginOrReuse({ context: f.context, fetch })).toMatchObject({
-    access_token: "fresh-access", refresh_token: "fresh-refresh",
-  });
-  expect(fetch).toHaveBeenCalledTimes(expired ? 2 : 3);
+      : Response.json({ error: "expired" }, { status: 401 }));
+  expect(await consoleLoginOrReuse({ context: f.context, fetch })).toMatchObject({ access_token: "session-access" });
+  expect(fetch).toHaveBeenCalledOnce();
 });
 
 it.each([401, 403, 500])("Console deletion HTTP %s keeps profile and never tries SDK deletion", async (status) => {

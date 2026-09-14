@@ -22,6 +22,9 @@ import { resolveFolderAgent } from "./folder-link.js";
 export const DEFAULT_API_URL = "https://api.relayapp.im";
 export const DEFAULT_PROFILE = "default";
 export const STAGING_API_URL = "https://api.staging.relayapp.im";
+/** Relay-Auth, the one account per person; `relay login` runs its device flow. */
+export const DEFAULT_AUTH_URL = "https://auth.relayapp.im";
+export const STAGING_AUTH_URL = "https://auth.staging.relayapp.im";
 /** This package's own version as published (`X.Y.Z` or `X.Y.Z-staging.N`). */
 export const packageVersion = (): string =>
   createRequire(import.meta.url)("../package.json").version;
@@ -31,6 +34,15 @@ export const isStagingBuild = (version: string): boolean =>
 export const defaultCreationApiURL = (
   version: string = packageVersion(),
 ): string => isStagingBuild(version) ? STAGING_API_URL : DEFAULT_API_URL;
+/** RELAY_AUTH_URL overrides, the way RELAY_CONSOLE_API_URL overrides the Console. */
+export const defaultAuthURL = (
+  env: NodeJS.ProcessEnv = process.env,
+  version: string = packageVersion(),
+): string => {
+  const configured = env.RELAY_AUTH_URL?.trim();
+  if (configured) return new URL(configured).toString().replace(/\/$/, "");
+  return isStagingBuild(version) ? STAGING_AUTH_URL : DEFAULT_AUTH_URL;
+};
 
 export interface RelayProfile {
   api_url?: string;
@@ -41,12 +53,12 @@ export interface RelayProfile {
   local_webhook_secret?: string;
 }
 
+/** A Relay-Auth session token from the device flow. It has no refresh: the
+ * token lives 30 days and `relay login` renews it. */
 export interface RelayConsoleOAuthSession {
   type?: "oauth";
   access_token: string;
-  refresh_token: string;
   expires_at: number;
-  client_id: string;
   organization_id?: string;
   user: {
     id: string;
@@ -162,18 +174,18 @@ const parseConfig = (value: unknown): RelayConfig => {
       ? { console: parseOrganizationKey(value.console) }
       : isRecord(value.console)
       && typeof value.console.access_token === "string"
-      && typeof value.console.refresh_token === "string"
+      // An older session (refresh_token, client_id) is signed out: its
+      // token is not a Relay-Auth token. Run relay login.
+      && value.console.refresh_token === undefined
+      && value.console.client_id === undefined
       && typeof value.console.expires_at === "number"
-      && typeof value.console.client_id === "string"
       && isRecord(value.console.user)
       && typeof value.console.user.id === "string"
       && typeof value.console.user.email === "string"
       ? {
           console: {
             access_token: value.console.access_token,
-            refresh_token: value.console.refresh_token,
             expires_at: value.console.expires_at,
-            client_id: value.console.client_id,
             ...(typeof value.console.organization_id === "string"
               ? { organization_id: value.console.organization_id }
               : {}),
@@ -463,6 +475,6 @@ export const collectConfiguredTokens = async (
   const envToken = contextEnv(context).RELAY_AGENT_TOKEN;
   if (envToken) tokens.push(envToken);
   if (config.console?.type === "organization_key") tokens.push(config.console.organization_key);
-  else if (config.console) tokens.push(config.console.access_token, config.console.refresh_token);
+  else if (config.console) tokens.push(config.console.access_token);
   return [...new Set(tokens)];
 };
