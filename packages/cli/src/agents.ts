@@ -89,6 +89,9 @@ export const validateFirstName = (name: string): string => {
   return firstName;
 };
 
+/** The name the CLI invents when the person gave none. */
+export const DEFAULT_AGENT_NAME = "My Agent";
+
 export async function createAgent(input: CreateAgentInput, deps: AgentDependencies) {
   const before = await deps.read();
   if (input.profile) {
@@ -106,7 +109,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
   }
   if (input.imageRecipe !== undefined && input.imageURL === undefined) throw new Error("An image recipe also needs the finished picture. Pass --image or --image-url with it; this command does not draw pictures.");
   const body: ConsoleAgentCreateInput = {
-    displayName: firstName ?? "My Agent",
+    displayName: firstName ?? DEFAULT_AGENT_NAME,
     ...(input.about === undefined ? {} : { about: input.about.trim() }),
     ...(input.handle === undefined ? {} : { handle: input.handle }),
   };
