@@ -73,10 +73,11 @@ for mode, columns, rows in modes:
         end = time.monotonic() + 5
         while not ready.exists() and time.monotonic() < end: time.sleep(.05)
         env['RELAY_API_URL'] = json.loads(ready.read_text())['origin']
-        # The shipped CLI creates new Agents through Console after the WorkOS
-        # device login. Point the offline Console boundary at the same loopback
+        # The shipped CLI signs in through the Relay-Auth device flow, then creates
+        # the Agent through Console. Point both boundaries at the same loopback
         # fixture so this native proof never opens a real account or browser.
         env['RELAY_CONSOLE_API_URL'] = env['RELAY_API_URL']
+        env['RELAY_AUTH_URL'] = env['RELAY_API_URL']
         master, slave = pty.openpty(); fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', rows, columns, 0, 0)); before = termios.tcgetattr(slave)
         process = subprocess.Popen([node, shim, 'connect', '--allow', 'terminal_fixture_person', '--no-skill'], stdin=slave, stdout=slave, stderr=slave, env=env, cwd=home)
         stage = 0; end = time.monotonic() + 30
@@ -114,7 +115,7 @@ for mode, columns, rows in modes:
         # 60 rows fit one text line per module row, so that window gets the full cells and no glyph.
         if rows >= 60 and (fullCells or halfBlocks): assert fullCells and not halfBlocks, output
         state = json.loads(report.read_text())
-        assert state['consoleCreates'] == 1 and state['observers'] == 1 and state['authConfirmed'] and state['queries'] == ['/v1/websocket?observe=true'] and state['frames'] == [], state
+        assert state['consoleCreates'] == 1 and state['authSessionRead'] and state['observers'] == 1 and state['authConfirmed'] and state['queries'] == ['/v1/websocket?observe=true'] and state['frames'] == [], state
         # What was written: the folder link (a pointer, no token), the channel's .env (the token, owner-only), the profile.
         link = json.loads((home / '.relay' / 'agent.json').read_bytes()); assert link == {'handle': handle, 'apiUrl': env['RELAY_API_URL']}, link
         channel = (home / '.claude' / 'channels' / 'relay' / '.env').read_bytes(); assert token in channel and b'terminal_fixture_person' in channel
