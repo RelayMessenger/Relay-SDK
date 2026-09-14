@@ -385,7 +385,10 @@ export const createProgram = (
           context: configContext,
           apiURL: defaultCreationApiURL(),
           ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
-          ...(dependencies.prompts ? { prompts: dependencies.prompts } : {}),
+          // Continue? is connect's last question (_artifacts/cli-connect-design-20260912.md, item 5):
+          // the login gets no prompts, so a first sign-in takes the person's default
+          // organization name instead of asking one more question after the confirm.
+          // `relay login` keeps its question.
           stderr,
           nonInteractive: dependencies.isInteractive === false,
         })),
