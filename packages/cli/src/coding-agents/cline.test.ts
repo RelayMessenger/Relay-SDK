@@ -45,7 +45,7 @@ it("connect starts Cline over its ACP bridge", async () => {
     connect: {
       sniff: async () => [{ id: "cline", label: "Cline", found: true }],
       bridge, observer: () => ({ semantics: "observational-no-ack", run: async () => undefined }),
-      renderQR: () => "[QR]\n", pairTimeoutMs: 1, version: "0.1.6-staging.0",
+      renderQR: () => "[QR]\n", version: "0.1.6-staging.0",
     },
   })).toBe(0);
   expect(bridge).toHaveBeenCalledWith(expect.objectContaining({ command: "cline", acpArgs: ["--acp"], kind: "acp" }));

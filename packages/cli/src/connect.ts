@@ -1,4 +1,3 @@
-import type { RelayWebhookEvent } from "@relaymessenger/sdk";
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
@@ -39,8 +38,6 @@ export const CLAUDE_PLUGIN_ID = "relay@relay-messenger";
  * `main`, the same rule the Relay skill installer already follows. */
 export const claudeMarketplaceSource = (version: string = packageVersion()): string =>
   `${CLAUDE_MARKETPLACE_REPO}@${isStagingBuild(version) ? "staging" : "main"}`;
-/** Pairing waits this long for a first message before it names --allow instead. */
-export const PAIR_TIMEOUT_MS = 180_000;
 export const REPLY_TIMEOUT_MS = 300_000;
 
 /** The MCP server the seven MCP agents run (packages/mcp, bin `relay-mcp`). A
@@ -128,7 +125,6 @@ export interface ConnectDependencies {
     say(line: string): void;
   }) => Promise<void>;
   renderQR?: (url: string, options?: TerminalQROptions) => string;
-  pairTimeoutMs?: number;
   version?: string;
   fetch?: typeof globalThis.fetch;
   offerSkill?: () => Promise<void>;
@@ -436,57 +432,6 @@ export const runtimeConnectPlan = (input: PlanContext & { agents: readonly Codin
   return { headline: input.ask === false ? count : "Continue? (Y/n)", steps, agents };
 };
 
-const senderOf = (event: RelayWebhookEvent): { handle: string; text: string } | undefined => {
-  const row = event as unknown as Record<string, unknown>;
-  if (row.event_type !== "message.received") return undefined;
-  const data = (row.data ?? {}) as Record<string, unknown>;
-  const sender = (data.sender_handle ?? {}) as Record<string, unknown>;
-  if (typeof sender.handle !== "string" || !sender.handle) return undefined;
-  const parts = Array.isArray(data.parts) ? data.parts : [];
-  const text = parts
-    .map((part) => part as Record<string, unknown>)
-    .filter((part) => part.type === "text" && typeof part.value === "string")
-    .map((part) => part.value as string)
-    .join(" ");
-  return { handle: sender.handle, text };
-};
-
-/**
- * Watches only. This connection never answers Relay and never takes an event,
- * so the agent being connected still receives every message.
- */
-export const waitForNewSender = async (
-  observer: TerminalObserver,
-  allowed: readonly string[],
-  options: { timeoutMs: number; signal?: AbortSignal },
-): Promise<{ handle: string; text: string } | undefined> => {
-  const known = new Set(allowed);
-  const control = new AbortController();
-  const forward = (): void => control.abort();
-  options.signal?.addEventListener("abort", forward, { once: true });
-  const timer = setTimeout(forward, options.timeoutMs);
-  let found: { handle: string; text: string } | undefined;
-  try {
-    await observer.run({
-      signal: control.signal,
-      onStatus: () => undefined,
-      onEvent: (event) => {
-        if (found) return;
-        const sender = senderOf(event);
-        if (!sender || known.has(sender.handle)) return;
-        found = sender;
-        control.abort();
-      },
-    });
-  } catch {
-    // A dropped watch connection is not a failed connect; pairing simply ends.
-  } finally {
-    clearTimeout(timer);
-    options.signal?.removeEventListener("abort", forward);
-  }
-  return found;
-};
-
 const defaultRunCommand = async (file: string, args: readonly string[]): Promise<ConnectCommandResult> =>
   new Promise((resolve) => {
     const child = spawnCommand(file, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -765,16 +710,13 @@ export const runConnect = async (
       const channelDir = claudeChannelDir(deps.env, deps.home);
       const envPath = join(channelDir, ".env");
       await screen.work("Installing the plugin", () => runAgentCommands(target, runtime, ctx, runCommand), () => "Plugin installed");
+      // An empty list means anyone can message this agent (owner's order,
+      // 2026-09-14); --allow narrows it and nothing waits for a first message.
       await writeChannelEnv(channelDir, { token: agent.token, baseURL: agent.apiURL, allowedSenders: allowed }, platform);
       screen.step(`wrote  ${screen.dim(envPath)}`);
-      if (!allowed.length) {
+      if (!qrShown && !json) {
         qrShown = true;
-        const paired = await pairFirstSender(agent, deps, screen);
-        if (paired) {
-          allowed.push(paired);
-          await writeChannelEnv(channelDir, { token: agent.token, baseURL: agent.apiURL, allowedSenders: allowed }, platform);
-          screen.step(`Allowed: ${screen.handle(paired)}`);
-        }
+        showAddQR(agent, deps, screen);
       }
       Object.assign(result, { env_path: envPath, plugin: CLAUDE_PLUGIN_ID, marketplace: claudeMarketplaceSource(version), allowed_senders: allowed });
     } else if (method.kind === "mcp-command") {
@@ -1152,32 +1094,4 @@ const showAddQR = (agent: ConnectAgent, deps: ConnectDependencies, screen: Scree
     try { deps.stdout(`${(deps.renderQR ?? renderTerminalQR)(share, { rows: terminalQRRowsLeft(process.stdout.rows, 4) })}${screen.link(share)}\n`); }
     catch { deps.stdout(`${screen.link(share)}\n`); }
   }
-};
-
-const pairFirstSender = async (
-  agent: ConnectAgent,
-  deps: ConnectDependencies,
-  screen: Screen,
-): Promise<string | undefined> => {
-  const ui = deps.prompts;
-  if (!ui || screen.json) {
-    throw new HeadlessPrompt("Relay cannot wait for a first message here.", [
-      "--allow <handles>  the handles allowed to message this agent, separated by commas",
-    ]);
-  }
-  showAddQR(agent, deps, screen);
-  const observer = deps.observer?.(agent.token, agent.apiURL);
-  if (!observer) {
-    screen.say("Relay could not open its watch connection, so it did not wait for a first message.");
-    return undefined;
-  }
-  const spinner = ui.spinner();
-  spinner.start("Waiting for the first message…");
-  const sender = await waitForNewSender(observer, [], { timeoutMs: deps.pairTimeoutMs ?? PAIR_TIMEOUT_MS });
-  spinner.stop(sender ? `@${sender.handle} wrote "${sender.text}"` : "No message yet.");
-  if (!sender) {
-    screen.say("No message arrived. Run  npx relaymessenger connect claude-code --allow <your handle>  to allow a sender without waiting.");
-    return undefined;
-  }
-  return await ui.confirm(`Allow @${sender.handle} to message this agent?`) ? sender.handle : undefined;
 };
