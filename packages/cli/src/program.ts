@@ -386,9 +386,7 @@ export const createProgram = (
           apiURL: defaultCreationApiURL(),
           ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
           // Continue? is connect's last question (_artifacts/cli-connect-design-20260912.md, item 5):
-          // the login gets no prompts, so a first sign-in takes the person's default
-          // organization name instead of asking one more question after the confirm.
-          // `relay login` keeps its question.
+          // the login has no prompts; Relay Console names a first organization itself (GET /me).
           stderr,
           nonInteractive: dependencies.isInteractive === false,
         })),
@@ -667,9 +665,8 @@ export const createProgram = (
     .helpGroup(HELP_GROUPS.everythingElse);
   loginCommand
     .option("--with-token", "read an organization API key from a pipe")
-    .option("--organization-name <name>", "name for a new organization")
-    .option("--website <domain>", "optional website for a new organization")
-    .action(async (options: { withToken?: boolean; organizationName?: string; website?: string }, command: Command) => {
+    .option("--website <domain>", "set the organization website after sign-in")
+    .action(async (options: { withToken?: boolean; website?: string }, command: Command) => {
       if (options.withToken) {
         if (!dependencies.readStdin && process.stdin.isTTY) {
           throw new CliError("Pipe an organization API key into relay login --with-token.", "not_a_tty");
@@ -691,7 +688,6 @@ export const createProgram = (
         ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
         ...(dependencies.prompts ? { prompts: dependencies.prompts } : {}),
         stderr,
-        ...(options.organizationName ? { name: options.organizationName } : {}),
         ...(options.website === undefined ? {} : { website: options.website }),
         nonInteractive: globals(command).nonInteractive === true || globals(command).json === true || dependencies.isInteractive === false,
       });
