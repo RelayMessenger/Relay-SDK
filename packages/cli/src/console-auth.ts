@@ -314,6 +314,9 @@ export interface ConsoleAgentCreateInput {
   handle?: string;
   displayName: string;
   about?: string;
+  /** Sent as `image_url` on the create request itself: the bird the CLI picked
+   * for an identity it invented (agent-create.ts, birdImageUrl). */
+  defaultImageURL?: string;
   image?: string;
   imageRecipe?: import("@relaymessenger/sdk").AgentImageRecipe;
   cwd?: string;
@@ -325,6 +328,14 @@ export interface ConsoleAgentCreateResult {
   token: string;
   image?: AgentImageUploadResult;
 }
+
+/**
+ * The handle the CLI invents when the person gave none: the display name in
+ * handle letters. Relay refuses a collision rather than renaming, so the handle
+ * sent is the handle created (server console.ts, POST /agents).
+ */
+export const inventedHandle = (displayName: string): string =>
+  displayName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^[^a-z]+/u, "").replace(/_+$/u, "").slice(0, 32).replace(/_+$/u, "") || "assistant";
 
 export const createConsoleAgent = async (
   deps: ConsoleRequestDependencies,
@@ -346,8 +357,7 @@ export const createConsoleAgent = async (
     throw new Error("--image-recipe requires its rendered --image or --image-url.");
   }
   const me = await consoleRequest<{ org: { id: string } }>(deps, "/me");
-  const base = (input.handle ?? (input.displayName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^[^a-z]+/u, "").replace(/_+$/u, "").slice(0, 32).replace(/_+$/u, "") || "assistant"));
-  const handle = base;
+  const handle = input.handle ?? inventedHandle(input.displayName);
   const response = await consoleRequest<{
     agent: { handle: string; displayName: string; avatarUrl: string | null };
     token: string;
@@ -361,6 +371,7 @@ export const createConsoleAgent = async (
       handle,
       displayName: input.displayName,
       ...(input.about === undefined ? {} : { about: input.about }),
+      ...(input.defaultImageURL === undefined ? {} : { image_url: input.defaultImageURL }),
     }),
   });
   const created: ConsoleAgentCreateResult = {

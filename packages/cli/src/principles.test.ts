@@ -1,3 +1,4 @@
+import { withBirdManifest } from "../test/bird-manifest.js";
 import { consoleFixture } from "../test/console-fixture.js";
 import { afterEach, expect, it } from "vitest";
 import { mkdtemp, rm, realpath } from "node:fs/promises";
@@ -94,11 +95,12 @@ it("agent creation forwards trimmed about and omits it when absent", async () =>
     const context = { home, env: { RELAY_CONFIG_PATH: join(home, "config.json") } };
     const console = consoleFixture(context, { handle: "calendar", first_name: "Calendar", image_url: null });
     await console.login();
-    const deps = agentDependencies(context, console.wrap(async (_url, init) => {
+    const fetch = withBirdManifest(console.wrap(async (_url, init) => {
       body = JSON.parse(String(init?.body));
       return Response.json({ agent: { handle: "calendar", first_name: "Calendar", image_url: null }, secret: "rly_test_about_0123456789", share_url: "https://relayapp.im/calendar" }, { status: 201 });
     }));
-    await createAgentWithPicture({ apiURL: "https://api.staging.relayapp.im", ...(about === undefined ? {} : { about }) }, deps);
+    const deps = agentDependencies(context, fetch);
+    await createAgentWithPicture({ apiURL: "https://api.staging.relayapp.im", ...(about === undefined ? {} : { about }) }, deps, fetch);
     if (about === undefined) expect(body).not.toHaveProperty("about");
     else expect(body.about).toBe("Helps with your calendar");
   }

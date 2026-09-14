@@ -1,9 +1,55 @@
 import { prepareAgentImage, type LocalAgentImage } from "./local-image.js";
 import { uploadAgentImage, type AgentImageUploadResult } from "./agent-image-upload.js";
-import { agentRecord, createAgent, type AgentDependencies, type CreateAgentInput } from "./agents.js";
+import { agentRecord, createAgent, DEFAULT_AGENT_NAME, type AgentDependencies, type CreateAgentInput } from "./agents.js";
+import { inventedHandle } from "./console-auth.js";
 import { safeMetadata } from "./output.js";
 import Relay, { type AgentImageRecipe } from "@relaymessenger/sdk";
 import { defaultCreationApiURL, validateApiURL } from "./config.js";
+import { createHash } from "node:crypto";
+
+/**
+ * The picture tree for a new agent (owner ruling, 2026-09-14): a supplied
+ * picture wins; a supplied name or handle leaves the picture to the server,
+ * which draws a monogram; an identity the CLI invented whole (no picture, no
+ * name, no handle) gets a bird, chosen by the server's own rule so the CLI and
+ * the server agree: sha256(handle) first byte, modulo 84, in manifest order
+ * (Relay-Server server/src/default-avatar.ts).
+ */
+const BIRD_COUNT = 84;
+const manifests = new Map<string, Promise<string[] | undefined>>();
+
+/** Forget the manifests read so far; tests use it between cases. */
+export const forgetBirdManifests = (): void => { manifests.clear(); };
+
+const birdFiles = (apiURL: string, fetchImplementation: typeof globalThis.fetch): Promise<string[] | undefined> => {
+  const cached = manifests.get(apiURL);
+  if (cached) return cached;
+  const reading = (async () => {
+    const response = await fetchImplementation(new URL("/avatars/manifest.json", apiURL));
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const manifest = await response.json() as { assets?: Array<{ file?: unknown }> };
+    const files = (manifest.assets ?? []).map((asset) => asset.file);
+    if (files.length < BIRD_COUNT || files.some((file) => typeof file !== "string")) throw new Error("not the 84-bird manifest");
+    return files as string[];
+  })().catch((error: unknown) => {
+    process.stderr.write(`Relay could not read the bird pictures (${error instanceof Error ? error.message : String(error)}); the server will pick this agent's picture.\n`);
+    return undefined;
+  });
+  manifests.set(apiURL, reading);
+  return reading;
+};
+
+/** The bird address for a handle, or undefined when the manifest could not be read. */
+export const birdImageUrl = async (
+  apiURL: string,
+  handle: string,
+  fetchImplementation: typeof globalThis.fetch = globalThis.fetch,
+): Promise<string | undefined> => {
+  const files = await birdFiles(apiURL, fetchImplementation);
+  if (!files) return undefined;
+  const index = createHash("sha256").update(handle, "utf8").digest()[0]! % BIRD_COUNT;
+  return new URL(`/avatars/${files[index]!}`, apiURL).toString();
+};
 
 /**
  * One creation path for every caller. `agents create` and `connect` both make an
@@ -44,8 +90,16 @@ export const createAgentWithPicture = async (
   if (input.imageRecipe !== undefined && imageURL === undefined && !localImage) {
     throw new Error("--image-recipe requires its rendered --image or --image-url.");
   }
+  // Nothing typed at all: the CLI invented the name and the handle, so it also
+  // names the bird. Any supplied field leaves the picture to the server.
+  let defaultImageURL: string | undefined;
+  if (input.handle === undefined && input.firstName === undefined && imageURL === undefined && !localImage) {
+    const apiURL = validateApiURL(input.apiURL ?? deps.env.RELAY_API_URL ?? defaultCreationApiURL());
+    defaultImageURL = await birdImageUrl(apiURL, inventedHandle(DEFAULT_AGENT_NAME), fetchImplementation ?? globalThis.fetch);
+  }
   const result = await createAgent({
     ...(input.profile === undefined ? {} : { profile: input.profile }),
+    ...(defaultImageURL === undefined ? {} : { defaultImageURL }),
     ...(input.apiURL === undefined ? {} : { apiURL: input.apiURL }),
     ...(input.handle === undefined ? {} : { handle: input.handle }),
     ...(input.firstName === undefined ? {} : { firstName: input.firstName }),

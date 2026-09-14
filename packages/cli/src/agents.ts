@@ -49,6 +49,8 @@ export interface CreateAgentInput {
   about?: string;
   imageURL?: string;
   imageRecipe?: AgentImageRecipe;
+  /** A picture sent on the create request itself (the bird for an invented identity). */
+  defaultImageURL?: string;
   /** Save the new profile as the last connected agent, in the same config write. */
   makeDefault?: boolean;
 }
@@ -89,6 +91,9 @@ export const validateFirstName = (name: string): string => {
   return firstName;
 };
 
+/** The name the CLI invents when the person gave none. */
+export const DEFAULT_AGENT_NAME = "My Agent";
+
 export async function createAgent(input: CreateAgentInput, deps: AgentDependencies) {
   const before = await deps.read();
   if (input.profile) {
@@ -106,9 +111,10 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
   }
   if (input.imageRecipe !== undefined && input.imageURL === undefined) throw new Error("An image recipe also needs the finished picture. Pass --image or --image-url with it; this command does not draw pictures.");
   const body: ConsoleAgentCreateInput = {
-    displayName: firstName ?? "My Agent",
+    displayName: firstName ?? DEFAULT_AGENT_NAME,
     ...(input.about === undefined ? {} : { about: input.about.trim() }),
     ...(input.handle === undefined ? {} : { handle: input.handle }),
+    ...(input.defaultImageURL === undefined ? {} : { defaultImageURL: input.defaultImageURL }),
   };
   if (Buffer.byteLength(JSON.stringify(body), "utf8") > 8192) throw new Error("These agent details are too long. Shorten the name, the handle or the picture address.");
   try { await deps.preflight(); } catch { throw new Error("Relay could not prepare a private file to save the token in, so it did not create the agent. Check the permissions on your Relay config folder."); }
