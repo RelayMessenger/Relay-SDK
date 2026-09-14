@@ -14,7 +14,7 @@ import {
   type RelayConsoleOAuthSession,
   type RelayConsoleOrganizationKey,
 } from "./config.js";
-import { HeadlessPrompt, type InteractivePrompts } from "./interactive.js";
+import { type InteractivePrompts } from "./interactive.js";
 import { CliError } from "./error-codes.js";
 import { prepareAgentImage, type LocalAgentImage } from "./local-image.js";
 import { uploadAgentImage, type AgentImageUploadResult } from "./agent-image-upload.js";
@@ -60,7 +60,6 @@ export interface ConsoleAuthDependencies {
   prompts?: InteractivePrompts;
   stderr?: (value: string) => void;
   openBrowser?: (url: string) => Promise<void>;
-  name?: string;
   website?: string;
   nonInteractive?: boolean;
 }
@@ -100,26 +99,6 @@ const openBrowser = async (url: string): Promise<void> => {
     child.once("error", reject);
     child.once("spawn", () => { child.unref(); resolve(); });
   });
-};
-
-const userName = (user: DeviceToken["user"]): string => {
-  if (user.name?.trim()) return user.name.trim();
-  return user.email.split("@", 1)[0] || "Personal";
-};
-
-const publicMailDomains = new Set([
-  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com",
-  "yahoo.com", "icloud.com", "me.com", "proton.me", "protonmail.com",
-]);
-
-/** Relay-Auth returns the verified email; use a Workspace domain only as a display hint. */
-export const organizationDefaults = (user: DeviceToken["user"]): { name: string } => {
-  const emailDomain = user.email.split("@")[1]?.toLowerCase();
-  const company = emailDomain && !publicMailDomains.has(emailDomain)
-    ? emailDomain.split(".")[0]!.replace(/[-_]+/g, " ").trim()
-    : "";
-  const name = company ? company.replace(/\b\w/g, (value) => value.toUpperCase()) : userName(user);
-  return { name: name.slice(0, 80) };
 };
 
 const saveSession = async (context: ConfigContext, session: RelayConsoleSession): Promise<void> => {
@@ -200,24 +179,27 @@ const pollDevice = async (deps: ConsoleAuthDependencies, start: DeviceStart): Pr
   throw new CliError("Relay login expired. Run relay login again.", "refused");
 };
 
-const bootstrap = async (
-  deps: ConsoleAuthDependencies,
-  token: DeviceToken,
-  setup: { name: string },
-): Promise<string> => {
+/**
+ * Relay Console names a person's first organization itself (Relay-Console
+ * apps/api/src/routes/me.ts, firstOrganization): GET /me creates it on the
+ * first call and answers 409 organization_selection_required when the person
+ * belongs to several and has not chosen one. The 409 body carries no list, so
+ * the choice is made in Console, not here.
+ */
+const readOrganization = async (deps: ConsoleAuthDependencies, token: DeviceToken): Promise<string> => {
   const api = defaultConsoleApiURL(deps.apiURL ?? defaultCreationApiURL(), deps.context.env ?? process.env);
-  const response = await httpFetch(deps)(`${api}/auth/cli/bootstrap`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token.access_token}`,
-      "X-Relay-CLI": "1",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ name: setup.name }),
+  const response = await httpFetch(deps)(`${api}/me`, {
+    headers: { Authorization: `Bearer ${token.access_token}`, "X-Relay-CLI": "1" },
   });
-  const value = await json<{ organization_id?: string; error?: string }>(response);
-  if (!value.organization_id) throw new Error("Relay Console did not return an organization.");
-  return value.organization_id;
+  if (response.status === 409) {
+    const value = await response.json().catch(() => null) as { code?: unknown } | null;
+    if (value?.code === "organization_selection_required") {
+      throw new CliError("Choose an organization in Relay Console, then run relay login again.", "refused");
+    }
+  }
+  const value = await json<{ org?: { id?: unknown } }>(response);
+  if (typeof value?.org?.id !== "string" || !value.org.id) throw new Error("Relay Console did not return an organization.");
+  return value.org.id;
 };
 
 /** Ends the Relay-Auth session server-side; a failure is not fatal, the local copy is still removed. */
@@ -245,14 +227,7 @@ export const consoleLogin = async (deps: ConsoleAuthDependencies): Promise<Relay
   stderr(`If it does not open, enter this code at ${start.verification_uri}: ${start.user_code}\n`);
   await (deps.openBrowser ?? openBrowser)(verification).catch(() => undefined);
   const token = await pollDevice(deps, start);
-  const defaults = organizationDefaults(token.user);
-  let name = deps.name ?? defaults.name;
-  if (deps.prompts && !deps.nonInteractive) {
-    name = (await deps.prompts.text("Organization name", name)).trim() || name;
-  } else if (deps.nonInteractive && (deps.name === undefined)) {
-    throw new HeadlessPrompt("Relay needs organization setup after login.", ["--organization-name <name>"]);
-  }
-  const organizationId = await bootstrap(deps, token, { name });
+  const organizationId = await readOrganization(deps, token);
   const session: RelayConsoleOAuthSession = {
     access_token: token.access_token,
     expires_at: token.expires_at,

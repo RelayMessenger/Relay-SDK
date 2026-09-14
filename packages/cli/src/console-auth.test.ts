@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { defaultAuthURL, defaultConsoleApiURL, emptyConfig, readConfig, writeConfig } from "./config.js";
-import { consoleLogin, consoleRequest, consoleSignOut, organizationDefaults } from "./console-auth.js";
+import { consoleLogin, consoleRequest, consoleSignOut } from "./console-auth.js";
 
 const AUTH = "https://auth.staging.relayapp.im";
 const CONSOLE = "https://console.staging.relayapp.im/api";
@@ -35,19 +35,7 @@ it("picks Relay-Auth by build, and RELAY_AUTH_URL overrides it", () => {
   expect(defaultAuthURL({ RELAY_AUTH_URL: "http://localhost:3000/" }, "1.0.0")).toBe("http://localhost:3000");
 });
 
-it("uses a Workspace domain for the organization display default and no random suffix", () => {
-  expect(organizationDefaults({ id: "user_1", email: "ada@acme.com", name: "Ada Lovelace" })).toEqual({
-    name: "Acme",
-  });
-});
-
-it("uses the identity name for public email providers", () => {
-  expect(organizationDefaults({ id: "user_1", email: "ada@gmail.com", name: "Ada Lovelace" })).toEqual({
-    name: "Ada Lovelace",
-  });
-});
-
-it("completes the Relay-Auth device flow, fills the person from get-session, bootstraps the organization, and never prints secrets", async () => {
+it("completes the Relay-Auth device flow, fills the person from get-session, reads the organization from Console /me, and never prints secrets", async () => {
   const configPath = await scratch("relay-console-device-");
   const expiresAt = new Date(Date.now() + 30 * 24 * 3600_000).toISOString();
   const calls: string[] = [];
@@ -74,9 +62,16 @@ it("completes the Relay-Auth device flow, fills the person from get-session, boo
         user: { id: "user_1", email: "ada@gmail.com", name: "Ada Lovelace" },
       });
     }
-    if (url === `${CONSOLE}/auth/cli/bootstrap`) {
+    if (url === `${CONSOLE}/me`) {
+      expect(init?.method ?? "GET").toBe("GET");
       expect(init?.headers).toMatchObject({ Authorization: "Bearer session-secret", "X-Relay-CLI": "1" });
-      return Response.json({ organization_id: "org_personal", created: true }, { status: 201 });
+      return Response.json({
+        user: { id: "user_1", email: "ada@gmail.com", name: "Ada Lovelace" },
+        org: { id: "org_personal", name: "Ada Lovelace", logoUrl: null },
+        orgs: [{ id: "org_personal", name: "Ada Lovelace", logoUrl: null, role: "owner" }],
+        role: "owner",
+        capabilities: [],
+      });
     }
     throw new Error(`unexpected request ${url}`);
   });
@@ -90,8 +85,7 @@ it("completes the Relay-Auth device flow, fills the person from get-session, boo
     fetch,
     openBrowser: async (url) => { opened.push(url); },
     stderr: (value) => stderr.push(value),
-    name: "Ada",
-    nonInteractive: true,
+    prompts: { select: async () => { throw new Error("login must not prompt"); }, text: async () => { throw new Error("login must not prompt"); } } as never,
   });
 
   expect(session).toEqual({
@@ -106,7 +100,7 @@ it("completes the Relay-Auth device flow, fills the person from get-session, boo
     `${AUTH}/api/auth/device/token`,
     `${AUTH}/api/auth/device/token`,
     `${AUTH}/api/auth/get-session`,
-    `${CONSOLE}/auth/cli/bootstrap`,
+    `${CONSOLE}/me`,
   ]);
   expect(bodies).toEqual(Array(2).fill({
     grant_type: "urn:ietf:params:oauth:grant-type:device_code",
@@ -120,6 +114,25 @@ it("completes the Relay-Auth device flow, fills the person from get-session, boo
   expect(printed).not.toContain("device-secret");
   expect(printed).not.toContain("session-secret");
   expect((await readConfig({ env: { RELAY_CONFIG_PATH: configPath } })).console).toEqual(session);
+});
+
+it("tells the person to choose an organization in Console when /me answers 409 organization_selection_required", async () => {
+  const configPath = await scratch("relay-console-409-");
+  noWait();
+  const fetch = vi.fn(async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/device/code")) return deviceStart();
+    if (url.endsWith("/device/token")) return Response.json({ access_token: "session-secret", token_type: "Bearer" });
+    if (url.endsWith("/get-session")) return Response.json({ session: {}, user: { id: "u", email: "u@gmail.com" } });
+    if (url === `${CONSOLE}/me`) return Response.json({ error: "select an organization", code: "organization_selection_required" }, { status: 409 });
+    throw new Error(`unexpected request ${url}`);
+  });
+  await expect(consoleLogin({
+    context: { env: { RELAY_CONFIG_PATH: configPath, RELAY_AUTH_URL: AUTH } },
+    apiURL: "https://api.staging.relayapp.im",
+    fetch, openBrowser: async () => {}, stderr: () => {}, nonInteractive: true,
+  })).rejects.toMatchObject({ message: "Choose an organization in Relay Console, then run relay login again.", code: "refused" });
+  expect((await readConfig({ env: { RELAY_CONFIG_PATH: configPath } })).console).toBeUndefined();
 });
 
 it("polls at the returned interval and adds 5 seconds on slow_down", async () => {
@@ -142,13 +155,13 @@ it("polls at the returned interval and adds 5 seconds on slow_down", async () =>
       return Response.json({ access_token: "session-secret", token_type: "Bearer" });
     }
     if (url.endsWith("/get-session")) return Response.json({ session: { expiresAt: new Date(Date.now() + 1000).toISOString() }, user: { id: "u", email: "u@gmail.com" } });
-    if (url.endsWith("/bootstrap")) return Response.json({ organization_id: "org" });
+    if (url.endsWith("/me")) return Response.json({ org: { id: "org" } });
     throw new Error(`unexpected request ${url}`);
   });
   await consoleLogin({
     context: { env: { RELAY_CONFIG_PATH: configPath, RELAY_AUTH_URL: AUTH } },
     apiURL: "https://api.staging.relayapp.im",
-    fetch, openBrowser: async () => {}, stderr: () => {}, name: "Org", nonInteractive: true,
+    fetch, openBrowser: async () => {}, stderr: () => {}, nonInteractive: true,
   });
   // 5 s, 5 s, then slow_down lifts every later wait to 10 s.
   expect(waits).toEqual([5_000, 5_000, 10_000, 10_000]);

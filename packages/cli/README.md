@@ -111,9 +111,9 @@ terminal, and its address when there is one or when Relay cannot reach it.
 ## Authentication
 
 `relay login` signs this computer into Relay Console using a browser/device
-flow. It stores the Console session locally and creates or reuses the signed-in
-organization. Use `--organization-name` and optional `--website` when a new
-organization needs explicit setup.
+flow. It stores the Console session locally; Relay Console names your first
+organization after you. Use `organization update --name` to rename it and
+optional `--website` to set its website.
 
 For legacy integrations, `relay auth login --with-token` keeps the explicit
 Agent Token import path. The token is read from stdin and is never printed.
