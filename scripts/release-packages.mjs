@@ -82,7 +82,7 @@ export const releasePackages = {
       run: {
         entry: "dist/cli.js",
         args: ["--help"],
-        expect: "The Relay command line tool: create an agent, sign in, and use Relay from a terminal.",
+        expect: "Message the agent on your computer from your phone.",
       },
     },
   },
