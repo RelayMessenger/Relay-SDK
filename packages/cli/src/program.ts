@@ -90,7 +90,7 @@ export interface ProgramDependencies {
   /** The one Relay skill offer of a run, made at the end of a connect and
    * nowhere else (owner ruling, 2026-09-09). */
   offerSkill?: () => Promise<void>;
-  connect?: Partial<Pick<import("./connect.js").ConnectDependencies, "sniff" | "runCommand" | "startCommand" | "observer" | "bridge" | "renderQR" | "pairTimeoutMs" | "version" | "drivingAgent">>;
+  connect?: Partial<Pick<import("./connect.js").ConnectDependencies, "sniff" | "runCommand" | "startCommand" | "observer" | "bridge" | "renderQR" | "version" | "drivingAgent">>;
   /** Which runtime is driving this command; `@vercel/detect-agent` by default. */
   detectAgent?: () => Promise<import("@vercel/detect-agent").AgentResult>;
   terminalSession?: AgentSessionDependencies["session"];
@@ -305,7 +305,7 @@ export const createProgram = (
     // scripts and is the visible one.
     .option("--with-token", "use an agent you already have; its token is read from a pipe")
     .option("--token <token>", "use an agent you already have, by its token; visible in ps and shell history")
-    .option("--allow <handles>", "the handles allowed to message this agent, separated by commas; skips sender pairing, not the reply wait")
+    .option("--allow <handles>", "only these handles may message this agent, separated by commas; without it, anyone can")
     .option("-y, --yes", "take the plan as it is")
     .option("--dry-run", "print the plan and change nothing")
     .option("--no-start", "skip the start offer, but still wait for the first reply")

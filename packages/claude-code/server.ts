@@ -44,7 +44,7 @@ if (process.argv.includes("--check")) {
       );
     }
     process.stdout.write(
-      `Relay channel configuration valid: token accepted, ${config.allowedSenders.configured.length} allowed sender(s), no saved Webhook subscriptions.\n`,
+      `Relay channel configuration valid: token accepted, ${config.allowedSenders.everyone ? "anyone can message this agent" : `${config.allowedSenders.configured.length} allowed sender(s)`}, no saved Webhook subscriptions.\n`,
     );
     process.exit(0);
   } catch (error) {

@@ -3,7 +3,7 @@
   "name": "relay",
   "displayName": "Relay Messenger",
   "description": "Relay Messenger channel for Claude Code with durable acknowledged delivery, explicit Read receipts, and retry-safe replies.",
-  "version": "0.3.4-staging.10",
+  "version": "0.3.5-staging.0",
   "author": {
     "name": "Relay Messenger",
     "url": "https://relayapp.im"
@@ -36,8 +36,8 @@
     "allowed_senders": {
       "type": "string",
       "title": "Allowed Relay senders",
-      "description": "Comma-separated Relay Contact UUIDs or exact Handles allowed to inject messages.",
-      "required": true
+      "description": "Optional. Leave empty and anyone can message this agent. To allow only some people, list their handles separated by commas.",
+      "required": false
     },
     "base_url": {
       "type": "string",

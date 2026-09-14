@@ -42,7 +42,6 @@ it.each([undefined, "/fake/bin/hermes"])("resolves the Hermes executable (%s)", 
       startCommand,
       observer: () => ({ semantics: "observational-no-ack", run: async () => undefined }),
       renderQR: () => "[QR]\n",
-      pairTimeoutMs: 1,
     },
   });
   expect(code).toBe(0);

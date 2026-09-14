@@ -40,7 +40,7 @@ it.each([undefined, "/fake/bin/opencode"])("connect drives OpenCode over ACP usi
     connect: {
       sniff: async () => [{ id: "opencode", label: "OpenCode", found: true, ...(executable ? { executable } : {}) }],
       bridge, observer: () => ({ semantics: "observational-no-ack", run: async () => undefined }),
-      renderQR: () => "[QR]\n", pairTimeoutMs: 1, version: "0.1.6-staging.0",
+      renderQR: () => "[QR]\n", version: "0.1.6-staging.0",
     },
   })).toBe(0);
   expect(errors).toEqual([]);

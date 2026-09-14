@@ -40,7 +40,7 @@ it.each([undefined, "/fake/bin/gemini"])("connect drives Gemini over ACP using e
     connect: {
       sniff: async () => [{ id: "gemini-cli", label: "Gemini CLI", found: true, ...(executable ? { executable } : {}) }],
       bridge, observer: () => ({ semantics: "observational-no-ack", run: async () => undefined }),
-      renderQR: () => "[QR]\n", pairTimeoutMs: 1, version: "0.1.6-staging.0",
+      renderQR: () => "[QR]\n", version: "0.1.6-staging.0",
     },
   })).toBe(0);
   expect(errors).toEqual([]);

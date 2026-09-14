@@ -8,9 +8,10 @@ print an Agent Token in chat.
 
 1. Prefer Claude Code plugin user configuration. Ask the user to open `/plugin`,
    select `relay@relay-messenger`, and enable/configure it. Claude Code stores
-   the `agent_token` sensitive value in secure credential storage. They must
-   also set `allowed_senders` to comma-separated exact Relay Contact UUIDs or
-   Handles. Do not ask them to tell you either value.
+   the `agent_token` sensitive value in secure credential storage.
+   `allowed_senders` is optional: left empty, anyone can message this agent;
+   to allow only some people, they list those handles separated by commas.
+   Do not ask them to tell you either value.
 
 2. If plugin user configuration is unavailable, tell the user to create the
    platform equivalent of `~/.claude/channels/relay/.env` themselves with

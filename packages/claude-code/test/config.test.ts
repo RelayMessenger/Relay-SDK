@@ -39,6 +39,25 @@ describe("Relay channel configuration", () => {
     expect(senderIsAllowed(allowed, { id: "other", handle: "@owner", kind: "user" })).toBe(false);
   });
 
+  it("treats an empty RELAY_ALLOWED_SENDERS as anyone can message this agent", () => {
+    const everyone = parseAllowedSenders("");
+    expect(everyone.everyone).toBe(true);
+    expect(everyone.configured).toEqual([]);
+    expect(parseAllowedSenders(" , ").everyone).toBe(true);
+    expect(senderIsAllowed(everyone, { id: "anyone", handle: "@stranger", kind: "user" })).toBe(true);
+    expect(senderIsAllowed(everyone, { id: "anyone", handle: "@peer", kind: "agent" })).toBe(true);
+    expect(senderIsAllowed(everyone, { id: "anyone", handle: "@stranger", kind: "unknown" })).toBe(false);
+  });
+
+  it("still narrows to the list when senders are configured", () => {
+    const listed = parseAllowedSenders("@owner");
+    expect(listed.everyone).toBe(false);
+    expect(senderIsAllowed(listed, { id: "other", handle: "@owner", kind: "user" })).toBe(true);
+    expect(senderIsAllowed(listed, { id: "other", handle: "@stranger", kind: "user" })).toBe(false);
+    expect(() => parseAllowedSenders(Array.from({ length: 65 }, (_, i) => `@h${i}`).join(","))).toThrow(/at most 64/u);
+    expect(() => parseAllowedSenders("@bad\u0000")).toThrow(/invalid entry/u);
+  });
+
   it("resolves a linked folder profile and walks parents", () => {
     const root = mkdtempSync(join(tmpdir(), "relay-link-")); cleanups.push(root);
     const cwd = join(root, "child"); mkdirSync(join(root, ".relay"), { recursive: true }); mkdirSync(cwd);

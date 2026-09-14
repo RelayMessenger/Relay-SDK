@@ -1,6 +1,6 @@
 import { describeFailure } from "./errors.js";
 import { safeMetadata } from "./output.js";
-import { createConsoleAgent, type ConsoleAgentCreateInput, type ConsoleAgentCreateResult } from "./console-auth.js";
+import { ConsoleRefusal, createConsoleAgent, HANDLE_TAKEN, type ConsoleAgentCreateInput, type ConsoleAgentCreateResult } from "./console-auth.js";
 import { savedAgentShareURL } from "./agent-session.js";
 import { CliError } from "./error-codes.js";
 import Relay, { RelayAPIError, type AgentImageRecipe, type ContactCardItem } from "@relaymessenger/sdk";
@@ -55,6 +55,11 @@ export interface CreateAgentInput {
 
 // Status/code are safe structured diagnostics; server-controlled messages are not.
 const apiFailure = (error: unknown): string => {
+  if (error instanceof ConsoleRefusal) {
+    // Only the status and the Console's own short code, never its sentence.
+    const taken = error.code === HANDLE_TAKEN ? " That handle is taken. Choose another." : "";
+    return ` Relay said: error ${error.status}${error.code ? `, code ${error.code}` : ""}.${taken}`;
+  }
   if (!(error instanceof RelayAPIError)) return "";
   const reference = [Number.isInteger(error.status) ? `error ${error.status}` : "", Number.isInteger(error.code) ? `code ${error.code}` : ""]
     .filter(Boolean).join(", ");
@@ -70,7 +75,8 @@ const safeAPIFailure = (message: string, error: unknown): Error => error instanc
     ...(error.status === undefined ? {} : { status: error.status }),
     ...(error.code === undefined ? {} : { code: error.code }),
   }) : error instanceof CliError && error.code === "no_token"
-    ? new CliError(message, "no_token") : new Error(message);
+    ? new CliError(message, "no_token")
+    : error instanceof ConsoleRefusal ? new ConsoleRefusal(message, error.status, error.code) : new Error(message);
 
 /** The handle a person asked for, checked before anything is created or asked. */
 export const validateHandle = (handle: string): string => {
@@ -89,6 +95,9 @@ export const validateFirstName = (name: string): string => {
   return firstName;
 };
 
+/** The name the CLI invents when the person gave none. */
+export const DEFAULT_AGENT_NAME = "My Agent";
+
 export async function createAgent(input: CreateAgentInput, deps: AgentDependencies) {
   const before = await deps.read();
   if (input.profile) {
@@ -106,7 +115,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
   }
   if (input.imageRecipe !== undefined && input.imageURL === undefined) throw new Error("An image recipe also needs the finished picture. Pass --image or --image-url with it; this command does not draw pictures.");
   const body: ConsoleAgentCreateInput = {
-    displayName: firstName ?? "My Agent",
+    displayName: firstName ?? DEFAULT_AGENT_NAME,
     ...(input.about === undefined ? {} : { about: input.about.trim() }),
     ...(input.handle === undefined ? {} : { handle: input.handle }),
   };
@@ -119,6 +128,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     // The error body from Relay may hold a secret that is not yet in the redaction set.
     const rejected = (error instanceof RelayAPIError && error.status !== undefined
       && error.status >= 400 && error.status < 500)
+      || (error instanceof ConsoleRefusal && error.status >= 400 && error.status < 500)
       || (error instanceof CliError && error.code === "no_token");
     const message = rejected
       ? `Relay refused to create this agent.${apiFailure(error)} Relay did not try again.`

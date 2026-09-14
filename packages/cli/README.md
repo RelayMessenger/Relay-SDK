@@ -28,8 +28,8 @@ npx relaymessenger connect claude     # names it outright
 
 `connect` finds the runtimes on this computer, makes an agent or takes one you
 already have, shows every file it will write and every command it will run,
-writes the runtime's own configuration, waits for a first message and asks
-whether to allow that sender, then offers to start the runtime. This build
+writes the runtime's own configuration, then offers to start the runtime.
+Anyone can message the agent; `--allow` narrows that to the handles you list. This build
 writes Claude Code; Hermes and OpenClaw are detected, their plan is printed, and
 the command stops without changing anything.
 

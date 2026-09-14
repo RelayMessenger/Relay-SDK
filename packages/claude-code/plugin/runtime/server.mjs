@@ -22416,7 +22416,7 @@ function parseEnvFile(contents) {
 function parseAllowedSenders(value) {
   const configured = [...new Set(value.split(",").map((entry) => entry.trim()).filter(Boolean))];
   if (configured.length === 0) {
-    throw new Error("RELAY_ALLOWED_SENDERS must contain at least one Relay Contact UUID or exact Handle");
+    return { ids: /* @__PURE__ */ new Set(), handles: /* @__PURE__ */ new Set(), configured, everyone: true };
   }
   if (configured.length > 64) {
     throw new Error("RELAY_ALLOWED_SENDERS accepts at most 64 entries");
@@ -22430,10 +22430,12 @@ function parseAllowedSenders(value) {
     if (UUID_PATTERN.test(sender)) ids.add(sender.toLowerCase());
     else handles.add(sender);
   }
-  return { ids, handles, configured };
+  return { ids, handles, configured, everyone: false };
 }
 function senderIsAllowed(allowed, sender) {
-  return (sender.kind === "user" || sender.kind === "agent") && (allowed.ids.has(sender.id.toLowerCase()) || allowed.handles.has(sender.handle));
+  if (sender.kind !== "user" && sender.kind !== "agent") return false;
+  if (allowed.everyone) return true;
+  return allowed.ids.has(sender.id.toLowerCase()) || allowed.handles.has(sender.handle);
 }
 function defaultChannelDir(env = process.env) {
   const configured = actualValue(env.RELAY_CHANNEL_DIR);
@@ -23850,7 +23852,7 @@ var RelayStateStore = class {
 };
 
 // server.ts
-var VERSION = true ? "0.3.4-staging.10" : createRequire(import.meta.url)("./package.json").version;
+var VERSION = true ? "0.3.5-staging.0" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);
@@ -23879,7 +23881,7 @@ if (process.argv.includes("--check")) {
       );
     }
     process.stdout.write(
-      `Relay channel configuration valid: token accepted, ${config2.allowedSenders.configured.length} allowed sender(s), no saved Webhook subscriptions.
+      `Relay channel configuration valid: token accepted, ${config2.allowedSenders.everyone ? "anyone can message this agent" : `${config2.allowedSenders.configured.length} allowed sender(s)`}, no saved Webhook subscriptions.
 `
     );
     process.exit(0);
