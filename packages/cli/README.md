@@ -112,8 +112,8 @@ terminal, and its address when there is one or when Relay cannot reach it.
 
 `relay login` signs this computer into Relay Console using a browser/device
 flow. It stores the Console session locally and creates or reuses the signed-in
-organization. Use `--organization-name`, `--namespace`, and optional
-`--website` when a new organization needs explicit setup.
+organization. Use `--organization-name` and optional `--website` when a new
+organization needs explicit setup.
 
 For legacy integrations, `relay auth login --with-token` keeps the explicit
 Agent Token import path. The token is read from stdin and is never printed.
@@ -245,9 +245,9 @@ relay agents create \
   --image-url https://images.example.com/helper.png
 ```
 
-Creation takes only the local handle part, such as `my_helper`; Console adds
-the selected organization namespace. Qualified handles such as `my_helper.dev`
-are rejected, not reinterpreted. Names are at most 30 characters. A collision is
+A handle is one word, such as `my_helper`: 3 to 32 lowercase letters, numbers
+or underscores. Dotted handles such as `my_helper.dev` are rejected, not
+reinterpreted. Names are at most 30 characters. A collision is
 an error, never a request for a different handle. Interactive creation asks `Handle (optional)`, `Name (optional)`, and `Image
 (optional)` with a single help line; blank answers preserve defaults. Selecting
 Create already expresses intent, so no second create confirmation is shown.

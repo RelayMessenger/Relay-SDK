@@ -148,7 +148,7 @@ try {
     assert.match(agentHelp, /create/);
     assert.doesNotMatch(agentHelp, /^\s+setup[ \[]/m, 'Owner approved exactly create/list/delete under agents');
     assert.doesNotMatch(cli('agents', 'create', '--help'), /token-name/);
-    assert.match(cli('agents', 'create', '--help'), /organization namespace/);
+    assert.match(cli('agents', 'create', '--help'), /--handle <handle>/);
     assert.match(cli('agents', 'delete', '--help'), /handle/);
     const inventory = JSON.parse(cli('agents', 'list', '--json'));
     assert.ok(inventory.agents.every(item => item.token === 'missing'));
