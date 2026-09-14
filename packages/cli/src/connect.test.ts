@@ -9,7 +9,7 @@ import { readConfig } from "./config.js";
 import type { InteractivePrompts, SelectOption } from "./interactive.js";
 import {
   ABOUT_QUESTION, AVATAR_QUESTION, claudeMarketplaceSource, CLAUDE_PLUGIN_ID, CUSTOMIZE_HINT, CUSTOMIZE_QUESTION, HANDLE_QUESTION, handleFromName,
-  linkedLine, NAME_QUESTION, NO_TTY_NEXT_STEP, NO_TTY_SENTENCE, NOT_AN_IMAGE, SAY_HI, waitForNewSender,
+  linkedLine, NAME_QUESTION, NO_TTY_NEXT_STEP, NO_TTY_SENTENCE, NOT_AN_IMAGE, SAY_HI,
 } from "./connect.js";
 import type { TextOptions } from "./interactive.js";
 import { folderLinkPath } from "./folder-link.js";
@@ -74,7 +74,7 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}, sniffed: Ru
     skillInstaller: async () => undefined,
     stdout: (value) => stdout.push(value),
     stderr: (value) => stderr.push(value),
-    connect: { sniff: async () => sniffed, runCommand, startCommand, bridge, observer: () => observer, renderQR: () => "[QR]\n", pairTimeoutMs: 10, version: "0.1.6-staging.0" },
+    connect: { sniff: async () => sniffed, runCommand, startCommand, bridge, observer: () => observer, renderQR: () => "[QR]\n", version: "0.1.6-staging.0" },
     ...overrides,
   };
   return { deps, env, home, prompts, fetch, runCommand, startCommand, bridge, stdout, stderr, channel: join(home, ".claude", "channels", "relay") };
@@ -424,20 +424,6 @@ describe("the Claude Code path", () => {
     expect(f.stderr.join("")).toContain("Nothing else was changed");
     await expect(readFile(join(f.channel, ".env"))).rejects.toMatchObject({ code: "ENOENT" });
   });
-
-  it("pairing takes the first sender who is not allowed yet, and ignores the rest", async () => {
-    const seen: TerminalObserver = {
-      semantics: "observational-no-ack",
-      async run(input) {
-        input.onEvent({ event_type: "message.sent", data: { sender_handle: { handle: "someone" }, parts: [] } } as never);
-        input.onEvent({ event_type: "message.received", data: { sender_handle: { handle: "known" }, parts: [] } } as never);
-        input.onEvent({ event_type: "message.received", data: { sender_handle: { handle: "advait" }, parts: [{ type: "text", value: "hi" }] } } as never);
-      },
-    };
-    expect(await waitForNewSender(seen, ["known"], { timeoutMs: 1000 })).toEqual({ handle: "advait", text: "hi" });
-    const silent: TerminalObserver = { semantics: "observational-no-ack", run: async () => undefined };
-    expect(await waitForNewSender(silent, [], { timeoutMs: 5 })).toBeUndefined();
-  });
 });
 
 describe("the MCP agents", () => {
@@ -605,7 +591,6 @@ describe("with no terminal", () => {
   it.each([
     [["connect", "claude"], "--new"],
     [["connect", "claude", "--new"], "--yes"],
-    [["connect", "claude", "--new", "--yes"], "--allow <handles>"],
   ])("%j exits 2 and names the flag that would have answered", async (argv, expected) => {
     const f = await fixture(headless);
     expect(await runCLI(argv as string[], f.deps)).toBe(2);

@@ -21,6 +21,8 @@ export interface AllowedSenders {
   readonly ids: ReadonlySet<string>;
   readonly handles: ReadonlySet<string>;
   readonly configured: readonly string[];
+  /** True when nothing was configured: anyone on Relay may message this agent. */
+  readonly everyone: boolean;
 }
 
 export interface RelayChannelConfig {
@@ -83,7 +85,7 @@ export function parseEnvFile(contents: string): Record<string, string> {
 export function parseAllowedSenders(value: string): AllowedSenders {
   const configured = [...new Set(value.split(",").map((entry) => entry.trim()).filter(Boolean))];
   if (configured.length === 0) {
-    throw new Error("RELAY_ALLOWED_SENDERS must contain at least one Relay Contact UUID or exact Handle");
+    return { ids: new Set(), handles: new Set(), configured, everyone: true };
   }
   if (configured.length > 64) {
     throw new Error("RELAY_ALLOWED_SENDERS accepts at most 64 entries");
@@ -97,15 +99,16 @@ export function parseAllowedSenders(value: string): AllowedSenders {
     if (UUID_PATTERN.test(sender)) ids.add(sender.toLowerCase());
     else handles.add(sender);
   }
-  return { ids, handles, configured };
+  return { ids, handles, configured, everyone: false };
 }
 
 export function senderIsAllowed(
   allowed: AllowedSenders,
   sender: { id: string; handle: string; kind: string },
 ): boolean {
-  return (sender.kind === "user" || sender.kind === "agent")
-    && (allowed.ids.has(sender.id.toLowerCase()) || allowed.handles.has(sender.handle));
+  if (sender.kind !== "user" && sender.kind !== "agent") return false;
+  if (allowed.everyone) return true;
+  return allowed.ids.has(sender.id.toLowerCase()) || allowed.handles.has(sender.handle);
 }
 
 export function defaultChannelDir(env: NodeJS.ProcessEnv = process.env): string {
