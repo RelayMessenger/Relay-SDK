@@ -49,8 +49,6 @@ export interface CreateAgentInput {
   about?: string;
   imageURL?: string;
   imageRecipe?: AgentImageRecipe;
-  /** A picture sent on the create request itself (the bird for an invented identity). */
-  defaultImageURL?: string;
   /** Save the new profile as the last connected agent, in the same config write. */
   makeDefault?: boolean;
 }
@@ -114,7 +112,6 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
     displayName: firstName ?? DEFAULT_AGENT_NAME,
     ...(input.about === undefined ? {} : { about: input.about.trim() }),
     ...(input.handle === undefined ? {} : { handle: input.handle }),
-    ...(input.defaultImageURL === undefined ? {} : { defaultImageURL: input.defaultImageURL }),
   };
   if (Buffer.byteLength(JSON.stringify(body), "utf8") > 8192) throw new Error("These agent details are too long. Shorten the name, the handle or the picture address.");
   try { await deps.preflight(); } catch { throw new Error("Relay could not prepare a private file to save the token in, so it did not create the agent. Check the permissions on your Relay config folder."); }

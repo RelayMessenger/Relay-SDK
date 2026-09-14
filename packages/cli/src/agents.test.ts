@@ -124,11 +124,12 @@ describe("pure agent command handlers", () => {
 describe("agent CLI program", () => {
   it("routes create/list/delete with JSON output and no secret", async () => {
     const { deps } = setup();
-    const stdout: string[] = []; const stderr: string[] = [];
-    const options = { consoleLogin: async () => ({ type: "organization_key" as const, organization_key: "rel_org_test", organization_id: "org_fixture", console_api_url: "https://console.staging.relayapp.im/api" }), agents: deps, configContext: privateContext, stdout: (s: string) => stdout.push(s), stderr: (s: string) => stderr.push(s), fetch: withBirdManifest() };
+    const stdout: string[] = []; const stderr: string[] = []; const pictures: Array<{ handle: string | null; image_url: unknown }> = [];
+    const options = { consoleLogin: async () => ({ type: "organization_key" as const, organization_key: "rel_org_test", organization_id: "org_fixture", console_api_url: "https://console.staging.relayapp.im/api" }), agents: deps, configContext: privateContext, stdout: (s: string) => stdout.push(s), stderr: (s: string) => stderr.push(s), fetch: withBirdManifest(undefined, pictures) };
     expect(await runCLI(["--profile", "new-profile", "agents", "create", "--json"], options)).toBe(0);
-    // Nothing typed: the CLI invented the name and the handle, so it names the bird too.
-    expect(deps.provision).toHaveBeenCalledWith({ displayName: "My Agent", defaultImageURL: birdFor(creationOrigin, "my_agent") }, { apiURL: creationOrigin });
+    expect(deps.provision).toHaveBeenCalledWith({ displayName: "My Agent" }, { apiURL: creationOrigin });
+    // Nothing typed: the CLI invented the name and the handle, so it names the bird too, from the handle Relay returned.
+    expect(pictures).toEqual([{ handle: card.handle, image_url: birdFor(creationOrigin, card.handle) }]);
     expect(await runCLI(["agents", "list", "--json"], options)).toBe(0);
     expect(await runCLI(["--profile", "default", "agents", "delete", card.handle, "--json"], options)).toBe(0);
     expect(stdout.join("")).not.toContain(secret);

@@ -7,7 +7,7 @@ import Relay from "@relaymessenger/sdk";
 import { birdImageUrl, createAgentWithPicture, forgetBirdManifests } from "./agent-create.js";
 import type { AgentDependencies } from "./agents.js";
 import { emptyConfig, type RelayConfig } from "./config.js";
-import { birdFiles } from "../test/bird-manifest.js";
+import { birdFiles, withBirdManifest } from "../test/bird-manifest.js";
 
 // The owner's picture tree (2026-09-14): nothing typed → a bird by the server's
 // own rule; a name or a handle typed → no picture from the CLI, the server draws
@@ -34,14 +34,20 @@ function setup(manifestStatus = 200) {
     auth: vi.fn(async () => { throw new Error("unused"); }),
     env: { RELAY_API_URL: api, RELAY_CONFIG_PATH: join(mkdtempSync(join(tmpdir(), "relay-bird-")), "config.json") },
   };
-  const fetch = vi.fn(async (input: string | URL | Request) => {
+  const pictures: Array<{ handle: string | null; image_url: unknown }> = [];
+  const manifestReads = { count: 0 };
+  const served = withBirdManifest(async (input) => { throw new Error(`unexpected request ${input instanceof Request ? input.url : String(input)}`); }, pictures);
+  // The manifest read is counted here, and turned into a failure when the case asks for one.
+  const fetch: typeof globalThis.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
-    expect(url.toString()).toBe(`${api}/avatars/manifest.json`);
-    return manifestStatus === 200
-      ? Response.json({ assets: files.map((file) => ({ file })), count: 84 })
-      : new Response("down", { status: manifestStatus });
-  }) as unknown as typeof globalThis.fetch;
-  return { deps, fetch };
+    if (url.pathname === "/avatars/manifest.json") {
+      expect(url.origin).toBe(api);
+      manifestReads.count += 1;
+      if (manifestStatus !== 200) return new Response("down", { status: manifestStatus });
+    }
+    return served(input, init);
+  };
+  return { deps, fetch, pictures, manifestReads };
 }
 
 describe("a CLI-invented agent gets a bird", () => {
@@ -49,39 +55,54 @@ describe("a CLI-invented agent gets a bird", () => {
   beforeEach(() => { forgetBirdManifests(); stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true); });
   afterEach(() => { stderr.mockRestore(); });
 
-  it("nothing supplied → image_url is the bird for the invented handle, by sha256 first byte % 84", async () => {
-    const { deps, fetch } = setup();
-    await createAgentWithPicture({ apiURL: api }, deps, fetch);
-    expect(vi.mocked(deps.provision).mock.calls[0]![0]).toEqual({ displayName: "My Agent", defaultImageURL: expectedBird });
+  it("nothing supplied → the picture is the bird for the handle Relay returned, by sha256 first byte % 84", async () => {
+    const { deps, fetch, pictures } = setup();
+    const created = await createAgentWithPicture({ apiURL: api }, deps, fetch);
+    // The create request itself carries no picture: Relay Console's create route takes none.
+    expect(vi.mocked(deps.provision).mock.calls[0]![0]).toEqual({ displayName: "My Agent" });
+    expect(pictures).toEqual([{ handle: inventedHandle, image_url: expectedBird }]);
+    expect(created.result.image_url).toBe(expectedBird);
+    expect(created.image).toBeUndefined();
     expect(stderr).not.toHaveBeenCalled();
   });
 
-  it("reads the manifest once per run", async () => {
-    const { deps, fetch } = setup();
+  it("the bird follows the handle Relay returned, not the one the CLI sent", async () => {
+    const { deps, fetch, pictures } = setup();
+    vi.mocked(deps.provision).mockResolvedValue({ agent: { ...card, handle: "my_agent_x1" }, token: secret });
     await createAgentWithPicture({ apiURL: api }, deps, fetch);
-    await createAgentWithPicture({ apiURL: api }, deps, fetch);
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    const index = createHash("sha256").update("my_agent_x1", "utf8").digest()[0]! % 84;
+    expect(pictures).toEqual([{ handle: "my_agent_x1", image_url: `${api}/avatars/${files[index]}` }]);
   });
 
-  it("name only → no image_url", async () => {
-    const { deps, fetch } = setup();
+  it("reads the manifest once per run", async () => {
+    const { deps, fetch, manifestReads } = setup();
+    await createAgentWithPicture({ apiURL: api }, deps, fetch);
+    await createAgentWithPicture({ apiURL: api }, deps, fetch);
+    expect(manifestReads.count).toBe(1);
+  });
+
+  it("name only → no picture from the CLI", async () => {
+    const { deps, fetch, pictures, manifestReads } = setup();
     await createAgentWithPicture({ apiURL: api, firstName: "Ada" }, deps, fetch);
     expect(vi.mocked(deps.provision).mock.calls[0]![0]).toEqual({ displayName: "Ada" });
-    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(pictures).toEqual([]);
+    expect(manifestReads.count).toBe(0);
   });
 
-  it("handle only → no image_url", async () => {
-    const { deps, fetch } = setup();
+  it("handle only → no picture from the CLI", async () => {
+    const { deps, fetch, pictures, manifestReads } = setup();
     await createAgentWithPicture({ apiURL: api, handle: "ada" }, deps, fetch);
     expect(vi.mocked(deps.provision).mock.calls[0]![0]).toEqual({ displayName: "My Agent", handle: "ada" });
-    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(pictures).toEqual([]);
+    expect(manifestReads.count).toBe(0);
   });
 
-  it("manifest 500 → no image_url, the agent is still created, one stderr line", async () => {
-    const { deps, fetch } = setup(500);
+  it("manifest 500 → no picture, the agent is still created, one stderr line", async () => {
+    const { deps, fetch, pictures } = setup(500);
     const created = await createAgentWithPicture({ apiURL: api }, deps, fetch);
     expect(created.result.handle).toBe(inventedHandle);
-    expect(vi.mocked(deps.provision).mock.calls[0]![0]).toEqual({ displayName: "My Agent" });
+    expect(created.image).toBeUndefined();
+    expect(pictures).toEqual([]);
     expect(stderr).toHaveBeenCalledTimes(1);
     expect(String(stderr.mock.calls[0]![0])).toMatch(/^Relay could not read the bird pictures \(HTTP 500\); the server will pick this agent's picture\.\n$/);
   });

@@ -314,9 +314,6 @@ export interface ConsoleAgentCreateInput {
   handle?: string;
   displayName: string;
   about?: string;
-  /** Sent as `image_url` on the create request itself: the bird the CLI picked
-   * for an identity it invented (agent-create.ts, birdImageUrl). */
-  defaultImageURL?: string;
   image?: string;
   imageRecipe?: import("@relaymessenger/sdk").AgentImageRecipe;
   cwd?: string;
@@ -371,7 +368,6 @@ export const createConsoleAgent = async (
       handle,
       displayName: input.displayName,
       ...(input.about === undefined ? {} : { about: input.about }),
-      ...(input.defaultImageURL === undefined ? {} : { image_url: input.defaultImageURL }),
     }),
   });
   const created: ConsoleAgentCreateResult = {

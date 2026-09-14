@@ -1,7 +1,6 @@
 import { prepareAgentImage, type LocalAgentImage } from "./local-image.js";
 import { uploadAgentImage, type AgentImageUploadResult } from "./agent-image-upload.js";
-import { agentRecord, createAgent, DEFAULT_AGENT_NAME, type AgentDependencies, type CreateAgentInput } from "./agents.js";
-import { inventedHandle } from "./console-auth.js";
+import { agentRecord, createAgent, type AgentDependencies, type CreateAgentInput } from "./agents.js";
 import { safeMetadata } from "./output.js";
 import Relay, { type AgentImageRecipe } from "@relaymessenger/sdk";
 import { defaultCreationApiURL, validateApiURL } from "./config.js";
@@ -13,7 +12,9 @@ import { createHash } from "node:crypto";
  * which draws a monogram; an identity the CLI invented whole (no picture, no
  * name, no handle) gets a bird, chosen by the server's own rule so the CLI and
  * the server agree: sha256(handle) first byte, modulo 84, in manifest order
- * (Relay-Server server/src/default-avatar.ts).
+ * (Relay-Server server/src/default-avatar.ts). The bird is set after the agent
+ * exists, from the handle Relay returned, through the same contact-card update
+ * every picture uses: Relay Console's create route takes no picture field.
  */
 const BIRD_COUNT = 84;
 const manifests = new Map<string, Promise<string[] | undefined>>();
@@ -92,14 +93,9 @@ export const createAgentWithPicture = async (
   }
   // Nothing typed at all: the CLI invented the name and the handle, so it also
   // names the bird. Any supplied field leaves the picture to the server.
-  let defaultImageURL: string | undefined;
-  if (input.handle === undefined && input.firstName === undefined && imageURL === undefined && !localImage) {
-    const apiURL = validateApiURL(input.apiURL ?? deps.env.RELAY_API_URL ?? defaultCreationApiURL());
-    defaultImageURL = await birdImageUrl(apiURL, inventedHandle(DEFAULT_AGENT_NAME), fetchImplementation ?? globalThis.fetch);
-  }
+  const invented = input.handle === undefined && input.firstName === undefined && imageURL === undefined && !localImage;
   const result = await createAgent({
     ...(input.profile === undefined ? {} : { profile: input.profile }),
-    ...(defaultImageURL === undefined ? {} : { defaultImageURL }),
     ...(input.apiURL === undefined ? {} : { apiURL: input.apiURL }),
     ...(input.handle === undefined ? {} : { handle: input.handle }),
     ...(input.firstName === undefined ? {} : { firstName: input.firstName }),
@@ -108,6 +104,7 @@ export const createAgentWithPicture = async (
     ...(input.imageRecipe === undefined || localImage ? {} : { imageRecipe: input.imageRecipe }),
     ...(input.makeDefault ? { makeDefault: true } : {}),
   }, deps);
+  if (invented) imageURL = await birdImageUrl(result.api_url, result.handle, fetchImplementation ?? globalThis.fetch);
   if (!localImage && !imageURL) return { result };
   let image: AgentImageUploadResult;
   try {
