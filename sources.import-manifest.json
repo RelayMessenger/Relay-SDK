@@ -1009,7 +1009,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/auth.test.ts",
       "source_sha256": "82d1bb9a7c1eeaa662a6d3a61a67f9e746fbe150432a796a2b6c212d0186ab0b",
-      "destination_sha256": "537b375d4580e76867ab24d5d012b3c129dc6b9593d31b29d1a0adf51c3d9b77",
+      "destination_sha256": "83ccefee274c0bf9bbd4057ad0574aa468d0aa0aac8b36bf19b09692e379355f",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1064,7 +1064,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/server.test.ts",
       "source_sha256": "139f264949013c31d667e8e2ef72619ab2a5ead79ce5a896ecf909c10de80dcd",
-      "destination_sha256": "80429fe585f39d5d1cf17be8c8b176baebc99831bc746dc06e65d1a842ef520b",
+      "destination_sha256": "9e9074637cd58055e0610e6239ee26640752108153c49477bb2776e35287c849",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
