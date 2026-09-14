@@ -19,9 +19,7 @@ async function fixture() {
   const config = emptyConfig();
   config.console = {
     access_token: "private-access-fixture",
-    refresh_token: "private-refresh-fixture",
     expires_at: Date.now() + 3600_000,
-    client_id: "client_fixture",
     organization_id: "org_fixture",
     user: { id: "user_fixture", email: "fixture@example.invalid" },
   };

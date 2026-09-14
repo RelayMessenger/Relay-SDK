@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { runCLI } from "./program.js";
-import { defaultConsoleApiURL, readConfig } from "./config.js";
+import { defaultAuthURL, readConfig } from "./config.js";
 
 it.each([
   ["agents", "create"],
@@ -22,7 +22,7 @@ it.each([
         runCommand,
       },
     })).toBe(4);
-    expect(fetch).toHaveBeenCalledExactlyOnceWith(`${defaultConsoleApiURL()}/auth/cli/device`, expect.anything());
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(`${defaultAuthURL()}/api/auth/device/code`, expect.anything());
     expect(runCommand).not.toHaveBeenCalled();
     expect(Object.values((await readConfig(context)).profiles).every(profile => !profile.agent_token)).toBe(true);
   } finally {

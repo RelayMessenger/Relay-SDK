@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
-import { Buffer } from "node:buffer";
 import { randomBytes } from "node:crypto";
 import Relay from "@relaymessenger/sdk";
 import {
+  defaultAuthURL,
   defaultConsoleApiURL,
   defaultCreationApiURL,
   readConfig,
@@ -20,8 +20,9 @@ import { prepareAgentImage, type LocalAgentImage } from "./local-image.js";
 import { uploadAgentImage, type AgentImageUploadResult } from "./agent-image-upload.js";
 import { safeMetadata } from "./output.js";
 
-const WORKOS_DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
-const WORKOS_TOKEN_URL = "https://api.workos.com/user_management/authenticate";
+/** RFC 8628 device grant, as Relay-Auth's device-authorization plugin names it. */
+const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
+const DEVICE_CLIENT_ID = "relay-cli";
 
 /** Generate the UUIDv7 required by the Console create-agent idempotency key. */
 const uuidv7 = (): string => {
@@ -43,14 +44,13 @@ interface DeviceStart {
   verification_uri_complete?: string;
   expires_in: number;
   interval?: number;
-  client_id: string;
 }
 
+/** The device flow ends in a Relay-Auth session: the bearer plus the person it belongs to. */
 interface DeviceToken {
-  user: { id: string; email: string; name?: string; first_name?: string; last_name?: string };
-  organization_id?: string;
+  user: { id: string; email: string; name?: string };
   access_token: string;
-  refresh_token: string;
+  expires_at: number;
 }
 
 export interface ConsoleAuthDependencies {
@@ -104,8 +104,6 @@ const openBrowser = async (url: string): Promise<void> => {
 
 const userName = (user: DeviceToken["user"]): string => {
   if (user.name?.trim()) return user.name.trim();
-  const full = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
-  if (full) return full;
   return user.email.split("@", 1)[0] || "Personal";
 };
 
@@ -114,7 +112,7 @@ const publicMailDomains = new Set([
   "yahoo.com", "icloud.com", "me.com", "proton.me", "protonmail.com",
 ]);
 
-/** WorkOS AuthKit returns the verified email; use a Workspace domain only as a display hint. */
+/** Relay-Auth returns the verified email; use a Workspace domain only as a display hint. */
 export const organizationDefaults = (user: DeviceToken["user"]): { name: string } => {
   const emailDomain = user.email.split("@")[1]?.toLowerCase();
   const company = emailDomain && !publicMailDomains.has(emailDomain)
@@ -124,63 +122,82 @@ export const organizationDefaults = (user: DeviceToken["user"]): { name: string 
   return { name: name.slice(0, 80) };
 };
 
-const expiryFromAccessToken = (token: string): number => {
-  try {
-    const [, encoded] = token.split(".");
-    if (encoded) {
-      const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as { exp?: unknown };
-      if (typeof payload.exp === "number") return payload.exp * 1000;
-    }
-  } catch { /* Use a short conservative lifetime when the token shape changes. */ }
-  return Date.now() + 15 * 60 * 1000;
-};
-
 const saveSession = async (context: ConfigContext, session: RelayConsoleSession): Promise<void> => {
   const config = await readConfig(context);
   config.console = session;
   await writeConfig(config, context);
 };
 
+const authURL = (deps: ConsoleAuthDependencies | ConsoleRequestDependencies): string =>
+  defaultAuthURL(deps.context.env ?? process.env);
+
 const postDeviceStart = async (deps: ConsoleAuthDependencies): Promise<DeviceStart> => {
-  const api = defaultConsoleApiURL(deps.apiURL ?? defaultCreationApiURL(), deps.context.env ?? process.env);
-  const response = await httpFetch(deps)(`${api}/auth/cli/device`, {
+  const response = await httpFetch(deps)(`${authURL(deps)}/api/auth/device/code`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: "{}",
+    body: JSON.stringify({ client_id: DEVICE_CLIENT_ID }),
   });
   return json<DeviceStart>(response);
 };
 
+/** The person the bearer belongs to, and when the session ends. */
+const fetchSession = async (deps: ConsoleAuthDependencies, accessToken: string): Promise<DeviceToken> => {
+  const response = await httpFetch(deps)(`${authURL(deps)}/api/auth/get-session`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const value = await response.json().catch(() => null) as {
+    user?: { id?: unknown; email?: unknown; name?: unknown };
+    session?: { expiresAt?: unknown };
+  } | null;
+  if (!response.ok || typeof value?.user?.id !== "string" || typeof value.user.email !== "string") {
+    throw new Error("Relay login did not return the signed-in person.");
+  }
+  const expiresAt = typeof value.session?.expiresAt === "string" ? Date.parse(value.session.expiresAt)
+    : typeof value.session?.expiresAt === "number" ? value.session.expiresAt
+      : Number.NaN;
+  return {
+    access_token: accessToken,
+    // The session lasts 30 days; fall back to that when the date does not parse.
+    expires_at: Number.isFinite(expiresAt) ? expiresAt : Date.now() + 30 * 24 * 60 * 60 * 1000,
+    user: {
+      id: value.user.id,
+      email: value.user.email,
+      ...(typeof value.user.name === "string" && value.user.name ? { name: value.user.name } : {}),
+    },
+  };
+};
+
 const pollDevice = async (deps: ConsoleAuthDependencies, start: DeviceStart): Promise<DeviceToken> => {
-  const api = defaultConsoleApiURL(deps.apiURL ?? defaultCreationApiURL(), deps.context.env ?? process.env);
   const deadline = Date.now() + start.expires_in * 1000;
   let interval = Math.max(1, start.interval ?? 5) * 1000;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, interval));
-    const body = new URLSearchParams({
-      grant_type: WORKOS_DEVICE_GRANT,
-      device_code: start.device_code,
-    });
-    const response = await httpFetch(deps)(`${api}/auth/cli/device-code`, {
+    const response = await httpFetch(deps)(`${authURL(deps)}/api/auth/device/token`, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: DEVICE_GRANT,
+        device_code: start.device_code,
+        client_id: DEVICE_CLIENT_ID,
+      }),
     });
     const value = await response.json().catch(() => ({})) as Record<string, unknown>;
     if (response.ok) {
-      if (typeof value.access_token !== "string" || typeof value.refresh_token !== "string" || !value.user || typeof value.user !== "object") {
-        throw new Error("Relay Console returned an incomplete login response.");
+      if (typeof value.access_token !== "string" || !value.access_token) {
+        throw new Error("Relay login returned an incomplete response.");
       }
-      return value as unknown as DeviceToken;
+      return fetchSession(deps, value.access_token);
     }
+    // Error codes per the device-authorization plugin: authorization_pending,
+    // slow_down (+5 s), expired_token, access_denied, invalid_grant.
     const error = typeof value.error === "string" ? value.error : "";
     if (error === "authorization_pending") continue;
     if (error === "slow_down") { interval += 5_000; continue; }
-    if (error === "access_denied") throw new CliError("Relay Console login was denied.", "refused");
-    if (error === "expired_token") throw new CliError("Relay Console login expired. Run relay login again.", "refused");
-    throw new Error(`Relay Console login failed (HTTP ${response.status}).`);
+    if (error === "access_denied") throw new CliError("Relay login was denied.", "refused");
+    if (error === "expired_token") throw new CliError("Relay login expired. Run relay login again.", "refused");
+    throw new Error(`Relay login failed (HTTP ${response.status}).`);
   }
-  throw new CliError("Relay Console login expired. Run relay login again.", "refused");
+  throw new CliError("Relay login expired. Run relay login again.", "refused");
 };
 
 const bootstrap = async (
@@ -203,59 +220,45 @@ const bootstrap = async (
   return value.organization_id;
 };
 
-const refresh = async (deps: ConsoleRequestDependencies, session: RelayConsoleOAuthSession): Promise<RelayConsoleOAuthSession> => {
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    client_id: session.client_id,
-    refresh_token: session.refresh_token,
-    ...(session.organization_id ? { organization_id: session.organization_id } : {}),
-  });
-  const response = await httpFetch(deps)(WORKOS_TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-  const value = await json<{ access_token: string; refresh_token?: string; organization_id?: string }>(response);
-  return {
-    ...session,
-    access_token: value.access_token,
-    refresh_token: value.refresh_token ?? session.refresh_token,
-    expires_at: expiryFromAccessToken(value.access_token),
-    ...(value.organization_id ? { organization_id: value.organization_id } : {}),
-  };
+/** Ends the Relay-Auth session server-side; a failure is not fatal, the local copy is still removed. */
+export const consoleSignOut = async (deps: ConsoleRequestDependencies): Promise<boolean> => {
+  const session = (await readConfig(deps.context)).console;
+  if (!session || session.type === "organization_key") return false;
+  try {
+    const response = await httpFetch(deps)(`${authURL(deps)}/api/auth/sign-out`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 };
 
 export const consoleLogin = async (deps: ConsoleAuthDependencies): Promise<RelayConsoleOAuthSession> => {
   const stderr = deps.stderr ?? ((value) => process.stderr.write(value));
   const start = await postDeviceStart(deps);
   const verification = start.verification_uri_complete ?? start.verification_uri;
+  stderr(`Your code is ${start.user_code}\n`);
   stderr(`Open ${verification}\n`);
-  if (start.user_code && !start.verification_uri_complete) stderr(`Code: ${start.user_code}\n`);
+  stderr(`If it does not open, enter this code at ${start.verification_uri}: ${start.user_code}\n`);
   await (deps.openBrowser ?? openBrowser)(verification).catch(() => undefined);
   const token = await pollDevice(deps, start);
   const defaults = organizationDefaults(token.user);
   let name = deps.name ?? defaults.name;
-  if (!token.organization_id && deps.prompts && !deps.nonInteractive) {
+  if (deps.prompts && !deps.nonInteractive) {
     name = (await deps.prompts.text("Organization name", name)).trim() || name;
-  } else if (!token.organization_id && deps.nonInteractive && (deps.name === undefined)) {
+  } else if (deps.nonInteractive && (deps.name === undefined)) {
     throw new HeadlessPrompt("Relay needs organization setup after login.", ["--organization-name <name>"]);
   }
-  // WorkOS may already select an organization for the user. Bootstrap only
-  // the first-organization case; repeating it can create duplicate orgs.
-  const organizationId = token.organization_id
-    ?? await bootstrap(deps, token, { name });
-  let session: RelayConsoleOAuthSession = {
+  const organizationId = await bootstrap(deps, token, { name });
+  const session: RelayConsoleOAuthSession = {
     access_token: token.access_token,
-    refresh_token: token.refresh_token,
-    expires_at: expiryFromAccessToken(token.access_token),
-    client_id: start.client_id,
+    expires_at: token.expires_at,
     organization_id: organizationId,
-    user: { id: token.user.id, email: token.user.email, ...(token.user.name ? { name: token.user.name } : {}) },
+    user: token.user,
   };
-  if (!token.organization_id) {
-    session = await refresh(deps, session);
-    session.organization_id = organizationId;
-  }
   await saveSession(deps.context, session);
   if (deps.website !== undefined) {
     await consoleRequest(
@@ -467,25 +470,18 @@ export const consoleRequest = async <T>(
       throw new Error(message);
     }
   }
-  let oauth = session;
-  if (oauth.expires_at <= Date.now() + 30_000) {
-    oauth = await refresh(deps, oauth);
-    await saveSession(deps.context, oauth);
+  // No refresh: a Relay-Auth session token lives 30 days and relay login renews it.
+  if (session.expires_at <= Date.now()) {
+    throw new CliError("Relay Console session expired. Run relay login.", "no_token");
   }
-  const request = () => httpFetch(deps)(`${api}${path}`, {
+  const response = await httpFetch(deps)(`${api}${path}`, {
     ...init,
     headers: {
       ...(init.headers ?? {}),
-      Authorization: `Bearer ${oauth.access_token}`,
+      Authorization: `Bearer ${session.access_token}`,
       "X-Relay-CLI": "1",
     },
   });
-  let response = await request();
-  if (response.status === 401) {
-    oauth = await refresh(deps, oauth);
-    await saveSession(deps.context, oauth);
-    response = await request();
-  }
   return json<T>(response);
 };
 
