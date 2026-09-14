@@ -1,6 +1,7 @@
 import { installedConsoleFixture } from "../../../scripts/agent-cli-console-fixture.mjs";
 // Exercises the installed SDK and CLI program, never workspace imports.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -20,14 +21,20 @@ const originalParentACL = aclModule ? (await aclModule.inspectWindowsAcl(home)).
 const card = { handle: "brave_cangoo", first_name: "Brave Canada Goose", last_name: null, image_url: null, is_active: true, kind: "agent" };
 const output = []; const errors = []; const calls = [];
 let deleteStatus = 409;
+// Nothing typed: the CLI invents "My Agent" and "my_agent", so it also names the
+// bird, by the server's rule (sha256 first byte % 84, manifest order).
+const birds = Array.from({ length: 84 }, (_, index) => `relay-agent-bird-${index.toString(16).padStart(16, "0")}.png`);
+const bird = (origin) => `${origin}/avatars/${birds[createHash("sha256").update("my_agent", "utf8").digest()[0] % 84]}`;
 const deps = {
   configContext: { env: { RELAY_CONFIG_PATH: configPath, RELAY_AGENT_TOKEN: "unrelated-env-token", RELAY_PROFILE: "default" } },
   stdout: (text) => output.push(text), stderr: (text) => errors.push(text),
-  fetch: async (url, init) => {
+  fetch: async (url, init = {}) => {
     calls.push({ url: String(url), init });
+    const { pathname } = new URL(String(url));
+    if (pathname === "/avatars/manifest.json") return Response.json({ assets: birds.map((file) => ({ file })), count: 84 });
     if (init.method === "POST") {
       assert.equal(new Headers(init.headers).get("authorization"), "Bearer rel_org_installedFixtureOnly");
-      assert.deepEqual(JSON.parse(init.body), { handle: "my_agent", displayName: "My Agent" });
+      assert.deepEqual(JSON.parse(init.body), { handle: "my_agent", displayName: "My Agent", image_url: bird(configModule.defaultCreationApiURL()) });
       return Response.json({ agent: card, secret: token, share_url: `https://go.test/@${card.handle}` }, { status: 201 });
     }
     assert.equal(new Headers(init.headers).get("authorization"), init.method === "DELETE" ? "Bearer rel_org_installedFixtureOnly" : `Bearer ${token}`);
