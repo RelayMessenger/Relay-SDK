@@ -23,7 +23,12 @@ export default function relayPiExtension(pi: ExtensionAPI): void {
         return;
       }
       controller = new AbortController();
-      running = runPiChannel({ agentToken }, controller.signal).catch((error: unknown) => {
+      running = runPiChannel({
+        agentToken,
+        ...(process.env.RELAY_BASE_URL?.trim()
+          ? { baseURL: process.env.RELAY_BASE_URL.trim() }
+          : {}),
+      }, controller.signal).catch((error: unknown) => {
         ctx.ui.notify(`Relay Pi channel stopped: ${error instanceof Error ? error.message : String(error)}`, "error");
       }).finally(() => {
         running = undefined;

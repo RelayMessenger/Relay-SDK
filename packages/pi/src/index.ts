@@ -112,7 +112,7 @@ export class PiChannel {
       const answer = response.data?.text?.trim();
       if (!answer) throw new Error("Pi returned no final text answer");
       const data = event.data as MessageWebhookData;
-      const chunks = answer.match(/[\s\S]{1,10_000}/gu) ?? [];
+      const chunks = answer.match(/[\s\S]{1,10000}/gu) ?? [];
       for (const [index, chunk] of chunks.entries()) {
         await this.#relay.chats.messages.send(data.chat.id, {
           message: {
