@@ -5,9 +5,9 @@ import { CODING_AGENTS, CODING_AGENT_IDS, agentDetectedAs, codingAgent, normaliz
 import { agentFiles, agentPlan, runtimeConnectPlan, type PlanContext } from "./connect.js";
 import { createProgram } from "./program.js";
 
-/** The nine, in the order the page's section 4 lists them. Ruled 2026-09-10;
+/** The ten, in the order the page's section 4 lists them. Pi added 2026-09-15;
  * Claude Desktop dropped 2026-09-11 (no native wake). */
-const AGENTS = ["claude-code", "codex", "cursor", "opencode", "cline", "vscode", "gemini-cli", "hermes", "openclaw"] as const;
+const AGENTS = ["claude-code", "codex", "cursor", "opencode", "cline", "vscode", "gemini-cli", "hermes", "openclaw", "pi"] as const;
 
 const context = (overrides: Partial<PlanContext> = {}): PlanContext => ({
   env: {}, home: "/home/dev", platform: "linux", version: "0.1.6-staging.3", cwd: "/home/dev/project",
@@ -25,7 +25,7 @@ it("the help's Supported agents line is built from the registry", () => {
   const help = connect.helpInformation();
   expect(help.startsWith(`Usage: relaymessenger connect [options] [agent]\n${supportedAgentsLine()}\n`)).toBe(true);
   expect(help).toMatch(/^  agent +Runtime to connect \(see Runs in above\)$/mu);
-  expect(help).toMatch(/^  -y, --yes +take the plan as it is$/mu);
+  expect(help).toMatch(/^  -y, --yes +replace an existing runtime token without asking$/mu);
   // Gone: the old argument line and the old runtime words.
   expect(help).not.toContain("what will answer as this agent");
   expect(help).not.toContain("coding agent");
@@ -69,7 +69,7 @@ it("every agent has a plan that names the file it writes, or an ACP bridge that 
   for (const id of AGENTS) {
     const plan = agentPlan(id, context());
     expect(plan.steps.length, id).toBeGreaterThan(0);
-    if (codingAgent(id).connect.kind === "acp-bridge" || id === "openclaw") {
+    if (codingAgent(id).connect.kind === "acp-bridge" || codingAgent(id).connect.kind === "pi-channel" || id === "openclaw") {
       // The ACP bridge writes no file; the Relay MCP server travels through the
       // agent's session (acp-bridge.ts). OpenClaw's own `channels add` keeps
       // the token, so Relay writes no OpenClaw file either.
@@ -109,7 +109,7 @@ it("Codex gets the project file written by Relay, not a command; the ACP agents 
 it("every agent's plan is at most three lines: what is installed, what is written, what starts", () => {
   for (const id of AGENTS) {
     const plan = runtimeConnectPlan({ ...context({ start: true }), agents: [id] });
-    expect(plan.headline, id).toBe("Continue? (Y/n)");
+    expect(plan.headline, id).toBe(`Relay will do ${plan.steps.length} ${plan.steps.length === 1 ? "thing" : "things"}.`);
     expect(plan.steps.length, id).toBeLessThanOrEqual(3);
     expect(plan.steps.length, id).toBeGreaterThan(0);
     expect(plan.agents.map((entry) => entry.agent)).toEqual([id]);
@@ -132,7 +132,7 @@ it("every agent plan uses Windows separators independently of the host", () => {
     hermes: ".hermes/.env",
   };
   for (const id of AGENTS) {
-    if (codingAgent(id).connect.kind === "acp-bridge" || id === "openclaw") {
+    if (codingAgent(id).connect.kind === "acp-bridge" || codingAgent(id).connect.kind === "pi-channel" || id === "openclaw") {
       expect(agentFiles(id, windows), id).toEqual([]);
     } else {
       expect(agentFiles(id, windows)[0], id).toBe(win32.join(windows.home, expected[id]!));

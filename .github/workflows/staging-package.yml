@@ -75,6 +75,9 @@ jobs:
       - run: npm ci
       - name: Build the canonical SDK workspace
         run: npm run build --workspace @relaymessenger/sdk
+      - name: Build the Pi workspace for the CLI
+        if: inputs.package == 'cli'
+        run: npm run build --workspace @relaymessenger/pi
       - id: resolve
         run: node scripts/release-catalog.mjs --key "$RELEASE_PACKAGE"
       - name: Validate selected package

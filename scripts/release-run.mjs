@@ -151,6 +151,11 @@ async function recordTag(row) {
 rewriteReleaseWorkspace(root, plan, { sdkIntegrity });
 run(process.execPath, ["scripts/sync-root-discovery.mjs", "--write"]);
 for (const row of plan.filter((entry) => entry.action === "skip")) {
+  // A package earlier in the release order may have rewritten a Relay
+  // dependency and reconciled the workspace tree. Reconcile again before
+  // building a skipped dependent so its local workspace link exists at the
+  // derived version too.
+  run(npm, ["install", "--no-audit", "--no-fund"]);
   run(npm, ["run", "build", "--workspace", row.name]);
 }
 

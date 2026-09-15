@@ -9,11 +9,12 @@ import vscode from "./coding-agents/vscode.js";
 import geminiCli from "./coding-agents/gemini-cli.js";
 import hermes from "./coding-agents/hermes.js";
 import openclaw from "./coding-agents/openclaw.js";
-export { platformPath, claudeConfigDir, codexHome, hermesHome, openclawHome } from "./coding-agents/shared.js";
+import pi from "./coding-agents/pi.js";
+export { platformPath, claudeConfigDir, codexHome, hermesHome, openclawHome, piHome } from "./coding-agents/shared.js";
 
 
 /**
- * The nine runtimes `connect` knows, in the order the help lists them.
+ * The ten runtimes `connect` knows, in the order the help lists them.
  * This is the one table: detection, the "Supported agents" line, the prompt,
  * the plan and the tests all read it, so the list cannot drift between screens.
  *
@@ -38,7 +39,8 @@ export type CodingAgentId =
   | "vscode"
   | "gemini-cli"
   | "hermes"
-  | "openclaw";
+  | "openclaw"
+  | "pi";
 
 export interface AgentPaths {
   env: NodeJS.ProcessEnv;
@@ -66,6 +68,7 @@ export type ConnectMethod =
   | { kind: "codex-project"; file: (paths: AgentPaths) => string }
   | { kind: "mcp-file"; file: (paths: AgentPaths) => string; shape: "mcpServers" | "vscode" | "opencode" }
   | { kind: "acp-bridge" }
+  | { kind: "pi-channel" }
   | { kind: "hermes-plugin" }
   | { kind: "openclaw-plugin" };
 
@@ -80,6 +83,7 @@ export const CODING_AGENTS: readonly CodingAgent[] = [
   geminiCli,
   hermes,
   openclaw,
+  pi,
 ];
 
 export const CODING_AGENT_IDS: readonly CodingAgentId[] = CODING_AGENTS.map((agent) => agent.id);

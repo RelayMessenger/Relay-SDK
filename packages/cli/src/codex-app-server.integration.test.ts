@@ -8,15 +8,17 @@ import { findExecutable } from "./runtime-sniff.js";
 /**
  * The one test that talks to the real `codex app-server`, so the hand-written
  * shapes in codex-bridge.ts are checked against the program they describe
- * rather than against a stand-in. It is skipped where Codex is not installed,
- * which is every machine that builds this package.
+ * rather than against a stand-in. It is opt-in because an installed Codex may
+ * require a human account or model credentials. Run it with
+ * RELAY_RUN_LIVE_AGENT_TESTS=1.
  */
 const installed = await findExecutable("codex", process.env, process.platform) !== undefined;
+const enabled = process.env.RELAY_RUN_LIVE_AGENT_TESTS === "1";
 
 const folders: string[] = [];
 afterAll(async () => { for (const folder of folders.splice(0)) await rm(folder, { recursive: true, force: true }); });
 
-describe.skipIf(!installed)("the codex on this computer", () => {
+describe.skipIf(!installed || !enabled)("the codex on this computer", () => {
   it("takes a message and answers it", async () => {
     const folder = await mkdtemp(join(tmpdir(), "relay-codex-live-"));
     folders.push(folder);

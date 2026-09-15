@@ -73,7 +73,18 @@ await mkdir(sdkRelease);
 run("npm", ["pack", "--ignore-scripts", "--pack-destination", sdkRelease], { cwd: resolve(root, "../sdk") });
 const sdkTarballs = (await readdir(sdkRelease)).filter((name) => name.endsWith(".tgz"));
 assert.equal(sdkTarballs.length, 1);
-run("npm", ["install", "--ignore-scripts", join(sdkRelease, sdkTarballs[0]), tarball], { cwd: consumer });
+const piRelease = join(release, "pi");
+await mkdir(piRelease);
+run("npm", ["pack", "--ignore-scripts", "--pack-destination", piRelease], { cwd: resolve(root, "../pi") });
+const piTarballs = (await readdir(piRelease)).filter((name) => name.endsWith(".tgz"));
+assert.equal(piTarballs.length, 1);
+run("npm", [
+  "install",
+  "--ignore-scripts",
+  join(sdkRelease, sdkTarballs[0]),
+  join(piRelease, piTarballs[0]),
+  tarball,
+], { cwd: consumer });
 
 const binDirectory = join(consumer, "node_modules", ".bin");
 const relay = join(binDirectory, process.platform === "win32" ? "relay.cmd" : "relay");
@@ -110,6 +121,10 @@ assert.equal(installedManifest.name, "relaymessenger");
 assert.equal(
   installedManifest.dependencies["@relaymessenger/sdk"],
   sourceManifest.dependencies["@relaymessenger/sdk"],
+);
+assert.equal(
+  installedManifest.dependencies["@relaymessenger/pi"],
+  sourceManifest.dependencies["@relaymessenger/pi"],
 );
 
 console.log(`CLI tarball install smoke OK: ${tarball}`);

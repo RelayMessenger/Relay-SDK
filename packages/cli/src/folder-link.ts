@@ -1,4 +1,4 @@
-import { appendFile, chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, chmod, lstat, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 /**
@@ -45,6 +45,20 @@ export async function readFolderLink(cwd: string): Promise<(FolderLink & { path:
  */
 export async function writeFolderLink(cwd: string, link: FolderLink): Promise<string> {
   const dir = join(cwd, FOLDER_LINK_DIR);
+  // A stale local setup can leave `.relay` pointing at a deleted directory.
+  // Repair only a dangling symlink. A live symlink is left untouched.
+  try {
+    const entry = await lstat(dir);
+    if (entry.isSymbolicLink()) {
+      try {
+        await stat(dir);
+      } catch {
+        await unlink(dir);
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const path = folderLinkPath(cwd);
   await writeFile(path, `${JSON.stringify({ handle: link.handle, apiUrl: link.apiUrl }, null, 2)}\n`, { mode: 0o600 });

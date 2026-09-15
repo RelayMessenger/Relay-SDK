@@ -187,5 +187,24 @@
       "prompt": "Start OpenClaw with Relay now?"
     },
     "detectedAs": []
+  },
+  {
+    "id": "pi",
+    "label": "Pi",
+    "aliases": [
+      "pi-coding-agent"
+    ],
+    "installedIf": "(paths) => [piHome(paths.home, paths.platform)]",
+    "connect": {
+      "kind": "pi-channel"
+    },
+    "start": {
+      "kind": "pi-bridge",
+      "command": "pi",
+      "prompt": "Answer Relay messages with Pi from this folder?"
+    },
+    "detectedAs": [
+      "pi"
+    ]
   }
 ]

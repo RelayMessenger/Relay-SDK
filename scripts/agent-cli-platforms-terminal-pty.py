@@ -1,9 +1,9 @@
 """The native proof of `relaymessenger connect` on a real pseudo-terminal.
 
-It drives the installed CLI through the redesigned screens
-(_artifacts/cli-connect-design-20260912.md): the one question `Where does your agent run?`
-answered with Enter, `Customize the agent?` answered with Enter (No), the plan (`create a new agent` first, then at most three lines for the
-agent), `Continue? (Y/n)` answered with Enter, only then the agent created, one line per file written, `Say hi from your phone`, the share link and the QR,
+It drives the installed CLI through the redesigned screens: the one question
+`Where does your agent run?` answered with Enter, the plan (`create a new agent`
+first, then at most three lines for the agent), the agent created immediately,
+one line per file written, `Say hi from your phone`, the share link and the QR,
 then the agent's first reply. Relay is loopback only (agent-cli-platforms-terminal-server.mjs);
 no deployed Server is touched. A fake `claude` on PATH stands in for Claude Code's own
 plugin commands, so the three-line plan (install, write, start) is the one proved.
@@ -56,10 +56,8 @@ def drain(fd, seconds):
             except OSError: break
     return out
 
-# The three questions, all answered with Enter: the runtime picker takes its default (the
-# first agent found), the optional customize step takes No (owner ruling 2026-09-12, in
-# Hermes' "(Optional)" shape), and the confirm takes Yes.
-steps = [(b'Where does your agent run?', b'\r'), (b'Customize the agent? (name, handle, about, avatar)', b'\r'), (b'Continue? (Y/n)', b'\r')]
+# One question, answered with Enter: the runtime picker takes its default.
+steps = [(b'Where does your agent run?', b'\r')]
 # 24 and 32 rows have no room for a full-cell code; 60 rows has. All three are proved.
 modes = [('light', 80, 24), ('dark', 100, 32), ('tall', 100, 60)]
 for mode, columns, rows in modes:
@@ -88,15 +86,22 @@ for mode, columns, rows in modes:
         assert stage == len(steps), {'mode': mode, 'stage': stage, 'exit': process.poll()}
         assert process.wait(timeout=4) == 0, {'mode': mode, 'exit': process.returncode}
         assert termios.tcgetattr(slave) == before
-        # The screens, in order: the wordmark, the one question, the optional customize step and its hint, the create line
-        # and the three plan lines, the confirm, the agent created only after it, the files, the phone step, the reply.
-        order = [b'Relay', b'Where does your agent run?', b'Customize the agent? (name, handle, about, avatar)', b'Enter skips. Relay picks a name and handle.', b'create a new agent  (Relay picks the name)', b'install  the Relay plugin for Claude Code', b'write  ', b'start Claude Code with Relay when you are ready',
-                 b'Continue? (Y/n)', b'Created @' + handle.encode(), b'wrote  ', b'Say hi from your phone', b'Answered from your phone: owned integrated agent reply']
+        # The screens, in order: the wordmark, the one question, the create line,
+        # the three plan lines, the agent, the files, the phone step, the reply.
+        order = [b'Relay', b'Where does your agent run?', b'create a new agent  (Relay picks the name)', b'install  the Relay plugin for Claude Code', b'write  ', b'start Claude Code with Relay when you are ready',
+                 b'Created @' + handle.encode(), b'wrote  ', b'Say hi from your phone', b'Answered from your phone: owned integrated agent reply']
         text = plain(output); at = 0
         for needle in order:
             found = text.find(needle, at); assert found >= 0, {'mode': mode, 'missing': needle}; at = found
-        plan = text[text.find(b'install  the Relay plugin'):text.find(b'Continue? (Y/n)')]
-        planLines = [line for line in plan.split(b'\n') if re.search(rb'[A-Za-z]', line)]
+        plan = text[text.find(b'install  the Relay plugin'):text.find(b'Created @')]
+        planLines = [
+            line for line in plan.split(b'\n')
+            if any(marker in line for marker in (
+                b'install  the Relay plugin',
+                b'write  ',
+                b'start Claude Code with Relay',
+            ))
+        ]
         assert len(planLines) == 3, {'mode': mode, 'plan': planLines}
         for gone in [b'Which agent?', b'found on this computer', b'Handle', b'Install the Relay skill?', b'Relay is ready', b'Open Relay, scan', b'Later:', token]:
             assert gone not in text, {'mode': mode, 'unexpected': gone}
@@ -125,7 +130,7 @@ for mode, columns, rows in modes:
         nonTTY = subprocess.run([node, shim, '--profile', handle, 'auth', 'status'], env=env, cwd=home, input='', capture_output=True, text=True, timeout=10); assert nonTTY.returncode == 0, nonTTY
         assert json.loads(report.read_text())['observers'] == 1 and (home / 'config.json').read_bytes() == saved
         results.append({'mode': mode, 'size': [columns, rows], 'inputSteps': stage, 'installedShim': True, 'oneQuestion': True, 'planLines': len(planLines),
-                        'continueDefaultYes': True, 'folderLink': True, 'apexURL': True, 'QRfits': True, 'QRform': 'full' if fullCells and not halfBlocks else 'compact',
+                        'noConfirmationPrompt': True, 'folderLink': True, 'apexURL': True, 'QRfits': True, 'QRform': 'full' if fullCells and not halfBlocks else 'compact',
                         'noGreenSGR': True, 'noTokenEcho': True, 'firstReply': True, 'rawRestored': True, 'nonTTYNoNewWatch': True, 'server': state})
     finally:
         (dest / (mode + '.ansi')).write_bytes(output.replace(token, b'[REDACTED]'))
