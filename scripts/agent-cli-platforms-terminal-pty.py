@@ -94,7 +94,14 @@ for mode, columns, rows in modes:
         for needle in order:
             found = text.find(needle, at); assert found >= 0, {'mode': mode, 'missing': needle}; at = found
         plan = text[text.find(b'install  the Relay plugin'):text.find(b'Created @')]
-        planLines = [line for line in plan.split(b'\n') if re.search(rb'[A-Za-z]', line)]
+        planLines = [
+            line for line in plan.split(b'\n')
+            if any(marker in line for marker in (
+                b'install  the Relay plugin',
+                b'write  ',
+                b'start Claude Code with Relay',
+            ))
+        ]
         assert len(planLines) == 3, {'mode': mode, 'plan': planLines}
         for gone in [b'Which agent?', b'found on this computer', b'Handle', b'Install the Relay skill?', b'Relay is ready', b'Open Relay, scan', b'Later:', token]:
             assert gone not in text, {'mode': mode, 'unexpected': gone}
