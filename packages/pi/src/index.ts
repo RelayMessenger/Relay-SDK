@@ -89,7 +89,10 @@ export class PiChannel {
     signal?.addEventListener("abort", this.#abortListener, { once: true });
     try {
       await this.#relay.websocket.run({ ...(signal ? { signal } : {}), onEvent: async (event) => this.#handle(event, signal), onFullSync: async () => { throw new Error("Pi channel cannot acknowledge FULL sync without a durable Relay inbox"); } });
-    } finally { this.stop(); if (signal && this.#abortListener) signal.removeEventListener("abort", this.#abortListener); }
+    } finally {
+      this.stop();
+      if (signal) signal.removeEventListener("abort", this.#abortListener!);
+    }
   }
   stop(): void { for (const session of this.#sessions.values()) session.stop(); this.#sessions.clear(); }
   async #handle(event: RelayWebhookEvent, signal?: AbortSignal): Promise<void> {
@@ -114,7 +117,7 @@ export class PiChannel {
     const response = await session.command("get_last_assistant_text", {}, timeout, signal);
     const answer = response.data?.text?.trim();
     if (!answer) throw new Error("Pi returned no final text answer");
-    const chunks = answer.match(/[\s\S]{1,10_000}/gu) ?? [];
+    const chunks = answer.match(/[\s\S]{1,10000}/gu) ?? [];
     for (const [index, chunk] of chunks.entries()) await this.#relay.chats.messages.send(data.chat.id, { message: { parts: [{ type: "text", value: chunk }], idempotency_key: `pi-${event.event_id}-${index}` } });
   }
 }
