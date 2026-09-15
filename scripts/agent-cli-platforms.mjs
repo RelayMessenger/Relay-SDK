@@ -40,7 +40,7 @@ const npm = (args, options) => run(process.execPath, [npmCli, ...args], options)
 try {
   report.sha = run('git', ['rev-parse', 'HEAD']).trim();
   report.dirty = run('git', ['status', '--porcelain']).trim();
-  const packageNames = { sdk: '@relaymessenger/sdk', cli: 'relaymessenger' };
+  const packageNames = { sdk: '@relaymessenger/sdk', pi: '@relaymessenger/pi', cli: 'relaymessenger' };
   const publication = publishedPlan(root);
   let cliManifest = JSON.parse(readFileSync(join(root, 'packages/cli/package.json')));
   assert.equal(cliManifest.name, packageNames.cli, 'Final proof requires canonical relaymessenger, not a scoped wrapper');
@@ -48,7 +48,7 @@ try {
   report.packageName = cliManifest.name;
   report.packageVersion = cliManifest.version;
   report.validationFailures = [];
-  if (!publication) for (const pkg of ['sdk', 'cli']) {
+  if (!publication) for (const pkg of ['sdk', 'pi', 'cli']) {
     for (const task of ['check', 'build']) npm(['run', task, '--workspace', packageNames[pkg]]);
     // Keep the overall run red, but still collect independent installed-package evidence.
     try { npm(['run', 'test', '--workspace', packageNames[pkg]]); }
@@ -57,14 +57,14 @@ try {
   const published = publication ? packPublished(publication, scratch, npm, report) : undefined;
   const packs = published?.packs ?? {};
   if (publication) report.sourceValidation = 'not run: this is published-consumer proof, not a source validation claim';
-  if (!publication) for (const pkg of ['sdk', 'cli']) {
+  if (!publication) for (const pkg of ['sdk', 'pi', 'cli']) {
     const packed = JSON.parse(npm(['pack', '--workspace', packageNames[pkg], '--ignore-scripts', '--json', '--pack-destination', scratch]));
     packs[pkg] = join(scratch, packed[0].filename);
   }
   report.tarballSHA256 = Object.fromEntries(Object.entries(packs).map(([k,v]) => [k,createHash('sha256').update(readFileSync(v)).digest('hex')]));
   const consumer = join(scratch, 'consumer'); mkdirSync(consumer);
   writeFileSync(join(consumer, 'package.json'), JSON.stringify({ private: true }));
-  npm(['install', '--ignore-scripts', '--no-audit', '--no-fund', ...(publication ? ['--registry', publication.registry, packs.cli] : [packs.sdk, packs.cli])], { cwd: consumer });
+  npm(['install', '--ignore-scripts', '--no-audit', '--no-fund', ...(publication ? ['--registry', publication.registry, packs.cli] : [packs.sdk, packs.pi, packs.cli])], { cwd: consumer });
   if (publication) {
     cliManifest = verifyPublishedConsumer(root, consumer, publication, report);
     report.packageVersion = cliManifest.version;
