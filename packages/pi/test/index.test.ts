@@ -1,7 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
+import type Relay from "@relaymessenger/sdk";
+import type { RelayWebhookEvent } from "@relaymessenger/sdk";
 import { PiChannel, type PiProcess } from "../src/index.js";
 
-const event = { event_type: "message.received", event_id: "evt", data: { direction: "inbound", id: "msg", chat: { id: "chat" }, sender_handle: { handle: "alice" }, parts: [{ type: "text", value: "hello" }] } } as any;
+const event = {
+  event_type: "message.received",
+  event_id: "evt",
+  data: {
+    direction: "inbound",
+    id: "msg",
+    chat: { id: "chat" },
+    sender_handle: { handle: "alice" },
+    parts: [{ type: "text", value: "hello" }],
+  },
+} as unknown as RelayWebhookEvent;
 function fakePi(lines: string[]): PiProcess {
   async function* output(): AsyncGenerator<string> {
     yield* lines;
@@ -12,7 +24,10 @@ function fakePi(lines: string[]): PiProcess {
 describe("Pi channel", () => {
   it("prompts Pi and sends one final answer", async () => {
     const create = vi.fn().mockResolvedValue({});
-    const relay = { chats: { messages: { send: create } }, websocket: { run: async ({ onEvent }: any) => onEvent(event) } } as any;
+    const relay = {
+      chats: { messages: { send: create } },
+      websocket: { run: async (options: { onEvent: (value: RelayWebhookEvent) => Promise<void> }) => options.onEvent(event) },
+    } as unknown as Relay;
     const pi = fakePi([
       JSON.stringify({ id: "1", type: "response", command: "prompt", success: true }),
       JSON.stringify({ type: "agent_settled" }),

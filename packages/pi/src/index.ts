@@ -7,6 +7,7 @@ export interface PiChannelOptions {
   readonly baseURL?: string;
   readonly piCommand?: string;
   readonly piArgs?: readonly string[];
+  readonly rpcTimeoutMs?: number;
   readonly spawnPi?: (command: string, args: readonly string[]) => PiProcess;
   readonly relay?: Relay;
 }
@@ -39,6 +40,7 @@ export class PiChannel {
   readonly #relay: Relay;
   readonly #options: PiChannelOptions;
   readonly #spawnPi: (command: string, args: readonly string[]) => PiProcess;
+  readonly #seen = new Set<string>();
   constructor(options: PiChannelOptions) {
     if (!options.agentToken.trim()) throw new Error("Relay Agent Token is required");
     this.#options = options;
@@ -52,21 +54,40 @@ export class PiChannel {
   async run(signal?: AbortSignal): Promise<void> {
     await this.#relay.websocket.run({
       ...(signal ? { signal } : {}),
-      onEvent: async (event) => { await this.#handle(event); },
-      onFullSync: async () => {},
+      onEvent: async (event) => { await this.#handle(event, signal); },
+      onFullSync: async () => {
+        throw new Error("Pi channel cannot safely acknowledge FULL sync without a durable Relay inbox");
+      },
     });
   }
 
-  async #handle(event: RelayWebhookEvent): Promise<void> {
+  async #handle(event: RelayWebhookEvent, signal?: AbortSignal): Promise<void> {
+    if (this.#seen.has(event.event_id)) return;
     const message = textFromEvent(event);
     if (!message) return;
+    this.#seen.add(event.event_id);
     const pi = this.#spawnPi(this.#options.piCommand ?? "pi", ["--mode", "rpc", ...(this.#options.piArgs ?? [])]);
     try {
       const lines = pi.stdout[Symbol.asyncIterator]();
+      const timeoutMs = this.#options.rpcTimeoutMs ?? 60_000;
+      const readLine = async (): Promise<IteratorResult<string>> => {
+        if (signal?.aborted) throw new Error("Pi RPC request aborted");
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          return await Promise.race([
+            lines.next(),
+            new Promise<IteratorResult<string>>((_, reject) => {
+              timer = setTimeout(() => reject(new Error("Pi RPC request timed out")), timeoutMs);
+            }),
+          ]);
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      };
       let id = 0;
       const readResponse = async (requestId: string, command: string): Promise<RpcRecord> => {
         for (;;) {
-          const item = await lines.next();
+          const item = await readLine();
           if (item.done) throw new Error("Pi RPC process exited before responding");
           const record = JSON.parse(item.value) as RpcRecord;
           if (record.type === "response" && record.id === requestId) {
@@ -80,7 +101,7 @@ export class PiChannel {
       await readResponse(promptId, "prompt");
       let settled = false;
       while (!settled) {
-        const item = await lines.next();
+        const item = await readLine();
         if (item.done) throw new Error("Pi RPC process exited before settling");
         const record = JSON.parse(item.value) as RpcRecord;
         settled = record.type === "agent_settled";
@@ -90,13 +111,16 @@ export class PiChannel {
       const response = await readResponse(textId, "get_last_assistant_text");
       const answer = response.data?.text?.trim();
       if (!answer) throw new Error("Pi returned no final text answer");
-    const data = event.data as MessageWebhookData;
-    await this.#relay.chats.messages.send(data.chat.id, {
-        message: {
-          parts: [{ type: "text", value: answer }],
-          idempotency_key: `pi-${event.event_id}`,
-        },
-      });
+      const data = event.data as MessageWebhookData;
+      const chunks = answer.match(/[\s\S]{1,10_000}/gu) ?? [];
+      for (const [index, chunk] of chunks.entries()) {
+        await this.#relay.chats.messages.send(data.chat.id, {
+          message: {
+            parts: [{ type: "text", value: chunk }],
+            idempotency_key: `pi-${event.event_id}-${index}`,
+          },
+        });
+      }
     } finally { pi.stdin.end(); pi.kill(); }
   }
 }
