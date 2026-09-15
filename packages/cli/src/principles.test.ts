@@ -61,11 +61,14 @@ it("root and nested help end in the two documentation lines", async () => {
     ]);
   }
 });
-it("no-input aliases non-interactive and changes the piped plan", async () => {
+it("no-input aliases non-interactive without adding a prompt", async () => {
   const normal = await run(["connect", "claude", "--new", "--dry-run"]);
   for (const flag of ["--non-interactive", "--no-input"]) {
     const r = await run([flag, "connect", "claude", "--new", "--dry-run"]);
-    expect(r.code).toBe(0); expect(r.out).not.toContain("Continue?"); expect(r.out).not.toBe(normal.out);
+    expect(r.code).toBe(0);
+    expect(r.out).not.toContain("Continue?");
+    expect(r.err).not.toContain("Continue?");
+    expect(normal.out).not.toContain("Continue?");
   }
 });
 it("about validates before any creation request", async () => {

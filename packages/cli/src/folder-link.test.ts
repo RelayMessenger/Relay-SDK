@@ -24,6 +24,14 @@ describe("the folder link", () => {
     expect(await readFolderLink(await mkdtemp(join(tmpdir(), "relay-folder-unlinked-")))).toBeUndefined();
   });
 
+  it("repairs a dangling .relay symlink before writing the link", async () => {
+    const root = await mkdtemp(join(tmpdir(), "relay-folder-link-"));
+    if (process.platform === "win32") return;
+    await import("node:fs/promises").then(({ symlink }) => symlink(join(root, "deleted-runtime"), join(root, ".relay")));
+    await writeFolderLink(root, link);
+    expect(JSON.parse(await readFile(folderLinkPath(root), "utf8"))).toEqual(link);
+  });
+
   it("a broken or tokenless file is not a link", async () => {
     const root = await mkdtemp(join(tmpdir(), "relay-folder-link-"));
     await mkdir(join(root, ".relay"));

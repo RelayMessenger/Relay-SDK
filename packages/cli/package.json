@@ -30,6 +30,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",
     "@clack/prompts": "1.8.0",
+    "@relaymessenger/pi": "0.1.0-staging.0",
     "@relaymessenger/sdk": "0.3.3-staging.7",
     "@vercel/detect-agent": "1.2.5",
     "commander": "^15.0.0",

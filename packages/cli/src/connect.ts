@@ -52,9 +52,9 @@ export const HERMES_PLUGIN_SOURCE = "RelayMessenger/Relay-Hermes";
 export const openclawPluginSpec = (version: string = packageVersion()): string =>
   `@relaymessenger/openclaw-plugin${isStagingBuild(version) ? "@staging" : ""}`;
 
-/** Vercel's `skills` sentence for a pipe with no target and no -y (src/add.ts:408-418), with our nouns. */
+/** The one required choice when no runtime was named and stdin is unavailable. */
 export const NO_TTY_SENTENCE = "Interactive prompt required but stdin is not a TTY. Nothing was connected.";
-export const NO_TTY_NEXT_STEP = "Name an agent and -y to run non-interactively.";
+export const NO_TTY_NEXT_STEP = "Name the runtime, or use --json for machine-readable output.";
 
 export interface ConnectOptions {
   new?: boolean;
@@ -110,7 +110,7 @@ export interface ConnectDependencies {
    * coding-agents/{cursor,gemini-cli,opencode}.ts).
    */
   bridge?: (input: {
-    kind: "codex" | "acp";
+    kind: "codex" | "acp" | "pi";
     token: string;
     apiURL: string;
     /** The agent that answers, so its threads or sessions are kept apart from another's. */
@@ -155,32 +155,16 @@ export interface ConnectAgent {
   created: boolean;
 }
 
-/**
- * The optional step after the runtime question, in Hermes' shape (`hermes
- * setup`: "Step 2: Customize Your Bot (Optional)", "Add an MCP server now?"
- * defaulting to No with "Add later with `hermes mcp add`"). Enter skips every
- * one of these (owner ruling, 2026-09-12).
- */
-export const CUSTOMIZE_QUESTION = "Customize the agent? (name, handle, about, avatar)";
-export const CUSTOMIZE_HINT = "Enter skips. Relay picks a name and handle.";
-export const NAME_QUESTION = "Name (optional)";
-export const HANDLE_QUESTION = "Handle (optional)";
-export const ABOUT_QUESTION = "About (optional)";
-export const AVATAR_QUESTION = "Avatar (optional)";
-export const NAME_PLACEHOLDER = "Relay picks one";
-export const ABOUT_PLACEHOLDER = "One sentence about what it does";
-export const AVATAR_PLACEHOLDER = "Path to a PNG or JPEG";
-export const NOT_AN_IMAGE = "Not an image file. Enter skips.";
 const AVATAR_EXTENSIONS = new Set([".png", ".jpg", ".jpeg"]);
 
-/**
- * The handle Relay's rule allows for a name (agents.ts, validateHandle): the
- * words lowercased and joined with underscores, a letter first, at most 32
- * characters.
- * Undefined when nothing of the name survives the rule.
- */
+/** Derive Relay's default handle from an optional display name flag. */
 export const handleFromName = (name: string): string | undefined => {
-  const body = name.toLowerCase().replace(/[^a-z0-9]+/gu, "_").replace(/^[^a-z]+/u, "").replace(/_+$/u, "").slice(0, 32).replace(/_+$/u, "");
+  const body = name.toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "_")
+    .replace(/^[^a-z]+/u, "")
+    .replace(/_+$/u, "")
+    .slice(0, 32)
+    .replace(/_+$/u, "");
   return body.length >= 3 ? body : undefined;
 };
 
@@ -321,6 +305,9 @@ export const agentFiles = (agent: CodingAgentId, context: PlanContext): string[]
     // The ACP bridge writes no file: the Relay MCP server travels through the
     // agent's session instead (acp-bridge.ts).
     case "acp-bridge": return [];
+    // The Relay Pi package is loaded by the CLI, and Pi's RPC process owns its
+    // own state. Relay writes no Pi configuration file.
+    case "pi-channel": return [];
     case "hermes-plugin": return [hermesEnvPath(context)];
     // OpenClaw's own command keeps the token; Relay writes nothing.
     case "openclaw-plugin": return [];
@@ -375,6 +362,9 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
       // tools into the session; no mcp.json is written.
       steps = [`keep running here, and answer your Relay messages with ${label} from this folder  (Relay's tools travel through the session; no mcp.json is written)`];
       break;
+    case "pi-channel":
+      steps = [`keep running here, and answer your Relay messages with Pi from this folder  (Relay drives Pi through its native RPC mode)`];
+      break;
     case "hermes-plugin":
       steps = [
         `install  the Relay plugin for ${label}  (${shown.commands[0]})`,
@@ -421,15 +411,13 @@ export const createLine = (create: AgentIdentity | undefined, mark: (value: stri
  */
 export const runtimeConnectPlan = (input: PlanContext & { agents: readonly CodingAgentId[]; ask?: boolean }): ConnectPlan => {
   const agents = input.agents.map((agent) => agentPlan(agent, input));
-  // A new agent is the first thing the plan makes, so it is the first line:
-  // nothing is created until the plan is taken (owner, 2026-09-12, after a No
-  // at Continue left a stray agent on staging).
+  // Keep the plan short enough to scan before any files or agents are changed.
   const steps = [...(input.create ? [createLine(input.create, input.mark)] : []), ...agents.flatMap((plan) => plan.steps)];
   // With `--non-interactive` no one can answer, so the plan is a statement:
   // clig.dev, Interactivity: "If --no-input is passed, don't prompt or do
   // anything interactive" (ledger row P27, captures/relay/ni2.out).
   const count = `Relay will do ${steps.length} ${steps.length === 1 ? "thing" : "things"}.`;
-  return { headline: input.ask === false ? count : "Continue? (Y/n)", steps, agents };
+  return { headline: count, steps, agents };
 };
 
 const defaultRunCommand = async (file: string, args: readonly string[]): Promise<ConnectCommandResult> =>
@@ -619,9 +607,8 @@ export const runConnect = async (
   }
 
   const linked = await readFolderLink(deps.cwd);
-  // Which agent: one that exists, or one the plan will create. Nothing is
-  // created here; every question comes before the plan, and the plan before
-  // anything is made.
+  // A linked folder or explicit profile reuses an existing agent. Otherwise
+  // connect creates one. `--new` remains accepted as an explicit alias.
   const chosen = await resolveAgent({ ...options, ...(avatarFlag ? { avatar: avatarFlag } : {}) }, deps, screen, linked);
   const known = "pending" in chosen ? undefined : chosen;
 
@@ -654,14 +641,8 @@ export const runConnect = async (
 
   const plan = runtimeConnectPlan({ ...context(chosen, replacing), agents: targets, ask: options.nonInteractive !== true });
   screen.plan(plan.headline, plan.steps);
-  // One question, and Enter says yes (fly: "Would you like to sign in? (Y/n)").
-  // The plan named what starts, so nothing below asks again.
-  if (options.yes !== true) {
-    if (!ui || json) throw new HeadlessPrompt("Relay cannot ask you to confirm this plan.", ["--yes  to run the plan above"]);
-    if (!await ui.confirm("Continue?", { initialValue: true })) throw new InteractiveCancelled();
-  }
-
-  // The plan was taken: only now is an agent created and its token saved.
+  // The explicit connect command is the user's approval. Only the existing
+  // runtime-token replacement prompt below can still stop a write.
   let consoleSession: RelayConsoleSession | undefined;
   if (!known) {
     consoleSession = await (deps.consoleLogin?.() ?? consoleLoginOrReuse({
@@ -695,7 +676,7 @@ export const runConnect = async (
   let bridge: {
     label: string;
     command: string;
-    kind: "codex" | "acp";
+    kind: "codex" | "acp" | "pi";
     acpArgs?: readonly string[];
     mcpServer: ReturnType<typeof mcpServerSpec>;
   } | undefined;
@@ -765,6 +746,12 @@ export const runConnect = async (
       result.bridge_args = [...start.args];
       if (!json && options.start !== false && (options.yes === true || ui !== undefined)) {
         bridge = { label: definition.label, command, kind: "acp", acpArgs: start.args, mcpServer: mcpServerSpec(ctx) };
+      }
+    } else if (start?.kind === "pi-bridge") {
+      const command = runtime?.executable ?? start.command;
+      result.bridge_command = command;
+      if (!json && options.start !== false && (options.yes === true || ui !== undefined)) {
+        bridge = { label: definition.label, command, kind: "pi", mcpServer: mcpServerSpec(ctx) };
       }
     } else if (start?.kind === "command") {
       const command = runtime?.executable ?? start.command;
@@ -940,55 +927,20 @@ interface PendingAgent {
   identity: AgentIdentity;
 }
 
-/** The flags first; then, in a terminal, the optional step with one question per field the flags left open. */
-const chooseIdentity = async (options: ConnectOptions, deps: ConnectDependencies): Promise<AgentIdentity> => {
+/** Identity flags are optional overrides. The default connect asks nothing about identity. */
+const chooseIdentity = (options: ConnectOptions): AgentIdentity => {
   const identity: AgentIdentity = {
     ...(options.handle ? { handle: options.handle } : {}),
     ...(options.name ? { name: options.name } : {}),
     ...(options.about ? { about: options.about } : {}),
     ...(options.avatar ? { avatar: options.avatar } : {}),
   };
-  const ui = deps.prompts;
-  if (!ui || options.json || options.nonInteractive) return identity;
-  const open = (["name", "handle", "about", "avatar"] as const).filter((field) => identity[field] === undefined);
-  if (!open.length) return identity;
-  if (!await ui.confirm(CUSTOMIZE_QUESTION, { initialValue: false, hint: CUSTOMIZE_HINT })) return identity;
-  if (open.includes("name")) {
-    const name = (await ui.text(NAME_QUESTION, "", {
-      placeholder: NAME_PLACEHOLDER,
-      validate: (value) => { try { if (value.trim()) validateFirstName(value); return undefined; } catch (error) { return (error as Error).message; } },
-    })).trim();
-    if (name) identity.name = name;
-  }
-  if (open.includes("handle")) {
-    // The placeholder is the handle Relay's rule gives the name, and Enter takes it.
-    const derived = identity.name ? handleFromName(identity.name) : undefined;
-    const typed = (await ui.text(HANDLE_QUESTION, "", {
-      placeholder: derived ?? "assistant",
-      validate: (value) => { try { if (value.trim()) validateHandle(value.trim()); return undefined; } catch (error) { return (error as Error).message; } },
-    })).trim();
-    if (typed) identity.handle = typed;
-    else if (derived) identity.handle = derived;
-  }
-  if (open.includes("about")) {
-    const about = (await ui.text(ABOUT_QUESTION, "", { placeholder: ABOUT_PLACEHOLDER })).trim();
-    if (about) identity.about = about;
-  }
-  if (open.includes("avatar")) {
-    const where = { cwd: deps.cwd, home: deps.home };
-    const avatar = (await ui.text(AVATAR_QUESTION, "", {
-      placeholder: AVATAR_PLACEHOLDER,
-      validate: (value) => value.trim() && !avatarFile(value, where) ? NOT_AN_IMAGE : undefined,
-    })).trim();
-    const path = avatar ? avatarFile(avatar, where) : undefined;
-    if (path) identity.avatar = path;
-  }
   return identity;
 };
 
 /**
  * Which agent to connect: the one named by a token, a linked folder or an
- * answer, or a pending creation. Nothing is created here.
+ * explicit profile, or a pending creation. Nothing is created here.
  */
 const resolveAgent = async (
   options: ConnectOptions,
@@ -1008,32 +960,16 @@ const resolveAgent = async (
       }
       screen.say(`This folder is linked to ${screen.handle(linked.handle)}, which this computer does not hold.`);
     }
-    if (!deps.prompts || options.json) {
-      throw new HeadlessPrompt("Relay cannot ask which agent to connect.", [
-        "--new  to create one, with --handle and --name if you want to choose them",
-        "--token <token>  to use an agent you already have",
-      ]);
-    }
-    // The second question exists only when there is something to choose from
-    // (item 3): the saved agents on this computer, after "New agent".
-    const config = await deps.agents.read();
-    const saved = Object.entries(config.profiles).filter(([, profile]) => profile.agent_token).map(([name]) => name);
-    if (saved.length) {
-      const answer = await deps.prompts.select("Which agent?", [
-        { value: "new", label: "New agent" },
-        ...saved.map((name) => ({ value: name, label: `@${name}` })),
-      ], "new");
-      if (answer !== "new") {
-        const agent = await savedAgent(answer, deps, apiURL);
-        if (agent) return agent;
-      }
+    if (deps.profile) {
+      const agent = await savedAgent(deps.profile, deps, apiURL);
+      if (agent) return agent;
     }
   }
-  const identity = await chooseIdentity(options, deps);
+  const identity = chooseIdentity(options);
   return { pending: true, apiURL, ...(identity.handle ? { handle: identity.handle } : {}), identity };
 };
 
-/** Creates the agent the plan named and saves its token; runs only after Continue. */
+/** Creates the agent the plan named and saves its token. */
 const createNewAgent = async (
   pending: PendingAgent,
   options: ConnectOptions,

@@ -1,5 +1,8 @@
-# relay-pi-channel
+# @relaymessenger/pi
 
-A bounded Relay channel that consumes Relay's acknowledged Agent WebSocket, runs each inbound message through Pi RPC mode, and sends one final text reply.
+Relay channel for Pi. It consumes Relay's acknowledged Agent WebSocket, runs
+each inbound Message through Pi RPC mode, and sends one final text reply.
 
-Configure `RELAY_AGENT_TOKEN`, optionally `RELAY_BASE_URL` and `PI_BIN`, then use `runPiChannel()`.
+`relay connect pi` configures and runs this path for you. For a direct
+integration, pass `agentToken`, optionally `baseURL` and `piCommand`, then use
+`runPiChannel()`.

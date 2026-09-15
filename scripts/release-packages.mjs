@@ -71,6 +71,20 @@ export const releasePackages = {
       ],
     },
   },
+  pi: {
+    directory: "packages/pi",
+    workspace: "@relaymessenger/pi",
+    validate: "validate:pi",
+    tagPrefix: "pi-v",
+    smoke: {
+      imports: [
+        {
+          specifier: "@relaymessenger/pi",
+          named: ["PiChannel", "runPiChannel"],
+        },
+      ],
+    },
+  },
   cli: {
     directory: "packages/cli",
     workspace: "relaymessenger",

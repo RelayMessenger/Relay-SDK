@@ -9,6 +9,7 @@ import { codexCommand, runCodexBridge } from "./codex-bridge.js";
 import { openCodexThreads } from "./codex-threads.js";
 import { acpCommand, relayMcpServer, runAcpBridge } from "./acp-bridge.js";
 import { openAcpSessions } from "./acp-threads.js";
+import { runPiChannel } from "@relaymessenger/pi";
 import { sdkTerminalObserver, terminalEventLine } from "./terminal-watch.js";
 import { dim, link } from "./ui-colour.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
@@ -294,7 +295,7 @@ export const createProgram = (
     .argument("[agent]", "Runtime to connect (see Runs in above)")
     .description("connect a runtime to Relay, new or by token, and wait for its first reply")
     .helpGroup(HELP_GROUPS.getStarted)
-    .option("--new", "create a new agent instead of using one you already have")
+    .option("--new", "explicitly create a new agent; this is the default in an unlinked folder")
     .option("--handle <handle>", "the agent's handle: one word, 3 to 32 lowercase letters, numbers or underscores")
     .option("--name <name>", "the name people see next to a new agent")
     .option("--about <text>", "the one line people see above your agent's first message", aboutText)
@@ -306,7 +307,7 @@ export const createProgram = (
     .option("--with-token", "use an agent you already have; its token is read from a pipe")
     .option("--token <token>", "use an agent you already have, by its token; visible in ps and shell history")
     .option("--allow <handles>", "only these handles may message this agent, separated by commas; without it, anyone can")
-    .option("-y, --yes", "take the plan as it is")
+    .option("-y, --yes", "replace an existing runtime token without asking")
     .option("--dry-run", "print the plan and change nothing")
     .option("--no-start", "skip the start offer, but still wait for the first reply")
     .option("--no-skill", "do not offer the Relay skill at the end")
@@ -339,7 +340,7 @@ export const createProgram = (
         // Pairing watches the agent's own events; it never answers Relay and
         // never takes an event, so the runtime still receives every message.
         observer: (token, apiURL) => sdkTerminalObserver(new Relay({ apiKey: token, baseURL: apiURL, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) })),
-        // Codex, Cursor, Gemini CLI and OpenCode cannot start a turn of their
+        // Codex, Cursor, Gemini CLI, OpenCode and Pi cannot start a turn of their
         // own, so connect stays and answers for them: Codex over its app-server
         // (codex-bridge.ts), the others over ACP (acp-bridge.ts). Control-C ends
         // the wait and the command.
@@ -349,7 +350,14 @@ export const createProgram = (
           process.once("SIGINT", stop);
           const relayClient = () => new Relay({ apiKey: input.token, baseURL: input.apiURL, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) });
           try {
-            if (input.kind === "acp") {
+            if (input.kind === "pi") {
+              await runPiChannel({
+                agentToken: input.token,
+                baseURL: input.apiURL,
+                piCommand: input.command,
+                relay: relayClient(),
+              }, control.signal);
+            } else if (input.kind === "acp") {
               await runAcpBridge({
                 client: relayClient(),
                 acp: await acpCommand(input.command, input.acpArgs ?? [], env),
@@ -385,8 +393,8 @@ export const createProgram = (
           context: configContext,
           apiURL: defaultCreationApiURL(),
           ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
-          // Continue? is connect's last question (_artifacts/cli-connect-design-20260912.md, item 5):
-          // the login has no prompts; Relay Console names a first organization itself (GET /me).
+          // Console login has no prompts; Relay Console names a first
+          // organization itself (GET /me).
           stderr,
           nonInteractive: dependencies.isInteractive === false,
         })),

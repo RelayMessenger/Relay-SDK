@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
-import Relay, { type RelayWebhookEvent } from "@relaymessenger/sdk";
+import Relay, { type MessageWebhookData, type RelayWebhookEvent } from "@relaymessenger/sdk";
 
 export interface PiChannelOptions {
   readonly agentToken: string;
@@ -22,7 +22,8 @@ interface RpcRecord { readonly type?: string; readonly id?: string; readonly com
 class ChildPiProcess implements PiProcess {
   readonly #child: ChildProcessWithoutNullStreams;
   constructor(command: string, args: readonly string[]) {
-    this.#child = spawn(command, [...args], { stdio: ["pipe", "pipe", "inherit"] });
+    this.#child = spawn(command, [...args], { stdio: ["pipe", "pipe", "pipe"] });
+    this.#child.stderr.resume();
   }
   get stdin() { return this.#child.stdin; }
   get stdout() { return createInterface({ input: this.#child.stdout }); }
@@ -41,13 +42,16 @@ export class PiChannel {
   constructor(options: PiChannelOptions) {
     if (!options.agentToken.trim()) throw new Error("Relay Agent Token is required");
     this.#options = options;
-    this.#relay = options.relay ?? new Relay({ apiKey: options.agentToken, baseURL: options.baseURL });
+    this.#relay = options.relay ?? new Relay({
+      apiKey: options.agentToken,
+      ...(options.baseURL ? { baseURL: options.baseURL } : {}),
+    });
     this.#spawnPi = options.spawnPi ?? ((command, args) => new ChildPiProcess(command, args));
   }
 
   async run(signal?: AbortSignal): Promise<void> {
     await this.#relay.websocket.run({
-      signal,
+      ...(signal ? { signal } : {}),
       onEvent: async (event) => { await this.#handle(event); },
       onFullSync: async () => {},
     });
@@ -86,7 +90,8 @@ export class PiChannel {
       const response = await readResponse(textId, "get_last_assistant_text");
       const answer = response.data?.text?.trim();
       if (!answer) throw new Error("Pi returned no final text answer");
-      await this.#relay.chats.messages.send(event.data.chat.id, {
+    const data = event.data as MessageWebhookData;
+    await this.#relay.chats.messages.send(data.chat.id, {
         message: {
           parts: [{ type: "text", value: answer }],
           idempotency_key: `pi-${event.event_id}`,

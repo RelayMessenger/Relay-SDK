@@ -8,8 +8,8 @@ import { runCLI, type ProgramDependencies } from "./program.js";
 import { readConfig } from "./config.js";
 import type { InteractivePrompts, SelectOption } from "./interactive.js";
 import {
-  ABOUT_QUESTION, AVATAR_QUESTION, claudeMarketplaceSource, CLAUDE_PLUGIN_ID, CUSTOMIZE_HINT, CUSTOMIZE_QUESTION, HANDLE_QUESTION, handleFromName,
-  linkedLine, NAME_QUESTION, NO_TTY_NEXT_STEP, NO_TTY_SENTENCE, NOT_AN_IMAGE, SAY_HI,
+  claudeMarketplaceSource, CLAUDE_PLUGIN_ID,
+  linkedLine, NO_TTY_NEXT_STEP, NO_TTY_SENTENCE, SAY_HI,
 } from "./connect.js";
 import type { TextOptions } from "./interactive.js";
 import { folderLinkPath } from "./folder-link.js";
@@ -34,11 +34,10 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}, sniffed: Ru
   const stdout: string[] = [];
   const stderr: string[] = [];
   const prompts = {
-    // Enter on every question: the runtime picker takes its default, and
-    // "Which agent?" takes "New agent".
+    // Enter takes the runtime default; connect no longer asks about identity
+    // or which saved agent to use.
     select: vi.fn(async (message: string, options: SelectOption[], initial?: string) => message === "Where does your agent run?" ? initial ?? options[0]!.value : "new"),
-    // The optional customize step takes its default, No; every other yes/no is Yes.
-    confirm: vi.fn(async (message: string) => message !== CUSTOMIZE_QUESTION),
+    confirm: vi.fn(async () => true),
     password: vi.fn(async () => token),
     text: vi.fn(async (_message: string, initial: string, _options?: TextOptions) => initial),
     info: vi.fn(),
@@ -95,27 +94,11 @@ describe("nothing is created before the plan is taken", () => {
     expect(f.stdout.join("")).not.toContain("Creating your agent");
   });
 
-  it("No at Continue creates nothing: no agent, no token, no link", async () => {
-    const f = await fixture();
-    f.prompts.confirm.mockImplementation(async () => false);
-    expect(await runCLI(["connect", "claude", "--new", "--handle", "calm_cangoo", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
-    expect(f.prompts.confirm).toHaveBeenCalledWith("Continue?", { initialValue: true });
-    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
-    expect(f.fetch).not.toHaveBeenCalled();
-    expect(f.runCommand).not.toHaveBeenCalled();
-    expect((await readConfig(f.deps.configContext)).profiles[card.handle]).toBeUndefined();
-    await expect(readFile(folderLinkPath(f.home))).rejects.toMatchObject({ code: "ENOENT" });
-    // The plan named the creation as its first line, and the creation never started.
-    const printed = f.stdout.join("");
-    expect(printed).toContain("create a new agent  (@calm_cangoo)");
-    expect(printed).not.toContain("Creating your agent");
-    expect(printed).not.toContain("Created @");
-  });
-
-  it("Yes at Continue creates exactly one agent, after the plan", async () => {
+  it("creates exactly one agent without identity or confirmation prompts", async () => {
     const f = await fixture();
     expect(await runCLI(["connect", "claude", "--new", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
-    expect(f.prompts.confirm).toHaveBeenCalledWith("Continue?", { initialValue: true });
+    expect(f.prompts.confirm).not.toHaveBeenCalled();
+    expect(f.prompts.text).not.toHaveBeenCalled();
     expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
     const lines = f.stdout.join("").split("\n");
     const plan = lines.findIndex((line) => line.includes("create a new agent  (Relay picks the name)"));
@@ -123,113 +106,6 @@ describe("nothing is created before the plan is taken", () => {
     expect(plan).toBeGreaterThanOrEqual(0);
     expect(created).toBeGreaterThan(plan);
     expect((await readConfig(f.deps.configContext)).profiles[card.handle]?.agent_token).toBe(token);
-  });
-});
-
-describe("the optional customize step", () => {
-  const argv = ["connect", "claude", "--new", "--allow", "advait", "--no-start", "--no-skill"];
-  const posted = (f: Awaited<ReturnType<typeof fixture>>): Record<string, unknown> =>
-    JSON.parse(String(f.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body)) as Record<string, unknown>;
-  const textOptions = (f: Awaited<ReturnType<typeof fixture>>, question: string): TextOptions =>
-    (f.prompts.text.mock.calls.find(([message]) => message === question) as [string, string, TextOptions])[2];
-  // A real PNG by signature, so the same local-image check `agents create --image` runs passes.
-  const png = async (home: string): Promise<string> => {
-    const path = join(home, "face.png");
-    await writeFile(path, Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.alloc(64)]));
-    return path;
-  };
-
-  it("is asked after the runtime question, defaults to No with its hint, and No leaves the run byte-identical", async () => {
-    // No runtime named, so the runtime question is asked and the order is real.
-    const asked = argv.filter((word) => word !== "claude");
-    const f = await fixture();
-    expect(await runCLI(asked, f.deps)).toBe(0);
-    expect(f.prompts.confirm).toHaveBeenCalledWith(CUSTOMIZE_QUESTION, { initialValue: false, hint: CUSTOMIZE_HINT });
-    expect(f.prompts.confirm.mock.calls.map(([message]) => message)).toEqual([CUSTOMIZE_QUESTION, "Continue?"]);
-    expect(f.prompts.select.mock.invocationCallOrder[0]).toBeLessThan(f.prompts.confirm.mock.invocationCallOrder[0]!);
-    expect(f.prompts.text).not.toHaveBeenCalled();
-    expect(posted(f)).toEqual({ handle: "my_agent", displayName: "My Agent" });
-    expect(f.stdout.join("")).toContain("create a new agent  (Relay picks the name)");
-    // Yes, then Enter on all four, is the same run: same request, same screen.
-    const yes = await fixture();
-    yes.prompts.confirm.mockImplementation(async () => true);
-    expect(await runCLI(asked, yes.deps)).toBe(0);
-    expect(yes.prompts.text.mock.calls.map(([message]) => message)).toEqual([NAME_QUESTION, HANDLE_QUESTION, ABOUT_QUESTION, AVATAR_QUESTION]);
-    expect(yes.prompts.text.mock.calls.every(([message]) => message.endsWith("(optional)"))).toBe(true);
-    expect(posted(yes)).toEqual(posted(f));
-    // Only each run's own temp home differs.
-    expect(yes.stdout.join("").replaceAll(yes.home, "<home>")).toBe(f.stdout.join("").replaceAll(f.home, "<home>"));
-  });
-
-  it("a name derives the handle placeholder, and Enter takes it", async () => {
-    const f = await fixture();
-    f.prompts.confirm.mockImplementation(async () => true);
-    f.prompts.text.mockImplementation(async (message: string) => message === NAME_QUESTION ? "Calm Canada Goose" : "");
-    expect(await runCLI(argv, f.deps)).toBe(0);
-    expect(handleFromName("Calm Canada Goose")).toBe("calm_canada_goose");
-    expect(textOptions(f, NAME_QUESTION).placeholder).toBe("Relay picks one");
-    expect(textOptions(f, HANDLE_QUESTION).placeholder).toBe("calm_canada_goose");
-    expect(textOptions(f, HANDLE_QUESTION).validate!("Not")).toContain("A handle is one word");
-    expect(textOptions(f, HANDLE_QUESTION).validate!("")).toBeUndefined();
-    expect(textOptions(f, ABOUT_QUESTION).placeholder).toBe("One sentence about what it does");
-    expect(textOptions(f, AVATAR_QUESTION).placeholder).toBe("Path to a PNG or JPEG");
-    expect(posted(f)).toEqual({ handle: "calm_canada_goose", displayName: "Calm Canada Goose" });
-    expect(f.stdout.join("")).toContain('create @calm_canada_goose  "Calm Canada Goose"');
-  });
-
-  it("--name, --handle, --about and --avatar pre-fill, so nothing is asked, and the plan line carries them", async () => {
-    const f = await fixture();
-    const face = await png(f.home);
-    expect(await runCLI([...argv, "--name", "Calm Canada Goose", "--handle", "calm_cangoo", "--about", "Answers the mail.", "--avatar", face], f.deps)).toBe(0);
-    expect(f.prompts.confirm.mock.calls.map(([message]) => message)).toEqual(["Continue?"]);
-    expect(f.prompts.text).not.toHaveBeenCalled();
-    expect(posted(f)).toEqual({ handle: "calm_cangoo", displayName: "Calm Canada Goose", about: "Answers the mail." });
-    expect(f.stdout.join("")).toContain('create @calm_cangoo  "Calm Canada Goose"  about: Answers the mail.  avatar: face.png');
-    expect(f.fetch.mock.calls.some(([input]) => String(input).includes("/attachments"))).toBe(true);
-  });
-
-  it("--about alone leaves the other three questions open; --avatar refuses a file that is not an image", async () => {
-    const f = await fixture();
-    f.prompts.confirm.mockImplementation(async () => true);
-    expect(await runCLI([...argv, "--about", "Answers the mail."], f.deps)).toBe(0);
-    expect(f.prompts.text.mock.calls.map(([message]) => message)).toEqual([NAME_QUESTION, HANDLE_QUESTION, AVATAR_QUESTION]);
-    const bad = await fixture();
-    await writeFile(join(bad.home, "notes.txt"), "x");
-    expect(await runCLI([...argv, "--avatar", join(bad.home, "notes.txt")], bad.deps)).toBe(2);
-    expect(bad.stderr.join("")).toContain("Not an image file");
-    expect(bad.prompts.select).not.toHaveBeenCalled();
-    expect(bad.fetch).not.toHaveBeenCalled();
-  });
-
-  it("an avatar path that is not an image shows the one-line error, and Enter skips", async () => {
-    const f = await fixture();
-    f.prompts.confirm.mockImplementation(async () => true);
-    expect(await runCLI(argv, f.deps)).toBe(0);
-    const { validate } = textOptions(f, AVATAR_QUESTION);
-    expect(validate!(join(f.home, "missing.png"))).toBe(NOT_AN_IMAGE);
-    await writeFile(join(f.home, "notes.txt"), "x");
-    expect(validate!(join(f.home, "notes.txt"))).toBe(NOT_AN_IMAGE);
-    expect(validate!(await png(f.home))).toBeUndefined();
-    expect(validate!("")).toBeUndefined();
-    expect(posted(f)).toEqual({ handle: "my_agent", displayName: "My Agent" });
-    expect(f.fetch.mock.calls.some(([input]) => String(input).includes("/attachments"))).toBe(false);
-  });
-
-  it("a failed avatar upload prints one dim line and the connect still finishes", async () => {
-    const f = await fixture();
-    const face = await png(f.home);
-    const inner = f.fetch.getMockImplementation()!;
-    f.fetch.mockImplementation(async (input, init) => String(input).includes("/attachments")
-      ? Response.json({ error: "no" }, { status: 500 })
-      : inner(input, init));
-    expect(await runCLI([...argv, "--avatar", face], f.deps)).toBe(0);
-    const printed = f.stdout.join("");
-    expect(printed).toContain(`Created @${card.handle}`);
-    expect(printed).toContain("avatar not set: ");
-    expect(printed.indexOf("avatar not set: ")).toBeLessThan(printed.indexOf(SAY_HI));
-    expect(f.stderr.join("")).toBe("");
-    expect((await readConfig(f.deps.configContext)).profiles[card.handle]?.agent_token).toBe(token);
-    await expectOwnerOnly(join(f.channel, ".env"));
   });
 });
 
@@ -259,7 +135,7 @@ describe("the plan screen", () => {
     expect(answer.agents).toHaveLength(1);
     expect(answer.agents[0].agent).toBe(id === "claude" ? "claude-code" : id);
     const kind = codingAgent(id === "claude" ? "claude-code" : id).connect.kind;
-    if (kind === "acp-bridge" || kind === "openclaw-plugin") {
+    if (kind === "acp-bridge" || kind === "pi-channel" || kind === "openclaw-plugin") {
       // The ACP bridge writes no file: the Relay MCP server travels through the
       // agent's session instead (acp-bridge.ts). OpenClaw's own `channels add`
       // keeps the token, so Relay writes no OpenClaw file either.
@@ -352,7 +228,7 @@ describe("the Claude Code path", () => {
     const f = await fixture();
     await writeFile(join(f.home, ".gitignore"), "node_modules\n");
     expect(await runCLI(["connect", "claude", "--yes", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
-    // No saved agents yet, so "Which agent?" was not asked; the only question was answered by the argument.
+    // The runtime was named, so no picker was needed.
     expect(f.prompts.select).not.toHaveBeenCalled();
     expect(JSON.parse(await readFile(folderLinkPath(f.home), "utf8"))).toEqual({ handle: card.handle, apiUrl: "https://api.staging.relayapp.im" });
     expect(await readFile(join(f.home, ".gitignore"), "utf8")).toBe("node_modules\n.relay\n");
@@ -372,29 +248,17 @@ describe("the Claude Code path", () => {
     expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(creates + 1);
   });
 
-  it("asks Which agent? only when saved agents exist, New agent first and the default", async () => {
+  it("creates a new agent by default when the folder is not linked", async () => {
     const f = await fixture();
-    // A saved agent on this computer, and no link in this folder.
     expect(await runCLI(["connect", "claude", "--new", "--yes", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
     const { rm } = await import("node:fs/promises");
     await rm(join(f.home, ".relay"), { recursive: true });
     f.prompts.select.mockClear();
-    // "New agent" again: the .env still holds the first agent's token, and a new
-    // agent always gets its own, so the replace question is asked and answered.
-    f.prompts.select.mockImplementation(async (message: string, options: SelectOption[], initial?: string) =>
-      message === "Where does your agent run?" ? initial ?? options[0]!.value : message.startsWith("Claude Code already has") ? "replace" : "new");
-    expect(await runCLI(["connect", "claude", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
-    const asked = f.prompts.select.mock.calls.find(([message]) => message === "Which agent?");
-    expect(asked).toBeDefined();
-    const [, options, initial] = asked!;
-    expect(options.map((option) => option.label)).toEqual(["New agent", `@${card.handle}`]);
-    expect(initial).toBe("new");
-    // Picking the saved one creates nothing and links the folder to it.
-    await rm(join(f.home, ".relay"), { recursive: true });
+    f.prompts.select.mockResolvedValue("replace");
     const posts = f.fetch.mock.calls.filter(([, init]) => init?.method === "POST").length;
-    f.prompts.select.mockImplementationOnce(async (message: string, options: SelectOption[], initial?: string) => message === "Which agent?" ? card.handle : initial ?? options[0]!.value);
     expect(await runCLI(["connect", "claude", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
-    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(posts);
+    expect(f.prompts.select.mock.calls.some(([message]) => message === "Which agent?")).toBe(false);
+    expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(posts + 1);
     expect(JSON.parse(await readFile(folderLinkPath(f.home), "utf8")).handle).toBe(card.handle);
   });
 
@@ -589,25 +453,22 @@ describe("with no terminal", () => {
   });
 
   it.each([
-    [["connect", "claude"], "--new"],
-    [["connect", "claude", "--new"], "--yes"],
-  ])("%j exits 2 and names the flag that would have answered", async (argv, expected) => {
+    [["connect", "claude"]],
+    [["connect", "claude", "--new"]],
+  ])("%j creates without an identity or confirmation prompt", async (argv) => {
     const f = await fixture(headless);
-    expect(await runCLI(argv as string[], f.deps)).toBe(2);
-    const said = f.stderr.join("");
-    expect(said).toContain("There is no terminal here, so nothing was asked.");
-    expect(said).toContain(expected);
-    expect(said).not.toContain("Usage:");
+    expect(await runCLI(argv, f.deps)).toBe(0);
+    expect(f.prompts.confirm).not.toHaveBeenCalled();
+    expect(f.prompts.text).not.toHaveBeenCalled();
   });
 
-  it("--json turns every error into an error and a next step", async () => {
+  it("--json creates without interactive prompts", async () => {
     const f = await fixture(headless);
-    expect(await runCLI(["connect", "claude", "--json"], f.deps)).toBe(2);
-    const answer = JSON.parse(f.stderr.join(""));
-    expect(Object.keys(answer).sort()).toEqual(["code", "error", "next_step"]);
-    expect(answer.error).toContain("Relay cannot ask which agent to connect");
-    expect(answer.error).toContain("--token <token>");
-    expect(answer.next_step).toBe(NEXT_STEP.not_a_tty);
+    expect(await runCLI(["connect", "claude", "--json"], f.deps)).toBe(0);
+    const answer = JSON.parse(f.stdout.join(""));
+    expect(answer.ok).toBe(true);
+    expect(f.prompts.confirm).not.toHaveBeenCalled();
+    expect(f.prompts.text).not.toHaveBeenCalled();
   });
 
   it("-y is --yes", async () => {

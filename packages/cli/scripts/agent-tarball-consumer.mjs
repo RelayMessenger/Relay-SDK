@@ -71,13 +71,6 @@ assert.match(plan.join(""), /channels[\\/]relay[\\/]\.env/);
 assert.match(plan.join(""), /Dry run: nothing was changed\./);
 assert.equal(plan.join("").includes(token), false);
 
-// With no terminal, a question that cannot be asked names its flags and exits 2.
-const headless = [];
-assert.equal(await runCLI(["connect", "claude"], {
-  ...deps, isInteractive: false, stdout: (text) => headless.push(text), stderr: (text) => headless.push(text),
-}), 2);
-assert.match(headless.join(""), /--token <token>/);
-
 let config = JSON.parse(await readFile(configPath, "utf8"));
 assert.equal(config.profiles[card.handle].agent_token, token);
 const security = await configModule.inspectConfigPermissions(deps.configContext);

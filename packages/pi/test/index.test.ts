@@ -1,8 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { PiChannel, type PiProcess } from "../src/index.ts";
+import { PiChannel, type PiProcess } from "../src/index.js";
 
 const event = { event_type: "message.received", event_id: "evt", data: { direction: "inbound", id: "msg", chat: { id: "chat" }, sender_handle: { handle: "alice" }, parts: [{ type: "text", value: "hello" }] } } as any;
-function fakePi(lines: string[]): PiProcess { return { stdin: { write: vi.fn(), end: vi.fn() }, stdout: lines, kill: vi.fn() } as any; }
+function fakePi(lines: string[]): PiProcess {
+  async function* output(): AsyncGenerator<string> {
+    yield* lines;
+  }
+  return { stdin: { write: vi.fn(), end: vi.fn() }, stdout: output(), kill: vi.fn() };
+}
 
 describe("Pi channel", () => {
   it("prompts Pi and sends one final answer", async () => {

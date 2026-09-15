@@ -25,6 +25,7 @@ export const hermesHome = (env: NodeJS.ProcessEnv, home: string, platform: NodeJ
   return configured ? configured : platformPath(platform).join(home, ".hermes");
 };
 export const openclawHome = (home: string, platform: NodeJS.Platform = process.platform): string => platformPath(platform).join(home, ".openclaw");
+export const piHome = (home: string, platform: NodeJS.Platform = process.platform): string => platformPath(platform).join(home, ".pi", "agent");
 
 /** Per-OS config files, quoted from Docker's registry (`paths:` per client). */
 export const byPlatform = (paths: AgentPaths, files: { darwin: string; win32: string; linux: string }): string =>
@@ -58,6 +59,7 @@ export interface CodingAgent {
      * required: an agent whose ACP command is not confirmed is not wired here.
      */
     | { kind: "acp-bridge"; command: string; args: readonly string[]; prompt: string }
+    | { kind: "pi-bridge"; command: string; prompt: string }
     | { kind: "restart"; instruction: string };
   /** What `@vercel/detect-agent` calls it when we are running inside it. */
   detectedAs: readonly string[];
