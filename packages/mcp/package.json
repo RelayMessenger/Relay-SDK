@@ -53,9 +53,9 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.0.0",
-    "@modelcontextprotocol/inspector": "2.4.0",
-    "@types/node": "^22.18.0",
-    "vitest": "^4.0.0",
+    "@modelcontextprotocol/inspector": "2.6.0",
+    "@types/node": "^26.5.1",
+    "vitest": "^5.0.0",
     "yaml": "^2.8.1"
   },
   "publishConfig": {
