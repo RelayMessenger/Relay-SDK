@@ -59,6 +59,7 @@ async function create(args: string[]) {
 
 describe("chats create request contract", () => {
   it.each([
+    [["--to", "@alice"], ["alice"]],
     [["--to", "a"], ["a"]],
     [["--to", "alice", "bob"], ["alice", "bob"]],
     [["--to", "alice", "--to", "bob"], ["alice", "bob"]],
@@ -73,7 +74,7 @@ describe("chats create request contract", () => {
       message: { parts: [{ type: "text", value: "Hello" }], idempotency_key: "chats-create-test" } });
   });
 
-  it.each([[], ["--to", ""], ["--to", "alice,,bob"], ["--to", "@alice"],
+  it.each([[], ["--to", ""], ["--to", "alice,,bob"],
     ["--to", "a,b,c,d,e,f,g"]].map((args) => ({ args })))("rejects invalid recipients $args before calling the SDK", async ({ args }) => {
     const result = await create(args);
     expect(result.code).not.toBe(0);

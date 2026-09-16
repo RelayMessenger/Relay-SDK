@@ -4,6 +4,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { agentDependencies } from "./agents.js";
 import type { ClientContext } from "./client.js";
 import { configPath } from "./config.js";
 import { runCLI } from "./program.js";
@@ -80,6 +81,42 @@ describe("CLI command routing", () => {
     stdout: (value) => stdout.push(value),
     stderr: (value) => stderr.push(value),
     configContext: { env: { RELAY_AGENT_TOKEN: "rly_test_secret", RELAY_API_URL: "https://api.staging.relayapp.im", RELAY_CONFIG_PATH: privatePath } },
+  });
+
+  it.each(["x", "@x"])("watch %s selects the same saved profile", async (name) => {
+    const auth = vi.fn(async () => ({
+      profile: "x", apiURL: "https://api.staging.relayapp.im",
+      token: "rly_test_secret", tokenSource: "profile" as const, configPath: privatePath,
+    }));
+    const agents = {
+      ...agentDependencies({ env: { RELAY_CONFIG_PATH: privatePath } }),
+      read: async () => ({ profiles: { x: { agent_token: "rly_test_secret", api_url: "https://api.staging.relayapp.im" } } }),
+      client: () => ({ contactCard: { retrieve: async () => ({ contact_cards: [{ handle: "x", kind: "agent" }] }) } }) as never,
+      auth,
+    };
+    expect(await runCLI(["watch", name], {
+      agents, isInteractive: false,
+      stdout: (value) => stdout.push(value), stderr: (value) => stderr.push(value),
+      configContext: { env: { RELAY_CONFIG_PATH: privatePath } },
+    })).toBe(1);
+    expect(auth).toHaveBeenCalledExactlyOnceWith("x");
+    expect(stderr.join("")).toContain("This view needs a terminal.");
+  });
+
+  it("prints an invalid handle and docs to stderr with exit 2", async () => {
+    expect(await run(["watch", "bad handle"])).toBe(2);
+    expect(stderr.join("").split("\n").filter((line) => /^error:/iu.test(line))).toHaveLength(1);
+    expect(stderr.join("")).toContain("Error: Handles must be non-empty and contain no spaces.\nDocs: https://docs.relayapp.im");
+  });
+
+  it.each([
+    ["listen"],
+    ["chats", "list", "--limit", "bad"],
+    ["--unknown-option"],
+  ])("prints parser errors once for %j", async (...args) => {
+    expect(await run(args)).toBe(2);
+    expect(stderr.join("").split("\n").filter((line) => /^error:/iu.test(line))).toHaveLength(1);
+    expect(stderr.join("").match(/Docs:/gu)).toHaveLength(1);
   });
 
   it("routes reads and typing through SDK resources", async () => {
