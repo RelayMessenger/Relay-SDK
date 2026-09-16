@@ -140,7 +140,7 @@ describe("CLI command routing", () => {
     expect(fake.methods.listMessages).toHaveBeenCalledTimes(1);
   });
 
-  it("requires stable idempotency for sends", async () => {
+  it("preserves supplied idempotency and generates omitted keys for sends", async () => {
     expect(await run([
       "chats",
       "messages",
@@ -164,7 +164,13 @@ describe("CLI command routing", () => {
       "chat-1",
       "--text",
       "hello",
-    ])).not.toBe(0);
+    ])).toBe(0);
+    expect(fake.methods.sendMessage).toHaveBeenLastCalledWith("chat-1", {
+      message: {
+        parts: [{ type: "text", value: "hello" }],
+        idempotency_key: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
+      },
+    });
   });
 
   it("--silent marks a Chat send silent, and its absence leaves the body alone", async () => {
