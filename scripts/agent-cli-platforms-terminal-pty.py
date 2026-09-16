@@ -2,11 +2,11 @@
 
 It drives the installed CLI through the redesigned screens: the one question
 `Where does your agent run?` answered with Enter, the plan (`create a new agent`
-first, then at most three lines for the agent), the agent created immediately,
-one line per file written, `Say hi from your phone`, the share link and the QR,
+first, then the Claude Code bridge line), the agent created immediately,
+`Say hi from your phone`, the share link and the QR,
 then the agent's first reply. Relay is loopback only (agent-cli-platforms-terminal-server.mjs);
 no deployed Server is touched. A fake `claude` on PATH stands in for Claude Code's own
-plugin commands, so the three-line plan (install, write, start) is the one proved.
+runtime detection; --no-start proves setup without launching the bridge.
 
 Run it locally, from the repository root, after `npm run build`:
 
@@ -31,13 +31,9 @@ if not node or not pathlib.Path(shim).exists():
     raise SystemExit(f'node ({node}) or the built CLI ({shim}) is missing; run npm run build first')
 token = b'rel_token_' + b'P' * 43
 handle = 'my_agent.terminal'
-# A fake Claude Code: connect detects it on PATH, runs its three plugin commands and its
-# start command, and every one of them exits 0 and says nothing. The start command stays
-# up for a moment, the way the real one stays up for a session, so the agent's first reply
-# (the fixture's third event, 750 ms in) lands while Claude Code "runs"; connect ends its
-# reply wait the moment a started agent returns (packages/cli/src/connect.ts, waitForFirstReply).
+# A fake Claude Code lets runtime detection find it; --no-start never launches it.
 fakebin = root / 'bin'; fakebin.mkdir()
-(fakebin / 'claude').write_text('#!/bin/sh\ncase "$1" in plugin) exit 0;; esac\nsleep 2\nexit 0\n'); (fakebin / 'claude').chmod(0o755)
+(fakebin / 'claude').write_text('#!/bin/sh\nexit 0\n'); (fakebin / 'claude').chmod(0o755)
 baseenv = {k: v for k, v in os.environ.items() if k in ['LANG', 'LC_ALL']}
 baseenv['PATH'] = str(fakebin) + ':' + str(pathlib.Path(node).parent) + ':/usr/bin:/bin'
 baseenv['RELAY_TERMINAL_SOURCE'] = source
@@ -77,7 +73,7 @@ for mode, columns, rows in modes:
         env['RELAY_CONSOLE_API_URL'] = env['RELAY_API_URL']
         env['RELAY_AUTH_URL'] = env['RELAY_API_URL']
         master, slave = pty.openpty(); fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', rows, columns, 0, 0)); before = termios.tcgetattr(slave)
-        process = subprocess.Popen([node, shim, 'connect', '--allow', 'terminal_fixture_person', '--no-skill'], stdin=slave, stdout=slave, stderr=slave, env=env, cwd=home)
+        process = subprocess.Popen([node, shim, 'connect', '--allow', 'terminal_fixture_person', '--no-skill', '--no-start'], stdin=slave, stdout=slave, stderr=slave, env=env, cwd=home)
         stage = 0; end = time.monotonic() + 30
         while time.monotonic() < end:
             output += drain(master, .08)
@@ -87,22 +83,21 @@ for mode, columns, rows in modes:
         assert process.wait(timeout=4) == 0, {'mode': mode, 'exit': process.returncode}
         assert termios.tcgetattr(slave) == before
         # The screens, in order: the wordmark, the one question, the create line,
-        # the three plan lines, the agent, the files, the phone step, the reply.
-        order = [b'Relay', b'Where does your agent run?', b'create a new agent  (Relay picks the name)', b'install  the Relay plugin for Claude Code', b'write  ', b'start Claude Code with Relay when you are ready',
-                 b'Created @' + handle.encode(), b'wrote  ', b'Say hi from your phone', b'Answered from your phone: owned integrated agent reply']
+        # the two plan lines, the agent, the phone step, the reply.
+        order = [b'Relay', b'Where does your agent run?', b'create a new agent  (Relay picks the name)', b'keep running here, and answer your Relay messages with Claude Code from this folder',
+                 b'Created @' + handle.encode(), b'Say hi from your phone', b'Answered from your phone: owned integrated agent reply']
         text = plain(output); at = 0
         for needle in order:
             found = text.find(needle, at); assert found >= 0, {'mode': mode, 'missing': needle}; at = found
-        plan = text[text.find(b'install  the Relay plugin'):text.find(b'Created @')]
+        plan = text[text.find(b'create a new agent  (Relay picks the name)'):text.find(b'Created @')]
         planLines = [
             line for line in plan.split(b'\n')
             if any(marker in line for marker in (
-                b'install  the Relay plugin',
-                b'write  ',
-                b'start Claude Code with Relay',
+                b'create a new agent  (Relay picks the name)',
+                b'keep running here, and answer your Relay messages with Claude Code from this folder',
             ))
         ]
-        assert len(planLines) == 3, {'mode': mode, 'plan': planLines}
+        assert len(planLines) == 2, {'mode': mode, 'plan': planLines}
         for gone in [b'Which agent?', b'found on this computer', b'Handle', b'Install the Relay skill?', b'Relay is ready', b'Open Relay, scan', b'Later:', token]:
             assert gone not in text, {'mode': mode, 'unexpected': gone}
         assert not GREEN.search(output), {'mode': mode, 'green': GREEN.search(output).group(0)}
@@ -121,11 +116,11 @@ for mode, columns, rows in modes:
         if rows >= 60 and (fullCells or halfBlocks): assert fullCells and not halfBlocks, output
         state = json.loads(report.read_text())
         assert state['consoleCreates'] == 1 and state['authSessionRead'] and state['observers'] == 1 and state['authConfirmed'] and state['queries'] == ['/v1/websocket?observe=true'] and state['frames'] == [], state
-        # What was written: the folder link (a pointer, no token), the channel's .env (the token, owner-only), the profile.
+        # What was written: the folder link (a pointer, no token) and owner-only CLI config.
         link = json.loads((home / '.relay' / 'agent.json').read_bytes()); assert link == {'handle': handle, 'apiUrl': env['RELAY_API_URL']}, link
-        channel = (home / '.claude' / 'channels' / 'relay' / '.env').read_bytes(); assert token in channel and b'terminal_fixture_person' in channel
-        assert (home / '.claude' / 'channels' / 'relay' / '.env').stat().st_mode & 0o777 == 0o600
-        saved = (home / 'config.json').read_bytes(); assert token in saved
+        config = pathlib.Path(env['RELAY_CONFIG_PATH'])
+        saved = config.read_bytes(); assert token in saved
+        assert config.stat().st_mode & 0o777 == 0o600
         # Same saved identity in a real non-TTY command must exit, not open another watch connection.
         nonTTY = subprocess.run([node, shim, '--profile', handle, 'auth', 'status'], env=env, cwd=home, input='', capture_output=True, text=True, timeout=10); assert nonTTY.returncode == 0, nonTTY
         assert json.loads(report.read_text())['observers'] == 1 and (home / 'config.json').read_bytes() == saved
