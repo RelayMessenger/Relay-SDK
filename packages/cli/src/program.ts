@@ -233,10 +233,10 @@ export const createProgram = (
   const program = new Command()
     .name("relaymessenger")
     .helpOption("-h, --help", "help")
-    .description("Message your computer’s agent from your phone")
+    .description("Message the agent on your computer from your phone")
     .version(`relaymessenger ${PACKAGE_VERSION}`, "-V, --version", "the version")
     .option("--json", "JSON output")
-    .option("--no-input, --non-interactive", "no prompts; exit 2 when input required")
+    .option("--no-input, --non-interactive", "no prompts")
     .option("--agent <auto|yes|no>", "runtime detection override (default auto)", agentModeValue)
     .option("-q, --quiet", "errors only")
     .option("--verbose", "request method, path, status, milliseconds on stderr")
@@ -308,7 +308,7 @@ export const createProgram = (
     // pipe and never touches `ps` or the shell history. `--token` stays for
     // scripts and is the visible one.
     .option("--with-token", "an existing token from a pipe")
-    .option("--token <token>", "existing token, visible in process listings/history")
+    .option("--token <token>", "an existing token, visible in ps and history")
     .option("--allow <handles>", "allowed sender handles, comma-separated; default everyone")
     .option("-y, --yes", "token replacement without asking")
     .option("--dry-run", "the plan, nothing changed")
@@ -1384,7 +1384,7 @@ export const createProgram = (
     .option("--forward-to <url>", "local address for signed event copies")
     .requiredOption(
       "--acknowledge-events",
-      "acknowledgment that reading may consume test-agent events",
+      "mark test-agent events as read",
     )
     .description("print incoming events and optionally forward signed copies")
     .action(async (
