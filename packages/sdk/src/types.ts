@@ -32,6 +32,8 @@ interface ChatHandleBase {
   is_me?: boolean | null;
   display_name: string | null;
   image_url: string | null;
+  /** Dominant colour of the picture at image_url, six uppercase hex digits, computed by Relay once when the picture is set. Null when Relay could not read the picture. */
+  image_color: string | null;
   about: string | null;
   verified: boolean;
   /** True when the caller holds this Handle as a Contact. */
@@ -508,6 +510,8 @@ export interface ContactCardItem {
   first_name: string;
   last_name: string | null;
   image_url: string | null;
+  /** Dominant colour of the picture at image_url, six uppercase hex digits, computed by Relay once when the picture is set. Null when Relay could not read the picture. */
+  image_color: string | null;
   is_active: boolean;
   kind: "user" | "agent";
 }
