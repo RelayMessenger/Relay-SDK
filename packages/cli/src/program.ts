@@ -1214,7 +1214,7 @@ export const createProgram = (
       output(await (await clientFor(command)).messages.addReaction(messageID, body));
     });
 
-  const attachments = program.command("attachments", { hidden: true }).description("upload files to Relay, and read or delete the ones you uploaded").helpGroup(HELP_GROUPS.everythingElse);
+  const attachments = program.command("attachments", { hidden: true }).description("upload files to Relay, or get and delete an uploaded file by ID").helpGroup(HELP_GROUPS.everythingElse);
   attachments
     .command("allocate")
     .description("reserve a place for a file at Relay, and get the address to upload it to")
@@ -1236,24 +1236,46 @@ export const createProgram = (
     .command("upload")
     .description("upload a file from this computer in one step")
     .argument("<file>", "the file to upload")
-    .requiredOption("--content-type <type>", "the MIME type of the file")
+    .option("--content-type <type>", "the MIME type of the file; detected when omitted")
     .action(async (
       file: string,
-      options: { contentType: string },
+      options: { contentType?: string },
       command: Command,
     ) => {
-      const client = await clientFor(command);
       const metadata = await stat(file);
       if (!metadata.isFile()) throw new Error("Attachment path is not a file.");
+      const data = await readFile(file);
+      const filename = file.split(/[\\/]/).pop() ?? "attachment";
+      const signatures: [string, SupportedContentType][] = [
+        ["89504e47", "image/png"],
+        ["ffd8ff", "image/jpeg"],
+        ["47494638", "image/gif"],
+        ["25504446", "application/pdf"],
+      ];
+      const header = data.subarray(0, 4).toString("hex");
+      const sniffed = signatures.find(([signature]) => header.startsWith(signature))?.[1]
+        ?? (data.subarray(0, 4).toString("ascii") === "RIFF"
+          && data.subarray(8, 12).toString("ascii") === "WEBP" ? "image/webp" : undefined);
+      const extensions: Record<string, SupportedContentType> = {
+        png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+        webp: "image/webp", pdf: "application/pdf", heic: "image/heic", heif: "image/heif",
+        tif: "image/tiff", tiff: "image/tiff", bmp: "image/bmp", ico: "image/x-icon",
+        mp4: "video/mp4", mov: "video/quicktime", mp3: "audio/mpeg", m4a: "audio/x-m4a",
+        wav: "audio/x-wav", aac: "audio/aac", txt: "text/plain", md: "text/markdown",
+        csv: "text/csv", html: "text/html", vcf: "text/vcard", ics: "text/calendar",
+      };
+      const extension = /\.([^.]+)$/.exec(filename)?.[1]?.toLowerCase();
+      const contentType = options.contentType !== undefined
+        ? nonempty("Content type", options.contentType) as SupportedContentType
+        : sniffed ?? (extension && Object.hasOwn(extensions, extension) ? extensions[extension] : undefined);
+      if (!contentType) throw new Error("Could not detect the file type. Set --content-type to the file's MIME type.");
+      const client = await clientFor(command);
       const allocation = await client.attachments.create({
-        filename: file.split(/[\\/]/).pop() ?? "attachment",
-        content_type: nonempty(
-          "Content type",
-          options.contentType,
-        ) as SupportedContentType,
+        filename,
+        content_type: contentType,
         size_bytes: metadata.size,
       });
-      await client.attachments.upload(allocation, await readFile(file));
+      await client.attachments.upload(allocation, data);
       output(allocation);
     });
   attachments
