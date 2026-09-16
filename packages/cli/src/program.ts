@@ -1474,17 +1474,24 @@ export const createProgram = (
     .option("--handle <handle>", "the agent's handle", handle)
     .action(async (options: { handle?: string }, command: Command) =>
       output(await (await clientFor(command)).contactCard.retrieve(options)));
+  const contactCardHandle = async (client: Relay, explicit?: string): Promise<string> => {
+    if (explicit) return explicit;
+    const cards = await client.contactCard.retrieve({});
+    const agents = cards.contact_cards.filter((card) => card.kind === "agent" && card.is_active);
+    if (agents.length !== 1) throw new Error("This token must belong to exactly one active agent.");
+    return agents[0]!.handle;
+  };
   contactCard
     .command("setup")
     .description("set the name and picture people see for this agent, the first time")
-    .requiredOption("--handle <handle>", "the agent's handle", handle)
+    .option("--handle <handle>", "the agent's handle", handle)
     .option("--name <name>", "the name people see next to this agent")
     .addOption(new Option("--first-name <name>", "the name people see next to this agent").hideHelp())
     .option("--last-name <name>", "an optional second name")
     .option("--image-url <url>", "a picture at an https:// address")
     .action(async (
       options: {
-        handle: string;
+        handle?: string;
         name?: string; about?: string;
         firstName?: string;
         lastName?: string;
@@ -1492,19 +1499,21 @@ export const createProgram = (
       },
       command: Command,
     ) => {
+      const selected = await resolveClient(globals(command).profile);
+      const client = selected.client;
       const body = {
-        handle: options.handle,
+        handle: await contactCardHandle(client, options.handle),
         first_name: nonempty("Name", options.name ?? options.firstName ?? ""),
         ...(options.lastName ? { last_name: options.lastName } : {}),
         ...(options.imageUrl ? { image_url: options.imageUrl } : {}),
       } satisfies ContactCardCreateParams;
-      output(await (await clientFor(command)).contactCard.create(body));
+      output(await client.contactCard.create(body));
     });
   contactCard
     .command("update")
     .alias("set")
     .description("change the name or picture people see for this agent")
-    .requiredOption("--handle <handle>", "the agent's handle", handle)
+    .option("--handle <handle>", "the agent's handle", handle)
     .option("--name <name>", "the name people see next to this agent")
     .option("--about <text>", "the one line people see above your agent's first message", aboutText)
     .addOption(new Option("--first-name <name>", "the name people see next to this agent").hideHelp())
@@ -1517,7 +1526,7 @@ export const createProgram = (
     .option("--clear-image-url", "remove the picture")
     .action(async (
       options: {
-        handle: string;
+        handle?: string;
         name?: string; about?: string;
         firstName?: string;
         lastName?: string;
@@ -1540,8 +1549,10 @@ export const createProgram = (
       const imageURL = image?.kind === "url" ? image.url : options.imageUrl;
       if (options.imageRecipe && !image && !options.imageUrl && !options.attachmentId) throw new Error("--image-recipe requires a rendered image URL, file, or completed attachment.");
       const recipe = options.imageRecipe ? await readImageRecipe(options.imageRecipe) : undefined;
+      const selected = await resolveClient(globals(command).profile);
+      const client = selected.client;
       const body = {
-        handle: options.handle,
+        handle: await contactCardHandle(client, options.handle),
         ...(options.about === undefined ? {} : { about: options.about }),
         ...((options.name ?? options.firstName) ? { first_name: (options.name ?? options.firstName)! } : {}),
         ...(options.lastName
@@ -1557,9 +1568,7 @@ export const createProgram = (
         ...(recipe ? { image_recipe: recipe } : {}),
       } satisfies ContactCardUpdateParams;
       if (image?.kind === "file" || options.attachmentId) {
-        const selected = await resolveClient(globals(command).profile);
-        const client = selected.client;
-        const rawOutcome = await uploadAgentImage({ handle: options.handle,
+        const rawOutcome = await uploadAgentImage({ handle: body.handle,
           ...(image?.kind === "file" ? { image: image.file } : {}), ...(options.attachmentId ? { attachmentID: options.attachmentId } : {}),
         }, client, (attachmentID) => client.contactCard.update({ ...body, attachment_id: attachmentID }, { maxRetries: 0 }));
         const outcome = safeMetadata(rawOutcome, [selected.auth.token]);
@@ -1570,7 +1579,7 @@ export const createProgram = (
       if (Object.keys(body).length === 1) {
         throw new Error("Nothing to change. Pass --name, --last-name, a picture option, or one of the --clear options.");
       }
-      output(await (await clientFor(command)).contactCard.update(body));
+      output(await client.contactCard.update(body));
     });
   contactCard
     .command("share")
