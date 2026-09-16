@@ -1079,15 +1079,15 @@ export const createProgram = (
     .description("send a text message to a chat")
     .argument("<chat-id>", "the chat ID")
     .requiredOption("--text <text>", "the text to send")
-    .requiredOption("--idempotency-key <key>", "reuse this key to avoid sending the same request twice")
+    .option("--idempotency-key <key>", "a key that makes a repeated send safe; generated when omitted")
     .option("--silent", "deliver without a banner or sound")
     .action(async (
       chatID: string,
-      options: { text: string; idempotencyKey: string; silent?: boolean },
+      options: { text: string; idempotencyKey?: string; silent?: boolean },
       command: Command,
     ) => {
       const body = {
-        message: textContent(options.text, options.idempotencyKey, options.silent),
+        message: textContent(options.text, options.idempotencyKey ?? crypto.randomUUID(), options.silent),
       } satisfies MessageSendParams;
       output(await (await clientFor(command)).chats.messages.send(chatID, body));
     });
@@ -1123,16 +1123,16 @@ export const createProgram = (
     .description("start or reuse a chat with the handles you name, and send one message")
     .requiredOption("--to <handles...>", "at most 6 recipient Handles; repeat --to or use a comma-separated list", recipients)
     .requiredOption("--text <text>", "the text to send")
-    .requiredOption("--idempotency-key <key>", "reuse this key to avoid sending the same request twice")
+    .option("--idempotency-key <key>", "a key that makes a repeated send safe; generated when omitted")
     .option("--silent", "deliver without a banner or sound")
     .action(async (
-      options: { to: string[]; text: string; idempotencyKey: string; silent?: boolean },
+      options: { to: string[]; text: string; idempotencyKey?: string; silent?: boolean },
       command: Command,
     ) => {
       if (options.to.length > 6) throw new Error("A Chat accepts at most 6 recipient Handles (7 total participants).");
       const body = {
         to: options.to,
-        message: textContent(options.text, options.idempotencyKey, options.silent),
+        message: textContent(options.text, options.idempotencyKey ?? crypto.randomUUID(), options.silent),
       } satisfies MessageCreateParams;
       output(await (await clientFor(command)).messages.create(body));
     });
