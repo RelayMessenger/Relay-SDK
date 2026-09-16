@@ -1,17 +1,16 @@
 import { consoleFixture } from "../test/console-fixture.js";
-import { birdFor, withBirdManifest } from "../test/bird-manifest.js";
+import { withBirdManifest } from "../test/bird-manifest.js";
 import { mkdtemp, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, expect, it, vi } from "vitest";
-import { createAgentWithPicture, forgetBirdManifests } from "./agent-create.js";
+import { createAgentWithPicture } from "./agent-create.js";
 import { agentDependencies } from "./agents.js";
 import { readConfig } from "./config.js";
 import { inventedHandleAttempts } from "./console-auth.js";
 import { protectWindowsPath } from "./runtime-connect/windows-acl.js";
 
-// Handles are one flat namespace: once anyone has `my_agent`, every later
-// create with nothing typed would collide. The Console answers a taken handle
+// Handles derived from typed names can collide. The Console answers a taken handle
 // with 409 and its own code `handle_taken` (Relay-Console error-copy.ts).
 const api = "https://api.staging.relayapp.im";
 const taken = () => Response.json({ error: "That handle is taken. Choose another.", code: "handle_taken", details: { status: 409, code: "1005", docUrl: null } }, { status: 409 });
@@ -33,22 +32,22 @@ async function fixture(refusals: number, card = { handle: "", first_name: "My Ag
   return { context, deps: agentDependencies(context, fetch), fetch, posted, pictures };
 }
 
-beforeEach(() => { forgetBirdManifests(); vi.spyOn(process.stderr, "write").mockImplementation(() => true); });
+beforeEach(() => { vi.spyOn(process.stderr, "write").mockImplementation(() => true); });
 
-it("an invented handle taken twice is retried with a 4-letter, then a 6-letter suffix, and the bird follows the final handle", async () => {
+it("a handle derived from a typed name taken twice is retried with a 4-letter, then a 6-letter suffix, for a typed name", async () => {
   const { deps, fetch, posted, pictures } = await fixture(2);
-  const created = await createAgentWithPicture({ apiURL: api }, deps, fetch);
+  const created = await createAgentWithPicture({ apiURL: api, firstName: "My Agent" }, deps, fetch);
   expect(posted).toHaveLength(3);
   expect(posted[0]).toBe("my_agent");
   expect(posted[1]).toMatch(/^my_agent_[a-z0-9]{4}$/u);
   expect(posted[2]).toMatch(/^my_agent_[a-z0-9]{6}$/u);
   expect(created.result.handle).toBe(posted[2]);
-  expect(pictures).toEqual([{ handle: posted[2], image_url: birdFor(api, posted[2]!) }]);
+  expect(pictures).toEqual([]);
 });
 
 it("gives up after the third refusal with the CLI's refusal message", async () => {
   const { deps, fetch, posted, pictures } = await fixture(3);
-  await expect(createAgentWithPicture({ apiURL: api }, deps, fetch)).rejects.toThrow(/Relay refused to create this agent\. Relay said: error 409, code handle_taken\. That handle is taken\. Choose another\./u);
+  await expect(createAgentWithPicture({ apiURL: api, firstName: "My Agent" }, deps, fetch)).rejects.toThrow(/Relay refused to create this agent\. Relay said: error 409, code handle_taken\. That handle is taken\. Choose another\./u);
   expect(posted).toHaveLength(3);
   expect(pictures).toEqual([]);
 });
@@ -60,20 +59,20 @@ it("a typed handle that is taken is never retried", async () => {
   expect(pictures).toEqual([]);
 });
 
-it("a refusal that is not a taken handle is not retried, even for an invented handle", async () => {
+it("a refusal that is not a taken handle is not retried, even for a name-derived handle", async () => {
   const { context, fetch: _unused, posted } = await fixture(0);
   const deps = agentDependencies(context, withBirdManifest(consoleFixture(context, { handle: "unused", first_name: "My Agent", image_url: null }).wrap(async (_url, init) => {
     posted.push((JSON.parse(String(init?.body)) as { handle: string }).handle);
     return Response.json({ error: "A handle is one word.", code: "1005", details: { status: 400, code: "1005" } }, { status: 400 });
   })));
-  await expect(createAgentWithPicture({ apiURL: api }, deps)).rejects.toThrow(/Relay refused to create this agent/u);
+  await expect(createAgentWithPicture({ apiURL: api, firstName: "My Agent" }, deps)).rejects.toThrow(/Relay refused to create this agent/u);
   expect(posted).toEqual(["my_agent"]);
 });
 
 it("a second agent with the same returned handle still gets its own profile name", async () => {
   const { context, deps, fetch } = await fixture(0, { handle: "my_agent_ab12", first_name: "My Agent", image_url: null });
-  const first = await createAgentWithPicture({ apiURL: api }, deps, fetch);
-  const second = await createAgentWithPicture({ apiURL: api }, deps, fetch);
+  const first = await createAgentWithPicture({ apiURL: api, firstName: "My Agent" }, deps, fetch);
+  const second = await createAgentWithPicture({ apiURL: api, firstName: "My Agent" }, deps, fetch);
   expect(first.result.profile).toBe("my_agent_ab12");
   expect(second.result.profile).toBe("my_agent_ab12-2");
   const saved = await readConfig(context);

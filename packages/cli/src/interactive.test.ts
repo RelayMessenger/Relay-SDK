@@ -182,7 +182,10 @@ it("interactive creation collects optional fields; blanks keep server defaults",
   expect(JSON.parse(String(post[1]?.body))).toEqual({ handle: "custom_agent", displayName: "Custom Agent" });
   const blank = await fixture(); blank.prompts.select.mockResolvedValueOnce("create"); blank.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   expect(await runCLI(["agents"], blank.deps)).toBe(0);
-  expect(JSON.parse(String(blank.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body))).toEqual({ handle: "my_agent", displayName: "My Agent" });
+  expect(JSON.parse(String(blank.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body))).toEqual({});
+  expect(blank.stdout.join("")).toContain(card.handle);
+  const saved = await readConfig(blank.deps.configContext);
+  expect(saved.profiles[card.handle]?.agent_token).toBe(token);
 });
 
 it.each(["CODEX_HOME", "CLAUDE_CONFIG_DIR", "HERMES_HOME"])("preserves and detects the installer's selected %s", async (key) => {
@@ -214,4 +217,18 @@ it("Create selection needs no extra confirmation and has exactly three concise o
   expect(f.prompts.confirm).not.toHaveBeenCalled();
   expect(f.prompts.info).toHaveBeenCalledTimes(1);
   expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+});
+
+
+it("no-name creation shows and saves the identity returned by Console", async () => {
+  const f = await fixture();
+  await consoleFixture(f.deps.configContext, card).login();
+  expect(await runCLI(["--json", "--no-input", "agents", "create"], f.deps)).toBe(0);
+  const post = f.fetch.mock.calls.find(([, init]) => init?.method === "POST")!;
+  expect(JSON.parse(String(post[1]?.body))).toEqual({});
+  expect(JSON.parse(f.stdout.join(""))).toMatchObject({
+    handle: card.handle, display_name: card.first_name, profile: card.handle,
+  });
+  const saved = await readConfig(f.deps.configContext);
+  expect(saved.profiles[card.handle]?.agent_token).toBe(token);
 });
