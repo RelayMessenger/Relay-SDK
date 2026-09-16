@@ -6,6 +6,7 @@ import {
   readConfig,
   resolveAuth,
   validateApiURL,
+  validateToken,
 } from "./config.js";
 
 import { CliError } from "./error-codes.js";
@@ -66,15 +67,25 @@ export const runDoctor = async (
     const config = await readConfig(dependencies.configContext);
     const session = config.console;
     signedIn = Boolean(session && (session.type === "organization_key" || session.expires_at > Date.now()));
+    const environmentToken = (dependencies.configContext?.env ?? process.env).RELAY_AGENT_TOKEN;
+    let hasEnvironmentToken = false;
+    if (environmentToken !== undefined) {
+      try { hasEnvironmentToken = Boolean(validateToken(environmentToken)); }
+      catch { /* The Token check reports invalid environment tokens. */ }
+    }
+    const hasAgentToken = hasEnvironmentToken
+      || Object.values(config.profiles).some((profile) => Boolean(profile.agent_token));
     noAgentsYet = Object.keys(config.profiles).length === 1
       && config.profiles.default !== undefined
       && !config.profiles.default.agent_token;
     checks.push({
       name: "Sign-in",
-      ok: signedIn,
+      ok: signedIn || hasAgentToken,
       detail: signedIn && session
         ? session.type === "organization_key" ? session.organization_id : session.user.email
-        : "Not signed in. Run npx relaymessenger login",
+        : hasAgentToken
+          ? "Not signed in; saved agents still work"
+          : "Not signed in. Run npx relaymessenger login",
     });
   } catch (error) {
     checks.push({
