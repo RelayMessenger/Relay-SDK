@@ -349,7 +349,7 @@ describe("Hermes and OpenClaw", () => {
   it("Hermes installs our plugin and writes the four settings the docs name, owner-only", async () => {
     const f = await fixture({}, runtimes({ hermes: { found: true, executable: "/fake/bin/hermes" } }));
     expect(await runCLI(["connect", "hermes", "--token", token, "--yes", "--allow", "00000000-0000-7000-8000-000000000901", "--no-skill"], f.deps)).toBe(0);
-    expect(ranLines(f)).toEqual(["/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --enable"]);
+    expect(ranLines(f)).toEqual(["/fake/bin/hermes plugins list", "/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --enable"]);
     const envPath = join(f.home, ".hermes", ".env");
     const written = await readFile(envPath, "utf8");
     expect(written).toContain(`RELAY_AGENT_TOKEN="${token}"`);
@@ -359,6 +359,24 @@ describe("Hermes and OpenClaw", () => {
     await expectOwnerOnly(envPath, join(f.home, ".hermes"));
     expect(f.stdout.join("")).toContain("hermes gateway run");
     expect([...f.stdout, ...f.stderr].join("")).not.toContain(token);
+  });
+
+  it("Hermes updates and enables an already installed plugin instead of installing it", async () => {
+    const f = await fixture({}, runtimes({ hermes: { found: true, executable: "/fake/bin/hermes" } }));
+    f.runCommand.mockResolvedValueOnce({ code: 0, stdout: "relay-hermes  disabled  0.1.0", stderr: "" });
+    expect(await runCLI(["connect", "hermes", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+    expect(ranLines(f)).toEqual([
+      "/fake/bin/hermes plugins list",
+      "/fake/bin/hermes plugins update relay-hermes",
+      "/fake/bin/hermes plugins enable relay-hermes",
+    ]);
+  });
+
+  it("Hermes dry run explains install or update without running commands", async () => {
+    const f = await fixture();
+    expect(await runCLI(["connect", "hermes", "--dry-run"], f.deps)).toBe(0);
+    expect(f.stdout.join("")).toContain("install the Relay plugin for Hermes, or update it if it is already installed");
+    expect(f.runCommand).not.toHaveBeenCalled();
   });
 
   it("Hermes keeps a token already there unless told to replace it", async () => {
