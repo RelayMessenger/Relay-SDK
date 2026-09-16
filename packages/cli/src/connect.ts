@@ -686,9 +686,9 @@ export const runConnect = async (
     const definition = codingAgent(target);
     const method = definition.connect;
     const ctx = context(agent, replacing);
-    const result: Record<string, unknown> = { agent: target, files: planned.files, commands: planned.commands };
+    const result: Record<string, unknown> = { agent: target, files: planned.files, commands: [] };
     if (method.kind === "mcp-command") {
-      await screen.work(
+      result.commands = await screen.work(
         `Adding the Relay MCP server to ${codingAgent(target).label}`,
         () => runAgentCommands(target, runtime, ctx, runCommand),
         () => `Relay MCP server added to ${codingAgent(target).label}  ${screen.dim(planned.files[0] ?? "")}`,
@@ -707,7 +707,7 @@ export const runConnect = async (
       // session, and this process drives the agent's turns (acp-bridge.ts).
       screen.step(`Relay drives ${codingAgent(target).label} over ACP; no mcp.json is written`);
     } else if (method.kind === "hermes-plugin") {
-      await screen.work("Installing the plugin", () => runAgentCommands(target, runtime, ctx, runCommand), () => "Plugin installed");
+      result.commands = await screen.work("Installing the plugin", () => runAgentCommands(target, runtime, ctx, runCommand), (ran) => ran.some((line) => line.includes("plugins update")) ? "Plugin updated" : "Plugin installed");
       await writeEnvFile(hermesEnvPath(ctx), {
         RELAY_AGENT_TOKEN: agent.token,
         RELAY_BASE_URL: agent.apiURL,
@@ -718,7 +718,7 @@ export const runConnect = async (
       Object.assign(result, { env_path: hermesEnvPath(ctx), start_command: "hermes gateway run" });
     } else {
       // Both of OpenClaw's own commands: the plugin, then the channel with the token.
-      await screen.work("Installing the plugin", () => runAgentCommands(target, runtime, ctx, runCommand), () => "Plugin installed, channel added");
+      result.commands = await screen.work("Installing the plugin", () => runAgentCommands(target, runtime, ctx, runCommand), (ran) => `${ran.some((line) => line.includes("plugins update")) ? "Plugin updated" : "Plugin installed"}, channel added`);
       Object.assign(result, { channel: MCP_SERVER_NAME });
     }
     const start = definition.start;
