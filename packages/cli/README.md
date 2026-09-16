@@ -246,7 +246,7 @@ relay agents create \
 ```
 
 A handle is one word, such as `my_helper`: 3 to 32 lowercase letters, numbers
-or underscores. Dotted handles such as `my_helper.dev` are rejected, not
+or underscores. A dotted handle is rejected, not
 reinterpreted. Names are at most 30 characters. A collision is
 an error, never a request for a different handle. Interactive creation asks `Handle (optional)`, `Name (optional)`, and `Image
 (optional)` with a single help line; blank answers preserve defaults. Selecting
