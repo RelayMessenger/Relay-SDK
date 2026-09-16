@@ -359,6 +359,7 @@ describe("Hermes and OpenClaw", () => {
     expect(written).toContain('RELAY_ALLOWED_CONTACTS="00000000-0000-7000-8000-000000000901"');
     await expectOwnerOnly(envPath, join(f.home, ".hermes"));
     expect(f.stdout.join("")).toContain("hermes gateway run");
+    expect(f.stdout.join("")).toContain("Plugin installed");
     expect([...f.stdout, ...f.stderr].join("")).not.toContain(token);
   });
 
@@ -371,6 +372,24 @@ describe("Hermes and OpenClaw", () => {
       "/fake/bin/hermes plugins update relay-hermes",
       "/fake/bin/hermes plugins enable relay-hermes",
     ]);
+    expect(f.stdout.join("")).toContain("Plugin updated");
+    expect(f.stdout.join("")).not.toContain("Plugin installed");
+  });
+
+  it.each([false, true])("Hermes JSON reports the commands run (installed: %s)", async (installed) => {
+    const f = await fixture({}, runtimes({ hermes: { found: true, executable: "/fake/bin/hermes" } }));
+    f.runCommand.mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(installed ? [{ name: "relay-hermes" }] : []), stderr: "" });
+    expect(await runCLI(["connect", "hermes", "--token", token, "--yes", "--no-skill", "--json"], f.deps)).toBe(0);
+    const answer = JSON.parse(f.stdout.join(""));
+    expect(answer.agents[0].commands).toEqual(installed ? [
+      "hermes plugins list --json",
+      "hermes plugins update relay-hermes",
+      "hermes plugins enable relay-hermes",
+    ] : [
+      "hermes plugins list --json",
+      "hermes plugins install RelayMessenger/Relay-Hermes --enable",
+    ]);
+    if (installed) expect(answer.agents[0].commands.join("\n")).not.toContain("plugins install");
   });
 
   it.each([
