@@ -347,7 +347,7 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
       break;
     case "hermes-plugin":
       steps = [
-        `install  the Relay plugin for ${label}  (${shown.commands[0]})`,
+        "install the Relay plugin for Hermes, or update it if it is already installed",
         write(shown.files[0]!, `token, API address, state folder${context.allow.length ? ", allowed contacts" : ""}; Hermes has one Relay agent per install`),
         ...(context.start ? ["start the Hermes gateway when you are ready:  hermes gateway run"] : []),
       ];
@@ -488,7 +488,8 @@ const runAgentCommands = async (
   runCommand: (file: string, args: readonly string[]) => Promise<ConnectCommandResult>,
 ): Promise<string[]> => {
   const ran: string[] = [];
-  for (const [name, ...args] of agentCommands(agent, context)) {
+  const commands = agent === "hermes" ? [["hermes", "plugins", "list"]] : agentCommands(agent, context);
+  for (const [name, ...args] of commands) {
     const file = runtime?.executable ?? name!;
     const outcome = await runCommand(file, args);
     const line = shownCommandLine([name!, ...args]);
@@ -501,6 +502,11 @@ const runAgentCommands = async (
       );
     }
     ran.push(line);
+    if (agent === "hermes" && args[1] === "list") {
+      commands.push(...(/(?<![\w-])relay-hermes(?![\w-])/u.test(outcome.stdout)
+        ? [["hermes", "plugins", "update", "relay-hermes"], ["hermes", "plugins", "enable", "relay-hermes"]]
+        : agentCommands(agent, context)));
+    }
   }
   return ran;
 };
