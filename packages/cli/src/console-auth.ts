@@ -85,7 +85,7 @@ export class ConsoleRefusal extends Error {
 
 const json = async <T>(response: Response): Promise<T> => {
   if (response.status === 401) {
-    throw new CliError("Relay Console returned HTTP 401. Run relay login.", "no_token");
+    throw new CliError("Your Relay Console sign-in expired.", "signin_expired");
   }
   if (response.status === 204) return undefined as T;
   const text = await response.text();
@@ -276,9 +276,7 @@ export const consoleLoginWithKey = async (
     }));
     if (typeof me?.org?.id !== "string" || !me.org.id) throw new Error("Missing organization");
   } catch (error) {
-    if (error instanceof CliError && error.code === "no_token") {
-      throw new CliError("Relay Console rejected this organization API key. Nothing was changed. Run relay login --with-token.", "no_token");
-    }
+    if (error instanceof CliError && error.code === "signin_expired") throw error;
     throw new Error("Relay Console could not validate this organization API key. Nothing was changed.");
   }
   const session: RelayConsoleOrganizationKey = {
@@ -320,12 +318,13 @@ export const consoleLoginOrReuse = async (
       // A stale or revoked session falls through to the browser flow.
     }
   }
+  if (deps.nonInteractive) throw new CliError("Not signed in.", "no_token");
   return consoleLogin(deps);
 };
 
 export interface ConsoleAgentCreateInput {
   handle?: string;
-  displayName: string;
+  displayName?: string;
   about?: string;
   image?: string;
   imageRecipe?: import("@relaymessenger/sdk").AgentImageRecipe;
@@ -340,7 +339,7 @@ export interface ConsoleAgentCreateResult {
 }
 
 /**
- * The handle the CLI invents when the person gave none: the display name in
+ * The handle derived from a name the person typed: the display name in
  * handle letters. Relay refuses a collision rather than renaming, so the handle
  * sent is the handle created (server console.ts, POST /agents).
  */
@@ -348,8 +347,7 @@ export const inventedHandle = (displayName: string): string =>
   displayName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^[^a-z]+/u, "").replace(/_+$/u, "").slice(0, 32).replace(/_+$/u, "") || "assistant";
 
 /**
- * Handles are one flat namespace, so an invented handle is taken as soon as
- * anyone has one. The handles the CLI tries for an identity it invented: the
+ * Handles are one flat namespace. The handles the CLI tries for a typed name: the
  * plain one, then one with 4 random lowercase letters or digits, then one with
  * 6, inside Relay's 32-character limit. A typed handle is tried once.
  */
@@ -379,7 +377,7 @@ export const createConsoleAgent = async (
     throw new Error("--image-recipe requires its rendered --image or --image-url.");
   }
   const me = await consoleRequest<{ org: { id: string } }>(deps, "/me");
-  const attempts = input.handle === undefined ? inventedHandleAttempts(inventedHandle(input.displayName)) : [input.handle];
+  const attempts = input.handle === undefined && input.displayName !== undefined ? inventedHandleAttempts(inventedHandle(input.displayName)) : [input.handle];
   let response: { agent: { handle: string; displayName: string; avatarUrl: string | null }; token: string } | undefined;
   for (const [attempt, handle] of attempts.entries()) {
     try {
@@ -391,8 +389,8 @@ export const createConsoleAgent = async (
           "Idempotency-Key": uuidv7(),
         },
         body: JSON.stringify({
-          handle,
-          displayName: input.displayName,
+          ...(handle === undefined ? {} : { handle }),
+          ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
           ...(input.about === undefined ? {} : { about: input.about }),
         }),
       });
@@ -481,14 +479,14 @@ export const consoleRequest = async <T>(
         error instanceof Error ? error.message : "Relay Console request failed.",
         [session.organization_key],
       );
-      if (error instanceof CliError && error.code === "no_token") throw new CliError(message, "no_token");
+      if (error instanceof CliError) throw new CliError(message, error.code);
       if (error instanceof ConsoleRefusal) throw new ConsoleRefusal(message, error.status, error.code);
       throw new Error(message);
     }
   }
   // No refresh: a Relay-Auth session token lives 30 days and relay login renews it.
   if (session.expires_at <= Date.now()) {
-    throw new CliError("Relay Console session expired. Run relay login.", "no_token");
+    throw new CliError("Your Relay Console sign-in expired.", "signin_expired");
   }
   const response = await httpFetch(deps)(`${api}${path}`, {
     ...init,

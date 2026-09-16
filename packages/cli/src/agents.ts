@@ -95,9 +95,6 @@ export const validateFirstName = (name: string): string => {
   return firstName;
 };
 
-/** The name the CLI invents when the person gave none. */
-export const DEFAULT_AGENT_NAME = "My Agent";
-
 export async function createAgent(input: CreateAgentInput, deps: AgentDependencies) {
   const before = await deps.read();
   if (input.profile) {
@@ -115,7 +112,7 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
   }
   if (input.imageRecipe !== undefined && input.imageURL === undefined) throw new Error("An image recipe also needs the finished picture. Pass --image or --image-url with it; this command does not draw pictures.");
   const body: ConsoleAgentCreateInput = {
-    displayName: firstName ?? DEFAULT_AGENT_NAME,
+    ...(firstName === undefined ? {} : { displayName: firstName }),
     ...(input.about === undefined ? {} : { about: input.about.trim() }),
     ...(input.handle === undefined ? {} : { handle: input.handle }),
   };
@@ -222,6 +219,9 @@ export async function deleteAgent(handle: string, profile: string | undefined, d
       await deps.client(auth.token, auth.apiURL).agents.delete(handle, { maxRetries: 0 });
     }
   } catch (error) {
+    if (error instanceof CliError && error.code === "signin_expired") {
+      throw new CliError("Relay could not delete this agent because your Console sign-in expired. The token saved on this computer is unchanged.", error.code);
+    }
     throw safeAPIFailure(`Relay could not confirm this agent was deleted, so the token saved on this computer is unchanged.${apiFailure(error)}`, error);
   }
   let removed;

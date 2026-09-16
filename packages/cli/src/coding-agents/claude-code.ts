@@ -8,12 +8,11 @@ const agent: CodingAgent =
     aliases: ["claude", "claudecode"],
     command: "claude",
     installedIf: (paths) => [claudeConfigDir(paths.env, paths.home, paths.platform)],
-    connect: { kind: "claude-plugin" },
+    connect: { kind: "claude-bridge" },
     start: {
-      kind: "command",
+      kind: "claude-bridge",
       command: "claude",
-      args: ["--dangerously-load-development-channels", "plugin:relay@relay-messenger"],
-      prompt: "Start Claude Code with Relay now?",
+      prompt: "Answer Relay messages with Claude Code from this folder?",
     },
     detectedAs: ["claude"],
   };

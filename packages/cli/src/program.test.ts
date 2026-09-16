@@ -4,6 +4,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { agentDependencies } from "./agents.js";
 import type { ClientContext } from "./client.js";
 import { configPath } from "./config.js";
 import { runCLI } from "./program.js";
@@ -82,6 +83,83 @@ describe("CLI command routing", () => {
     configContext: { env: { RELAY_AGENT_TOKEN: "rly_test_secret", RELAY_API_URL: "https://api.staging.relayapp.im", RELAY_CONFIG_PATH: privatePath } },
   });
 
+  it.each([[[]], [["--non-interactive"]], [["--json"]]])("explicit login starts device sign-in without a terminal (%j)", async (flags) => {
+    const authURL = "https://auth.staging.relayapp.im";
+    const fetch = vi.fn(async () => Response.json({
+      device_code: "device-secret",
+      user_code: "ABCD-EFGH",
+      verification_uri: `${authURL}/device`,
+      verification_uri_complete: `${authURL}/device?user_code=ABCD-EFGH`,
+      expires_in: 1800,
+      interval: 5,
+    }));
+    await runCLI(["login", ...flags], {
+      fetch,
+      isInteractive: false,
+      stdout: (value) => stdout.push(value),
+      stderr: (value) => {
+        stderr.push(value);
+        // Stop after the device instructions, before opening a real browser or polling.
+        if (value.startsWith("If it does not open")) throw new Error("device instructions received");
+      },
+      configContext: { env: { RELAY_CONFIG_PATH: privatePath, RELAY_AUTH_URL: authURL } },
+    });
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(`${authURL}/api/auth/device/code`, expect.objectContaining({ method: "POST" }));
+    expect(stderr.join("")).toContain("Your code is ABCD-EFGH");
+    expect(stderr.join("")).toContain(`Open ${authURL}/device?user_code=ABCD-EFGH`);
+    expect(stderr.join("")).toContain(`If it does not open, enter this code at ${authURL}/device: ABCD-EFGH`);
+  });
+
+  it("agents create --json refuses a missing session without a terminal", async () => {
+    const fetch = vi.fn();
+    const code = await runCLI(["agents", "create", "--json"], {
+      fetch,
+      isInteractive: false,
+      stdout: (value) => stdout.push(value),
+      stderr: (value) => stderr.push(value),
+      configContext: { env: { RELAY_CONFIG_PATH: privatePath } },
+    });
+    expect(code).not.toBe(0);
+    expect([...stdout, ...stderr].join("")).toContain("Not signed in.");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(["x", "@x"])("watch %s selects the same saved profile", async (name) => {
+    const auth = vi.fn(async () => ({
+      profile: "x", apiURL: "https://api.staging.relayapp.im",
+      token: "rly_test_secret", tokenSource: "profile" as const, configPath: privatePath,
+    }));
+    const agents = {
+      ...agentDependencies({ env: { RELAY_CONFIG_PATH: privatePath } }),
+      read: async () => ({ profiles: { x: { agent_token: "rly_test_secret", api_url: "https://api.staging.relayapp.im" } } }),
+      client: () => ({ contactCard: { retrieve: async () => ({ contact_cards: [{ handle: "x", kind: "agent" }] }) } }) as never,
+      auth,
+    };
+    expect(await runCLI(["watch", name], {
+      agents, isInteractive: false,
+      stdout: (value) => stdout.push(value), stderr: (value) => stderr.push(value),
+      configContext: { env: { RELAY_CONFIG_PATH: privatePath } },
+    })).toBe(1);
+    expect(auth).toHaveBeenCalledExactlyOnceWith("x");
+    expect(stderr.join("")).toContain("This view needs a terminal.");
+  });
+
+  it("prints an invalid handle and docs to stderr with exit 2", async () => {
+    expect(await run(["watch", "bad handle"])).toBe(2);
+    expect(stderr.join("").split("\n").filter((line) => /^error:/iu.test(line))).toHaveLength(1);
+    expect(stderr.join("")).toContain("Error: Handles must be non-empty and contain no spaces.\nDocs: https://docs.relayapp.im");
+  });
+
+  it.each([
+    ["listen"],
+    ["chats", "list", "--limit", "bad"],
+    ["--unknown-option"],
+  ])("prints parser errors once for %j", async (...args) => {
+    expect(await run(args)).toBe(2);
+    expect(stderr.join("").split("\n").filter((line) => /^error:/iu.test(line))).toHaveLength(1);
+    expect(stderr.join("").match(/Docs:/gu)).toHaveLength(1);
+  });
+
   it("routes reads and typing through SDK resources", async () => {
     expect(await run(["chats", "list", "--limit", "20"])).toBe(0);
     expect(fake.methods.listChats).toHaveBeenCalledWith({ limit: 20 });
@@ -103,7 +181,7 @@ describe("CLI command routing", () => {
     expect(fake.methods.listMessages).toHaveBeenCalledTimes(1);
   });
 
-  it("requires stable idempotency for sends", async () => {
+  it("preserves supplied idempotency and generates omitted keys for sends", async () => {
     expect(await run([
       "chats",
       "messages",
@@ -127,7 +205,13 @@ describe("CLI command routing", () => {
       "chat-1",
       "--text",
       "hello",
-    ])).not.toBe(0);
+    ])).toBe(0);
+    expect(fake.methods.sendMessage).toHaveBeenLastCalledWith("chat-1", {
+      message: {
+        parts: [{ type: "text", value: "hello" }],
+        idempotency_key: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
+      },
+    });
   });
 
   it("--silent marks a Chat send silent, and its absence leaves the body alone", async () => {
@@ -279,11 +363,11 @@ describe("CLI command routing", () => {
     expect(help()).toContain("Chats between agents only need no such contact");
     stdout.length = 0;
     expect(await run(["chats", "create", "--help"])).toBe(0);
-    expect(help()).toContain("at most 7 total participants, including the sender");
-    expect(help()).toContain("at most 6 recipient Handles");
+    expect(help()).toContain("up to 7 participants");
+    expect(help()).toContain("up to six recipients");
     stdout.length = 0;
     expect(await run(["messages", "send", "--help"])).toBe(0);
-    expect(help()).toContain("at most 6 recipient Handles");
+    expect(help()).toContain("up to six recipients");
   });
 
   it("refuses to advance Agent event checkpoints without an explicit safe profile", async () => {
@@ -353,7 +437,7 @@ describe("CLI command routing", () => {
     expect(stderr.join("")).toContain("required option '--forward-to <url>' not specified");
     stderr.length = 0;
     expect(await run(["listen", "--help"])).toBe(0);
-    expect(stdout.join("")).toContain("forward each event to a route on this computer, signed like a webhook, while you develop");
+    expect(stdout.join("")).toContain("forward each event to a route on this computer");
   });
 
   it("redacts a token from thrown errors", async () => {

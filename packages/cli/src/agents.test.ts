@@ -5,9 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import Relay, { RelayAPIError } from "@relaymessenger/sdk";
 import { savedAgentShareURL } from "./agent-session.js";
 import { createAgent, deleteAgent, listAgents, type AgentDependencies } from "./agents.js";
-import { defaultCreationApiURL, emptyConfig, type RelayConfig, type ResolvedAuth } from "./config.js";
+import { defaultCreationApiURL, emptyConfig, writeConfig, type RelayConfig, type ResolvedAuth } from "./config.js";
 import { runCLI } from "./program.js";
-import { birdFor, withBirdManifest } from "../test/bird-manifest.js";
+import { EXIT_CODES } from "./exit-codes.js";
+import { withBirdManifest } from "../test/bird-manifest.js";
 
 const privateContext = { env: { RELAY_CONFIG_PATH: join(mkdtempSync(join(tmpdir(), "relay-unit-config-")), "config.json") } };
 const secret = "one-time-secret-not-for-output";
@@ -127,9 +128,10 @@ describe("agent CLI program", () => {
     const stdout: string[] = []; const stderr: string[] = []; const pictures: Array<{ handle: string | null; image_url: unknown }> = [];
     const options = { consoleLogin: async () => ({ type: "organization_key" as const, organization_key: "rel_org_test", organization_id: "org_fixture", console_api_url: "https://console.staging.relayapp.im/api" }), agents: deps, configContext: privateContext, stdout: (s: string) => stdout.push(s), stderr: (s: string) => stderr.push(s), fetch: withBirdManifest(undefined, pictures) };
     expect(await runCLI(["--profile", "new-profile", "agents", "create", "--json"], options)).toBe(0);
-    expect(deps.provision).toHaveBeenCalledWith({ displayName: "My Agent" }, { apiURL: creationOrigin });
-    // Nothing typed: the CLI invented the name and the handle, so it names the bird too, from the handle Relay returned.
-    expect(pictures).toEqual([{ handle: card.handle, image_url: birdFor(creationOrigin, card.handle) }]);
+    expect(deps.provision).toHaveBeenCalledWith({}, { apiURL: creationOrigin });
+    expect(JSON.parse(stdout[0]!)).toMatchObject({ handle: card.handle, display_name: card.first_name, profile: "new-profile" });
+    // The server owns the default name and picture.
+    expect(pictures).toEqual([]);
     expect(await runCLI(["agents", "list", "--json"], options)).toBe(0);
     expect(await runCLI(["--profile", "default", "agents", "delete", card.handle, "--json"], options)).toBe(0);
     expect(stdout.join("")).not.toContain(secret);
@@ -183,7 +185,6 @@ it("post-create storage failure reports assigned handle and actual local outcome
   expect(second.deps.provision).toHaveBeenCalledOnce();
 });
 
-
 it.each([
   [new TypeError("fetch failed: secret-server-text"), "network", 1],
   [new RelayAPIError("secret-server-text", { status: 401, code: 1001 }), "1001", 4],
@@ -208,4 +209,31 @@ it.each([
   expect(entries[1]).not.toHaveProperty("error");
   expect(JSON.parse(stderr.join(""))).toMatchObject({ code, next_step: entries[0].next_step });
   expect(stdout.concat(stderr).join("")).not.toMatch(/secret-server-text|token-failed|token-good/);
+});
+
+it("reports an expired Console sign-in on deletion without changing the saved agent token", async () => {
+  const config = emptyConfig(); config.profiles.default!.agent_token = secret;
+  const { deps, remove, config: saved } = setup(config);
+  const context = { env: { RELAY_CONFIG_PATH: join(mkdtempSync(join(tmpdir(), "relay-delete-expired-")), "config.json") } };
+  config.console = { access_token: "session-secret", expires_at: Date.now() + 3600_000,
+    organization_id: "org_1", user: { id: "user_1", email: "ada@acme.com" } };
+  await writeConfig(config, context);
+  const fetch = vi.fn(async (input: string | URL | Request) => {
+    expect(String(input)).toMatch(/\/me$/u);
+    return new Response(null, { status: 401 });
+  });
+  const stderr: string[] = [];
+  const exit = await runCLI(["--profile", "default", "agents", "delete", card.handle, "--json"], {
+    agents: deps, configContext: context, fetch, stderr: value => stderr.push(value),
+  });
+  expect(exit).toBe(EXIT_CODES.signInNeeded);
+  expect(JSON.parse(stderr.join(""))).toEqual({
+    error: "Relay could not delete this agent because your Console sign-in expired. The token saved on this computer is unchanged.",
+    code: "signin_expired", next_step: "Run  npx relaymessenger login  to sign in again.",
+  });
+  expect(stderr.join("")).not.toContain("connect");
+  expect(remove).not.toHaveBeenCalled();
+  expect(deps.update).not.toHaveBeenCalled();
+  expect(saved().profiles).toEqual(config.profiles);
+  expect(fetch).toHaveBeenCalledOnce();
 });

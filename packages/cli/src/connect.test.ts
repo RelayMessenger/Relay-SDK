@@ -8,7 +8,6 @@ import { runCLI, type ProgramDependencies } from "./program.js";
 import { readConfig } from "./config.js";
 import type { InteractivePrompts, SelectOption } from "./interactive.js";
 import {
-  claudeMarketplaceSource, CLAUDE_PLUGIN_ID,
   linkedLine, NO_TTY_NEXT_STEP, NO_TTY_SENTENCE, SAY_HI,
 } from "./connect.js";
 import type { TextOptions } from "./interactive.js";
@@ -115,9 +114,8 @@ describe("the plan screen", () => {
     expect(await runCLI(["connect", "claude", "--dry-run"], f.deps)).toBe(0);
     const printed = f.stdout.join("");
     expect(printed).not.toContain("found on this computer");
-    expect(printed).toContain(`install  the Relay plugin for Claude Code  (claude plugin marketplace add ${claudeMarketplaceSource("0.1.6-staging.0")}; claude plugin install ${CLAUDE_PLUGIN_ID} --yes)`);
-    expect(printed).toContain(`write  ${join(f.home, ".claude", "channels", "relay", ".env")}  (token, API address, allowed senders)`);
-    expect(printed).toContain("start Claude Code with Relay when you are ready");
+    expect(printed).toContain("keep running here, and answer your Relay messages with Claude Code from this folder  (Relay's tools travel through the session; no mcp.json is written)");
+    expect(printed).not.toMatch(/marketplace|\.env|start Claude Code/);
     expect(printed).toContain("Dry run: nothing was changed.");
     expect(f.fetch).not.toHaveBeenCalled();
     expect(f.runCommand).not.toHaveBeenCalled();
@@ -135,7 +133,7 @@ describe("the plan screen", () => {
     expect(answer.agents).toHaveLength(1);
     expect(answer.agents[0].agent).toBe(id === "claude" ? "claude-code" : id);
     const kind = codingAgent(id === "claude" ? "claude-code" : id).connect.kind;
-    if (kind === "acp-bridge" || kind === "pi-channel" || kind === "openclaw-plugin") {
+    if (kind === "claude-bridge" || kind === "acp-bridge" || kind === "pi-channel" || kind === "openclaw-plugin") {
       // The ACP bridge writes no file: the Relay MCP server travels through the
       // agent's session instead (acp-bridge.ts). OpenClaw's own `channels add`
       // keeps the token, so Relay writes no OpenClaw file either.
@@ -163,7 +161,7 @@ describe("choosing agents", () => {
     expect(initial).toBe("claude-code");
     expect(f.stdout.join("")).not.toContain("found on this computer");
     // Enter took Claude Code, so its plan is the one printed.
-    expect(f.stdout.join("")).toContain("install  the Relay plugin for Claude Code");
+    expect(f.stdout.join("")).toContain("answer your Relay messages with Claude Code");
     // With nothing found the list is the same nine, all dimmed, and no sentence is added.
     const none = await fixture({}, runtimes());
     expect(await runCLI(["connect", "--dry-run", "--yes"], none.deps)).toBe(0);
@@ -198,30 +196,16 @@ describe("choosing agents", () => {
 });
 
 describe("the Claude Code path", () => {
-  it("creates the agent, runs the three plugin commands, and writes an owner-only .env", async () => {
+  it("creates the agent without running commands or writing Claude configuration", async () => {
     const f = await fixture();
-    expect(await runCLI(["connect", "claude", "--new", "--yes", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
-    expect(ranLines(f)).toEqual([
-      `/fake/bin/claude plugin marketplace add ${claudeMarketplaceSource("0.1.6-staging.0")}`,
-      `/fake/bin/claude plugin install ${CLAUDE_PLUGIN_ID} --yes`,
-      `/fake/bin/claude plugin enable ${CLAUDE_PLUGIN_ID}`,
-    ]);
-    const written = await readFile(join(f.channel, ".env"), "utf8");
-    expect(written).toContain(`RELAY_AGENT_TOKEN="${token}"`);
-    expect(written).toContain('RELAY_BASE_URL="https://api.staging.relayapp.im"');
-    expect(written).toContain('RELAY_ALLOWED_SENDERS="advait"');
-    await expectOwnerOnly(join(f.channel, ".env"), f.channel);
-    expect((await readConfig(f.deps.configContext)).profiles[card.handle]?.agent_token).toBe(token);
+    expect(await runCLI(["connect", "claude", "--new", "--yes", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    expect(f.runCommand).not.toHaveBeenCalled();
     expect(f.startCommand).not.toHaveBeenCalled();
+    expect(f.bridge).not.toHaveBeenCalled();
+    await expect(readFile(join(f.channel, ".env"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await readConfig(f.deps.configContext)).profiles[card.handle]?.agent_token).toBe(token);
+    expect(f.stdout.join("")).toContain(SAY_HI);
     expect([...f.stdout, ...f.stderr].join("")).not.toContain(token);
-    // Success is one line per file written, then the phone step with the link and the QR.
-    const printed = f.stdout.join("");
-    expect(printed).toContain(`wrote  ${join(f.channel, ".env")}`);
-    expect(printed).toContain(SAY_HI);
-    expect(printed).toContain(`[QR]\nhttps://staging.relayapp.im/@${card.handle}`);
-    expect(printed).not.toMatch(/Relay is ready|Open Relay, scan|Later:|opens next/u);
-    // No handle question: a new agent gets a picked handle.
-    expect(f.prompts.text).not.toHaveBeenCalled();
   });
 
   it("links the folder to the agent, ignores .relay in git, and a re-run uses the link without asking", async () => {
@@ -262,32 +246,33 @@ describe("the Claude Code path", () => {
     expect(JSON.parse(await readFile(folderLinkPath(f.home), "utf8")).handle).toBe(card.handle);
   });
 
-  it("a token already there for another agent is kept unless the person replaces it", async () => {
+  it("leaves old plugin configuration untouched and asks no replacement question", async () => {
     const f = await fixture();
-    const kept = `rel_token_${"D".repeat(43)}`;
     await mkdir(f.channel, { recursive: true });
-    await writeFile(join(f.channel, ".env"), `RELAY_AGENT_TOKEN="${kept}"\n`, { mode: 0o600 });
-    f.prompts.select.mockResolvedValueOnce("keep");
-    expect(await runCLI(["connect", "claude", "--new", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
-    expect(await readFile(join(f.channel, ".env"), "utf8")).toContain(kept);
+    const old = 'RELAY_AGENT_TOKEN="old-token"\n';
+    await writeFile(join(f.channel, ".env"), old);
+    expect(await runCLI(["connect", "claude", "--new", "--no-start", "--no-skill"], f.deps)).toBe(0);
+    expect(await readFile(join(f.channel, ".env"), "utf8")).toBe(old);
+    expect(f.prompts.select).not.toHaveBeenCalled();
     expect(f.runCommand).not.toHaveBeenCalled();
-    expect(f.stdout.join("")).toContain("Kept the token for");
-    // Replace writes the new one and leaves nothing of the old.
-    f.prompts.select.mockResolvedValueOnce("replace");
-    expect(await runCLI(["connect", "claude", "--new", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(0);
-    const written = await readFile(join(f.channel, ".env"), "utf8");
-    expect(written).toContain(token);
-    expect(written).not.toContain(kept);
   });
 
-  it("a failed plugin command says the agent's own words and writes nothing", async () => {
+  it("starts the Claude bridge after Say hi without opening a Claude window", async () => {
     const f = await fixture();
-    f.runCommand.mockResolvedValueOnce({ code: 1, stdout: "", stderr: "marketplace not found\n" });
-    expect(await runCLI(["connect", "claude", "--new", "--yes", "--allow", "advait", "--no-start", "--no-skill"], f.deps)).toBe(1);
-    expect(f.stderr.join("")).toContain("marketplace not found");
-    expect(f.stderr.join("")).toContain("Nothing else was changed");
-    await expect(readFile(join(f.channel, ".env"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await runCLI(["connect", "claude", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+    expect(f.bridge).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      kind: "claude", command: "/fake/bin/claude", label: "Claude Code", cwd: f.home,
+      handle: card.handle, token, apiURL: "https://api.staging.relayapp.im",
+      mcpServer: { command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", card.handle], env: { RELAY_CONFIG_PATH: f.env.RELAY_CONFIG_PATH } },
+    }));
+    expect(f.runCommand).not.toHaveBeenCalled();
+    expect(f.startCommand).not.toHaveBeenCalled();
+    const printed = f.stdout.join("");
+    const line = `Claude Code answers your Relay messages from ${f.home}. Press Control-C to stop.`;
+    expect(printed).toContain(line);
+    expect(printed.indexOf(line)).toBeGreaterThan(printed.indexOf(SAY_HI));
   });
+
 });
 
 describe("the MCP agents", () => {
@@ -363,8 +348,9 @@ describe("the MCP agents", () => {
 describe("Hermes and OpenClaw", () => {
   it("Hermes installs our plugin and writes the four settings the docs name, owner-only", async () => {
     const f = await fixture({}, runtimes({ hermes: { found: true, executable: "/fake/bin/hermes" } }));
+    f.runCommand.mockResolvedValueOnce({ code: 0, stdout: "[]", stderr: "" });
     expect(await runCLI(["connect", "hermes", "--token", token, "--yes", "--allow", "00000000-0000-7000-8000-000000000901", "--no-skill"], f.deps)).toBe(0);
-    expect(ranLines(f)).toEqual(["/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --enable"]);
+    expect(ranLines(f)).toEqual(["/fake/bin/hermes plugins list --json", "/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --enable"]);
     const envPath = join(f.home, ".hermes", ".env");
     const written = await readFile(envPath, "utf8");
     expect(written).toContain(`RELAY_AGENT_TOKEN="${token}"`);
@@ -373,7 +359,69 @@ describe("Hermes and OpenClaw", () => {
     expect(written).toContain('RELAY_ALLOWED_CONTACTS="00000000-0000-7000-8000-000000000901"');
     await expectOwnerOnly(envPath, join(f.home, ".hermes"));
     expect(f.stdout.join("")).toContain("hermes gateway run");
+    expect(f.stdout.join("")).toContain("Plugin installed");
     expect([...f.stdout, ...f.stderr].join("")).not.toContain(token);
+  });
+
+  it("Hermes updates and enables an already installed plugin instead of installing it", async () => {
+    const f = await fixture({}, runtimes({ hermes: { found: true, executable: "/fake/bin/hermes" } }));
+    f.runCommand.mockResolvedValueOnce({ code: 0, stdout: JSON.stringify([{ name: "another-plugin" }, { name: "relay-hermes", status: "disabled", version: "0.1.0" }]), stderr: "" });
+    expect(await runCLI(["connect", "hermes", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+    expect(ranLines(f)).toEqual([
+      "/fake/bin/hermes plugins list --json",
+      "/fake/bin/hermes plugins update relay-hermes",
+      "/fake/bin/hermes plugins enable relay-hermes",
+    ]);
+    expect(f.stdout.join("")).toContain("Plugin updated");
+    expect(f.stdout.join("")).not.toContain("Plugin installed");
+  });
+
+  it.each([false, true])("Hermes JSON reports the commands run (installed: %s)", async (installed) => {
+    const f = await fixture({}, runtimes({ hermes: { found: true, executable: "/fake/bin/hermes" } }));
+    f.runCommand.mockResolvedValueOnce({ code: 0, stdout: JSON.stringify(installed ? [{ name: "relay-hermes" }] : []), stderr: "" });
+    expect(await runCLI(["connect", "hermes", "--token", token, "--yes", "--no-skill", "--json"], f.deps)).toBe(0);
+    const answer = JSON.parse(f.stdout.join(""));
+    expect(answer.agents[0].commands).toEqual(installed ? [
+      "hermes plugins list --json",
+      "hermes plugins update relay-hermes",
+      "hermes plugins enable relay-hermes",
+    ] : [
+      "hermes plugins list --json",
+      "hermes plugins install RelayMessenger/Relay-Hermes --enable",
+    ]);
+    if (installed) expect(answer.agents[0].commands.join("\n")).not.toContain("plugins install");
+  });
+
+  it.each([
+    { code: 0, stdout: "not JSON: relay-hermes", stderr: "" },
+    { code: 0, stdout: JSON.stringify([{ name: "other-plugin", description: "relay-hermes" }, { name: "relay-hermes-extra" }, null]), stderr: "" },
+    { code: 0, stdout: JSON.stringify({ name: "relay-hermes" }), stderr: "" },
+    { code: 1, stdout: JSON.stringify([{ name: "relay-hermes" }]), stderr: "list failed" },
+  ])("Hermes falls back to install for list result %j", async (outcome) => {
+    const f = await fixture({}, runtimes({ hermes: { found: true, executable: "/fake/bin/hermes" } }));
+    f.runCommand.mockResolvedValueOnce(outcome);
+    expect(await runCLI(["connect", "hermes", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+    expect(ranLines(f)).toEqual([
+      "/fake/bin/hermes plugins list --json",
+      "/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --enable",
+    ]);
+  });
+
+  it("Hermes falls back to install when listing rejects", async () => {
+    const f = await fixture({}, runtimes({ hermes: { found: true, executable: "/fake/bin/hermes" } }));
+    f.runCommand.mockRejectedValueOnce(new Error("list failed"));
+    expect(await runCLI(["connect", "hermes", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+    expect(ranLines(f)).toEqual([
+      "/fake/bin/hermes plugins list --json",
+      "/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --enable",
+    ]);
+  });
+
+  it("Hermes dry run explains install or update without running commands", async () => {
+    const f = await fixture();
+    expect(await runCLI(["connect", "hermes", "--dry-run"], f.deps)).toBe(0);
+    expect(f.stdout.join("")).toContain("install the Relay plugin for Hermes, or update it if it is already installed");
+    expect(f.runCommand).not.toHaveBeenCalled();
   });
 
   it("Hermes keeps a token already there unless told to replace it", async () => {
@@ -579,38 +627,6 @@ describe("connect first reply proof", () => {
     expect(f.stdout.join("")).toContain("Answered from your phone: first answer");
     expect(f.stdout.join("")).not.toMatch(/wrong agent|incoming|second answer|No reply yet/);
     expect(f.startCommand).not.toHaveBeenCalled();
-  });
-
-  it.each([true, false])("keeps the terminal silent until foreground start returns (reply=%s)", async (hasReply) => {
-    const f = await fixture();
-    let emit: Parameters<TerminalObserver["run"]>[0]["onEvent"];
-    let stopped = false;
-    f.deps.connect!.observer = () => ({
-      semantics: "observational-no-ack",
-      run: async (input) => {
-        emit = input.onEvent;
-        await new Promise<void>(resolve => input.signal.addEventListener("abort", () => resolve(), { once: true }));
-        stopped = true;
-      },
-    });
-    const order: string[] = [];
-    f.deps.stdout = (message) => { f.stdout.push(message); order.push(message.trimEnd()); };
-    // The closing sentence goes out on Clack's gutter, not straight to stdout.
-    f.prompts.message.mockImplementation((message: string) => { f.stdout.push(`${message}\n`); order.push(message.trimEnd()); });
-    f.startCommand.mockImplementation(async () => {
-      const before = [...order];
-      if (hasReply) emit({ event_type: "message.sent", data: { sender_handle: { handle: card.handle }, parts: [{ type: "text", value: "first answer" }] } } as never);
-      await Promise.resolve();
-      expect(order).toEqual(before);
-      order.push("start returned");
-      return 0;
-    });
-    expect(await runCLI(["connect", "claude", "--token", token, "--yes", "--allow", "person", "--no-skill"], f.deps)).toBe(0);
-    expect(f.startCommand).toHaveBeenCalledExactlyOnceWith("/fake/bin/claude", ["--dangerously-load-development-channels", "plugin:relay@relay-messenger"]);
-    expect(stopped).toBe(true);
-    const outcome = hasReply ? "Answered from your phone: first answer" : `No reply yet. Run:  relay watch @${card.handle}`;
-    expect(order.slice(-2)).toEqual(["start returned", outcome]);
-    expect(order.filter(line => line === outcome)).toHaveLength(1);
   });
 
   it("times out after five minutes, exits zero and keeps the connection", async () => {

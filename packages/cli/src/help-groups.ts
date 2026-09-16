@@ -123,7 +123,7 @@ export const formatRelayHelp = (cmd: Command, helper: Help, heading?: string): s
         helper.styleSubcommandTerm(helpCommand ? helper.subcommandTerm(helpCommand) : "help [command]"),
         helper.styleSubcommandDescription(helpCommand
           ? helper.subcommandDescription(helpCommand)
-          : "show what a command does and the options it takes"),
+          : "show what a command does"),
       ));
       lines.push("");
     }

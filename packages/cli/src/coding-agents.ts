@@ -52,7 +52,7 @@ export interface AgentPaths {
 
 /**
  * How Relay reaches the agent once its token is saved on this computer.
- * - `claude-plugin`: the Relay channel plugin for Claude Code, as today.
+ * - `claude-bridge`: Relay drives Claude Code through the Agent SDK, without config files.
  * - `mcp-command`: the agent's own `mcp add` writes its config.
  * - `codex-project`: Relay writes `[mcp_servers.relay]` into the folder's own
  *   `.codex/config.toml`, Codex's project layer (codex-rs/core/src/config.rs,
@@ -63,7 +63,7 @@ export interface AgentPaths {
  * - `hermes-plugin`, `openclaw-plugin`: our plugins, as Relay-Docs describe.
  */
 export type ConnectMethod =
-  | { kind: "claude-plugin" }
+  | { kind: "claude-bridge" }
   | { kind: "mcp-command"; file: (paths: AgentPaths) => string }
   | { kind: "codex-project"; file: (paths: AgentPaths) => string }
   | { kind: "mcp-file"; file: (paths: AgentPaths) => string; shape: "mcpServers" | "vscode" | "opencode" }
