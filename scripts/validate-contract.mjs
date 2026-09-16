@@ -36,9 +36,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "d4dc62372194bf929801229740346cdacfe2d5c9",
+    commit: "35023fe4f52497f2c27fb9172a5f0b27a7be8bf1",
     path: "contracts/developer/openapi.yaml",
-    sha256: "81d23529476ae77b3b7f7dfc931d2e0e421d3c91e20c59136e2deef9123f722e",
+    sha256: "42e8039ee94377aa047f70593102bed980d00c3597f6850a0628cbd0fdf6bc81",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -466,6 +466,7 @@ const validateOpenAPI = () => {
       "kind",
       "display_name",
       "image_url",
+      "image_color",
       "about",
       "verified",
       "is_contact",
@@ -483,6 +484,7 @@ const validateOpenAPI = () => {
       "kind",
       "display_name",
       "image_url",
+      "image_color",
       "about",
       "verified",
       "is_contact",

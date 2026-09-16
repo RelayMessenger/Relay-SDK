@@ -34,7 +34,7 @@ it.each([undefined, "/fake/bin/hermes"])("resolves the Hermes executable (%s)", 
     cwd: home,
     isInteractive: true,
     prompts,
-    fetch: vi.fn(async () => Response.json({ contact_cards: [{ handle: "test.dev", first_name: "Test", last_name: null, image_url: null, kind: "agent", is_active: true }] })),
+    fetch: vi.fn(async () => Response.json({ contact_cards: [{ handle: "test_bird", first_name: "Test", last_name: null, image_url: null, kind: "agent", is_active: true }] })),
     stdout: vi.fn(), stderr: vi.fn(),
     connect: {
       sniff: async () => [{ id: "hermes", label: "Hermes", found: true, ...(executable ? { executable } : {}) }],

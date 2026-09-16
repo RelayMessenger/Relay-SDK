@@ -53,7 +53,7 @@ it("connect prints the VS Code restart instruction and waits for the bounded rep
       prompts,
       stdout: (value) => stdout.push(value),
       stderr: () => undefined,
-      fetch: async () => Response.json({ contact_cards: [{ handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true }] }),
+      fetch: async () => Response.json({ contact_cards: [{ handle: "calm_cangoo", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true }] }),
       connect: {
         sniff: async () => [{ id: "vscode", label: "VS Code", found: true }],
         startCommand,
@@ -67,7 +67,7 @@ it("connect prints the VS Code restart instruction and waits for the bounded rep
     expect(stdout.join("")).not.toContain("You might have to restart");
     expect(startCommand).not.toHaveBeenCalled();
     expect(prompts.confirm).not.toHaveBeenCalled();
-    expect(stdout.join("")).toContain("No reply yet. Run:  relay watch @calm_cangoo.dev");
+    expect(stdout.join("")).toContain("No reply yet. Run:  relay watch @calm_cangoo");
   } finally {
     vi.useRealTimers();
   }

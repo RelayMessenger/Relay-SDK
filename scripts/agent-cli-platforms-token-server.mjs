@@ -13,7 +13,7 @@ const server = createServer((request, response) => {
   writeFileSync(logFile, JSON.stringify(requests));
   response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
   response.end(JSON.stringify(status === 200 ? { contact_cards: [{
-    handle: 'verification_bird.dev', first_name: 'Verification Bird', last_name: null,
+    handle: 'verification_bird', first_name: 'Verification Bird', last_name: null,
     image_url: null, kind: 'agent', is_active: true,
   }] } : { error: { message: 'Fixture credential or route rejected', code: 2004 } }));
 });

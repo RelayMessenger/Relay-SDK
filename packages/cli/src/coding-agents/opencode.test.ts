@@ -35,7 +35,7 @@ it.each([undefined, "/fake/bin/opencode"])("connect drives OpenCode over ACP usi
   expect(await runCLI(["connect", "opencode", "--token", token, "--yes", "--no-skill"], {
     configContext: { env: { RELAY_CONFIG_PATH: join(home, "config.json"), PATH: "" }, home, platform: "linux" },
     cwd: home, isInteractive: true, prompts,
-    fetch: vi.fn(async () => Response.json({ contact_cards: [{ handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true }] })),
+    fetch: vi.fn(async () => Response.json({ contact_cards: [{ handle: "calm_cangoo", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true }] })),
     stdout: () => undefined, stderr: (value) => errors.push(value),
     connect: {
       sniff: async () => [{ id: "opencode", label: "OpenCode", found: true, ...(executable ? { executable } : {}) }],

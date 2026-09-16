@@ -89,7 +89,7 @@ describe("Relay v1 request shapes", () => {
       fetch: responder(calls),
     });
     const body = {
-      handle: "research.dev",
+      handle: "research",
       ...(hideHistory === undefined ? {} : { hide_history: hideHistory }),
     };
     await client.chats.participants.add("chat/id", body);
@@ -139,8 +139,8 @@ describe("Relay v1 request shapes", () => {
     await client.chats.listChats({ cursor: "chat-cursor", limit: 20 });
     await client.chats.retrieve("chat-id");
     await client.chats.update("chat-id", { display_name: "Team" });
-    await client.chats.participants.add("chat-id", { handle: "research.dev" });
-    await client.chats.participants.remove("chat-id", { handle: "research.dev" });
+    await client.chats.participants.add("chat-id", { handle: "research" });
+    await client.chats.participants.remove("chat-id", { handle: "research" });
     await client.chats.leaveChat("chat-id");
     await client.chats.startTyping("chat-id");
     await client.chats.stopTyping("chat-id");
@@ -204,13 +204,13 @@ describe("Relay v1 request shapes", () => {
       handle: "echo",
       first_name: "New Echo",
     });
-    await client.agents.delete("agent.dev");
+    await client.agents.delete("agent");
 
     expect([...calls.slice(-1), ...calls.slice(0, -1)].map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
         operation.method,
         operation.path
-          .replace("{handle}", "agent.dev")
+          .replace("{handle}", "agent")
           .replace("{chatId}", "chat-id")
           .replace("{messageId}", "message-id")
           .replace("{attachmentId}", "attachment-id")
@@ -252,7 +252,7 @@ describe("Relay v1 request shapes", () => {
 
     const removeParticipant = calls[5]!;
     expect(JSON.parse(String(removeParticipant.body))).toEqual({
-      handle: "research.dev",
+      handle: "research",
     });
 
     const contactUpdate = calls.find((call) =>
@@ -274,15 +274,15 @@ describe("Relay v1 request shapes", () => {
 
   it.each([
     { name: "one-agent direct Chat", to: ["bob"] },
-    { name: "multi-agent group Chat", to: ["bob", "research.dev"] },
-    { name: "agent-to-agent Chat", to: ["research.dev"] },
+    { name: "multi-agent group Chat", to: ["bob", "research"] },
+    { name: "agent-to-agent Chat", to: ["research"] },
     {
       name: "seven-total user-containing Chat",
-      to: ["bob", "research.dev", "planner.dev", "writer.dev", "reviewer.dev", "helper.dev"],
+      to: ["bob", "research", "planner", "writer", "reviewer", "helper"],
     },
     {
       name: "seven-total agent-only Chat",
-      to: ["research.dev", "planner.dev", "writer.dev", "reviewer.dev", "helper.dev", "ops.dev"],
+      to: ["research", "planner", "writer", "reviewer", "helper", "ops"],
     },
   ])("preserves agent-initiated creation of a $name", async ({ to }) => {
     const calls: Captured[] = [];
@@ -384,13 +384,13 @@ it("promotes a completed owned image attachment with the existing card routes", 
   const calls: Array<{ url: URL; init?: RequestInit }> = [];
   const client = new Relay({ apiKey: "test-agent-token", baseURL: "https://api.staging.relayapp.im", fetch: async (input, init) => {
     calls.push({ url: new URL(input instanceof Request ? input.url : input), ...(init ? { init } : {}) });
-    return Response.json({ handle: "picture_agent.dev", first_name: "Picture Agent", kind: "agent", image_url: "https://api.staging.relayapp.im/images/picture.png", last_name: null, is_active: true });
+    return Response.json({ handle: "picture_agent", first_name: "Picture Agent", kind: "agent", image_url: "https://api.staging.relayapp.im/images/picture.png", last_name: null, is_active: true });
   } });
   const attachment_id = "019a2123-1234-7890-abcd-123456789abc";
-  await client.contactCard.update({ handle: "picture_agent.dev", attachment_id, image_recipe: { recipe: { image: {} } } }, { maxRetries: 0 });
-  expect(calls[0]?.url.pathname).toBe("/v1/contact_card"); expect(calls[0]?.url.searchParams.get("handle")).toBe("picture_agent.dev");
+  await client.contactCard.update({ handle: "picture_agent", attachment_id, image_recipe: { recipe: { image: {} } } }, { maxRetries: 0 });
+  expect(calls[0]?.url.pathname).toBe("/v1/contact_card"); expect(calls[0]?.url.searchParams.get("handle")).toBe("picture_agent");
   expect(calls[0]?.init?.method).toBe("PATCH");
   expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ attachment_id, image_recipe: { recipe: { image: {} } } });
-  await client.contactCard.create({ handle: "picture_agent.dev", first_name: "Picture Agent", attachment_id });
-  expect(calls[1]?.init?.method).toBe("POST"); expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({ handle: "picture_agent.dev", first_name: "Picture Agent", attachment_id });
+  await client.contactCard.create({ handle: "picture_agent", first_name: "Picture Agent", attachment_id });
+  expect(calls[1]?.init?.method).toBe("POST"); expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({ handle: "picture_agent", first_name: "Picture Agent", attachment_id });
 });
