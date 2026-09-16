@@ -10,7 +10,7 @@ const port = Number(process.env.MOCK_RELAY_PORT ?? 8790);
 const stateDir = process.env.OPENCLAW_STATE_DIR;
 let token;
 let createCount = 0;
-const createdHandle = "verification_bird.dev";
+const createdHandle = "verification_bird";
 const createdCard = { handle: createdHandle, first_name: "Verification Bird", last_name: null, image_url: null, is_active: true, kind: "agent" };
 const chatId = "00000000-0000-7000-8000-000000000010";
 const eventId = "00000000-0000-7000-8000-000000000011";

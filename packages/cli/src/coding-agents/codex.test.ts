@@ -22,7 +22,7 @@ describe("Codex start", () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
     const configContext = { home, platform: process.platform, env: { PATH: "", RELAY_CONFIG_PATH: join(home, "config.json") } };
-    const console = consoleFixture(configContext, { handle: "codex_test.dev", first_name: "Codex", image_url: null });
+    const console = consoleFixture(configContext, { handle: "codex_test", first_name: "Codex", image_url: null });
     const code = await runCLI(["connect", "codex", "--new", "--yes", "--no-skill", "--json"], {
       configContext, consoleLogin: console.login,
       cwd: home,
@@ -30,9 +30,9 @@ describe("Codex start", () => {
       stdout: (value) => stdout.push(value),
       stderr: (value) => stderr.push(value),
       fetch: console.wrap(vi.fn(async () => Response.json({
-        agent: { handle: "codex_test.dev", first_name: "Codex", last_name: null, image_url: null, kind: "agent", is_active: true },
+        agent: { handle: "codex_test", first_name: "Codex", last_name: null, image_url: null, kind: "agent", is_active: true },
         secret: `rel_token_${"C".repeat(43)}`,
-        share_url: "https://relayapp.im/@codex_test.dev",
+        share_url: "https://relayapp.im/@codex_test",
       }, { status: 201 }))),
       connect: {
         sniff: async () => [{ id: "codex", label: "Codex", found: true, ...(executable ? { executable } : {}) }],

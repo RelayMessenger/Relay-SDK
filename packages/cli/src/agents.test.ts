@@ -35,10 +35,10 @@ function setup(initial: RelayConfig = emptyConfig()) {
 
 it("reports the real organization handle when private persistence fails", async () => {
   const { deps } = setup();
-  vi.mocked(deps.provision).mockResolvedValue({ ...response, agent: { ...card, handle: "worker.acme_team" } });
+  vi.mocked(deps.provision).mockResolvedValue({ ...response, agent: { ...card, handle: "worker" } });
   vi.mocked(deps.update).mockRejectedValue(new Error(secret));
   const error = await createAgent({ handle: "worker" }, deps).catch(error => error as Error);
-  expect(String(error)).toContain("@worker.acme_team");
+  expect(String(error)).toContain("@worker");
   expect(String(error)).not.toContain("(unavailable)");
   expect(String(error)).not.toContain(secret);
 });

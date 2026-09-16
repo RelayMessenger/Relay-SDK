@@ -8,7 +8,7 @@ import pkg from "../package.json" with { type: "json" };
 const TOKEN = "rel_token_mcp_test_secret_never_given_to_guest";
 const CHAT = "01993d50-754d-7f51-a51b-5da552024fd1";
 const sessions: Array<{ client: Client; server: ReturnType<typeof createRelayMcpServer> }> = [];
-function sdk(fetch = vi.fn(async () => Response.json({ id: CHAT, handle: "fixture.dev" }))) {
+function sdk(fetch = vi.fn(async () => Response.json({ id: CHAT, handle: "fixture" }))) {
   return { fetch, client: new Relay({ apiKey: TOKEN, baseURL: "http://127.0.0.1:1", maxRetries: 0, fetch }) };
 }
 async function connect(options: RelayMcpServerOptions = {}) {
@@ -77,7 +77,7 @@ describe("approved two-tool MCP", () => {
   });
   it("executes the real SDK with the existing Agent Token only on the host", async () => {
     const s=await ready(); const r=await s.execute('async function run(client) { return await client.contactCard.retrieve(); }');
-    expect(r.isError).not.toBe(true); expect(result(r)).toEqual({id:CHAT,handle:"fixture.dev"});
+    expect(r.isError).not.toBe(true); expect(result(r)).toEqual({id:CHAT,handle:"fixture"});
     const request=s.fixture.fetch.mock.calls[0] as unknown as [string,RequestInit];
     expect(String(request[0])).toBe("http://127.0.0.1:1/v1/contact_card");
     expect(new Headers(request[1].headers).get("authorization")).toBe(`Bearer ${TOKEN}`);
@@ -122,7 +122,7 @@ describe("approved two-tool MCP", () => {
     const fetch = vi.fn(async (input: unknown) => {
       const url = String(input); requests.push(url);
       if (new URL(url).origin !== defaultApiURL()) throw new Error("OTHER ENVIRONMENT BLOCKED BEFORE NETWORK");
-      return Response.json({ handle: "fixture.dev" });
+      return Response.json({ handle: "fixture" });
     });
     vi.stubGlobal("fetch", fetch);
     try {
