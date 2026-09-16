@@ -308,7 +308,7 @@ export const createProgram = (
     // pipe and never touches `ps` or the shell history. `--token` stays for
     // scripts and is the visible one.
     .option("--with-token", "an existing token from a pipe")
-    .option("--token <token>", "an existing token, visible in ps and history")
+    .option("--token <token>", "an existing token, visible in shell history")
     .option("--allow <handles>", "allowed sender handles, comma-separated; default everyone")
     .option("-y, --yes", "token replacement without asking")
     .option("--dry-run", "the plan, nothing changed")
