@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { defaultAuthURL, defaultConsoleApiURL, emptyConfig, readConfig, writeConfig } from "./config.js";
-import { consoleLogin, consoleRequest, consoleSignOut } from "./console-auth.js";
+import { consoleLogin, consoleLoginOrReuse, consoleRequest, consoleSignOut } from "./console-auth.js";
 
 const AUTH = "https://auth.staging.relayapp.im";
 const CONSOLE = "https://console.staging.relayapp.im/api";
@@ -23,6 +23,31 @@ const noWait = () => vi.spyOn(globalThis, "setTimeout").mockImplementation(((cal
 }) as typeof setTimeout);
 
 const scratch = async (prefix: string) => `${await mkdtemp(join(tmpdir(), prefix))}/config.json`;
+
+it("refuses a missing session in non-interactive mode without starting the device flow", async () => {
+  const configPath = await scratch("relay-console-non-interactive-");
+  const fetch = vi.fn(async () => Response.json({ error: "unexpected_device_flow" }, { status: 400 }));
+
+  await expect(consoleLoginOrReuse({
+    context: { env: { RELAY_CONFIG_PATH: configPath, RELAY_AUTH_URL: AUTH } },
+    fetch,
+    nonInteractive: true,
+  })).rejects.toMatchObject({ code: "no_token", message: "Not signed in." });
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it("starts the device flow for a missing session in interactive mode", async () => {
+  const configPath = await scratch("relay-console-interactive-");
+  const stopped = new Error("device flow started");
+  const fetch = vi.fn(async () => { throw stopped; });
+
+  await expect(consoleLoginOrReuse({
+    context: { env: { RELAY_CONFIG_PATH: configPath, RELAY_AUTH_URL: AUTH } },
+    fetch,
+    nonInteractive: false,
+  })).rejects.toThrow(stopped);
+  expect(fetch).toHaveBeenCalledExactlyOnceWith(`${AUTH}/api/auth/device/code`, expect.objectContaining({ method: "POST" }));
+});
 
 it("maps staging and production API origins to their Console API origins", () => {
   expect(defaultConsoleApiURL("https://api.staging.relayapp.im")).toBe(CONSOLE);

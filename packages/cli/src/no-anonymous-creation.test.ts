@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { runCLI } from "./program.js";
-import { defaultAuthURL, readConfig } from "./config.js";
+import { readConfig } from "./config.js";
 
 it.each([
   ["agents", "create"],
@@ -14,15 +14,17 @@ it.each([
     const context = { home, cwd: home, env: { RELAY_CONFIG_PATH: join(home, "config.json"), PATH: "" } };
     const fetch = vi.fn(async () => Response.json({ error: "unauthorized" }, { status: 401 }));
     const runCommand = vi.fn();
+    const output: string[] = [];
     expect(await runCLI(["--json", "--no-input", ...args], {
       configContext: context, cwd: home, isInteractive: false, fetch,
-      stdout: () => undefined, stderr: () => undefined,
+      stdout: (value) => output.push(value), stderr: (value) => output.push(value),
       connect: {
         sniff: async () => [{ id: "codex", label: "Codex", found: true, executable: "/fixture/codex" }],
         runCommand,
       },
     })).toBe(4);
-    expect(fetch).toHaveBeenCalledExactlyOnceWith(`${defaultAuthURL()}/api/auth/device/code`, expect.anything());
+    expect(fetch).not.toHaveBeenCalled();
+    expect(output.join(" ")).toContain("Not signed in.");
     expect(runCommand).not.toHaveBeenCalled();
     expect(Object.values((await readConfig(context)).profiles).every(profile => !profile.agent_token)).toBe(true);
   } finally {

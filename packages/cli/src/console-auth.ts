@@ -320,6 +320,7 @@ export const consoleLoginOrReuse = async (
       // A stale or revoked session falls through to the browser flow.
     }
   }
+  if (deps.nonInteractive) throw new CliError("Not signed in.", "no_token");
   return consoleLogin(deps);
 };
 
