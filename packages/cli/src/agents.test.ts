@@ -7,7 +7,7 @@ import { savedAgentShareURL } from "./agent-session.js";
 import { createAgent, deleteAgent, listAgents, type AgentDependencies } from "./agents.js";
 import { defaultCreationApiURL, emptyConfig, type RelayConfig, type ResolvedAuth } from "./config.js";
 import { runCLI } from "./program.js";
-import { birdFor, withBirdManifest } from "../test/bird-manifest.js";
+import { withBirdManifest } from "../test/bird-manifest.js";
 
 const privateContext = { env: { RELAY_CONFIG_PATH: join(mkdtempSync(join(tmpdir(), "relay-unit-config-")), "config.json") } };
 const secret = "one-time-secret-not-for-output";
@@ -127,9 +127,10 @@ describe("agent CLI program", () => {
     const stdout: string[] = []; const stderr: string[] = []; const pictures: Array<{ handle: string | null; image_url: unknown }> = [];
     const options = { consoleLogin: async () => ({ type: "organization_key" as const, organization_key: "rel_org_test", organization_id: "org_fixture", console_api_url: "https://console.staging.relayapp.im/api" }), agents: deps, configContext: privateContext, stdout: (s: string) => stdout.push(s), stderr: (s: string) => stderr.push(s), fetch: withBirdManifest(undefined, pictures) };
     expect(await runCLI(["--profile", "new-profile", "agents", "create", "--json"], options)).toBe(0);
-    expect(deps.provision).toHaveBeenCalledWith({ displayName: "My Agent" }, { apiURL: creationOrigin });
-    // Nothing typed: the CLI invented the name and the handle, so it names the bird too, from the handle Relay returned.
-    expect(pictures).toEqual([{ handle: card.handle, image_url: birdFor(creationOrigin, card.handle) }]);
+    expect(deps.provision).toHaveBeenCalledWith({}, { apiURL: creationOrigin });
+    expect(JSON.parse(stdout[0]!)).toMatchObject({ handle: card.handle, display_name: card.first_name, profile: "new-profile" });
+    // The server owns the default name and picture.
+    expect(pictures).toEqual([]);
     expect(await runCLI(["agents", "list", "--json"], options)).toBe(0);
     expect(await runCLI(["--profile", "default", "agents", "delete", card.handle, "--json"], options)).toBe(0);
     expect(stdout.join("")).not.toContain(secret);

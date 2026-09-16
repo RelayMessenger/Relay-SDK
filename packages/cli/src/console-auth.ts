@@ -325,7 +325,7 @@ export const consoleLoginOrReuse = async (
 
 export interface ConsoleAgentCreateInput {
   handle?: string;
-  displayName: string;
+  displayName?: string;
   about?: string;
   image?: string;
   imageRecipe?: import("@relaymessenger/sdk").AgentImageRecipe;
@@ -340,7 +340,7 @@ export interface ConsoleAgentCreateResult {
 }
 
 /**
- * The handle the CLI invents when the person gave none: the display name in
+ * The handle derived from a name the person typed: the display name in
  * handle letters. Relay refuses a collision rather than renaming, so the handle
  * sent is the handle created (server console.ts, POST /agents).
  */
@@ -348,8 +348,7 @@ export const inventedHandle = (displayName: string): string =>
   displayName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^[^a-z]+/u, "").replace(/_+$/u, "").slice(0, 32).replace(/_+$/u, "") || "assistant";
 
 /**
- * Handles are one flat namespace, so an invented handle is taken as soon as
- * anyone has one. The handles the CLI tries for an identity it invented: the
+ * Handles are one flat namespace. The handles the CLI tries for a typed name: the
  * plain one, then one with 4 random lowercase letters or digits, then one with
  * 6, inside Relay's 32-character limit. A typed handle is tried once.
  */
@@ -379,7 +378,7 @@ export const createConsoleAgent = async (
     throw new Error("--image-recipe requires its rendered --image or --image-url.");
   }
   const me = await consoleRequest<{ org: { id: string } }>(deps, "/me");
-  const attempts = input.handle === undefined ? inventedHandleAttempts(inventedHandle(input.displayName)) : [input.handle];
+  const attempts = input.handle === undefined && input.displayName !== undefined ? inventedHandleAttempts(inventedHandle(input.displayName)) : [input.handle];
   let response: { agent: { handle: string; displayName: string; avatarUrl: string | null }; token: string } | undefined;
   for (const [attempt, handle] of attempts.entries()) {
     try {
@@ -391,8 +390,8 @@ export const createConsoleAgent = async (
           "Idempotency-Key": uuidv7(),
         },
         body: JSON.stringify({
-          handle,
-          displayName: input.displayName,
+          ...(handle === undefined ? {} : { handle }),
+          ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
           ...(input.about === undefined ? {} : { about: input.about }),
         }),
       });
