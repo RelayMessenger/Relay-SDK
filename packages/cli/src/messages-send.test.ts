@@ -29,6 +29,7 @@ async function send(args: string[]) {
 
 describe("messages send recipients", () => {
   it.each([
+    [["--to", "@alice"], ["alice"]],
     [["--to", "alice"], ["alice"]],
     [["--to", "alice", "bob"], ["alice", "bob"]],
     [["--to", "alice", "--to", "bob"], ["alice", "bob"]],
@@ -42,7 +43,7 @@ describe("messages send recipients", () => {
     }]);
   });
 
-  it.each([[], ["--to", ""], ["--to", "alice,,bob"], ["--to", "@alice"],
+  it.each([[], ["--to", ""], ["--to", "alice,,bob"],
     ["--to", "a,b,c,d,e,f,g"]].map((args) => ({ args })))("refuses %j before it sends anything", async ({ args }) => {
     const result = await send(args);
     expect(result.code).not.toBe(0);

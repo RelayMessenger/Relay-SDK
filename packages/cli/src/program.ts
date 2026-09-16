@@ -1736,7 +1736,14 @@ export const runCLI = async (
       return failure.exit;
     }
     if (error instanceof CommanderError) {
-      if (error.message) stderr(`Error: ${failure.error}\n${DOCS_LINE}\n`);
+      // Parser errors were printed by configureOutput; a raw coercion error
+      // thrown inside an action has not passed through that reporter.
+      const alreadyReported = !(error instanceof InvalidArgumentError) && [
+        "commander.unknownOption", "commander.unknownCommand", "commander.missingArgument",
+        "commander.optionMissingArgument", "commander.missingMandatoryOptionValue",
+        "commander.excessArguments", "commander.invalidArgument",
+      ].includes(error.code);
+      if (error.message && !alreadyReported) stderr(`Error: ${failure.error}\n${DOCS_LINE}\n`);
       return failure.exit;
     }
     if (error instanceof HeadlessPrompt) {
