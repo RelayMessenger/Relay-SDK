@@ -5,7 +5,7 @@ import { parse } from "smol-toml";
 import { describe, expect, it } from "vitest";
 import { codexProjectConfigPath, writeCodexProjectMcpServer } from "./codex-project-config.js";
 
-const relay = { name: "relay", command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", "calm_cangoo.dev"] };
+const relay = { name: "relay", command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", "calm_cangoo"] };
 
 describe("the Codex project config writer", () => {
   it("creates .codex/config.toml with [mcp_servers.relay] when the folder has none", async () => {

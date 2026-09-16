@@ -152,7 +152,7 @@ try {
     assert.match(cli('agents', 'delete', '--help'), /handle/);
     const inventory = JSON.parse(cli('agents', 'list', '--json'));
     assert.ok(inventory.agents.every(item => item.token === 'missing'));
-    run(process.execPath, [bin, 'agents', 'delete', 'verification_bird.dev'], { cwd: consumer, expectedExit: 1 });
+    run(process.execPath, [bin, 'agents', 'delete', 'verification_bird'], { cwd: consumer, expectedExit: 1 });
     // The core-owned consumer exercises the installed module with an injected HTTP fixture.
     // Native process checks above and module fixture checks are recorded separately from live staging.
     run(process.execPath, [join(root, 'packages/cli/scripts/agent-tarball-consumer.mjs'), consumer, scratch], { cwd: consumer });

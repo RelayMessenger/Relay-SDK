@@ -208,12 +208,12 @@ it.each([401, 403, 500])("Console deletion HTTP %s keeps profile and never tries
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input); calls.push(url);
     if (url === `${api}/me`) return Response.json({ org: { id: "org_fixture" } });
-    if (url === `${api}/orgs/org_fixture/agents`) return Response.json([{ id: "uuid_fixture", handle: "test.fixture" }]);
-    if (url.endsWith("/v1/contact_card")) return Response.json({ contact_cards: [{ handle: "test.fixture", kind: "agent" }] });
+    if (url === `${api}/orgs/org_fixture/agents`) return Response.json([{ id: "uuid_fixture", handle: "test" }]);
+    if (url.endsWith("/v1/contact_card")) return Response.json({ contact_cards: [{ handle: "test", kind: "agent" }] });
     expect(init?.method).toBe("DELETE");
     return Response.json({ error: key }, { status });
   });
-  expect(await runCLI(["--json", "--no-input", "--profile", "test", "agents", "delete", "test.fixture"], { ...f.cli, fetch })).toBe(status === 401 ? 4 : 1);
+  expect(await runCLI(["--json", "--no-input", "--profile", "test", "agents", "delete", "test"], { ...f.cli, fetch })).toBe(status === 401 ? 4 : 1);
   expect(f.err.join("")).not.toContain(key);
   expect(calls.filter(url => url.startsWith(api))).toEqual([`${api}/me`, `${api}/orgs/org_fixture/agents`, `${api}/orgs/org_fixture/agents/uuid_fixture`]);
   expect((await readConfig(f.context)).profiles.test?.agent_token).toBe("agent-private-token");
@@ -228,10 +228,10 @@ it("Console delete never clears a different explicitly selected agent", async ()
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     expect(init?.method).not.toBe("DELETE");
     if (String(input).endsWith("/me")) return Response.json({ org: { id: "org_fixture" } });
-    if (String(input).endsWith("/agents")) return Response.json([{ id: "uuid_fixture", handle: "target.fixture" }]);
-    return Response.json({ contact_cards: [{ kind: "agent", handle: "other.fixture" }] });
+    if (String(input).endsWith("/agents")) return Response.json([{ id: "uuid_fixture", handle: "target" }]);
+    return Response.json({ contact_cards: [{ kind: "agent", handle: "other" }] });
   });
-  expect(await runCLI(["--json", "--no-input", "--profile", "other", "agents", "delete", "target.fixture"], { ...f.cli, fetch })).not.toBe(0);
+  expect(await runCLI(["--json", "--no-input", "--profile", "other", "agents", "delete", "target"], { ...f.cli, fetch })).not.toBe(0);
   expect((await readConfig(f.context)).profiles.other?.agent_token).toBe("other-agent-token");
 });
 

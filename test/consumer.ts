@@ -36,17 +36,17 @@ await relay.chats.shareContactCard("chat-id");
 await relay.chats.startTyping("chat-id");
 await relay.chats.stopTyping("chat-id");
 await relay.chats.markAsRead("chat-id");
-await relay.chats.participants.add("chat-id", { handle: "research.agent" });
-await relay.chats.participants.add("chat-id", { handle: "research.agent", hide_history: true });
-await relay.chats.participants.add("chat-id", { handle: "research.agent", hide_history: false });
+await relay.chats.participants.add("chat-id", { handle: "research" });
+await relay.chats.participants.add("chat-id", { handle: "research", hide_history: true });
+await relay.chats.participants.add("chat-id", { handle: "research", hide_history: false });
 // @ts-expect-error History selection is a boolean, not a string.
-await relay.chats.participants.add("chat-id", { handle: "research.agent", hide_history: "false" });
+await relay.chats.participants.add("chat-id", { handle: "research", hide_history: "false" });
 // @ts-expect-error History selection belongs only to addition.
-await relay.chats.participants.remove("chat-id", { handle: "research.agent", hide_history: false });
+await relay.chats.participants.remove("chat-id", { handle: "research", hide_history: false });
 // @ts-expect-error Private chat visibility is not a public API parameter.
-await relay.chats.participants.add("chat-id", { handle: "research.agent", is_hidden: true });
+await relay.chats.participants.add("chat-id", { handle: "research", is_hidden: true });
 // @ts-expect-error Private history boundaries are not public API parameters.
-await relay.chats.participants.add("chat-id", { handle: "research.agent", truncated_at: 123 });
+await relay.chats.participants.add("chat-id", { handle: "research", truncated_at: 123 });
 // Relay retired message editing and unsending from the developer API.
 // @ts-expect-error A Message cannot be edited through the Relay API.
 await relay.messages.edit("message-id", { text: "Corrected" });
@@ -268,7 +268,7 @@ message2.edited_at satisfies string | null | undefined;
 message2.unsent_at satisfies string | null | undefined;
 
 // Existing agents retain authenticated deletion; registration is Console-owned.
-(await relay.agents.delete("brave_cangoo.dev")) satisfies void;
+(await relay.agents.delete("brave_cangoo")) satisfies void;
 // @ts-expect-error Anonymous SDK registration has been removed.
 Relay.createAgent;
 // @ts-expect-error Authenticated instances require an API key.

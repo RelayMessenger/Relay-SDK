@@ -32,7 +32,7 @@ const BANNED = new RegExp(
 const roots: string[] = [];
 const token = "rly_private_test_only_not_real";
 const origin = "https://api.staging.relayapp.im";
-const agent = { token, origin, handle: "test_bird.dev" };
+const agent = { token, origin, handle: "test_bird" };
 const consent = { consent: true, runtimeStopped: true } as const;
 async function root(): Promise<string> {
   const path = await realpath(await mkdtemp(join(tmpdir(), "relay-plain-words-")));

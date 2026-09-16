@@ -40,7 +40,7 @@ it("connect starts Cline over its ACP bridge", async () => {
   expect(await runCLI(["connect", "cline", "--token", token, "--yes", "--no-skill"], {
     configContext: { env: { RELAY_CONFIG_PATH: join(home, "config.json"), PATH: "" }, home, platform: process.platform },
     cwd: home, isInteractive: true, prompts,
-    fetch: vi.fn(async () => Response.json({ contact_cards: [{ handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true }] })),
+    fetch: vi.fn(async () => Response.json({ contact_cards: [{ handle: "calm_cangoo", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true }] })),
     stdout: (value) => stdout.push(value), stderr: () => undefined,
     connect: {
       sniff: async () => [{ id: "cline", label: "Cline", found: true }],

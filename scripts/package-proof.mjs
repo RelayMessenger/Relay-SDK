@@ -233,7 +233,7 @@ try {
 
     for (const hideHistory of [undefined, true, false]) {
       const body = {
-        handle: "research.agent",
+        handle: "research",
         ...(hideHistory === undefined ? {} : { hide_history: hideHistory }),
       };
       await relay.chats.participants.add("chat/id", body);
@@ -322,17 +322,17 @@ try {
     added.data.chat_id satisfies string;
     declare const removed: ContactRemovedWebhookEvent;
     removed.data.contact.handle satisfies string;
-    void relay.chats.participants.add("chat", { handle: "research.agent" });
-    void relay.chats.participants.add("chat", { handle: "research.agent", hide_history: true });
-    void relay.chats.participants.add("chat", { handle: "research.agent", hide_history: false });
+    void relay.chats.participants.add("chat", { handle: "research" });
+    void relay.chats.participants.add("chat", { handle: "research", hide_history: true });
+    void relay.chats.participants.add("chat", { handle: "research", hide_history: false });
     // @ts-expect-error History selection is a boolean.
-    void relay.chats.participants.add("chat", { handle: "research.agent", hide_history: "false" });
+    void relay.chats.participants.add("chat", { handle: "research", hide_history: "false" });
     // @ts-expect-error Removal has no history selector.
-    void relay.chats.participants.remove("chat", { handle: "research.agent", hide_history: false });
+    void relay.chats.participants.remove("chat", { handle: "research", hide_history: false });
     // @ts-expect-error Chat visibility is private.
-    void relay.chats.participants.add("chat", { handle: "research.agent", is_hidden: true });
+    void relay.chats.participants.add("chat", { handle: "research", is_hidden: true });
     // @ts-expect-error History boundaries are private.
-    void relay.chats.participants.add("chat", { handle: "research.agent", truncated_at: 123 });
+    void relay.chats.participants.add("chat", { handle: "research", truncated_at: 123 });
     void relay.messages.create({
       to: ["advait"],
       message: {
