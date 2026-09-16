@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server d4dc62372194bf929801229740346cdacfe2d5c9
- * OpenAPI 81d23529476ae77b3b7f7dfc931d2e0e421d3c91e20c59136e2deef9123f722e
+ * Relay Server 35023fe4f52497f2c27fb9172a5f0b27a7be8bf1
+ * OpenAPI 42e8039ee94377aa047f70593102bed980d00c3597f6850a0628cbd0fdf6bc81
  */
 
 export const RELAY_API_VERSION = "v1" as const;
