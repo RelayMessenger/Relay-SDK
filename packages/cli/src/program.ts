@@ -710,7 +710,7 @@ export const createProgram = (
         ...(dependencies.prompts ? { prompts: dependencies.prompts } : {}),
         stderr,
         ...(options.website === undefined ? {} : { website: options.website }),
-        nonInteractive: globals(command).nonInteractive === true || globals(command).json === true || dependencies.isInteractive === false,
+        nonInteractive: false,
       });
       output({
         ok: true,

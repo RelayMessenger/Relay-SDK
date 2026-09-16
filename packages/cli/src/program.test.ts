@@ -83,6 +83,47 @@ describe("CLI command routing", () => {
     configContext: { env: { RELAY_AGENT_TOKEN: "rly_test_secret", RELAY_API_URL: "https://api.staging.relayapp.im", RELAY_CONFIG_PATH: privatePath } },
   });
 
+  it.each([[[]], [["--non-interactive"]], [["--json"]]])("explicit login starts device sign-in without a terminal (%j)", async (flags) => {
+    const authURL = "https://auth.staging.relayapp.im";
+    const fetch = vi.fn(async () => Response.json({
+      device_code: "device-secret",
+      user_code: "ABCD-EFGH",
+      verification_uri: `${authURL}/device`,
+      verification_uri_complete: `${authURL}/device?user_code=ABCD-EFGH`,
+      expires_in: 1800,
+      interval: 5,
+    }));
+    await runCLI(["login", ...flags], {
+      fetch,
+      isInteractive: false,
+      stdout: (value) => stdout.push(value),
+      stderr: (value) => {
+        stderr.push(value);
+        // Stop after the device instructions, before opening a real browser or polling.
+        if (value.startsWith("If it does not open")) throw new Error("device instructions received");
+      },
+      configContext: { env: { RELAY_CONFIG_PATH: privatePath, RELAY_AUTH_URL: authURL } },
+    });
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(`${authURL}/api/auth/device/code`, expect.objectContaining({ method: "POST" }));
+    expect(stderr.join("")).toContain("Your code is ABCD-EFGH");
+    expect(stderr.join("")).toContain(`Open ${authURL}/device?user_code=ABCD-EFGH`);
+    expect(stderr.join("")).toContain(`If it does not open, enter this code at ${authURL}/device: ABCD-EFGH`);
+  });
+
+  it("agents create --json refuses a missing session without a terminal", async () => {
+    const fetch = vi.fn();
+    const code = await runCLI(["agents", "create", "--json"], {
+      fetch,
+      isInteractive: false,
+      stdout: (value) => stdout.push(value),
+      stderr: (value) => stderr.push(value),
+      configContext: { env: { RELAY_CONFIG_PATH: privatePath } },
+    });
+    expect(code).not.toBe(0);
+    expect([...stdout, ...stderr].join("")).toContain("Not signed in.");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it.each(["x", "@x"])("watch %s selects the same saved profile", async (name) => {
     const auth = vi.fn(async () => ({
       profile: "x", apiURL: "https://api.staging.relayapp.im",
