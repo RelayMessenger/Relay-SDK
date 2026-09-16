@@ -488,11 +488,31 @@ const runAgentCommands = async (
   runCommand: (file: string, args: readonly string[]) => Promise<ConnectCommandResult>,
 ): Promise<string[]> => {
   const ran: string[] = [];
-  const commands = agent === "hermes" ? [["hermes", "plugins", "list"]] : agentCommands(agent, context);
+  const commands = agent === "hermes" ? [["hermes", "plugins", "list", "--json"]] : agentCommands(agent, context);
   for (const [name, ...args] of commands) {
     const file = runtime?.executable ?? name!;
-    const outcome = await runCommand(file, args);
+    const listingHermes = agent === "hermes" && args[1] === "list";
+    const outcome = await runCommand(file, args).catch((error: unknown) => {
+      if (!listingHermes) throw error;
+      return { code: 1, stdout: "", stderr: "" };
+    });
     const line = shownCommandLine([name!, ...args]);
+    if (listingHermes) {
+      let installed = false;
+      if (outcome.code === 0) {
+        try {
+          const plugins: unknown = JSON.parse(outcome.stdout);
+          installed = Array.isArray(plugins) && plugins.some((plugin) => plugin?.name === "relay-hermes");
+        } catch {
+          // Older Hermes versions may not support JSON output; install instead.
+        }
+      }
+      commands.push(...(installed
+        ? [["hermes", "plugins", "update", "relay-hermes"], ["hermes", "plugins", "enable", "relay-hermes"]]
+        : agentCommands(agent, context)));
+      ran.push(line);
+      continue;
+    }
     if (outcome.code !== 0) {
       // The agent's own words first, then what is true about Relay's side.
       const said = `${outcome.stderr}\n${outcome.stdout}`.split("\n").map((entry) => entry.trim()).find(Boolean) ?? "";
@@ -502,11 +522,6 @@ const runAgentCommands = async (
       );
     }
     ran.push(line);
-    if (agent === "hermes" && args[1] === "list") {
-      commands.push(...(/(?<![\w-])relay-hermes(?![\w-])/u.test(outcome.stdout)
-        ? [["hermes", "plugins", "update", "relay-hermes"], ["hermes", "plugins", "enable", "relay-hermes"]]
-        : agentCommands(agent, context)));
-    }
   }
   return ran;
 };

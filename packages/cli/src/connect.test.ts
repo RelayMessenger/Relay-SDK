@@ -348,8 +348,9 @@ describe("the MCP agents", () => {
 describe("Hermes and OpenClaw", () => {
   it("Hermes installs our plugin and writes the four settings the docs name, owner-only", async () => {
     const f = await fixture({}, runtimes({ hermes: { found: true, executable: "/fake/bin/hermes" } }));
+    f.runCommand.mockResolvedValueOnce({ code: 0, stdout: "[]", stderr: "" });
     expect(await runCLI(["connect", "hermes", "--token", token, "--yes", "--allow", "00000000-0000-7000-8000-000000000901", "--no-skill"], f.deps)).toBe(0);
-    expect(ranLines(f)).toEqual(["/fake/bin/hermes plugins list", "/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --enable"]);
+    expect(ranLines(f)).toEqual(["/fake/bin/hermes plugins list --json", "/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --enable"]);
     const envPath = join(f.home, ".hermes", ".env");
     const written = await readFile(envPath, "utf8");
     expect(written).toContain(`RELAY_AGENT_TOKEN="${token}"`);
@@ -363,12 +364,37 @@ describe("Hermes and OpenClaw", () => {
 
   it("Hermes updates and enables an already installed plugin instead of installing it", async () => {
     const f = await fixture({}, runtimes({ hermes: { found: true, executable: "/fake/bin/hermes" } }));
-    f.runCommand.mockResolvedValueOnce({ code: 0, stdout: "relay-hermes  disabled  0.1.0", stderr: "" });
+    f.runCommand.mockResolvedValueOnce({ code: 0, stdout: JSON.stringify([{ name: "another-plugin" }, { name: "relay-hermes", status: "disabled", version: "0.1.0" }]), stderr: "" });
     expect(await runCLI(["connect", "hermes", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
     expect(ranLines(f)).toEqual([
-      "/fake/bin/hermes plugins list",
+      "/fake/bin/hermes plugins list --json",
       "/fake/bin/hermes plugins update relay-hermes",
       "/fake/bin/hermes plugins enable relay-hermes",
+    ]);
+  });
+
+  it.each([
+    { code: 0, stdout: "not JSON: relay-hermes", stderr: "" },
+    { code: 0, stdout: JSON.stringify([{ name: "other-plugin", description: "relay-hermes" }, { name: "relay-hermes-extra" }, null]), stderr: "" },
+    { code: 0, stdout: JSON.stringify({ name: "relay-hermes" }), stderr: "" },
+    { code: 1, stdout: JSON.stringify([{ name: "relay-hermes" }]), stderr: "list failed" },
+  ])("Hermes falls back to install for list result %j", async (outcome) => {
+    const f = await fixture({}, runtimes({ hermes: { found: true, executable: "/fake/bin/hermes" } }));
+    f.runCommand.mockResolvedValueOnce(outcome);
+    expect(await runCLI(["connect", "hermes", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+    expect(ranLines(f)).toEqual([
+      "/fake/bin/hermes plugins list --json",
+      "/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --enable",
+    ]);
+  });
+
+  it("Hermes falls back to install when listing rejects", async () => {
+    const f = await fixture({}, runtimes({ hermes: { found: true, executable: "/fake/bin/hermes" } }));
+    f.runCommand.mockRejectedValueOnce(new Error("list failed"));
+    expect(await runCLI(["connect", "hermes", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+    expect(ranLines(f)).toEqual([
+      "/fake/bin/hermes plugins list --json",
+      "/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --enable",
     ]);
   });
 
