@@ -2,7 +2,10 @@ import type Relay from "@relaymessenger/sdk";
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
 import type { query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
-import { runClaudeBridge } from "./claude-bridge.js";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { claudeCommand, runClaudeBridge } from "./claude-bridge.js";
 import { codexPrompt } from "./codex-bridge.js";
 import type { ClaudeThreadStore } from "./claude-threads.js";
 
@@ -183,5 +186,23 @@ describe("Claude Agent SDK bridge", () => {
     expect(calls).toBe(1);
     expect(state.relay.sent).toHaveLength(1);
     state.control.abort();
+  });
+});
+
+
+describe("the Claude executable the bridge starts", () => {
+  it("resolves the Windows npm shim", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "relay-claude-path-"));
+    try {
+      await writeFile(join(folder, "claude.cmd"), "@echo off\r\n");
+      expect(await claudeCommand("claude", { PATH: folder }, "win32")).toEqual({ executable: join(folder, "claude.cmd") });
+    } finally { await rm(folder, { recursive: true, force: true }); }
+  });
+  it("leaves a Windows shell name when PATH has no shim", async () => {
+    expect(await claudeCommand("claude", { PATH: "" }, "win32")).toEqual({ executable: "claude.cmd" });
+  });
+  it("keeps the absolute executable connect found", async () => {
+    const executable = join(tmpdir(), "bin", "claude");
+    expect(await claudeCommand(executable, { PATH: "" }, "darwin")).toEqual({ executable });
   });
 });

@@ -1,3 +1,5 @@
+import { isAbsolute } from "node:path";
+import { findExecutable } from "./runtime-sniff.js";
 import type Relay from "@relaymessenger/sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { bridgeTurn, codexPrompt, MAX_RELAY_TEXT, replyKey, type BridgeTurn } from "./codex-bridge.js";
@@ -13,6 +15,17 @@ export interface ClaudeBridgeInput {
   say(line: string): void;
   query?: typeof query;
 }
+
+/** Resolve the executable connect found, including npm's Windows shim. */
+export const claudeCommand = async (
+  found: string,
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): Promise<ClaudeBridgeInput["claude"]> => {
+  if (isAbsolute(found)) return { executable: found };
+  const onPath = await findExecutable(found, env, platform);
+  return { executable: onPath ?? (platform === "win32" ? `${found}.cmd` : found) };
+};
 
 interface LiveTurn {
   control: AbortController;

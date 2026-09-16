@@ -9,15 +9,14 @@ import {
   CODING_AGENT_IDS,
   codingAgent,
   platformPath,
-  claudeConfigDir,
   hermesHome,
   normalizeAgentId,
   supportedAgentsLine,
   type AgentPaths,
   type CodingAgentId,
 } from "./coding-agents.js";
-import { claudeChannelDir, sniffRuntimes, type RuntimeFound, type RuntimeId, type RuntimeSniffContext } from "./runtime-sniff.js";
-import { readChannelEnv, writeChannelEnv, writeEnvFile } from "./claude-channel.js";
+import { sniffRuntimes, type RuntimeFound, type RuntimeId, type RuntimeSniffContext } from "./runtime-sniff.js";
+import { readChannelEnv, writeEnvFile } from "./claude-channel.js";
 import { readFolderLink, writeFolderLink } from "./folder-link.js";
 import { writeCodexProjectMcpServer } from "./coding-agents/codex-project-config.js";
 import { configPath, defaultCreationApiURL, isStagingBuild, packageVersion, validateApiURL, validateProfileName, validateToken, type RelayConsoleSession } from "./config.js";
@@ -30,14 +29,8 @@ import { spawnCommand } from "./spawn-command.js";
 import { runTerminalWatch, type TerminalObserver } from "./terminal-watch.js";
 import { consoleLoginOrReuse } from "./console-auth.js";
 
-/** The plugin, and the marketplace it comes from, exactly as Claude Code names
- * them (.claude-plugin/marketplace.json: marketplace "relay-messenger", plugin "relay"). */
-export const CLAUDE_MARKETPLACE_REPO = "RelayMessenger/Relay-SDK";
+/** Still used by agent-driver.ts for its Claude plugin hint. */
 export const CLAUDE_PLUGIN_ID = "relay@relay-messenger";
-/** A `-staging` build installs the plugin from `staging` and a release from
- * `main`, the same rule the Relay skill installer already follows. */
-export const claudeMarketplaceSource = (version: string = packageVersion()): string =>
-  `${CLAUDE_MARKETPLACE_REPO}@${isStagingBuild(version) ? "staging" : "main"}`;
 export const REPLY_TIMEOUT_MS = 300_000;
 
 /** The MCP server the seven MCP agents run (packages/mcp, bin `relay-mcp`). A
@@ -110,7 +103,7 @@ export interface ConnectDependencies {
    * coding-agents/{cursor,gemini-cli,opencode}.ts).
    */
   bridge?: (input: {
-    kind: "codex" | "acp" | "pi";
+    kind: "codex" | "acp" | "pi" | "claude";
     token: string;
     apiURL: string;
     /** The agent that answers, so its threads or sessions are kept apart from another's. */
@@ -266,12 +259,7 @@ export const shownCommandLine = (words: readonly string[]): string =>
 /** The agent's own command lines, exactly as this command runs them. */
 export const agentCommands = (agent: CodingAgentId, context: PlanContext): string[][] => {
   switch (agent) {
-    case "claude-code":
-      return [
-        ["claude", "plugin", "marketplace", "add", claudeMarketplaceSource(context.version)],
-        ["claude", "plugin", "install", CLAUDE_PLUGIN_ID, "--yes"],
-        ["claude", "plugin", "enable", CLAUDE_PLUGIN_ID],
-      ];
+    case "claude-code": return [];
     case "hermes":
       return [["hermes", "plugins", "install", HERMES_PLUGIN_SOURCE, "--enable"]];
     case "openclaw":
@@ -298,7 +286,7 @@ export const agentCommands = (agent: CodingAgentId, context: PlanContext): strin
 export const agentFiles = (agent: CodingAgentId, context: PlanContext): string[] => {
   const method = codingAgent(agent).connect;
   switch (method.kind) {
-    case "claude-plugin": return [platformPath(context.platform).join(context.env.RELAY_CHANNEL_DIR?.trim() || platformPath(context.platform).join(claudeConfigDir(context.env, context.home, context.platform), "channels", "relay"), ".env")];
+    case "claude-bridge": return [];
     case "mcp-command": return [method.file(paths(context))];
     case "codex-project": return [method.file(paths(context))];
     case "mcp-file": return [method.file(paths(context))];
@@ -334,15 +322,6 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
   // (_artifacts/cli-connect-design-20260912.md, item 5).
   let steps: string[];
   switch (method.kind) {
-    case "claude-plugin":
-      steps = [
-        // Both commands it runs, on the one install line (the tarball consumer
-        // reads the marketplace source here, packages/cli/scripts/agent-tarball-consumer.mjs:47).
-        `install  the Relay plugin for ${label}  (${shown.commands[0]}; ${shown.commands[1]})`,
-        write(shown.files[0]!, "token, API address, allowed senders"),
-        ...(context.start ? [`start ${label} with Relay when you are ready`] : []),
-      ];
-      break;
     case "mcp-command":
       steps = [`run  ${shown.commands[0]}  (adds the Relay MCP server to ${shown.files[0]})`];
       break;
@@ -357,6 +336,7 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
     case "mcp-file":
       steps = [`add  ${mcpRootKey(method.shape)}.${MCP_SERVER_NAME}  to  ${shown.files[0]}  (every other entry kept)`];
       break;
+    case "claude-bridge":
     case "acp-bridge":
       // Relay drives the agent over its own ACP server and hands Relay's MCP
       // tools into the session; no mcp.json is written.
@@ -510,13 +490,7 @@ const runAgentCommands = async (
   const ran: string[] = [];
   for (const [name, ...args] of agentCommands(agent, context)) {
     const file = runtime?.executable ?? name!;
-    let outcome = await runCommand(file, args);
-    // Claude Code says "network source differs from the one declared" when switching builds; remove the old source before adding the new one.
-    if (outcome.code !== 0 && args[0] === "plugin" && args[1] === "marketplace" && args[2] === "add"
-      && /network source differs|differs from the one declared/u.test(`${outcome.stderr}\n${outcome.stdout}`)) {
-      outcome = await runCommand(file, ["plugin", "marketplace", "remove", CLAUDE_PLUGIN_ID.split("@")[1]!]);
-      if (outcome.code === 0) outcome = await runCommand(file, args);
-    }
+    const outcome = await runCommand(file, args);
     const line = shownCommandLine([name!, ...args]);
     if (outcome.code !== 0) {
       // The agent's own words first, then what is true about Relay's side.
@@ -622,8 +596,7 @@ export const runConnect = async (
   // today, so it is never replaced without being told to.
   const replacing: PlanContext["replacing"] = {};
   for (const target of targets) {
-    const path = target === "claude-code" ? join(claudeChannelDir(deps.env, deps.home), ".env")
-      : target === "hermes" ? hermesEnvPath(context(chosen)) : undefined;
+    const path = target === "hermes" ? hermesEnvPath(context(chosen)) : undefined;
     if (!path) continue;
     let existing: string | undefined;
     try { existing = readChannelEnv(await readFile(path, "utf8")).RELAY_AGENT_TOKEN; } catch { /* No file yet. */ }
@@ -682,7 +655,7 @@ export const runConnect = async (
   let bridge: {
     label: string;
     command: string;
-    kind: "codex" | "acp" | "pi";
+    kind: "codex" | "acp" | "pi" | "claude";
     acpArgs?: readonly string[];
     mcpServer: ReturnType<typeof mcpServerSpec>;
   } | undefined;
@@ -693,20 +666,7 @@ export const runConnect = async (
     const method = definition.connect;
     const ctx = context(agent, replacing);
     const result: Record<string, unknown> = { agent: target, files: planned.files, commands: planned.commands };
-    if (method.kind === "claude-plugin") {
-      const channelDir = claudeChannelDir(deps.env, deps.home);
-      const envPath = join(channelDir, ".env");
-      await screen.work("Installing the plugin", () => runAgentCommands(target, runtime, ctx, runCommand), () => "Plugin installed");
-      // An empty list means anyone can message this agent (owner's order,
-      // 2026-09-14); --allow narrows it and nothing waits for a first message.
-      await writeChannelEnv(channelDir, { token: agent.token, baseURL: agent.apiURL, allowedSenders: allowed }, platform);
-      screen.step(`wrote  ${screen.dim(envPath)}`);
-      if (!qrShown && !json) {
-        qrShown = true;
-        showAddQR(agent, deps, screen);
-      }
-      Object.assign(result, { env_path: envPath, plugin: CLAUDE_PLUGIN_ID, marketplace: claudeMarketplaceSource(version), allowed_senders: allowed });
-    } else if (method.kind === "mcp-command") {
+    if (method.kind === "mcp-command") {
       await screen.work(
         `Adding the Relay MCP server to ${codingAgent(target).label}`,
         () => runAgentCommands(target, runtime, ctx, runCommand),
@@ -719,6 +679,8 @@ export const runConnect = async (
     } else if (method.kind === "mcp-file") {
       await writeMcpFileEntry(planned.files[0]!, method.shape, mcpServerSpec(ctx));
       screen.step(`wrote  ${screen.dim(planned.files[0] ?? "")}`);
+    } else if (method.kind === "claude-bridge") {
+      // Relay tools travel through the Agent SDK session; no Claude config is written.
     } else if (method.kind === "acp-bridge") {
       // Nothing is written: the Relay MCP server is handed to the agent's ACP
       // session, and this process drives the agent's turns (acp-bridge.ts).
@@ -739,7 +701,13 @@ export const runConnect = async (
       Object.assign(result, { channel: MCP_SERVER_NAME });
     }
     const start = definition.start;
-    if (start?.kind === "bridge") {
+    if (start?.kind === "claude-bridge") {
+      const command = runtime?.executable ?? start.command;
+      result.bridge_command = command;
+      if (!json && options.start !== false && (options.yes === true || ui !== undefined)) {
+        bridge = { label: definition.label, command, kind: "claude", mcpServer: mcpServerSpec(ctx) };
+      }
+    } else if (start?.kind === "bridge") {
       const command = runtime?.executable ?? start.command;
       result.bridge_command = command;
       // The plan's last line said this starts, and Continue took it.
