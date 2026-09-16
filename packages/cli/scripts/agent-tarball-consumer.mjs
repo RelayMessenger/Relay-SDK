@@ -1,7 +1,6 @@
 import { installedConsoleFixture } from "../../../scripts/agent-cli-console-fixture.mjs";
 // Exercises the installed SDK and CLI program, never workspace imports.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -21,29 +20,14 @@ const originalParentACL = aclModule ? (await aclModule.inspectWindowsAcl(home)).
 const card = { handle: "brave_cangoo", first_name: "Brave Canada Goose", last_name: null, image_url: null, is_active: true, kind: "agent" };
 const output = []; const errors = []; const calls = [];
 let deleteStatus = 409;
-// Nothing typed: the CLI invents "My Agent" and "my_agent", so it also names the
-// bird, by the server's rule (sha256 first byte % 84, manifest order).
-const birds = Array.from({ length: 84 }, (_, index) => `relay-agent-bird-${index.toString(16).padStart(16, "0")}.png`);
-const bird = (origin, handle) => `${origin}/avatars/${birds[createHash("sha256").update(handle, "utf8").digest()[0] % 84]}`;
-const pictures = [];
 const deps = {
   configContext: { env: { RELAY_CONFIG_PATH: configPath, RELAY_AGENT_TOKEN: "unrelated-env-token", RELAY_PROFILE: "default" } },
   stdout: (text) => output.push(text), stderr: (text) => errors.push(text),
   fetch: async (url, init = {}) => {
     calls.push({ url: String(url), init });
-    const { pathname, searchParams } = new URL(String(url));
-    if (pathname === "/avatars/manifest.json") return Response.json({ assets: birds.map((file) => ({ file })), count: 84 });
-    if (init.method === "PATCH") {
-      // The bird is set after creation, for the handle Relay returned, with the new agent's token.
-      assert.equal(new Headers(init.headers).get("authorization"), `Bearer ${token}`);
-      assert.equal(searchParams.get("handle"), card.handle);
-      assert.deepEqual(JSON.parse(init.body), { image_url: bird(configModule.defaultCreationApiURL(), card.handle) });
-      pictures.push(card.handle);
-      return Response.json({ ...card, image_url: bird(configModule.defaultCreationApiURL(), card.handle) });
-    }
     if (init.method === "POST") {
       assert.equal(new Headers(init.headers).get("authorization"), "Bearer rel_org_installedFixtureOnly");
-      assert.deepEqual(JSON.parse(init.body), { handle: "my_agent", displayName: "My Agent" });
+      assert.deepEqual(JSON.parse(init.body), {});
       return Response.json({ agent: card, secret: token, share_url: `https://go.test/@${card.handle}` }, { status: 201 });
     }
     assert.equal(new Headers(init.headers).get("authorization"), init.method === "DELETE" ? "Bearer rel_org_installedFixtureOnly" : `Bearer ${token}`);
@@ -57,8 +41,8 @@ deps.fetch = consoleAuth.wrap(deps.fetch);
 assert.equal(await runCLI(["agents", "create", "--json"], deps), 0);
 assert.equal(JSON.parse(output[0]).handle, card.handle);
 assert.equal(JSON.parse(output[0]).token, "stored");
-assert.deepEqual(pictures, [card.handle]);
-assert.equal(JSON.parse(output[0]).image_url, bird(configModule.defaultCreationApiURL(), card.handle));
+assert.equal(JSON.parse(output[0]).image_url, card.image_url);
+assert.equal(calls.some(({ init }) => init.method === "PATCH"), false);
 
 // The front door ships in the tarball and can say what it would do without
 // creating anything, running anything, or needing a terminal.
