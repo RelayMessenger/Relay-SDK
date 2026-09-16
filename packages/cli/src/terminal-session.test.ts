@@ -25,6 +25,7 @@ it("persists QR with a real observer adapter, separates runtime readiness, resto
   await turn();
   expect(f.text()).toContain("██ QR ██"); expect(f.text()).toContain("watching only; your agent still receives every message"); expect(f.text()).not.toMatch(/ACK|listener|retention|Runtime/);
   expect(f.text()).toContain("Agent: connection not checked"); expect(f.text()).toContain("contact.added");
+  expect(f.renderQR).toHaveBeenCalledExactlyOnceWith(options.agent.shareUrl);
   expect(stopped).toBe(false); f.input.write("q");
   expect(await pending).toEqual({ reason: "quit", observedEvents: 1, observerStopped: true });
   expect(stopped).toBe(true); expect(f.input.isRaw).toBe(false);
@@ -69,7 +70,7 @@ it("resizes without clipping QR and bounds output to terminal height", async () 
   f.input.write("\x04"); await pending; f.input.destroy();
 });
 
-it("shows the compact QR in a short window and full cells in a tall one, never a size complaint", async () => {
+it("shows the same compact QR in short and tall windows, never a size complaint", async () => {
   // The real renderer, not the fixture's stand-in: this is the size rule itself.
   const f = fixture(24); f.output.columns = 80;
   const pending = runTerminalSession(options, { input: f.input, output: f.output, signals: f.signals });
@@ -79,14 +80,12 @@ it("shows the compact QR in a short window and full cells in a tall one, never a
   expect(last()).not.toContain("Enlarge terminal");
   expect(last()).not.toContain("QR unavailable");
   expect(last().split("\n").length).toBeLessThanOrEqual(24);
-  // Tall enough for one text line per module row, so no half-block gap is drawn.
+  // A tall window keeps the same compact rendering.
   f.output.rows = 60; f.output.emit("resize"); await turn();
   expect(last()).toContain("[48;5;16m");
-  expect(last()).not.toMatch(/[▀▄█]/u);
+  expect(last()).toMatch(/[▀▄█]/u);
   expect(last()).not.toContain("Enlarge terminal");
-  // 40 rows is taller than the full code's 35 lines and still has no room for it
-  // once the text is stacked underneath, so the code drops a size rather than
-  // asking the person to resize a window that is already big enough.
+  // Wider windows also keep the compact rendering.
   f.output.rows = 40; f.output.columns = 100; f.output.emit("resize"); await turn();
   expect(last()).toMatch(/[▀▄█]/u);
   expect(last()).not.toContain("Enlarge terminal");

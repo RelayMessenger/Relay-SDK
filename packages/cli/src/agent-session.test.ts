@@ -61,7 +61,7 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
     // The owner saw two identical QR codes stacked in his terminal after
     // `agents create` (2026-09-08): the create screen printed one, then the
     // live view drew its own. Exactly one surface may draw it.
-    // A terminal QR is background-coloured cells now, never a half-block glyph.
+    // A terminal QR paints each half-block cell with fixed cube colours.
     const qr = new RegExp(QR_DARK.replace("[", "\\["), "u");
     const live = await fixture();
     live.terminalSession.mockImplementation(async () => exited);
