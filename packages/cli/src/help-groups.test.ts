@@ -184,3 +184,33 @@ it("a bare command stays clean even when a runtime is driving it", async () => {
   });
   expect(json.join("")).toContain("Docs: https://docs.relayapp.im/llms.txt");
 });
+
+
+it("help agents prints the agents help", async () => {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const code = await runCLI(["help", "agents"], {
+    configContext: { env: {} }, isInteractive: false,
+    stdout: (value) => stdout.push(value), stderr: (value) => stderr.push(value),
+  });
+  expect(code).toBe(0);
+  expect(stdout.join("")).toContain("relaymessenger agents");
+  expect(stdout.join("")).toContain("list");
+  expect(stderr.join("")).toBe("");
+});
+
+it("help names an unknown command before the Docs line and root help", async () => {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const code = await runCLI(["help", "nosuchcommand"], {
+    configContext: { env: {} }, isInteractive: false,
+    stdout: (value) => stdout.push(value), stderr: (value) => stderr.push(value),
+  });
+  expect(code).toBe(2);
+  const error = stderr.join("");
+  expect(error).toMatch(/^error: unknown command 'nosuchcommand'\nDocs: /u);
+  expect(error).toContain("USAGE");
+  expect(error).toContain("TOPICS");
+  expect(error.indexOf("Docs:")).toBeLessThan(error.indexOf("USAGE"));
+  expect(stdout.join("")).toBe("");
+});
