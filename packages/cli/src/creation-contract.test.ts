@@ -45,8 +45,8 @@ it("does not advertise or accept the obsolete token-name option", async () => {
   const connect = program.commands.find(c => c.name() === "connect")!;
   expect(create.options.some(option => option.long === "--token-name")).toBe(false);
   expect(create.helpInformation()).not.toContain("--token-name");
-  expect(create.helpInformation()).toContain("one word, 3 to 32 lowercase letters");
-  expect(connect.helpInformation()).toContain("one word, 3 to 32 lowercase letters");
+  expect(create.helpInformation()).toContain("the agent's handle");
+  expect(connect.helpInformation()).toContain("the agent's handle");
   const fetch = vi.fn(), consoleLogin = vi.fn();
   expect(await runCLI(["--json", "--no-input", "agents", "create", "--token-name", "old"], {
     fetch, consoleLogin, stdout: () => undefined, stderr: () => undefined,

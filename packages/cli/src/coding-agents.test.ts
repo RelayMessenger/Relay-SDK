@@ -24,11 +24,11 @@ it("the help's Supported agents line is built from the registry", () => {
   const connect = createProgram({ configContext: { env: {}, home: "/home/dev" } }).commands.find((command) => command.name() === "connect")!;
   const help = connect.helpInformation();
   expect(help.startsWith(`Usage: relaymessenger connect [options] [agent]\n${supportedAgentsLine()}\n`)).toBe(true);
-  expect(help).toMatch(/^  agent +Runtime to connect \(see Runs in above\)$/mu);
-  expect(help).toMatch(/^  -y, --yes +replace an existing runtime token without asking$/mu);
+  expect(help).toMatch(/^  agent +the runtime to connect$/mu);
+  expect(help).toMatch(/^  -y, --yes +token replacement without asking$/mu);
   // Gone: the old argument line and the old runtime words.
   expect(help).not.toContain("what will answer as this agent");
-  expect(help).not.toContain("coding agent");
+  expect(help).toContain("connect a coding agent and wait for a reply");
 });
 
 it("claude stays as an alias of claude-code; ids and aliases resolve, nonsense does not", () => {
