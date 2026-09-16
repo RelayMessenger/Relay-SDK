@@ -96,7 +96,7 @@ export const releasePackages = {
       run: {
         entry: "dist/cli.js",
         args: ["--help"],
-        expect: "Message the agent on your computer from your phone.",
+        expect: "Message the agent on your computer from your phone",
       },
     },
   },
