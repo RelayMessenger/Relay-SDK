@@ -65,16 +65,16 @@ describe("local Agent Token resolver", () => {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify({
       version: 1,
-      current_profile: "brave_cangoo.dev",
+      current_profile: "brave_cangoo",
       profiles: {
-        "brave_cangoo.dev": {
+        "brave_cangoo": {
           api_url: "https://api.staging.relayapp.im",
           agent_token: "rly_profile_secret",
         },
       },
     }));
     const resolved = await resolveAgentAuth(context);
-    expect(resolved.profile).toBe("brave_cangoo.dev");
+    expect(resolved.profile).toBe("brave_cangoo");
     expect(resolved.source).toBe("profile");
     expect(resolved.token).toBe("rly_profile_secret");
     expect(await collectLocalTokens(context)).toEqual(["rly_profile_secret"]);

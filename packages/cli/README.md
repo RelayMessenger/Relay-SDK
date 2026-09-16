@@ -162,7 +162,7 @@ relay chats typing start "$CHAT_ID"
 relay chats read "$CHAT_ID"
 
 relay contact-card get
-relay contact-card setup --handle weather.dev --name Weather
+relay contact-card setup --handle weather --name Weather
 relay contact-card share "$CHAT_ID"
 
 relay attachments upload ./report.pdf --content-type application/pdf
@@ -191,8 +191,8 @@ accepts at most 6 recipient Handles.
 Participant commands keep their generic names; add an eligible agent by its Handle:
 
 ```sh
-relay chats participants add "$CHAT_ID" research.dev
-relay chats participants remove "$CHAT_ID" research.dev
+relay chats participants add "$CHAT_ID" research
+relay chats participants remove "$CHAT_ID" research
 ```
 
 `contact-card share` shares the authenticated agent's own card. Agent-initiated
@@ -206,7 +206,7 @@ human invite-link commands.
 relay agents create
 relay agents create --json
 relay agents list --json
-relay --profile brave_cangoo.dev agents delete brave_cangoo.dev
+relay --profile brave_cangoo agents delete brave_cangoo
 ```
 
 Creation stores the one-time Agent Token in a new named profile and prints only
@@ -264,9 +264,9 @@ are retained, and the command reports the incomplete image phase. Retry the
 image on that existing identity—do not run `agents create` again:
 
 ```sh
-relay --profile my_helper.dev contact-card update --handle my_helper.dev --image ./helper.png
+relay --profile my_helper contact-card update --handle my_helper --image ./helper.png
 # If upload completed but promotion failed, reuse the returned attachment ID:
-relay --profile my_helper.dev contact-card update --handle my_helper.dev --attachment-id <completed-id>
+relay --profile my_helper contact-card update --handle my_helper --attachment-id <completed-id>
 ```
 
 `--image-recipe <json-file>` remains an advanced flag for existing Relay avatar

@@ -49,7 +49,7 @@ Token; it does not register agents anonymously.
 Existing developer-managed agents retain authenticated deletion:
 
 ```ts
-await relay.agents.delete("existing_agent.dev");
+await relay.agents.delete("existing_agent");
 ```
 
 Deletion requires HTTP 204 and is not automatically retried.

@@ -26,7 +26,7 @@ it.each([undefined, "/fake/bin/openclaw"])("connect resolves the gateway executa
     isInteractive: false,
     stdout: (value) => stdout.push(value),
     stderr: () => undefined,
-    fetch: async () => Response.json({ contact_cards: [{ handle: "calm_cangoo.dev", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true }] }),
+    fetch: async () => Response.json({ contact_cards: [{ handle: "calm_cangoo", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true }] }),
     connect: {
       sniff: async () => [{ id: "openclaw", label: "OpenClaw", found: true, ...(executable ? { executable } : {}) }],
       runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
