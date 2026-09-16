@@ -115,6 +115,7 @@ const envelope = (
       kind: "user",
       display_name: "Advait",
       image_url: null,
+      image_color: null,
       about: null,
       verified: false,
       is_contact: true,

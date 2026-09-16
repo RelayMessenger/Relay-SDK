@@ -31,6 +31,7 @@ export const WEBHOOK_SECRET = `whsec_${bytesToBase64(secretBytes)}`;
 
 export const USER_HANDLE: RelayChatHandle = {
   image_url: null,
+  image_color: null,
   display_name: "Ada",
   handle: "ada",
   id: IDS.user,
@@ -45,6 +46,7 @@ export const USER_HANDLE: RelayChatHandle = {
 
 export const AGENT_HANDLE: RelayChatHandle = {
   image_url: null,
+  image_color: null,
   display_name: "Relay Agent",
   handle: "relay-agent",
   id: IDS.agent,

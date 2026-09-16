@@ -42,6 +42,7 @@ const inboundEvent = {
       joined_at: new Date().toISOString(),
       display_name: "Harness",
       image_url: null,
+      image_color: null,
       about: null,
       verified: false,
       is_contact: true,
