@@ -89,7 +89,7 @@ it.each([401, 403, 500])("failed validation HTTP %s preserves existing OAuth and
   const before = await readFile(f.context.env.RELAY_CONFIG_PATH, "utf8");
   const fetch = vi.fn(async () => Response.json({ error: key }, { status }));
   expect(await runCLI(["--json", "--no-input", "login", "--with-token"], { ...f.cli, fetch })).toBe(status === 401 ? 4 : 1);
-  expect(JSON.parse(f.err.join("")).code).toBe(status === 401 ? "no_token" : "refused");
+  expect(JSON.parse(f.err.join("")).code).toBe(status === 401 ? "signin_expired" : "refused");
   expect(await readFile(f.context.env.RELAY_CONFIG_PATH, "utf8")).toBe(before);
   expect(fetch).toHaveBeenCalledOnce();
   expect(f.err.join("")).not.toContain(key);
@@ -111,7 +111,7 @@ it.each([401, 403, 500])("saved key rejection HTTP %s never refreshes or falls b
   await consoleLoginWithKey(f.deps, key);
   const fetch = vi.fn(async () => Response.json({ error: key }, { status }));
   const openBrowser = vi.fn();
-  await expect(consoleLoginOrReuse({ context: f.context, fetch, openBrowser })).rejects.toThrow(`HTTP ${status}`);
+  await expect(consoleLoginOrReuse({ context: f.context, fetch, openBrowser })).rejects.toThrow(status === 401 ? "Your Relay Console sign-in expired." : `HTTP ${status}`);
   expect(fetch).toHaveBeenCalledOnce();
   expect(fetch.mock.calls[0]?.[0]).toBe(`${api}/me`);
   expect(openBrowser).not.toHaveBeenCalled();
@@ -138,7 +138,7 @@ it.each([["login"], ["whoami"], ["agents", "create", "--name", "Rejected"]])(
     const fetch = vi.fn(async () => Response.json({ error: key }, { status: 401 }));
     const before = await readFile(f.context.env.RELAY_CONFIG_PATH, "utf8");
     expect(await runCLI(["--json", "--no-input", ...args], { ...f.cli, fetch })).toBe(4);
-    expect(JSON.parse(f.err.join("")).code).toBe("no_token");
+    expect(JSON.parse(f.err.join("")).code).toBe("signin_expired");
     expect(await readFile(f.context.env.RELAY_CONFIG_PATH, "utf8")).toBe(before);
     expect(fetch).toHaveBeenCalledExactlyOnceWith(`${api}/me`, expect.objectContaining({
       headers: expect.objectContaining({ Authorization: `Bearer ${key}` }),
@@ -154,7 +154,7 @@ it.each([["login", "--with-token"], ["whoami"]])("non-JSON HTTP 401 exits 4 for 
   const before = await readFile(f.context.env.RELAY_CONFIG_PATH, "utf8");
   const fetch = vi.fn(async () => new Response(`Unauthorized ${key}`, { status: 401 }));
   expect(await runCLI(["--json", "--no-input", ...args], { ...f.cli, fetch })).toBe(4);
-  expect(JSON.parse(f.err.join("")).code).toBe("no_token");
+  expect(JSON.parse(f.err.join("")).code).toBe("signin_expired");
   expect(f.err.join("")).not.toContain(key);
   expect(await readFile(f.context.env.RELAY_CONFIG_PATH, "utf8")).toBe(before);
   expect(fetch).toHaveBeenCalledOnce();

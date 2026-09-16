@@ -85,7 +85,7 @@ export class ConsoleRefusal extends Error {
 
 const json = async <T>(response: Response): Promise<T> => {
   if (response.status === 401) {
-    throw new CliError("Relay Console returned HTTP 401. Run relay login.", "no_token");
+    throw new CliError("Your Relay Console sign-in expired.", "signin_expired");
   }
   if (response.status === 204) return undefined as T;
   const text = await response.text();
@@ -276,9 +276,7 @@ export const consoleLoginWithKey = async (
     }));
     if (typeof me?.org?.id !== "string" || !me.org.id) throw new Error("Missing organization");
   } catch (error) {
-    if (error instanceof CliError && error.code === "no_token") {
-      throw new CliError("Relay Console rejected this organization API key. Nothing was changed. Run relay login --with-token.", "no_token");
-    }
+    if (error instanceof CliError && error.code === "signin_expired") throw error;
     throw new Error("Relay Console could not validate this organization API key. Nothing was changed.");
   }
   const session: RelayConsoleOrganizationKey = {
@@ -481,14 +479,14 @@ export const consoleRequest = async <T>(
         error instanceof Error ? error.message : "Relay Console request failed.",
         [session.organization_key],
       );
-      if (error instanceof CliError && error.code === "no_token") throw new CliError(message, "no_token");
+      if (error instanceof CliError) throw new CliError(message, error.code);
       if (error instanceof ConsoleRefusal) throw new ConsoleRefusal(message, error.status, error.code);
       throw new Error(message);
     }
   }
   // No refresh: a Relay-Auth session token lives 30 days and relay login renews it.
   if (session.expires_at <= Date.now()) {
-    throw new CliError("Relay Console session expired. Run relay login.", "no_token");
+    throw new CliError("Your Relay Console sign-in expired.", "signin_expired");
   }
   const response = await httpFetch(deps)(`${api}${path}`, {
     ...init,

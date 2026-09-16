@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { defaultAuthURL, defaultConsoleApiURL, emptyConfig, readConfig, writeConfig } from "./config.js";
 import { consoleLogin, consoleLoginOrReuse, consoleRequest, consoleSignOut } from "./console-auth.js";
+import { describeFailure } from "./errors.js";
+import { EXIT_CODES } from "./exit-codes.js";
 
 const AUTH = "https://auth.staging.relayapp.im";
 const CONSOLE = "https://console.staging.relayapp.im/api";
@@ -262,7 +264,11 @@ it("sends the bearer to every Console call, never refreshes, and asks for relay 
   const expired = await readConfig(context);
   expired.console = { ...config.console, expires_at: Date.now() - 1 };
   await writeConfig(expired, context);
-  await expect(consoleRequest({ context, fetch }, "/me")).rejects.toThrow("Run relay login.");
+  const error = await consoleRequest({ context, fetch }, "/me").catch(error => error);
+  expect(describeFailure(error)).toEqual({
+    error: "Your Relay Console sign-in expired.", code: "signin_expired",
+    next_step: "Run  npx relaymessenger login  to sign in again.", exit: EXIT_CODES.signInNeeded,
+  });
   expect(fetch).toHaveBeenCalledOnce();
 });
 
@@ -302,3 +308,21 @@ it("round-trips a private Console session without printing or changing agent pro
 });
 
 afterEach(() => vi.restoreAllMocks());
+
+it.each(["session", "organization_key"])("reports an expired sign-in for a /me 401 with %s credentials", async (type) => {
+  const context = { env: { RELAY_CONFIG_PATH: await scratch("relay-console-revoked-") } };
+  const config = emptyConfig();
+  config.console = type === "organization_key"
+    ? { type: "organization_key", organization_key: "rel_org_secret", organization_id: "org_1", console_api_url: CONSOLE }
+    : { access_token: "session-secret", expires_at: Date.now() + 3600_000, organization_id: "org_1", user: { id: "user_1", email: "ada@acme.com" } };
+  await writeConfig(config, context);
+  const fetch = vi.fn(async (_input: string | URL | Request) => new Response(null, { status: 401 }));
+  const error = await consoleRequest({ context, apiURL: "https://api.staging.relayapp.im", fetch }, "/me").catch(error => error);
+  const failure = describeFailure(error);
+  expect(failure).toEqual({
+    error: "Your Relay Console sign-in expired.", code: "signin_expired",
+    next_step: "Run  npx relaymessenger login  to sign in again.", exit: EXIT_CODES.signInNeeded,
+  });
+  expect(JSON.stringify(failure)).not.toContain("connect");
+  expect(fetch.mock.calls[0]?.[0]).toBe(`${CONSOLE}/me`);
+});

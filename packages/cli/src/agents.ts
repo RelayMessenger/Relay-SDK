@@ -219,6 +219,9 @@ export async function deleteAgent(handle: string, profile: string | undefined, d
       await deps.client(auth.token, auth.apiURL).agents.delete(handle, { maxRetries: 0 });
     }
   } catch (error) {
+    if (error instanceof CliError && error.code === "signin_expired") {
+      throw new CliError("Relay could not delete this agent because your Console sign-in expired. The token saved on this computer is unchanged.", error.code);
+    }
     throw safeAPIFailure(`Relay could not confirm this agent was deleted, so the token saved on this computer is unchanged.${apiFailure(error)}`, error);
   }
   let removed;
