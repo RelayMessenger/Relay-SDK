@@ -1,5 +1,5 @@
 import { stripVTControlCharacters } from "node:util";
-import { renderTerminalQR, type TerminalQROptions } from "./qr-terminal.js";
+import { renderTerminalQR } from "./qr-terminal.js";
 import { runTerminalWatch, terminalText, type TerminalObserver, type TerminalRuntimeOwnership, type TerminalWatchStatus } from "./terminal-watch.js";
 
 export interface TerminalAgent {
@@ -44,7 +44,7 @@ export interface TerminalSessionIO {
   input?: TerminalInput;
   output?: TerminalOutput;
   signals?: Pick<NodeJS.Process, "on" | "off">;
-  renderQR?: (publicUrl: string, options?: TerminalQROptions) => Promise<string>;
+  renderQR?: (publicUrl: string) => Promise<string>;
 }
 export interface TerminalSessionResult {
   reason: "quit" | "aborted" | "input-ended" | "non-interactive" | "terminal-error";
@@ -55,20 +55,12 @@ const ENTER_SCREEN = "\u001b[?1049h\u001b[?25l";
 const LEAVE_SCREEN = "\u001b[0m\u001b[?25h\u001b[?1049l";
 const CLEAR = "\u001b[H\u001b[2J";
 const HELP = "c · redraw QR    ? · help    q / Ctrl-C / Ctrl-D · stop viewing";
-const defaultQR = async (url: string, options: TerminalQROptions = {}): Promise<string> => renderTerminalQR(url, options);
-/** No rows at all, so the renderer gives its smallest standard form. */
-const COMPACT: TerminalQROptions = { rows: 0 };
+const defaultQR = async (url: string): Promise<string> => renderTerminalQR(url);
 /** The largest frame this view ever draws. Everything is clamped to it. */
 const MAX_COLUMNS = 240;
 const MAX_ROWS = 100;
-/**
- * The most a drawn code can be worth keeping. A full cell is two columns painted
- * with a 17-character escape pair, so this is the widest and tallest code the
- * view could ever place; anything larger would be dropped by the layout anyway.
- * Sized from the frame, never guessed: full cells cost about 21,000 characters
- * for a share link, which the old flat 20,000 silently threw away.
- */
-const QR_CHARACTER_LIMIT = MAX_ROWS * (MAX_COLUMNS / 2) * 17;
+/** Each compact cell carries two colour escapes and one glyph, plus each row's reset. */
+const QR_CHARACTER_LIMIT = MAX_ROWS * (MAX_COLUMNS * 23 + 5);
 function publicShareUrl(value: string, secrets: readonly string[]): string | undefined {
   if (value.length > 1024 || terminalText(value, secrets, 1024) !== value) return;
   try {
@@ -98,17 +90,13 @@ export async function runTerminalSession(options: TerminalSessionOptions, io: Te
   if (options.signal?.aborted) return { reason: "aborted", observedEvents: 0, observerStopped: true };
   const secrets = options.secrets ?? [];
   const share = publicShareUrl(options.agent.shareUrl, secrets);
-  // Both standard sizes are drawn once, here: the window can be resized at any
-  // moment, and the redraw picks the size that fits without waiting on the encoder.
-  let qrFull = "";
-  let qrCompact = "";
+  // Draw once; resizing only changes where the same compact code is placed.
+  let qr = "";
   if (share) {
     const draw = io.renderQR ?? defaultQR;
     try {
-      qrFull = await draw(share);
-      if (qrFull.length > QR_CHARACTER_LIMIT) qrFull = "";
-      qrCompact = await draw(share, COMPACT);
-      if (qrCompact.length > QR_CHARACTER_LIMIT) qrCompact = "";
+      qr = await draw(share);
+      if (qr.length > QR_CHARACTER_LIMIT) qr = "";
     }
     catch { /* Public link remains usable; QR exceptions are never displayed. */ }
   }
@@ -152,8 +140,8 @@ export async function runTerminalSession(options: TerminalSessionOptions, io: Te
       return result.length ? result : [""];
     };
     // A QR is scannable only whole, so lay out the code beside the text when it
-    // fits, above it when it does not, and say nothing about size until neither
-    // size of the code fits at all.
+    // fits, above it when it does not, and say nothing about size until the
+    // whole code no longer fits.
     const place = (painted: string): string[] | undefined => {
       if (!painted) return undefined;
       const qrLines = painted.trimEnd().split("\n");
@@ -171,8 +159,8 @@ export async function runTerminalSession(options: TerminalSessionOptions, io: Te
       }
       return undefined;
     };
-    let header = place(qrFull) ?? place(qrCompact)
-      ?? [qrFull || qrCompact ? "Enlarge terminal to display the full QR." : "QR unavailable; use the public link below.", ...info].flatMap(line => wrap(line, width));
+    let header = place(qr)
+      ?? [qr ? "Enlarge terminal to display the full QR." : "QR unavailable; use the public link below.", ...info].flatMap(line => wrap(line, width));
     header.push(...wrap(HELP, width));
     const available = Math.max(0, height - header.length - 1);
     if (available) header.push(...lines.slice(-available).map(line => Array.from(line).slice(0, width).join("")));
