@@ -58,7 +58,6 @@ it("@vercel/detect-agent's names map onto ours, and unknown names onto nothing",
  * home; Codex's is the project layer under the folder connect runs in. The four
  * ACP-bridge agents (cursor, opencode, cline, gemini-cli) write none. */
 const FILE_AGENTS = {
-  "claude-code": [".claude", "channels", "relay", ".env"],
   codex: ["project", ".codex", "config.toml"],
   vscode: [".config", "Code", "User", "mcp.json"],
   hermes: [".hermes", ".env"],
@@ -69,7 +68,7 @@ it("every agent has a plan that names the file it writes, or an ACP bridge that 
   for (const id of AGENTS) {
     const plan = agentPlan(id, context());
     expect(plan.steps.length, id).toBeGreaterThan(0);
-    if (codingAgent(id).connect.kind === "acp-bridge" || codingAgent(id).connect.kind === "pi-channel" || id === "openclaw") {
+    if (id === "claude-code" || codingAgent(id).connect.kind === "acp-bridge" || codingAgent(id).connect.kind === "pi-channel" || id === "openclaw") {
       // The ACP bridge writes no file; the Relay MCP server travels through the
       // agent's session (acp-bridge.ts). OpenClaw's own `channels add` keeps
       // the token, so Relay writes no OpenClaw file either.
@@ -115,9 +114,7 @@ it("every agent's plan is at most three lines: what is installed, what is writte
     expect(plan.agents.map((entry) => entry.agent)).toEqual([id]);
   }
   expect(runtimeConnectPlan({ ...context({ start: true }), agents: ["claude-code"] }).steps).toEqual([
-    "install  the Relay plugin for Claude Code  (claude plugin marketplace add RelayMessenger/Relay-SDK@staging; claude plugin install relay@relay-messenger --yes)",
-    "write  /home/dev/.claude/channels/relay/.env  (token, API address, allowed senders)",
-    "start Claude Code with Relay when you are ready",
+    "keep running here, and answer your Relay messages with Claude Code from this folder  (Relay's tools travel through the session; no mcp.json is written)",
   ]);
   expect(runtimeConnectPlan({ ...context(), agents: ["cursor"], ask: false }).headline).toBe("Relay will do 1 thing.");
 });
@@ -126,13 +123,12 @@ it("every agent's plan is at most three lines: what is installed, what is writte
 it("every agent plan uses Windows separators independently of the host", () => {
   const windows = context({ platform: "win32", home: "C:\\Users\\dev", cwd: "C:\\Users\\dev\\project" });
   const expected: Record<string, string> = {
-    "claude-code": ".claude/channels/relay/.env",
     codex: "project/.codex/config.toml",
     vscode: "AppData/Roaming/Code/User/mcp.json",
     hermes: ".hermes/.env",
   };
   for (const id of AGENTS) {
-    if (codingAgent(id).connect.kind === "acp-bridge" || codingAgent(id).connect.kind === "pi-channel" || id === "openclaw") {
+    if (id === "claude-code" || codingAgent(id).connect.kind === "acp-bridge" || codingAgent(id).connect.kind === "pi-channel" || id === "openclaw") {
       expect(agentFiles(id, windows), id).toEqual([]);
     } else {
       expect(agentFiles(id, windows)[0], id).toBe(win32.join(windows.home, expected[id]!));

@@ -6,6 +6,8 @@ import { homedir } from "node:os";
 import { clackPrompts, chooseInteractiveCommand, interactiveAllowed, interactiveEntry, HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { runConnect, ConnectFailure, type ConnectOptions as ConnectRunOptions } from "./connect.js";
 import { codexCommand, runCodexBridge } from "./codex-bridge.js";
+import { claudeCommand, runClaudeBridge } from "./claude-bridge.js";
+import { openClaudeThreads } from "./claude-threads.js";
 import { openCodexThreads } from "./codex-threads.js";
 import { acpCommand, relayMcpServer, runAcpBridge } from "./acp-bridge.js";
 import { openAcpSessions } from "./acp-threads.js";
@@ -357,6 +359,16 @@ export const createProgram = (
                 piCommand: input.command,
                 relay: relayClient(),
               }, control.signal);
+            } else if (input.kind === "claude") {
+              await runClaudeBridge({
+                client: relayClient(),
+                claude: await claudeCommand(input.command, env),
+                cwd: input.cwd,
+                threads: await openClaudeThreads({ apiURL: input.apiURL, handle: input.handle }, configContext),
+                mcpServer: input.mcpServer,
+                signal: control.signal,
+                say: input.say,
+              });
             } else if (input.kind === "acp") {
               await runAcpBridge({
                 client: relayClient(),

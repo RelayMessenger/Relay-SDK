@@ -51,6 +51,7 @@ export interface CodingAgent {
      * person already asked it.
      */
     | { kind: "bridge"; command: string; prompt: string }
+    | { kind: "claude-bridge"; command: string; prompt: string }
     /**
      * Connect keeps running and answers Relay messages by driving the agent
      * over the Agent Client Protocol (acp-bridge.ts). `args` is the ACP

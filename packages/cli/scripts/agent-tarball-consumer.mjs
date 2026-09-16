@@ -50,8 +50,9 @@ const plan = [];
 assert.equal(await runCLI(["connect", "claude", "--dry-run"], {
   ...deps, isInteractive: false, stdout: (text) => plan.push(text), stderr: (text) => plan.push(text),
 }), 0);
-assert.match(plan.join(""), /claude plugin marketplace add RelayMessenger\/Relay-SDK@/);
-assert.match(plan.join(""), /channels[\\/]relay[\\/]\.env/);
+assert.match(plan.join(""), /keep running here, and answer your Relay messages with Claude Code from this folder/);
+assert.match(plan.join(""), /Relay's tools travel through the session; no mcp\.json is written/);
+assert.doesNotMatch(plan.join(""), /\.env|marketplace/);
 assert.match(plan.join(""), /Dry run: nothing was changed\./);
 assert.equal(plan.join("").includes(token), false);
 
