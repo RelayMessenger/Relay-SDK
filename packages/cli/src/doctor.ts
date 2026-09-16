@@ -3,9 +3,12 @@ import type Relay from "@relaymessenger/sdk";
 import type { ConfigContext } from "./config.js";
 import {
   inspectConfigPermissions,
+  readConfig,
   resolveAuth,
   validateApiURL,
 } from "./config.js";
+
+import { CliError } from "./error-codes.js";
 
 export interface DoctorCheck {
   name: string;
@@ -57,6 +60,30 @@ export const runDoctor = async (
       : "no config file yet, which is fine when the token comes from RELAY_AGENT_TOKEN",
   });
 
+  let signedIn = false;
+  let noAgentsYet = false;
+  try {
+    const config = await readConfig(dependencies.configContext);
+    const session = config.console;
+    signedIn = Boolean(session && (session.type === "organization_key" || session.expires_at > Date.now()));
+    noAgentsYet = Object.keys(config.profiles).length === 1
+      && config.profiles.default !== undefined
+      && !config.profiles.default.agent_token;
+    checks.push({
+      name: "Sign-in",
+      ok: signedIn,
+      detail: signedIn && session
+        ? session.type === "organization_key" ? session.organization_id : session.user.email
+        : "Not signed in. Run npx relaymessenger login",
+    });
+  } catch (error) {
+    checks.push({
+      name: "Sign-in",
+      ok: false,
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   let auth: Awaited<ReturnType<typeof resolveAuth>> | undefined;
   try {
     auth = await resolveAuth(options.profile, dependencies.configContext);
@@ -71,10 +98,14 @@ export const runDoctor = async (
       detail: validateApiURL(auth.apiURL),
     });
   } catch (error) {
+    const freshSignIn = signedIn && noAgentsYet
+      && error instanceof CliError && error.code === "no_token";
     checks.push({
       name: "Token",
-      ok: false,
-      detail: error instanceof Error ? error.message : String(error),
+      ok: freshSignIn,
+      detail: freshSignIn
+        ? "No agents yet. Run npx relaymessenger connect"
+        : error instanceof Error ? error.message : String(error),
     });
   }
 
