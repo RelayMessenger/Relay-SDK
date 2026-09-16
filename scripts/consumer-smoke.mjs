@@ -95,6 +95,7 @@ try {
     "is_me",
     "display_name",
     "image_url",
+    "image_color",
     "about",
     "verified",
     "is_contact",
