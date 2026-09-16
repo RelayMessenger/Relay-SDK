@@ -1625,8 +1625,20 @@ export const createProgram = (
   // Last, so only the root's own help command takes this group: set earlier, the
   // default would be inherited by every subcommand and put an "Everything else"
   // heading on ten help screens that have no such section.
-  program.commandsGroup(HELP_GROUPS.everythingElse)
-    .helpCommand("help [command]", "show what a command does and the options it takes");
+  program.commandsGroup(HELP_GROUPS.everythingElse).helpCommand(false);
+  program.command("help")
+    .argument("[command]", "command to show help for")
+    .description("show what a command does and the options it takes")
+    .action((name?: string) => {
+      const target = name === undefined ? program : program.commands.find(
+        (command) => command.name() === name || command.aliases().includes(name),
+      );
+      if (!target) {
+        program.showHelpAfterError(!dependencies.json);
+        return program.error(`error: unknown command '${name}'`, { code: "commander.unknownCommand", exitCode: 2 });
+      }
+      target.help();
+    });
 
   return program;
 };
