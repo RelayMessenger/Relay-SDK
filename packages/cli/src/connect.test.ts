@@ -5,10 +5,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runCLI, type ProgramDependencies } from "./program.js";
+import { agentDependencies } from "./agents.js";
 import { readConfig } from "./config.js";
 import type { InteractivePrompts, SelectOption } from "./interactive.js";
 import {
-  claudeMarketplaceSource, CLAUDE_PLUGIN_ID,
+  claudeMarketplaceSource, CLAUDE_PLUGIN_ID, ConnectFailure, runConnect,
   linkedLine, NO_TTY_NEXT_STEP, NO_TTY_SENTENCE, SAY_HI,
 } from "./connect.js";
 import type { TextOptions } from "./interactive.js";
@@ -278,6 +279,69 @@ describe("the Claude Code path", () => {
     const written = await readFile(join(f.channel, ".env"), "utf8");
     expect(written).toContain(token);
     expect(written).not.toContain(kept);
+  });
+
+  const sourceMismatch = 'Failed to add marketplace: Cannot add marketplace "relay-messenger": its network source differs from the one declared for it in settings (kind, target, or a fetch-shaping field such as headers / ref / path / sparsePaths); the source must match the one declared for this name in settings (or change the declaration).';
+  const connectClaude = (f: Awaited<ReturnType<typeof fixture>>) => runConnect("claude", {
+    new: true, yes: true, start: false, skill: false,
+  }, {
+    agents: agentDependencies(f.deps.configContext, f.deps.fetch),
+    env: f.env, home: f.home, cwd: f.home,
+    stdout: f.deps.stdout!, stderr: f.deps.stderr!, prompts: f.prompts,
+    fetch: f.deps.fetch, consoleLogin: f.deps.consoleLogin,
+    ...f.deps.connect,
+  });
+
+  it.each([sourceMismatch, "source differs from the one declared"])("re-adds a moved marketplace before installing and enabling the plugin: %s", async (stderr) => {
+    const f = await fixture();
+    f.runCommand.mockResolvedValueOnce({ code: 1, stdout: "", stderr });
+    await expect(connectClaude(f)).resolves.toBeUndefined();
+    expect(ranLines(f)).toEqual([
+      `/fake/bin/claude plugin marketplace add ${claudeMarketplaceSource("0.1.6-staging.0")}`,
+      "/fake/bin/claude plugin marketplace remove relay-messenger",
+      `/fake/bin/claude plugin marketplace add ${claudeMarketplaceSource("0.1.6-staging.0")}`,
+      `/fake/bin/claude plugin install ${CLAUDE_PLUGIN_ID} --yes`,
+      `/fake/bin/claude plugin enable ${CLAUDE_PLUGIN_ID}`,
+    ]);
+  });
+
+  it("throws ConnectFailure with the retry output and never installs when re-adding fails", async () => {
+    const f = await fixture();
+    f.runCommand
+      .mockResolvedValueOnce({ code: 1, stdout: "", stderr: sourceMismatch })
+      .mockResolvedValueOnce({ code: 0, stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ code: 1, stdout: "", stderr: "retry could not fetch marketplace" });
+    const failure = connectClaude(f);
+    await expect(failure).rejects.toBeInstanceOf(ConnectFailure);
+    await expect(failure).rejects.toThrow("retry could not fetch marketplace");
+    expect(ranLines(f)).toEqual([
+      `/fake/bin/claude plugin marketplace add ${claudeMarketplaceSource("0.1.6-staging.0")}`,
+      "/fake/bin/claude plugin marketplace remove relay-messenger",
+      `/fake/bin/claude plugin marketplace add ${claudeMarketplaceSource("0.1.6-staging.0")}`,
+    ]);
+  });
+
+  it("throws ConnectFailure without retrying the add when removal fails", async () => {
+    const f = await fixture();
+    f.runCommand
+      .mockResolvedValueOnce({ code: 1, stdout: "", stderr: sourceMismatch })
+      .mockResolvedValueOnce({ code: 1, stdout: "", stderr: "could not remove marketplace" });
+    const failure = connectClaude(f);
+    await expect(failure).rejects.toBeInstanceOf(ConnectFailure);
+    await expect(failure).rejects.toThrow("could not remove marketplace");
+    expect(ranLines(f)).toEqual([
+      `/fake/bin/claude plugin marketplace add ${claudeMarketplaceSource("0.1.6-staging.0")}`,
+      "/fake/bin/claude plugin marketplace remove relay-messenger",
+    ]);
+  });
+
+  it("throws immediately without removing for an unrelated marketplace failure", async () => {
+    const f = await fixture();
+    f.runCommand.mockResolvedValueOnce({ code: 1, stdout: "", stderr: "marketplace not found" });
+    await expect(connectClaude(f)).rejects.toBeInstanceOf(ConnectFailure);
+    expect(ranLines(f)).toEqual([
+      `/fake/bin/claude plugin marketplace add ${claudeMarketplaceSource("0.1.6-staging.0")}`,
+    ]);
   });
 
   it("a failed plugin command says the agent's own words and writes nothing", async () => {

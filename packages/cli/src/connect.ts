@@ -510,7 +510,13 @@ const runAgentCommands = async (
   const ran: string[] = [];
   for (const [name, ...args] of agentCommands(agent, context)) {
     const file = runtime?.executable ?? name!;
-    const outcome = await runCommand(file, args);
+    let outcome = await runCommand(file, args);
+    // Claude Code says "network source differs from the one declared" when switching builds; remove the old source before adding the new one.
+    if (outcome.code !== 0 && args[0] === "plugin" && args[1] === "marketplace" && args[2] === "add"
+      && /network source differs|differs from the one declared/u.test(`${outcome.stderr}\n${outcome.stdout}`)) {
+      outcome = await runCommand(file, ["plugin", "marketplace", "remove", CLAUDE_PLUGIN_ID.split("@")[1]!]);
+      if (outcome.code === 0) outcome = await runCommand(file, args);
+    }
     const line = shownCommandLine([name!, ...args]);
     if (outcome.code !== 0) {
       // The agent's own words first, then what is true about Relay's side.
