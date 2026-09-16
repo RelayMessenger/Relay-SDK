@@ -16,6 +16,7 @@ import { CODING_AGENT_IDS, codingAgent } from "./coding-agents.js";
 import type { RuntimeFound } from "./runtime-sniff.js";
 import type { TerminalObserver } from "./terminal-watch.js";
 import { expectOwnerOnly } from "./private-file.test.js";
+import { TerminalQRSizeError } from "./qr-terminal.js";
 
 const token = `rel_token_${"C".repeat(43)}`;
 const card = { handle: "calm_cangoo", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true };
@@ -80,6 +81,15 @@ async function fixture(overrides: Partial<ProgramDependencies> = {}, sniffed: Ru
 
 const ranLines = (f: Awaited<ReturnType<typeof fixture>>): string[] =>
   f.runCommand.mock.calls.map(([file, args]) => [file, ...(args as string[])].join(" "));
+
+it("keeps the public link and a short resize hint when the QR cannot fit", async () => {
+  const f = await fixture();
+  f.deps.connect!.renderQR = () => { throw new TerminalQRSizeError(); };
+  expect(await runCLI(["connect", "claude", "--token", token, "--yes", "--no-start", "--no-skill"], f.deps)).toBe(0);
+  expect(f.stdout.join("")).toContain("Enlarge terminal to show the QR.");
+  expect(f.stdout.join("")).toContain(`https://staging.relayapp.im/@${card.handle}`);
+  expect(f.stdout.join("")).not.toContain("[QR]");
+});
 
 describe("nothing is created before the plan is taken", () => {
   it("a bad --handle is refused before any question, with the same words", async () => {

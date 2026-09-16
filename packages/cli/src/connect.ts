@@ -22,7 +22,7 @@ import { writeCodexProjectMcpServer } from "./coding-agents/codex-project-config
 import { configPath, defaultCreationApiURL, isStagingBuild, packageVersion, validateApiURL, validateProfileName, validateToken, type RelayConsoleSession } from "./config.js";
 import { HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { CliError, type CliErrorCode } from "./error-codes.js";
-import { renderTerminalQR } from "./qr-terminal.js";
+import { renderTerminalQRForOutput, TerminalQRSizeError } from "./qr-terminal.js";
 import { dim, handle as markHandle, link } from "./ui-colour.js";
 import { safeMetadata } from "./output.js";
 import { spawnCommand } from "./spawn-command.js";
@@ -1020,7 +1020,10 @@ const showAddQR = (agent: ConnectAgent, deps: ConnectDependencies, screen: Scree
   const share = agent.shareURL || savedAgentShareURL(agent.apiURL, agent.handle);
   screen.step(SAY_HI);
   if (share) {
-    try { deps.stdout(`${(deps.renderQR ?? renderTerminalQR)(share)}${screen.link(share)}\n`); }
-    catch { deps.stdout(`${screen.link(share)}\n`); }
+    try { deps.stdout(`${(deps.renderQR ?? renderTerminalQRForOutput)(share)}${screen.link(share)}\n`); }
+    catch (error) {
+      if (error instanceof TerminalQRSizeError) screen.say(error.message);
+      deps.stdout(`${screen.link(share)}\n`);
+    }
   }
 };

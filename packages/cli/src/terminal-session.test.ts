@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { expect, it, vi } from "vitest";
 import { runTerminalSession } from "./terminal-session.js";
+import { QR_LIGHT, renderTerminalQR } from "./qr-terminal.js";
 import { terminalText, terminalEventLine, sdkTerminalObserver, type TerminalObserver } from "./terminal-watch.js";
 
 function fixture(rows = 40) {
@@ -73,7 +74,10 @@ it("resizes without clipping QR and bounds output to terminal height", async () 
 it("shows the same compact QR in short and tall windows, never a size complaint", async () => {
   // The real renderer, not the fixture's stand-in: this is the size rule itself.
   const f = fixture(24); f.output.columns = 80;
-  const pending = runTerminalSession(options, { input: f.input, output: f.output, signals: f.signals });
+  const pending = runTerminalSession(options, {
+    input: f.input, output: f.output, signals: f.signals,
+    renderQR: async url => renderTerminalQR(url, { terminalProgram: "ghostty" }),
+  });
   await turn();
   const last = (): string => f.output.write.mock.calls.at(-1)![0];
   expect(last()).toMatch(/[▀▄█]/u);
@@ -89,6 +93,26 @@ it("shows the same compact QR in short and tall windows, never a size complaint"
   f.output.rows = 40; f.output.columns = 100; f.output.emit("resize"); await turn();
   expect(last()).toMatch(/[▀▄█]/u);
   expect(last()).not.toContain("Enlarge terminal");
+  f.input.write("q"); await pending; f.input.destroy();
+});
+
+it("shows Apple Terminal's whole solid QR after a resize, never a partial code", async () => {
+  const f = fixture(24);
+  f.renderQR.mockImplementation(async () => renderTerminalQR(options.agent.shareUrl, { terminalProgram: "Apple_Terminal" }));
+  const pending = runTerminalSession(options, f);
+  await turn();
+  const last = (): string => f.output.write.mock.calls.at(-1)![0];
+  expect(last()).toContain("Enlarge terminal");
+  expect(last()).not.toContain(QR_LIGHT);
+  f.output.rows = 60; f.output.emit("resize"); await turn();
+  expect(last()).toContain(QR_LIGHT);
+  expect(last()).not.toContain("Enlarge terminal");
+  f.output.columns = 40; f.output.emit("resize"); await turn();
+  expect(last()).toContain("Enlarge terminal");
+  expect(last()).not.toContain(QR_LIGHT);
+  f.output.columns = 100; f.output.emit("resize"); await turn();
+  expect(last()).toContain(QR_LIGHT);
+  expect(f.renderQR).toHaveBeenCalledOnce();
   f.input.write("q"); await pending; f.input.destroy();
 });
 

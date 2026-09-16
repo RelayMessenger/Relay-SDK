@@ -16,7 +16,7 @@ import { sdkTerminalObserver, terminalEventLine } from "./terminal-watch.js";
 import { dim, link } from "./ui-colour.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
-import { renderTerminalQR } from "./qr-terminal.js";
+import { renderTerminalQRForOutput, TerminalQRSizeError } from "./qr-terminal.js";
 import { agentDependencies, deleteAgent, listAgents, selectAgentAuth, validateFirstName, validateHandle, type AgentDependencies } from "./agents.js";
 import { createRequire } from "node:module";
 import { readFile, stat } from "node:fs/promises";
@@ -536,8 +536,12 @@ export const createProgram = (
         stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\n`);
         const liveViewFollows = imageUpdate?.status !== "incomplete" && willShowSavedAgent(command);
         if (!liveViewFollows) {
-          try { stdout(renderTerminalQR(result.share_url)); }
-          catch { stderr("Relay could not draw the QR code. Use the link above instead.\n"); }
+          try { stdout(renderTerminalQRForOutput(result.share_url)); }
+          catch (error) {
+            stderr(error instanceof TerminalQRSizeError
+              ? `${error.message}\n`
+              : "Relay could not draw the QR code. Use the link above instead.\n");
+          }
         }
         if (imageUpdate?.status === "incomplete") output({ image: imageUpdate });
       }
