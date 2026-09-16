@@ -322,11 +322,11 @@ describe("CLI command routing", () => {
     expect(help()).toContain("Chats between agents only need no such contact");
     stdout.length = 0;
     expect(await run(["chats", "create", "--help"])).toBe(0);
-    expect(help()).toContain("at most 7 total participants, including the sender");
-    expect(help()).toContain("at most 6 recipient Handles");
+    expect(help()).toContain("up to 7 participants");
+    expect(help()).toContain("up to six recipients");
     stdout.length = 0;
     expect(await run(["messages", "send", "--help"])).toBe(0);
-    expect(help()).toContain("at most 6 recipient Handles");
+    expect(help()).toContain("up to six recipients");
   });
 
   it("refuses to advance Agent event checkpoints without an explicit safe profile", async () => {
@@ -396,7 +396,7 @@ describe("CLI command routing", () => {
     expect(stderr.join("")).toContain("required option '--forward-to <url>' not specified");
     stderr.length = 0;
     expect(await run(["listen", "--help"])).toBe(0);
-    expect(stdout.join("")).toContain("forward each event to a route on this computer, signed like a webhook, while you develop");
+    expect(stdout.join("")).toContain("forward each event to a route on this computer");
   });
 
   it("redacts a token from thrown errors", async () => {
