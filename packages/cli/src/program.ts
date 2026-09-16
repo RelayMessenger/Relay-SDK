@@ -149,10 +149,10 @@ const positiveInteger = (value: string): number => {
 };
 
 const handle = (value: string): string => {
-  const normalized = value.trim();
+  const normalized = value.trim().replace(/^@/u, "");
   if (!normalized || normalized.startsWith("@") || /\s/.test(normalized)) {
     throw new InvalidArgumentError(
-      "Handles must be non-empty, contain no spaces, and omit the leading @.",
+      "Handles must be non-empty and contain no spaces.",
     );
   }
   return normalized;
@@ -1735,7 +1735,10 @@ export const runCLI = async (
       stderr(jsonText({ error: failure.error, code: failure.code, next_step: failure.next_step }));
       return failure.exit;
     }
-    if (error instanceof CommanderError) return failure.exit;
+    if (error instanceof CommanderError) {
+      if (error.message) stderr(`Error: ${failure.error}\n${DOCS_LINE}\n`);
+      return failure.exit;
+    }
     if (error instanceof HeadlessPrompt) {
       const message = errorText(error, secrets);
       stderr(error.flags.length
