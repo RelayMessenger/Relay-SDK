@@ -98,7 +98,6 @@ function envelope(
 function handle(id: string, handleName: string) {
   return {
     image_url: null,
-    image_color: null,
     display_name: handleName,
     handle: handleName,
     id,

@@ -34,7 +34,6 @@ const EVENT: RelayWebhookEnvelope<
       joined_at: "2026-09-01T12:00:00Z",
       display_name: null,
       image_url: null,
-      image_color: null,
       about: null,
       verified: false,
       ...{ is_contact: true },

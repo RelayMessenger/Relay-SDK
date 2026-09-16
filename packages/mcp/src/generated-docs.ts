@@ -3,7 +3,7 @@ import type { MethodDoc } from "./search-docs.js";
 export const DOCS_SOURCE = {
   "contract": "42e8039ee94377aa047f70593102bed980d00c3597f6850a0628cbd0fdf6bc81",
   "client": "634b70902d0d41303172a8baf82ff3fd128519dbaf0a5ec1a693c1f57272bba2",
-  "types": "620e635abcb7aaa982e818871c7940a22d352483675a73b05031cf18baa12d32"
+  "types": "76dfb9f303ec685adb215f6fe20d7ecd27e270b68d5fe7aa8fef21097ffc13b6"
 };
 export const METHOD_DOCS: readonly MethodDoc[] = [
   {
@@ -314,7 +314,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface SystemEvent {\n  type: SystemEventType;\n  actor: SystemEventParty;\n  subject: SystemEventParty | null;\n  value: string | null;\n  icon_attachment_id: UUID | null;\n  contact_card: ContactCardItem | null;\n}",
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  /** Dominant colour of the picture at image_url, six uppercase hex digits, computed by Relay once when the picture is set. Null when Relay could not read the picture. */\n  image_color: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
+      "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
       "export type DeliveryStatus =\n  | \"sent\"\n  | \"delivered\"\n  | \"read\";",
       "export interface MessageDelivery {\n  contact: ChatHandle;\n  delivered_at: string | null;\n  read_at: string | null;\n}"
     ],
@@ -598,7 +598,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface AgentEmojiImageRecipe {\n  recipe: { emoji: { emoji: string }; monogram?: never; image?: never };\n  background: AgentImageBackground;\n}",
       "export interface AgentPhotoImageRecipe {\n  recipe: { image: Record<string, never>; monogram?: never; emoji?: never };\n  background?: never;\n}",
       "export interface RequestOptions {\n  signal?: AbortSignal;\n  timeout?: number;\n  maxRetries?: number;\n  headers?: HeadersInit;\n}",
-      "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  /** Dominant colour of the picture at image_url, six uppercase hex digits, computed by Relay once when the picture is set. Null when Relay could not read the picture. */\n  image_color: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}"
+      "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}"
     ],
     "requestBody": {
       "required": true,
@@ -629,7 +629,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface ContactCardRetrieveParams {\n  handle?: string;\n}",
       "export interface RequestOptions {\n  signal?: AbortSignal;\n  timeout?: number;\n  maxRetries?: number;\n  headers?: HeadersInit;\n}",
       "export interface ContactCardRetrieveResponse {\n  contact_cards: ContactCardItem[];\n}",
-      "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  /** Dominant colour of the picture at image_url, six uppercase hex digits, computed by Relay once when the picture is set. Null when Relay could not read the picture. */\n  image_color: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}"
+      "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}"
     ],
     "requestBody": null,
     "executable": true,
@@ -655,7 +655,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface AgentEmojiImageRecipe {\n  recipe: { emoji: { emoji: string }; monogram?: never; image?: never };\n  background: AgentImageBackground;\n}",
       "export interface AgentPhotoImageRecipe {\n  recipe: { image: Record<string, never>; monogram?: never; emoji?: never };\n  background?: never;\n}",
       "export interface RequestOptions {\n  signal?: AbortSignal;\n  timeout?: number;\n  maxRetries?: number;\n  headers?: HeadersInit;\n}",
-      "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  /** Dominant colour of the picture at image_url, six uppercase hex digits, computed by Relay once when the picture is set. Null when Relay could not read the picture. */\n  image_color: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}"
+      "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}"
     ],
     "requestBody": {
       "required": true,
@@ -778,7 +778,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface SystemEvent {\n  type: SystemEventType;\n  actor: SystemEventParty;\n  subject: SystemEventParty | null;\n  value: string | null;\n  icon_attachment_id: UUID | null;\n  contact_card: ContactCardItem | null;\n}",
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  /** Dominant colour of the picture at image_url, six uppercase hex digits, computed by Relay once when the picture is set. Null when Relay could not read the picture. */\n  image_color: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
+      "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
       "export type DeliveryStatus =\n  | \"sent\"\n  | \"delivered\"\n  | \"read\";",
       "export interface MessageDelivery {\n  contact: ChatHandle;\n  delivered_at: string | null;\n  read_at: string | null;\n}"
     ],
@@ -814,7 +814,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface SystemEvent {\n  type: SystemEventType;\n  actor: SystemEventParty;\n  subject: SystemEventParty | null;\n  value: string | null;\n  icon_attachment_id: UUID | null;\n  contact_card: ContactCardItem | null;\n}",
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  /** Dominant colour of the picture at image_url, six uppercase hex digits, computed by Relay once when the picture is set. Null when Relay could not read the picture. */\n  image_color: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
+      "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
       "export type DeliveryStatus =\n  | \"sent\"\n  | \"delivered\"\n  | \"read\";",
       "export interface MessageDelivery {\n  contact: ChatHandle;\n  delivered_at: string | null;\n  read_at: string | null;\n}"
     ],
