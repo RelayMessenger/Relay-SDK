@@ -24,6 +24,20 @@ updates:
       # OpenClaw 2026.9 requires Node 24.16 or newer; CI runs the .nvmrc Node 22
       # line. Lift this when .nvmrc moves to Node 24.
       - dependency-name: openclaw
+      # @types/node's major is the Node line; it follows .nvmrc, not the registry.
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
+      # @cloudflare/vitest-plugin 1.1.x declares vitest ^4.1; vitest 5 fails the
+      # Workers pool. Both move together when the plugin supports vitest 5.
+      - dependency-name: vitest
+        update-types: [version-update:semver-major]
+      - dependency-name: "@vitest/coverage-v8"
+        update-types: [version-update:semver-major]
+      # The chat SDK adapter pins chat and @chat-adapter/* to one exact version;
+      # 4.40 changed the StateAdapter types. Upgrading is a coordinated adapter
+      # change, never a bump.
+      - dependency-name: chat
+      - dependency-name: "@chat-adapter/*"
 
   - package-ecosystem: github-actions
     directory: /
