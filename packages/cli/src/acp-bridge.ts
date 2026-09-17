@@ -1,3 +1,4 @@
+import { inboundMediaPrompt, type InboundMediaOptions } from "./inbound-media.js";
 import type Relay from "@relaymessenger/sdk";
 import {
   ClientSideConnection,
@@ -226,6 +227,7 @@ export const runTurn = async (
 
 export interface AcpBridgeInput {
   client: Pick<Relay, "chats" | "websocket">;
+  media?: Omit<InboundMediaOptions, "chatId">;
   /** The agent's ACP command, and the folder to run it in. */
   acp: AcpCommand;
   cwd: string;
@@ -339,8 +341,9 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
     try {
       const agent = await acpAgent();
       const sessionId = await openSession(agent, turn.chatId);
+      const media = await inboundMediaPrompt(turn, input.media);
       outcome = await runTurn(agent, {
-        sessionId, prompt: acpPrompt(turn.sender, turn.text),
+        sessionId, prompt: acpPrompt(turn.sender, media.text),
         onStarted: (live) => { mine = live; lane.live = live; started(); },
       });
     } catch { /* Named below, with everything else the agent can fail at. */ }

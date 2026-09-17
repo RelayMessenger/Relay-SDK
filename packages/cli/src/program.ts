@@ -16,7 +16,7 @@ import { sdkTerminalObserver, terminalEventLine } from "./terminal-watch.js";
 import { dim, link } from "./ui-colour.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
 import { readHiddenToken } from "./secret-input.js";
-import { renderTerminalQR } from "./qr-terminal.js";
+import { renderTerminalQRForOutput, TerminalQRSizeError } from "./qr-terminal.js";
 import { agentDependencies, deleteAgent, listAgents, selectAgentAuth, validateFirstName, validateHandle, type AgentDependencies } from "./agents.js";
 import { createRequire } from "node:module";
 import { readFile, stat } from "node:fs/promises";
@@ -363,6 +363,7 @@ export const createProgram = (
             } else if (input.kind === "claude") {
               await runClaudeBridge({
                 client: relayClient(),
+                media: { token: input.token, apiURL: input.apiURL, context: configContext, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) },
                 claude: await claudeCommand(input.command, env),
                 cwd: input.cwd,
                 threads: await openClaudeThreads({ apiURL: input.apiURL, handle: input.handle }, configContext),
@@ -373,6 +374,7 @@ export const createProgram = (
             } else if (input.kind === "acp") {
               await runAcpBridge({
                 client: relayClient(),
+                media: { token: input.token, apiURL: input.apiURL, context: configContext, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) },
                 acp: await acpCommand(input.command, input.acpArgs ?? [], env),
                 cwd: input.cwd,
                 // Relay's own tools travel through the agent's session.
@@ -387,6 +389,7 @@ export const createProgram = (
             } else {
               await runCodexBridge({
                 client: relayClient(),
+                media: { token: input.token, apiURL: input.apiURL, context: configContext, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) },
                 codex: await codexCommand(input.command, env),
                 cwd: input.cwd,
                 // The chat's Codex thread outlives this run, so a restart picks
@@ -536,8 +539,12 @@ export const createProgram = (
         stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\n`);
         const liveViewFollows = imageUpdate?.status !== "incomplete" && willShowSavedAgent(command);
         if (!liveViewFollows) {
-          try { stdout(renderTerminalQR(result.share_url)); }
-          catch { stderr("Relay could not draw the QR code. Use the link above instead.\n"); }
+          try { stdout(renderTerminalQRForOutput(result.share_url)); }
+          catch (error) {
+            stderr(error instanceof TerminalQRSizeError
+              ? `${error.message}\n`
+              : "Relay could not draw the QR code. Use the link above instead.\n");
+          }
         }
         if (imageUpdate?.status === "incomplete") output({ image: imageUpdate });
       }

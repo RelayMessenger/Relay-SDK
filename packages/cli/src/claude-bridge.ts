@@ -1,3 +1,4 @@
+import { inboundMediaPrompt, type InboundMediaOptions } from "./inbound-media.js";
 import { isAbsolute } from "node:path";
 import { findExecutable } from "./runtime-sniff.js";
 import type Relay from "@relaymessenger/sdk";
@@ -7,6 +8,7 @@ import type { ClaudeThreadStore } from "./claude-threads.js";
 
 export interface ClaudeBridgeInput {
   client: Pick<Relay, "chats" | "websocket">;
+  media?: Omit<InboundMediaOptions, "chatId">;
   claude: { executable: string };
   cwd: string;
   threads: ClaudeThreadStore;
@@ -58,8 +60,9 @@ export const runClaudeBridge = async (input: ClaudeBridgeInput): Promise<void> =
         catch { /* The answer matters more than the typing indicator. */ }
         if (mine.control.signal.aborted) return;
         const resume = input.threads.get(turn.chatId);
+        const media = await inboundMediaPrompt(turn, input.media);
         const result = ask({
-          prompt: codexPrompt(turn.sender, turn.text),
+          prompt: codexPrompt(turn.sender, media.text),
           options: {
             cwd: input.cwd,
             ...(resume !== undefined ? { resume } : {}),
