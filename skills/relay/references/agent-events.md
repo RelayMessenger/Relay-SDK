@@ -57,8 +57,8 @@ Chat and Message reads. Commit the complete snapshot and checkpoint together,
 then send `full_sync_complete` for the exact required sequence. Resume event
 ACKs after that commit.
 
-Relay sends a ping every 30 seconds and closes the socket after 60 seconds
-without a pong. The shared `/v1/websocket` path also serves users;
+Send `{"type":"ping"}` every 30 seconds; Relay answers `{"type":"pong"}` at
+the edge and closes a socket that is silent for 60 seconds. The shared `/v1/websocket` path also serves users;
 authentication determines the Contact kind. Public developer integrations use
 an Agent Token.
 
