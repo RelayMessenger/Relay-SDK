@@ -7,6 +7,12 @@ import { lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+// Package manifests and lockfiles are living dependency records, not imported
+// artifacts: Dependabot and `npm update` rewrite them without running this
+// sync, so their current bytes are recorded but never asserted. Their
+// historical import (repository, commit, source bytes) stays immutable.
+export const LIVING_MANIFEST = /(^|\/)package(-lock)?\.json$/u;
+
 export function syncImportMetadata(root, { write = false } = {}) {
   const path = join(root, "sources.import-manifest.json");
   const manifest = JSON.parse(readFileSync(path, "utf8"));
@@ -24,7 +30,9 @@ export function syncImportMetadata(root, { write = false } = {}) {
       status: digest === entry.source_sha256 && mode === entry.source_mode ? "exact" : "canonicalized",
     };
     if (write) Object.assign(entry, expected);
-    else for (const [key, value] of Object.entries(expected)) {
+    else if (LIVING_MANIFEST.test(entry.destination)) {
+      assert.equal(entry.destination_mode, expected.destination_mode, `${entry.destination}: destination_mode drifted; run npm run metadata:sync`);
+    } else for (const [key, value] of Object.entries(expected)) {
       assert.equal(entry[key], value, `${entry.destination}: ${key} drifted; run npm run metadata:sync`);
     }
   }

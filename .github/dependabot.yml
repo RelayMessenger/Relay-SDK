@@ -21,6 +21,9 @@ updates:
       # the scripts move when the API is ported, not on a bump.
       - dependency-name: typescript
         update-types: [version-update:semver-major]
+      # OpenClaw 2026.9 requires Node 24.16 or newer; CI runs the .nvmrc Node 22
+      # line. Lift this when .nvmrc moves to Node 24.
+      - dependency-name: openclaw
 
   - package-ecosystem: github-actions
     directory: /
