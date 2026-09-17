@@ -1,8 +1,14 @@
 version: 2
 updates:
+  # npm version updates are off (security updates still open pull requests):
+  # validate requires artifacts a bot cannot produce (the committed Claude Code
+  # runtime bundle, the cookbook lockfiles, metadata:sync), so every version
+  # group went red on 2026-09-16 and 2026-09-17. Dependencies move by hand in
+  # one reviewed pull request until an auto-fix job rebuilds those artifacts.
   - package-ecosystem: npm
     directory: /
     target-branch: staging
+    open-pull-requests-limit: 0
     schedule:
       interval: weekly
     # Majors arrive one per pull request so a breaking one cannot block the
