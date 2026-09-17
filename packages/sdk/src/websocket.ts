@@ -7,6 +7,7 @@ import type {
   WebSocketEventFrame,
   WebSocketFullSyncFrame,
   WebSocketPingFrame,
+  WebSocketPongFrame,
   WebSocketReadyFrame,
 } from "./types.js";
 import { RELAY_WEBHOOK_EVENT_TYPES } from "./operations.js";
@@ -31,7 +32,6 @@ export interface WebSocketLike {
   ): void;
   send(data: string): void;
   close(code?: number, reason?: string): void;
-  ping?(): void;
   on?(
     type: string,
     listener: (...args: any[]) => void,
@@ -150,8 +150,13 @@ const WEBSOCKET_ERROR_CODES = new Set([
   "full_sync_required",
   "full_sync_mismatch",
 ]);
-const HEARTBEAT_PING_INTERVAL_MS = 30_000;
 const HEARTBEAT_PONG_TIMEOUT_MS = 60_000;
+/**
+ * The exact text frame Relay answers without waking the Agent's Durable
+ * Object. It must stay byte-identical to the server's configured
+ * auto-response request, so it is serialized once here.
+ */
+const HEARTBEAT_PING_FRAME = JSON.stringify({ type: "ping" });
 const CLIENT_CLOSE_DURABLE_ACCEPTANCE = 4001;
 const CLIENT_CLOSE_PROTOCOL_ERROR = 4002;
 const CLIENT_CLOSE_RECONNECT = 4003;
@@ -254,6 +259,19 @@ const parsePing = (value: unknown): WebSocketPingFrame => {
     );
   }
   return value as unknown as WebSocketPingFrame;
+};
+
+const parsePong = (value: unknown): WebSocketPongFrame => {
+  if (
+    !isRecord(value)
+    || !hasExactKeys(value, ["type"])
+    || value.type !== "pong"
+  ) {
+    throw new WebSocketProtocolError(
+      "Relay WebSocket received an invalid pong frame.",
+    );
+  }
+  return value as unknown as WebSocketPongFrame;
 };
 
 const parseError = (value: unknown): WebSocketErrorFrame => {
@@ -429,7 +447,6 @@ const runConnection = (
       socket.removeEventListener("message", onMessage);
       socket.removeEventListener("close", onClose);
       socket.removeEventListener("error", onSocketError);
-      socket.off?.("pong", onPong);
       socket.off?.("unexpected-response", onUnexpectedResponse);
       options.signal?.removeEventListener("abort", onAbort);
       if (error === undefined) resolve();
@@ -457,19 +474,14 @@ const runConnection = (
         finish(error);
       }
     };
-    const onPong = (): void => {
+    /**
+     * The heartbeat is a text frame, not a protocol ping, so it runs on every
+     * WebSocket implementation — the browser's, Node's built-in, and `ws`.
+     * Relay answers the frame from the edge without waking the Agent.
+     */
+    const startHeartbeat = (intervalMs: number): void => {
+      if (heartbeatTimer !== undefined) return;
       lastPongAt = Date.now();
-    };
-    const startHeartbeat = (): void => {
-      if (
-        heartbeatTimer !== undefined
-        || socket.ping === undefined
-        || socket.on === undefined
-      ) {
-        return;
-      }
-      lastPongAt = Date.now();
-      socket.on("pong", onPong);
       heartbeatTimer = setInterval(() => {
         if (Date.now() - lastPongAt >= HEARTBEAT_PONG_TIMEOUT_MS) {
           closeForRetry(new RetryableWebSocketError(
@@ -478,7 +490,7 @@ const runConnection = (
           return;
         }
         try {
-          socket.ping?.();
+          socket.send(HEARTBEAT_PING_FRAME);
         } catch (cause) {
           closeForRetry(new RetryableWebSocketError(
             `Relay WebSocket ping failed: ${
@@ -486,7 +498,7 @@ const runConnection = (
             }`,
           ));
         }
-      }, HEARTBEAT_PING_INTERVAL_MS);
+      }, intervalMs);
     };
     const onUnexpectedResponse = (
       _request: unknown,
@@ -550,7 +562,7 @@ const runConnection = (
           fullSyncThrough = parsed.full_sync_required
             ? BigInt(parsed.full_sync_through!)
             : null;
-          startHeartbeat();
+          startHeartbeat(parsed.heartbeat_interval_ms);
           onReady(parsed);
           return;
         }
@@ -585,6 +597,13 @@ const runConnection = (
           }
           parsePing(frame);
           send({ type: "pong" });
+          return;
+        }
+        // The answer to this client's own text ping. Relay sends it from the
+        // edge, so it can arrive while the Agent is asleep.
+        if (isRecord(frame) && frame.type === "pong") {
+          parsePong(frame);
+          lastPongAt = Date.now();
           return;
         }
         if (isRecord(frame) && frame.type === "error") {
