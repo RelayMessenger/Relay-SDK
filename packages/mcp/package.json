@@ -55,7 +55,7 @@
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/inspector": "2.4.0",
     "@types/node": "^22.20.3",
-    "vitest": "^4.0.0",
+    "vitest": "^5.0.0",
     "yaml": "^2.9.1"
   },
   "publishConfig": {
