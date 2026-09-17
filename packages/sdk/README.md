@@ -264,8 +264,9 @@ history, it sends a `full_sync` frame. `onFullSync` must fetch and durably apply
 a complete REST snapshot. The SDK sends `full_sync_complete` after that promise
 resolves, then resumes event ACKs.
 
-Relay sends a JSON ping every 30 seconds. The SDK answers with a JSON pong and
-also uses the Node WebSocket heartbeat to detect a dead connection.
+The SDK sends the text frame `{"type":"ping"}` at the interval the `ready`
+frame names, and Relay answers it at the edge with `{"type":"pong"}` without
+waking the Agent. Sixty seconds with no pong reconnects.
 
 The runner uses capped, jittered exponential reconnect after
 `heartbeat_timeout`, `restart`, close codes `1011`, `1012`, or `4408`, send
