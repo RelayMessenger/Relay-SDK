@@ -5,11 +5,22 @@ updates:
     target-branch: staging
     schedule:
       interval: weekly
+    # Majors arrive one per pull request so a breaking one cannot block the
+    # weekly minor and patch group (TypeScript 7 removed the compiler API the
+    # docs and smoke scripts use; grouped with 12 others it blocked them all
+    # on 2026-09-16).
     groups:
       npm-development:
         dependency-type: development
+        update-types: [minor, patch]
       npm-runtime:
         dependency-type: production
+        update-types: [minor, patch]
+    ignore:
+      # TypeScript 7 is the native compiler without `ts.createSourceFile`;
+      # the scripts move when the API is ported, not on a bump.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: github-actions
     directory: /
