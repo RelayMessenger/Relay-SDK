@@ -1,3 +1,4 @@
+import type { InboundMediaOptions } from "./inbound-media.js";
 import type Relay from "@relaymessenger/sdk";
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -132,6 +133,7 @@ const runBridge = async (input: {
   events: readonly RelayWebhookEvent[];
   threads?: CodexThreadStore;
   endings?: number;
+  media?: Omit<InboundMediaOptions, "chatId">;
   relay?: ReturnType<typeof fakeRelay>;
 }): Promise<{ said: string[]; relay: ReturnType<typeof fakeRelay> }> => {
   const relay = input.relay ?? fakeRelay(input.events);
@@ -139,6 +141,7 @@ const runBridge = async (input: {
   const control = new AbortController();
   try {
     await runCodexBridge({
+      ...(input.media ? { media: input.media } : {}),
       client: relay.client, codex: input.codex, cwd: input.cwd,
       threads: input.threads ?? memoryThreads(),
       signal: control.signal, say: (line) => said.push(line),
@@ -149,6 +152,19 @@ const runBridge = async (input: {
 };
 
 describe("the app-server the bridge starts", () => {
+  it("a photo with no text starts a turn", async () => {
+    const agent = await fakeAppServer();
+    const event = received("photo-event", "chat-1", "");
+    Object.assign(event.data, { parts: [{ type: "media", id: "photo", url: "https://cdn.example/photo", filename: "photo.png", mime_type: "image/png", size_bytes: 3, reactions: null }] });
+    await runBridge({ ...agent, events: [event], media: { token: "secret", apiURL: "https://api.example", mediaDir: join(agent.cwd, "media"), fetch: async () => new Response("png") } });
+    const items = (await agent.log()).find((line) => line.in === "turn/start")?.params?.input;
+    const path = join(agent.cwd, "media", "chat-1", "photo-photo.png");
+    expect(items).toEqual(expect.arrayContaining([{ type: "text", text: expect.stringContaining(`Photo: ${path}`) }]));
+    expect(items).toEqual(expect.arrayContaining([{ type: "localImage", path }]));
+    expect(await readFile(path, "utf8")).toBe("png");
+  });
+
+
   it("says hello the way the protocol asks, before it opens anything", async () => {
     const codex = await fakeAppServer();
     await runBridge({ ...codex, events: [received("event-1", "chat-1", "Hey, what's up")] });
@@ -219,7 +235,7 @@ describe("the codex the bridge starts", () => {
 describe("which messages the bridge answers", () => {
   it("answers an inbound message that has text", () => {
     expect(bridgeTurn(received("event-1", "chat-1", "Hey, what's up"))).toEqual({
-      eventId: "event-1", chatId: "chat-1", sender: "alice", text: "Hey, what's up",
+      eventId: "event-1", chatId: "chat-1", sender: "alice", text: "Hey, what's up", media: [],
     });
   });
 

@@ -1,5 +1,7 @@
+import { inboundMediaPrompt, type InboundMediaOptions } from "./inbound-media.js";
 import type Relay from "@relaymessenger/sdk";
-import type { MessagePartResponse, RelayWebhookEvent } from "@relaymessenger/sdk";
+import { bridgeTurn, type BridgeTurn } from "./bridge-turn.js";
+export { bridgeTurn, type BridgeTurn } from "./bridge-turn.js";
 import type { CodexThreadStore } from "./codex-threads.js";
 import { isAbsolute } from "node:path";
 import { findExecutable } from "./runtime-sniff.js";
@@ -268,7 +270,7 @@ export const isFinalMessage = (phase: unknown): boolean =>
  */
 export const runTurn = async (
   server: CodexAppServer,
-  input: { threadId: string; prompt: string; onStarted(turn: LiveTurn): void },
+  input: { threadId: string; prompt: string; images: string[]; onStarted(turn: LiveTurn): void },
 ): Promise<TurnOutcome> => {
   const answers: string[] = [];
   const deltas: string[] = [];
@@ -309,7 +311,7 @@ export const runTurn = async (
     // there, so they are not repeated on every turn.
     const started = await server.request("turn/start", {
       threadId: input.threadId,
-      input: [{ type: "text", text: input.prompt }],
+      input: [{ type: "text", text: input.prompt }, ...input.images.map((path) => ({ type: "localImage", path }))],
     });
     const id = asRecord(started.turn).id;
     if (typeof id !== "string" || !id) throw new Error("Codex started a turn with no id.");
@@ -323,37 +325,9 @@ export const runTurn = async (
   } finally { unwatch(); }
 };
 
-/** One message this process answers. */
-export interface BridgeTurn {
-  eventId: string;
-  chatId: string;
-  sender: string;
-  text: string;
-}
-
-/** An inbound message with text in it. Everything else is left alone. */
-export const bridgeTurn = (event: RelayWebhookEvent): BridgeTurn | undefined => {
-  if (event.event_type !== "message.received") return undefined;
-  const data = event.data as {
-    chat?: { id?: unknown } | null;
-    direction?: unknown;
-    sender_handle?: { handle?: unknown } | null;
-    parts?: unknown;
-  };
-  if (data.direction !== "inbound") return undefined;
-  const chatId = typeof data.chat?.id === "string" ? data.chat.id : "";
-  const sender = typeof data.sender_handle?.handle === "string" ? data.sender_handle.handle : "";
-  const text = (Array.isArray(data.parts) ? data.parts as MessagePartResponse[] : [])
-    .filter((part) => part.type === "text" || part.type === "link")
-    .map((part) => part.value)
-    .join("\n")
-    .trim();
-  if (!chatId || !sender || !text) return undefined;
-  return { eventId: event.event_id, chatId, sender, text };
-};
-
 export interface CodexBridgeInput {
   client: Pick<Relay, "chats" | "websocket">;
+  media?: Omit<InboundMediaOptions, "chatId">;
   /** The `codex` to run, and the folder to run it in. */
   codex: CodexCommand;
   cwd: string;
@@ -469,8 +443,9 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
     try {
       const server = await appServer();
       const threadId = await openThread(server, turn.chatId);
+      const media = await inboundMediaPrompt(turn, input.media);
       outcome = await runTurn(server, {
-        threadId, prompt: codexPrompt(turn.sender, turn.text),
+        threadId, prompt: codexPrompt(turn.sender, media.text), images: media.images,
         onStarted: (live) => { mine = live; lane.live = live; started(); },
       });
     } catch { /* Named below, with everything else Codex can fail at. */ }

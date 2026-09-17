@@ -1,3 +1,4 @@
+import type { InboundMediaOptions } from "./inbound-media.js";
 import type Relay from "@relaymessenger/sdk";
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
 import { execFileSync } from "node:child_process";
@@ -142,6 +143,7 @@ const runBridge = async (input: {
   events: readonly RelayWebhookEvent[];
   sessions?: AcpSessionStore;
   endings?: number;
+  media?: Omit<InboundMediaOptions, "chatId">;
   relay?: ReturnType<typeof fakeRelay>;
   mcpServers?: ReturnType<typeof relayMcpServer>[];
 }): Promise<{ said: string[]; relay: ReturnType<typeof fakeRelay> }> => {
@@ -150,6 +152,7 @@ const runBridge = async (input: {
   const control = new AbortController();
   try {
     await runAcpBridge({
+      ...(input.media ? { media: input.media } : {}),
       client: relay.client, acp: input.acp, cwd: input.cwd,
       mcpServers: input.mcpServers ?? [relayMcpServer(RELAY_MCP)],
       label: "Cursor",
@@ -162,6 +165,18 @@ const runBridge = async (input: {
 };
 
 describe("the ACP agent the bridge starts", () => {
+  it("a photo with no text starts a turn", async () => {
+    const agent = await fakeAcpAgent();
+    const event = received("photo-event", "chat-1", "");
+    Object.assign(event.data, { parts: [{ type: "media", id: "photo", url: "https://cdn.example/photo", filename: "photo.png", mime_type: "image/png", size_bytes: 3, reactions: null }] });
+    await runBridge({ ...agent, events: [event], media: { token: "secret", apiURL: "https://api.example", mediaDir: join(agent.cwd, "media"), fetch: async () => new Response("png") } });
+    const items = (await agent.log()).find((line) => line.in === "session/prompt")?.params?.prompt;
+    const path = join(agent.cwd, "media", "chat-1", "photo-photo.png");
+    expect(items).toEqual(expect.arrayContaining([{ type: "text", text: expect.stringContaining(`Photo: ${path}`) }]));
+    expect(await readFile(path, "utf8")).toBe("png");
+  });
+
+
   it("says hello the way the protocol asks, before it prompts anything", async () => {
     const acp = await fakeAcpAgent();
     await runBridge({ ...acp, events: [received("event-1", "chat-1", "Hey, what's up")] });
