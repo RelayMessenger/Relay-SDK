@@ -38,6 +38,11 @@ updates:
       # change, never a bump.
       - dependency-name: chat
       - dependency-name: "@chat-adapter/*"
+      # cookbook/cloudflare-think-agent locks @cloudflare/think, ai and agents to
+      # one tested tuple (its contracts test pins them); they move together.
+      - dependency-name: "@cloudflare/think"
+      - dependency-name: ai
+      - dependency-name: agents
 
   - package-ecosystem: github-actions
     directory: /
