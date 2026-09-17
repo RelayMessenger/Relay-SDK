@@ -2,7 +2,7 @@ import type Relay from "@relaymessenger/sdk";
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
 import type { query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeCommand, runClaudeBridge } from "./claude-bridge.js";
@@ -90,6 +90,23 @@ const setup = (ask: typeof query, events: RelayWebhookEvent[]) => {
 };
 
 describe("Claude Agent SDK bridge", () => {
+  it("a photo with no text starts a turn", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relay-claude-media-"));
+    const calls: Parameters<typeof query>[0][] = [];
+    const ask = fakeQuery(async function* (input) { calls.push(input); yield success(); });
+    const event = received("photo-event", "chat-1", "");
+    Object.assign(event.data, { parts: [{ type: "media", id: "photo", url: "https://cdn.example/photo", filename: "photo.png", mime_type: "image/png", size_bytes: 3, reactions: null }] });
+    const state = setup(ask, [event]);
+    try {
+      await runClaudeBridge({ ...state.input, media: { token: "secret", apiURL: "https://api.example", mediaDir: directory, fetch: async () => new Response("png") } });
+      await untilEnded(state.said, 1);
+      const path = join(directory, "chat-1", "photo-photo.png");
+      expect(calls[0]?.prompt).toContain(`Photo: ${path}`);
+      expect(await readFile(path, "utf8")).toBe("png");
+    } finally { state.control.abort(); await rm(directory, { recursive: true, force: true }); }
+  });
+
+
   it("passes the prompt, execution options and Relay MCP server, saves and resumes the chat session", async () => {
     const calls: Parameters<typeof query>[0][] = [];
     const ask = fakeQuery(async function* (input) {

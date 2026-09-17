@@ -363,6 +363,7 @@ export const createProgram = (
             } else if (input.kind === "claude") {
               await runClaudeBridge({
                 client: relayClient(),
+                media: { token: input.token, apiURL: input.apiURL, context: configContext, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) },
                 claude: await claudeCommand(input.command, env),
                 cwd: input.cwd,
                 threads: await openClaudeThreads({ apiURL: input.apiURL, handle: input.handle }, configContext),
@@ -373,6 +374,7 @@ export const createProgram = (
             } else if (input.kind === "acp") {
               await runAcpBridge({
                 client: relayClient(),
+                media: { token: input.token, apiURL: input.apiURL, context: configContext, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) },
                 acp: await acpCommand(input.command, input.acpArgs ?? [], env),
                 cwd: input.cwd,
                 // Relay's own tools travel through the agent's session.
@@ -387,6 +389,7 @@ export const createProgram = (
             } else {
               await runCodexBridge({
                 client: relayClient(),
+                media: { token: input.token, apiURL: input.apiURL, context: configContext, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) },
                 codex: await codexCommand(input.command, env),
                 cwd: input.cwd,
                 // The chat's Codex thread outlives this run, so a restart picks
