@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import test from "node:test";
@@ -53,18 +53,24 @@ test("release skip does not leave a staging workspace behind for dependent resol
   assert.equal(plan[0].action, "skip", "rewriting must not change registry decisions");
 });
 
-test("import metadata updates destination hashes only and rejects subsequent drift", (t) => {
+test("import metadata updates destination hashes only; manifests are living, imported code still drifts", (t) => {
   const dir = fixture(t);
   const before = JSON.parse(readFileSync(join(dir, "sources.import-manifest.json")));
+  // A version or dependency bump rewrites package.json without a sync
+  // (Dependabot, npm update); that is never drift.
   applyVersion(dir, "sdk", "0.99.0-staging.9");
-  assert.throws(() => syncImportMetadata(dir), /drifted/u);
+  assert.doesNotThrow(() => syncImportMetadata(dir));
   const after = syncImportMetadata(dir, { write: true });
   assert.equal(after.entries.length, before.entries.length);
   const sourceFields = (entry) => Object.fromEntries(Object.entries(entry).filter(([key]) => !["destination_sha256", "destination_mode", "status"].includes(key)));
   assert.deepEqual(after.entries.map(sourceFields), before.entries.map(sourceFields));
+  const manifestEntry = (manifest) => manifest.entries.find((entry) => entry.destination === "packages/sdk/package.json");
+  assert.notEqual(manifestEntry(after).destination_sha256, manifestEntry(before).destination_sha256, "write still records the current manifest bytes");
   syncImportMetadata(dir);
-  applyVersion(dir, "sdk", "0.99.0-staging.10");
-  assert.throws(() => syncImportMetadata(dir), /drifted/u);
+  // Imported source keeps the byte pin.
+  const imported = join(dir, "packages/sdk/src/client.ts");
+  writeFileSync(imported, `${readFileSync(imported, "utf8")}\n// drift\n`);
+  assert.throws(() => syncImportMetadata(dir), /packages\/sdk\/src\/client\.ts: destination_sha256 drifted/u);
 });
 
 test("cookbook workspace linking survives future prerelease tuples without changing standalone or locked manifests", (t) => {

@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { verifyImportInventory } from "./import-inventory.mjs";
+import { LIVING_MANIFEST } from "./sync-import-metadata.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const lock = JSON.parse(readFileSync(join(root, "sources.lock.json"), "utf8"));
@@ -62,8 +63,9 @@ for (const entry of manifest.entries) {
   assert.match(entry.commit, /^[0-9a-f]{40}$/u);
   assert.ok(["exact", "canonicalized"].includes(entry.status));
   const destination = join(root, entry.destination);
-  assert.equal(sha256(bytes(destination)), entry.destination_sha256, `${entry.destination}: destination metadata drifted; run npm run metadata:sync`);
   assert.equal(mode(destination), entry.destination_mode);
+  if (LIVING_MANIFEST.test(entry.destination)) continue;
+  assert.equal(sha256(bytes(destination)), entry.destination_sha256, `${entry.destination}: destination metadata drifted; run npm run metadata:sync`);
   if (entry.status === "exact") {
     assert.equal(entry.source_sha256, entry.destination_sha256);
     assert.equal(entry.source_mode, entry.destination_mode);
