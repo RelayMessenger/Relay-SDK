@@ -604,7 +604,6 @@ export interface WebSocketFullSyncCompleteFrame {
 
 export interface WebSocketPingFrame {
   type: "ping";
-  sent_at: string;
 }
 
 export interface WebSocketPongFrame {
