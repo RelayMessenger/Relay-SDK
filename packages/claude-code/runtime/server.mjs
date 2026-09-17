@@ -20434,8 +20434,8 @@ var WEBSOCKET_ERROR_CODES = /* @__PURE__ */ new Set([
   "full_sync_required",
   "full_sync_mismatch"
 ]);
-var HEARTBEAT_PING_INTERVAL_MS = 3e4;
 var HEARTBEAT_PONG_TIMEOUT_MS = 6e4;
+var HEARTBEAT_PING_FRAME = JSON.stringify({ type: "ping" });
 var CLIENT_CLOSE_DURABLE_ACCEPTANCE = 4001;
 var CLIENT_CLOSE_PROTOCOL_ERROR = 4002;
 var CLIENT_CLOSE_RECONNECT = 4003;
@@ -20473,6 +20473,12 @@ var parseFullSync = (value) => {
 var parsePing = (value) => {
   if (!isRecord(value) || !hasExactKeys(value, ["type", "sent_at"]) || value.type !== "ping" || typeof value.sent_at !== "string" || Number.isNaN(Date.parse(value.sent_at))) {
     throw new WebSocketProtocolError("Relay WebSocket received an invalid ping frame.");
+  }
+  return value;
+};
+var parsePong = (value) => {
+  if (!isRecord(value) || !hasExactKeys(value, ["type"]) || value.type !== "pong") {
+    throw new WebSocketProtocolError("Relay WebSocket received an invalid pong frame.");
   }
   return value;
 };
@@ -20587,7 +20593,6 @@ var runConnection = (url, agentToken, options, Constructor, onReady) => new Prom
     socket.removeEventListener("message", onMessage);
     socket.removeEventListener("close", onClose);
     socket.removeEventListener("error", onSocketError);
-    socket.off?.("pong", onPong);
     socket.off?.("unexpected-response", onUnexpectedResponse);
     options.signal?.removeEventListener("abort", onAbort);
     if (error2 === void 0)
@@ -20613,26 +20618,21 @@ var runConnection = (url, agentToken, options, Constructor, onReady) => new Prom
       finish(error2);
     }
   };
-  const onPong = () => {
-    lastPongAt = Date.now();
-  };
-  const startHeartbeat = () => {
-    if (heartbeatTimer !== void 0 || socket.ping === void 0 || socket.on === void 0) {
+  const startHeartbeat = (intervalMs) => {
+    if (heartbeatTimer !== void 0)
       return;
-    }
     lastPongAt = Date.now();
-    socket.on("pong", onPong);
     heartbeatTimer = setInterval(() => {
       if (Date.now() - lastPongAt >= HEARTBEAT_PONG_TIMEOUT_MS) {
         closeForRetry(new RetryableWebSocketError("Relay WebSocket did not receive a pong within 60 seconds."));
         return;
       }
       try {
-        socket.ping?.();
+        socket.send(HEARTBEAT_PING_FRAME);
       } catch (cause) {
         closeForRetry(new RetryableWebSocketError(`Relay WebSocket ping failed: ${cause instanceof Error ? cause.message : String(cause)}`));
       }
-    }, HEARTBEAT_PING_INTERVAL_MS);
+    }, intervalMs);
   };
   const onUnexpectedResponse = (_request, response) => {
     const chunks = [];
@@ -20679,7 +20679,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady) => new Prom
         ready = true;
         acceptedThrough = BigInt(parsed.acked_through);
         fullSyncThrough = parsed.full_sync_required ? BigInt(parsed.full_sync_through) : null;
-        startHeartbeat();
+        startHeartbeat(parsed.heartbeat_interval_ms);
         onReady(parsed);
         return;
       }
@@ -20699,6 +20699,11 @@ var runConnection = (url, agentToken, options, Constructor, onReady) => new Prom
         }
         parsePing(frame);
         send({ type: "pong" });
+        return;
+      }
+      if (isRecord(frame) && frame.type === "pong") {
+        parsePong(frame);
+        lastPongAt = Date.now();
         return;
       }
       if (isRecord(frame) && frame.type === "error") {
