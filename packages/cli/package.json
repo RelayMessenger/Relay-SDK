@@ -40,10 +40,10 @@
     "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@types/node": "^22.20.3",
+    "@types/node": "^22.20.2",
     "jsqr": "1.4.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.0"
+    "vitest": "^4.1.11"
   },
   "publishConfig": {
     "access": "public",
