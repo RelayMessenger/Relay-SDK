@@ -73,7 +73,39 @@ export interface LinkPart {
   value: string;
 }
 
-export type MessagePart = TextPart | MediaPart | LinkPart;
+/** One button in a `buttons`. Exactly one of `id` or `url`. */
+export interface ButtonItem {
+  /** Callback button: the tap arrives as a `button_reply` carrying this id. */
+  id?: string;
+  /** Link button: the tap opens this HTTPS URL and sends nothing. */
+  url?: string;
+  label: string;
+  /** Optional small image drawn before the label. */
+  image_url?: string | null;
+}
+
+/** Agent-only: a vertical stack of 1 to 5 buttons under the message. */
+export interface ButtonsPart {
+  type: "buttons";
+  items: ButtonItem[];
+}
+
+/**
+ * A user's tap on a `buttons` item. Must be the only part, and
+ * `reply_to` must name the message and part index of the `buttons`.
+ */
+export interface ButtonReplyPart {
+  type: "button_reply";
+  id: string;
+  label: string;
+}
+
+export type MessagePart =
+  | TextPart
+  | MediaPart
+  | LinkPart
+  | ButtonsPart
+  | ButtonReplyPart;
 
 export interface TextPartResponse extends TextPart {
   mentions?: Array<{
@@ -103,6 +135,14 @@ export interface MediaPartResponse {
 }
 
 export interface LinkPartResponse extends LinkPart {
+  reactions: Reaction[] | null;
+}
+
+export interface ButtonsPartResponse extends ButtonsPart {
+  reactions: Reaction[] | null;
+}
+
+export interface ButtonReplyPartResponse extends ButtonReplyPart {
   reactions: Reaction[] | null;
 }
 
@@ -146,6 +186,8 @@ export type MessagePartResponse =
   | TextPartResponse
   | MediaPartResponse
   | LinkPartResponse
+  | ButtonsPartResponse
+  | ButtonReplyPartResponse
   | SystemPartResponse;
 
 export interface ReplyTo {
@@ -167,7 +209,7 @@ export interface MessageContent {
 
 /**
  * The Message a send returns. A send never produces a system Message, so its
- * parts are only text, media or link, and it carries no `system_event`.
+ * parts are only text, media, link, buttons or button_reply, and it carries no `system_event`.
  * `is_system_message` is on the wire and is always `false` here; the contract's
  * `SentMessage` does not declare it yet.
  * Read paths (`chats.messages.list`, `messages.listMessagesThread`) return
@@ -175,7 +217,13 @@ export interface MessageContent {
  */
 export interface SentMessage {
   id: UUID;
-  parts: Array<TextPartResponse | MediaPartResponse | LinkPartResponse>;
+  parts: Array<
+    | TextPartResponse
+    | MediaPartResponse
+    | LinkPartResponse
+    | ButtonsPartResponse
+    | ButtonReplyPartResponse
+  >;
   created_at: string;
   sent_at: string | null;
   delivered_at?: string | null;
