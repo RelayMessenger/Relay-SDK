@@ -287,3 +287,18 @@ const sendText: TextPart = {
   mentions: [],
 };
 void [readRange, noMentions, sendText];
+
+// Button labels are text-only, while tap reply bubbles remain reactable.
+const buttonItem: import("@relaymessenger/sdk").ButtonItem = { id: "approve", label: "Approve" };
+const removedButtonImage: import("@relaymessenger/sdk").ButtonItem = {
+  id: "approve", label: "Approve",
+  // @ts-expect-error Button items no longer support images.
+  image_url: "https://example.test/icon.png",
+};
+const buttonsResponse: import("@relaymessenger/sdk").ButtonsPartResponse = {
+  type: "buttons", items: [buttonItem], reactions: null,
+};
+const tapResponse: import("@relaymessenger/sdk").ButtonReplyPartResponse = {
+  type: "button_reply", id: "approve", label: "Approve", reactions: [],
+};
+void [removedButtonImage, buttonsResponse, tapResponse];

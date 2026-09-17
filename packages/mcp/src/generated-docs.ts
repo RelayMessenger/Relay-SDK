@@ -3,7 +3,7 @@ import type { MethodDoc } from "./search-docs.js";
 export const DOCS_SOURCE = {
   "contract": "42e8039ee94377aa047f70593102bed980d00c3597f6850a0628cbd0fdf6bc81",
   "client": "634b70902d0d41303172a8baf82ff3fd128519dbaf0a5ec1a693c1f57272bba2",
-  "types": "3525aea91fb1ed9f8dabf33bb2db707ac264a242e71724c564e94a9f9cd84da2"
+  "types": "9f86c48bad9e40c566f66d17eaec8c8cf25953ba66b94d6cbf0c64622287e1ba"
 };
 export const METHOD_DOCS: readonly MethodDoc[] = [
   {

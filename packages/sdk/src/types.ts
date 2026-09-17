@@ -80,11 +80,12 @@ export interface ButtonItem {
   /** Link button: the tap opens this HTTPS URL and sends nothing. */
   url?: string;
   label: string;
-  /** Optional small image drawn before the label. */
-  image_url?: string | null;
 }
 
-/** Agent-only: a vertical stack of 1 to 5 buttons under the message. */
+/**
+ * Agent-only: a vertical stack of 1 to 5 text-only buttons under the message.
+ * Only button_reply may target this part; ordinary replies and reactions may not.
+ */
 export interface ButtonsPart {
   type: "buttons";
   items: ButtonItem[];
@@ -190,6 +191,8 @@ export type MessagePartResponse =
   | ButtonReplyPartResponse
   | SystemPartResponse;
 
+/** Ordinary replies target text, media, link, or button_reply, never buttons or system.
+ * A button_reply instead targets the originating buttons part. */
 export interface ReplyTo {
   message_id: UUID;
   part_index?: number;
@@ -381,6 +384,7 @@ export interface MessageListParams {
 
 export type MessageThreadParams = MessageListParams;
 
+/** Target text, media, link, or button_reply; buttons and system cannot receive reactions. */
 export interface MessageAddReactionParams {
   operation: "add" | "remove";
   type: ReactionType;

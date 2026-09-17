@@ -70,4 +70,27 @@ describe("buttons request shapes", () => {
     expect(calls[0]!.body).toBe(JSON.stringify(body));
     expect(JSON.parse(String(calls[0]!.body))).toEqual(body);
   });
+
+  it.each([0, 1])("preserves ordinary text replies and reactions at part %i", async (partIndex) => {
+    // Targets are opaque IDs: preserve each caller-selected part index.
+    // The server, not the SDK, resolves and validates the target's stored type.
+    const calls: Captured[] = [];
+    const relay = client(calls);
+    const body: MessageSendParams = {
+      message: {
+        parts: [{ type: "text", value: "Thanks!" }],
+        reply_to: { message_id: "message-id", part_index: partIndex },
+      },
+    };
+    await relay.chats.messages.send("chat-id", body);
+    await relay.messages.addReaction("message-id", {
+      operation: "add", type: "love", part_index: partIndex,
+    });
+    expect(JSON.parse(String(calls[0]!.body))).toEqual(body);
+    expect(calls[1]!.url.pathname).toBe("/v1/messages/message-id/reactions");
+    expect(JSON.parse(String(calls[1]!.body))).toEqual({
+      operation: "add", type: "love", part_index: partIndex,
+    });
+  });
+
 });
