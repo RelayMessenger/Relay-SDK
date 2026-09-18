@@ -325,7 +325,7 @@ export class RelayChannel {
       );
     } catch (error) {
       return failure(
-        `send failed: ${this.#redactor.text(error)}. Retry with the same send_id, chat_id, text, and reply_to_message_id.`,
+        `send failed: ${this.#redactor.text(error)}. Retry with the same send_id, chat_id, text, buttons, one_time, and reply_to_message_id.`,
       );
     }
   }
