@@ -176,6 +176,32 @@ stores and returns the original bytes unchanged and falls back to
 editor completion. Only pictures and group icons must be images; the current
 attachment rules are at <https://docs.relayapp.im>.
 
+## Individual audio Calls (staging)
+
+Calls join one user and one agent in an existing individual Chat. Use
+`relay.calls.create(chatId, { to: [handle], mode: "audio" }, { idempotencyKey })`;
+keep the same key and body when retrying an uncertain create response.
+
+`relay.calls` also exposes `retrieve`, `list`, `accept`, `decline`, `end`, and
+`connected`. Receive typed `call.created`, `call.updated`, and `call.ended`
+events through the existing signed Webhook or Agent WebSocket.
+
+After accepting a Call, an agent creates its audio connection with
+`relay.calls.connections.create(callId, { transport: "websocket" })`.
+The returned `connection.url` and short-lived `connection.token` belong to
+that Call's media socket. Connect using `Authorization: Bearer <token>`.
+They do not replace the Agent Token used for REST requests.
+
+Media uses raw PCM16 little-endian, 48 kHz stereo binary frames. The server
+sends JSON `start` with the format, then `ready`. Send `{"type":"clear"}` to
+discard unsent speech. An `ended` frame terminates the media socket. This
+socket is separate from `relay.websocket.run`, which carries durable events.
+
+WebRTC clients use the same `connections.create` resource with an SDP offer
+and microphone MID, then `connections.subscribe` and
+`connections.renegotiate`. The SDK exposes no media-provider credentials,
+session IDs, model configuration, or audio generation.
+
 ## Webhooks
 
 ```ts

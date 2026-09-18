@@ -8,6 +8,13 @@ import type {
   BlockedHandleListResponse,
   BlockHandleParams,
   BlockHandleResponse,
+  CallConnectionCreateParams,
+  CallConnectionResponse,
+  CallCreateOptions,
+  CallCreateParams,
+  CallListParams,
+  CallListResponse,
+  CallResponse,
   Chat,
   ChatCreateParams,
   ChatCreateResponse,
@@ -717,10 +724,103 @@ export class Agents {
   }
 }
 
+export class CallConnections {
+  constructor(private readonly transport: Transport) {}
+
+  create(
+    callID: string,
+    body: CallConnectionCreateParams,
+    options?: RequestOptions,
+  ): Promise<CallConnectionResponse> {
+    return this.transport.request({
+      method: "POST", path: `/v1/calls/${pathID(callID)}/connections`, body, options,
+    });
+  }
+
+  subscribe(
+    callID: string,
+    connectionID: string,
+    options?: RequestOptions,
+  ): Promise<{ session_description: { type: "offer"; sdp: string } }> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/calls/${pathID(callID)}/connections/${pathID(connectionID)}/subscribe`,
+      body: {}, options, retryable: true,
+    });
+  }
+
+  renegotiate(
+    callID: string,
+    connectionID: string,
+    body: { session_description: { type: "answer"; sdp: string } },
+    options?: RequestOptions,
+  ): Promise<{ success: true }> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/calls/${pathID(callID)}/connections/${pathID(connectionID)}/renegotiate`,
+      body, options, retryable: true,
+    });
+  }
+}
+
+export class Calls {
+  readonly connections: CallConnections;
+
+  constructor(private readonly transport: Transport) {
+    this.connections = new CallConnections(transport);
+  }
+
+  create(chatID: string, body: CallCreateParams, options: CallCreateOptions): Promise<CallResponse> {
+    if (typeof options?.idempotencyKey !== "string"
+      || options.idempotencyKey.length < 1 || options.idempotencyKey.length > 255) {
+      throw new Error("Call creation requires an idempotencyKey of 1 to 255 characters.");
+    }
+    return this.transport.request({
+      method: "POST", path: `/v1/chats/${pathID(chatID)}/calls`, body, options,
+      idempotencyKey: options.idempotencyKey,
+    });
+  }
+
+  retrieve(callID: string, options?: RequestOptions): Promise<CallResponse> {
+    return this.transport.request({ method: "GET", path: `/v1/calls/${pathID(callID)}`, options });
+  }
+
+  list(chatID: string, query: CallListParams = {}, options?: RequestOptions): Promise<CallListResponse> {
+    return this.transport.request({
+      method: "GET", path: `/v1/chats/${pathID(chatID)}/calls`, query, options,
+    });
+  }
+
+  accept(callID: string, options?: RequestOptions): Promise<CallResponse> {
+    return this.transport.request({
+      method: "POST", path: `/v1/calls/${pathID(callID)}/accept`, body: {}, options, retryable: true,
+    });
+  }
+
+  decline(callID: string, options?: RequestOptions): Promise<CallResponse> {
+    return this.transport.request({
+      method: "POST", path: `/v1/calls/${pathID(callID)}/decline`, body: {}, options, retryable: true,
+    });
+  }
+
+  end(callID: string, options?: RequestOptions): Promise<CallResponse> {
+    return this.transport.request({
+      method: "POST", path: `/v1/calls/${pathID(callID)}/end`, body: {}, options, retryable: true,
+    });
+  }
+
+  connected(callID: string, options?: RequestOptions): Promise<CallResponse> {
+    return this.transport.request({
+      method: "POST", path: `/v1/calls/${pathID(callID)}/connected`, body: {}, options, retryable: true,
+    });
+  }
+}
+
 export class Relay {
   readonly agents: Agents;
   readonly baseURL: string;
   readonly chats: Chats;
+  readonly calls: Calls;
   readonly messages: Messages;
   readonly attachments: Attachments;
   readonly webhookEvents: WebhookEvents;
@@ -736,6 +836,7 @@ export class Relay {
     this.baseURL = transport.baseURL;
     this.agents = new Agents(transport);
     this.chats = new Chats(transport);
+    this.calls = new Calls(transport);
     this.messages = new Messages(transport);
     this.attachments = new Attachments(transport);
     this.webhookEvents = new WebhookEvents(transport);

@@ -12,6 +12,9 @@ import Relay, {
 } from "../packages/sdk/dist/index.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Explicit source-only proof for an uncommitted contract. Default validation
+// still requires real Server and durable public SDK commit pins.
+const structuralOnly = process.argv.includes("--structural");
 const declaredTypes = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), "../packages/sdk/dist/types.d.ts"),
   "utf8",
@@ -36,9 +39,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "55e12f23fdb559e23e54e4f386a77fd397293834",
+    commit: "74b7603fff3025b6d591a35f9b6f8ed9e2383173",
     path: "contracts/developer/openapi.yaml",
-    sha256: "de33237b05b09414c1994446f746795ab8bf410cb2c8f1422259103775cfc182",
+    sha256: "9e92c51df654d6896e13a56e95b6a32ce0fbb4c77ed9c754603482890e84dfde",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -46,10 +49,15 @@ assert.deepEqual(
 // runWebSocket rather than as a generated REST resource method.
 const sourceOnlyOperations = [
   {
-    method: "GET",
-    path: "/v1/websocket",
-    operationId: "connectAgentWebSocket",
+    "method": "GET",
+    "path": "/v1/websocket",
+    "operationId": "connectAgentWebSocket"
   },
+  {
+    "method": "GET",
+    "path": "/v1/calls/{callId}/media",
+    "operationId": "connectCallAudioWebSocket"
+  }
 ];
 const allowedOperationSignatures = [
   "DELETE /v1/agents/{handle}",
@@ -86,6 +94,16 @@ const allowedOperationSignatures = [
   "GET /v1/contact_card",
   "POST /v1/contact_card",
   "PATCH /v1/contact_card",
+  "POST /v1/chats/{chatId}/calls",
+  "GET /v1/chats/{chatId}/calls",
+  "GET /v1/calls/{callId}",
+  "POST /v1/calls/{callId}/accept",
+  "POST /v1/calls/{callId}/decline",
+  "POST /v1/calls/{callId}/end",
+  "POST /v1/calls/{callId}/connected",
+  "POST /v1/calls/{callId}/connections",
+  "POST /v1/calls/{callId}/connections/{connectionId}/subscribe",
+  "POST /v1/calls/{callId}/connections/{connectionId}/renegotiate"
 ];
 const forbiddenPathPrefixes = [
   "/v1/me/",
@@ -96,14 +114,14 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 34);
-assert.equal(manifest.path_count, 21);
-assert.equal(manifest.source_path_count, 22);
-assert.equal(manifest.source_schema_count, 111);
-assert.equal(manifest.callback_count, 16);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 21);
-assert.equal(operationJSON.length, 34);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 16);
+assert.equal(manifest.operation_count, 44);
+assert.equal(manifest.path_count, 30);
+assert.equal(manifest.source_path_count, 32);
+assert.equal(manifest.source_schema_count, 132);
+assert.equal(manifest.callback_count, 19);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 30);
+assert.equal(operationJSON.length, 44);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
@@ -198,6 +216,7 @@ assert.deepEqual(Object.keys(client).sort(), [
   "attachments",
   "baseURL",
   "blockedHandles",
+  "calls",
   "chats",
   "contactCard",
   "messages",
@@ -208,6 +227,10 @@ assert.deepEqual(Object.keys(client).sort(), [
 ]);
 assert.equal("createAgent" in Relay, false);
 assert.deepEqual(publicMethods(client.agents), ["delete"]);
+assert.deepEqual(publicMethods(client.calls), [
+  "accept", "connected", "create", "decline", "end", "list", "retrieve",
+]);
+assert.deepEqual(publicMethods(client.calls.connections), ["create", "renegotiate", "subscribe"]);
 assert.deepEqual(publicMethods(client.chats), [
   "create",
   "leaveChat",
@@ -346,6 +369,27 @@ const validateOpenAPI = () => {
     /existing membership rules/u,
   );
   assert.equal(document.openapi, "3.1.0");
+  for (const [name, type] of [["CallOffer", "offer"], ["CallAnswer", "answer"]]) {
+    assert.deepEqual(document.components.schemas[name].properties.type.enum, [type]);
+    assert.equal(document.components.schemas[name].properties.sdp.maxLength, 65_536);
+  }
+  assert.deepEqual(document.components.schemas.CallAudioFormat.properties.encoding.enum, ["pcm_s16le"]);
+  assert.deepEqual(document.components.schemas.CallAudioFormat.properties.sample_rate.enum, [48_000]);
+  assert.deepEqual(document.components.schemas.CallAudioFormat.properties.channels.enum, [2]);
+  assert.equal(document.components.schemas.CallCreateRequest.properties.to.minItems, 1);
+  assert.equal(document.components.schemas.CallCreateRequest.properties.to.maxItems, 1);
+  for (const [event, name] of [
+    ["call.created", "CallCreatedWebhook"],
+    ["call.updated", "CallUpdatedWebhook"],
+    ["call.ended", "CallEndedWebhook"],
+  ]) {
+    assert.equal(
+      document["x-relay-webhooks"][`${event}.v2026-08-30`].post
+        .requestBody.content["application/json"].schema.$ref,
+      `#/components/schemas/${name}`,
+    );
+  }
+  assert.equal(operationJSON.some((o) => o.path === "/v1/calls/{callId}/media"), false);
   const sourceOperations = [];
   for (const [path, item] of Object.entries(document.paths)) {
     for (const [method, operation] of Object.entries(item)) {
@@ -654,34 +698,51 @@ const skillLock = JSON.parse(
   readFileSync(resolve(root, "skills/relay/references/relay-v1-lock.json"), "utf8"),
 );
 const pinned = skillLock.api.public_source;
-const pinnedFile = spawnSync(
-  "git",
-  ["-C", root, "show", `${pinned.commit}:${pinned.path}`],
-  { maxBuffer: 64 * 1024 * 1024 },
-);
-assert.equal(
-  pinnedFile.status,
-  0,
-  `skill lock api.public_source.commit ${pinned.commit} is not readable in this checkout`
-  + ` (fetch the full history): ${String(pinnedFile.stderr)}`,
-);
-const pinnedDigest = createHash("sha256").update(pinnedFile.stdout).digest("hex");
-assert.equal(
-  pinnedDigest,
-  skillLock.api.openapi_sha256,
-  `skill lock: ${pinned.path} at ${pinned.commit} hashes ${pinnedDigest},`
-  + ` but api.openapi_sha256 is ${skillLock.api.openapi_sha256};`
-  + " point public_source.commit at the commit that carries the locked contract",
-);
-// A commit that hashes right is still a bad pin when only one machine has it:
-// this repository squash-merges, so a PR-branch commit is gone after merge.
-// The pin has to be reachable from a durable public ref (scripts/contract-pin.mjs).
-const durability = pinReachability({ root, commit: pinned.commit, sha256: skillLock.api.openapi_sha256 });
-if (!durability.checked) console.warn(durability.message);
-assert.ok(durability.checked === false || durability.reachable, durability.message);
+let provenanceChecked = false;
+if (!structuralOnly) {
+  assert.match(
+    manifest.upstream.commit,
+    /^[a-f0-9]{40}$/u,
+    "Server contract pin is pending. Pin the actual commit carrying these bytes; never substitute current HEAD.",
+  );
+  assert.match(
+    pinned.commit,
+    /^[a-f0-9]{40}$/u,
+    "Public SDK contract pin is pending. Pin a durable public commit carrying these bytes.",
+  );
+  const pinnedFile = spawnSync(
+    "git",
+    ["-C", root, "show", `${pinned.commit}:${pinned.path}`],
+    { maxBuffer: 64 * 1024 * 1024 },
+  );
+  assert.equal(
+    pinnedFile.status,
+    0,
+    `skill lock api.public_source.commit ${pinned.commit} is not readable in this checkout`
+    + ` (fetch the full history): ${String(pinnedFile.stderr)}`,
+  );
+  const pinnedDigest = createHash("sha256").update(pinnedFile.stdout).digest("hex");
+  assert.equal(
+    pinnedDigest,
+    skillLock.api.openapi_sha256,
+    `skill lock: ${pinned.path} at ${pinned.commit} hashes ${pinnedDigest},`
+    + ` but api.openapi_sha256 is ${skillLock.api.openapi_sha256};`
+    + " point public_source.commit at the commit that carries the locked contract",
+  );
+  // A commit that hashes right is still a bad pin when only one machine has it:
+  // this repository squash-merges, so a PR-branch commit is gone after merge.
+  // The pin has to be reachable from a durable public ref (scripts/contract-pin.mjs).
+  const durability = pinReachability({ root, commit: pinned.commit, sha256: skillLock.api.openapi_sha256 });
+  if (!durability.checked) console.warn(durability.message);
+  assert.ok(durability.checked === false || durability.reachable, durability.message);
+  provenanceChecked = durability.checked;
+} else {
+  console.warn("Source-only contract checks: Server/public SDK commit provenance was NOT checked.");
+}
 
 console.log(JSON.stringify({
   ok: true,
+  provenance_checked: provenanceChecked,
   package: "@relaymessenger/sdk",
   paths: manifest.path_count,
   operations: operationJSON.length,
