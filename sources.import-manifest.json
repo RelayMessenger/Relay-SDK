@@ -2032,7 +2032,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/relay-v1-lock.json",
       "source_sha256": "c18b70f1edfed7cfc6a396ed86c609e667975396d4c3ff57c00a49c0ad7e4ab4",
-      "destination_sha256": "a01fd9e735e9c9641923a4c1a6c3bd65ed051e26eb2226973e42a51df75590d4",
+      "destination_sha256": "e9592d4feaa1d191c579d403936d00d021a9ed325f3615a23f1385d260d2ceff",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
