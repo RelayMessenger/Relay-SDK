@@ -96,10 +96,10 @@ for (const [path, digest] of Object.entries(provenance.generated_files)) {
 
 assert.deepEqual(lock, provenance.relay_v1_lock);
 assert.equal(lock.sdk.version, "0.3.1-staging.1");
-assert.equal(lock.api.commit, "2852a2585c7e82c9d720e7c78dea4184a41bb09f");
+assert.equal(lock.api.commit, "1d5ccc3ebb1f6cbf5cc7732e9353a4cfb62703e7");
 assert.equal(
   lock.api.openapi_sha256,
-  "19cec94a3e5fcdf75e3b1101ebe64f637c4bc1b1b9b755196fe72383f00417a8",
+  "379ba81f3bd4092bf65c445a730c396620a162a37fec775c0e382bf9edce2640",
 );
 assert.equal(lock.docs.commit, "79e5abe98860840a12fc46ae70ad3a42131283aa");
 

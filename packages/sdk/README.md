@@ -182,25 +182,45 @@ Calls join one user and one agent in an existing individual Chat. Use
 `relay.calls.create(chatId, { to: [handle], mode: "audio" }, { idempotencyKey })`;
 keep the same key and body when retrying an uncertain create response.
 
-`relay.calls` also exposes `retrieve`, `list`, `accept`, `decline`, `end`, and
-`connected`. Receive typed `call.created`, `call.updated`, and `call.ended`
-events through the existing signed Webhook or Agent WebSocket.
+`relay.calls` also exposes `retrieve`, `list`, `accept`, `decline`, and `end`.
+Receive typed `call.created`, `call.updated`, and `call.ended` events through
+the existing signed Webhook or Agent WebSocket.
 
-After accepting a Call, an agent creates its audio connection with
-`relay.calls.connections.create(callId, { transport: "websocket" })`.
-The returned `connection.url` and short-lived `connection.token` belong to
-that Call's media socket. Connect using `Authorization: Bearer <token>`.
-They do not replace the Agent Token used for REST requests.
+Every participant holds one socket to the Call room. `relay.calls.room(callId)`
+opens `GET /v1/calls/{callId}/room` with the same bearer as every REST route,
+sends `join`, and keeps `room.state` at the latest `roomState` the room pushed
+after every change. Nothing is polled.
 
-Media uses raw PCM16 little-endian, 48 kHz stereo binary frames. The server
-sends JSON `start` with the format, then `ready`. Send `{"type":"clear"}` to
-discard unsent speech. An `ended` frame terminates the media socket. This
-socket is separate from `relay.websocket.run`, which carries durable events.
+```ts
+const room = relay.calls.room(event.data.call.id);
+room.on("roomState", ({ call, participants, media }) => {
+  // `media` (the audio-socket url and short-lived token) is present only on
+  // the agent's own socket. Open it, then accept.
+  if (call.status === "ringing" && media) room.accept();
+});
+room.on("offer", ({ session_description, track }) => {
+  // The room started pulling the other side's track; answer it.
+  room.send({ type: "answer", session_description: { type: "answer", sdp } });
+});
+room.on("ended", ({ reason }) => { /* the socket closes right after */ });
+room.connected();
+room.userUpdate({ muted: true });
+room.end();
+```
 
-WebRTC clients use the same `connections.create` resource with an SDP offer
-and microphone MID, then `connections.subscribe` and
-`connections.renegotiate`. The SDK exposes no media-provider credentials,
-session IDs, model configuration, or audio generation.
+`room.send(frame)` takes any client frame from the contract (`join`, `offer`,
+`answer`, `userUpdate`, `accept`, `decline`, `end`, `connected`, `heartbeat`);
+`accept()`, `decline()`, `end()`, `connected()` and `userUpdate()` send the
+matching frame. The client sends `heartbeat` every 15 s until `close()`. An
+invalid room frame closes the socket 4400 and fires `error`.
+
+The agent's audio flows on the media socket named in `roomState.media`, with
+`Authorization: Bearer <media.token>`: raw PCM16 little-endian, 48 kHz stereo
+binary frames. The server sends JSON `start` with the format, then `ready`.
+Send `{"type":"clear"}` to discard unsent speech. An `ended` frame terminates
+the media socket. Both sockets are separate from `relay.websocket.run`, which
+carries durable events. The SDK exposes no media-provider credentials, session
+IDs, model configuration, or audio generation.
 
 ## Webhooks
 

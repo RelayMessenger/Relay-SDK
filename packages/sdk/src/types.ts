@@ -61,35 +61,119 @@ export interface CallAudioFormat {
   channels: 2;
 }
 
-export type CallConnectionCreateParams =
-  | { transport: "websocket" }
-  | {
-      transport: "webrtc";
-      session_description: { type: "offer"; sdp: string };
-      tracks: [{ mid: string; name: "microphone" }];
-    };
+export type CallRoomTrack = "microphone" | "agent-voice";
 
-export interface CallWebSocketConnection {
-  id: UUID;
-  call_id: UUID;
-  transport: "websocket";
+export interface CallRoomParticipant {
+  contact_id: UUID;
+  kind: "user" | "agent";
+  attached: boolean;
+  track: CallRoomTrack | null;
+  muted: boolean;
+  connected: boolean;
+}
+
+/** The audio-socket grant; present only in the agent's own roomState. */
+export interface CallRoomMedia {
   url: string;
-  /** Ephemeral Relay grant, supplied as the media WebSocket bearer token. */
+  /** Short-lived Relay media grant, the media WebSocket bearer. Treat it as a secret. */
   token: string;
   expires_at: string;
   audio_format: CallAudioFormat;
 }
 
-export interface CallWebRTCConnection {
-  id: UUID;
-  call_id: UUID;
-  transport: "webrtc";
+export interface CallRoomStateFrame {
+  type: "roomState";
+  call: Call;
+  participants: CallRoomParticipant[];
+  media?: CallRoomMedia;
+}
+
+export interface CallRoomAnswerFrame {
+  type: "answer";
   session_description: { type: "answer"; sdp: string };
 }
 
-export interface CallConnectionResponse {
-  connection: CallWebSocketConnection | CallWebRTCConnection;
+/** The room started pulling the other side's track; reply with `answer`. */
+export interface CallRoomOfferFrame {
+  type: "offer";
+  session_description: { type: "offer"; sdp: string };
+  track: CallRoomTrack;
 }
+
+export type CallEndReason = NonNullable<Call["end_reason"]>;
+
+export interface CallRoomEndedFrame {
+  type: "ended";
+  reason: CallEndReason;
+}
+
+export type CallRoomErrorCode = "invalid_frame" | "not_allowed" | "media_unavailable";
+
+export interface CallRoomErrorFrame {
+  type: "error";
+  code: CallRoomErrorCode;
+  message: string;
+}
+
+export interface CallRoomHeartbeatFrame {
+  type: "heartbeat";
+}
+
+export type CallRoomServerFrame =
+  | CallRoomStateFrame
+  | CallRoomAnswerFrame
+  | CallRoomOfferFrame
+  | CallRoomEndedFrame
+  | CallRoomErrorFrame
+  | CallRoomHeartbeatFrame;
+
+export interface CallRoomJoinFrame {
+  type: "join";
+}
+
+/** Publish this participant's microphone to the SFU (users only). */
+export interface CallRoomClientOfferFrame {
+  type: "offer";
+  session_description: { type: "offer"; sdp: string };
+  tracks: [{ mid: string; name: "microphone" }];
+}
+
+export interface CallRoomClientAnswerFrame {
+  type: "answer";
+  session_description: { type: "answer"; sdp: string };
+}
+
+export interface CallRoomUserUpdateFrame {
+  type: "userUpdate";
+  muted: boolean;
+}
+
+export interface CallRoomAcceptFrame {
+  type: "accept";
+}
+
+export interface CallRoomDeclineFrame {
+  type: "decline";
+}
+
+export interface CallRoomEndFrame {
+  type: "end";
+}
+
+export interface CallRoomConnectedFrame {
+  type: "connected";
+}
+
+export type CallRoomClientFrame =
+  | CallRoomJoinFrame
+  | CallRoomClientOfferFrame
+  | CallRoomClientAnswerFrame
+  | CallRoomUserUpdateFrame
+  | CallRoomAcceptFrame
+  | CallRoomDeclineFrame
+  | CallRoomEndFrame
+  | CallRoomConnectedFrame
+  | CallRoomHeartbeatFrame;
 
 export type CallWebhookEvent = RelayWebhookEnvelope<
   CallResponse,
