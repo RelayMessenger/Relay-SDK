@@ -43,7 +43,7 @@ const textFromEvent = (event: RelayWebhookEvent): string | null => {
  * every other runtime carries.
  */
 export const piPrompt = (message: string): string =>
-  `${message}\n\nWrite your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself.\n\n${BUTTONS_BLOCK_INSTRUCTION} ${BUTTONS_GUIDANCE}`;
+  `${message}\n\nWrite your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself. Text is plain chat text, not Markdown: the app shows asterisks and pound signs literally.\n\n${BUTTONS_BLOCK_INSTRUCTION} ${BUTTONS_GUIDANCE}`;
 
 /**
  * The messages an answer becomes: text in chunks the API takes, and the
