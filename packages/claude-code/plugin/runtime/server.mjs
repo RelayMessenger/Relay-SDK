@@ -20365,6 +20365,258 @@ var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 var wrapper_default = import_websocket.default;
 
+// node_modules/@relaymessenger/sdk/dist/calls-room.js
+var HEARTBEAT_INTERVAL_MS = 15e3;
+var HEARTBEAT_FRAME = JSON.stringify({ type: "heartbeat" });
+var CLIENT_CLOSE_INVALID_FRAME = 4400;
+var CALL_STATUSES = /* @__PURE__ */ new Set(["ringing", "connecting", "active", "ended"]);
+var END_REASONS = /* @__PURE__ */ new Set([
+  "completed",
+  "declined",
+  "canceled",
+  "no_answer",
+  "disconnected",
+  "failed"
+]);
+var ROOM_ERROR_CODES = /* @__PURE__ */ new Set(["invalid_frame", "not_allowed", "media_unavailable"]);
+var TRACKS = /* @__PURE__ */ new Set(["microphone", "agent-voice"]);
+var isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+var hasKeys = (value, required2, optional2 = []) => {
+  const keys = Object.keys(value);
+  return required2.every((key) => keys.includes(key)) && keys.every((key) => required2.includes(key) || optional2.includes(key));
+};
+var isSessionDescription = (value, type) => isRecord(value) && hasKeys(value, ["type", "sdp"]) && value.type === type && typeof value.sdp === "string" && value.sdp.length > 0;
+var isCall = (value) => isRecord(value) && typeof value.id === "string" && typeof value.chat_id === "string" && isRecord(value.from) && Array.isArray(value.to) && value.mode === "audio" && CALL_STATUSES.has(String(value.status)) && Number.isInteger(value.revision) && typeof value.created_at === "string" && (value.end_reason === null || END_REASONS.has(String(value.end_reason)));
+var isParticipant = (value) => isRecord(value) && hasKeys(value, ["contact_id", "kind", "attached", "track", "muted", "connected"]) && typeof value.contact_id === "string" && (value.kind === "user" || value.kind === "agent") && typeof value.attached === "boolean" && (value.track === null || TRACKS.has(String(value.track))) && typeof value.muted === "boolean" && typeof value.connected === "boolean";
+var isMedia = (value) => isRecord(value) && hasKeys(value, ["url", "token", "expires_at", "audio_format"]) && typeof value.url === "string" && typeof value.token === "string" && typeof value.expires_at === "string" && isRecord(value.audio_format) && value.audio_format.encoding === "pcm_s16le" && value.audio_format.sample_rate === 48e3 && value.audio_format.channels === 2;
+var parseServerFrame = (value) => {
+  if (!isRecord(value) || typeof value.type !== "string")
+    return void 0;
+  switch (value.type) {
+    case "roomState":
+      return hasKeys(value, ["type", "call", "participants"], ["media"]) && isCall(value.call) && Array.isArray(value.participants) && value.participants.every(isParticipant) && (!Object.hasOwn(value, "media") || isMedia(value.media)) ? value : void 0;
+    case "answer":
+      return hasKeys(value, ["type", "session_description"]) && isSessionDescription(value.session_description, "answer") ? value : void 0;
+    case "offer":
+      return hasKeys(value, ["type", "session_description", "track"]) && isSessionDescription(value.session_description, "offer") && TRACKS.has(String(value.track)) ? value : void 0;
+    case "ended":
+      return hasKeys(value, ["type", "reason"]) && END_REASONS.has(String(value.reason)) ? value : void 0;
+    case "error":
+      return hasKeys(value, ["type", "code", "message"]) && ROOM_ERROR_CODES.has(String(value.code)) && typeof value.message === "string" ? value : void 0;
+    case "heartbeat":
+      return hasKeys(value, ["type"]) ? { type: "heartbeat" } : void 0;
+    default:
+      return void 0;
+  }
+};
+var deriveRoomURL = (baseURL, callID) => {
+  let url;
+  try {
+    url = new URL(baseURL);
+  } catch {
+    throw new TypeError("Relay baseURL must be an absolute HTTP(S) URL.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:" || url.username !== "" || url.password !== "") {
+    throw new TypeError("Relay baseURL must be an absolute HTTP(S) URL.");
+  }
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = `/v1/calls/${encodeURIComponent(callID)}/room`;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+};
+var CallRoom = class {
+  url;
+  /** The latest `roomState` frame, or null before the room has answered `join`. */
+  state = null;
+  #socket;
+  #listeners = /* @__PURE__ */ new Map();
+  #heartbeatIntervalMs;
+  #heartbeat;
+  #open = false;
+  #closed = false;
+  constructor(baseURL, callID, token, options = {}) {
+    if (!callID.trim())
+      throw new TypeError("A Call id is required to join its room.");
+    if (!token.trim())
+      throw new TypeError("A Relay token is required to join a Call room.");
+    this.url = deriveRoomURL(baseURL, callID);
+    this.#heartbeatIntervalMs = options.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS;
+    const Constructor = options.WebSocket ?? wrapper_default;
+    this.#socket = new Constructor(this.url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    this.#socket.addEventListener("open", this.#onOpen);
+    this.#socket.addEventListener("message", this.#onMessage);
+    this.#socket.addEventListener("close", this.#onClose);
+    this.#socket.addEventListener("error", this.#onError);
+    this.#socket.on?.("unexpected-response", this.#onUnexpectedResponse);
+  }
+  get closed() {
+    return this.#closed;
+  }
+  on(event, listener) {
+    const listeners = this.#listeners.get(event) ?? /* @__PURE__ */ new Set();
+    listeners.add(listener);
+    this.#listeners.set(event, listeners);
+    return this;
+  }
+  off(event, listener) {
+    this.#listeners.get(event)?.delete(listener);
+    return this;
+  }
+  /** Send one client frame from the room contract. */
+  send(frame) {
+    if (this.#closed)
+      throw new Error("Relay Call room socket is closed.");
+    this.#socket.send(JSON.stringify(frame));
+  }
+  /** Callee only: ringing → connecting. */
+  accept() {
+    this.send({ type: "accept" });
+  }
+  /** Callee only: ringing → ended(declined). */
+  decline() {
+    this.send({ type: "decline" });
+  }
+  /** Either side: ringing → ended(canceled) by the caller, else ended(completed). */
+  end() {
+    this.send({ type: "end" });
+  }
+  /** "My remote track is playing"; the second side's `connected` makes the Call active. */
+  connected() {
+    this.send({ type: "connected" });
+  }
+  /** Mute state for the other side's screen; the room answers with `roomState`. */
+  userUpdate(update) {
+    this.send({ type: "userUpdate", muted: update.muted });
+  }
+  close(code = 1e3, reason = "client closed") {
+    if (this.#closed)
+      return;
+    this.#stopHeartbeat();
+    try {
+      this.#socket.close(code, reason);
+    } catch {
+      this.#finish({ code, reason });
+    }
+  }
+  #emit(event, ...args) {
+    for (const listener of this.#listeners.get(event) ?? [])
+      listener(...args);
+  }
+  #stopHeartbeat() {
+    if (this.#heartbeat !== void 0)
+      clearInterval(this.#heartbeat);
+    this.#heartbeat = void 0;
+  }
+  #finish(event) {
+    if (this.#closed)
+      return;
+    this.#closed = true;
+    this.#stopHeartbeat();
+    this.#socket.removeEventListener("open", this.#onOpen);
+    this.#socket.removeEventListener("message", this.#onMessage);
+    this.#socket.removeEventListener("close", this.#onClose);
+    this.#socket.removeEventListener("error", this.#onError);
+    this.#socket.off?.("unexpected-response", this.#onUnexpectedResponse);
+    this.#emit("close", event);
+  }
+  #invalid(message) {
+    this.#emit("error", new Error(`Relay Call room received an invalid frame: ${message}`));
+    this.close(CLIENT_CLOSE_INVALID_FRAME, "invalid frame");
+  }
+  #onOpen = () => {
+    if (this.#open || this.#closed)
+      return;
+    this.#open = true;
+    this.send({ type: "join" });
+    this.#heartbeat = setInterval(() => {
+      try {
+        this.#socket.send(HEARTBEAT_FRAME);
+      } catch (cause) {
+        this.#emit("error", cause instanceof Error ? cause : new Error(String(cause)));
+        this.close(1e3, "heartbeat failed");
+      }
+    }, this.#heartbeatIntervalMs);
+  };
+  #onMessage = (message) => {
+    if (this.#closed)
+      return;
+    let value;
+    try {
+      const data = message.data;
+      const textData = typeof data === "string" ? data : data instanceof ArrayBuffer || ArrayBuffer.isView(data) ? new TextDecoder().decode(data) : void 0;
+      if (textData === void 0) {
+        this.#invalid("non-text frame");
+        return;
+      }
+      value = JSON.parse(textData);
+    } catch {
+      this.#invalid("invalid JSON");
+      return;
+    }
+    const frame = parseServerFrame(value);
+    if (frame === void 0) {
+      this.#invalid(isRecord(value) && typeof value.type === "string" ? `unexpected ${value.type} frame` : "missing type");
+      return;
+    }
+    switch (frame.type) {
+      case "roomState":
+        this.state = frame;
+        this.#emit("roomState", frame);
+        return;
+      case "offer":
+        this.#emit("offer", frame);
+        return;
+      case "answer":
+        this.#emit("answer", frame);
+        return;
+      case "ended":
+        this.#emit("ended", frame);
+        this.close(1e3, "Call ended");
+        return;
+      case "error":
+        this.#emit("error", frame);
+        return;
+      case "heartbeat":
+        return;
+    }
+  };
+  #onClose = (event) => {
+    this.#finish({ code: event.code ?? 1006, reason: event.reason ?? "" });
+  };
+  #onError = () => {
+    if (this.#closed)
+      return;
+    this.#emit("error", new Error("Relay Call room connection failed."));
+  };
+  #onUnexpectedResponse = (_request, response) => {
+    const chunks = [];
+    response.setEncoding?.("utf8");
+    response.on("data", (chunk) => {
+      if (chunks.join("").length < 65536)
+        chunks.push(String(chunk));
+    });
+    const settle = () => {
+      const status = response.statusCode ?? 0;
+      let message = `Relay Call room upgrade failed with HTTP ${status}.`;
+      let body = chunks.join("");
+      try {
+        body = JSON.parse(chunks.join(""));
+        if (isRecord(body) && isRecord(body.error) && typeof body.error.message === "string") {
+          message = body.error.message;
+        }
+      } catch {
+      }
+      this.#emit("error", new RelayAPIError(message, { status, body }));
+      this.#finish({ code: 1006, reason: `HTTP ${status}` });
+    };
+    response.on("end", settle);
+    response.on("error", settle);
+  };
+};
+
 // node_modules/@relaymessenger/sdk/dist/operations.js
 var RELAY_WEBHOOK_EVENT_TYPES = [
   "message.sent",
@@ -20420,7 +20672,7 @@ var text = async (value) => {
   throw new Error("Relay WebSocket received a non-text frame.");
 };
 var validSequence = (value) => typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
-var isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+var isRecord2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 var hasExactKeys = (value, keys) => {
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
@@ -20447,7 +20699,7 @@ var WebSocketProtocolError = class extends Error {
   stop = true;
 };
 var parseReady = (value) => {
-  if (!isRecord(value) || !hasExactKeys(value, [
+  if (!isRecord2(value) || !hasExactKeys(value, [
     "type",
     "connection_id",
     "acked_through",
@@ -20462,31 +20714,31 @@ var parseReady = (value) => {
   return value;
 };
 var parseEvent = (value) => {
-  if (!isRecord(value) || !hasExactKeys(value, ["type", "sequence", "event"]) || value.type !== "event" || !validSequence(value.sequence) || !isRecord(value.event) || value.event.api_version !== "v1" || value.event.webhook_version !== "2026-08-30" || !WEBHOOK_EVENT_TYPES.has(String(value.event.event_type)) || !validUUID(value.event.event_id) || typeof value.event.created_at !== "string" || typeof value.event.trace_id !== "string" || !validUUID(value.event.agent_id) || !isRecord(value.event.data)) {
+  if (!isRecord2(value) || !hasExactKeys(value, ["type", "sequence", "event"]) || value.type !== "event" || !validSequence(value.sequence) || !isRecord2(value.event) || value.event.api_version !== "v1" || value.event.webhook_version !== "2026-08-30" || !WEBHOOK_EVENT_TYPES.has(String(value.event.event_type)) || !validUUID(value.event.event_id) || typeof value.event.created_at !== "string" || typeof value.event.trace_id !== "string" || !validUUID(value.event.agent_id) || !isRecord2(value.event.data)) {
     throw new WebSocketProtocolError("Relay WebSocket received an invalid event frame.");
   }
   return value;
 };
 var parseFullSync = (value) => {
-  if (!isRecord(value) || !hasExactKeys(value, ["type", "through_sequence", "reason"]) || value.type !== "full_sync" || !validSequence(value.through_sequence) || value.reason !== "checkpoint_outside_retention") {
+  if (!isRecord2(value) || !hasExactKeys(value, ["type", "through_sequence", "reason"]) || value.type !== "full_sync" || !validSequence(value.through_sequence) || value.reason !== "checkpoint_outside_retention") {
     throw new WebSocketProtocolError("Relay WebSocket received an invalid FULL sync frame.");
   }
   return value;
 };
 var parsePing = (value) => {
-  if (!isRecord(value) || !hasExactKeys(value, ["type", "sent_at"]) || value.type !== "ping" || typeof value.sent_at !== "string" || Number.isNaN(Date.parse(value.sent_at))) {
+  if (!isRecord2(value) || !hasExactKeys(value, ["type", "sent_at"]) || value.type !== "ping" || typeof value.sent_at !== "string" || Number.isNaN(Date.parse(value.sent_at))) {
     throw new WebSocketProtocolError("Relay WebSocket received an invalid ping frame.");
   }
   return value;
 };
 var parsePong = (value) => {
-  if (!isRecord(value) || !hasExactKeys(value, ["type"]) || value.type !== "pong") {
+  if (!isRecord2(value) || !hasExactKeys(value, ["type"]) || value.type !== "pong") {
     throw new WebSocketProtocolError("Relay WebSocket received an invalid pong frame.");
   }
   return value;
 };
 var parseError = (value) => {
-  if (!isRecord(value) || !hasExactKeys(value, [
+  if (!isRecord2(value) || !hasExactKeys(value, [
     "type",
     "code",
     "message",
@@ -20498,7 +20750,7 @@ var parseError = (value) => {
   return value;
 };
 var parseDisconnect = (value) => {
-  if (!isRecord(value) || !hasExactKeys(value, ["type", "reason"]) || value.type !== "disconnect" || ![
+  if (!isRecord2(value) || !hasExactKeys(value, ["type", "reason"]) || value.type !== "disconnect" || ![
     "revoked",
     "heartbeat_timeout",
     "restart",
@@ -20536,10 +20788,10 @@ var upgradeResponseBody = (status, statusMessage, textBody) => {
   try {
     const parsed = textBody ? JSON.parse(textBody) : void 0;
     body = parsed;
-    if (isRecord(parsed)) {
+    if (isRecord2(parsed)) {
       if (typeof parsed.trace_id === "string")
         traceId = parsed.trace_id;
-      if (isRecord(parsed.error) && typeof parsed.error.message === "string") {
+      if (isRecord2(parsed.error) && typeof parsed.error.message === "string") {
         message = parsed.error.message;
       }
     }
@@ -20665,7 +20917,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady) => new Prom
       } catch (cause) {
         throw new WebSocketProtocolError(cause instanceof SyntaxError ? "Relay WebSocket received invalid JSON." : "Relay WebSocket received a non-text frame.");
       }
-      if (isRecord(frame) && frame.type === "ready") {
+      if (isRecord2(frame) && frame.type === "ready") {
         if (ready) {
           throw new WebSocketProtocolError("Relay WebSocket received more than one ready frame.");
         }
@@ -20686,7 +20938,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady) => new Prom
         onReady(parsed);
         return;
       }
-      if (isRecord(frame) && frame.type === "disconnect") {
+      if (isRecord2(frame) && frame.type === "disconnect") {
         const parsed = parseDisconnect(frame);
         if (parsed.reason === "heartbeat_timeout" || parsed.reason === "restart") {
           throw new RetryableWebSocketError(parsed.reason === "restart" ? "Relay WebSocket is restarting." : "Relay WebSocket heartbeat timed out.");
@@ -20696,7 +20948,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady) => new Prom
         }
         throw new WebSocketStoppedError(`Relay WebSocket disconnected permanently: ${parsed.reason}.`, 4401);
       }
-      if (isRecord(frame) && frame.type === "ping") {
+      if (isRecord2(frame) && frame.type === "ping") {
         if (!ready) {
           throw new WebSocketProtocolError("Relay WebSocket received a ping before the ready frame.");
         }
@@ -20704,12 +20956,12 @@ var runConnection = (url, agentToken, options, Constructor, onReady) => new Prom
         send({ type: "pong" });
         return;
       }
-      if (isRecord(frame) && frame.type === "pong") {
+      if (isRecord2(frame) && frame.type === "pong") {
         parsePong(frame);
         lastPongAt = Date.now();
         return;
       }
-      if (isRecord(frame) && frame.type === "error") {
+      if (isRecord2(frame) && frame.type === "error") {
         const parsed = parseError(frame);
         if (!parsed.retryable) {
           throw new WebSocketStoppedError(parsed.message);
@@ -20719,7 +20971,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady) => new Prom
       if (!ready || acceptedThrough === void 0 || fullSyncThrough === void 0) {
         throw new WebSocketProtocolError("Relay WebSocket received a data frame before the ready frame.");
       }
-      if (isRecord(frame) && frame.type === "full_sync") {
+      if (isRecord2(frame) && frame.type === "full_sync") {
         const fullSync = parseFullSync(frame);
         if (fullSyncThrough === null || BigInt(fullSync.through_sequence) !== fullSyncThrough) {
           throw new WebSocketProtocolError("Relay WebSocket FULL sync did not match the ready checkpoint.");
@@ -21005,6 +21257,11 @@ var Transport = class {
     if (!this.#apiKey)
       throw new Error("Relay API key is required.");
     return runWebSocket(this.baseURL, this.#apiKey, options);
+  }
+  openCallRoom(callID, options) {
+    if (!this.#apiKey)
+      throw new Error("Relay API key is required.");
+    return new CallRoom(this.baseURL, callID, this.#apiKey, options);
   }
 };
 var ChatMessages = class {
@@ -21368,44 +21625,10 @@ var Agents = class {
     });
   }
 };
-var CallConnections = class {
-  transport;
-  constructor(transport2) {
-    this.transport = transport2;
-  }
-  create(callID, body, options) {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/calls/${pathID(callID)}/connections`,
-      body,
-      options
-    });
-  }
-  subscribe(callID, connectionID, options) {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/calls/${pathID(callID)}/connections/${pathID(connectionID)}/subscribe`,
-      body: {},
-      options,
-      retryable: true
-    });
-  }
-  renegotiate(callID, connectionID, body, options) {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/calls/${pathID(callID)}/connections/${pathID(connectionID)}/renegotiate`,
-      body,
-      options,
-      retryable: true
-    });
-  }
-};
 var Calls = class {
   transport;
-  connections;
   constructor(transport2) {
     this.transport = transport2;
-    this.connections = new CallConnections(transport2);
   }
   create(chatID, body, options) {
     if (typeof options?.idempotencyKey !== "string" || options.idempotencyKey.length < 1 || options.idempotencyKey.length > 255) {
@@ -21457,14 +21680,12 @@ var Calls = class {
       retryable: true
     });
   }
-  connected(callID, options) {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/calls/${pathID(callID)}/connected`,
-      body: {},
-      options,
-      retryable: true
-    });
+  /**
+   * Open this participant's socket to the Call room (GET /v1/calls/{callId}/room).
+   * The room pushes `roomState` after every change; nothing is polled.
+   */
+  room(callID, options = {}) {
+    return this.transport.openCallRoom(callID, options);
   }
 };
 var Relay = class {
@@ -21756,7 +21977,7 @@ var ConsumerLock = class {
 
 // src/bridge.ts
 var MAX_RELAY_TEXT = 1e4;
-function isRecord2(value) {
+function isRecord3(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function renderPart(part) {
@@ -21809,10 +22030,10 @@ function classifyRelayEvent(params) {
   if (event.event_type !== "message.received") {
     return { kind: "ignore", reason: `event type ${event.event_type} is not an inbound Message` };
   }
-  if (!isRecord2(event.data)) return { kind: "refuse", reason: "Message event data is not an object" };
+  if (!isRecord3(event.data)) return { kind: "refuse", reason: "Message event data is not an object" };
   const data = event.data;
-  const chat = isRecord2(data.chat) ? data.chat : null;
-  const sender = isRecord2(data.sender_handle) ? data.sender_handle : null;
+  const chat = isRecord3(data.chat) ? data.chat : null;
+  const sender = isRecord3(data.sender_handle) ? data.sender_handle : null;
   const chatId = typeof chat?.id === "string" ? chat.id : "";
   const messageId = typeof data.id === "string" ? data.id : "";
   const senderId = typeof sender?.id === "string" ? sender.id : "";
@@ -21834,9 +22055,9 @@ function classifyRelayEvent(params) {
     return { kind: "blocked", senderId, senderHandle };
   }
   const isGroup = chat?.is_group === true;
-  const owner = isRecord2(chat?.owner_handle) ? chat.owner_handle : null;
+  const owner = isRecord3(chat?.owner_handle) ? chat.owner_handle : null;
   const ownerHandle = owner?.kind === "agent" && owner.id === event.agent_id && typeof owner.handle === "string" ? owner.handle : null;
-  const replyTo = isRecord2(data.reply_to) && typeof data.reply_to.message_id === "string" ? data.reply_to.message_id : null;
+  const replyTo = isRecord3(data.reply_to) && typeof data.reply_to.message_id === "string" ? data.reply_to.message_id : null;
   const groupGate = !isGroup ? "direct" : partsMentionHandle(parts, ownerHandle) ? "mention" : replyTo ? "reply" : "unaddressed";
   const content = messageContent(parts, params.redactor);
   const delivery = {

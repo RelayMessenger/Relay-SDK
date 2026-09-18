@@ -39,9 +39,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "78d7991c7b8a615302ab30d727503779755df3ab",
+    commit: "ef8cedb1015e1e0d0856d61b69057f2b831f7c90",
     path: "contracts/developer/openapi.yaml",
-    sha256: "1d790da998a8dfc26cffc098def76d85b8275af7a343148df8e78c486cd02849",
+    sha256: "1b687dc9ffc7a6296a04b570d20fe32bed758deb2ed8f38fc48d0d44a10db2ec",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -57,6 +57,11 @@ const sourceOnlyOperations = [
     "method": "GET",
     "path": "/v1/calls/{callId}/media",
     "operationId": "connectCallAudioWebSocket"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/calls/{callId}/room",
+    "operationId": "connectCallRoom"
   }
 ];
 const allowedOperationSignatures = [
@@ -99,11 +104,7 @@ const allowedOperationSignatures = [
   "GET /v1/calls/{callId}",
   "POST /v1/calls/{callId}/accept",
   "POST /v1/calls/{callId}/decline",
-  "POST /v1/calls/{callId}/end",
-  "POST /v1/calls/{callId}/connected",
-  "POST /v1/calls/{callId}/connections",
-  "POST /v1/calls/{callId}/connections/{connectionId}/subscribe",
-  "POST /v1/calls/{callId}/connections/{connectionId}/renegotiate"
+  "POST /v1/calls/{callId}/end"
 ];
 const forbiddenPathPrefixes = [
   "/v1/me/",
@@ -114,13 +115,13 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 44);
-assert.equal(manifest.path_count, 30);
-assert.equal(manifest.source_path_count, 32);
-assert.equal(manifest.source_schema_count, 138);
+assert.equal(manifest.operation_count, 40);
+assert.equal(manifest.path_count, 26);
+assert.equal(manifest.source_path_count, 29);
+assert.equal(manifest.source_schema_count, 126);
 assert.equal(manifest.callback_count, 19);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 30);
-assert.equal(operationJSON.length, 44);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 26);
+assert.equal(operationJSON.length, 40);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
@@ -228,9 +229,8 @@ assert.deepEqual(Object.keys(client).sort(), [
 assert.equal("createAgent" in Relay, false);
 assert.deepEqual(publicMethods(client.agents), ["delete"]);
 assert.deepEqual(publicMethods(client.calls), [
-  "accept", "connected", "create", "decline", "end", "list", "retrieve",
+  "accept", "create", "decline", "end", "list", "retrieve", "room",
 ]);
-assert.deepEqual(publicMethods(client.calls.connections), ["create", "renegotiate", "subscribe"]);
 assert.deepEqual(publicMethods(client.chats), [
   "create",
   "leaveChat",
@@ -369,13 +369,19 @@ const validateOpenAPI = () => {
     /existing membership rules/u,
   );
   assert.equal(document.openapi, "3.1.0");
-  for (const [name, type] of [["CallOffer", "offer"], ["CallAnswer", "answer"]]) {
-    assert.deepEqual(document.components.schemas[name].properties.type.enum, [type]);
-    assert.equal(document.components.schemas[name].properties.sdp.maxLength, 65_536);
+  // The REST media routes and their schemas are gone; the per-call room
+  // socket (connectCallRoom) carries offer/answer/roomState frames instead.
+  for (const gone of [
+    "CallOffer", "CallAnswer", "CallAudioFormat", "CallConnectionRequest",
+    "CallConnectionResult", "CallSubscribeResult", "CallRenegotiateRequest",
+  ]) {
+    assert.equal(gone in document.components.schemas, false, `${gone} is obsolete`);
   }
-  assert.deepEqual(document.components.schemas.CallAudioFormat.properties.encoding.enum, ["pcm_s16le"]);
-  assert.deepEqual(document.components.schemas.CallAudioFormat.properties.sample_rate.enum, [48_000]);
-  assert.deepEqual(document.components.schemas.CallAudioFormat.properties.channels.enum, [2]);
+  assert.equal(document.paths["/v1/calls/{callId}/room"].get.operationId, "connectCallRoom");
+  assert.ok(document.paths["/v1/calls/{callId}/room"].get.responses["101"]);
+  for (const gone of ["connected", "connections"]) {
+    assert.equal(`/v1/calls/{callId}/${gone}` in document.paths, false, `${gone} REST route is obsolete`);
+  }
   assert.equal(document.components.schemas.CallCreateRequest.properties.to.minItems, 1);
   assert.equal(document.components.schemas.CallCreateRequest.properties.to.maxItems, 1);
   for (const [event, name] of [
@@ -390,6 +396,7 @@ const validateOpenAPI = () => {
     );
   }
   assert.equal(operationJSON.some((o) => o.path === "/v1/calls/{callId}/media"), false);
+  assert.equal(operationJSON.some((o) => o.path === "/v1/calls/{callId}/room"), false);
   const sourceOperations = [];
   for (const [path, item] of Object.entries(document.paths)) {
     for (const [method, operation] of Object.entries(item)) {

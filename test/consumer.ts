@@ -131,22 +131,26 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "call.ended",
 ];
 
-// Compile-only provider-neutral call receive and connection exercise.
+// Compile-only provider-neutral call receive and room exercise.
 async function receiveCall(event: CallWebhookEvent): Promise<void> {
   event.data.call satisfies Call;
   if (event.event_type !== "call.created") return;
-  await relay.calls.accept(event.data.call.id);
-  const { connection } = await relay.calls.connections.create(event.data.call.id, {
-    transport: "websocket",
+  const room = relay.calls.room(event.data.call.id);
+  room.on("roomState", (frame) => {
+    frame.call satisfies Call;
+    frame.media?.token satisfies string | undefined;
+    if (frame.call.status === "ringing" && frame.media) room.accept();
   });
-  if (connection.transport === "websocket") {
-    connection.audio_format.encoding satisfies "pcm_s16le";
-    connection.audio_format.sample_rate satisfies 48000;
-    connection.audio_format.channels satisfies 2;
-    connection.token satisfies string;
-    // @ts-expect-error Vendor credentials are never part of Relay's media grant.
-    connection.appSecret;
-  }
+  room.on("offer", (frame) => {
+    frame.track satisfies "microphone" | "agent-voice";
+    room.send({ type: "answer", session_description: { type: "answer", sdp: "v=0\r\n" } });
+  });
+  room.on("ended", (frame) => { frame.reason satisfies string; });
+  room.userUpdate({ muted: false });
+  room.connected();
+  // @ts-expect-error Only contract client frames may be sent.
+  room.send({ type: "subscribe" });
+  room.close();
 }
 void receiveCall;
 await relay.calls.create("chat-id", { to: ["agent"], mode: "audio" }, {

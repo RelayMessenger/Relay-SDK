@@ -1,14 +1,14 @@
 {
   "source": "contracts/relay-v1-openapi.yaml",
-  "source_openapi_sha256": "1d790da998a8dfc26cffc098def76d85b8275af7a343148df8e78c486cd02849",
+  "source_openapi_sha256": "1b687dc9ffc7a6296a04b570d20fe32bed758deb2ed8f38fc48d0d44a10db2ec",
   "upstream": {
     "repository": "https://github.com/RelayMessenger/Relay-Server.git",
-    "commit": "78d7991c7b8a615302ab30d727503779755df3ab",
+    "commit": "ef8cedb1015e1e0d0856d61b69057f2b831f7c90",
     "path": "contracts/developer/openapi.yaml",
-    "sha256": "1d790da998a8dfc26cffc098def76d85b8275af7a343148df8e78c486cd02849"
+    "sha256": "1b687dc9ffc7a6296a04b570d20fe32bed758deb2ed8f38fc48d0d44a10db2ec"
   },
-  "source_path_count": 32,
-  "source_schema_count": 138,
+  "source_path_count": 29,
+  "source_schema_count": 126,
   "callback_count": 19,
   "transport_decision": {
     "source": "contracts/agent-transport-decision.md",
@@ -19,8 +19,8 @@
       "path": "research/relay-rebuild-20260828/TRANSPORT-DECISION-20260829.md"
     }
   },
-  "path_count": 30,
-  "operation_count": 44,
+  "path_count": 26,
+  "operation_count": 40,
   "operations": [
     {
       "method": "DELETE",
@@ -221,26 +221,6 @@
       "method": "POST",
       "path": "/v1/calls/{callId}/end",
       "operationId": "endCall"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/calls/{callId}/connected",
-      "operationId": "markCallConnected"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/calls/{callId}/connections",
-      "operationId": "createCallConnection"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/calls/{callId}/connections/{connectionId}/subscribe",
-      "operationId": "subscribeCallAudio"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/calls/{callId}/connections/{connectionId}/renegotiate",
-      "operationId": "renegotiateCallAudio"
     }
   ]
 }

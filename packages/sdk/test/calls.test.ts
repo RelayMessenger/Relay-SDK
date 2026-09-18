@@ -55,7 +55,7 @@ describe("provider-independent call API", () => {
     }, { idempotencyKey: "" })).toThrow(/idempotencyKey/);
   });
 
-  it.each(["accept", "decline", "end", "connected"] as const)(
+  it.each(["accept", "decline", "end"] as const)(
     "sends the exact %s action",
     async (action) => {
       let observed: { url: string; body: unknown } | undefined;
@@ -73,68 +73,7 @@ describe("provider-independent call API", () => {
     },
   );
 
-  it("returns the ephemeral audio grant without replacing the Agent Token", async () => {
-    const requests: RequestInit[] = [];
-    const connection = {
-      id: "01995bc0-0000-7000-8000-000000000005",
-      call_id: call.id, transport: "websocket",
-      url: `wss://api.staging.relayapp.im/v1/calls/${call.id}/media`,
-      token: "temporary-media-grant",
-      expires_at: "2026-09-17T12:01:00Z",
-      audio_format: { encoding: "pcm_s16le", sample_rate: 48000, channels: 2 },
-    };
-    const client = new Relay({
-      apiKey: "agent-token",
-      fetch: async (_url, init) => {
-        requests.push(init!);
-        return Response.json(requests.length === 1 ? { connection } : { call }, { status: 201 });
-      },
-    });
-    expect(await client.calls.connections.create(call.id, { transport: "websocket" }))
-      .toEqual({ connection });
-    await client.calls.end(call.id);
-    expect(new Headers(requests[1]!.headers).get("authorization")).toBe("Bearer agent-token");
-    expect(JSON.parse(String(requests[0]!.body))).toEqual({ transport: "websocket" });
-  });
-
-  it("does not silently retry media connection allocation", async () => {
-    let attempts = 0;
-    const client = new Relay({
-      apiKey: "token", maxRetries: 3, retryBaseDelayMs: 0,
-      fetch: async () => {
-        attempts++;
-        return Response.json({ error: { message: "unavailable" } }, { status: 503 });
-      },
-    });
-    await expect(client.calls.connections.create(call.id, { transport: "websocket" }))
-      .rejects.toThrow("unavailable");
-    expect(attempts).toBe(1);
-  });
-
-  it("reads call history with its cursor and negotiated audio shapes", async () => {
-    const seen: Array<{ url: string; body: unknown }> = [];
-    const client = new Relay({
-      apiKey: "token", baseURL: "https://api.staging.relayapp.im",
-      fetch: async (url, init) => {
-        seen.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined });
-        return Response.json({ calls: [call], next_cursor: null });
-      },
-    });
-    await client.calls.list(call.chat_id, { cursor: "cursor-one", limit: 10 });
-    expect(new URL(seen[0]!.url).searchParams.get("cursor")).toBe("cursor-one");
-    expect(new URL(seen[0]!.url).searchParams.get("limit")).toBe("10");
-    expect(new URL(seen[0]!.url).pathname).toBe(`/v1/chats/${call.chat_id}/calls`);
-    await client.calls.connections.subscribe(call.id, "connection");
-    expect(seen[1]!.body).toEqual({});
-    expect(new URL(seen[1]!.url).pathname).toBe(`/v1/calls/${call.id}/connections/connection/subscribe`);
-    await client.calls.connections.renegotiate(call.id, "connection", {
-      session_description: { type: "answer", sdp: "v=0\r\n" },
-    });
-    expect(seen[2]!.body).toEqual({ session_description: { type: "answer", sdp: "v=0\r\n" } });
-    expect(new URL(seen[2]!.url).pathname).toBe(`/v1/calls/${call.id}/connections/connection/renegotiate`);
-  });
-
-  it("encodes call IDs and sends the user SDP without vendor fields", async () => {
+  it("encodes call IDs in REST paths", async () => {
     const seen: Array<{ path: string; method: string; body: unknown }> = [];
     const client = new Relay({
       apiKey: "token",
@@ -147,21 +86,8 @@ describe("provider-independent call API", () => {
       },
     });
     await client.calls.retrieve("call/one");
-    await client.calls.connections.create(call.id, {
-      transport: "webrtc",
-      session_description: { type: "offer", sdp: "v=0\r\n" },
-      tracks: [{ mid: "0", name: "microphone" }],
-    });
     expect(seen).toEqual([
       { path: "/v1/calls/call%2Fone", method: "GET", body: undefined },
-      {
-        path: `/v1/calls/${call.id}/connections`, method: "POST",
-        body: {
-          transport: "webrtc",
-          session_description: { type: "offer", sdp: "v=0\r\n" },
-          tracks: [{ mid: "0", name: "microphone" }],
-        },
-      },
     ]);
   });
 

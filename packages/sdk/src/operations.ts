@@ -204,26 +204,6 @@ export const RELAY_V1_OPERATIONS = [
     "method": "POST",
     "path": "/v1/calls/{callId}/end",
     "operationId": "endCall"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/calls/{callId}/connected",
-    "operationId": "markCallConnected"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/calls/{callId}/connections",
-    "operationId": "createCallConnection"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/calls/{callId}/connections/{connectionId}/subscribe",
-    "operationId": "subscribeCallAudio"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/calls/{callId}/connections/{connectionId}/renegotiate",
-    "operationId": "renegotiateCallAudio"
   }
 ] as const satisfies readonly RelayV1Operation[];
 

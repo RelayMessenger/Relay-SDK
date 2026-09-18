@@ -23,11 +23,11 @@ export interface WebSocketFullSyncContext {
 
 export interface WebSocketLike {
   addEventListener(
-    type: "message" | "close" | "error",
+    type: "open" | "message" | "close" | "error",
     listener: (event: any) => void,
   ): void;
   removeEventListener(
-    type: "message" | "close" | "error",
+    type: "open" | "message" | "close" | "error",
     listener: (event: any) => void,
   ): void;
   send(data: string): void;

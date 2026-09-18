@@ -4,7 +4,6 @@ export {
   BlockedHandles,
   Chats,
   Calls,
-  CallConnections,
   ContactCard,
   Messages,
   Relay,
@@ -37,6 +36,11 @@ export {
   verifyWebhookSignature,
   type WebhookHeaders,
 } from "./webhooks.js";
+export {
+  CallRoom,
+  type CallRoomEvents,
+  type CallRoomOptions,
+} from "./calls-room.js";
 export {
   runWebSocket,
   type WebSocketEventContext,
