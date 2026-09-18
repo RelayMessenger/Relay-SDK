@@ -62,7 +62,7 @@ export const CLIENT_NAME = "relaymessenger";
 /** Who answers the person: this process sends the final message. */
 export const ANSWER_INSTRUCTION =
   "Write your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself. "
-  + "Text is plain chat text, not Markdown: the app shows asterisks and pound signs literally.";
+  + "Write chat text. Inline Markdown draws: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.";
 
 /**
  * How the answer carries buttons, and when it should: the SDK's one text for
