@@ -14,7 +14,7 @@ assert.equal(contract.paths["/v1/agents"]?.post, undefined, "Anonymous Agent reg
 const httpMethods = new Set(["get", "post", "put", "patch", "delete", "head", "options", "trace"]);
 // Upgrades are source-only HTTP, not JSON REST resource methods.
 // Same exclusion as scripts/validate-contract.mjs.
-const sourceOnlyPaths = new Set(["/v1/websocket", "/v1/calls/{callId}/media"]);
+const sourceOnlyPaths = new Set(["/v1/websocket", "/v1/calls/{callId}/media", "/v1/calls/{callId}/room"]);
 const operationCount = Object.entries(contract.paths).reduce(
   (count, [path, item]) => count + (sourceOnlyPaths.has(path) ? 0 : Object.keys(item).filter(method => httpMethods.has(method)).length), 0,
 );

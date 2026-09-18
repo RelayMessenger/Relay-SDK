@@ -8,8 +8,6 @@ import type {
   BlockedHandleListResponse,
   BlockHandleParams,
   BlockHandleResponse,
-  CallConnectionCreateParams,
-  CallConnectionResponse,
   CallCreateOptions,
   CallCreateParams,
   CallListParams,
@@ -49,6 +47,7 @@ import type {
   WebhookSubscriptionUpdateParams,
 } from "./types.js";
 import { Webhooks } from "./webhooks.js";
+import { CallRoom, type CallRoomOptions } from "./calls-room.js";
 import {
   runWebSocket,
   type WebSocketRunOptions,
@@ -247,6 +246,11 @@ class Transport {
   runWebSocket(options: WebSocketRunOptions): Promise<void> {
     if (!this.#apiKey) throw new Error("Relay API key is required.");
     return runWebSocket(this.baseURL, this.#apiKey, options);
+  }
+
+  openCallRoom(callID: string, options: CallRoomOptions): CallRoom {
+    if (!this.#apiKey) throw new Error("Relay API key is required.");
+    return new CallRoom(this.baseURL, callID, this.#apiKey, options);
   }
 }
 
@@ -724,51 +728,8 @@ export class Agents {
   }
 }
 
-export class CallConnections {
-  constructor(private readonly transport: Transport) {}
-
-  create(
-    callID: string,
-    body: CallConnectionCreateParams,
-    options?: RequestOptions,
-  ): Promise<CallConnectionResponse> {
-    return this.transport.request({
-      method: "POST", path: `/v1/calls/${pathID(callID)}/connections`, body, options,
-    });
-  }
-
-  subscribe(
-    callID: string,
-    connectionID: string,
-    options?: RequestOptions,
-  ): Promise<{ session_description: { type: "offer"; sdp: string } }> {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/calls/${pathID(callID)}/connections/${pathID(connectionID)}/subscribe`,
-      body: {}, options, retryable: true,
-    });
-  }
-
-  renegotiate(
-    callID: string,
-    connectionID: string,
-    body: { session_description: { type: "answer"; sdp: string } },
-    options?: RequestOptions,
-  ): Promise<{ success: true }> {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/calls/${pathID(callID)}/connections/${pathID(connectionID)}/renegotiate`,
-      body, options, retryable: true,
-    });
-  }
-}
-
 export class Calls {
-  readonly connections: CallConnections;
-
-  constructor(private readonly transport: Transport) {
-    this.connections = new CallConnections(transport);
-  }
+  constructor(private readonly transport: Transport) {}
 
   create(chatID: string, body: CallCreateParams, options: CallCreateOptions): Promise<CallResponse> {
     if (typeof options?.idempotencyKey !== "string"
@@ -809,10 +770,12 @@ export class Calls {
     });
   }
 
-  connected(callID: string, options?: RequestOptions): Promise<CallResponse> {
-    return this.transport.request({
-      method: "POST", path: `/v1/calls/${pathID(callID)}/connected`, body: {}, options, retryable: true,
-    });
+  /**
+   * Open this participant's socket to the Call room (GET /v1/calls/{callId}/room).
+   * The room pushes `roomState` after every change; nothing is polled.
+   */
+  room(callID: string, options: CallRoomOptions = {}): CallRoom {
+    return this.transport.openCallRoom(callID, options);
   }
 }
 

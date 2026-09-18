@@ -175,10 +175,6 @@ try {
         "POST /v1/calls/{callId}/accept",
         "POST /v1/calls/{callId}/decline",
         "POST /v1/calls/{callId}/end",
-        "POST /v1/calls/{callId}/connected",
-        "POST /v1/calls/{callId}/connections",
-        "POST /v1/calls/{callId}/connections/{connectionId}/subscribe",
-        "POST /v1/calls/{callId}/connections/{connectionId}/renegotiate",
       ]);
       assert.deepEqual(
         new Set(RELAY_V1_OPERATIONS.map(
