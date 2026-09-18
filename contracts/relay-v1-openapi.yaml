@@ -3933,7 +3933,8 @@ components:
             Defaults to 0 (first part) if not provided.
             Use this when replying to a specific part of a multipart message.
             Targeting a `buttons` part returns 422 unless the message is a tap:
-            one `text` part equal to one of that part's plain button labels.
+            one `text` part equal to one of that part's plain button labels,
+            sent by the user. An agent's reply to a `buttons` part returns 403.
           minimum: 0
     RequestUploadRequest:
       type: object
