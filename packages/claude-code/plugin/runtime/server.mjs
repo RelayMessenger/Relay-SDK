@@ -20382,7 +20382,10 @@ var RELAY_WEBHOOK_EVENT_TYPES = [
   "chat.typing_indicator.started",
   "chat.typing_indicator.stopped",
   "contact.added",
-  "contact.removed"
+  "contact.removed",
+  "call.created",
+  "call.updated",
+  "call.ended"
 ];
 
 // node_modules/@relaymessenger/sdk/dist/websocket.js
@@ -21365,10 +21368,110 @@ var Agents = class {
     });
   }
 };
+var CallConnections = class {
+  transport;
+  constructor(transport2) {
+    this.transport = transport2;
+  }
+  create(callID, body, options) {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/calls/${pathID(callID)}/connections`,
+      body,
+      options
+    });
+  }
+  subscribe(callID, connectionID, options) {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/calls/${pathID(callID)}/connections/${pathID(connectionID)}/subscribe`,
+      body: {},
+      options,
+      retryable: true
+    });
+  }
+  renegotiate(callID, connectionID, body, options) {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/calls/${pathID(callID)}/connections/${pathID(connectionID)}/renegotiate`,
+      body,
+      options,
+      retryable: true
+    });
+  }
+};
+var Calls = class {
+  transport;
+  connections;
+  constructor(transport2) {
+    this.transport = transport2;
+    this.connections = new CallConnections(transport2);
+  }
+  create(chatID, body, options) {
+    if (typeof options?.idempotencyKey !== "string" || options.idempotencyKey.length < 1 || options.idempotencyKey.length > 255) {
+      throw new Error("Call creation requires an idempotencyKey of 1 to 255 characters.");
+    }
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/chats/${pathID(chatID)}/calls`,
+      body,
+      options,
+      idempotencyKey: options.idempotencyKey
+    });
+  }
+  retrieve(callID, options) {
+    return this.transport.request({ method: "GET", path: `/v1/calls/${pathID(callID)}`, options });
+  }
+  list(chatID, query = {}, options) {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/chats/${pathID(chatID)}/calls`,
+      query,
+      options
+    });
+  }
+  accept(callID, options) {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/calls/${pathID(callID)}/accept`,
+      body: {},
+      options,
+      retryable: true
+    });
+  }
+  decline(callID, options) {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/calls/${pathID(callID)}/decline`,
+      body: {},
+      options,
+      retryable: true
+    });
+  }
+  end(callID, options) {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/calls/${pathID(callID)}/end`,
+      body: {},
+      options,
+      retryable: true
+    });
+  }
+  connected(callID, options) {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/calls/${pathID(callID)}/connected`,
+      body: {},
+      options,
+      retryable: true
+    });
+  }
+};
 var Relay = class {
   agents;
   baseURL;
   chats;
+  calls;
   messages;
   attachments;
   webhookEvents;
@@ -21384,6 +21487,7 @@ var Relay = class {
     this.baseURL = transport2.baseURL;
     this.agents = new Agents(transport2);
     this.chats = new Chats(transport2);
+    this.calls = new Calls(transport2);
     this.messages = new Messages(transport2);
     this.attachments = new Attachments(transport2);
     this.webhookEvents = new WebhookEvents(transport2);

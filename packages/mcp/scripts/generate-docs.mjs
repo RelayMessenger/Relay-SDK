@@ -12,10 +12,11 @@ const contractText = read("contracts/relay-v1-openapi.yaml");
 const contract = parse(contractText);
 assert.equal(contract.paths["/v1/agents"]?.post, undefined, "Anonymous Agent registration is retired");
 const httpMethods = new Set(["get", "post", "put", "patch", "delete", "head", "options", "trace"]);
-// The upgrade is source-only HTTP; SDK WebSocket.run is a transport, not a REST method.
+// Upgrades are source-only HTTP, not JSON REST resource methods.
 // Same exclusion as scripts/validate-contract.mjs.
+const sourceOnlyPaths = new Set(["/v1/websocket", "/v1/calls/{callId}/media"]);
 const operationCount = Object.entries(contract.paths).reduce(
-  (count, [path, item]) => count + (path === "/v1/websocket" ? 0 : Object.keys(item).filter(method => httpMethods.has(method)).length), 0,
+  (count, [path, item]) => count + (sourceOnlyPaths.has(path) ? 0 : Object.keys(item).filter(method => httpMethods.has(method)).length), 0,
 );
 const clientFile = ts.createSourceFile("client.ts", clientText, ts.ScriptTarget.Latest, true);
 const typesFile = ts.createSourceFile("types.ts", typesText, ts.ScriptTarget.Latest, true);
@@ -59,7 +60,8 @@ function walk(className, prefix) {
       operationId: request.operation.operationId, summary: request.operation.summary ?? request.operation.operationId,
       description: request.operation.description ?? "", definitions: definitions(signature),
       requestBody: request.operation.requestBody ?? null, executable: !isStatic,
-      optionsIndex: member.parameters.findIndex(p => p.type?.getText(clientFile) === "RequestOptions"),
+      optionsIndex: member.parameters.findIndex(p =>
+        ["RequestOptions", "CallCreateOptions"].includes(p.type?.getText(clientFile) ?? "")),
     });
   }
 }

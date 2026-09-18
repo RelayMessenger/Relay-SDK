@@ -204,6 +204,20 @@ describe("Relay v1 request shapes", () => {
       handle: "echo",
       first_name: "New Echo",
     });
+    await client.calls.create("chat-id", { to: ["bob"], mode: "audio" }, {
+      idempotencyKey: "call-create-key",
+    });
+    await client.calls.list("chat-id");
+    await client.calls.retrieve("call-id");
+    await client.calls.accept("call-id");
+    await client.calls.decline("call-id");
+    await client.calls.end("call-id");
+    await client.calls.connected("call-id");
+    await client.calls.connections.create("call-id", { transport: "websocket" });
+    await client.calls.connections.subscribe("call-id", "connection-id");
+    await client.calls.connections.renegotiate("call-id", "connection-id", {
+      session_description: { type: "answer", sdp: "v=0\r\n" },
+    });
     await client.agents.delete("agent");
 
     expect([...calls.slice(-1), ...calls.slice(0, -1)].map((call) => [call.method, call.url.pathname])).toEqual(
@@ -214,7 +228,9 @@ describe("Relay v1 request shapes", () => {
           .replace("{chatId}", "chat-id")
           .replace("{messageId}", "message-id")
           .replace("{attachmentId}", "attachment-id")
-          .replace("{subscriptionId}", "subscription-id"),
+          .replace("{subscriptionId}", "subscription-id")
+          .replace("{callId}", "call-id")
+          .replace("{connectionId}", "connection-id"),
       ]),
     );
     expect(calls.every((call) =>
@@ -322,6 +338,7 @@ describe("Relay v1 request shapes", () => {
       "attachments",
       "baseURL",
       "blockedHandles",
+      "calls",
       "chats",
       "contactCard",
       "messages",
@@ -351,6 +368,20 @@ describe("Relay v1 request shapes", () => {
     ]);
     expect(methods(client.chats.messages)).toEqual(["list", "send"]);
     expect(methods(client.chats.participants)).toEqual(["add", "remove"]);
+    expect(methods(client.calls)).toEqual([
+      "accept",
+      "connected",
+      "create",
+      "decline",
+      "end",
+      "list",
+      "retrieve",
+    ]);
+    expect(methods(client.calls.connections)).toEqual([
+      "create",
+      "renegotiate",
+      "subscribe",
+    ]);
     expect(methods(client.attachments)).toEqual([
       "create",
       "delete",
