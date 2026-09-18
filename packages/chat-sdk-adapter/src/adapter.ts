@@ -1244,6 +1244,12 @@ export class RelayAdapter
       case "contact.added":
       case "contact.removed":
         return;
+      // The Chat SDK has no call primitive, so a Call's lifecycle is not
+      // recorded or dispatched either.
+      case "call.created":
+      case "call.updated":
+      case "call.ended":
+        return;
       default:
         return assertExhaustiveEvent(envelope.event_type);
     }

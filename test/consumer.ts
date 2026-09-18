@@ -1,6 +1,8 @@
 import Relay, {
   RELAY_WEBHOOK_EVENT_TYPES,
   type Chat,
+  type Call,
+  type CallWebhookEvent,
   type ChatHandle,
   type ChatSendVoicememoResponse,
   type ContactAddedWebhookEvent,
@@ -124,7 +126,38 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "chat.typing_indicator.stopped",
   "contact.added",
   "contact.removed",
+  "call.created",
+  "call.updated",
+  "call.ended",
 ];
+
+// Compile-only provider-neutral call receive and connection exercise.
+async function receiveCall(event: CallWebhookEvent): Promise<void> {
+  event.data.call satisfies Call;
+  if (event.event_type !== "call.created") return;
+  await relay.calls.accept(event.data.call.id);
+  const { connection } = await relay.calls.connections.create(event.data.call.id, {
+    transport: "websocket",
+  });
+  if (connection.transport === "websocket") {
+    connection.audio_format.encoding satisfies "pcm_s16le";
+    connection.audio_format.sample_rate satisfies 48000;
+    connection.audio_format.channels satisfies 2;
+    connection.token satisfies string;
+    // @ts-expect-error Vendor credentials are never part of Relay's media grant.
+    connection.appSecret;
+  }
+}
+void receiveCall;
+await relay.calls.create("chat-id", { to: ["agent"], mode: "audio" }, {
+  idempotencyKey: "one-call",
+});
+// @ts-expect-error Call creation requires a stable idempotency key.
+await relay.calls.create("chat-id", { to: ["agent"], mode: "audio" });
+// @ts-expect-error Individual Calls have exactly one recipient.
+await relay.calls.create("chat-id", { to: ["one", "two"], mode: "audio" }, { idempotencyKey: "one" });
+// @ts-expect-error Calls are audio-only.
+await relay.calls.create("chat-id", { to: ["agent"], mode: "video" }, { idempotencyKey: "one" });
 
 const envelope: RelayWebhookEnvelope = {
   api_version: "v1",

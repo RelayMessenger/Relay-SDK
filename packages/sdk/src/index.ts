@@ -3,6 +3,8 @@ export {
   Attachments,
   BlockedHandles,
   Chats,
+  Calls,
+  CallConnections,
   ContactCard,
   Messages,
   Relay,

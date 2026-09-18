@@ -9,6 +9,93 @@ export interface RequestOptions {
   headers?: HeadersInit;
 }
 
+export interface CallContact {
+  id: UUID;
+  handle: string;
+  kind: "user" | "agent";
+}
+
+export interface Call {
+  id: UUID;
+  chat_id: UUID;
+  from: CallContact;
+  to: [CallContact];
+  mode: "audio";
+  status: "ringing" | "connecting" | "active" | "ended";
+  revision: number;
+  created_at: string;
+  ringing_at: string;
+  answered_at: string | null;
+  connected_at: string | null;
+  ended_at: string | null;
+  end_reason: "completed" | "declined" | "canceled" | "no_answer" | "disconnected" | "failed" | null;
+}
+
+export interface CallCreateParams {
+  to: [string];
+  mode: "audio";
+}
+
+export interface CallCreateOptions extends RequestOptions {
+  /** Reuse this key and request after an uncertain response. */
+  idempotencyKey: string;
+}
+
+export interface CallListParams {
+  cursor?: string;
+  limit?: number;
+}
+
+export interface CallListResponse {
+  calls: Call[];
+  next_cursor: string | null;
+}
+
+export interface CallResponse {
+  call: Call;
+}
+
+export interface CallAudioFormat {
+  encoding: "pcm_s16le";
+  sample_rate: 48000;
+  channels: 2;
+}
+
+export type CallConnectionCreateParams =
+  | { transport: "websocket" }
+  | {
+      transport: "webrtc";
+      session_description: { type: "offer"; sdp: string };
+      tracks: [{ mid: string; name: "microphone" }];
+    };
+
+export interface CallWebSocketConnection {
+  id: UUID;
+  call_id: UUID;
+  transport: "websocket";
+  url: string;
+  /** Ephemeral Relay grant, supplied as the media WebSocket bearer token. */
+  token: string;
+  expires_at: string;
+  audio_format: CallAudioFormat;
+}
+
+export interface CallWebRTCConnection {
+  id: UUID;
+  call_id: UUID;
+  transport: "webrtc";
+  session_description: { type: "answer"; sdp: string };
+}
+
+export interface CallConnectionResponse {
+  connection: CallWebSocketConnection | CallWebRTCConnection;
+}
+
+export type CallWebhookEvent = RelayWebhookEnvelope<
+  CallResponse,
+  "call.created" | "call.updated" | "call.ended"
+>;
+
 export type DeliveryStatus =
   | "sent"
   | "delivered"
@@ -656,7 +743,6 @@ export interface WebSocketFullSyncCompleteFrame {
 
 export interface WebSocketPingFrame {
   type: "ping";
-  sent_at: string;
 }
 
 export interface WebSocketPongFrame {
@@ -798,6 +884,9 @@ type OtherWebhookEventType = Exclude<
   | "contact.added"
   | "contact.removed"
   | "message.failed"
+  | "call.created"
+  | "call.updated"
+  | "call.ended"
 >;
 
 export type RelayWebhookEvent =
@@ -809,6 +898,7 @@ export type RelayWebhookEvent =
   | MessageFailedWebhook
   | ContactAddedWebhookEvent
   | ContactRemovedWebhookEvent
+  | CallWebhookEvent
   | RelayWebhookEnvelope<Record<string, unknown>, OtherWebhookEventType>;
 
 /** Existing Relay avatar gradient pairs, ordered top then base. */

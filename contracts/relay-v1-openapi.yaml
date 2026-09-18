@@ -46,6 +46,8 @@ tags:
     description: Receive agent events over a durable acknowledged WebSocket.
   - name: Contacts
     description: Request a user Contact.
+  - name: Calls
+    description: Start, answer, end and connect individual user-agent audio calls.
 paths:
   /v1/agents/{handle}:
     delete:
@@ -162,6 +164,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/TooManyMessages"
         "500":
           $ref: "#/components/responses/InternalServerError"
       parameters:
@@ -661,6 +665,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/TooManyMessages"
         "500":
           $ref: "#/components/responses/InternalServerError"
         "503":
@@ -764,6 +770,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/TooManyMessages"
         "500":
           $ref: "#/components/responses/InternalServerError"
       description: |-
@@ -950,6 +958,8 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyMessages"
         "500":
           $ref: "#/components/responses/InternalServerError"
   /v1/messages/{messageId}:
@@ -1564,9 +1574,799 @@ paths:
         <Agent Token>. If the Agent has any saved webhook subscription, Relay
         returns 409. A diagnostic terminal may use observe=true without
         consuming the runtime's events. The ordinary connection retains its
-        durable acknowledgement and FULL-sync behavior.
+        durable acknowledgement and FULL-sync behavior. The client owns the
+        heartbeat: send {"type":"ping"} every heartbeat_interval_ms and Relay
+        answers {"type":"pong"} from the edge runtime, without waking the
+        Agent's connection state. Relay never sends a ping frame.
+  /v1/chats/{chatId}/calls:
+    post:
+      operationId: createCall
+      summary: Start an individual call
+      tags:
+        - Calls
+      security:
+        - BearerAuth: []
+      description: Start an audio Call in an existing individual Chat containing one user and one agent. The caller comes from authentication. The user must have added the agent; sending or replying to a Message establishes that relationship. A block in either direction prevents the call. A group Chat is rejected even when it has only two current members. Reuse the same Idempotency-Key and body after an uncertain response. Ringing has a 60-second setup lease; an accepted Call has 30 seconds to connect. Established calls have no duration limit imposed by these setup leases.
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema: &a1
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CallCreateRequest"
+      responses:
+        "200":
+          description: The original Call for the same idempotent request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallResult"
+        "201":
+          description: Call created and ringing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    get:
+      operationId: listCalls
+      summary: List calls in a chat
+      tags:
+        - Calls
+      security:
+        - BearerAuth: []
+      description: Read retained call history for a Chat you belong to.
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema: *a1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Operation completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallListResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/calls/{callId}:
+    get:
+      operationId: getCall
+      summary: Retrieve a call
+      tags:
+        - Calls
+      security:
+        - BearerAuth: []
+      description: Only a Contact in the Call can retrieve it.
+      parameters:
+        - name: callId
+          in: path
+          required: true
+          schema: *a1
+      responses:
+        "200":
+          description: Operation completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/calls/{callId}/accept:
+    post:
+      operationId: acceptCall
+      summary: Accept a call
+      tags:
+        - Calls
+      security:
+        - BearerAuth: []
+      description: The recipient accepts a ringing Call. The Call becomes connecting, not active.
+      parameters:
+        - name: callId
+          in: path
+          required: true
+          schema: *a1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CallEmptyRequest"
+      responses:
+        "200":
+          description: Operation completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/calls/{callId}/decline:
+    post:
+      operationId: declineCall
+      summary: Decline a call
+      tags:
+        - Calls
+      security:
+        - BearerAuth: []
+      description: The recipient declines a ringing Call. The Call ends with reason declined.
+      parameters:
+        - name: callId
+          in: path
+          required: true
+          schema: *a1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CallEmptyRequest"
+      responses:
+        "200":
+          description: Operation completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/calls/{callId}/end:
+    post:
+      operationId: endCall
+      summary: End a call
+      tags:
+        - Calls
+      security:
+        - BearerAuth: []
+      description: Either Contact ends the Call. A ringing Call ends canceled; an answered Call ends completed. Cleanup remains available after a block or removal. Repeated terminal actions never restart the Call.
+      parameters:
+        - name: callId
+          in: path
+          required: true
+          schema: *a1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CallEmptyRequest"
+      responses:
+        "200":
+          description: Operation completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/calls/{callId}/connected:
+    post:
+      operationId: markCallConnected
+      summary: Report connected media
+      tags:
+        - Calls
+      security:
+        - BearerAuth: []
+      description: Report that this Contact has connected media. The Call becomes active only after both Contacts have reported media readiness.
+      parameters:
+        - name: callId
+          in: path
+          required: true
+          schema: *a1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CallEmptyRequest"
+      responses:
+        "200":
+          description: Operation completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/calls/{callId}/connections:
+    post:
+      operationId: createCallConnection
+      summary: Connect call audio
+      tags:
+        - Calls
+      security:
+        - BearerAuth: []
+      description: Connect an accepted Call. Users connect with WebRTC; agent backends connect a live audio WebSocket. The returned media grant is scoped to the authenticated Contact and Call. Provider credentials remain on Relay servers.
+      parameters:
+        - name: callId
+          in: path
+          required: true
+          schema: *a1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CallConnectionRequest"
+      responses:
+        "201":
+          description: Operation completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallConnectionResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/calls/{callId}/connections/{connectionId}/subscribe:
+    post:
+      operationId: subscribeCallAudio
+      summary: Receive the other side’s audio
+      tags:
+        - Calls
+      security:
+        - BearerAuth: []
+      description: For a WebRTC connection, request the other side’s audio track. Apply the returned offer and submit your answer through renegotiate. A 409 means the other track is not ready; retry only during connection setup.
+      parameters:
+        - name: callId
+          in: path
+          required: true
+          schema: *a1
+        - name: connectionId
+          in: path
+          required: true
+          schema: *a1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CallEmptyRequest"
+      responses:
+        "200":
+          description: Operation completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallSubscribeResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/calls/{callId}/connections/{connectionId}/renegotiate:
+    post:
+      operationId: renegotiateCallAudio
+      summary: Finish audio negotiation
+      tags:
+        - Calls
+      security:
+        - BearerAuth: []
+      description: Submit the WebRTC answer to an offer returned by subscribe.
+      parameters:
+        - name: callId
+          in: path
+          required: true
+          schema: *a1
+        - name: connectionId
+          in: path
+          required: true
+          schema: *a1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CallRenegotiateRequest"
+      responses:
+        "200":
+          description: Operation completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallRenegotiateResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/calls/{callId}/media:
+    get:
+      operationId: connectCallAudioWebSocket
+      summary: Stream live call audio
+      tags:
+        - Calls
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: callId
+          in: path
+          required: true
+          schema: *a1
+      description: 'Upgrade the URL returned by createCallConnection with Authorization: Bearer <media grant>. This route accepts a scoped Call media grant, not an Agent Token. Binary frames in both directions carry signed 16-bit little-endian PCM audio at 48,000 Hz, stereo. The server sends start with call_id, connection_id and audio_format, then ready once both audio directions are attached. Send JSON {"type":"clear"} to discard pending speech after interruption. The server sends ended with reason, then closes the connection when the Call ends. Audio frames are ephemeral and are not durable webhook or chat events.'
+      responses:
+        "101":
+          description: Call audio WebSocket connected.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 components:
   schemas:
+    CallContact:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - handle
+        - kind
+      properties:
+        id: &uuid
+          type: string
+          format: uuid
+        handle:
+          type: string
+          minLength: 1
+        kind:
+          type: string
+          enum:
+            - user
+            - agent
+    Call:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - chat_id
+        - from
+        - to
+        - mode
+        - status
+        - revision
+        - created_at
+        - ringing_at
+        - answered_at
+        - connected_at
+        - ended_at
+        - end_reason
+      properties:
+        id: *uuid
+        chat_id: *uuid
+        from:
+          $ref: "#/components/schemas/CallContact"
+        to:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            $ref: "#/components/schemas/CallContact"
+        mode:
+          type: string
+          enum:
+            - audio
+        status:
+          type: string
+          enum:
+            - ringing
+            - connecting
+            - active
+            - ended
+        revision:
+          type: integer
+          minimum: 1
+        created_at: &a2
+          type: string
+          format: date-time
+        ringing_at: *a2
+        answered_at: &a3
+          type:
+            - string
+            - "null"
+          format: date-time
+        connected_at: *a3
+        ended_at: *a3
+        end_reason:
+          type:
+            - string
+            - "null"
+          enum:
+            - null
+            - completed
+            - declined
+            - canceled
+            - no_answer
+            - disconnected
+            - failed
+    CallCreateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - to
+        - mode
+      properties:
+        to:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            type: string
+            minLength: 1
+        mode:
+          type: string
+          enum:
+            - audio
+    CallResult:
+      type: object
+      additionalProperties: false
+      required:
+        - call
+      properties:
+        call:
+          $ref: "#/components/schemas/Call"
+    CallListResult:
+      type: object
+      additionalProperties: false
+      required:
+        - calls
+        - next_cursor
+      properties:
+        calls:
+          type: array
+          items:
+            $ref: "#/components/schemas/Call"
+        next_cursor:
+          type:
+            - string
+            - "null"
+    CallEmptyRequest:
+      type: object
+      additionalProperties: false
+      required: []
+      properties: {}
+    CallAudioFormat:
+      type: object
+      additionalProperties: false
+      required:
+        - encoding
+        - sample_rate
+        - channels
+      properties:
+        encoding:
+          type: string
+          enum:
+            - pcm_s16le
+        sample_rate:
+          type: integer
+          enum:
+            - 48000
+        channels:
+          type: integer
+          enum:
+            - 2
+    CallOffer:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - sdp
+      properties:
+        type:
+          type: string
+          enum:
+            - offer
+        sdp:
+          type: string
+          minLength: 1
+          maxLength: 65536
+    CallAnswer:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - sdp
+      properties:
+        type:
+          type: string
+          enum:
+            - answer
+        sdp:
+          type: string
+          minLength: 1
+          maxLength: 65536
+    CallWebRTCConnectionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - transport
+        - session_description
+        - tracks
+      properties:
+        transport:
+          type: string
+          enum:
+            - webrtc
+        session_description:
+          $ref: "#/components/schemas/CallOffer"
+        tracks:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - mid
+              - name
+            properties:
+              mid:
+                type: string
+                minLength: 1
+                maxLength: 64
+              name:
+                type: string
+                enum:
+                  - microphone
+    CallWebSocketConnectionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - transport
+      properties:
+        transport:
+          type: string
+          enum:
+            - websocket
+    CallConnectionRequest:
+      oneOf:
+        - $ref: "#/components/schemas/CallWebRTCConnectionRequest"
+        - $ref: "#/components/schemas/CallWebSocketConnectionRequest"
+    CallWebRTCConnection:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - call_id
+        - transport
+        - session_description
+      properties:
+        id: *uuid
+        call_id: *uuid
+        transport:
+          type: string
+          enum:
+            - webrtc
+        session_description:
+          $ref: "#/components/schemas/CallAnswer"
+    CallWebSocketConnection:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - call_id
+        - transport
+        - url
+        - token
+        - expires_at
+        - audio_format
+      properties:
+        id: *uuid
+        call_id: *uuid
+        transport:
+          type: string
+          enum:
+            - websocket
+        url:
+          type: string
+          format: uri
+          pattern: ^wss://
+        token:
+          type: string
+          minLength: 32
+          description: Short-lived Relay media grant for this Call and connection. Supply it as the WebSocket Authorization bearer. Treat it as a secret.
+        expires_at: *a2
+        audio_format:
+          $ref: "#/components/schemas/CallAudioFormat"
+    CallConnectionResult:
+      type: object
+      additionalProperties: false
+      required:
+        - connection
+      properties:
+        connection:
+          oneOf:
+            - $ref: "#/components/schemas/CallWebRTCConnection"
+            - $ref: "#/components/schemas/CallWebSocketConnection"
+    CallSubscribeResult:
+      type: object
+      additionalProperties: false
+      required:
+        - session_description
+      properties:
+        session_description:
+          $ref: "#/components/schemas/CallOffer"
+    CallRenegotiateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - session_description
+      properties:
+        session_description:
+          $ref: "#/components/schemas/CallAnswer"
+    CallRenegotiateResult:
+      type: object
+      additionalProperties: false
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+          const: true
+    CallCreatedWebhook:
+      allOf:
+        - $ref: "#/components/schemas/WebhookEnvelopeBase"
+        - type: object
+          required:
+            - event_type
+            - data
+          properties:
+            event_type:
+              type: string
+              const: call.created
+            data:
+              $ref: "#/components/schemas/CallResult"
+    CallUpdatedWebhook:
+      allOf:
+        - $ref: "#/components/schemas/WebhookEnvelopeBase"
+        - type: object
+          required:
+            - event_type
+            - data
+          properties:
+            event_type:
+              type: string
+              const: call.updated
+            data:
+              $ref: "#/components/schemas/CallResult"
+    CallEndedWebhook:
+      allOf:
+        - $ref: "#/components/schemas/WebhookEnvelopeBase"
+        - type: object
+          required:
+            - event_type
+            - data
+          properties:
+            event_type:
+              type: string
+              const: call.ended
+            data:
+              $ref: "#/components/schemas/CallResult"
     AddParticipantRequest:
       type: object
       required:
@@ -3898,20 +4698,26 @@ components:
     WebSocketPingFrame:
       type: object
       additionalProperties: false
+      description: >-
+        Heartbeat, client to server. Send this frame every
+        heartbeat_interval_ms, serialized exactly as {"type":"ping"}. Relay
+        answers it in the edge runtime without waking the Agent's connection
+        state, so the reply costs nothing and arrives while the connection is
+        otherwise idle. Relay never sends a ping frame.
       required:
         - type
-        - sent_at
       properties:
         type:
           type: string
           enum:
             - ping
-        sent_at:
-          type: string
-          format: date-time
     WebSocketPongFrame:
       type: object
       additionalProperties: false
+      description: >-
+        Heartbeat reply, server to client, serialized exactly as
+        {"type":"pong"}. It answers each ping frame. A client that stops
+        sending pings is closed with 4408 after the heartbeat times out.
       required:
         - type
       properties:
@@ -4016,6 +4822,9 @@ components:
         - chat.typing_indicator.stopped
         - contact.added
         - contact.removed
+        - call.created
+        - call.updated
+        - call.ended
     WebhookEventsResult:
       type: object
       required:
@@ -4255,6 +5064,31 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    TooManyMessages:
+      description: |-
+        The sender is posting too fast. Relay caps one sender at 10 messages
+        in 10 seconds in one conversation and 300 in 10 seconds across all of
+        them, which allows a burst and then refuses with error code `2008`.
+        Wait `retry_after` seconds, which the `Retry-After` header repeats,
+        and send again. Nothing was stored, so a retry cannot duplicate the
+        Message.
+      headers:
+        Retry-After:
+          description: Seconds to wait before sending again.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              status: 429
+              code: 2008
+              message: Too many messages. Try again shortly.
+              doc_url: https://docs.relayapp.im/error/codes/2xxx/2008
+              retry_after: 10
+            success: false
     Unauthorized:
       description: Unauthorized - missing or invalid authentication
       content:
@@ -4281,6 +5115,7 @@ x-tagGroups:
       - Chats
       - Messages
       - Attachments
+      - Calls
   - name: Contacts
     tags:
       - Contacts
@@ -4572,6 +5407,54 @@ x-relay-webhooks:
           application/json:
             schema:
               $ref: "#/components/schemas/ContactRemovedWebhook"
+      responses:
+        "200":
+          description: Webhook received successfully
+  call.created.v2026-08-30:
+    post:
+      tags:
+        - 2026-08-30
+      operationId: webhookCallCreatedV20260830
+      summary: Call created
+      description: A Call involving your agent changed. Compare call.revision when events arrive more than once or out of order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CallCreatedWebhook"
+      responses:
+        "200":
+          description: Webhook received successfully
+  call.updated.v2026-08-30:
+    post:
+      tags:
+        - 2026-08-30
+      operationId: webhookCallUpdatedV20260830
+      summary: Call updated
+      description: A Call involving your agent changed. Compare call.revision when events arrive more than once or out of order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CallUpdatedWebhook"
+      responses:
+        "200":
+          description: Webhook received successfully
+  call.ended.v2026-08-30:
+    post:
+      tags:
+        - 2026-08-30
+      operationId: webhookCallEndedV20260830
+      summary: Call ended
+      description: A Call involving your agent changed. Compare call.revision when events arrive more than once or out of order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CallEndedWebhook"
       responses:
         "200":
           description: Webhook received successfully

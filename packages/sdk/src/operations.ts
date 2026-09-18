@@ -5,7 +5,11 @@ export interface RelayV1Operation {
 }
 
 export const RELAY_V1_OPERATIONS = [
-  { method: "DELETE", path: "/v1/agents/{handle}", operationId: "deleteAgent" },
+  {
+    "method": "DELETE",
+    "path": "/v1/agents/{handle}",
+    "operationId": "deleteAgent"
+  },
   {
     "method": "POST",
     "path": "/v1/chats",
@@ -170,6 +174,56 @@ export const RELAY_V1_OPERATIONS = [
     "method": "PATCH",
     "path": "/v1/contact_card",
     "operationId": "updateContactCard"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/chats/{chatId}/calls",
+    "operationId": "createCall"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/chats/{chatId}/calls",
+    "operationId": "listCalls"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/calls/{callId}",
+    "operationId": "getCall"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/calls/{callId}/accept",
+    "operationId": "acceptCall"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/calls/{callId}/decline",
+    "operationId": "declineCall"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/calls/{callId}/end",
+    "operationId": "endCall"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/calls/{callId}/connected",
+    "operationId": "markCallConnected"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/calls/{callId}/connections",
+    "operationId": "createCallConnection"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/calls/{callId}/connections/{connectionId}/subscribe",
+    "operationId": "subscribeCallAudio"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/calls/{callId}/connections/{connectionId}/renegotiate",
+    "operationId": "renegotiateCallAudio"
   }
 ] as const satisfies readonly RelayV1Operation[];
 
@@ -190,4 +244,7 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "chat.typing_indicator.stopped",
   "contact.added",
   "contact.removed",
+  "call.created",
+  "call.updated",
+  "call.ended",
 ] as const;
