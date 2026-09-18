@@ -137,11 +137,20 @@ export interface RelaySystemPartResponse {
   value: string;
 }
 
+/** A person's tap on an agent's buttons item; its label is the derived text. */
+export interface RelayButtonReplyPartResponse {
+  id: string;
+  label: string;
+  reactions?: RelayReaction[] | null;
+  type: "button_reply";
+}
+
 export type RelayMessagePartResponse =
   | RelayTextPartResponse
   | RelayMediaPartResponse
   | RelayLinkPartResponse
-  | RelaySystemPartResponse;
+  | RelaySystemPartResponse
+  | RelayButtonReplyPartResponse;
 
 export interface RelayReplyTo {
   message_id: string;
@@ -178,7 +187,10 @@ export interface RelayWebhookMessageEvent {
   id: string;
   idempotency_key?: string | null;
   parts: Array<
-    RelayTextPartResponse | RelayMediaPartResponse | RelayLinkPartResponse
+    | RelayTextPartResponse
+    | RelayMediaPartResponse
+    | RelayLinkPartResponse
+    | RelayButtonReplyPartResponse
   >;
   read_at?: string | null;
   reply_to?: RelayReplyTo | null;
@@ -194,7 +206,10 @@ export interface RelaySentMessage {
   from_handle?: RelayChatHandle | null;
   id: string;
   parts: Array<
-    RelayTextPartResponse | RelayMediaPartResponse | RelayLinkPartResponse
+    | RelayTextPartResponse
+    | RelayMediaPartResponse
+    | RelayLinkPartResponse
+    | RelayButtonReplyPartResponse
   >;
   reply_to?: RelayReplyTo | null;
   sent_at: string | null;

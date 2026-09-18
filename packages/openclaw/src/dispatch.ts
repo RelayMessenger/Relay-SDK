@@ -236,7 +236,9 @@ export async function dispatchRelayEvent(params: {
     reply: {
       to: facts.chatId,
       originatingTo: facts.chatId,
-      ...(facts.replyToId ? { replyToId: facts.replyToId } : {}),
+      ...((facts.replyAnchorId ?? facts.replyToId)
+        ? { replyToId: facts.replyAnchorId ?? facts.replyToId }
+        : {}),
     },
     message: {
       inboundEventKind: "user_request",

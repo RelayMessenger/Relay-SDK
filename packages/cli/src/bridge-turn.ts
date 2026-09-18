@@ -24,8 +24,9 @@ export const bridgeTurn = (event: RelayWebhookEvent): BridgeTurn | undefined => 
   const parts = Array.isArray(data.parts) ? data.parts as MessagePartResponse[] : [];
   const media = parts.filter((part): part is MediaPartResponse => part.type === "media");
   const text = parts
-    .filter((part) => part.type === "text" || part.type === "link")
-    .map((part) => part.value)
+    .flatMap((part) => part.type === "text" || part.type === "link"
+      ? [part.value]
+      : part.type === "button_reply" ? [part.label] : [])
     .join("\n")
     .trim();
   if (!chatId || !sender || (!text && media.length === 0)) return undefined;

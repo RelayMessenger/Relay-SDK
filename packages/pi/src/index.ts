@@ -26,7 +26,11 @@ class ChildPiProcess implements PiProcess {
 }
 const textFromEvent = (event: RelayWebhookEvent): string | null => {
   if (event.event_type !== "message.received" || event.data.direction !== "inbound") return null;
-  return event.data.parts.filter((part) => part.type === "text" || part.type === "link").map((part) => part.value).join("\n").trim() || null;
+  return event.data.parts
+    .flatMap((part) => part.type === "text" || part.type === "link"
+      ? [part.value]
+      : part.type === "button_reply" ? [part.label] : [])
+    .join("\n").trim() || null;
 };
 class ChatSession {
   readonly process: PiProcess;

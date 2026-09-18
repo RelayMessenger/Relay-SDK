@@ -72,5 +72,12 @@ export type RelayInboundFacts = {
   mentionHandles: string[];
   ownerHandle?: ChatHandle;
   replyToId?: string;
+  /**
+   * The Message an outbound reply should quote. A tap's reply_to names the
+   * agent's buttons part, which only a button_reply may target, so the
+   * agent's answer quotes the tap itself; every other Message quotes what
+   * the person quoted.
+   */
+  replyAnchorId?: string;
   timestamp?: number;
 };

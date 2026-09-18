@@ -4,6 +4,7 @@ import type {
   RelayWebhookEvent,
 } from "@relaymessenger/sdk";
 import { describe, expect, it } from "vitest";
+import type { RelayMessageReceivedEvent } from "./types.js";
 import {
   buildRelayInboundFacts,
   renderRelayMessageParts,
@@ -96,6 +97,7 @@ describe("Relay inbound Message mapping", () => {
         is_contact: true,
       },
       replyToId: "00000000-0000-7000-8000-000000000006",
+      replyAnchorId: "00000000-0000-7000-8000-000000000006",
       timestamp: Date.parse("2026-09-01T00:00:01.000Z"),
     });
   });
@@ -118,6 +120,26 @@ describe("Relay inbound Message mapping", () => {
       "Read this\nhttps://example.test\n" +
         "[Attachment: report.pdf (application/pdf)] https://cdn.example.test/file",
     );
+  });
+
+  it("reads a button tap as its label and anchors the reply to the tap, not the buttons", () => {
+    const base = event();
+    const data = base.data as RelayMessageReceivedEvent["data"];
+    const input = {
+      ...base,
+      data: {
+        ...data,
+        parts: [{ type: "button_reply", id: "yes", label: "Yes, 7pm works", reactions: null }],
+        reply_to: { message_id: "00000000-0000-7000-8000-000000000006", part_index: 1 },
+      },
+    } as RelayWebhookEvent;
+    const facts = buildRelayInboundFacts(input);
+    expect(facts?.text).toBe("Yes, 7pm works");
+    expect(facts?.replyToId).toBe("00000000-0000-7000-8000-000000000006");
+    expect(facts?.replyAnchorId).toBe("00000000-0000-7000-8000-000000000005");
+    expect(renderRelayMessageParts([
+      { type: "buttons", items: [{ id: "yes", label: "Yes" }], reactions: null },
+    ])).toBe("");
   });
 
   it("maps agent-authored Messages for the same downstream authorization and activation", () => {

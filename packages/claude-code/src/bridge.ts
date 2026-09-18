@@ -26,6 +26,7 @@ function renderPart(part: MessagePartResponse): string | null {
     return `[Relay attachment: ${details}]\n${part.url}`;
   }
   if (part.type === "system") return part.value;
+  if (part.type === "button_reply") return part.label;
   return null;
 }
 
