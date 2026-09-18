@@ -21768,6 +21768,7 @@ function renderPart(part) {
 ${part.url}`;
   }
   if (part.type === "system") return part.value;
+  if (part.type === "button_reply") return part.label;
   return null;
 }
 function messageContent(parts, redactor2) {
@@ -23000,7 +23001,7 @@ var RelayStateStore = class {
 };
 
 // server.ts
-var VERSION = true ? "0.3.9-staging.2" : createRequire(import.meta.url)("./package.json").version;
+var VERSION = true ? "0.3.9-staging.3" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);
