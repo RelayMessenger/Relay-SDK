@@ -195,7 +195,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/test/request-shapes.test.ts",
       "source_sha256": "2bf2720f298f464364763c00a84da295fb37fc09f40ec397a51a5ff21fdb02a6",
-      "destination_sha256": "5c8f27a28760d9c101faa233f66e82fd488e16202a5773aa49b0038807b3f0eb",
+      "destination_sha256": "7c3201376cc9b2e481ad46d16bb226f29771b65077246a2be1b849e1e5f2f74d",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -349,7 +349,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "src/adapter.ts",
       "source_sha256": "5cf9ae13db199cdffa265b7499712a250cdaf0b28fcf47f8435806245fbeb8d2",
-      "destination_sha256": "4b01518ce19e874fb39645a3b10efa14015fd150b3ec4e951e0058d4c6bfd0ef",
+      "destination_sha256": "5be7a128f393752419fcfaf1fd05e40c9fff11e954cdfa6064a494aaf6f70ba2",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2032,7 +2032,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/relay-v1-lock.json",
       "source_sha256": "c18b70f1edfed7cfc6a396ed86c609e667975396d4c3ff57c00a49c0ad7e4ab4",
-      "destination_sha256": "8a24effab47337855502d80742171206c0d081a7680dd7d0a3c2fc97b5d19d66",
+      "destination_sha256": "3c50aaec2aa0bcc3dee28c47ce2c4209a05caf5d044a0f1db57d3caf4463c857",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
