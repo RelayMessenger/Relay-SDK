@@ -21768,6 +21768,7 @@ function renderPart(part) {
 ${part.url}`;
   }
   if (part.type === "system") return part.value;
+  if (part.type === "button_reply") return part.label;
   return null;
 }
 function messageContent(parts, redactor2) {
