@@ -321,17 +321,24 @@ const sendText: TextPart = {
 };
 void [readRange, noMentions, sendText];
 
-// Button labels are text-only, while tap reply bubbles remain reactable.
-const buttonItem: import("@relaymessenger/sdk").ButtonItem = { id: "approve", label: "Approve" };
+// Button items are a label and an optional url; a tap is an ordinary text reply.
+const buttonItem: import("@relaymessenger/sdk").ButtonItem = { label: "Approve" };
+const linkItem: import("@relaymessenger/sdk").ButtonItem = { url: "https://example.test", label: "Open" };
+const removedButtonId: import("@relaymessenger/sdk").ButtonItem = {
+  label: "Approve",
+  // @ts-expect-error Button items carry no id; the tap sends the label.
+  id: "approve",
+};
 const removedButtonImage: import("@relaymessenger/sdk").ButtonItem = {
-  id: "approve", label: "Approve",
+  label: "Approve",
   // @ts-expect-error Button items no longer support images.
   image_url: "https://example.test/icon.png",
 };
 const buttonsResponse: import("@relaymessenger/sdk").ButtonsPartResponse = {
-  type: "buttons", items: [buttonItem], reactions: null,
+  type: "buttons", items: [buttonItem, linkItem], reactions: null,
 };
-const tapResponse: import("@relaymessenger/sdk").ButtonReplyPartResponse = {
-  type: "button_reply", id: "approve", label: "Approve", reactions: [],
+const tap: import("@relaymessenger/sdk").MessageContent = {
+  parts: [{ type: "text", value: "Approve" }],
+  reply_to: { message_id: "message-id", part_index: 1 },
 };
-void [removedButtonImage, buttonsResponse, tapResponse];
+void [removedButtonId, removedButtonImage, buttonsResponse, tap];

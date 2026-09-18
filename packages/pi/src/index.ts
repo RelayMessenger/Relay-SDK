@@ -1,6 +1,13 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
-import Relay, { type MessageWebhookData, type RelayWebhookEvent } from "@relaymessenger/sdk";
+import Relay, {
+  BUTTONS_BLOCK_INSTRUCTION,
+  BUTTONS_GUIDANCE,
+  splitButtons,
+  type MessagePart,
+  type MessageWebhookData,
+  type RelayWebhookEvent,
+} from "@relaymessenger/sdk";
 
 export interface PiChannelOptions {
   readonly agentToken: string;
@@ -27,11 +34,34 @@ class ChildPiProcess implements PiProcess {
 const textFromEvent = (event: RelayWebhookEvent): string | null => {
   if (event.event_type !== "message.received" || event.data.direction !== "inbound") return null;
   return event.data.parts
-    .flatMap((part) => part.type === "text" || part.type === "link"
-      ? [part.value]
-      : part.type === "button_reply" ? [part.label] : [])
+    .flatMap((part) => part.type === "text" || part.type === "link" ? [part.value] : [])
     .join("\n").trim() || null;
 };
+/**
+ * The prompt pi is given for one message: the words, then how to answer.
+ * This process sends pi's final text for it, and the same buttons rules
+ * every other runtime carries.
+ */
+export const piPrompt = (message: string): string =>
+  `${message}\n\nWrite your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself.\n\n${BUTTONS_BLOCK_INSTRUCTION} ${BUTTONS_GUIDANCE}`;
+
+/**
+ * The messages an answer becomes: text in chunks the API takes, and the
+ * buttons its fenced block asked for on the last one. A block pi wrote that
+ * cannot be read stays in the words, so nothing the person was told is lost.
+ */
+export const answerMessages = (answer: string): { parts: MessagePart[]; error?: string }[] => {
+  const { text, buttons, error } = splitButtons(answer);
+  const chunks = text.match(/[\s\S]{1,10000}/gu) ?? [];
+  const messages: { parts: MessagePart[]; error?: string }[] = chunks.map((chunk) => ({ parts: [{ type: "text", value: chunk }] }));
+  if (buttons) {
+    if (messages.length === 0) messages.push({ parts: [buttons] });
+    else messages[messages.length - 1]!.parts.push(buttons);
+  }
+  if (error && messages[0]) messages[0].error = error;
+  return messages;
+};
+
 class ChatSession {
   readonly process: PiProcess;
   readonly lines: AsyncIterator<string>;
@@ -116,13 +146,14 @@ export class PiChannel {
     let session = this.#sessions.get(data.chat.id);
     if (!session) { session = new ChatSession(this.#spawnPi(this.#options.piCommand ?? "pi", ["--mode", "rpc", ...(this.#options.piArgs ?? [])], data.chat.id)); this.#sessions.set(data.chat.id, session); }
     const timeout = this.#options.rpcTimeoutMs ?? 60_000;
-    await session.command("prompt", { message }, timeout, signal);
+    await session.command("prompt", { message: piPrompt(message) }, timeout, signal);
     if (!session.settled) { while (!session.settled) await session.read(timeout, signal); }
     const response = await session.command("get_last_assistant_text", {}, timeout, signal);
     const answer = response.data?.text?.trim();
     if (!answer) throw new Error("Pi returned no final text answer");
-    const chunks = answer.match(/[\s\S]{1,10000}/gu) ?? [];
-    for (const [index, chunk] of chunks.entries()) await this.#relay.chats.messages.send(data.chat.id, { message: { parts: [{ type: "text", value: chunk }], idempotency_key: `pi-${event.event_id}-${index}` } });
+    const messages = answerMessages(answer);
+    if (messages[0]?.error) console.error(`Relay: the buttons block in pi's answer was left as text: ${messages[0].error}.`);
+    for (const [index, message] of messages.entries()) await this.#relay.chats.messages.send(data.chat.id, { message: { parts: message.parts, idempotency_key: `pi-${event.event_id}-${index}` } });
   }
 }
 export const runPiChannel = (options: PiChannelOptions, signal?: AbortSignal): Promise<void> => new PiChannel(options).run(signal);

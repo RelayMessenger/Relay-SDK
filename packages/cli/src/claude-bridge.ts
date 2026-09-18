@@ -3,7 +3,7 @@ import { isAbsolute } from "node:path";
 import { findExecutable } from "./runtime-sniff.js";
 import type Relay from "@relaymessenger/sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { bridgeTurn, codexPrompt, MAX_RELAY_TEXT, replyKey, type BridgeTurn } from "./codex-bridge.js";
+import { answerParts, bridgeTurn, codexPrompt, replyKey, type BridgeTurn } from "./codex-bridge.js";
 import type { ClaudeThreadStore } from "./claude-threads.js";
 
 export interface ClaudeBridgeInput {
@@ -102,7 +102,7 @@ export const runClaudeBridge = async (input: ClaudeBridgeInput): Promise<void> =
       try {
         await input.client.chats.messages.send(turn.chatId, {
           message: {
-            parts: [{ type: "text", value: answer.slice(0, MAX_RELAY_TEXT) }],
+            parts: answerParts(answer, turn.sender, input.say),
             idempotency_key: replyKey(turn.eventId),
           },
         });

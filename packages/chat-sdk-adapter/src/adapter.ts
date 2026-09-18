@@ -200,9 +200,6 @@ function textAndLinks(parts: RelayMessagePartResponse[]): {
     } else if (part.type === "link") {
       pieces.push(part.value);
       links.push({ url: part.value });
-    } else if (part.type === "button_reply") {
-      // The label the person tapped, the same text the server derives.
-      if (part.label) pieces.push(part.label);
     }
   }
   return { links, value: pieces.join("\n\n") };

@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  partsWithButtons,
   Relay,
   RelayAPIError,
+  splitButtons,
   type MessageSendResponse,
 } from "@relaymessenger/sdk";
 import type { ResolvedRelayAccount } from "./types.js";
@@ -32,6 +34,11 @@ export function deriveRelayIdempotencyKey(params: {
     : `relay-openclaw:sha256:${createHash("sha256").update(raw).digest("hex")}`;
 }
 
+/**
+ * OpenClaw hands the agent's words as text, so buttons ride in them as the
+ * SDK's fenced block, lifted here into the buttons part. A block that cannot
+ * be read stays in the words and is reported through `onButtonsError`.
+ */
 export async function sendRelayText(params: {
   relay: Pick<Relay, "chats">;
   chatId: string;
@@ -40,13 +47,16 @@ export async function sendRelayText(params: {
   idempotencyKey: string;
   signal?: AbortSignal;
   onPlatformSendDispatch?: () => Promise<void>;
+  onButtonsError?: (error: string) => void;
 }): Promise<MessageSendResponse> {
   await params.onPlatformSendDispatch?.();
+  const { text, buttons, error } = splitButtons(params.text);
+  if (error) params.onButtonsError?.(error);
   return await params.relay.chats.messages.send(
     params.chatId,
     {
       message: {
-        parts: [{ type: "text", value: params.text }],
+        parts: partsWithButtons(text, buttons),
         idempotency_key: params.idempotencyKey,
         ...(params.replyToId
           ? { reply_to: { message_id: params.replyToId } }

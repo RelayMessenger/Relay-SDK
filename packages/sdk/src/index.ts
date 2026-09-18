@@ -46,5 +46,18 @@ export {
   type WebSocketLike,
 } from "./websocket.js";
 export type * from "./types.js";
+export {
+  BUTTONS_BLOCK_INSTRUCTION,
+  BUTTONS_FENCE,
+  BUTTONS_GUIDANCE,
+  BUTTONS_MAX_ITEMS,
+  BUTTON_LABEL_MAX_LENGTH,
+  BUTTON_URL_MAX_LENGTH,
+  buttonsPart,
+  parseButtonsBlock,
+  partsWithButtons,
+  splitButtons,
+  type SplitButtons,
+} from "./buttons.js";
 
 export { Relay as default } from "./client.js";

@@ -22,7 +22,7 @@ const received = (eventId: string, chatId: string, text: string, sender = "alice
 /** Relay, reduced to what the bridge touches, with every call written down. */
 function fakeRelay(events: readonly RelayWebhookEvent[]) {
   const typing: string[] = [];
-  const sent: Array<{ chatId: string; text: string; key: string | undefined }> = [];
+  const sent: Array<{ chatId: string; text: string; key: string | undefined; parts?: unknown[] }> = [];
   let sendFails = false;
   const client = {
     chats: {
@@ -31,7 +31,7 @@ function fakeRelay(events: readonly RelayWebhookEvent[]) {
       messages: {
         send: async (chatID: string, body: { message: { parts: Array<{ value?: string }>; idempotency_key?: string } }) => {
           if (sendFails) throw new Error("Relay refused this send.");
-          sent.push({ chatId: chatID, text: body.message.parts[0]?.value ?? "", key: body.message.idempotency_key });
+          sent.push({ chatId: chatID, text: body.message.parts[0]?.value ?? "", key: body.message.idempotency_key, parts: body.message.parts });
           return {} as never;
         },
       },
@@ -90,6 +90,53 @@ const setup = (ask: typeof query, events: RelayWebhookEvent[]) => {
 };
 
 describe("Claude Agent SDK bridge", () => {
+  it("lifts a buttons block out of the answer into a buttons part beside the text", async () => {
+    const ask = fakeQuery(async function* () {
+      yield success("Which time works?\n\n```buttons\n[{\"label\": \"9am\"}, {\"label\": \"2pm\"}]\n```");
+    });
+    const state = setup(ask, [received("event-1", "chat-1", "book me")]);
+    await runClaudeBridge(state.input);
+    await untilEnded(state.said, 1);
+    expect(state.relay.sent.map((item) => item.parts)).toEqual([[
+      { type: "text", value: "Which time works?" },
+      { type: "buttons", items: [{ label: "9am" }, { label: "2pm" }] },
+    ]]);
+    expect(state.said).toEqual(["@alice  book me", "Sent the answer to @alice."]);
+  });
+
+  it("sends a buttons-only answer as just the buttons", async () => {
+    const ask = fakeQuery(async function* () {
+      yield success("```buttons\n[{\"label\": \"Connect Google\", \"url\": \"https://accounts.example/o/oauth2\"}]\n```");
+    });
+    const state = setup(ask, [received("event-1", "chat-1", "link my google")]);
+    await runClaudeBridge(state.input);
+    await untilEnded(state.said, 1);
+    expect(state.relay.sent.map((item) => item.parts)).toEqual([[
+      { type: "buttons", items: [{ url: "https://accounts.example/o/oauth2", label: "Connect Google" }] },
+    ]]);
+  });
+
+  it("leaves a malformed buttons block in the text and says why", async () => {
+    const answer = "Pick one\n\n```buttons\n[{label: A}]\n```";
+    const ask = fakeQuery(async function* () { yield success(answer); });
+    const state = setup(ask, [received("event-1", "chat-1", "hi")]);
+    await runClaudeBridge(state.input);
+    await untilEnded(state.said, 1);
+    expect(state.relay.sent.map((item) => item.parts)).toEqual([[{ type: "text", value: answer }]]);
+    expect(state.said).toEqual([
+      "@alice  hi",
+      "The buttons block in the answer to @alice was left as text: the buttons block is not valid JSON.",
+      "Sent the answer to @alice.",
+    ]);
+  });
+
+  it("tells the agent how to send buttons and when", () => {
+    const prompt = codexPrompt("alice", "hello");
+    expect(prompt).toContain("fenced code block tagged `buttons`");
+    expect(prompt).toContain("Send buttons when your message ends with a question");
+    expect(prompt).toContain("If the person asks for buttons, send them.");
+  });
+
   it("a photo with no text starts a turn", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relay-claude-media-"));
     const calls: Parameters<typeof query>[0][] = [];
@@ -123,7 +170,7 @@ describe("Claude Agent SDK bridge", () => {
       mcpServers: { relay: mcpServer }, abortController: expect.any(AbortController),
     } });
     expect(state.threads.get("chat-1")).toBe("session-1");
-    expect(state.relay.sent).toEqual([{ chatId: "chat-1", text: "Answer", key: "codex-bridge-event-1" }]);
+    expect(state.relay.sent).toEqual([{ chatId: "chat-1", text: "Answer", key: "codex-bridge-event-1", parts: [{ type: "text", value: "Answer" }] }]);
     expect(state.relay.typing).toEqual(["start chat-1", "stop chat-1"]);
     expect(state.said).toEqual(["@alice  hello", "Sent the answer to @alice."]);
     const second = fakeRelay([received("event-2", "chat-1", "again")]);

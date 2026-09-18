@@ -998,7 +998,7 @@ paths:
     post:
       operationId: sendReaction
       summary: Add or remove a reaction to a message
-      description: Add or remove a reaction on one Message part. Targeting a `buttons` part returns 422. Text and `button_reply` parts remain reactable.
+      description: Add or remove a reaction on one Message part. Targeting a `buttons` part returns 422.
       tags:
         - Messages
       security:
@@ -3140,35 +3140,29 @@ components:
     ButtonItem:
       type: object
       description: |
-        One button in a `buttons` part. Exactly one of `id` or `url`: an `id`
-        button comes back as a `button_reply` carrying that id when tapped; a
-        `url` button opens the page in the browser and sends nothing.
+        One button in a `buttons` part. A tap on a plain button sends its
+        `label` back as the person's next message: one `text` part whose value
+        is the label, with `reply_to` naming the `buttons` part. A `url`
+        button opens the page in the browser and sends nothing.
       required:
         - label
       properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 100
-          description: Callback identifier, unique within the part. Not with `url`.
         url:
           type: string
           format: uri
           maxLength: 2048
-          description: The page a link button opens. Not with `id`.
+          description: The page a link button opens instead of sending its label.
         label:
           type: string
           minLength: 1
           maxLength: 80
-          description: The button's visible text
+          description: The button's visible text, and what a tap sends
     ButtonItemResponse:
       type: object
       description: One button as read back
       required:
         - label
       properties:
-        id:
-          type: string
         url:
           type: string
         label:
@@ -3178,8 +3172,9 @@ components:
       description: |
         A vertical stack of 1 to 5 buttons drawn under the message. Only an
         agent can send one, and a message carries at most one. Send a `text`
-        part beside it that asks the question. Reactions and normal replies to
-        this part return 422; only a valid sole-part `button_reply` may reply to it.
+        part beside it that asks the question. Reactions to this part return
+        422. The only reply it accepts is a tap: one `text` part equal to one
+        of its plain buttons' labels, sent by the user.
       required:
         - type
         - items
@@ -3210,53 +3205,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ButtonItemResponse"
-        reactions:
-          type:
-            - array
-            - "null"
-          description: Reactions on this message part
-          items:
-            $ref: "#/components/schemas/Reaction"
-    ButtonReplyPart:
-      type: object
-      description: |
-        A tap on a `buttons` item. It must be the only part in its message, and
-        `reply_to` must name the message and part index of the `buttons` part.
-        `id` must be one of that part's `id` buttons.
-      required:
-        - type
-        - id
-        - label
-      properties:
-        type:
-          type: string
-          enum:
-            - button_reply
-        id:
-          type: string
-          minLength: 1
-          maxLength: 100
-        label:
-          type: string
-          minLength: 1
-          maxLength: 80
-    ButtonReplyPartResponse:
-      type: object
-      description: A button tap as read back
-      required:
-        - type
-        - id
-        - label
-        - reactions
-      properties:
-        type:
-          type: string
-          enum:
-            - button_reply
-        id:
-          type: string
-        label:
-          type: string
         reactions:
           type:
             - array
@@ -3467,7 +3415,6 @@ components:
               - $ref: "#/components/schemas/MediaPartResponse"
               - $ref: "#/components/schemas/LinkPartResponse"
               - $ref: "#/components/schemas/ButtonsPartResponse"
-              - $ref: "#/components/schemas/ButtonReplyPartResponse"
               - $ref: "#/components/schemas/SystemPartResponse"
         reply_to:
           oneOf:
@@ -3655,7 +3602,6 @@ components:
               - $ref: "#/components/schemas/schemas-MediaPartResponse"
               - $ref: "#/components/schemas/schemas-LinkPartResponse"
               - $ref: "#/components/schemas/ButtonsPartResponse"
-              - $ref: "#/components/schemas/ButtonReplyPartResponse"
             discriminator:
               propertyName: type
               mapping:
@@ -3663,7 +3609,6 @@ components:
                 media: "#/components/schemas/schemas-MediaPartResponse"
                 link: "#/components/schemas/schemas-LinkPartResponse"
                 buttons: "#/components/schemas/ButtonsPartResponse"
-                button_reply: "#/components/schemas/ButtonReplyPartResponse"
         sent_at:
           type:
             - string
@@ -3717,13 +3662,11 @@ components:
           media: "#/components/schemas/MediaPart"
           link: "#/components/schemas/LinkPart"
           buttons: "#/components/schemas/ButtonsPart"
-          button_reply: "#/components/schemas/ButtonReplyPart"
       oneOf:
         - $ref: "#/components/schemas/TextPart"
         - $ref: "#/components/schemas/MediaPart"
         - $ref: "#/components/schemas/LinkPart"
         - $ref: "#/components/schemas/ButtonsPart"
-        - $ref: "#/components/schemas/ButtonReplyPart"
     MessageReadWebhook:
       description: Complete webhook payload for message.read events (2026-08-30 format)
       allOf:
@@ -3979,8 +3922,8 @@ components:
             The specific message part to reply to (0-based index).
             Defaults to 0 (first part) if not provided.
             Use this when replying to a specific part of a multipart message.
-            Targeting a `buttons` part returns 422 unless the message contains
-            only a valid `button_reply`. Text and `button_reply` parts remain replyable.
+            Targeting a `buttons` part returns 422 unless the message is a tap:
+            one `text` part equal to one of that part's plain button labels.
           minimum: 0
     RequestUploadRequest:
       type: object
@@ -4266,7 +4209,6 @@ components:
               - $ref: "#/components/schemas/MediaPartResponse"
               - $ref: "#/components/schemas/LinkPartResponse"
               - $ref: "#/components/schemas/ButtonsPartResponse"
-              - $ref: "#/components/schemas/ButtonReplyPartResponse"
         created_at:
           type: string
           format: date-time

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { buttonsPart } from "@relaymessenger/sdk";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import Relay, { type RelayWebhookEvent } from "@relaymessenger/sdk";
 import {
@@ -261,9 +262,12 @@ export class RelayChannel {
       text?: unknown;
       send_id?: unknown;
       reply_to_message_id?: unknown;
+      buttons?: unknown;
     } | null;
     const chatId = args && typeof args.chat_id === "string" ? args.chat_id : "";
     const text = args && typeof args.text === "string" ? args.text : "";
+    const buttons = args?.buttons === undefined ? undefined : buttonsPart(args.buttons);
+    if (typeof buttons === "string") return failure(`buttons: ${buttons}`);
     const sendId = args && typeof args.send_id === "string" ? args.send_id : "";
     const replyTo = args && typeof args.reply_to_message_id === "string"
       ? args.reply_to_message_id
@@ -276,13 +280,13 @@ export class RelayChannel {
       return failure("reply_to_message_id must be a Relay Message UUID");
     }
     const redactedText = this.#redactor.text(text);
-    if (!redactedText || redactedText.length > 10_000) {
+    if ((!redactedText && !buttons) || redactedText.length > 10_000) {
       return failure("text must be 1-10000 UTF-16 code units after token redaction");
     }
     const idempotencyKey = `claude-reply-${createHash("sha256")
       .update(`${this.#config.accountKey}\0${this.#config.sessionKey}\0${sendId}`)
       .digest("hex")}`;
-    const body = buildReply(redactedText, idempotencyKey, replyTo);
+    const body = buildReply(redactedText, idempotencyKey, replyTo, buttons);
     const payloadHash = stableHash({ chatId, body });
     const existing = this.#state.existingOutboundSend({
       sendId,

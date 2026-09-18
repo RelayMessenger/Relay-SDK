@@ -36,7 +36,7 @@ function requestIn(node) {
   return ts.forEachChild(node, requestIn);
 }
 function definitions(text, depth = 0, seen = new Set()) {
-  if (depth > 2) return [];
+  if (depth > 4) return [];
   const found = [];
   for (const name of text.match(/\b[A-Z][A-Za-z0-9]+\b/g) ?? []) {
     if (seen.has(name) || !types.has(name)) continue;

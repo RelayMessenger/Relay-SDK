@@ -38,7 +38,7 @@ describe("buttons request shapes", () => {
           {
             type: "buttons",
             items: [
-              { id: "approve", label: "Approve" },
+              { label: "Approve" },
               { url: "https://example.com", label: "Open" },
             ],
           },
@@ -55,11 +55,11 @@ describe("buttons request shapes", () => {
     expect(JSON.parse(String(calls[0]!.body))).toEqual(body);
   });
 
-  it("serializes a button_reply part with reply_to verbatim", async () => {
+  it("serializes a tap, the label as text replying to the buttons part, verbatim", async () => {
     const calls: Captured[] = [];
     const body: MessageSendParams = {
       message: {
-        parts: [{ type: "button_reply", id: "approve", label: "Approve" }],
+        parts: [{ type: "text", value: "Approve" }],
         reply_to: { message_id: "message-id", part_index: 1 },
       },
     };

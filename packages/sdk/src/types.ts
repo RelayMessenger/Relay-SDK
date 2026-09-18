@@ -160,40 +160,34 @@ export interface LinkPart {
   value: string;
 }
 
-/** One button in a `buttons`. Exactly one of `id` or `url`. */
+/**
+ * One button in a `buttons`. A tap on a plain button sends its `label` back
+ * as the person's next message: one `text` part whose value is the label,
+ * with `reply_to` naming the `buttons` part. A `url` button opens the page
+ * in the app and sends nothing.
+ */
 export interface ButtonItem {
-  /** Callback button: the tap arrives as a `button_reply` carrying this id. */
-  id?: string;
-  /** Link button: the tap opens this HTTPS URL and sends nothing. */
+  /** Link button: the tap opens this HTTPS URL instead of sending the label. */
   url?: string;
+  /** The button's visible text, 1 to 80 characters, and what a tap sends. */
   label: string;
 }
 
 /**
  * Agent-only: a vertical stack of 1 to 5 text-only buttons under the message.
- * Only button_reply may target this part; ordinary replies and reactions may not.
+ * At most one per message. The only reply it accepts is a tap; reactions may
+ * not target it.
  */
 export interface ButtonsPart {
   type: "buttons";
   items: ButtonItem[];
 }
 
-/**
- * A user's tap on a `buttons` item. Must be the only part, and
- * `reply_to` must name the message and part index of the `buttons`.
- */
-export interface ButtonReplyPart {
-  type: "button_reply";
-  id: string;
-  label: string;
-}
-
 export type MessagePart =
   | TextPart
   | MediaPart
   | LinkPart
-  | ButtonsPart
-  | ButtonReplyPart;
+  | ButtonsPart;
 
 export interface TextPartResponse extends TextPart {
   mentions?: Array<{
@@ -227,10 +221,6 @@ export interface LinkPartResponse extends LinkPart {
 }
 
 export interface ButtonsPartResponse extends ButtonsPart {
-  reactions: Reaction[] | null;
-}
-
-export interface ButtonReplyPartResponse extends ButtonReplyPart {
   reactions: Reaction[] | null;
 }
 
@@ -275,11 +265,10 @@ export type MessagePartResponse =
   | MediaPartResponse
   | LinkPartResponse
   | ButtonsPartResponse
-  | ButtonReplyPartResponse
   | SystemPartResponse;
 
-/** Ordinary replies target text, media, link, or button_reply, never buttons or system.
- * A button_reply instead targets the originating buttons part. */
+/** Ordinary replies target text, media, or link, never system. A buttons part
+ * accepts only a tap: one text part equal to one of its plain labels. */
 export interface ReplyTo {
   message_id: UUID;
   part_index?: number;
@@ -299,7 +288,7 @@ export interface MessageContent {
 
 /**
  * The Message a send returns. A send never produces a system Message, so its
- * parts are only text, media, link, buttons or button_reply, and it carries no `system_event`.
+ * parts are only text, media, link or buttons, and it carries no `system_event`.
  * `is_system_message` is on the wire and is always `false` here; the contract's
  * `SentMessage` does not declare it yet.
  * Read paths (`chats.messages.list`, `messages.listMessagesThread`) return
@@ -312,7 +301,6 @@ export interface SentMessage {
     | MediaPartResponse
     | LinkPartResponse
     | ButtonsPartResponse
-    | ButtonReplyPartResponse
   >;
   created_at: string;
   sent_at: string | null;
@@ -471,7 +459,7 @@ export interface MessageListParams {
 
 export type MessageThreadParams = MessageListParams;
 
-/** Target text, media, link, or button_reply; buttons and system cannot receive reactions. */
+/** Target text, media, or link; buttons and system cannot receive reactions. */
 export interface MessageAddReactionParams {
   operation: "add" | "remove";
   type: ReactionType;

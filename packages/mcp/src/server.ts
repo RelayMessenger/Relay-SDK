@@ -1,5 +1,5 @@
 import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
-import Relay from "@relaymessenger/sdk";
+import Relay, { BUTTONS_GUIDANCE } from "@relaymessenger/sdk";
 import { z } from "zod";
 import type { AuthContext } from "./auth.js";
 import { collectLocalTokens, resolveAgentAuth } from "./auth.js";
@@ -52,7 +52,10 @@ export const createRelayMcpServer = (options: RelayMcpServerOptions = {}): McpSe
       + "Returns the function result and console output. Each call has a fresh, bounded JavaScript runtime; "
       + "no shell, filesystem, environment variables, imports, or arbitrary network access are provided. "
       + "Only SDK calls reach the configured Relay API. SDK credentials stay outside submitted code. "
-      + "HTTP results and arguments are JSON values; live WebSocket callbacks and raw uploads are not part of this runtime.",
+      + "HTTP results and arguments are JSON values; live WebSocket callbacks and raw uploads are not part of this runtime. "
+      + "A message's parts may include one buttons part ({ type: \"buttons\", items: [{ label }, { label, url }] }, 1 to 5 items) beside a text part; "
+      + "search_docs(\"buttons\") shows the shape. "
+      + BUTTONS_GUIDANCE,
     inputSchema: z.object({ code: z.string().min(1).max(100_000), intent: z.string().max(2_000).optional() }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, async ({ code }): Promise<CallToolResult> => {

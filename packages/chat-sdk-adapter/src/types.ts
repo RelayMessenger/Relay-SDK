@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 78d7991c7b8a615302ab30d727503779755df3ab
- * OpenAPI 1d790da998a8dfc26cffc098def76d85b8275af7a343148df8e78c486cd02849
+ * Relay Server db71ee6047aac7d1f08fa3ede4b45c8e4ce70155
+ * OpenAPI 6a0abd34db9d26e89170dd5cae6c7e0683af2cd076ec86f562367297330ec13e
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -95,10 +95,23 @@ export interface RelayLinkPart {
   value: string;
 }
 
+/** One button under a message: a label, and for a link button, the page it opens. */
+export interface RelayButtonItem {
+  label: string;
+  url?: string;
+}
+
+/** Agent-only: 1 to 5 buttons under the message; a tap comes back as text equal to the label. */
+export interface RelayButtonsPart {
+  type: "buttons";
+  items: RelayButtonItem[];
+}
+
 export type RelayOutgoingPart =
   | RelayTextPart
   | RelayMediaPart
-  | RelayLinkPart;
+  | RelayLinkPart
+  | RelayButtonsPart;
 
 export interface RelayTextPartResponse extends RelayTextPart {
   mentions?: Array<{
@@ -137,20 +150,11 @@ export interface RelaySystemPartResponse {
   value: string;
 }
 
-/** A person's tap on an agent's buttons item; its label is the derived text. */
-export interface RelayButtonReplyPartResponse {
-  id: string;
-  label: string;
-  reactions?: RelayReaction[] | null;
-  type: "button_reply";
-}
-
 export type RelayMessagePartResponse =
   | RelayTextPartResponse
   | RelayMediaPartResponse
   | RelayLinkPartResponse
-  | RelaySystemPartResponse
-  | RelayButtonReplyPartResponse;
+  | RelaySystemPartResponse;
 
 export interface RelayReplyTo {
   message_id: string;
@@ -190,7 +194,6 @@ export interface RelayWebhookMessageEvent {
     | RelayTextPartResponse
     | RelayMediaPartResponse
     | RelayLinkPartResponse
-    | RelayButtonReplyPartResponse
   >;
   read_at?: string | null;
   reply_to?: RelayReplyTo | null;
@@ -209,7 +212,6 @@ export interface RelaySentMessage {
     | RelayTextPartResponse
     | RelayMediaPartResponse
     | RelayLinkPartResponse
-    | RelayButtonReplyPartResponse
   >;
   reply_to?: RelayReplyTo | null;
   sent_at: string | null;

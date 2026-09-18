@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { partsWithButtons, type ButtonsPart } from "@relaymessenger/sdk";
 import type {
   Chat,
   Message,
@@ -26,7 +27,6 @@ function renderPart(part: MessagePartResponse): string | null {
     return `[Relay attachment: ${details}]\n${part.url}`;
   }
   if (part.type === "system") return part.value;
-  if (part.type === "button_reply") return part.label;
   return null;
 }
 
@@ -226,13 +226,18 @@ export function deliveryFromSnapshotMessage(params: {
   };
 }
 
-export function buildReply(text: string, idempotencyKey: string, replyTo?: string): MessageSendParams {
-  if (!text || text.length > MAX_RELAY_TEXT) {
+export function buildReply(
+  text: string,
+  idempotencyKey: string,
+  replyTo?: string,
+  buttons?: ButtonsPart,
+): MessageSendParams {
+  if (text.length > MAX_RELAY_TEXT || (!text && !buttons)) {
     throw new Error(`text must be 1-${MAX_RELAY_TEXT} UTF-16 code units`);
   }
   return {
     message: {
-      parts: [{ type: "text", value: text }],
+      parts: partsWithButtons(text, buttons),
       idempotency_key: idempotencyKey,
       ...(replyTo ? { reply_to: { message_id: replyTo } } : {}),
     },

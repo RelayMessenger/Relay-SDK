@@ -1,5 +1,12 @@
 import { inboundMediaPrompt, type InboundMediaOptions } from "./inbound-media.js";
-import type Relay from "@relaymessenger/sdk";
+import {
+  BUTTONS_BLOCK_INSTRUCTION,
+  BUTTONS_GUIDANCE,
+  partsWithButtons,
+  splitButtons,
+  type MessagePart,
+  type Relay,
+} from "@relaymessenger/sdk";
 import { bridgeTurn, type BridgeTurn } from "./bridge-turn.js";
 export { bridgeTurn, type BridgeTurn } from "./bridge-turn.js";
 import type { CodexThreadStore } from "./codex-threads.js";
@@ -52,6 +59,17 @@ export const APP_SERVER_ARGS = ["app-server"] as const;
 /** What app-server is told this client is (`ClientInfo`, ClientRequest.json). */
 export const CLIENT_NAME = "relaymessenger";
 
+/** Who answers the person: this process sends the final message. */
+export const ANSWER_INSTRUCTION =
+  "Write your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself.";
+
+/**
+ * How the answer carries buttons, and when it should: the SDK's one text for
+ * every runtime, so the same person gets buttons under the same conditions
+ * whichever agent answers.
+ */
+export const BUTTONS_INSTRUCTION = `${BUTTONS_BLOCK_INSTRUCTION} ${BUTTONS_GUIDANCE}`;
+
 /**
  * One message, as the prompt Codex is given. Codex keeps its Relay tools during
  * the turn, so the prompt says who answers the person: this process sends the
@@ -62,8 +80,25 @@ export const codexPrompt = (sender: string, text: string): string => [
   "",
   text.slice(0, MAX_RELAY_TEXT),
   "",
-  "Write your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself.",
+  ANSWER_INSTRUCTION,
+  "",
+  BUTTONS_INSTRUCTION,
 ].join("\n");
+
+/**
+ * The parts an answer becomes: its words as the text part, and the buttons
+ * its fenced block asked for. A block the SDK cannot read stays in the words,
+ * so the person still gets the answer, and the terminal says why.
+ */
+export const answerParts = (
+  answer: string,
+  sender: string,
+  say: (line: string) => void,
+): MessagePart[] => {
+  const { text, buttons, error } = splitButtons(answer);
+  if (error) say(`The buttons block in the answer to @${sender} was left as text: ${error}.`);
+  return partsWithButtons(text, buttons, MAX_RELAY_TEXT);
+};
 
 /**
  * The protocol, as far as this bridge needs it. Every shape here is written by
@@ -464,7 +499,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
     try {
       await input.client.chats.messages.send(turn.chatId, {
         message: {
-          parts: [{ type: "text", value: answer.slice(0, MAX_RELAY_TEXT) }],
+          parts: answerParts(answer, turn.sender, input.say),
           // The message that arrived is the key, so a retry after a dropped
           // connection cannot answer the same person twice.
           idempotency_key: replyKey(turn.eventId),

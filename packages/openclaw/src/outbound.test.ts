@@ -71,6 +71,52 @@ describe("Relay REST Message sends", () => {
     });
   });
 
+  it("lifts a fenced buttons block out of the agent's words into a buttons part", async () => {
+    const requests: Array<{ body: unknown }> = [];
+    const relay = new Relay({
+      apiKey: "token",
+      baseURL: "https://relay.test",
+      maxRetries: 0,
+      fetch: async (_input, init) => {
+        requests.push({ body: JSON.parse(String(init?.body)) });
+        return Response.json({ message: { id: "00000000-0000-7000-8000-000000000012" } }, { status: 202 });
+      },
+    });
+    const errors: string[] = [];
+    await sendRelayText({
+      relay,
+      chatId: "00000000-0000-7000-8000-000000000010",
+      text: "Which slot?\n\n```buttons\n[{\"label\": \"9am\"}, {\"label\": \"2pm\"}]\n```",
+      idempotencyKey: "key-1",
+      onButtonsError: (error) => errors.push(error),
+    });
+    expect(errors).toEqual([]);
+    expect(requests[0]?.body).toEqual({
+      message: {
+        parts: [
+          { type: "text", value: "Which slot?" },
+          { type: "buttons", items: [{ label: "9am" }, { label: "2pm" }] },
+        ],
+        idempotency_key: "key-1",
+      },
+    });
+
+    await sendRelayText({
+      relay,
+      chatId: "00000000-0000-7000-8000-000000000010",
+      text: "Pick\n\n```buttons\n[]\n```",
+      idempotencyKey: "key-2",
+      onButtonsError: (error) => errors.push(error),
+    });
+    expect(errors).toEqual(["the buttons block has no items"]);
+    expect(requests[1]?.body).toEqual({
+      message: {
+        parts: [{ type: "text", value: "Pick\n\n```buttons\n[]\n```" }],
+        idempotency_key: "key-2",
+      },
+    });
+  });
+
   it("keeps retries stable, separates parts, and keeps intentional sends distinct", () => {
     const first = deriveRelayIdempotencyKey({
       deliveryQueueId: "queue-1",

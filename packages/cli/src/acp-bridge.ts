@@ -13,7 +13,7 @@ import {
 import { Readable, Writable } from "node:stream";
 import { isAbsolute } from "node:path";
 import type { AcpSessionStore } from "./acp-threads.js";
-import { bridgeTurn, MAX_RELAY_TEXT, type BridgeTurn } from "./codex-bridge.js";
+import { answerParts, bridgeTurn, codexPrompt, type BridgeTurn } from "./codex-bridge.js";
 import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
@@ -47,16 +47,10 @@ export const CLIENT_NAME = "relaymessenger";
  * One message, as the prompt the agent is given. The agent keeps its Relay
  * tools during the turn, so the prompt says who answers the person: this
  * process sends the final message, and the agent must not send a second one.
- * Copied word for word from `codexPrompt` (codex-bridge.ts) so both bridges say
- * the same thing.
+ * The same words as `codexPrompt` (codex-bridge.ts), so both bridges say the
+ * same thing.
  */
-export const acpPrompt = (sender: string, text: string): string => [
-  `@${sender} sent you this message on Relay:`,
-  "",
-  text.slice(0, MAX_RELAY_TEXT),
-  "",
-  "Write your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself.",
-].join("\n");
+export const acpPrompt: (sender: string, text: string) => string = codexPrompt;
 
 /** What to run for the agent: the file, and the words that put it in ACP mode. */
 export interface AcpCommand {
@@ -362,7 +356,7 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
     try {
       await input.client.chats.messages.send(turn.chatId, {
         message: {
-          parts: [{ type: "text", value: answer.slice(0, MAX_RELAY_TEXT) }],
+          parts: answerParts(answer, turn.sender, input.say),
           // The message that arrived is the key, so a retry after a dropped
           // connection cannot answer the same person twice.
           idempotency_key: replyKey(turn.eventId),

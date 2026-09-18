@@ -97,7 +97,7 @@ describe("Relay inbound Message mapping", () => {
         is_contact: true,
       },
       replyToId: "00000000-0000-7000-8000-000000000006",
-      replyAnchorId: "00000000-0000-7000-8000-000000000006",
+      replyAnchorId: "00000000-0000-7000-8000-000000000005",
       timestamp: Date.parse("2026-09-01T00:00:01.000Z"),
     });
   });
@@ -122,14 +122,14 @@ describe("Relay inbound Message mapping", () => {
     );
   });
 
-  it("reads a button tap as its label and anchors the reply to the tap, not the buttons", () => {
+  it("reads a tap as the text it is and anchors the answer to the tap, not the buttons", () => {
     const base = event();
     const data = base.data as RelayMessageReceivedEvent["data"];
     const input = {
       ...base,
       data: {
         ...data,
-        parts: [{ type: "button_reply", id: "yes", label: "Yes, 7pm works", reactions: null }],
+        parts: [{ type: "text", value: "Yes, 7pm works", reactions: null }],
         reply_to: { message_id: "00000000-0000-7000-8000-000000000006", part_index: 1 },
       },
     } as RelayWebhookEvent;
@@ -138,7 +138,7 @@ describe("Relay inbound Message mapping", () => {
     expect(facts?.replyToId).toBe("00000000-0000-7000-8000-000000000006");
     expect(facts?.replyAnchorId).toBe("00000000-0000-7000-8000-000000000005");
     expect(renderRelayMessageParts([
-      { type: "buttons", items: [{ id: "yes", label: "Yes" }], reactions: null },
+      { type: "buttons", items: [{ label: "Yes" }], reactions: null },
     ])).toBe("");
   });
 

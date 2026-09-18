@@ -39,9 +39,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "78d7991c7b8a615302ab30d727503779755df3ab",
+    commit: "db71ee6047aac7d1f08fa3ede4b45c8e4ce70155",
     path: "contracts/developer/openapi.yaml",
-    sha256: "1d790da998a8dfc26cffc098def76d85b8275af7a343148df8e78c486cd02849",
+    sha256: "6a0abd34db9d26e89170dd5cae6c7e0683af2cd076ec86f562367297330ec13e",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -117,7 +117,7 @@ assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 44);
 assert.equal(manifest.path_count, 30);
 assert.equal(manifest.source_path_count, 32);
-assert.equal(manifest.source_schema_count, 138);
+assert.equal(manifest.source_schema_count, 136);
 assert.equal(manifest.callback_count, 19);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 30);
 assert.equal(operationJSON.length, 44);

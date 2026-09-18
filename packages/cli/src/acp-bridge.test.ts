@@ -92,7 +92,7 @@ const received = (eventId: string, chatId: string, text: string, sender = "alice
 /** Relay, reduced to what the bridge touches, with every call written down. */
 function fakeRelay(events: readonly RelayWebhookEvent[]) {
   const typing: string[] = [];
-  const sent: Array<{ chatId: string; text: string; key: string | undefined }> = [];
+  const sent: Array<{ chatId: string; text: string; key: string | undefined; parts?: unknown[] }> = [];
   let sendFails = false;
   const client = {
     chats: {
@@ -101,7 +101,7 @@ function fakeRelay(events: readonly RelayWebhookEvent[]) {
       messages: {
         send: async (chatID: string, body: { message: { parts: Array<{ value?: string }>; idempotency_key?: string } }) => {
           if (sendFails) throw new Error("Relay refused this send.");
-          sent.push({ chatId: chatID, text: body.message.parts[0]?.value ?? "", key: body.message.idempotency_key });
+          sent.push({ chatId: chatID, text: body.message.parts[0]?.value ?? "", key: body.message.idempotency_key, parts: body.message.parts });
           return {} as never;
         },
       },
@@ -262,6 +262,7 @@ describe("what the bridge sends back", () => {
       chatId: "chat-1",
       text: "Not much. Your README says this is a test project.",
       key: "acp-bridge-event-1",
+      parts: [{ type: "text", value: "Not much. Your README says this is a test project." }],
     }]);
     expect(relay.typing).toEqual(["start chat-1", "stop chat-1"]);
     expect(said).toEqual(["@alice  Hey, what's up", "Sent the answer to @alice."]);

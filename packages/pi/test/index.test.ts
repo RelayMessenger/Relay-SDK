@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type Relay from "@relaymessenger/sdk";
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
-import { PiChannel, type PiProcess } from "../src/index.js";
+import { answerMessages, PiChannel, piPrompt, type PiProcess } from "../src/index.js";
 import native from "../src/native.js";
 
 const makeEvent = (id: string, chat: string): RelayWebhookEvent => ({
@@ -44,3 +44,26 @@ describe("Pi channel", () => {
 });
 
 describe("native extension", () => { it("loads and registers only the documented commands", () => { const names: string[] = []; native({ registerCommand: (name: string) => names.push(name) } as never); expect(names).toEqual(["relay-connect", "relay-disconnect"]); }); });
+
+describe("buttons", () => {
+  it("tells pi how to send buttons and when", () => {
+    const prompt = piPrompt("hello");
+    expect(prompt.startsWith("hello\n\n")).toBe(true);
+    expect(prompt).toContain("fenced code block tagged `buttons`");
+    expect(prompt).toContain("If the person asks for buttons, send them.");
+  });
+  it("lifts the block into a buttons part on the last chunk, or alone", () => {
+    expect(answerMessages("Which?\n\n```buttons\n[{\"label\": \"A\"}, {\"label\": \"B\"}]\n```")).toEqual([
+      { parts: [{ type: "text", value: "Which?" }, { type: "buttons", items: [{ label: "A" }, { label: "B" }] }] },
+    ]);
+    expect(answerMessages("```buttons\n[{\"label\": \"Open\", \"url\": \"https://a.test\"}]\n```")).toEqual([
+      { parts: [{ type: "buttons", items: [{ url: "https://a.test", label: "Open" }] }] },
+    ]);
+    const long = "x".repeat(10_001) + "\n\n```buttons\n[{\"label\": \"A\"}]\n```";
+    const messages = answerMessages(long);
+    expect(messages).toHaveLength(2);
+    expect(messages[1]!.parts).toEqual([{ type: "text", value: "x" }, { type: "buttons", items: [{ label: "A" }] }]);
+    const bad = answerMessages("Pick\n\n```buttons\n[]\n```");
+    expect(bad).toEqual([{ parts: [{ type: "text", value: "Pick\n\n```buttons\n[]\n```" }], error: "the buttons block has no items" }]);
+  });
+});

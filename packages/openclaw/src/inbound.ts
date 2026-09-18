@@ -17,11 +17,8 @@ function renderPart(part: MessagePartResponse): string | undefined {
       return `[Attachment: ${part.filename} (${part.mime_type})] ${part.url}`;
     case "system":
       return part.value;
-    // A tap reads as the label the person chose: the same text the server
-    // derives for a button_reply. The agent's own buttons part reads as
-    // nothing, again as the server does; its question is the text beside it.
-    case "button_reply":
-      return part.label;
+    // The agent's own buttons part reads as nothing, as on the server; its
+    // question is the text beside it. A tap arrives as ordinary text.
     case "buttons":
       return undefined;
   }
@@ -93,9 +90,11 @@ export function buildRelayInboundFacts(
     ...(event.data.reply_to?.message_id
       ? {
         replyToId: event.data.reply_to.message_id,
-        replyAnchorId: event.data.parts.some((part) => part.type === "button_reply")
-          ? event.data.id
-          : event.data.reply_to.message_id,
+        // The answer quotes the person's message, the one it answers (a bot's
+        // reply_to in Telegram and Discord names the person's message). A
+        // tap's reply_to names the agent's buttons part, which no reply may
+        // target, so this is also what keeps a tap answerable.
+        replyAnchorId: event.data.id,
       }
       : {}),
     ...(Number.isFinite(timestamp) ? { timestamp } : {}),
