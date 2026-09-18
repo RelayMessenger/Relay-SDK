@@ -27,9 +27,12 @@ describe("splitButtons", () => {
     expect(partsWithButtons(split.text, split.buttons)).toEqual([split.buttons]);
   });
 
-  it("accepts the wrapped part shape too", () => {
+  it("accepts the wrapped part shape too, which is how one_time travels", () => {
     expect(splitButtons(block('{"type": "buttons", "items": [{"label": "Yes"}]}')).buttons)
       .toEqual({ type: "buttons", items: [{ label: "Yes" }] });
+    expect(splitButtons(block('{"one_time": false, "items": [{"label": "Next"}]}')).buttons)
+      .toEqual({ type: "buttons", items: [{ label: "Next" }], one_time: false });
+    expect(parseButtonsBlock('{"one_time": "no", "items": [{"label": "Next"}]}')).toBe("one_time must be true or false");
   });
 
   it("leaves an answer without a block alone", () => {

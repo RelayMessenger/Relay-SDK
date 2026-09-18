@@ -3189,6 +3189,13 @@ components:
           maxItems: 5
           items:
             $ref: "#/components/schemas/ButtonItem"
+        one_time:
+          type: boolean
+          description: |
+            Whether a tap puts the buttons away. Absent means true: the group
+            disappears once the person taps a plain button, the way a quick
+            reply does. `false` leaves the buttons on screen to tap again. A
+            `url` button never puts them away, since its tap sends nothing.
     ButtonsPartResponse:
       type: object
       description: A buttons part as read back
@@ -3205,6 +3212,9 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ButtonItemResponse"
+        one_time:
+          type: boolean
+          description: As sent; absent means true.
         reactions:
           type:
             - array

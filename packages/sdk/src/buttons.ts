@@ -27,6 +27,7 @@ export const BUTTONS_GUIDANCE = [
   "Do not send buttons when the answer is open-ended, when your options are not the full set of likely answers, or when you are not asking anything and there is nothing to do. One question or one action per message; never a menu of things you can do, and never as decoration.",
   "If you would otherwise write \"reply 1, 2 or 3\", list choices for the person to type, or paste a link for them to open, send buttons instead. If the person asks for buttons, send them.",
   "A tap comes back to you as an ordinary message whose text is the label. Labels are at most 80 characters.",
+  "Buttons disappear once tapped. Set one_time to false only for controls the person is meant to tap again and again, such as Next, Another one, or Refresh.",
 ].join(" ");
 
 /**
@@ -36,7 +37,8 @@ export const BUTTONS_GUIDANCE = [
 export const BUTTONS_BLOCK_INSTRUCTION =
   "To put buttons under your answer, end it with a fenced code block tagged `" + BUTTONS_FENCE + "` "
   + "holding a JSON array of 1 to 5 items, each {\"label\": \"...\"} or {\"label\": \"...\", \"url\": \"https://...\"}. "
-  + "The block is removed from the text and drawn as buttons.";
+  + "The block is removed from the text and drawn as buttons. "
+  + "To keep the buttons on screen after a tap, write the block as {\"one_time\": false, \"items\": [...]} instead of a bare array.";
 
 /** The server's limits (Discord's button limits): items 1..5, label 1..80, url <= 2048. */
 export const BUTTONS_MAX_ITEMS = 5;
@@ -87,13 +89,14 @@ const asItem = (value: unknown, index: number): ButtonItem | string => {
  * part, or explains why it cannot. The checks are the server's own, so a bad
  * value fails here with a readable reason instead of a 400 from the API.
  */
-export const buttonsPart = (parsed: unknown): ButtonsPart | string => {
-  const items = Array.isArray(parsed)
-    ? parsed
-    : parsed !== null && typeof parsed === "object" && Array.isArray((parsed as { items?: unknown }).items)
-      ? (parsed as { items: unknown[] }).items
-      : undefined;
+export const buttonsPart = (parsed: unknown, oneTime?: boolean): ButtonsPart | string => {
+  const wrapped = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+    ? parsed as { items?: unknown; one_time?: unknown }
+    : undefined;
+  const items = Array.isArray(parsed) ? parsed : Array.isArray(wrapped?.items) ? wrapped.items : undefined;
   if (items === undefined) return "the buttons block must be a JSON array of items";
+  const one_time = oneTime ?? wrapped?.one_time;
+  if (one_time !== undefined && typeof one_time !== "boolean") return "one_time must be true or false";
   if (items.length === 0) return "the buttons block has no items";
   if (items.length > BUTTONS_MAX_ITEMS) {
     return `the buttons block has ${items.length} items; the most is ${BUTTONS_MAX_ITEMS}`;
@@ -104,7 +107,7 @@ export const buttonsPart = (parsed: unknown): ButtonsPart | string => {
     if (typeof item === "string") return item;
     result.push(item);
   }
-  return { type: "buttons", items: result };
+  return { type: "buttons", items: result, ...(one_time === undefined ? {} : { one_time }) };
 };
 
 /** Parses the body of a buttons block, JSON, into a `buttons` part. */

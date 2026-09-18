@@ -146,6 +146,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             maxLength: 10000,
             description: "Plain text Relay Message. Optional only when buttons are given; then the question goes here.",
           },
+          one_time: {
+            type: "boolean",
+            description: "With buttons: whether a tap puts them away. Absent means true. Set false only for controls the person taps again and again.",
+          },
           buttons: {
             type: "array",
             minItems: 1,

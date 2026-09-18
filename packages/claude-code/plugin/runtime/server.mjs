@@ -21506,9 +21506,10 @@ var BUTTONS_GUIDANCE = [
   'Send one button when there is one thing to do next. A url button opens it inside the app: connect an account, sign in, open the page, pay. A plain button confirms one step: Start, Done, Continue. Do not paste a link or ask "ready?" when a single button does the job.',
   "Do not send buttons when the answer is open-ended, when your options are not the full set of likely answers, or when you are not asking anything and there is nothing to do. One question or one action per message; never a menu of things you can do, and never as decoration.",
   'If you would otherwise write "reply 1, 2 or 3", list choices for the person to type, or paste a link for them to open, send buttons instead. If the person asks for buttons, send them.',
-  "A tap comes back to you as an ordinary message whose text is the label. Labels are at most 80 characters."
+  "A tap comes back to you as an ordinary message whose text is the label. Labels are at most 80 characters.",
+  "Buttons disappear once tapped. Set one_time to false only for controls the person is meant to tap again and again, such as Next, Another one, or Refresh."
 ].join(" ");
-var BUTTONS_BLOCK_INSTRUCTION = "To put buttons under your answer, end it with a fenced code block tagged `" + BUTTONS_FENCE + '` holding a JSON array of 1 to 5 items, each {"label": "..."} or {"label": "...", "url": "https://..."}. The block is removed from the text and drawn as buttons.';
+var BUTTONS_BLOCK_INSTRUCTION = "To put buttons under your answer, end it with a fenced code block tagged `" + BUTTONS_FENCE + '` holding a JSON array of 1 to 5 items, each {"label": "..."} or {"label": "...", "url": "https://..."}. The block is removed from the text and drawn as buttons. To keep the buttons on screen after a tap, write the block as {"one_time": false, "items": [...]} instead of a bare array.';
 var BUTTONS_MAX_ITEMS = 5;
 var BUTTON_LABEL_MAX_LENGTH = 80;
 var BUTTON_URL_MAX_LENGTH = 2048;
@@ -21541,10 +21542,14 @@ var asItem = (value, index) => {
   }
   return { url, label };
 };
-var buttonsPart = (parsed) => {
-  const items = Array.isArray(parsed) ? parsed : parsed !== null && typeof parsed === "object" && Array.isArray(parsed.items) ? parsed.items : void 0;
+var buttonsPart = (parsed, oneTime) => {
+  const wrapped = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : void 0;
+  const items = Array.isArray(parsed) ? parsed : Array.isArray(wrapped?.items) ? wrapped.items : void 0;
   if (items === void 0)
     return "the buttons block must be a JSON array of items";
+  const one_time = oneTime ?? wrapped?.one_time;
+  if (one_time !== void 0 && typeof one_time !== "boolean")
+    return "one_time must be true or false";
   if (items.length === 0)
     return "the buttons block has no items";
   if (items.length > BUTTONS_MAX_ITEMS) {
@@ -21557,7 +21562,7 @@ var buttonsPart = (parsed) => {
       return item;
     result.push(item);
   }
-  return { type: "buttons", items: result };
+  return { type: "buttons", items: result, ...one_time === void 0 ? {} : { one_time } };
 };
 var partsWithButtons = (text2, buttons, limit = Number.POSITIVE_INFINITY) => [
   ...text2.length > 0 ? [{ type: "text", value: text2.slice(0, limit) }] : [],
@@ -22252,7 +22257,8 @@ var RelayChannel = class {
     const args = argumentsValue;
     const chatId = args && typeof args.chat_id === "string" ? args.chat_id : "";
     const text2 = args && typeof args.text === "string" ? args.text : "";
-    const buttons = args?.buttons === void 0 ? void 0 : buttonsPart(args.buttons);
+    if (args?.one_time !== void 0 && typeof args.one_time !== "boolean") return failure("one_time must be true or false");
+    const buttons = args?.buttons === void 0 ? void 0 : buttonsPart(args.buttons, args.one_time);
     if (typeof buttons === "string") return failure(`buttons: ${buttons}`);
     const sendId = args && typeof args.send_id === "string" ? args.send_id : "";
     const replyTo = args && typeof args.reply_to_message_id === "string" ? args.reply_to_message_id : void 0;
@@ -23191,6 +23197,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             minLength: 1,
             maxLength: 1e4,
             description: "Plain text Relay Message. Optional only when buttons are given; then the question goes here."
+          },
+          one_time: {
+            type: "boolean",
+            description: "With buttons: whether a tap puts them away. Absent means true. Set false only for controls the person taps again and again."
           },
           buttons: {
             type: "array",
