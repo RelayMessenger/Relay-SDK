@@ -21513,7 +21513,7 @@ var BUTTONS_BLOCK_INSTRUCTION = "To put buttons under your answer, end it with a
 var BUTTONS_MAX_ITEMS = 5;
 var BUTTON_LABEL_MAX_LENGTH = 80;
 var BUTTON_URL_MAX_LENGTH = 2048;
-var FENCE = new RegExp("(^|\\n)[ \\t]*```[ \\t]*" + BUTTONS_FENCE + "[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```[ \\t]*(?=\\n|$)", "u");
+var FENCE = new RegExp("(^|\\n)[ \\t]*```[ \\t]*" + BUTTONS_FENCE + "[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```[ \\t]*(?=\\r?\\n|$)", "u");
 var asItem = (value, index) => {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return `item ${index + 1} is not an object`;
@@ -22256,8 +22256,10 @@ var RelayChannel = class {
   async reply(argumentsValue) {
     const args = argumentsValue;
     const chatId = args && typeof args.chat_id === "string" ? args.chat_id : "";
+    if (args?.text !== void 0 && typeof args.text !== "string") return failure("text must be a string");
     const text2 = args && typeof args.text === "string" ? args.text : "";
     if (args?.one_time !== void 0 && typeof args.one_time !== "boolean") return failure("one_time must be true or false");
+    if (args?.one_time !== void 0 && args.buttons === void 0) return failure("one_time needs buttons");
     const buttons = args?.buttons === void 0 ? void 0 : buttonsPart(args.buttons, args.one_time);
     if (typeof buttons === "string") return failure(`buttons: ${buttons}`);
     const sendId = args && typeof args.send_id === "string" ? args.send_id : "";

@@ -56,7 +56,8 @@ export async function sendRelayText(params: {
     params.chatId,
     {
       message: {
-        parts: partsWithButtons(text, buttons),
+        // Without a block the words go exactly as OpenClaw handed them.
+        parts: buttons ? partsWithButtons(text, buttons) : [{ type: "text", value: params.text }],
         idempotency_key: params.idempotencyKey,
         ...(params.replyToId
           ? { reply_to: { message_id: params.replyToId } }

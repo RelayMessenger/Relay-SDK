@@ -266,8 +266,10 @@ export class RelayChannel {
       one_time?: unknown;
     } | null;
     const chatId = args && typeof args.chat_id === "string" ? args.chat_id : "";
+    if (args?.text !== undefined && typeof args.text !== "string") return failure("text must be a string");
     const text = args && typeof args.text === "string" ? args.text : "";
     if (args?.one_time !== undefined && typeof args.one_time !== "boolean") return failure("one_time must be true or false");
+    if (args?.one_time !== undefined && args.buttons === undefined) return failure("one_time needs buttons");
     const buttons = args?.buttons === undefined ? undefined : buttonsPart(args.buttons, args.one_time as boolean | undefined);
     if (typeof buttons === "string") return failure(`buttons: ${buttons}`);
     const sendId = args && typeof args.send_id === "string" ? args.send_id : "";

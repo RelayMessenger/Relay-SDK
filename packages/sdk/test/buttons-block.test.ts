@@ -35,8 +35,16 @@ describe("splitButtons", () => {
     expect(parseButtonsBlock('{"one_time": "no", "items": [{"label": "Next"}]}')).toBe("one_time must be true or false");
   });
 
-  it("leaves an answer without a block alone", () => {
-    expect(splitButtons("  plain words  ")).toEqual({ text: "plain words" });
+  it("lifts a block written with CRLF line endings", () => {
+    const answer = "Pick\r\n```buttons\r\n[{\"label\": \"Yes\"}]\r\n```\r\nThanks";
+    expect(splitButtons(answer)).toEqual({
+      text: "Pick\n\nThanks",
+      buttons: { type: "buttons", items: [{ label: "Yes" }] },
+    });
+  });
+
+  it("leaves an answer without a block alone, whitespace included", () => {
+    expect(splitButtons("  plain words  ")).toEqual({ text: "  plain words  " });
     expect(splitButtons("```json\n[1]\n```")).toEqual({ text: "```json\n[1]\n```" });
   });
 

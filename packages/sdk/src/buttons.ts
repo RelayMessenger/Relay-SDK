@@ -55,7 +55,7 @@ export interface SplitButtons {
 }
 
 const FENCE = new RegExp(
-  "(^|\\n)[ \\t]*```[ \\t]*" + BUTTONS_FENCE + "[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```[ \\t]*(?=\\n|$)",
+  "(^|\\n)[ \\t]*```[ \\t]*" + BUTTONS_FENCE + "[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```[ \\t]*(?=\\r?\\n|$)",
   "u",
 );
 
@@ -129,13 +129,13 @@ export const parseButtonsBlock = (body: string): ButtonsPart | string => {
  */
 export const splitButtons = (answer: string): SplitButtons => {
   const match = FENCE.exec(answer);
-  if (!match) return { text: answer.trim() };
+  if (!match) return { text: answer };
   const parsed = parseButtonsBlock(match[2] ?? "");
-  if (typeof parsed === "string") return { text: answer.trim(), error: parsed };
+  if (typeof parsed === "string") return { text: answer, error: parsed };
   const start = match.index + (match[1]?.length ?? 0);
-  const text = (answer.slice(0, start) + "\n" + answer.slice(match.index + match[0].length))
-    .replace(/\n{3,}/gu, "\n\n")
-    .trim();
+  const before = answer.slice(0, start).replace(/\s+$/u, "");
+  const after = answer.slice(match.index + match[0].length).replace(/^\s+/u, "");
+  const text = before && after ? `${before}\n\n${after}` : before || after;
   return { text, buttons: parsed };
 };
 
