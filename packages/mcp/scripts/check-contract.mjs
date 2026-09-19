@@ -34,7 +34,7 @@ assert.equal(
   expected,
   "The SDK v1 operation contract changed; review the public contract before refreshing this hash.",
 );
-assert.equal(RELAY_V1_OPERATIONS.length, 40);
+assert.equal(RELAY_V1_OPERATIONS.length, 38);
 assert.equal(
   RELAY_V1_OPERATIONS.some((operation) => operation.method === "POST" && operation.path === "/v1/agents"),
   false,

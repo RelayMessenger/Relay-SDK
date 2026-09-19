@@ -209,8 +209,6 @@ describe("Relay v1 request shapes", () => {
     });
     await client.calls.list("chat-id");
     await client.calls.retrieve("call-id");
-    await client.calls.accept("call-id");
-    await client.calls.decline("call-id");
     await client.calls.end("call-id");
     await client.agents.delete("agent");
 
@@ -362,13 +360,10 @@ describe("Relay v1 request shapes", () => {
     expect(methods(client.chats.messages)).toEqual(["list", "send"]);
     expect(methods(client.chats.participants)).toEqual(["add", "remove"]);
     expect(methods(client.calls)).toEqual([
-      "accept",
       "create",
-      "decline",
       "end",
       "list",
       "retrieve",
-      "room",
     ]);
     expect(methods(client.attachments)).toEqual([
       "create",
