@@ -524,3 +524,26 @@ export const deleteConsoleAgent = async (
   await consoleRequest(deps, `${path}/${encodeURIComponent(agent.id)}`, { method: "DELETE" });
   return true;
 };
+
+/** Creation's Console proxy does not accept call_url; set it after saving the token. */
+export const setConsoleAgentCallURL = async (
+  deps: ConsoleRequestDependencies,
+  handle: string,
+  callURL: string,
+): Promise<void> => {
+  const session = (await readConfig(deps.context)).console;
+  if (!session || session.type === "organization_key") {
+    throw new Error("Sign in with relay login to set the call address through Console.");
+  }
+  if (session.expires_at <= Date.now()) throw new CliError("Your Relay Console sign-in expired.", "signin_expired");
+  const me = await consoleRequest<{ org: { id: string } }>(deps, "/me");
+  const agents = await consoleRequest<Array<{ id: string; handle: string }>>(deps, `/orgs/${encodeURIComponent(me.org.id)}/agents`);
+  const agent = agents.find((entry) => entry.handle === handle);
+  if (!agent) throw new Error("Agent was not found.");
+  const response = await httpFetch(deps)(`${deps.apiURL ?? defaultCreationApiURL()}/v1/console/agents/${encodeURIComponent(agent.id)}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json", "X-Relay-Organization-ID": me.org.id },
+    body: JSON.stringify({ call_url: callURL }),
+  });
+  await json(response);
+};
