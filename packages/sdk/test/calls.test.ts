@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Webhook } from "standardwebhooks";
-import Relay, { type Call, type CallResponse, type CallWebhookEvent } from "../src/index.js";
+import Relay, { type Call, type CallResponse, type CallWebhookEvent, type SystemEvent, type ContactCardUpdateParams } from "../src/index.js";
 
 const call: Call = {
   id: "01995bc0-0000-7000-8000-000000000001",
@@ -13,7 +13,6 @@ const call: Call = {
   created_at: "2026-09-17T12:00:00Z",
   ringing_at: "2026-09-17T12:00:00Z",
   answered_at: null,
-  connected_at: null,
   ended_at: null,
   end_reason: null,
 };
@@ -55,7 +54,7 @@ describe("provider-independent call API", () => {
     }, { idempotencyKey: "" })).toThrow(/idempotencyKey/);
   });
 
-  it.each(["accept", "decline", "end"] as const)(
+  it.each(["end"] as const)(
     "sends the exact %s action",
     async (action) => {
       let observed: { url: string; body: unknown } | undefined;
@@ -118,4 +117,28 @@ describe("provider-independent call API", () => {
       } else throw new Error("Call event did not narrow.");
     },
   );
+});
+
+
+it("carries the call outcome in a system event", () => {
+  const event: SystemEvent = {
+    type: "call_ended", actor: call.from, subject: call.to[0], value: null,
+    icon_attachment_id: null, contact_card: null,
+    call: { id: call.id, mode: "audio", end_reason: "completed", connected: true, duration_seconds: 12 },
+  };
+  expect(JSON.parse(JSON.stringify(event)).call).toEqual({
+    id: call.id, mode: "audio", end_reason: "completed", connected: true, duration_seconds: 12,
+  });
+});
+
+it.each(["wss://agent.example/calls", null])("updates the call address to %s", async (call_url) => {
+  const observed: Array<{ url: string; body: unknown }> = [];
+  const client = new Relay({ apiKey: "token", fetch: async (url, init) => {
+    observed.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+    return Response.json({ handle: "echo", call_url });
+  } });
+  const params: ContactCardUpdateParams = { handle: "echo", call_url };
+  await client.contactCard.update(params);
+  expect(new URL(observed[0]!.url).searchParams.get("handle")).toBe("echo");
+  expect(observed[0]!.body).toEqual({ call_url });
 });

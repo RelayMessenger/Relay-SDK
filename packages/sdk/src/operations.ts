@@ -192,16 +192,6 @@ export const RELAY_V1_OPERATIONS = [
   },
   {
     "method": "POST",
-    "path": "/v1/calls/{callId}/accept",
-    "operationId": "acceptCall"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/calls/{callId}/decline",
-    "operationId": "declineCall"
-  },
-  {
-    "method": "POST",
     "path": "/v1/calls/{callId}/end",
     "operationId": "endCall"
   }

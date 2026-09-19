@@ -21,12 +21,11 @@ export interface Call {
   from: CallContact;
   to: [CallContact];
   mode: "audio";
-  status: "ringing" | "connecting" | "active" | "ended";
+  status: "ringing" | "active" | "ended";
   revision: number;
   created_at: string;
   ringing_at: string;
   answered_at: string | null;
-  connected_at: string | null;
   ended_at: string | null;
   end_reason: "completed" | "declined" | "canceled" | "no_answer" | "disconnected" | "failed" | null;
 }
@@ -54,126 +53,6 @@ export interface CallListResponse {
 export interface CallResponse {
   call: Call;
 }
-
-export interface CallAudioFormat {
-  encoding: "pcm_s16le";
-  sample_rate: 48000;
-  channels: 2;
-}
-
-export type CallRoomTrack = "microphone" | "agent-voice";
-
-export interface CallRoomParticipant {
-  contact_id: UUID;
-  kind: "user" | "agent";
-  attached: boolean;
-  track: CallRoomTrack | null;
-  muted: boolean;
-  connected: boolean;
-}
-
-/** The audio-socket grant; present only in the agent's own roomState. */
-export interface CallRoomMedia {
-  url: string;
-  /** Short-lived Relay media grant, the media WebSocket bearer. Treat it as a secret. */
-  token: string;
-  expires_at: string;
-  audio_format: CallAudioFormat;
-}
-
-export interface CallRoomStateFrame {
-  type: "roomState";
-  call: Call;
-  participants: CallRoomParticipant[];
-  media?: CallRoomMedia;
-}
-
-export interface CallRoomAnswerFrame {
-  type: "answer";
-  session_description: { type: "answer"; sdp: string };
-}
-
-/** The room started pulling the other side's track; reply with `answer`. */
-export interface CallRoomOfferFrame {
-  type: "offer";
-  session_description: { type: "offer"; sdp: string };
-  track: CallRoomTrack;
-}
-
-export type CallEndReason = NonNullable<Call["end_reason"]>;
-
-export interface CallRoomEndedFrame {
-  type: "ended";
-  reason: CallEndReason;
-}
-
-export type CallRoomErrorCode = "invalid_frame" | "not_allowed" | "media_unavailable";
-
-export interface CallRoomErrorFrame {
-  type: "error";
-  code: CallRoomErrorCode;
-  message: string;
-}
-
-export interface CallRoomHeartbeatFrame {
-  type: "heartbeat";
-}
-
-export type CallRoomServerFrame =
-  | CallRoomStateFrame
-  | CallRoomAnswerFrame
-  | CallRoomOfferFrame
-  | CallRoomEndedFrame
-  | CallRoomErrorFrame
-  | CallRoomHeartbeatFrame;
-
-export interface CallRoomJoinFrame {
-  type: "join";
-}
-
-/** Publish this participant's microphone to the SFU (users only). */
-export interface CallRoomClientOfferFrame {
-  type: "offer";
-  session_description: { type: "offer"; sdp: string };
-  tracks: [{ mid: string; name: "microphone" }];
-}
-
-export interface CallRoomClientAnswerFrame {
-  type: "answer";
-  session_description: { type: "answer"; sdp: string };
-}
-
-export interface CallRoomUserUpdateFrame {
-  type: "userUpdate";
-  muted: boolean;
-}
-
-export interface CallRoomAcceptFrame {
-  type: "accept";
-}
-
-export interface CallRoomDeclineFrame {
-  type: "decline";
-}
-
-export interface CallRoomEndFrame {
-  type: "end";
-}
-
-export interface CallRoomConnectedFrame {
-  type: "connected";
-}
-
-export type CallRoomClientFrame =
-  | CallRoomJoinFrame
-  | CallRoomClientOfferFrame
-  | CallRoomClientAnswerFrame
-  | CallRoomUserUpdateFrame
-  | CallRoomAcceptFrame
-  | CallRoomDeclineFrame
-  | CallRoomEndFrame
-  | CallRoomConnectedFrame
-  | CallRoomHeartbeatFrame;
 
 export type CallWebhookEvent = RelayWebhookEnvelope<
   CallResponse,
@@ -204,6 +83,7 @@ interface ChatHandleBase {
   display_name: string | null;
   image_url: string | null;
   about: string | null;
+  call_url?: string | null;
   verified: boolean;
   /** True when the caller holds this Handle as a Contact. */
   is_contact: boolean;
@@ -327,7 +207,16 @@ export type SystemEventType =
   | "participant_removed"
   | "group_name_updated"
   | "group_icon_updated"
-  | "contact_card_shared";
+  | "contact_card_shared"
+  | "call_ended";
+
+export interface CallMarker {
+  id: UUID;
+  mode: "audio";
+  end_reason: NonNullable<Call["end_reason"]>;
+  connected: boolean;
+  duration_seconds: number | null;
+}
 
 export interface SystemEvent {
   type: SystemEventType;
@@ -336,6 +225,7 @@ export interface SystemEvent {
   value: string | null;
   icon_attachment_id: UUID | null;
   contact_card: ContactCardItem | null;
+  call: CallMarker | null;
 }
 
 export interface SystemPartResponse {
@@ -715,6 +605,7 @@ export interface WebhookSubscriptionListResponse {
 }
 
 export interface ContactCardItem {
+  call_url?: string | null;
   handle: string;
   first_name: string;
   last_name: string | null;
@@ -745,6 +636,7 @@ export interface ContactCardRetrieveResponse {
 export interface ContactCardUpdateParams {
   /** Server contract 3097dda: trimmed about text, 1 to 60 characters. */
   about?: string;
+  call_url?: string | null;
   handle: string;
   first_name?: string;
   last_name?: string | null;

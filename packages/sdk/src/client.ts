@@ -47,7 +47,6 @@ import type {
   WebhookSubscriptionUpdateParams,
 } from "./types.js";
 import { Webhooks } from "./webhooks.js";
-import { CallRoom, type CallRoomOptions } from "./calls-room.js";
 import {
   runWebSocket,
   type WebSocketRunOptions,
@@ -248,10 +247,6 @@ class Transport {
     return runWebSocket(this.baseURL, this.#apiKey, options);
   }
 
-  openCallRoom(callID: string, options: CallRoomOptions): CallRoom {
-    if (!this.#apiKey) throw new Error("Relay API key is required.");
-    return new CallRoom(this.baseURL, callID, this.#apiKey, options);
-  }
 }
 
 class ChatMessages {
@@ -752,17 +747,7 @@ export class Calls {
     });
   }
 
-  accept(callID: string, options?: RequestOptions): Promise<CallResponse> {
-    return this.transport.request({
-      method: "POST", path: `/v1/calls/${pathID(callID)}/accept`, body: {}, options, retryable: true,
-    });
-  }
 
-  decline(callID: string, options?: RequestOptions): Promise<CallResponse> {
-    return this.transport.request({
-      method: "POST", path: `/v1/calls/${pathID(callID)}/decline`, body: {}, options, retryable: true,
-    });
-  }
 
   end(callID: string, options?: RequestOptions): Promise<CallResponse> {
     return this.transport.request({
@@ -770,13 +755,6 @@ export class Calls {
     });
   }
 
-  /**
-   * Open this participant's socket to the Call room (GET /v1/calls/{callId}/room).
-   * The room pushes `roomState` after every change; nothing is polled.
-   */
-  room(callID: string, options: CallRoomOptions = {}): CallRoom {
-    return this.transport.openCallRoom(callID, options);
-  }
 }
 
 export class Relay {
