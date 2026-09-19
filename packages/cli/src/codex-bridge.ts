@@ -2,8 +2,9 @@ import { inboundMediaPrompt, type InboundMediaOptions } from "./inbound-media.js
 import {
   BUTTONS_BLOCK_INSTRUCTION,
   BUTTONS_GUIDANCE,
-  partsWithButtons,
-  splitButtons,
+  LINK_LINE_INSTRUCTION,
+  answerMessages as splitAnswer,
+  indexedIdempotencyKey,
   type MessagePart,
   type Relay,
 } from "@relaymessenger/sdk";
@@ -65,11 +66,11 @@ export const ANSWER_INSTRUCTION =
   + "Write chat text. Inline Markdown draws: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.";
 
 /**
- * How the answer carries buttons, and when it should: the SDK's one text for
- * every runtime, so the same person gets buttons under the same conditions
- * whichever agent answers.
+ * How the answer carries buttons and links, and when it should: the SDK's one
+ * text for every runtime, so the same person gets buttons and link cards
+ * under the same conditions whichever agent answers.
  */
-export const BUTTONS_INSTRUCTION = `${BUTTONS_BLOCK_INSTRUCTION} ${BUTTONS_GUIDANCE}`;
+export const BUTTONS_INSTRUCTION = `${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE}`;
 
 /**
  * One message, as the prompt Codex is given. Codex keeps its Relay tools during
@@ -87,18 +88,40 @@ export const codexPrompt = (sender: string, text: string): string => [
 ].join("\n");
 
 /**
- * The parts an answer becomes: its words as the text part, and the buttons
- * its fenced block asked for. A block the SDK cannot read stays in the words,
- * so the person still gets the answer, and the terminal says why.
+ * The messages an answer becomes: its words as text, each link written alone
+ * on a line as its own message, and the buttons its fenced block asked for
+ * under the last words. A block the SDK cannot read stays in the words, so
+ * the person still gets the answer, and the terminal says why.
  */
-export const answerParts = (
+export const answerMessages = (
   answer: string,
   sender: string,
   say: (line: string) => void,
-): MessagePart[] => {
-  const { text, buttons, error } = splitButtons(answer);
+): MessagePart[][] => {
+  const { messages, error } = splitAnswer(answer);
   if (error) say(`The buttons block in the answer to @${sender} was left as text: ${error}.`);
-  return partsWithButtons(text, buttons, MAX_RELAY_TEXT);
+  return messages.map((parts) => parts.map((part) => (
+    part.type === "text" ? { ...part, value: part.value.slice(0, MAX_RELAY_TEXT) } : part
+  )));
+};
+
+/**
+ * Sends an answer, one message at a time in order. The message that arrived
+ * is the key, so a retry after a dropped connection cannot answer the same
+ * person twice; each message past the first carries its index.
+ */
+export const sendAnswer = async (
+  client: Pick<Relay, "chats">,
+  turn: Pick<BridgeTurn, "chatId" | "eventId" | "sender">,
+  answer: string,
+  say: (line: string) => void,
+  key: string = replyKey(turn.eventId),
+): Promise<void> => {
+  for (const [index, parts] of answerMessages(answer, turn.sender, say).entries()) {
+    await client.chats.messages.send(turn.chatId, {
+      message: { parts, idempotency_key: indexedIdempotencyKey(key, index) },
+    });
+  }
 };
 
 /**
@@ -498,14 +521,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
       return;
     }
     try {
-      await input.client.chats.messages.send(turn.chatId, {
-        message: {
-          parts: answerParts(answer, turn.sender, input.say),
-          // The message that arrived is the key, so a retry after a dropped
-          // connection cannot answer the same person twice.
-          idempotency_key: replyKey(turn.eventId),
-        },
-      });
+      await sendAnswer(input.client, turn, answer, input.say);
       input.say(`Sent the answer to @${turn.sender}.`);
     } catch {
       input.say(`The answer to @${turn.sender} did not reach Relay.`);

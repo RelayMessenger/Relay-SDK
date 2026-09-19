@@ -270,3 +270,37 @@ describe("the Claude executable the bridge starts", () => {
     expect(await claudeCommand(executable, { PATH: "" }, "darwin")).toEqual({ executable });
   });
 });
+
+describe("links in a bridged answer", () => {
+  it("sends a URL written alone on a line as its own link Message, in order, each on its own key", async () => {
+    const ask = fakeQuery(async function* () {
+      yield success("Found this one:\nhttps://example.com/listing/42\nWant me to book it?");
+    });
+    const state = setup(ask, [received("event-1", "chat-1", "find me a place")]);
+    await runClaudeBridge(state.input);
+    await untilEnded(state.said, 1);
+    expect(state.relay.sent.map((item) => [item.key, item.parts])).toEqual([
+      ["codex-bridge-event-1", [{ type: "text", value: "Found this one:" }]],
+      ["codex-bridge-event-1-1", [{ type: "link", value: "https://example.com/listing/42" }]],
+      ["codex-bridge-event-1-2", [{ type: "text", value: "Want me to book it?" }]],
+    ]);
+    expect(state.said).toEqual(["@alice  find me a place", "Sent the answer to @alice."]);
+  });
+
+  it("keeps a URL inside a sentence as words", async () => {
+    const ask = fakeQuery(async function* () { yield success("It is at https://example.com, open it when you can."); });
+    const state = setup(ask, [received("event-1", "chat-1", "where")]);
+    await runClaudeBridge(state.input);
+    await untilEnded(state.said, 1);
+    expect(state.relay.sent.map((item) => item.parts)).toEqual([[
+      { type: "text", value: "It is at https://example.com, open it when you can." },
+    ]]);
+  });
+
+  it("tells the agent how to send a link and when", () => {
+    const prompt = codexPrompt("alice", "hello");
+    expect(prompt).toContain("put its URL alone on its own line");
+    expect(prompt).toContain("when the page is the thing you are showing them, send a link");
+    expect(prompt).not.toContain("Do not paste a link");
+  });
+});

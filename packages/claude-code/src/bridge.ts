@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { partsWithButtons, type ButtonsPart } from "@relaymessenger/sdk";
+import { indexedIdempotencyKey, partsWithButtons, type ButtonsPart } from "@relaymessenger/sdk";
 import type {
   Chat,
   Message,
@@ -242,6 +242,32 @@ export function buildReply(
       ...(replyTo ? { reply_to: { message_id: replyTo } } : {}),
     },
   };
+}
+
+/**
+ * The Messages one reply becomes: the words (with any buttons) first, then
+ * the link as its own Message, which the server requires and the app draws
+ * as a card. A reply that is only a link is one Message. Each Message past
+ * the first carries its index in the key.
+ */
+export function buildReplyMessages(
+  text: string,
+  idempotencyKey: string,
+  replyTo?: string,
+  buttons?: ButtonsPart,
+  link?: string,
+): MessageSendParams[] {
+  if (!link) return [buildReply(text, idempotencyKey, replyTo, buttons)];
+  const messages: MessageSendParams[] = [];
+  if (text || buttons) messages.push(buildReply(text, idempotencyKey, replyTo, buttons));
+  messages.push({
+    message: {
+      parts: [{ type: "link", value: link }],
+      idempotency_key: indexedIdempotencyKey(idempotencyKey, messages.length),
+      ...(messages.length === 0 && replyTo ? { reply_to: { message_id: replyTo } } : {}),
+    },
+  });
+  return messages;
 }
 
 export function stableHash(value: unknown): string {

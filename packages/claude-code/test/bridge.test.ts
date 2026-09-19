@@ -2,6 +2,7 @@ import type { ChatHandle, Message, RelayWebhookEvent } from "@relaymessenger/sdk
 import { describe, expect, it } from "vitest";
 import {
   buildReply,
+  buildReplyMessages,
   classifyRelayEvent,
   deliveryFromSnapshotMessage,
 } from "../src/bridge.ts";
@@ -348,5 +349,30 @@ describe("FULL sync reconciliation", () => {
       allowedSenders: parseAllowedSenders(USER_ID),
       redactor,
     })).toThrow(/expected one deliveries\[\]\.contact\.is_me row/u);
+  });
+});
+
+describe("buildReplyMessages", () => {
+  it("is the one reply when there is no link", () => {
+    expect(buildReplyMessages("done", "claude-reply-key")).toEqual([buildReply("done", "claude-reply-key")]);
+  });
+
+  it("sends the words first, then the link alone on an indexed key", () => {
+    expect(buildReplyMessages("Read this:", "claude-reply-key", undefined, undefined, "https://example.com/a")).toEqual([
+      { message: { parts: [{ type: "text", value: "Read this:" }], idempotency_key: "claude-reply-key" } },
+      { message: { parts: [{ type: "link", value: "https://example.com/a" }], idempotency_key: "claude-reply-key-1" } },
+    ]);
+  });
+
+  it("sends a link-only reply as one Message that carries the reply anchor", () => {
+    expect(buildReplyMessages("", "claude-reply-key", "00000000-0000-7000-8000-000000000001", undefined, "https://example.com/a")).toEqual([
+      {
+        message: {
+          parts: [{ type: "link", value: "https://example.com/a" }],
+          idempotency_key: "claude-reply-key",
+          reply_to: { message_id: "00000000-0000-7000-8000-000000000001" },
+        },
+      },
+    ]);
   });
 });

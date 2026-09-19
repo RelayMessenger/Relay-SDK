@@ -3,7 +3,8 @@ import { createInterface } from "node:readline";
 import Relay, {
   BUTTONS_BLOCK_INSTRUCTION,
   BUTTONS_GUIDANCE,
-  splitButtons,
+  LINK_LINE_INSTRUCTION,
+  answerMessages as splitAnswer,
   type MessagePart,
   type MessageWebhookData,
   type RelayWebhookEvent,
@@ -39,26 +40,32 @@ const textFromEvent = (event: RelayWebhookEvent): string | null => {
 };
 /**
  * The prompt pi is given for one message: the words, then how to answer.
- * This process sends pi's final text for it, and the same buttons rules
- * every other runtime carries.
+ * This process sends pi's final text for it, and the same buttons and link
+ * rules every other runtime carries.
  */
 export const piPrompt = (message: string): string =>
-  `${message}\n\nWrite your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself. Write chat text. Inline Markdown draws: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.\n\n${BUTTONS_BLOCK_INSTRUCTION} ${BUTTONS_GUIDANCE}`;
+  `${message}\n\nWrite your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself. Write chat text. Inline Markdown draws: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.\n\n${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE}`;
 
 /**
- * The messages an answer becomes: text in chunks the API takes, and the
- * buttons its fenced block asked for on the last one. A block pi wrote that
- * cannot be read stays in the words, so nothing the person was told is lost.
+ * The messages an answer becomes: each link written alone on a line as its
+ * own message, text in chunks the API takes, and the buttons its fenced block
+ * asked for under the last words. A block pi wrote that cannot be read stays
+ * in the words, so nothing the person was told is lost.
  */
 export const answerMessages = (answer: string): { parts: MessagePart[]; error?: string }[] => {
-  const { text, buttons, error } = splitButtons(answer);
-  const chunks = text.match(/[\s\S]{1,10000}/gu) ?? [];
-  const messages: { parts: MessagePart[]; error?: string }[] = chunks.map((chunk) => ({ parts: [{ type: "text", value: chunk }] }));
-  if (buttons) {
-    if (messages.length === 0) messages.push({ parts: [buttons] });
-    else messages[messages.length - 1]!.parts.push(buttons);
+  const split = splitAnswer(answer);
+  const messages: { parts: MessagePart[]; error?: string }[] = [];
+  for (const [first, ...rest] of split.messages) {
+    if (first?.type !== "text" || first.value.length <= 10_000) {
+      messages.push({ parts: first ? [first, ...rest] : rest });
+      continue;
+    }
+    const chunks = first.value.match(/[\s\S]{1,10000}/gu) ?? [];
+    for (const [index, chunk] of chunks.entries()) {
+      messages.push({ parts: [{ type: "text", value: chunk }, ...(index === chunks.length - 1 ? rest : [])] });
+    }
   }
-  if (error && messages[0]) messages[0].error = error;
+  if (split.error && messages[0]) messages[0].error = split.error;
   return messages;
 };
 

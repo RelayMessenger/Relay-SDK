@@ -170,6 +170,26 @@ export function hasPostableContent(
   );
 }
 
+/** The server's limit for a link part's URL. */
+export const RELAY_MAX_LINK_LENGTH = 2_048;
+
+/**
+ * The URL a message carries when its whole text is one absolute HTTP or HTTPS
+ * URL, the way the Relay app itself turns such a draft into a `link` part so
+ * the reader sees a card; otherwise undefined, and the words go as text.
+ */
+export function standaloneLinkText(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!/^https?:\/\/\S+$/iu.test(trimmed) || trimmed.length > RELAY_MAX_LINK_LENGTH) return undefined;
+  try {
+    const url = new URL(trimmed);
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname) return undefined;
+  } catch {
+    return undefined;
+  }
+  return trimmed;
+}
+
 export function textParts(value: string): RelayOutgoingPart[] {
   if (!value) return [];
   const result: RelayOutgoingPart[] = [];
@@ -290,7 +310,16 @@ export async function buildRelayParts(
   message: AdapterPostableMessage,
   upload: RelayMediaUploader,
 ): Promise<RelayOutgoingPart[]> {
-  const parts = textParts(postableText(message));
+  const text = postableText(message);
+  const link = standaloneLinkText(text);
+  if (
+    link !== undefined
+    && extractPostableAttachments(message).length === 0
+    && extractFiles(message).length === 0
+  ) {
+    return [{ type: "link", value: link }];
+  }
+  const parts = textParts(text);
   for (const attachment of extractPostableAttachments(message)) {
     parts.push(await attachmentPart(attachment, upload));
   }

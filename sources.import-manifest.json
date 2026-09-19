@@ -85,7 +85,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/src/index.ts",
       "source_sha256": "10779947a299636b36b91a638a4434aeb99bbcafdbf5f9ad495e45ddb71213d0",
-      "destination_sha256": "261a818a63c52ca72ca74b68f3cb4a62f272e02c8a8b9aa1d3b01d6ff9792672",
+      "destination_sha256": "4f19d718847bed433d409154df147f6deee1e850d33f9f6c85e980264d1e3db1",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

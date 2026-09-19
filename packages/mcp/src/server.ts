@@ -55,6 +55,7 @@ export const createRelayMcpServer = (options: RelayMcpServerOptions = {}): McpSe
       + "HTTP results and arguments are JSON values; live WebSocket callbacks and raw uploads are not part of this runtime. "
       + "A message's parts may include one buttons part ({ type: \"buttons\", items: [{ label }, { label, url }] }, 1 to 5 items) beside a text part; "
       + "search_docs(\"buttons\") shows the shape. "
+      + "A link is its own message whose only part is { type: \"link\", value: \"https://...\" }, drawn as a card; send the words first, then the link. "
       + BUTTONS_GUIDANCE,
     inputSchema: z.object({ code: z.string().min(1).max(100_000), intent: z.string().max(2_000).optional() }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },

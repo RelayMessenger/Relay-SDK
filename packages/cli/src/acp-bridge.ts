@@ -13,7 +13,7 @@ import {
 import { Readable, Writable } from "node:stream";
 import { isAbsolute } from "node:path";
 import type { AcpSessionStore } from "./acp-threads.js";
-import { answerParts, bridgeTurn, codexPrompt, type BridgeTurn } from "./codex-bridge.js";
+import { bridgeTurn, codexPrompt, sendAnswer, type BridgeTurn } from "./codex-bridge.js";
 import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
@@ -354,14 +354,7 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
       return;
     }
     try {
-      await input.client.chats.messages.send(turn.chatId, {
-        message: {
-          parts: answerParts(answer, turn.sender, input.say),
-          // The message that arrived is the key, so a retry after a dropped
-          // connection cannot answer the same person twice.
-          idempotency_key: replyKey(turn.eventId),
-        },
-      });
+      await sendAnswer(input.client, turn, answer, input.say, replyKey(turn.eventId));
       input.say(`Sent the answer to @${turn.sender}.`);
     } catch {
       input.say(`The answer to @${turn.sender} did not reach Relay.`);

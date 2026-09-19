@@ -157,3 +157,41 @@ describe("Relay REST Message sends", () => {
     expect(second).not.toBe(first);
   });
 });
+
+describe("links in the agent's words", () => {
+  it("sends a URL alone on a line as its own link Message, keyed by index, with the reply anchor on the first", async () => {
+    const requests: Array<{ body: unknown }> = [];
+    const relay = new Relay({
+      apiKey: "token",
+      baseURL: "https://relay.test",
+      maxRetries: 0,
+      fetch: async (_input, init) => {
+        requests.push({ body: JSON.parse(String(init?.body)) });
+        return Response.json({ message: { id: `00000000-0000-7000-8000-00000000001${requests.length}` } }, { status: 202 });
+      },
+    });
+    const response = await sendRelayText({
+      relay,
+      chatId: "00000000-0000-7000-8000-000000000010",
+      text: "Here it is:\nhttps://example.com/story",
+      replyToId: "00000000-0000-7000-8000-000000000099",
+      idempotencyKey: "key-1",
+    });
+    expect(requests.map((request) => request.body)).toEqual([
+      {
+        message: {
+          parts: [{ type: "text", value: "Here it is:" }],
+          idempotency_key: "key-1",
+          reply_to: { message_id: "00000000-0000-7000-8000-000000000099" },
+        },
+      },
+      {
+        message: {
+          parts: [{ type: "link", value: "https://example.com/story" }],
+          idempotency_key: "key-1-1",
+        },
+      },
+    ]);
+    expect(response.message.id).toBe("00000000-0000-7000-8000-000000000011");
+  });
+});

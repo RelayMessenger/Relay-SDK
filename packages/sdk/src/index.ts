@@ -63,5 +63,16 @@ export {
   splitButtons,
   type SplitButtons,
 } from "./buttons.js";
+export {
+  IDEMPOTENCY_KEY_MAX_LENGTH,
+  LINK_LINE_INSTRUCTION,
+  LINK_URL_MAX_LENGTH,
+  answerMessages,
+  indexedIdempotencyKey,
+  splitLinks,
+  standaloneLink,
+  type AnswerMessages,
+  type AnswerSegment,
+} from "./links.js";
 
 export { Relay as default } from "./client.js";

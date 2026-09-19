@@ -67,3 +67,16 @@ describe("buttons", () => {
     expect(bad).toEqual([{ parts: [{ type: "text", value: "Pick\n\n```buttons\n[]\n```" }], error: "the buttons block has no items" }]);
   });
 });
+
+describe("links", () => {
+  it("tells pi how to send a link", () => {
+    expect(piPrompt("hello")).toContain("put its URL alone on its own line");
+  });
+  it("sends a URL alone on a line as its own message and keeps the buttons under the words", () => {
+    expect(answerMessages("Look:\nhttps://a.test/x\nBook it?\n\n```buttons\n[{\"label\": \"Yes\"}]\n```")).toEqual([
+      { parts: [{ type: "text", value: "Look:" }] },
+      { parts: [{ type: "link", value: "https://a.test/x" }] },
+      { parts: [{ type: "text", value: "Book it?" }, { type: "buttons", items: [{ label: "Yes" }] }] },
+    ]);
+  });
+});

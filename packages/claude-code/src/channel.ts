@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { buttonsPart } from "@relaymessenger/sdk";
+import { buttonsPart, standaloneLink } from "@relaymessenger/sdk";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import Relay, { type RelayWebhookEvent } from "@relaymessenger/sdk";
 import {
-  buildReply,
+  buildReplyMessages,
   classifyRelayEvent,
   stableHash,
 } from "./bridge.ts";
@@ -264,6 +264,7 @@ export class RelayChannel {
       reply_to_message_id?: unknown;
       buttons?: unknown;
       one_time?: unknown;
+      link?: unknown;
     } | null;
     const chatId = args && typeof args.chat_id === "string" ? args.chat_id : "";
     if (args?.text !== undefined && typeof args.text !== "string") return failure("text must be a string");
@@ -272,6 +273,12 @@ export class RelayChannel {
     if (args?.one_time !== undefined && args.buttons === undefined) return failure("one_time needs buttons");
     const buttons = args?.buttons === undefined ? undefined : buttonsPart(args.buttons, args.one_time as boolean | undefined);
     if (typeof buttons === "string") return failure(`buttons: ${buttons}`);
+    if (args?.link !== undefined && typeof args.link !== "string") return failure("link must be a string");
+    const link = args && typeof args.link === "string" ? standaloneLink(args.link) : undefined;
+    if (args?.link !== undefined && link === undefined) {
+      return failure("link must be one absolute http or https URL of at most 2048 characters");
+    }
+    if (link !== undefined && buttons !== undefined) return failure("link and buttons do not go together; a page the person acts on is a url button");
     const sendId = args && typeof args.send_id === "string" ? args.send_id : "";
     const replyTo = args && typeof args.reply_to_message_id === "string"
       ? args.reply_to_message_id
@@ -284,14 +291,15 @@ export class RelayChannel {
       return failure("reply_to_message_id must be a Relay Message UUID");
     }
     const redactedText = this.#redactor.text(text);
-    if ((!redactedText && !buttons) || redactedText.length > 10_000) {
+    if ((!redactedText && !buttons && !link) || redactedText.length > 10_000) {
       return failure("text must be 1-10000 UTF-16 code units after token redaction");
     }
     const idempotencyKey = `claude-reply-${createHash("sha256")
       .update(`${this.#config.accountKey}\0${this.#config.sessionKey}\0${sendId}`)
       .digest("hex")}`;
-    const body = buildReply(redactedText, idempotencyKey, replyTo, buttons);
-    const payloadHash = stableHash({ chatId, body });
+    const bodies = buildReplyMessages(redactedText, idempotencyKey, replyTo, buttons, link);
+    const body = bodies[0]!;
+    const payloadHash = stableHash(bodies.length === 1 ? { chatId, body } : { chatId, bodies });
     const existing = this.#state.existingOutboundSend({
       sendId,
       payloadHash,
@@ -315,7 +323,10 @@ export class RelayChannel {
         this.#state.completeDeliveryTurn(origin.deliveryId, "completed");
         return success("already sent; Relay turn completed");
       }
-      await this.relay.chats.messages.send(chatId, body);
+      // In order, each on its own key: a retry after a dropped connection
+      // re-sends the whole reply, and Relay answers the already-sent ones
+      // from their keys.
+      for (const message of bodies) await this.relay.chats.messages.send(chatId, message);
       this.#state.confirmOutboundSend(sendId);
       this.#state.completeDeliveryTurn(origin.deliveryId, "completed");
       return success(
@@ -325,7 +336,7 @@ export class RelayChannel {
       );
     } catch (error) {
       return failure(
-        `send failed: ${this.#redactor.text(error)}. Retry with the same send_id, chat_id, text, buttons, one_time, and reply_to_message_id.`,
+        `send failed: ${this.#redactor.text(error)}. Retry with the same send_id, chat_id, text, buttons, one_time, link, and reply_to_message_id.`,
       );
     }
   }

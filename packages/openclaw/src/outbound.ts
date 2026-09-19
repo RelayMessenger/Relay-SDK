@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  partsWithButtons,
+  answerMessages,
+  indexedIdempotencyKey,
   Relay,
   RelayAPIError,
-  splitButtons,
   type MessageSendResponse,
 } from "@relaymessenger/sdk";
 import type { ResolvedRelayAccount } from "./types.js";
@@ -36,8 +36,11 @@ export function deriveRelayIdempotencyKey(params: {
 
 /**
  * OpenClaw hands the agent's words as text, so buttons ride in them as the
- * SDK's fenced block, lifted here into the buttons part. A block that cannot
- * be read stays in the words and is reported through `onButtonsError`.
+ * SDK's fenced block, lifted here into the buttons part, and a link written
+ * alone on a line goes out as its own link Message. A block that cannot be
+ * read stays in the words and is reported through `onButtonsError`. Without
+ * a block or a link line the words go exactly as OpenClaw handed them, in one
+ * Message; the response is the first Message's, the one the reply anchors to.
  */
 export async function sendRelayText(params: {
   relay: Pick<Relay, "chats">;
@@ -50,22 +53,27 @@ export async function sendRelayText(params: {
   onButtonsError?: (error: string) => void;
 }): Promise<MessageSendResponse> {
   await params.onPlatformSendDispatch?.();
-  const { text, buttons, error } = splitButtons(params.text);
+  const { messages, error } = answerMessages(params.text);
   if (error) params.onButtonsError?.(error);
-  return await params.relay.chats.messages.send(
-    params.chatId,
-    {
-      message: {
-        // Without a block the words go exactly as OpenClaw handed them.
-        parts: buttons ? partsWithButtons(text, buttons) : [{ type: "text", value: params.text }],
-        idempotency_key: params.idempotencyKey,
-        ...(params.replyToId
-          ? { reply_to: { message_id: params.replyToId } }
-          : {}),
+  if (messages.length === 0) messages.push([{ type: "text", value: params.text }]);
+  let first: MessageSendResponse | undefined;
+  for (const [index, parts] of messages.entries()) {
+    const response = await params.relay.chats.messages.send(
+      params.chatId,
+      {
+        message: {
+          parts,
+          idempotency_key: indexedIdempotencyKey(params.idempotencyKey, index),
+          ...(index === 0 && params.replyToId
+            ? { reply_to: { message_id: params.replyToId } }
+            : {}),
+        },
       },
-    },
-    params.signal ? { signal: params.signal } : undefined,
-  );
+      params.signal ? { signal: params.signal } : undefined,
+    );
+    first ??= response;
+  }
+  return first!;
 }
 
 export function classifyUnknownRelaySend(error: unknown): {
