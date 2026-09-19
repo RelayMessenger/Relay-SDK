@@ -327,7 +327,8 @@ export type SystemEventType =
   | "participant_removed"
   | "group_name_updated"
   | "group_icon_updated"
-  | "contact_card_shared";
+  | "contact_card_shared"
+  | "call_ended";
 
 export interface SystemEvent {
   type: SystemEventType;
@@ -336,6 +337,13 @@ export interface SystemEvent {
   value: string | null;
   icon_attachment_id: UUID | null;
   contact_card: ContactCardItem | null;
+  call: {
+    id: UUID;
+    mode: "audio";
+    end_reason: "completed" | "declined" | "canceled" | "no_answer" | "disconnected" | "failed";
+    connected: boolean;
+    duration_seconds: number | null;
+  } | null;
 }
 
 export interface SystemPartResponse {
