@@ -131,26 +131,12 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "call.ended",
 ];
 
-// Compile-only provider-neutral call receive and room exercise.
+// Compile-only call event and REST exercise.
 async function receiveCall(event: CallWebhookEvent): Promise<void> {
   event.data.call satisfies Call;
-  if (event.event_type !== "call.created") return;
-  const room = relay.calls.room(event.data.call.id);
-  room.on("roomState", (frame) => {
-    frame.call satisfies Call;
-    frame.media?.token satisfies string | undefined;
-    if (frame.call.status === "ringing" && frame.media) room.accept();
-  });
-  room.on("offer", (frame) => {
-    frame.track satisfies "microphone" | "agent-voice";
-    room.send({ type: "answer", session_description: { type: "answer", sdp: "v=0\r\n" } });
-  });
-  room.on("ended", (frame) => { frame.reason satisfies string; });
-  room.userUpdate({ muted: false });
-  room.connected();
-  // @ts-expect-error Only contract client frames may be sent.
-  room.send({ type: "subscribe" });
-  room.close();
+  await relay.calls.list(event.data.call.chat_id);
+  await relay.calls.retrieve(event.data.call.id);
+  await relay.calls.end(event.data.call.id);
 }
 void receiveCall;
 await relay.calls.create("chat-id", { to: ["agent"], mode: "audio" }, {

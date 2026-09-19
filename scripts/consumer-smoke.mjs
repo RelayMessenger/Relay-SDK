@@ -96,6 +96,7 @@ try {
     "display_name",
     "image_url",
     "about",
+    "call_url",
     "verified",
     "is_contact",
   ]);
@@ -132,7 +133,7 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 40);
+      assert.equal(RELAY_V1_OPERATIONS.length, 38);
       assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
       const allowedOperations = new Set([
         "POST /v1/chats",
@@ -172,8 +173,6 @@ try {
         "POST /v1/chats/{chatId}/calls",
         "GET /v1/chats/{chatId}/calls",
         "GET /v1/calls/{callId}",
-        "POST /v1/calls/{callId}/accept",
-        "POST /v1/calls/{callId}/decline",
         "POST /v1/calls/{callId}/end",
       ]);
       assert.deepEqual(
