@@ -2869,7 +2869,9 @@ components:
         agent can send one, and a message carries at most one. Send a `text`
         part beside it that asks the question. Reactions to this part return
         422. The only reply it accepts is a tap: one `text` part equal to one
-        of its plain buttons' labels, sent by the user.
+        of its plain buttons' labels, sent by the user. The group disappears
+        once the person taps a plain button, the way a quick reply does; a
+        `url` button never puts it away, since its tap sends nothing.
       required:
         - type
         - items
@@ -2884,13 +2886,6 @@ components:
           maxItems: 5
           items:
             $ref: "#/components/schemas/ButtonItem"
-        one_time:
-          type: boolean
-          description: |
-            Whether a tap puts the buttons away. Absent means true: the group
-            disappears once the person taps a plain button, the way a quick
-            reply does. `false` leaves the buttons on screen to tap again. A
-            `url` button never puts them away, since its tap sends nothing.
     ButtonsPartResponse:
       type: object
       description: A buttons part as read back
@@ -2907,9 +2902,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ButtonItemResponse"
-        one_time:
-          type: boolean
-          description: As sent; absent means true.
         reactions:
           type:
             - array

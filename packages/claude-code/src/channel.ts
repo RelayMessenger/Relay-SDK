@@ -263,15 +263,12 @@ export class RelayChannel {
       send_id?: unknown;
       reply_to_message_id?: unknown;
       buttons?: unknown;
-      one_time?: unknown;
       link?: unknown;
     } | null;
     const chatId = args && typeof args.chat_id === "string" ? args.chat_id : "";
     if (args?.text !== undefined && typeof args.text !== "string") return failure("text must be a string");
     const text = args && typeof args.text === "string" ? args.text : "";
-    if (args?.one_time !== undefined && typeof args.one_time !== "boolean") return failure("one_time must be true or false");
-    if (args?.one_time !== undefined && args.buttons === undefined) return failure("one_time needs buttons");
-    const buttons = args?.buttons === undefined ? undefined : buttonsPart(args.buttons, args.one_time as boolean | undefined);
+    const buttons = args?.buttons === undefined ? undefined : buttonsPart(args.buttons);
     if (typeof buttons === "string") return failure(`buttons: ${buttons}`);
     if (args?.link !== undefined && typeof args.link !== "string") return failure("link must be a string");
     const link = args && typeof args.link === "string" ? standaloneLink(args.link) : undefined;
@@ -336,7 +333,7 @@ export class RelayChannel {
       );
     } catch (error) {
       return failure(
-        `send failed: ${this.#redactor.text(error)}. Retry with the same send_id, chat_id, text, buttons, one_time, link, and reply_to_message_id.`,
+        `send failed: ${this.#redactor.text(error)}. Retry with the same send_id, chat_id, text, buttons, link, and reply_to_message_id.`,
       );
     }
   }

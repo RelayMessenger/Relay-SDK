@@ -265,12 +265,6 @@ export interface ButtonItem {
 export interface ButtonsPart {
   type: "buttons";
   items: ButtonItem[];
-  /**
-   * Whether a tap puts the buttons away. Absent means true, the quick-reply
-   * behaviour; `false` leaves them on screen to tap again. A url button's tap
-   * never puts them away, since it sends nothing.
-   */
-  one_time?: boolean;
 }
 
 export type MessagePart =

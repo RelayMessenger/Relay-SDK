@@ -152,10 +152,6 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             maxLength: 2048,
             description: "One absolute http or https URL to show as a link card: an article, a listing, a video, a place, a product page. It is sent as its own Message right after the text. Not with buttons; a page the person acts on is a url button instead.",
           },
-          one_time: {
-            type: "boolean",
-            description: "With buttons: whether a tap puts them away. Absent means true. Set false only for controls the person taps again and again.",
-          },
           buttons: {
             type: "array",
             minItems: 1,

@@ -21729,9 +21729,9 @@ var BUTTONS_GUIDANCE = [
   "Do not send buttons when the answer is open-ended, when your options are not the full set of likely answers, or when you are not asking anything and there is nothing to do. One question or one action per message; never a menu of things you can do, and never as decoration.",
   'If you would otherwise write "reply 1, 2 or 3" or list choices for the person to type, send buttons instead. If the person asks for buttons, send them.',
   "A tap comes back to you as an ordinary message whose text is the label. Labels are at most 80 characters.",
-  "Buttons disappear once tapped. Set one_time to false only for controls the person is meant to tap again and again, such as Next, Another one, or Refresh."
+  "Buttons disappear once tapped."
 ].join(" ");
-var BUTTONS_BLOCK_INSTRUCTION = "To put buttons under your answer, end it with a fenced code block tagged `" + BUTTONS_FENCE + '` holding a JSON array of 1 to 5 items, each {"label": "..."} or {"label": "...", "url": "https://..."}. The block is removed from the text and drawn as buttons. To keep the buttons on screen after a tap, write the block as {"one_time": false, "items": [...]} instead of a bare array.';
+var BUTTONS_BLOCK_INSTRUCTION = "To put buttons under your answer, end it with a fenced code block tagged `" + BUTTONS_FENCE + '` holding a JSON array of 1 to 5 items, each {"label": "..."} or {"label": "...", "url": "https://..."}. The block is removed from the text and drawn as buttons.';
 var BUTTONS_MAX_ITEMS = 5;
 var BUTTON_LABEL_MAX_LENGTH = 80;
 var BUTTON_URL_MAX_LENGTH = 2048;
@@ -21764,14 +21764,11 @@ var asItem = (value, index) => {
   }
   return { url, label };
 };
-var buttonsPart = (parsed, oneTime) => {
+var buttonsPart = (parsed) => {
   const wrapped = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : void 0;
   const items = Array.isArray(parsed) ? parsed : Array.isArray(wrapped?.items) ? wrapped.items : void 0;
   if (items === void 0)
     return "the buttons block must be a JSON array of items";
-  const one_time = oneTime ?? wrapped?.one_time;
-  if (one_time !== void 0 && typeof one_time !== "boolean")
-    return "one_time must be true or false";
   if (items.length === 0)
     return "the buttons block has no items";
   if (items.length > BUTTONS_MAX_ITEMS) {
@@ -21784,7 +21781,7 @@ var buttonsPart = (parsed, oneTime) => {
       return item;
     result.push(item);
   }
-  return { type: "buttons", items: result, ...one_time === void 0 ? {} : { one_time } };
+  return { type: "buttons", items: result };
 };
 var partsWithButtons = (text2, buttons, limit = Number.POSITIVE_INFINITY) => [
   ...text2.length > 0 ? [{ type: "text", value: text2.slice(0, limit) }] : [],
@@ -22516,9 +22513,7 @@ var RelayChannel = class {
     const chatId = args && typeof args.chat_id === "string" ? args.chat_id : "";
     if (args?.text !== void 0 && typeof args.text !== "string") return failure("text must be a string");
     const text2 = args && typeof args.text === "string" ? args.text : "";
-    if (args?.one_time !== void 0 && typeof args.one_time !== "boolean") return failure("one_time must be true or false");
-    if (args?.one_time !== void 0 && args.buttons === void 0) return failure("one_time needs buttons");
-    const buttons = args?.buttons === void 0 ? void 0 : buttonsPart(args.buttons, args.one_time);
+    const buttons = args?.buttons === void 0 ? void 0 : buttonsPart(args.buttons);
     if (typeof buttons === "string") return failure(`buttons: ${buttons}`);
     if (args?.link !== void 0 && typeof args.link !== "string") return failure("link must be a string");
     const link = args && typeof args.link === "string" ? standaloneLink(args.link) : void 0;
@@ -22574,7 +22569,7 @@ var RelayChannel = class {
       );
     } catch (error2) {
       return failure(
-        `send failed: ${this.#redactor.text(error2)}. Retry with the same send_id, chat_id, text, buttons, one_time, link, and reply_to_message_id.`
+        `send failed: ${this.#redactor.text(error2)}. Retry with the same send_id, chat_id, text, buttons, link, and reply_to_message_id.`
       );
     }
   }
@@ -23470,10 +23465,6 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             format: "uri",
             maxLength: 2048,
             description: "One absolute http or https URL to show as a link card: an article, a listing, a video, a place, a product page. It is sent as its own Message right after the text. Not with buttons; a page the person acts on is a url button instead."
-          },
-          one_time: {
-            type: "boolean",
-            description: "With buttons: whether a tap puts them away. Absent means true. Set false only for controls the person taps again and again."
           },
           buttons: {
             type: "array",
