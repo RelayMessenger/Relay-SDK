@@ -117,13 +117,13 @@ it("new creation ignores a tokenless legacy production default without rewriting
   expect(after.profiles[handle]?.api_url).toBe(creationOrigin);
 });
 
-it("keeps exactly the three approved agents verbs and a version-aware creation origin", async () => {
+it("keeps exactly the four approved agents verbs and a version-aware creation origin", async () => {
   const { createProgram } = await import("./program.js");
   const { defaultCreationApiURL } = await import("./config.js");
   const { deps } = await fixture();
   const program = createProgram(deps);
   expect(program.name()).toBe("relaymessenger");
-  expect(program.commands.find((command) => command.name() === "agents")!.commands.map((command) => command.name())).toEqual(["create", "list", "delete"]);
+  expect(program.commands.find((command) => command.name() === "agents")!.commands.map((command) => command.name())).toEqual(["create", "list", "update", "delete"]);
   expect(defaultCreationApiURL("0.1.0-staging.0")).toBe("https://api.staging.relayapp.im");
   expect(defaultCreationApiURL("0.1.0")).toBe("https://api.relayapp.im");
 });

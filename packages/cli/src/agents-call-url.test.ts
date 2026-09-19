@@ -35,9 +35,9 @@ it("agents create --call-url sets the console call address after creation", asyn
 it("agents update sets and clears call_url", async () => {
   const { run, fetch, stderr } = await setup();
   expect(await run(["--profile", "default", "agents", "update", "coda", "--name", " Coda ", "--about", " Hello ", "--call-url", "wss://voice.example.com", "--json"]), stderr.join("")).toBe(0);
-  expect(fetch).toHaveBeenCalledWith("https://api.staging.relayapp.im/v1/contact_card?handle=coda", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ first_name: "Coda", about: "Hello", call_url: "wss://voice.example.com" }) }));
+  expect(fetch).toHaveBeenCalledWith(new URL("https://api.staging.relayapp.im/v1/contact_card?handle=coda"), expect.objectContaining({ method: "PATCH", body: JSON.stringify({ first_name: "Coda", about: "Hello", call_url: "wss://voice.example.com" }) }));
   expect(await run(["--profile", "default", "agents", "update", "coda", "--clear-call-url", "--json"])).toBe(0);
-  expect(fetch).toHaveBeenCalledWith("https://api.staging.relayapp.im/v1/contact_card?handle=coda", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ call_url: null }) }));
+  expect(fetch).toHaveBeenCalledWith(new URL("https://api.staging.relayapp.im/v1/contact_card?handle=coda"), expect.objectContaining({ method: "PATCH", body: JSON.stringify({ call_url: null }) }));
 });
 
 it.each([ [["agents", "create"]], [["agents", "update", "coda"]] ])("refuses https:// call addresses before a request (%j)", async (args) => {
