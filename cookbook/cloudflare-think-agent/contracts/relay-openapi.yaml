@@ -47,7 +47,7 @@ tags:
   - name: Contacts
     description: Request a user Contact.
   - name: Calls
-    description: Start, answer, end and connect individual user-agent audio calls.
+    description: Start, end and read individual user-agent audio calls. Relay dials the agent's call address (see updateContactCard) and carries the audio; the agent never assembles a call.
 paths:
   /v1/agents/{handle}:
     delete:
@@ -1586,7 +1586,7 @@ paths:
         - Calls
       security:
         - BearerAuth: []
-      description: Start an audio Call in an existing individual Chat containing one user and one agent. The caller comes from authentication. The user must have added the agent; sending or replying to a Message establishes that relationship. A block in either direction prevents the call. A group Chat is rejected even when it has only two current members. Reuse the same Idempotency-Key and body after an uncertain response. Ringing has a 60-second setup lease; an accepted Call has 30 seconds to connect. Established calls have no duration limit imposed by these setup leases.
+      description: Start an audio Call in an existing individual Chat containing one user and one agent. The caller comes from authentication. The user must have added the agent; sending or replying to a Message establishes that relationship. A block in either direction prevents the call. A group Chat is rejected even when it has only two current members. Reuse the same Idempotency-Key and body after an uncertain response. Relay opens a WebSocket to the agent's call address (call_url) in Twilio Media Streams' shape, signed like a webhook; a 101 within the 10-second ring lease answers the Call (status active), any other reply declines it, and silence ends it no_answer. An answered Call has no duration limit.
       parameters:
         - name: chatId
           in: path
@@ -1631,7 +1631,7 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
         "422":
-          description: The Chat cannot take a Call. The agent has no active webhook subscription that includes `call.created`, so nothing would answer (error code `2031`, "This agent does not take calls."); or the Chat is not an individual Chat of one user and one agent (error code `1005`).
+          description: The Chat cannot take a Call. The agent has no call address, so nothing would answer (error code `2031`, "This agent has no call address."); or the Chat is not an individual Chat of one user and one agent (error code `1005`).
           content:
             application/json:
               schema:
@@ -1714,84 +1714,6 @@ paths:
           $ref: "#/components/responses/Conflict"
         "500":
           $ref: "#/components/responses/InternalServerError"
-  /v1/calls/{callId}/accept:
-    post:
-      operationId: acceptCall
-      summary: Accept a call
-      tags:
-        - Calls
-      security:
-        - BearerAuth: []
-      description: The recipient accepts a ringing Call. The Call becomes connecting, not active.
-      parameters:
-        - name: callId
-          in: path
-          required: true
-          schema: *a1
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CallEmptyRequest"
-      responses:
-        "200":
-          description: Operation completed.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CallResult"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-  /v1/calls/{callId}/decline:
-    post:
-      operationId: declineCall
-      summary: Decline a call
-      tags:
-        - Calls
-      security:
-        - BearerAuth: []
-      description: The recipient declines a ringing Call. The Call ends with reason declined.
-      parameters:
-        - name: callId
-          in: path
-          required: true
-          schema: *a1
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CallEmptyRequest"
-      responses:
-        "200":
-          description: Operation completed.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CallResult"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
   /v1/calls/{callId}/end:
     post:
       operationId: endCall
@@ -1800,7 +1722,7 @@ paths:
         - Calls
       security:
         - BearerAuth: []
-      description: Either Contact ends the Call. A ringing Call ends canceled; an answered Call ends completed. Cleanup remains available after a block or removal. Repeated terminal actions never restart the Call.
+      description: Either Contact ends the Call. A ringing Call ends canceled when its caller ends it and declined when its recipient does; an answered Call ends completed. An agent declines by refusing the upgrade at its call address, and hangs up by closing that socket. Cleanup remains available after a block or removal. Repeated terminal actions never restart the Call.
       parameters:
         - name: callId
           in: path
@@ -1829,66 +1751,6 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-  /v1/calls/{callId}/media:
-    get:
-      operationId: connectCallAudioWebSocket
-      summary: Stream live call audio
-      tags:
-        - Calls
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: callId
-          in: path
-          required: true
-          schema: *a1
-      description: 'Upgrade the media URL with Authorization: Bearer <media grant>. The grant arrives in the room socket''s roomState.media field (see connectCallRoom); it is a scoped Call media grant, not an Agent Token. Binary frames in both directions carry signed 16-bit little-endian PCM audio at 48,000 Hz, stereo. The server sends start with call_id, connection_id and audio_format, then ready once both audio directions are attached. Send JSON {"type":"clear"} to discard pending speech after interruption. The server sends ended with reason, then closes the connection when the Call ends. Audio frames are ephemeral and are not durable webhook or chat events.'
-      responses:
-        "101":
-          description: Call audio WebSocket connected.
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-  /v1/calls/{callId}/room:
-    get:
-      operationId: connectCallRoom
-      summary: Join the call room
-      tags:
-        - Calls
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: callId
-          in: path
-          required: true
-          schema: *a1
-      description: 'Upgrade to a WebSocket with the same Authorization: Bearer <token> as every other route (the app''s own token or an Agent Token). One socket per participant per Call; a second upgrade from the same Contact replaces the first, which is closed 1000 "Replaced". Frames are JSON text objects discriminated by type. Client to room: join, offer (users publish their microphone; allowed while ringing, connecting or active), answer, userUpdate, accept, decline, end, connected, heartbeat. Room to client: roomState (the whole Call plus participants, sent after every change and once on join; the media field with the audio-socket grant is present only on the agent''s socket), answer, offer (the room started pulling the other side''s track; reply with answer), ended (terminal; the socket then closes 1000), error (invalid_frame, not_allowed or media_unavailable; invalid_frame is followed by close 4400). heartbeat is answered by the runtime, not by code.'
-      responses:
-        "101":
-          description: Call room WebSocket connected.
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "410":
-          description: The Call has already ended.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalServerError"
 components:
@@ -1926,7 +1788,6 @@ components:
         - created_at
         - ringing_at
         - answered_at
-        - connected_at
         - ended_at
         - end_reason
       properties:
@@ -1948,7 +1809,6 @@ components:
           type: string
           enum:
             - ringing
-            - connecting
             - active
             - ended
         revision:
@@ -1963,7 +1823,6 @@ components:
             - string
             - "null"
           format: date-time
-        connected_at: *a3
         ended_at: *a3
         end_reason:
           type:
@@ -3996,6 +3855,15 @@ components:
         - image_url
         - image_color
       properties:
+        call_url:
+          type:
+            - string
+            - "null"
+          format: uri
+          description: >-
+            The agent's one call address, a wss:// URL Relay dials when the
+            agent is called. Null when the agent takes no calls. Present on
+            agents only.
         first_name:
           type: string
           description: First name on the contact card
@@ -4039,6 +3907,7 @@ components:
         - value
         - icon_attachment_id
         - contact_card
+        - call
       properties:
         type:
           type: string
@@ -4049,6 +3918,10 @@ components:
             - group_name_updated
             - group_icon_updated
             - contact_card_shared
+            - call_ended
+          description: >-
+            What happened. For call_ended the actor is the caller, the subject
+            is the callee, and call carries the Call's outcome.
         actor:
           $ref: "#/components/schemas/SystemEventParty"
         subject:
@@ -4068,6 +3941,53 @@ components:
           oneOf:
             - $ref: "#/components/schemas/ContactCardItem"
             - type: "null"
+        call:
+          oneOf:
+            - $ref: "#/components/schemas/CallMarker"
+            - type: "null"
+          description: The ended Call this event marks. Null unless type is call_ended.
+    CallMarker:
+      type: object
+      additionalProperties: false
+      description: >-
+        The outcome of an ended Call, carried by a call_ended system event so a
+        client can draw the call in the chat history.
+      required:
+        - id
+        - mode
+        - end_reason
+        - connected
+        - duration_seconds
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The Call's id.
+        mode:
+          type: string
+          enum:
+            - audio
+        end_reason:
+          type: string
+          enum:
+            - completed
+            - declined
+            - canceled
+            - no_answer
+            - disconnected
+            - failed
+          description: Why the Call ended. The same values as Call.end_reason, never null here.
+        connected:
+          type: boolean
+          description: Whether the Call was answered (answered_at set).
+        duration_seconds:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+          description: >-
+            Whole seconds from answered to ended. Null when the Call was
+            never answered.
     SystemEventParty:
       type: object
       additionalProperties: false
@@ -4273,6 +4193,24 @@ components:
           minLength: 1
           maxLength: 60
           description: About text. Surrounding whitespace is trimmed.
+        call_url:
+          type:
+            - string
+            - "null"
+          format: uri
+          maxLength: 2048
+          description: >-
+            The one call address Relay dials when this agent is called: a
+            wss:// URL. Relay opens a WebSocket to it signed with the
+            agent's webhook secret (webhook-id, webhook-timestamp and
+            webhook-signature headers over an empty body), then speaks
+            Twilio Media Streams: connected, start (streamSid and callSid are
+            the Call id; customParameters carry from, to, chat_id and
+            direction), media (audio/x-mulaw, 8000 Hz, mono, base64) and
+            stop; the agent answers with media, mark and clear. Answering the
+            upgrade answers the Call; refusing it declines; closing the socket
+            hangs up. Null clears the address. If omitted, the existing value
+            is kept.
         first_name:
           type: string
           minLength: 1
