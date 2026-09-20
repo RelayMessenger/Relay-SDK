@@ -147,6 +147,7 @@ Available resource methods:
 - `webhookEvents.list`
 - `webhookSubscriptions.create`, `retrieve`, `update`, `list`, `delete`
 - `contactCard.create`, `retrieve`, `update`
+- `contacts.lookup({ handle })`
 - `blockedHandles.list`, `block`, `unblock`
 - `websocket.run`
 

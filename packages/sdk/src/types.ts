@@ -640,6 +640,26 @@ export interface WebhookSubscriptionListResponse {
   subscriptions: WebhookSubscription[];
 }
 
+export interface ContactLookup {
+  id: UUID;
+  handle: string;
+  display_name: string;
+  kind: "user" | "agent";
+  image_url: string | null;
+  image_color: string | null;
+  about: string | null;
+  verified: boolean;
+}
+
+export interface ContactLookupParams {
+  /** Relay Handle, trimmed and lowercased by the Server before validation. */
+  handle: string;
+}
+
+export interface ContactLookupResponse {
+  contact: ContactLookup;
+}
+
 export interface ContactCardItem {
   call_url?: string | null;
   handle: string;

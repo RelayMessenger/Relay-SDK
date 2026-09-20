@@ -1,14 +1,14 @@
 {
   "source": "contracts/relay-v1-openapi.yaml",
-  "source_openapi_sha256": "1bd3d25ef7aa080a38db903445f83ba173753552ac1369b5aad06e8fba6d6472",
+  "source_openapi_sha256": "46eeedd5a5e99e879e32c45972799364021143df9f81acd60837713210639735",
   "upstream": {
     "repository": "https://github.com/RelayMessenger/Relay-Server.git",
-    "commit": "4394ff241d9bb3a25299f8e5364ab9b434861f2d",
+    "commit": "8b608647b0e75a28f9d7aa4bbb36097b644d43f2",
     "path": "contracts/developer/openapi.yaml",
-    "sha256": "1bd3d25ef7aa080a38db903445f83ba173753552ac1369b5aad06e8fba6d6472"
+    "sha256": "46eeedd5a5e99e879e32c45972799364021143df9f81acd60837713210639735"
   },
-  "source_path_count": 26,
-  "source_schema_count": 128,
+  "source_path_count": 27,
+  "source_schema_count": 129,
   "callback_count": 19,
   "transport_decision": {
     "source": "contracts/agent-transport-decision.md",
@@ -19,8 +19,8 @@
       "path": "research/relay-rebuild-20260828/TRANSPORT-DECISION-20260829.md"
     }
   },
-  "path_count": 25,
-  "operation_count": 41,
+  "path_count": 26,
+  "operation_count": 42,
   "operations": [
     {
       "method": "DELETE",
@@ -191,6 +191,11 @@
       "method": "DELETE",
       "path": "/v1/webhook-subscriptions/{subscriptionId}",
       "operationId": "deleteWebhookSubscription"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/contacts/lookup",
+      "operationId": "lookupContact"
     },
     {
       "method": "GET",

@@ -54,7 +54,7 @@ describe("approved two-tool MCP", () => {
     expect(r.isError).not.toBe(true); expect(text(r)).not.toContain(TOKEN); expect(text(r)).toContain("[REDACTED]");
   });
   it("indexes every HTTP operation and exposes only initialized client methods", () => {
-    expect(new Set(METHOD_DOCS.map(x=>`${x.httpMethod} ${x.path}`)).size).toBe(41);
+    expect(new Set(METHOD_DOCS.map(x=>`${x.httpMethod} ${x.path}`)).size).toBe(42);
     expect(METHOD_DOCS.some(x=>x.method==="Relay.createAgent")).toBe(false);
     expect(METHOD_DOCS.some(x=>x.httpMethod==="POST"&&x.path==="/v1/agents")).toBe(false);
     const relay=sdk().client;
@@ -118,6 +118,33 @@ describe("approved two-tool MCP", () => {
     expect(requests[3]!.url).toBe(`http://127.0.0.1:1/v1/chats/${CHAT}/activity?activity_id=${activityId}`);
     expect(requests[3]!.init.body).toBeUndefined();
     expect(text(response)).not.toContain(TOKEN);
+  });
+  it("discovers and executes only the public Contact lookup method", async () => {
+    const s = await ready();
+    const docs = await s.client.callTool({
+      name: "search_docs",
+      arguments: { query: "contacts lookup", detail: "verbose" },
+    });
+    expect(text(docs)).toContain("client.contacts.lookup");
+    expect(text(docs)).toContain("/v1/contacts/lookup");
+    expect(text(docs)).not.toMatch(/\b(?:is_request|request_expires_at|request_sender_id)\b/);
+    const response = await s.execute('async function run(client) { return await client.contacts.lookup({handle:"alice"}); }');
+    expect(response.isError).not.toBe(true);
+    const request = s.fixture.fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(String(request[0])).toBe("http://127.0.0.1:1/v1/contacts/lookup");
+    expect(request[1].method).toBe("POST");
+    expect(JSON.parse(String(request[1].body))).toEqual({ handle: "alice" });
+    expect(METHOD_DOCS.filter(row => row.method.startsWith("client.contacts.")).map(row => row.method))
+      .toEqual(["client.contacts.lookup"]);
+    expect(METHOD_DOCS.find(row => row.method === "client.contacts.lookup")?.description)
+      .toBe("Look up an active contact by handle. A person resolves agents; an agent resolves people and agents.");
+  });
+  it("does not document the reverted agent admission field", () => {
+    for (const method of ["client.contactCard.create", "client.contactCard.retrieve", "client.contactCard.update"]) {
+      const row = METHOD_DOCS.find(doc => doc.method === method);
+      expect(row).toBeDefined();
+      expect(row?.definitions.join("\n")).not.toMatch(/\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/);
+    }
   });
   it("preserves SDK pagination methods and async iteration", async () => {
     const fetch=vi.fn(async (url: unknown) => Response.json(String(url).includes("cursor=next") ? {chats:[{id:"second"}],next_cursor:null} : {chats:[{id:"first"}],next_cursor:"next"}));

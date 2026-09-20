@@ -39,9 +39,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "4394ff241d9bb3a25299f8e5364ab9b434861f2d",
+    commit: "8b608647b0e75a28f9d7aa4bbb36097b644d43f2",
     path: "contracts/developer/openapi.yaml",
-    sha256: "1bd3d25ef7aa080a38db903445f83ba173753552ac1369b5aad06e8fba6d6472",
+    sha256: "46eeedd5a5e99e879e32c45972799364021143df9f81acd60837713210639735",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -83,6 +83,7 @@ const allowedOperationSignatures = [
   "GET /v1/webhook-subscriptions/{subscriptionId}",
   "PUT /v1/webhook-subscriptions/{subscriptionId}",
   "DELETE /v1/webhook-subscriptions/{subscriptionId}",
+  "POST /v1/contacts/lookup",
   "GET /v1/contact_card",
   "POST /v1/contact_card",
   "PATCH /v1/contact_card",
@@ -100,13 +101,13 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 41);
-assert.equal(manifest.path_count, 25);
-assert.equal(manifest.source_path_count, 26);
-assert.equal(manifest.source_schema_count, 128);
+assert.equal(manifest.operation_count, 42);
+assert.equal(manifest.path_count, 26);
+assert.equal(manifest.source_path_count, 27);
+assert.equal(manifest.source_schema_count, 129);
 assert.equal(manifest.callback_count, 19);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 25);
-assert.equal(operationJSON.length, 41);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 26);
+assert.equal(operationJSON.length, 42);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
@@ -152,7 +153,6 @@ for (const forbidden of [
   "/api/mobile",
   "/socket-mode",
   "/socket-connections",
-  "/v1/contacts",
 ]) {
   assert.equal(
     operationJSON.some((operation) => operation.path.includes(forbidden)),
@@ -160,6 +160,11 @@ for (const forbidden of [
     `unsupported path leaked into SDK: ${forbidden}`,
   );
 }
+assert.deepEqual(
+  operationJSON.filter((operation) => /^\/v1\/contacts(?:\/|$)/u.test(operation.path)),
+  [{ method: "POST", path: "/v1/contacts/lookup", operationId: "lookupContact" }],
+  "Only the approved lookup operation may expose the Contacts route",
+);
 assert.ok(operationJSON.some((operation) =>
   operation.path === "/v1/chats/{chatId}/share_contact_card"));
 assert.equal(operationJSON.some((operation) =>
@@ -205,6 +210,7 @@ assert.deepEqual(Object.keys(client).sort(), [
   "calls",
   "chats",
   "contactCard",
+  "contacts",
   "messages",
   "webhookEvents",
   "webhookSubscriptions",
@@ -258,6 +264,7 @@ assert.deepEqual(publicMethods(client.contactCard), [
   "retrieve",
   "update",
 ]);
+assert.deepEqual(publicMethods(client.contacts), ["lookup"]);
 assert.deepEqual(publicMethods(client.blockedHandles), [
   "block",
   "list",
@@ -310,6 +317,14 @@ const validateOpenAPI = () => {
     ["8F6CF2", "5F38CF"], ["5B9BFA", "0B52C0"], ["2596A6", "116A79"], ["2FA46A", "137347"],
   ]);
   assert.equal(Object.hasOwn(document.components.schemas.ContactCardItem.properties, "id"), false);
+  for (const name of [
+    "ContactCardItem", "SetContactCardResponse", "UpdateContactCardRequest",
+    "SetContactCardRequest", "ContactLookup",
+  ]) {
+    assert.equal(document.components.schemas[name].properties.message_requests_from, undefined);
+  }
+  assert.equal(document.paths["/v1/me"], undefined);
+  assert.doesNotMatch(declaredTypes, /\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/u);
   const deletion = document.paths["/v1/agents/{handle}"].delete;
   assert.equal(deletion.operationId, "deleteAgent");
   assert.equal(deletion.requestBody, undefined);
@@ -327,7 +342,43 @@ const validateOpenAPI = () => {
   assert.equal(addParticipant.properties.hide_history.type, "boolean");
   assert.equal(addParticipant.properties.hide_history.default, true);
   assert.match(declaredTypes, /hide_history\?: boolean/u);
-  assert.doesNotMatch(declaredTypes, /\b(?:is_hidden|truncated_at)\??:/u);
+  assert.doesNotMatch(declaredTypes, /\b(?:is_hidden|truncated_at|is_request|request_expires_at|request_sender_id)\??:/u);
+  for (const [name, schema] of Object.entries(document.components.schemas)) {
+    for (const field of ["is_request", "request_expires_at", "request_sender_id"]) {
+      assert.equal(field in (schema.properties ?? {}), false, `${name}.${field} is private`);
+    }
+  }
+  const lookup = document.paths["/v1/contacts/lookup"];
+  assert.deepEqual(Object.keys(lookup), ["post"]);
+  assert.equal(lookup.post.operationId, "lookupContact");
+  assert.equal(
+    lookup.post.description,
+    "Look up an active contact by handle. A person resolves agents; "
+      + "an agent resolves people and agents.",
+  );
+  const lookupBody = lookup.post.requestBody.content["application/json"].schema;
+  assert.deepEqual(lookupBody.required, ["handle"]);
+  assert.equal(lookupBody.additionalProperties, false);
+  assert.equal(lookupBody.properties.handle.type, "string");
+  assert.equal(lookupBody.properties.handle.minLength, 1);
+  assert.equal(lookupBody.properties.handle.maxLength, 255);
+  assert.equal(
+    lookup.post.responses["200"].content["application/json"].schema.properties.contact.$ref,
+    "#/components/schemas/ContactLookup",
+  );
+  const contactLookup = document.components.schemas.ContactLookup;
+  assert.deepEqual(contactLookup.required, [
+    "id", "handle", "display_name", "kind", "image_url", "image_color", "about", "verified",
+  ]);
+  assert.deepEqual(Object.keys(contactLookup.properties), contactLookup.required);
+  assert.deepEqual(contactLookup.properties.kind.enum, ["user", "agent"]);
+  assert.equal(
+    document.components.schemas.ChatHandle.properties.is_contact.description,
+    "Whether the caller holds this member as a Contact. A person's reply "
+      + "or adding the agent makes it a Contact. Removing a Contact keeps "
+      + "an existing conversation in Chats until another incoming message "
+      + "makes it a message request.",
+  );
   assert.match(
     document.paths["/v1/chats/{chatId}/participants"].post.description,
     /Set hide_history to false to also share earlier retained history/u,

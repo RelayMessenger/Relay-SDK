@@ -12,6 +12,7 @@ import Relay, {
   type ChatSetActivityParams,
   type ContactAddedWebhookEvent,
   type ContactRemovedWebhookEvent,
+  type ContactLookupResponse,
   type DeliveryStatus,
   type Message,
   type MessageContent,
@@ -216,8 +217,34 @@ relay.responding;
 relay.messages.poll;
 // @ts-expect-error Socket Mode is not Relay vocabulary.
 relay.socketMode;
-// @ts-expect-error Private user Contact operations are not in the Agent SDK.
-relay.contacts;
+// @ts-expect-error Person settings remain outside the public SDK contract.
+relay.me;
+// @ts-expect-error The public Contact Card update has no agent admission field.
+await relay.contactCard.update({ handle: "echo", message_requests_from: "everyone" });
+// @ts-expect-error The public Contact Card create request has no agent admission field.
+await relay.contactCard.create({ handle: "echo", first_name: "Echo", message_requests_from: "everyone" });
+const ownCards = await relay.contactCard.retrieve({ handle: "echo" });
+// @ts-expect-error The public Contact Card response has no agent admission field.
+ownCards.contact_cards[0]!.message_requests_from;
+const lookup: ContactLookupResponse = await relay.contacts.lookup({ handle: "alice" });
+lookup.contact.kind satisfies "user" | "agent";
+lookup.contact.image_color satisfies string | null;
+// @ts-expect-error Public lookup does not carry person settings or an agent admission field.
+lookup.contact.message_requests_from;
+// @ts-expect-error Lookup requires a Handle.
+await relay.contacts.lookup({});
+// @ts-expect-error Private Contact writes are not public SDK operations.
+relay.contacts.add;
+// @ts-expect-error Private Contact writes are not public SDK operations.
+relay.contacts.remove;
+// @ts-expect-error Private Contact lists are not public SDK operations.
+relay.contacts.list;
+// @ts-expect-error Request lifecycle state is private.
+lookup.contact.is_request;
+// @ts-expect-error Request expiry is private.
+lookup.contact.request_expires_at;
+// @ts-expect-error Request sender identity is private.
+lookup.contact.request_sender_id;
 // @ts-expect-error Add requests are gone; the first Message is the request.
 relay.contactRequests;
 const withService: MessageContent = {
@@ -227,6 +254,12 @@ const withService: MessageContent = {
 };
 void withService;
 declare const chat: Chat;
+// @ts-expect-error Request lifecycle state belongs to the private client projection.
+chat.is_request;
+// @ts-expect-error Request expiry belongs to the private client projection.
+chat.request_expires_at;
+// @ts-expect-error Request sender identity belongs to the private client projection.
+chat.request_sender_id;
 chat.handles[0]!.about satisfies string | null;
 // @ts-expect-error The active public Contact shape uses image_url only.
 chat.handles[0]!.avatar_url;
