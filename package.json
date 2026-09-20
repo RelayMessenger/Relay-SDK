@@ -48,21 +48,21 @@
     "chat": "4.41.0"
   },
   "engines": {
-    "node": ">=22.22.3"
+    "node": ">=24.21.0"
   },
   "packageManager": "npm@11.19.1",
   "allowScripts": {
-    "@google/genai@2.18.0": false,
-    "@modelcontextprotocol/inspector@2.4.0": true,
+    "@google/genai@2.21.0": false,
+    "@modelcontextprotocol/inspector@2.7.0": true,
     "@mongodb-js/zstd@7.0.0": true,
     "core-js-pure@3.50.0": false,
     "esbuild@0.28.1": true,
     "esbuild@0.28.2": true,
-    "koffi@3.1.6": true,
+    "koffi@3.2.1": true,
     "node-liblzma@2.2.0": true,
-    "openclaw@2026.8.1": true,
+    "openclaw@2026.9.5": true,
     "protobufjs@7.6.6": true,
     "tree-sitter-bash@0.25.1": true,
-    "workerd@1.20260828.1": true
+    "workerd@1.20260918.1": true
   }
 }
