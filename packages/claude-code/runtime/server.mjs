@@ -23067,7 +23067,7 @@ var RelayStateStore = class {
 };
 
 // server.ts
-var VERSION = true ? "0.3.9-staging.11" : createRequire(import.meta.url)("./package.json").version;
+var VERSION = true ? "0.3.9-staging.12" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);
