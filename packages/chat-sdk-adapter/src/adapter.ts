@@ -479,7 +479,6 @@ export class RelayAdapter
       .filter(
         (part): part is Extract<
           RelayMessagePartResponse,
-  RelayOutgoingPart,
           { type: "media" }
         > => part.type === "media",
       )
