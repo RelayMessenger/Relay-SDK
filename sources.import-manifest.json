@@ -1141,7 +1141,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "contracts/relay-v1.lock.json",
       "source_sha256": "b4bcb46233c3d140128638aea8b290e963bf9d8949fad2c1d6609c412fd5784d",
-      "destination_sha256": "3cf9070a0308423a9c14c077351b3a7dda4e897a32f669556bcd246e772d3daf",
+      "destination_sha256": "15c842a4d9340340adf90a3b981c24706a21ead93c59ccd0f4914dc29aa8bc0b",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

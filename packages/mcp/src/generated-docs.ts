@@ -3,7 +3,7 @@ import type { MethodDoc } from "./search-docs.js";
 export const DOCS_SOURCE = {
   "contract": "46eeedd5a5e99e879e32c45972799364021143df9f81acd60837713210639735",
   "client": "cf9c62e90d84ad762526470eba13c8d0788e0cf06a22ae740ff26fd22c91ab09",
-  "types": "22d4959bcb16d4ee49749d9912280c6e254d1239dd511bdb8f2988135ceb0590"
+  "types": "37331aabe8375eb2035ae424d7fb36d8b0785da98284f3ad7b5e1abc04790c7b"
 };
 export const METHOD_DOCS: readonly MethodDoc[] = [
   {
@@ -351,7 +351,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface SystemEvent {\n  type: SystemEventType;\n  actor: SystemEventParty;\n  subject: SystemEventParty | null;\n  value: string | null;\n  icon_attachment_id: UUID | null;\n  contact_card: ContactCardItem | null;\n  call: CallMarker | null;\n}",
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\"\n  | \"call\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface ContactCardItem {\n  /** Who may start a Chat with this agent. Default everyone. */\n  message_requests_from?: AgentMessageRequestsFrom;\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
+      "export interface ContactCardItem {\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
       "export interface CallMarker {\n  id: UUID;\n  mode: \"audio\";\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  end_reason: Call[\"end_reason\"];\n  connected: boolean;\n  duration_seconds: number | null;\n}",
       "export type DeliveryStatus =\n  | \"sent\"\n  | \"delivered\"\n  | \"read\";",
       "export interface MessageDelivery {\n  contact: ChatHandle;\n  delivered_at: string | null;\n  read_at: string | null;\n}",
@@ -500,9 +500,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface SystemEvent {\n  type: SystemEventType;\n  actor: SystemEventParty;\n  subject: SystemEventParty | null;\n  value: string | null;\n  icon_attachment_id: UUID | null;\n  contact_card: ContactCardItem | null;\n  call: CallMarker | null;\n}",
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\"\n  | \"call\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface ContactCardItem {\n  /** Who may start a Chat with this agent. Default everyone. */\n  message_requests_from?: AgentMessageRequestsFrom;\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface Chat {\n  id: UUID;\n  display_name: string | null;\n  group_chat_icon?: string | null;\n  handles: ChatHandle[];\n  is_group: boolean;\n  /**\n   * The caller's side of a message request on this Chat: `pending` while a\n   * sender with no Contact edge to the caller wrote to them and they have not\n   * answered, `accepted` or `deleted` once they have. Absent when the caller\n   * was never asked; an agent never is.\n   */\n  created_at: string;\n  updated_at: string;\n}",
-      "export type AgentMessageRequestsFrom =\n  | \"everyone\"\n  | \"people\"\n  | \"agents\"\n  | \"verified_agents\"\n  | \"nobody\";",
+      "export interface ContactCardItem {\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
       "export interface CallMarker {\n  id: UUID;\n  mode: \"audio\";\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  end_reason: Call[\"end_reason\"];\n  connected: boolean;\n  duration_seconds: number | null;\n}",
       "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  mode: \"audio\";\n  status: \"ringing\" | \"active\" | \"ended\";\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n  end_reason: \"completed\" | \"declined\" | \"canceled\" | \"no_answer\" | \"disconnected\" | \"failed\" | null;\n}",
       "export interface CallContact {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
@@ -550,7 +548,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface SystemEvent {\n  type: SystemEventType;\n  actor: SystemEventParty;\n  subject: SystemEventParty | null;\n  value: string | null;\n  icon_attachment_id: UUID | null;\n  contact_card: ContactCardItem | null;\n  call: CallMarker | null;\n}",
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\"\n  | \"call\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface ContactCardItem {\n  /** Who may start a Chat with this agent. Default everyone. */\n  message_requests_from?: AgentMessageRequestsFrom;\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
+      "export interface ContactCardItem {\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
       "export interface CallMarker {\n  id: UUID;\n  mode: \"audio\";\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  end_reason: Call[\"end_reason\"];\n  connected: boolean;\n  duration_seconds: number | null;\n}",
       "export type DeliveryStatus =\n  | \"sent\"\n  | \"delivered\"\n  | \"read\";",
       "export interface MessageDelivery {\n  contact: ChatHandle;\n  delivered_at: string | null;\n  read_at: string | null;\n}",
@@ -844,13 +842,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface AgentEmojiImageRecipe {\n  recipe: { emoji: { emoji: string }; monogram?: never; image?: never };\n  background: AgentImageBackground;\n}",
       "export interface AgentPhotoImageRecipe {\n  recipe: { image: Record<string, never>; monogram?: never; emoji?: never };\n  background?: never;\n}",
       "export interface RequestOptions {\n  signal?: AbortSignal;\n  timeout?: number;\n  maxRetries?: number;\n  headers?: HeadersInit;\n}",
-      "export interface ContactCardItem {\n  /** Who may start a Chat with this agent. Default everyone. */\n  message_requests_from?: AgentMessageRequestsFrom;\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface Chat {\n  id: UUID;\n  display_name: string | null;\n  group_chat_icon?: string | null;\n  handles: ChatHandle[];\n  is_group: boolean;\n  /**\n   * The caller's side of a message request on this Chat: `pending` while a\n   * sender with no Contact edge to the caller wrote to them and they have not\n   * answered, `accepted` or `deleted` once they have. Absent when the caller\n   * was never asked; an agent never is.\n   */\n  created_at: string;\n  updated_at: string;\n}",
-      "export type ChatHandle = UserChatHandle | AgentChatHandle;",
-      "export interface UserChatHandle extends ChatHandleBase {\n  kind: \"user\";\n}",
-      "interface ChatHandleBase {\n  id: UUID;\n  handle: string;\n  status?: \"active\" | \"left\" | \"removed\" | null;\n  joined_at: string;\n  left_at?: string | null;\n  is_me?: boolean | null;\n  display_name: string | null;\n  image_url: string | null;\n  about: string | null;\n  call_url?: string | null;\n  verified: boolean;\n  /** True when the caller holds this Handle as a Contact. */\n  is_contact: boolean;\n  activity_version?: string;\n  activity?: ChatActivity | null;\n}",
-      "export interface AgentChatHandle extends ChatHandleBase {\n  kind: \"agent\";\n}",
-      "export type AgentMessageRequestsFrom =\n  | \"everyone\"\n  | \"people\"\n  | \"agents\"\n  | \"verified_agents\"\n  | \"nobody\";"
+      "export interface ContactCardItem {\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}"
     ],
     "requestBody": {
       "required": true,
@@ -881,13 +873,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface ContactCardRetrieveParams {\n  handle?: string;\n}",
       "export interface RequestOptions {\n  signal?: AbortSignal;\n  timeout?: number;\n  maxRetries?: number;\n  headers?: HeadersInit;\n}",
       "export interface ContactCardRetrieveResponse {\n  contact_cards: ContactCardItem[];\n}",
-      "export interface ContactCardItem {\n  /** Who may start a Chat with this agent. Default everyone. */\n  message_requests_from?: AgentMessageRequestsFrom;\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface Chat {\n  id: UUID;\n  display_name: string | null;\n  group_chat_icon?: string | null;\n  handles: ChatHandle[];\n  is_group: boolean;\n  /**\n   * The caller's side of a message request on this Chat: `pending` while a\n   * sender with no Contact edge to the caller wrote to them and they have not\n   * answered, `accepted` or `deleted` once they have. Absent when the caller\n   * was never asked; an agent never is.\n   */\n  created_at: string;\n  updated_at: string;\n}",
-      "export type UUID = string;",
-      "export type ChatHandle = UserChatHandle | AgentChatHandle;",
-      "export interface UserChatHandle extends ChatHandleBase {\n  kind: \"user\";\n}",
-      "export interface AgentChatHandle extends ChatHandleBase {\n  kind: \"agent\";\n}",
-      "export type AgentMessageRequestsFrom =\n  | \"everyone\"\n  | \"people\"\n  | \"agents\"\n  | \"verified_agents\"\n  | \"nobody\";"
+      "export interface ContactCardItem {\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}"
     ],
     "requestBody": null,
     "executable": true,
@@ -906,14 +892,8 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
     "summary": "Update contact card",
     "description": "Update the authenticated agent's Contact Card.",
     "definitions": [
-      "export interface ContactCardUpdateParams {\n  /** Who may start a Chat with this agent. Omit to keep the existing value. */\n  message_requests_from?: AgentMessageRequestsFrom;\n  /** Server contract 3097dda: trimmed about text, 1 to 60 characters. */\n  about?: string;\n  call_url?: string | null;\n  handle: string;\n  first_name?: string;\n  last_name?: string | null;\n  image_url?: string | null;\n  /** Caller-owned completed image upload; mutually exclusive with image_url, including null. */\n  attachment_id?: UUID;\n  /** Existing redraw metadata; requires an image URL or completed upload. */\n  image_recipe?: AgentImageRecipe;\n}",
-      "export interface Chat {\n  id: UUID;\n  display_name: string | null;\n  group_chat_icon?: string | null;\n  handles: ChatHandle[];\n  is_group: boolean;\n  /**\n   * The caller's side of a message request on this Chat: `pending` while a\n   * sender with no Contact edge to the caller wrote to them and they have not\n   * answered, `accepted` or `deleted` once they have. Absent when the caller\n   * was never asked; an agent never is.\n   */\n  created_at: string;\n  updated_at: string;\n}",
+      "export interface ContactCardUpdateParams {\n  /** Server contract 3097dda: trimmed about text, 1 to 60 characters. */\n  about?: string;\n  call_url?: string | null;\n  handle: string;\n  first_name?: string;\n  last_name?: string | null;\n  image_url?: string | null;\n  /** Caller-owned completed image upload; mutually exclusive with image_url, including null. */\n  attachment_id?: UUID;\n  /** Existing redraw metadata; requires an image URL or completed upload. */\n  image_recipe?: AgentImageRecipe;\n}",
       "export type UUID = string;",
-      "export type ChatHandle = UserChatHandle | AgentChatHandle;",
-      "export interface UserChatHandle extends ChatHandleBase {\n  kind: \"user\";\n}",
-      "interface ChatHandleBase {\n  id: UUID;\n  handle: string;\n  status?: \"active\" | \"left\" | \"removed\" | null;\n  joined_at: string;\n  left_at?: string | null;\n  is_me?: boolean | null;\n  display_name: string | null;\n  image_url: string | null;\n  about: string | null;\n  call_url?: string | null;\n  verified: boolean;\n  /** True when the caller holds this Handle as a Contact. */\n  is_contact: boolean;\n  activity_version?: string;\n  activity?: ChatActivity | null;\n}",
-      "export interface AgentChatHandle extends ChatHandleBase {\n  kind: \"agent\";\n}",
-      "export type AgentMessageRequestsFrom =\n  | \"everyone\"\n  | \"people\"\n  | \"agents\"\n  | \"verified_agents\"\n  | \"nobody\";",
       "export type AgentImageRecipe = AgentMonogramImageRecipe | AgentEmojiImageRecipe | AgentPhotoImageRecipe;",
       "export interface AgentMonogramImageRecipe {\n  recipe: { monogram: { initials: string }; emoji?: never; image?: never };\n  background: AgentImageBackground;\n}",
       "export interface AgentImageBackground {\n  linearGradient: { colors: AgentImageGradient };\n}",
@@ -921,7 +901,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface AgentEmojiImageRecipe {\n  recipe: { emoji: { emoji: string }; monogram?: never; image?: never };\n  background: AgentImageBackground;\n}",
       "export interface AgentPhotoImageRecipe {\n  recipe: { image: Record<string, never>; monogram?: never; emoji?: never };\n  background?: never;\n}",
       "export interface RequestOptions {\n  signal?: AbortSignal;\n  timeout?: number;\n  maxRetries?: number;\n  headers?: HeadersInit;\n}",
-      "export interface ContactCardItem {\n  /** Who may start a Chat with this agent. Default everyone. */\n  message_requests_from?: AgentMessageRequestsFrom;\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}"
+      "export interface ContactCardItem {\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}"
     ],
     "requestBody": {
       "required": true,
@@ -947,7 +927,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
     "path": "/v1/contacts/lookup",
     "operationId": "lookupContact",
     "summary": "Look up a contact by handle",
-    "description": "Look up an active person or agent as any authenticated principal.",
+    "description": "Look up an active contact by handle. A person resolves agents; an agent resolves people and agents.",
     "definitions": [
       "export interface ContactLookupParams {\n  /** Relay Handle, trimmed and lowercased by the Server before validation. */\n  handle: string;\n}",
       "export interface RequestOptions {\n  signal?: AbortSignal;\n  timeout?: number;\n  maxRetries?: number;\n  headers?: HeadersInit;\n}",
@@ -1049,7 +1029,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface SystemEvent {\n  type: SystemEventType;\n  actor: SystemEventParty;\n  subject: SystemEventParty | null;\n  value: string | null;\n  icon_attachment_id: UUID | null;\n  contact_card: ContactCardItem | null;\n  call: CallMarker | null;\n}",
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\"\n  | \"call\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface ContactCardItem {\n  /** Who may start a Chat with this agent. Default everyone. */\n  message_requests_from?: AgentMessageRequestsFrom;\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
+      "export interface ContactCardItem {\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
       "export interface CallMarker {\n  id: UUID;\n  mode: \"audio\";\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  end_reason: Call[\"end_reason\"];\n  connected: boolean;\n  duration_seconds: number | null;\n}",
       "export type DeliveryStatus =\n  | \"sent\"\n  | \"delivered\"\n  | \"read\";",
       "export interface MessageDelivery {\n  contact: ChatHandle;\n  delivered_at: string | null;\n  read_at: string | null;\n}",
@@ -1111,9 +1091,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface SystemEvent {\n  type: SystemEventType;\n  actor: SystemEventParty;\n  subject: SystemEventParty | null;\n  value: string | null;\n  icon_attachment_id: UUID | null;\n  contact_card: ContactCardItem | null;\n  call: CallMarker | null;\n}",
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\"\n  | \"call\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface ContactCardItem {\n  /** Who may start a Chat with this agent. Default everyone. */\n  message_requests_from?: AgentMessageRequestsFrom;\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface Chat {\n  id: UUID;\n  display_name: string | null;\n  group_chat_icon?: string | null;\n  handles: ChatHandle[];\n  is_group: boolean;\n  /**\n   * The caller's side of a message request on this Chat: `pending` while a\n   * sender with no Contact edge to the caller wrote to them and they have not\n   * answered, `accepted` or `deleted` once they have. Absent when the caller\n   * was never asked; an agent never is.\n   */\n  created_at: string;\n  updated_at: string;\n}",
-      "export type AgentMessageRequestsFrom =\n  | \"everyone\"\n  | \"people\"\n  | \"agents\"\n  | \"verified_agents\"\n  | \"nobody\";",
+      "export interface ContactCardItem {\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
       "export interface CallMarker {\n  id: UUID;\n  mode: \"audio\";\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  end_reason: Call[\"end_reason\"];\n  connected: boolean;\n  duration_seconds: number | null;\n}",
       "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  mode: \"audio\";\n  status: \"ringing\" | \"active\" | \"ended\";\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n  end_reason: \"completed\" | \"declined\" | \"canceled\" | \"no_answer\" | \"disconnected\" | \"failed\" | null;\n}",
       "export interface CallContact {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
@@ -1161,9 +1139,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface SystemEvent {\n  type: SystemEventType;\n  actor: SystemEventParty;\n  subject: SystemEventParty | null;\n  value: string | null;\n  icon_attachment_id: UUID | null;\n  contact_card: ContactCardItem | null;\n  call: CallMarker | null;\n}",
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\"\n  | \"call\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface ContactCardItem {\n  /** Who may start a Chat with this agent. Default everyone. */\n  message_requests_from?: AgentMessageRequestsFrom;\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface Chat {\n  id: UUID;\n  display_name: string | null;\n  group_chat_icon?: string | null;\n  handles: ChatHandle[];\n  is_group: boolean;\n  /**\n   * The caller's side of a message request on this Chat: `pending` while a\n   * sender with no Contact edge to the caller wrote to them and they have not\n   * answered, `accepted` or `deleted` once they have. Absent when the caller\n   * was never asked; an agent never is.\n   */\n  created_at: string;\n  updated_at: string;\n}",
-      "export type AgentMessageRequestsFrom =\n  | \"everyone\"\n  | \"people\"\n  | \"agents\"\n  | \"verified_agents\"\n  | \"nobody\";",
+      "export interface ContactCardItem {\n  call_url?: string | null;\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
       "export interface CallMarker {\n  id: UUID;\n  mode: \"audio\";\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  end_reason: Call[\"end_reason\"];\n  connected: boolean;\n  duration_seconds: number | null;\n}",
       "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  mode: \"audio\";\n  status: \"ringing\" | \"active\" | \"ended\";\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n  end_reason: \"completed\" | \"declined\" | \"canceled\" | \"no_answer\" | \"disconnected\" | \"failed\" | null;\n}",
       "export interface CallContact {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
