@@ -2527,7 +2527,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "package-lock.json",
       "source_sha256": "a8b26b0bff63c93112cadc0d399298f81ecbcc81470da5bf3f4ebb31469bce7e",
-      "destination_sha256": "0c3f45505da71983f7a153952466edbda28290fc3e412e8da22f9092dd572d7d",
+      "destination_sha256": "422f5b25b2f80acf6fa01c465284ab767e41e3b231215206c5fe486e772f78d4",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2736,10 +2736,10 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "worker-configuration.d.ts",
       "source_sha256": "fe70b97b6fab37750e86e0321bfabf863102f2e2de1471d7d465429c906e3a13",
-      "destination_sha256": "fe70b97b6fab37750e86e0321bfabf863102f2e2de1471d7d465429c906e3a13",
+      "destination_sha256": "f898f6cd427eb12bf5fe8ec5da5d9a249136f636b00840318ed45de4da1ff036",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "cookbook/cloudflare-think-agent/wrangler.jsonc",
