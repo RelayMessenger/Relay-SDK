@@ -54,7 +54,7 @@ describe("approved two-tool MCP", () => {
     expect(r.isError).not.toBe(true); expect(text(r)).not.toContain(TOKEN); expect(text(r)).toContain("[REDACTED]");
   });
   it("indexes every HTTP operation and exposes only initialized client methods", () => {
-    expect(new Set(METHOD_DOCS.map(x=>`${x.httpMethod} ${x.path}`)).size).toBe(38);
+    expect(new Set(METHOD_DOCS.map(x=>`${x.httpMethod} ${x.path}`)).size).toBe(41);
     expect(METHOD_DOCS.some(x=>x.method==="Relay.createAgent")).toBe(false);
     expect(METHOD_DOCS.some(x=>x.httpMethod==="POST"&&x.path==="/v1/agents")).toBe(false);
     const relay=sdk().client;

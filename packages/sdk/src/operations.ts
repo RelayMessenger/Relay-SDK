@@ -46,6 +46,21 @@ export const RELAY_V1_OPERATIONS = [
     "operationId": "leaveChat"
   },
   {
+    "method": "GET",
+    "path": "/v1/chats/{chatId}/activity",
+    "operationId": "getActivity"
+  },
+  {
+    "method": "PUT",
+    "path": "/v1/chats/{chatId}/activity",
+    "operationId": "setActivity"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/chats/{chatId}/activity",
+    "operationId": "clearActivity"
+  },
+  {
     "method": "POST",
     "path": "/v1/chats/{chatId}/typing",
     "operationId": "startTyping"

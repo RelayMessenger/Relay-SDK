@@ -1,14 +1,14 @@
 {
   "source": "contracts/relay-v1-openapi.yaml",
-  "source_openapi_sha256": "27698655d12500fb9cd2e10dbf1c94025fbc64c288df6151db673a7649877111",
+  "source_openapi_sha256": "ec70d9ca659f6b06010fe3c04ff2c03e3463cf52a0755b97e8506b4110f0ac21",
   "upstream": {
     "repository": "https://github.com/RelayMessenger/Relay-Server.git",
-    "commit": "eb83978b6b2c625da82471e4af16acad8de0e618",
+    "commit": "PENDING_SERVER_ACTIVITY_COMMIT",
     "path": "contracts/developer/openapi.yaml",
-    "sha256": "27698655d12500fb9cd2e10dbf1c94025fbc64c288df6151db673a7649877111"
+    "sha256": "ec70d9ca659f6b06010fe3c04ff2c03e3463cf52a0755b97e8506b4110f0ac21"
   },
-  "source_path_count": 25,
-  "source_schema_count": 125,
+  "source_path_count": 26,
+  "source_schema_count": 128,
   "callback_count": 19,
   "transport_decision": {
     "source": "contracts/agent-transport-decision.md",
@@ -19,8 +19,8 @@
       "path": "research/relay-rebuild-20260828/TRANSPORT-DECISION-20260829.md"
     }
   },
-  "path_count": 24,
-  "operation_count": 38,
+  "path_count": 25,
+  "operation_count": 41,
   "operations": [
     {
       "method": "DELETE",
@@ -61,6 +61,21 @@
       "method": "POST",
       "path": "/v1/chats/{chatId}/leave",
       "operationId": "leaveChat"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/chats/{chatId}/activity",
+      "operationId": "getActivity"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/chats/{chatId}/activity",
+      "operationId": "setActivity"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/chats/{chatId}/activity",
+      "operationId": "clearActivity"
     },
     {
       "method": "POST",

@@ -39,9 +39,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "eb83978b6b2c625da82471e4af16acad8de0e618",
+    commit: "PENDING_SERVER_ACTIVITY_COMMIT",
     path: "contracts/developer/openapi.yaml",
-    sha256: "27698655d12500fb9cd2e10dbf1c94025fbc64c288df6151db673a7649877111",
+    sha256: "ec70d9ca659f6b06010fe3c04ff2c03e3463cf52a0755b97e8506b4110f0ac21",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -57,6 +57,9 @@ const allowedOperationSignatures = [
   "POST /v1/chats/{chatId}/participants",
   "DELETE /v1/chats/{chatId}/participants",
   "POST /v1/chats/{chatId}/leave",
+  "GET /v1/chats/{chatId}/activity",
+  "PUT /v1/chats/{chatId}/activity",
+  "DELETE /v1/chats/{chatId}/activity",
   "POST /v1/chats/{chatId}/typing",
   "DELETE /v1/chats/{chatId}/typing",
   "POST /v1/chats/{chatId}/read",
@@ -97,13 +100,13 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 38);
-assert.equal(manifest.path_count, 24);
-assert.equal(manifest.source_path_count, 25);
-assert.equal(manifest.source_schema_count, 125);
+assert.equal(manifest.operation_count, 41);
+assert.equal(manifest.path_count, 25);
+assert.equal(manifest.source_path_count, 26);
+assert.equal(manifest.source_schema_count, 128);
 assert.equal(manifest.callback_count, 19);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 24);
-assert.equal(operationJSON.length, 38);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 25);
+assert.equal(operationJSON.length, 41);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
@@ -526,8 +529,46 @@ const validateOpenAPI = () => {
       "about",
       "verified",
       "is_contact",
+      "activity_version",
+      "activity",
     ],
   );
+  const activityPath = document.paths["/v1/chats/{chatId}/activity"];
+  assert.deepEqual(Object.keys(activityPath), ["parameters", "get", "put", "delete"]);
+  assert.equal(activityPath.get.operationId, "getActivity");
+  assert.equal(activityPath.put.operationId, "setActivity");
+  assert.equal(activityPath.delete.operationId, "clearActivity");
+  assert.equal(activityPath.delete.parameters[0].name, "activity_id");
+  assert.equal(activityPath.delete.parameters[0].in, "query");
+  assert.equal(activityPath.delete.parameters[0].required, false);
+  assert.ok(activityPath.delete.responses["204"]);
+  assert.ok(activityPath.put.responses["409"]);
+  assert.equal(activityPath.put.requestBody.content["application/json"].schema.$ref,
+    "#/components/schemas/SetActivityRequest");
+  for (const method of ["get", "put"]) {
+    assert.equal(activityPath[method].responses["200"].content["application/json"].schema.$ref,
+      "#/components/schemas/ChatActivityState");
+  }
+  const activityInput = document.components.schemas.SetActivityRequest;
+  assert.deepEqual(activityInput.required, ["text"]);
+  assert.equal(activityInput.additionalProperties, false);
+  assert.equal(activityInput.properties.text["x-max-graphemes"], 21);
+  assert.equal(activityInput.properties.text["x-max-utf8-bytes"], 1024);
+  assert.deepEqual(activityInput.properties.emoji.type, ["string", "null"]);
+  assert.equal(activityInput.properties.activity_id.format, "uuid");
+  assert.deepEqual(document.components.schemas.ChatActivity.required,
+    ["id", "text", "emoji", "updated_at", "expires_at"]);
+  assert.deepEqual(document.components.schemas.ChatActivityState.required,
+    ["chat_id", "agent_id", "version", "activity"]);
+  assert.equal(document.components.schemas.ChatActivityState.properties.version.type, "string");
+  assert.deepEqual(document.components.schemas.ChatActivityState.properties.activity.anyOf,
+    [{ $ref: "#/components/schemas/ChatActivity" }, { type: "null" }]);
+  assert.equal(document.components.schemas.ChatHandle.properties.activity_version.type, "string");
+  assert.equal(RELAY_WEBHOOK_EVENT_TYPES.includes("chat.activity.updated"), false);
+  assert.equal(Object.keys(document["x-relay-webhooks"]).some((name) => name.startsWith("chat.activity.")), false);
+  for (const type of ["ChatActivity", "ChatActivityResponse", "ChatSetActivityParams", "ChatClearActivityParams"]) {
+    assert.ok(declaredTypes.includes(`export interface ${type} `), `Missing SDK ${type}`);
+  }
   assert.equal(
     document.components.schemas.ChatHandle.properties.about.maxLength,
     60,
