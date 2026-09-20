@@ -214,12 +214,15 @@ assert.deepEqual(publicMethods(client.calls), [
   "create", "end", "list", "retrieve",
 ]);
 assert.deepEqual(publicMethods(client.chats), [
+  "clearActivity",
   "create",
+  "getActivity",
   "leaveChat",
   "listChats",
   "markAsRead",
   "retrieve",
   "sendVoicememo",
+  "setActivity",
   "shareContactCard",
   "startTyping",
   "stopTyping",

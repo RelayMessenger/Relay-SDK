@@ -1,10 +1,14 @@
 import Relay, {
   RELAY_WEBHOOK_EVENT_TYPES,
   type Chat,
+  type ChatActivity,
+  type ChatActivityResponse,
+  type ChatClearActivityParams,
   type Call,
   type CallWebhookEvent,
   type ChatHandle,
   type ChatSendVoicememoResponse,
+  type ChatSetActivityParams,
   type ContactAddedWebhookEvent,
   type ContactRemovedWebhookEvent,
   type DeliveryStatus,
@@ -37,6 +41,22 @@ await relay.chats.messages.send("chat-id", { message: content });
 await relay.chats.shareContactCard("chat-id");
 await relay.chats.startTyping("chat-id");
 await relay.chats.stopTyping("chat-id");
+const activityParams: ChatSetActivityParams = { text: "Generating image", emoji: "🖼️" };
+const activityState: ChatActivityResponse = await relay.chats.setActivity("chat-id", activityParams);
+activityState.version satisfies string;
+activityState.activity satisfies ChatActivity | null;
+await relay.chats.getActivity("chat-id") satisfies ChatActivityResponse;
+await relay.chats.setActivity("chat-id", { text: "Working", activity_id: "activity-id", emoji: null });
+const clearActivityParams: ChatClearActivityParams = { activity_id: "activity-id" };
+await relay.chats.clearActivity("chat-id", clearActivityParams) satisfies void;
+await relay.chats.clearActivity("chat-id");
+// @ts-expect-error Activity text is required.
+await relay.chats.setActivity("chat-id", { emoji: "🖼️" });
+// @ts-expect-error An activity guard is a UUID string, not a number.
+await relay.chats.clearActivity("chat-id", { activity_id: 1 });
+// @ts-expect-error Activity is not an agent webhook event.
+const activityEvent: typeof RELAY_WEBHOOK_EVENT_TYPES[number] = "chat.activity.updated";
+void activityEvent;
 await relay.chats.markAsRead("chat-id");
 await relay.chats.participants.add("chat-id", { handle: "research" });
 await relay.chats.participants.add("chat-id", { handle: "research", hide_history: true });

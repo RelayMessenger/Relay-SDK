@@ -33,6 +33,7 @@ const responder = (calls: Captured[]) => async (
       || url.pathname.startsWith("/v1/webhook-subscriptions/")
       || url.pathname === "/v1/blocked_handles"
       || url.pathname.endsWith("/typing")
+      || url.pathname.endsWith("/activity")
     ))
   );
   if (noContent) return new Response(null, { status: 204 });
@@ -142,6 +143,9 @@ describe("Relay v1 request shapes", () => {
     await client.chats.participants.add("chat-id", { handle: "research" });
     await client.chats.participants.remove("chat-id", { handle: "research" });
     await client.chats.leaveChat("chat-id");
+    await client.chats.getActivity("chat-id");
+    await client.chats.setActivity("chat-id", { text: "Working" });
+    await client.chats.clearActivity("chat-id");
     await client.chats.startTyping("chat-id");
     await client.chats.stopTyping("chat-id");
     await client.chats.markAsRead("chat-id");
@@ -238,17 +242,20 @@ describe("Relay v1 request shapes", () => {
       },
     });
 
-    const sharedContactCard = calls[10]!;
+    const sharedContactCard = calls.find((call) =>
+      call.url.pathname.endsWith("/share_contact_card"))!;
     expect(sharedContactCard.body).toBeUndefined();
 
-    const createMessage = calls[11]!;
+    const createMessage = calls.find((call) =>
+      call.method === "POST" && call.url.pathname === "/v1/messages")!;
     expect(createMessage.headers.get("idempotency-key")).toBe("message-key");
     expect(JSON.parse(String(createMessage.body))).toEqual({
       to: ["bob"],
       message: { parts: [{ type: "text", value: "hello" }] },
     });
 
-    const chatMessage = calls[12]!;
+    const chatMessage = calls.find((call) =>
+      call.method === "POST" && call.url.pathname === "/v1/chats/chat-id/messages")!;
     expect(chatMessage.headers.get("idempotency-key")).toBe("chat-message-key");
     expect(JSON.parse(String(chatMessage.body))).toEqual({
       message: {
@@ -340,12 +347,15 @@ describe("Relay v1 request shapes", () => {
     ]);
     expect(methods(client.agents)).toEqual(["delete"]);
     expect(methods(client.chats)).toEqual([
+      "clearActivity",
       "create",
+      "getActivity",
       "leaveChat",
       "listChats",
       "markAsRead",
       "retrieve",
       "sendVoicememo",
+      "setActivity",
       "shareContactCard",
       "startTyping",
       "stopTyping",

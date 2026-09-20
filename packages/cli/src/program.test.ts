@@ -15,6 +15,9 @@ const makeClient = () => {
     retrieveChat: vi.fn(async () => ({ id: "chat-1" })),
     updateChat: vi.fn(async () => ({ status: "accepted", chat_id: "chat-1" })),
     startTyping: vi.fn(async () => undefined),
+    getActivity: vi.fn(async () => ({ chat_id: "chat-1", agent_id: "agent-1", version: "0", activity: null })),
+    setActivity: vi.fn(async () => ({ chat_id: "chat-1", agent_id: "agent-1", version: "1", activity: { id: "task-1" } })),
+    clearActivity: vi.fn(async () => undefined),
     sendMessage: vi.fn(async () => ({ chat_id: "chat-1" })),
     createChat: vi.fn(async () => ({ chat_id: "chat-1" })),
     sendToHandles: vi.fn(async () => ({ chat_id: "chat-1" })),
@@ -34,6 +37,9 @@ const makeClient = () => {
       retrieve: methods.retrieveChat,
       update: methods.updateChat,
       startTyping: methods.startTyping,
+      getActivity: methods.getActivity,
+      setActivity: methods.setActivity,
+      clearActivity: methods.clearActivity,
       messages: { send: methods.sendMessage, list: methods.listMessages },
       shareContactCard: methods.shareCard,
       participants: {
@@ -179,6 +185,26 @@ describe("CLI command routing", () => {
       "chats", "messages", "list", "chat-1", "--order", "newest",
     ])).not.toBe(0);
     expect(fake.methods.listMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes activity reads, starts, guarded refreshes and cleanup through the SDK", async () => {
+    expect(await run(["chats", "activity", "get", "chat-1"])).toBe(0);
+    expect(fake.methods.getActivity).toHaveBeenCalledWith("chat-1");
+    expect(await run(["chats", "activity", "set", "chat-1", "--text", "Generating image", "--emoji", "🖼️"])).toBe(0);
+    expect(fake.methods.setActivity).toHaveBeenLastCalledWith("chat-1", { text: "Generating image", emoji: "🖼️" });
+    expect(await run(["chats", "activity", "set", "chat-1", "--text", "Working", "--activity-id", "task-1", "--clear-emoji"])).toBe(0);
+    expect(fake.methods.setActivity).toHaveBeenLastCalledWith("chat-1", { text: "Working", activity_id: "task-1", emoji: null });
+    expect(await run(["chats", "activity", "clear", "chat-1", "--activity-id", "task-1"])).toBe(0);
+    expect(fake.methods.clearActivity).toHaveBeenLastCalledWith("chat-1", { activity_id: "task-1" });
+    expect(await run(["chats", "activity", "clear", "chat-1"])).toBe(0);
+    expect(fake.methods.clearActivity).toHaveBeenLastCalledWith("chat-1", {});
+  });
+
+  it("leaves omitted activity fields absent and rejects conflicting emoji flags", async () => {
+    expect(await run(["chats", "activity", "set", "chat-1", "--text", "Working"])).toBe(0);
+    expect(fake.methods.setActivity).toHaveBeenLastCalledWith("chat-1", { text: "Working" });
+    expect(await run(["chats", "activity", "set", "chat-1", "--text", "Working", "--emoji", "🖼️", "--clear-emoji"])).not.toBe(0);
+    expect(fake.methods.setActivity).toHaveBeenCalledTimes(1);
   });
 
   it("preserves supplied idempotency and generates omitted keys for sends", async () => {

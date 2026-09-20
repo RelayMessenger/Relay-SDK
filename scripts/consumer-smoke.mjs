@@ -99,6 +99,8 @@ try {
     "call_url",
     "verified",
     "is_contact",
+    "activity_version",
+    "activity",
   ]);
   assert.deepEqual(interfaceFields("UserChatHandle"), [
     "kind",
@@ -106,6 +108,16 @@ try {
   assert.deepEqual(interfaceFields("AgentChatHandle"), [
     "kind",
   ]);
+  assert.deepEqual(interfaceFields("ChatActivity"), [
+    "id", "text", "emoji", "updated_at", "expires_at",
+  ]);
+  assert.deepEqual(interfaceFields("ChatActivityResponse"), [
+    "chat_id", "agent_id", "version", "activity",
+  ]);
+  assert.deepEqual(interfaceFields("ChatSetActivityParams"), [
+    "text", "emoji", "activity_id",
+  ]);
+  assert.deepEqual(interfaceFields("ChatClearActivityParams"), ["activity_id"]);
   assert.doesNotMatch(packedTypes, /\bavatar_url\b/u);
   assert.doesNotMatch(packedTypes, /\btagline\b/u);
   assert.doesNotMatch(packedTypes, /AgentCreate(?:ProfileParams|Params|Response)/);
@@ -211,12 +223,15 @@ try {
       assert.equal("createAgent" in Relay, false);
       assert.deepEqual(methods(client.agents), ["delete"]);
       assert.deepEqual(methods(client.chats), [
+        "clearActivity",
         "create",
+        "getActivity",
         "leaveChat",
         "listChats",
         "markAsRead",
         "retrieve",
         "sendVoicememo",
+        "setActivity",
         "shareContactCard",
         "startTyping",
         "stopTyping",
@@ -259,6 +274,32 @@ try {
       ]);
       assert.deepEqual(methods(client.websocket), ["run"]);
       assert.deepEqual(methods(client.webhooks), ["unwrap", "verify"]);
+      const activityRequests = [];
+      const activityState = {
+        chat_id: "chat", agent_id: "agent", version: "9007199254740993",
+        activity: { id: "task", text: "Generating image", emoji: "🖼️",
+          updated_at: "2026-09-20T12:00:00Z", expires_at: "2026-09-20T12:01:30Z" },
+      };
+      const activityClient = new Relay({
+        apiKey: "consumer-test",
+        fetch: async (url, init) => {
+          activityRequests.push({ url: String(url), init });
+          return init.method === "DELETE"
+            ? new Response(null, { status: 204 })
+            : Response.json(activityState);
+        },
+      });
+      const started = await activityClient.chats.setActivity("chat/one", {
+        text: "Generating image", emoji: "🖼️",
+      });
+      assert.deepEqual(started, activityState);
+      assert.deepEqual(await activityClient.chats.getActivity("chat/one"), activityState);
+      await activityClient.chats.clearActivity("chat/one", { activity_id: started.activity.id });
+      assert.deepEqual(activityRequests.map(({ init }) => init.method), ["PUT", "GET", "DELETE"]);
+      assert.equal(new URL(activityRequests[0].url).pathname, "/v1/chats/chat%2Fone/activity");
+      assert.equal(new URL(activityRequests[2].url).searchParams.get("activity_id"), "task");
+      assert.equal(activityRequests[2].init.body, undefined);
+      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.includes("chat.activity.updated"), false);
     `,
   ], { cwd: consumer, stdio: "inherit" });
   console.log(JSON.stringify({
