@@ -2,6 +2,8 @@ import { inboundMediaPrompt, type InboundMediaOptions } from "./inbound-media.js
 import {
   BUTTONS_BLOCK_INSTRUCTION,
   BUTTONS_GUIDANCE,
+  SELECTION_GUIDANCE,
+  SELECTION_BLOCK_INSTRUCTION,
   LINK_LINE_INSTRUCTION,
   answerMessages as splitAnswer,
   indexedIdempotencyKey,
@@ -70,7 +72,7 @@ export const ANSWER_INSTRUCTION =
  * text for every runtime, so the same person gets buttons and link cards
  * under the same conditions whichever agent answers.
  */
-export const BUTTONS_INSTRUCTION = `${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE}`;
+export const BUTTONS_INSTRUCTION = `${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE}`;
 
 /**
  * One message, as the prompt Codex is given. Codex keeps its Relay tools during

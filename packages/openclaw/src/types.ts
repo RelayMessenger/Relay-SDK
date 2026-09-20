@@ -1,5 +1,6 @@
 import type {
   Chat,
+  SelectionReply,
   ChatHandle,
   MessageWebhookData,
   Message,
@@ -61,6 +62,7 @@ export type RelayMessageReceivedEvent = RelayWebhookEnvelope<
 >;
 
 export type RelayInboundFacts = {
+  selection?: SelectionReply;
   eventId: string;
   messageId: string;
   chatId: string;

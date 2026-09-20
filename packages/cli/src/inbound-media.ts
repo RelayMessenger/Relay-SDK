@@ -1,3 +1,4 @@
+import { selectionReplyContext } from "@relaymessenger/sdk";
 import type { MediaPartResponse } from "@relaymessenger/sdk";
 import { lstat, rename } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -65,6 +66,8 @@ export const inboundMediaPrompt = async (
   turn: BridgeTurn, options?: Omit<InboundMediaOptions, "chatId">,
 ): Promise<{ text: string; images: string[] }> => {
   const lines = turn.text ? [turn.text] : [];
+  const context = selectionReplyContext(turn.selection);
+  if (context) lines.push(context);
   const images: string[] = [];
   const files = options
     ? await downloadInboundMedia(turn.media, { ...options, chatId: turn.chatId })

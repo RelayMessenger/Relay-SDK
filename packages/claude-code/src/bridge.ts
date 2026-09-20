@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { indexedIdempotencyKey, partsWithButtons, type ButtonsPart } from "@relaymessenger/sdk";
+import { indexedIdempotencyKey, partsWithButtons, partsWithSelection, selectionReply, type SelectionPart, type ButtonsPart } from "@relaymessenger/sdk";
 import type {
   Chat,
   Message,
@@ -12,6 +12,14 @@ import type { Redactor } from "./redaction.ts";
 import type { DeliveryCandidate } from "./types.ts";
 
 const MAX_RELAY_TEXT = 10_000;
+
+function selectionMeta(parts: readonly MessagePartResponse[], replyTo: Message["reply_to"]): Record<string, string> {
+  const selection = selectionReply(parts, replyTo);
+  return selection ? {
+    selection_response: JSON.stringify({ selected_values: selection.selected_values }),
+    reply_to: JSON.stringify(selection.reply_to),
+  } : {};
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -157,6 +165,7 @@ export function classifyRelayEvent(params: {
     senderHandle,
     content,
     meta: {
+      ...selectionMeta(parts, data.reply_to),
       chat_id: chatId,
       message_id: messageId,
       sender_id: senderId,
@@ -213,6 +222,7 @@ export function deliveryFromSnapshotMessage(params: {
     senderHandle: sender.handle,
     content: messageContent(parts, params.redactor),
     meta: {
+      ...selectionMeta(parts, message.reply_to),
       chat_id: message.chat_id,
       message_id: message.id,
       sender_id: sender.id,
@@ -231,13 +241,15 @@ export function buildReply(
   idempotencyKey: string,
   replyTo?: string,
   buttons?: ButtonsPart,
+  selection?: SelectionPart,
 ): MessageSendParams {
+  if (selection && buttons) throw new Error("selection and buttons do not go together");
   if (text.length > MAX_RELAY_TEXT || (!text && !buttons)) {
     throw new Error(`text must be 1-${MAX_RELAY_TEXT} UTF-16 code units`);
   }
   return {
     message: {
-      parts: partsWithButtons(text, buttons),
+      parts: selection ? partsWithSelection(text, selection) : partsWithButtons(text, buttons),
       idempotency_key: idempotencyKey,
       ...(replyTo ? { reply_to: { message_id: replyTo } } : {}),
     },
@@ -256,8 +268,10 @@ export function buildReplyMessages(
   replyTo?: string,
   buttons?: ButtonsPart,
   link?: string,
+  selection?: SelectionPart,
 ): MessageSendParams[] {
-  if (!link) return [buildReply(text, idempotencyKey, replyTo, buttons)];
+  if (selection && (buttons || link)) throw new Error("selection cannot be combined with buttons or link");
+  if (!link) return [buildReply(text, idempotencyKey, replyTo, buttons, selection)];
   const messages: MessageSendParams[] = [];
   if (text || buttons) messages.push(buildReply(text, idempotencyKey, replyTo, buttons));
   messages.push({

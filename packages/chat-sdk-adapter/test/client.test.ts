@@ -380,3 +380,16 @@ describe("RelayClient error mapping", () => {
     expect((error as RelayApiError).relayCode).toBe("teapot");
   });
 });
+
+it("sends a typed native selection without losing the existing idempotency identity", async () => {
+  const requests: RequestInit[] = [];
+  const client = new RelayClient({ token: "test", fetch: async (_, init) => {
+    requests.push(init!);
+    return Response.json({ chat_id: IDS.chat, message: { id: IDS.message } }, { status: 202 });
+  } });
+  await client.sendMessage({ chatId: IDS.chat, idempotencyKey: "selection-operation", parts: [
+    { type: "text", value: "Topics?" }, { type: "selection", options: [{ value: "research", label: "Research" }] },
+  ] });
+  expect(new Headers(requests[0]?.headers).get("idempotency-key")).toBe("selection-operation");
+  expect(JSON.parse(String(requests[0]?.body)).message.parts[1]).toEqual({ type: "selection", options: [{ value: "research", label: "Research" }] });
+});

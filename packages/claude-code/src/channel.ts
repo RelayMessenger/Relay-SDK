@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { buttonsPart, standaloneLink } from "@relaymessenger/sdk";
+import { buttonsPart, selectionPart, standaloneLink } from "@relaymessenger/sdk";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import Relay, { type RelayWebhookEvent } from "@relaymessenger/sdk";
 import {
@@ -263,6 +263,7 @@ export class RelayChannel {
       send_id?: unknown;
       reply_to_message_id?: unknown;
       buttons?: unknown;
+      selection?: unknown;
       link?: unknown;
     } | null;
     const chatId = args && typeof args.chat_id === "string" ? args.chat_id : "";
@@ -276,6 +277,9 @@ export class RelayChannel {
       return failure("link must be one absolute http or https URL of at most 2048 characters");
     }
     if (link !== undefined && buttons !== undefined) return failure("link and buttons do not go together; a page the person acts on is a url button");
+    const selection = args?.selection === undefined ? undefined : selectionPart(args.selection);
+    if (typeof selection === "string") return failure(`selection: ${selection}`);
+    if (selection && (buttons || link)) return failure("selection cannot be combined with buttons or link");
     const sendId = args && typeof args.send_id === "string" ? args.send_id : "";
     const replyTo = args && typeof args.reply_to_message_id === "string"
       ? args.reply_to_message_id
@@ -291,10 +295,11 @@ export class RelayChannel {
     if ((!redactedText && !buttons && !link) || redactedText.length > 10_000) {
       return failure("text must be 1-10000 UTF-16 code units after token redaction");
     }
+    if (selection && !redactedText.trim()) return failure("selection needs a nonblank text prompt");
     const idempotencyKey = `claude-reply-${createHash("sha256")
       .update(`${this.#config.accountKey}\0${this.#config.sessionKey}\0${sendId}`)
       .digest("hex")}`;
-    const bodies = buildReplyMessages(redactedText, idempotencyKey, replyTo, buttons, link);
+    const bodies = buildReplyMessages(redactedText, idempotencyKey, replyTo, buttons, link, selection);
     const body = bodies[0]!;
     const payloadHash = stableHash(bodies.length === 1 ? { chatId, body } : { chatId, bodies });
     const existing = this.#state.existingOutboundSend({
@@ -333,7 +338,9 @@ export class RelayChannel {
       );
     } catch (error) {
       return failure(
-        `send failed: ${this.#redactor.text(error)}. Retry with the same send_id, chat_id, text, buttons, link, and reply_to_message_id.`,
+        selection
+          ? `send failed: ${this.#redactor.text(error)}. Retry with the same send_id, chat_id, text, selection, and reply_to_message_id.`
+          : `send failed: ${this.#redactor.text(error)}. Retry with the same send_id, chat_id, text, buttons, link, and reply_to_message_id.`,
       );
     }
   }

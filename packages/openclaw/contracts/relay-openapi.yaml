@@ -998,7 +998,7 @@ paths:
     post:
       operationId: sendReaction
       summary: Add or remove a reaction to a message
-      description: Add or remove a reaction on one Message part. Targeting a `buttons` part returns 422.
+      description: Add or remove a reaction on one Message part. Targeting a `buttons`, `selection`, or `selection_response` part returns 422.
       tags:
         - Messages
       security:
@@ -2768,6 +2768,77 @@ components:
           description: Reactions on this message part
           items:
             $ref: "#/components/schemas/Reaction"
+    SelectionOption:
+      type: object
+      additionalProperties: false
+      required: [value, label]
+      properties:
+        value:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'
+          description: Stable case-sensitive value, unique within the selection.
+        label:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: Visible label, trimmed before storage.
+    SelectionPart:
+      type: object
+      additionalProperties: false
+      description: Agent-only multiselect prompt. One selection per Message, with nonblank text and no buttons. Toggling and Clear are local; Send submits once per user.
+      required: [type, options]
+      properties:
+        type:
+          type: string
+          enum: [selection]
+        options:
+          type: array
+          minItems: 1
+          maxItems: 25
+          items:
+            $ref: "#/components/schemas/SelectionOption"
+    SelectionPartResponse:
+      type: object
+      required: [type, options, has_responded, reactions]
+      properties:
+        type:
+          type: string
+          enum: [selection]
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/SelectionOption"
+        has_responded:
+          type: boolean
+          readOnly: true
+          description: Whether the authenticated viewer has durably answered this part. Claims are scoped to the responding user, never to an agent viewer. Existing Chat admission rules still apply, including at most one user per Chat. Acceptance advances this viewer's Message updated_at and sends a message.upserted for the source prompt to this user's devices.
+        reactions:
+          type: "null"
+    SelectionResponsePart:
+      type: object
+      additionalProperties: false
+      description: User-only metadata, exactly the second part after plain text. Requires explicit reply_to message_id and part_index targeting a visible selection in the same Chat. Values are unique, nonempty, known and in source-option order; text equals selected labels joined with ', '. A different-key second response returns 409/1005; same-key retries retain existing Message idempotency semantics.
+      required: [type, selected_values]
+      properties:
+        type:
+          type: string
+          enum: [selection_response]
+        selected_values:
+          type: array
+          minItems: 1
+          maxItems: 25
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+            pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'
+    SelectionResponsePartResponse:
+      allOf:
+        - $ref: "#/components/schemas/SelectionResponsePart"
+      description: Persisted selection metadata; contributes no fallback text and cannot receive reactions.
     LinkPart:
       type: object
       required:
@@ -2971,6 +3042,8 @@ components:
               - $ref: "#/components/schemas/MediaPartResponse"
               - $ref: "#/components/schemas/LinkPartResponse"
               - $ref: "#/components/schemas/ButtonsPartResponse"
+              - $ref: "#/components/schemas/SelectionPartResponse"
+              - $ref: "#/components/schemas/SelectionResponsePartResponse"
               - $ref: "#/components/schemas/SystemPartResponse"
         reply_to:
           oneOf:
@@ -3045,7 +3118,7 @@ components:
             - type: "null"
     MessageContent:
       type: object
-      description: One message containing 1–100 ordered text, media, or link parts. A link must be the only part.
+      description: One message containing 1–100 ordered parts. A link must be the only part. Selection responses contain exactly plain text then selection_response metadata and require an explicit reply target.
       properties:
         parts:
           x-go-type-skip-optional-pointer: true
@@ -3158,6 +3231,8 @@ components:
               - $ref: "#/components/schemas/schemas-MediaPartResponse"
               - $ref: "#/components/schemas/schemas-LinkPartResponse"
               - $ref: "#/components/schemas/ButtonsPartResponse"
+              - $ref: "#/components/schemas/SelectionPartResponse"
+              - $ref: "#/components/schemas/SelectionResponsePartResponse"
             discriminator:
               propertyName: type
               mapping:
@@ -3165,6 +3240,8 @@ components:
                 media: "#/components/schemas/schemas-MediaPartResponse"
                 link: "#/components/schemas/schemas-LinkPartResponse"
                 buttons: "#/components/schemas/ButtonsPartResponse"
+                selection: "#/components/schemas/SelectionPartResponse"
+                selection_response: "#/components/schemas/SelectionResponsePartResponse"
         sent_at:
           type:
             - string
@@ -3218,11 +3295,15 @@ components:
           media: "#/components/schemas/MediaPart"
           link: "#/components/schemas/LinkPart"
           buttons: "#/components/schemas/ButtonsPart"
+          selection: "#/components/schemas/SelectionPart"
+          selection_response: "#/components/schemas/SelectionResponsePart"
       oneOf:
         - $ref: "#/components/schemas/TextPart"
         - $ref: "#/components/schemas/MediaPart"
         - $ref: "#/components/schemas/LinkPart"
         - $ref: "#/components/schemas/ButtonsPart"
+        - $ref: "#/components/schemas/SelectionPart"
+        - $ref: "#/components/schemas/SelectionResponsePart"
     MessageReadWebhook:
       description: Complete webhook payload for message.read events (2026-08-30 format)
       allOf:
@@ -3481,6 +3562,13 @@ components:
             Targeting a `buttons` part returns 422 unless the message is a tap:
             one `text` part equal to one of that part's plain button labels,
             sent by the user. An agent's reply to a `buttons` part returns 403.
+            A selection response must explicitly supply this index and target a
+            `selection` part. Only a user may answer, with exactly plain text
+            then `selection_response` metadata. Malformed shapes return 400/1005;
+            mismatched source values, order or text return 422/2006; an already
+            consumed selection with a different key returns 409/1005.
+            Same-key retries return the original Message, under normal Message
+            idempotency and authorization rules.
           minimum: 0
     RequestUploadRequest:
       type: object
@@ -3766,6 +3854,8 @@ components:
               - $ref: "#/components/schemas/MediaPartResponse"
               - $ref: "#/components/schemas/LinkPartResponse"
               - $ref: "#/components/schemas/ButtonsPartResponse"
+              - $ref: "#/components/schemas/SelectionPartResponse"
+              - $ref: "#/components/schemas/SelectionResponsePartResponse"
         created_at:
           type: string
           format: date-time

@@ -1,5 +1,5 @@
 import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
-import Relay, { BUTTONS_GUIDANCE } from "@relaymessenger/sdk";
+import Relay, { BUTTONS_GUIDANCE, SELECTION_GUIDANCE } from "@relaymessenger/sdk";
 import { z } from "zod";
 import type { AuthContext } from "./auth.js";
 import { collectLocalTokens, resolveAgentAuth } from "./auth.js";
@@ -56,7 +56,8 @@ export const createRelayMcpServer = (options: RelayMcpServerOptions = {}): McpSe
       + "A message's parts may include one buttons part ({ type: \"buttons\", items: [{ label }, { label, url }] }, 1 to 5 items) beside a text part; "
       + "search_docs(\"buttons\") shows the shape. "
       + "A link is its own message whose only part is { type: \"link\", value: \"https://...\" }, drawn as a card; send the words first, then the link. "
-      + BUTTONS_GUIDANCE,
+      + BUTTONS_GUIDANCE + " " + SELECTION_GUIDANCE
+      + ' A selection part is { type: "selection", options: [{ value: "research", label: "Research" }] }. Search selection with detail verbose for types. Incoming selection_response.selected_values and reply_to remain in Message parts and events.',
     inputSchema: z.object({ code: z.string().min(1).max(100_000), intent: z.string().max(2_000).optional() }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, async ({ code }): Promise<CallToolResult> => {

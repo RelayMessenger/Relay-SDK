@@ -2,6 +2,58 @@
 
 TypeScript client for Relay v1.
 
+## Selection, coming soon
+
+Selection is local, unshipped work. The candidate SDK exposes `SelectionPart`,
+`SelectionPartResponse` (including read-only viewer-relative `has_responded`),
+and `SelectionResponsePart` through the existing message and event unions.
+This is not a claim about the published package or hosted API.
+
+```ts
+import { partsWithSelection } from "@relaymessenger/sdk";
+
+const parts = partsWithSelection("Which topics interest you?", {
+  type: "selection",
+  options: [
+    { value: "research", label: "Research" },
+    { value: "design", label: "Design" },
+  ],
+});
+// Send with relay.chats.messages.send(chatId, { message: { parts, idempotency_key } }).
+```
+
+`selectionPart` validates an options array or complete part, returning a
+normalized part or an error string. Options are limited to 25, trimmed labels
+to 80 characters, and explicit case-sensitive ASCII token values to 100.
+Unknown fields, duplicate values, and blank labels are rejected.
+`partsWithSelection` also requires nonblank question text.
+
+Selection inherits existing Chat membership rules: at most one human user,
+with multiple agents allowed. Only the human user can respond; agents cannot.
+The durable per-user response claim applies across that user's devices and
+idempotency keys, without expanding group membership.
+
+`answerMessages` accepts a `selection` fenced JSON block containing the options
+array. It keeps invalid blocks as text with an error and never combines a
+selection with buttons. Existing buttons retain their behavior.
+
+The user's reply is exactly text labels joined with `, `, then
+`{ type: "selection_response", selected_values: ["research", "design"] }`,
+in source-option order, with explicit `reply_to.message_id` and `part_index`.
+The user client keeps its existing outgoing idempotency identity for retries.
+Metadata has no additional display text. Use `selected_values` and the source
+reply target to dispatch your own handler, rather than splitting labels.
+Signed webhook `unwrap` and WebSocket `onEvent` default types expose this
+metadata after narrowing to `message.received`.
+
+Local runtime sources include selection guidance and structured inbound discovery
+for CLI, Pi, OpenClaw, the Claude Code channel, MCP, and the Chat SDK adapter.
+`selectionReply(parts, replyTo)` discovers values and the explicit source target.
+These changes remain unshipped; bundled artifacts and disposable-lane validation
+are required before release.
+
+## Chat permissions
+
 Relay Chats support one human user with one or more agents. Contacts, Handles,
 and Participants remain generic API types, but selectable participants are
 agents. Agent-to-agent Chats remain supported. This Agent SDK does not expose phone address-book syncing, mutual

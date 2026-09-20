@@ -195,3 +195,15 @@ describe("links in the agent's words", () => {
     expect(response.message.id).toBe("00000000-0000-7000-8000-000000000011");
   });
 });
+
+it("sends a real selection part from a selection fence with the existing idempotency key", async () => {
+  const requests: unknown[] = [];
+  const relay = new Relay({ apiKey: "test", fetch: async (_, init) => {
+    requests.push(JSON.parse(String(init?.body)));
+    return Response.json({ message: { id: "sent" } }, { status: 202 });
+  } });
+  await sendRelayText({ relay, chatId: "chat", text: 'Topics?\n```selection\n[{"value":"research","label":"Research"}]\n```', idempotencyKey: "selection-operation" });
+  expect(requests).toEqual([{ message: { parts: [
+    { type: "text", value: "Topics?" }, { type: "selection", options: [{ value: "research", label: "Research" }] },
+  ], idempotency_key: "selection-operation" } }]);
+});

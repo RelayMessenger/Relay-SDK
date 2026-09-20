@@ -71,3 +71,19 @@ export {
 } from "./links.js";
 
 export { Relay as default } from "./client.js";
+export {
+  SELECTION_BLOCK_INSTRUCTION,
+  SELECTION_FENCE,
+  SELECTION_GUIDANCE,
+  SELECTION_MAX_OPTIONS,
+  SELECTION_LABEL_MAX_LENGTH,
+  SELECTION_VALUE_MAX_LENGTH,
+  selectionPart,
+  parseSelectionBlock,
+  partsWithSelection,
+  splitSelection,
+  selectionReply,
+  selectionReplyContext,
+  type SelectionReply,
+  type SplitSelection,
+} from "./selection.js";

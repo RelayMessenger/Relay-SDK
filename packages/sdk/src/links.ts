@@ -1,4 +1,5 @@
 import { splitButtons } from "./buttons.js";
+import { splitSelection } from "./selection.js";
 import type { ButtonsPart, LinkPart, MessagePart, TextPart } from "./types.js";
 
 /**
@@ -69,17 +70,30 @@ export const splitLinks = (text: string): AnswerSegment[] => {
 export interface AnswerMessages {
   /** The Messages the answer becomes, in order; each is one parts array. */
   messages: MessagePart[][];
-  /** Why a buttons block that was there could not be used. The text then keeps it. */
+  /** Why a component block could not be used. The text then keeps it. */
   error?: string;
 }
 
 /**
- * The Messages a text-only agent's answer becomes: the buttons block lifted
- * out first, then each link written alone on a line as its own Message, the
- * buttons under the last Message of words. A link must travel alone, so an
- * answer that is words, a link and more words is three Messages.
+ * The Messages a text-only agent's answer becomes: a buttons or selection
+ * block is lifted out, then each link on its own line becomes its own Message.
+ * The component accompanies the last Message of words. Selection requires a
+ * nonblank question; conflicting components remain text with an error.
  */
 export const answerMessages = (answer: string): AnswerMessages => {
+  const selected = splitSelection(answer);
+  if (selected.error) {
+    return { messages: [[{ type: "text", value: answer }]], error: selected.error };
+  }
+  if (selected.selection) {
+    const messages: MessagePart[][] = splitLinks(selected.text).map((segment) => [segment]);
+    const prompt = messages.findLast((parts) => parts[0]?.type === "text" && parts[0].value.trim());
+    if (!prompt) {
+      return { messages: [[{ type: "text", value: answer }]], error: "selection needs a nonblank text prompt" };
+    }
+    prompt.push(selected.selection);
+    return { messages };
+  }
   const { text, buttons, error } = splitButtons(answer);
   const messages: MessagePart[][] = splitLinks(text).map((segment) => [segment]);
   if (buttons) attachButtons(messages, buttons);

@@ -183,6 +183,38 @@ const run = (
   };
 };
 
+it("delivers selection response metadata and reply target to the default callback before ACK", async () => {
+  const event = envelope();
+  if (event.event_type !== "message.received") throw new Error("wrong fixture");
+  event.data.parts = [
+    { type: "text", value: "Research, Design", reactions: null },
+    { type: "selection_response", selected_values: ["research", "design"] },
+  ];
+  event.data.reply_to = { message_id: "source-message", part_index: 1 };
+  let received = false;
+  const { controller, running } = run(client(), {
+    onEvent: async (incoming) => {
+      if (incoming.event_type !== "message.received") throw new Error("wrong event");
+      expect(incoming.data.parts.find((part) => part.type === "selection_response")?.selected_values)
+        .toEqual(["research", "design"]);
+      expect(incoming.data.reply_to).toEqual(event.data.reply_to);
+      expect(FakeWebSocket.latest.sent).toEqual([]);
+      received = true;
+    },
+  });
+  try {
+    await waitFor(() => FakeWebSocket.instances.length === 1);
+    const socket = FakeWebSocket.latest;
+    emitFrame(socket, ready());
+    emitFrame(socket, eventFrame("1", event));
+    await waitFor(() => received && socket.sent.length > 0);
+    expect(socket.sent.map(JSON.parse)).toEqual([{ type: "ack", through_sequence: "1" }]);
+  } finally {
+    controller.abort();
+    await running;
+  }
+});
+
 it("derives /v1/websocket and sends the Agent Token header with no protocol", async () => {
   const { controller, running } = run(client());
   await waitFor(() => FakeWebSocket.instances.length === 1);

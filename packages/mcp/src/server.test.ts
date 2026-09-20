@@ -27,6 +27,16 @@ const result = (r: unknown) => (r as { structuredContent?: { result?: unknown } 
 afterEach(async () => { await Promise.all(sessions.splice(0).map(async s => { await s.client.close(); await s.server.close(); })); });
 
 describe("approved two-tool MCP", () => {
+  it("discovers selection authoring and structured response types without resolving credentials", async () => {
+    const resolveClient = vi.fn(async () => { throw new Error("must not resolve auth for search"); });
+    const client = await connect({ resolveClient });
+    const tools = (await client.listTools()).tools;
+    expect(tools.find(tool => tool.name === "execute")?.description).toContain("selected_values");
+    const found = await client.callTool({ name: "search_docs", arguments: { query: "selection", language: "typescript", detail: "verbose" } });
+    expect(text(found)).toContain("SelectionPart");
+    expect(text(found)).toContain("selected_values");
+    expect(resolveClient).not.toHaveBeenCalled();
+  });
   it("advertises exactly search_docs and execute, without credential arguments or talk", async () => {
     const client = await connect(); const tools = (await client.listTools()).tools;
     expect(tools.map(x=>x.name).sort()).toEqual(["execute","search_docs"]);

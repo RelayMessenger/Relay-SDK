@@ -3,6 +3,10 @@ import { createInterface } from "node:readline";
 import Relay, {
   BUTTONS_BLOCK_INSTRUCTION,
   BUTTONS_GUIDANCE,
+  selectionReply,
+  selectionReplyContext,
+  SELECTION_GUIDANCE,
+  SELECTION_BLOCK_INSTRUCTION,
   LINK_LINE_INSTRUCTION,
   answerMessages as splitAnswer,
   type MessagePart,
@@ -34,9 +38,12 @@ class ChildPiProcess implements PiProcess {
 }
 const textFromEvent = (event: RelayWebhookEvent): string | null => {
   if (event.event_type !== "message.received" || event.data.direction !== "inbound") return null;
-  return event.data.parts
+  const text = event.data.parts
     .flatMap((part) => part.type === "text" || part.type === "link" ? [part.value] : [])
-    .join("\n").trim() || null;
+    .join("\n").trim();
+  if (!text) return null;
+  const context = selectionReplyContext(selectionReply(event.data.parts, event.data.reply_to));
+  return [text, context].filter(Boolean).join("\n\n");
 };
 /**
  * The prompt pi is given for one message: the words, then how to answer.
@@ -44,7 +51,7 @@ const textFromEvent = (event: RelayWebhookEvent): string | null => {
  * rules every other runtime carries.
  */
 export const piPrompt = (message: string): string =>
-  `${message}\n\nWrite your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself. Write chat text. Inline Markdown draws: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.\n\n${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE}`;
+  `${message}\n\nWrite your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself. Write chat text. Inline Markdown draws: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.\n\n${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE}`;
 
 /**
  * The messages an answer becomes: each link written alone on a line as its

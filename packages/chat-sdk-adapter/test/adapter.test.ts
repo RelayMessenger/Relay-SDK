@@ -1864,3 +1864,18 @@ describe("Relay abort-on-receipt", () => {
     expect(sequence).toEqual([]);
   });
 });
+
+it("forwards selection response metadata through raw while rendering only the readable reply", () => {
+  const adapter = createRelayAdapter({ token: "test", webhookSecret: WEBHOOK_SECRET });
+  const message = adapter.parseMessage({
+    chatId: IDS.chat, createdAt: "2026-09-19T00:00:00.000Z", eventType: "message.received",
+    message: webhookMessage({
+      parts: [{ type: "text", value: "Research, Design" }, { type: "selection_response", selected_values: ["research", "design"] }],
+      reply_to: { message_id: IDS.reply, part_index: 1 },
+    }),
+  });
+  expect(message.text).toBe("Research, Design");
+  const response = message.raw.message?.parts?.find(part => part.type === "selection_response");
+  expect(response).toEqual({ type: "selection_response", selected_values: ["research", "design"] });
+  expect(message.raw.message?.reply_to).toEqual({ message_id: IDS.reply, part_index: 1 });
+});

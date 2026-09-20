@@ -602,3 +602,27 @@ describe("live group addressing", () => {
     }
   });
 });
+
+it("validates selection tool arguments and sends the native part on the existing durable reply path", async () => {
+  const { state, fake, channel } = fixture();
+  try {
+    const origin = event({ sequence: 1, text: "send selections" });
+    accept(state, origin, 1);
+    await channel.flush();
+    await channel.beginProcessing({ delivery_id: origin.event_id });
+    const args = { chat_id: CHAT_A, text: "Topics?", send_id: "selection-1", selection: [{ value: "research", label: " Research " }] };
+    for (const selection of [[], [{ label: "Missing value" }], [{ value: "a", label: "A" }, { value: "a", label: "B" }], [{ value: "x", label: "X", url: "https://example.test" }]]) {
+      expect((await channel.reply({ ...args, selection })).isError).toBe(true);
+    }
+    expect((await channel.reply({ ...args, buttons: [{ label: "Yes" }] })).isError).toBe(true);
+    expect((await channel.reply({ ...args, link: "https://example.test" })).isError).toBe(true);
+    expect((await channel.reply({ ...args, text: "  " })).isError).toBe(true);
+    expect(fake.sends).toHaveLength(0);
+    expect((await channel.reply(args)).isError).not.toBe(true);
+    expect(fake.sends[0]?.body.message.parts).toEqual([
+      { type: "text", value: "Topics?" }, { type: "selection", options: [{ value: "research", label: "Research" }] },
+    ]);
+    expect((await channel.reply(args)).isError).not.toBe(true);
+    expect(fake.sends).toHaveLength(1);
+  } finally { state.close(); }
+});

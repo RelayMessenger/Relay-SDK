@@ -1,3 +1,4 @@
+import { selectionReply } from "@relaymessenger/sdk";
 import type {
   MessagePartResponse,
   RelayWebhookEvent,
@@ -20,6 +21,8 @@ function renderPart(part: MessagePartResponse): string | undefined {
     // The agent's own buttons part reads as nothing, as on the server; its
     // question is the text beside it. A tap arrives as ordinary text.
     case "buttons":
+    case "selection":
+    case "selection_response":
       return undefined;
   }
 }
@@ -72,7 +75,9 @@ export function buildRelayInboundFacts(
   );
   const timestampValue = event.data.sent_at ?? event.created_at;
   const timestamp = Date.parse(timestampValue);
+  const selection = selectionReply(event.data.parts, event.data.reply_to);
   return {
+    ...(selection ? { selection } : {}),
     eventId: event.event_id,
     messageId: event.data.id,
     chatId: event.data.chat.id,

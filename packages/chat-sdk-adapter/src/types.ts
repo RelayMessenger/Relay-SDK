@@ -107,11 +107,33 @@ export interface RelayButtonsPart {
   items: RelayButtonItem[];
 }
 
+/** Coming soon: values are stable ASCII tokens, independent of trimmed labels. */
+export interface RelaySelectionPart {
+  type: "selection";
+  options: Array<{ value: string; label: string }>;
+}
+
+export interface RelayButtonsPartResponse extends RelayButtonsPart {
+  reactions?: RelayReaction[] | null;
+}
+
+export interface RelaySelectionPartResponse extends RelaySelectionPart {
+  readonly has_responded: boolean;
+  reactions: null;
+}
+
+/** User reply metadata, exposed intact through message.raw.message.parts. */
+export interface RelaySelectionResponsePart {
+  type: "selection_response";
+  selected_values: string[];
+}
+
 export type RelayOutgoingPart =
   | RelayTextPart
   | RelayMediaPart
   | RelayLinkPart
-  | RelayButtonsPart;
+  | RelayButtonsPart
+  | RelaySelectionPart;
 
 export interface RelayTextPartResponse extends RelayTextPart {
   mentions?: Array<{
@@ -154,7 +176,10 @@ export type RelayMessagePartResponse =
   | RelayTextPartResponse
   | RelayMediaPartResponse
   | RelayLinkPartResponse
-  | RelaySystemPartResponse;
+  | RelaySystemPartResponse
+  | RelayButtonsPartResponse
+  | RelaySelectionPartResponse
+  | RelaySelectionResponsePart;
 
 export interface RelayReplyTo {
   message_id: string;
@@ -194,6 +219,9 @@ export interface RelayWebhookMessageEvent {
     | RelayTextPartResponse
     | RelayMediaPartResponse
     | RelayLinkPartResponse
+    | RelayButtonsPartResponse
+    | RelaySelectionPartResponse
+    | RelaySelectionResponsePart
   >;
   read_at?: string | null;
   reply_to?: RelayReplyTo | null;
@@ -212,6 +240,9 @@ export interface RelaySentMessage {
     | RelayTextPartResponse
     | RelayMediaPartResponse
     | RelayLinkPartResponse
+    | RelayButtonsPartResponse
+    | RelaySelectionPartResponse
+    | RelaySelectionResponsePart
   >;
   reply_to?: RelayReplyTo | null;
   sent_at: string | null;

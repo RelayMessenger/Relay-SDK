@@ -147,11 +147,43 @@ export interface ButtonsPart {
   items: ButtonItem[];
 }
 
+/** Stable machine value and independently editable visible label. Coming soon. */
+export interface SelectionOption {
+  /** Unique case-sensitive ASCII token, 1–100 characters. Never derived from label. */
+  value: string;
+  /** Trimmed visible label, 1–80 characters. */
+  label: string;
+}
+
+/** Agent-only, 1–25 options; requires nonblank text and cannot mix with buttons. */
+export interface SelectionPart {
+  type: "selection";
+  options: SelectionOption[];
+}
+
+export interface SelectionPartResponse extends SelectionPart {
+  /** Durable response state for this viewer across devices. Existing Chat rules allow at most one human user; only that user can respond. */
+  readonly has_responded: boolean;
+  reactions: null;
+}
+
+/** User-only second part after exact labels joined with ', ', with explicit reply_to. */
+export interface SelectionResponsePart {
+  type: "selection_response";
+  /** Unique known values, nonempty and in source-option order. */
+  selected_values: string[];
+}
+
+/** Metadata only: contributes no visible fallback text. */
+export interface SelectionResponsePartResponse extends SelectionResponsePart {}
+
 export type MessagePart =
   | TextPart
   | MediaPart
   | LinkPart
-  | ButtonsPart;
+  | ButtonsPart
+  | SelectionPart
+  | SelectionResponsePart;
 
 export interface TextPartResponse extends TextPart {
   mentions?: Array<{
@@ -239,10 +271,13 @@ export type MessagePartResponse =
   | MediaPartResponse
   | LinkPartResponse
   | ButtonsPartResponse
+  | SelectionPartResponse
+  | SelectionResponsePartResponse
   | SystemPartResponse;
 
 /** Ordinary replies target text, media, or link, never system. A buttons part
- * accepts only a tap: one text part equal to one of its plain labels. */
+ * accepts only a tap: one text part equal to one of its plain labels. A selection
+ * requires explicit part_index and exactly text then selection_response metadata. */
 export interface ReplyTo {
   message_id: UUID;
   part_index?: number;
@@ -262,7 +297,7 @@ export interface MessageContent {
 
 /**
  * The Message a send returns. A send never produces a system Message, so its
- * parts are only text, media, link or buttons, and it carries no `system_event`.
+ * parts exclude system parts, and it carries no `system_event`.
  * `is_system_message` is on the wire and is always `false` here; the contract's
  * `SentMessage` does not declare it yet.
  * Read paths (`chats.messages.list`, `messages.listMessagesThread`) return
@@ -275,6 +310,8 @@ export interface SentMessage {
     | MediaPartResponse
     | LinkPartResponse
     | ButtonsPartResponse
+    | SelectionPartResponse
+    | SelectionResponsePartResponse
   >;
   created_at: string;
   sent_at: string | null;
@@ -433,7 +470,7 @@ export interface MessageListParams {
 
 export type MessageThreadParams = MessageListParams;
 
-/** Target text, media, or link; buttons and system cannot receive reactions. */
+/** Target text, media, or link; buttons, selection, selection_response and system cannot receive reactions. */
 export interface MessageAddReactionParams {
   operation: "add" | "remove";
   type: ReactionType;

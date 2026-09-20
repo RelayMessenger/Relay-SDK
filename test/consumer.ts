@@ -1,4 +1,7 @@
 import Relay, {
+  selectionPart,
+  partsWithSelection,
+  type SelectionPartResponse,
   RELAY_WEBHOOK_EVENT_TYPES,
   type Chat,
   type Call,
@@ -27,6 +30,30 @@ const relay = new Relay({
   apiKey: "consumer-token",
   baseURL: "http://127.0.0.1:8790",
 });
+
+// Coming soon: source-consumer example, not a claim about a published version.
+const topics = selectionPart([
+  { value: "research", label: "Research" },
+  { value: "design", label: "Design" },
+]);
+if (typeof topics === "string") throw new Error(topics);
+const selectionMessage: MessageContent = {
+  parts: partsWithSelection("Which topics?", topics),
+  idempotency_key: "selection-prompt-operation",
+};
+await relay.chats.messages.send("chat-id", { message: selectionMessage });
+const viewerSelection: SelectionPartResponse = {
+  ...topics, has_responded: false, reactions: null,
+};
+// @ts-expect-error Viewer state is read-only.
+viewerSelection.has_responded = true;
+const selectionEvent = relay.webhooks.unwrap("{}", { headers: {} });
+if (selectionEvent.event_type === "message.received") {
+  const values: string[] | undefined = selectionEvent.data.parts
+    .find((part) => part.type === "selection_response")?.selected_values;
+  const source: string | undefined = selectionEvent.data.reply_to?.message_id;
+  void [values, source];
+}
 
 const content: MessageContent = {
   parts: [{ type: "text", value: "Hello" }],
@@ -66,7 +93,12 @@ await relay.chats.update("chat-id", { group_chat_icon: null });
 // @ts-expect-error A group photo is addressed by ID or HTTPS address, never by bytes.
 await relay.chats.update("chat-id", { group_chat_icon: new Uint8Array() });
 void relay.websocket.run({
-  onEvent: async (_event, context) => {
+  onEvent: async (event, context) => {
+    if (event.event_type === "message.received") {
+      const selected: string[] | undefined = event.data.parts
+        .find((part) => part.type === "selection_response")?.selected_values;
+      void selected;
+    }
     context.sequence satisfies string;
     // @ts-expect-error WebSocket transport ACK context has no Read control.
     context.markAsRead("chat-id");

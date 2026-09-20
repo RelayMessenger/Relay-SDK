@@ -363,6 +363,15 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     expect(result.capabilities?.experimental).toEqual({
       "claude/channel": {},
     });
+    mcp.send({ jsonrpc: "2.0", id: 101, method: "tools/list", params: {} });
+    const listed = await mcp.take(message => message.id === 101, "selection reply schema");
+    const tools = (listed.result as { tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }> }).tools;
+    expect(tools.find(tool => tool.name === "reply")?.inputSchema.properties.selection).toMatchObject({
+      type: "array", minItems: 1, maxItems: 25,
+      items: { additionalProperties: false, required: ["value", "label"], properties: {
+        value: { maxLength: 100, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$" }, label: { maxLength: 80 },
+      } },
+    });
     await acked;
     const notification = await mcp.take(
       (message) => message.method === "notifications/claude/channel",

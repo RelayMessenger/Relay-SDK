@@ -1,3 +1,4 @@
+import { BUTTONS_GUIDANCE, BUTTONS_BLOCK_INSTRUCTION, LINK_LINE_INSTRUCTION, SELECTION_GUIDANCE, SELECTION_BLOCK_INSTRUCTION, selectionReplyContext } from "@relaymessenger/sdk";
 import type {
   Message,
   Relay,
@@ -243,7 +244,9 @@ export async function dispatchRelayEvent(params: {
     message: {
       inboundEventKind: "user_request",
       body,
-      bodyForAgent: facts.text,
+      bodyForAgent: [facts.text, selectionReplyContext(facts.selection),
+        `${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE}`,
+      ].filter(Boolean).join("\n\n"),
       rawBody: facts.text,
       commandBody: facts.text,
     },

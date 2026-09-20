@@ -7,6 +7,7 @@ import { dispatchRelayEvent } from "./dispatch.js";
 const approvedId = "01a07f76-4e51-70e1-8b12-a269a5b1774b";
 const otherId = "00000000-0000-7000-8000-000000000099";
 type EventOptions = {
+  selection?: boolean;
   senderKind?: "user" | "agent";
   group?: boolean;
   mention?: string;
@@ -36,6 +37,10 @@ async function dispatch(allowFrom: string[], contactId = approvedId, handle = "r
       ...(options.replyToAgent === undefined ? {} : { reply_to: { message_id: "00000000-0000-7000-8000-000000000010" } }),
     },
   } as RelayWebhookEvent;
+  if (options.selection && event.event_type === "message.received") {
+    event.data.parts = [{ type: "text", value: "Research", reactions: null }, { type: "selection_response", selected_values: ["research"] }];
+    event.data.reply_to = { message_id: "00000000-0000-7000-8000-000000000010", part_index: 1 };
+  }
   await dispatchRelayEvent({
     event, lifecycle: {} as never,
     account: { accountId: "work", enabled: true, configured: true, token: "synthetic-unused", baseUrl: "https://api.staging.relayapp.im", allowFrom, config: {} },
@@ -134,4 +139,18 @@ describe("Relay dispatch through real OpenClaw ingress", () => {
     const result = await dispatch([approvedId], approvedId, "peer_agent", { senderKind: "agent", direction: "outbound" });
     expect(result.invoke).not.toHaveBeenCalled();
   });
+});
+
+
+it("forwards selection data and native authoring guidance to the admitted OpenClaw turn", async () => {
+  const result = await dispatch([approvedId], approvedId, "review_sender", { selection: true });
+  expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+    ctxPayload: expect.objectContaining({
+      BodyForAgent: expect.stringContaining('"selected_values":["research"]'),
+      RawBody: "Research",
+    }),
+  }));
+  expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+    ctxPayload: expect.objectContaining({ BodyForAgent: expect.stringContaining("fenced code block tagged `selection`") }),
+  }));
 });
