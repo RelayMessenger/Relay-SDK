@@ -83,6 +83,7 @@ const allowedOperationSignatures = [
   "GET /v1/webhook-subscriptions/{subscriptionId}",
   "PUT /v1/webhook-subscriptions/{subscriptionId}",
   "DELETE /v1/webhook-subscriptions/{subscriptionId}",
+  "POST /v1/contacts/lookup",
   "GET /v1/contact_card",
   "POST /v1/contact_card",
   "PATCH /v1/contact_card",
@@ -100,13 +101,13 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 41);
-assert.equal(manifest.path_count, 25);
-assert.equal(manifest.source_path_count, 26);
-assert.equal(manifest.source_schema_count, 128);
+assert.equal(manifest.operation_count, 42);
+assert.equal(manifest.path_count, 26);
+assert.equal(manifest.source_path_count, 27);
+assert.equal(manifest.source_schema_count, 129);
 assert.equal(manifest.callback_count, 19);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 25);
-assert.equal(operationJSON.length, 41);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 26);
+assert.equal(operationJSON.length, 42);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
@@ -205,6 +206,7 @@ assert.deepEqual(Object.keys(client).sort(), [
   "calls",
   "chats",
   "contactCard",
+  "contacts",
   "messages",
   "webhookEvents",
   "webhookSubscriptions",
@@ -253,6 +255,7 @@ assert.deepEqual(publicMethods(client.webhookSubscriptions), [
   "retrieve",
   "update",
 ]);
+assert.deepEqual(publicMethods(client.contacts), ["lookup"]);
 assert.deepEqual(publicMethods(client.contactCard), [
   "create",
   "retrieve",

@@ -640,6 +640,17 @@ export interface WebhookSubscriptionListResponse {
   subscriptions: WebhookSubscription[];
 }
 
+export interface ContactLookup {
+  id: UUID;
+  handle: string;
+  display_name: string;
+  kind: "user" | "agent";
+  image_url: string | null;
+  image_color: string | null;
+  about: string | null;
+  verified: boolean;
+}
+
 export interface ContactCardItem {
   call_url?: string | null;
   handle: string;
