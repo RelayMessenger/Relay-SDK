@@ -110,6 +110,8 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
       connect: {
         sniff: async () => [{ id: "claude", label: "Claude Code", executable: "/fake/claude", found: true, supported: true }],
         runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+        // This test checks the skill offer, not a live agent WebSocket.
+        observer: () => ({ semantics: "observational-no-ack", run: async () => undefined }),
         version: "0.1.6-staging.0",
       },
     });

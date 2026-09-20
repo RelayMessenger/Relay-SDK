@@ -25,6 +25,7 @@ import Relay, {
   type AgentImageRecipe,
   type ChatCreateParams,
   type ChatSendVoicememoParams,
+  type ChatSetActivityParams,
   type ChatUpdateParams,
   type ContactCardCreateParams,
   type ContactCardUpdateParams,
@@ -1044,6 +1045,54 @@ export const createProgram = (
     .argument("<chat-id>", "the chat ID")
     .action(async (chatID: string, _options: object, command: Command) => {
       await (await clientFor(command)).chats.stopTyping(chatID);
+      output(voidResult);
+    });
+
+  const activity = chats.command("activity").description("get, set or clear this agent's task activity");
+  activity
+    .command("get")
+    .description("get this agent's activity in a chat")
+    .argument("<chat-id>", "the chat ID")
+    .action(async (chatID: string, _options: object, command: Command) =>
+      output(await (await clientFor(command)).chats.getActivity(chatID)));
+  activity
+    .command("set")
+    .description("start a task activity or refresh its current id")
+    .argument("<chat-id>", "the chat ID")
+    .requiredOption("--text <text>", "1–21 visible characters, at most 1024 bytes")
+    .option("--emoji <emoji>", "one Unicode emoji")
+    .option("--clear-emoji", "send a null emoji")
+    .option("--activity-id <uuid>", "refresh this task instead of replacing it")
+    .action(async (
+      chatID: string,
+      options: { text: string; emoji?: string; clearEmoji?: boolean; activityId?: string },
+      command: Command,
+    ) => {
+      if (options.emoji !== undefined && options.clearEmoji) {
+        throw new Error("Choose --emoji or --clear-emoji, not both.");
+      }
+      const body = {
+        text: options.text,
+        ...(options.emoji === undefined ? {} : { emoji: options.emoji }),
+        ...(options.clearEmoji ? { emoji: null } : {}),
+        ...(options.activityId === undefined ? {} : { activity_id: options.activityId }),
+      } satisfies ChatSetActivityParams;
+      output(await (await clientFor(command)).chats.setActivity(chatID, body));
+    });
+  activity
+    .command("clear")
+    .description("clear this agent's activity, optionally matching a task")
+    .argument("<chat-id>", "the chat ID")
+    .option("--activity-id <uuid>", "clear only this task")
+    .action(async (
+      chatID: string,
+      options: { activityId?: string },
+      command: Command,
+    ) => {
+      await (await clientFor(command)).chats.clearActivity(
+        chatID,
+        options.activityId === undefined ? {} : { activity_id: options.activityId },
+      );
       output(voidResult);
     });
 

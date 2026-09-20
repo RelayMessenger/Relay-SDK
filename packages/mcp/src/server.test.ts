@@ -54,7 +54,7 @@ describe("approved two-tool MCP", () => {
     expect(r.isError).not.toBe(true); expect(text(r)).not.toContain(TOKEN); expect(text(r)).toContain("[REDACTED]");
   });
   it("indexes every HTTP operation and exposes only initialized client methods", () => {
-    expect(new Set(METHOD_DOCS.map(x=>`${x.httpMethod} ${x.path}`)).size).toBe(38);
+    expect(new Set(METHOD_DOCS.map(x=>`${x.httpMethod} ${x.path}`)).size).toBe(41);
     expect(METHOD_DOCS.some(x=>x.method==="Relay.createAgent")).toBe(false);
     expect(METHOD_DOCS.some(x=>x.httpMethod==="POST"&&x.path==="/v1/agents")).toBe(false);
     const relay=sdk().client;
@@ -88,6 +88,36 @@ describe("approved two-tool MCP", () => {
     const r=await s.execute(`async function run(client) { return await client.chats.messages.send(${JSON.stringify(CHAT)}, {message:{parts:[{type:"text",value:"fixture only"}],idempotency_key:"mcp-two-tools-test"}}); }`);
     expect(r.isError).not.toBe(true); const req=fetch.mock.calls[0] as unknown as [string,RequestInit];
     expect(String(req[0])).toContain(`/v1/chats/${CHAT}/messages`); expect(new Headers(req[1].headers).get("idempotency-key")).toBe("mcp-two-tools-test");
+  });
+  it("discovers and executes guarded Chat activity through the generated SDK surface", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const activityId = "01995bc0-0000-7000-8000-000000000003";
+    const fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      requests.push({ url: String(url), init: init! });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      return Response.json({ chat_id: CHAT, agent_id: "agent", version: "9007199254740993", activity: {
+        id: activityId, text: "Generating image", emoji: "🖼️",
+        updated_at: "2026-09-20T12:00:00Z", expires_at: "2026-09-20T12:01:30Z",
+      } });
+    });
+    const s = await ready({}, sdk(fetch));
+    const docs = await s.client.callTool({ name: "search_docs", arguments: { query: "activity", detail: "verbose" } });
+    expect(text(docs)).toContain("client.chats.setActivity");
+    expect(text(docs)).toContain("activity_id");
+    const response = await s.execute(`async function run(client) {
+      const state = await client.chats.setActivity("${CHAT}", {text:"Generating image",emoji:"🖼️"});
+      await client.chats.setActivity("${CHAT}", {text:"Generating image",emoji:"🖼️",activity_id:state.activity.id});
+      const current = await client.chats.getActivity("${CHAT}");
+      await client.chats.clearActivity("${CHAT}", {activity_id:state.activity.id});
+      return current.version;
+    }`);
+    expect(response.isError).not.toBe(true);
+    expect(result(response)).toBe("9007199254740993");
+    expect(requests.map(({ init }) => init.method)).toEqual(["PUT", "PUT", "GET", "DELETE"]);
+    expect(JSON.parse(String(requests[1]!.init.body))).toEqual({ text: "Generating image", emoji: "🖼️", activity_id: activityId });
+    expect(requests[3]!.url).toBe(`http://127.0.0.1:1/v1/chats/${CHAT}/activity?activity_id=${activityId}`);
+    expect(requests[3]!.init.body).toBeUndefined();
+    expect(text(response)).not.toContain(TOKEN);
   });
   it("preserves SDK pagination methods and async iteration", async () => {
     const fetch=vi.fn(async (url: unknown) => Response.json(String(url).includes("cursor=next") ? {chats:[{id:"second"}],next_cursor:null} : {chats:[{id:"first"}],next_cursor:"next"}));

@@ -120,15 +120,21 @@ describe("provider-independent call API", () => {
 });
 
 
-it("carries the call outcome in a system event", () => {
-  const event: SystemEvent = {
-    type: "call_ended", actor: call.from, subject: call.to[0], value: null,
-    icon_attachment_id: null, contact_card: null,
-    call: { id: call.id, mode: "audio", end_reason: "completed", connected: true, duration_seconds: 12 },
+it.each(["ringing", "active", "ended"] as const)("carries the current %s call marker in a system event", (status) => {
+  const marker = {
+    id: call.id, mode: call.mode, status, from: call.from, to: call.to,
+    answered_at: status === "ringing" ? null : "2026-09-20T12:00:00Z",
+    ended_at: status === "ended" ? "2026-09-20T12:00:12Z" : null,
+    end_reason: status === "ended" ? "completed" as const : null,
+    connected: status !== "ringing",
+    duration_seconds: status === "ended" ? 12 : null,
   };
-  expect(JSON.parse(JSON.stringify(event)).call).toEqual({
-    id: call.id, mode: "audio", end_reason: "completed", connected: true, duration_seconds: 12,
-  });
+  const event: SystemEvent = {
+    type: "call", actor: call.from, subject: call.to[0], value: null,
+    icon_attachment_id: null, contact_card: null,
+    call: marker,
+  };
+  expect(JSON.parse(JSON.stringify(event)).call).toEqual(marker);
 });
 
 it.each(["wss://agent.example/calls", null])("updates the call address to %s", async (call_url) => {

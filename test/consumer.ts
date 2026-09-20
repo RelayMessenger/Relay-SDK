@@ -1,10 +1,15 @@
 import Relay, {
   RELAY_WEBHOOK_EVENT_TYPES,
   type Chat,
+  type ChatActivity,
+  type ChatActivityResponse,
+  type ChatClearActivityParams,
   type Call,
+  type CallMarker,
   type CallWebhookEvent,
   type ChatHandle,
   type ChatSendVoicememoResponse,
+  type ChatSetActivityParams,
   type ContactAddedWebhookEvent,
   type ContactRemovedWebhookEvent,
   type DeliveryStatus,
@@ -17,6 +22,7 @@ import Relay, {
   type RelayWebhookEnvelope,
   type RelayWebhookEvent,
   type SentMessage,
+  type SystemEventType,
   type TypingIndicatorWebhookData,
   type TextPartResponse,
   type TextPart,
@@ -28,6 +34,19 @@ const relay = new Relay({
   baseURL: "http://127.0.0.1:8790",
 });
 
+const liveCallMarker: CallMarker = {
+  id: "call-id", mode: "audio", status: "ringing",
+  answered_at: null, ended_at: null,
+  from: { id: "caller-id", handle: "caller", kind: "agent" },
+  to: [{ id: "callee-id", handle: "callee", kind: "user" }],
+  end_reason: null, connected: false, duration_seconds: null,
+};
+liveCallMarker.status satisfies Call["status"];
+const callEvent: SystemEventType = "call";
+// @ts-expect-error A call marker represents the whole call, not only its end.
+const retiredCallEvent: SystemEventType = "call_ended";
+void [liveCallMarker, callEvent, retiredCallEvent];
+
 const content: MessageContent = {
   parts: [{ type: "text", value: "Hello" }],
   idempotency_key: "consumer-key",
@@ -37,6 +56,22 @@ await relay.chats.messages.send("chat-id", { message: content });
 await relay.chats.shareContactCard("chat-id");
 await relay.chats.startTyping("chat-id");
 await relay.chats.stopTyping("chat-id");
+const activityParams: ChatSetActivityParams = { text: "Generating image", emoji: "🖼️" };
+const activityState: ChatActivityResponse = await relay.chats.setActivity("chat-id", activityParams);
+activityState.version satisfies string;
+activityState.activity satisfies ChatActivity | null;
+await relay.chats.getActivity("chat-id") satisfies ChatActivityResponse;
+await relay.chats.setActivity("chat-id", { text: "Working", activity_id: "activity-id", emoji: null });
+const clearActivityParams: ChatClearActivityParams = { activity_id: "activity-id" };
+await relay.chats.clearActivity("chat-id", clearActivityParams) satisfies void;
+await relay.chats.clearActivity("chat-id");
+// @ts-expect-error Activity text is required.
+await relay.chats.setActivity("chat-id", { emoji: "🖼️" });
+// @ts-expect-error An activity guard is a UUID string, not a number.
+await relay.chats.clearActivity("chat-id", { activity_id: 1 });
+// @ts-expect-error Activity is not an agent webhook event.
+const activityEvent: typeof RELAY_WEBHOOK_EVENT_TYPES[number] = "chat.activity.updated";
+void activityEvent;
 await relay.chats.markAsRead("chat-id");
 await relay.chats.participants.add("chat-id", { handle: "research" });
 await relay.chats.participants.add("chat-id", { handle: "research", hide_history: true });

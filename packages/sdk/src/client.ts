@@ -14,11 +14,14 @@ import type {
   CallListResponse,
   CallResponse,
   Chat,
+  ChatActivityResponse,
+  ChatClearActivityParams,
   ChatCreateParams,
   ChatCreateResponse,
   ChatListChatsParams,
   ChatSendVoicememoParams,
   ChatSendVoicememoResponse,
+  ChatSetActivityParams,
   ChatUpdateParams,
   ChatUpdateResponse,
   ContactCardItem,
@@ -403,6 +406,40 @@ export class Chats {
       path: `/v1/chats/${pathID(chatID)}/typing`,
       options,
       retryable: true,
+    });
+  }
+
+  getActivity(chatID: string, options?: RequestOptions): Promise<ChatActivityResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      options,
+    });
+  }
+
+  setActivity(
+    chatID: string,
+    body: ChatSetActivityParams,
+    options?: RequestOptions,
+  ): Promise<ChatActivityResponse> {
+    return this.transport.request({
+      method: "PUT",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      body,
+      options,
+    });
+  }
+
+  clearActivity(
+    chatID: string,
+    query: ChatClearActivityParams = {},
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      query,
+      options,
     });
   }
 

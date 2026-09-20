@@ -73,6 +73,35 @@ export type ReactionType =
   | "question"
   | "custom";
 
+export interface ChatActivity {
+  id: UUID;
+  text: string;
+  emoji: string | null;
+  updated_at: string;
+  expires_at: string;
+}
+
+export interface ChatActivityResponse {
+  chat_id: UUID;
+  agent_id: UUID;
+  version: string;
+  activity: ChatActivity | null;
+}
+
+export interface ChatSetActivityParams {
+  /** 1–21 visible characters, at most 1024 UTF-8 bytes. */
+  text: string;
+  /** One Unicode emoji, or null. */
+  emoji?: string | null;
+  /** Omit to start/replace; supply the current ID to refresh/update. */
+  activity_id?: UUID;
+}
+
+export interface ChatClearActivityParams {
+  /** Clear only this task. A stale or missing activity is a successful no-op. */
+  activity_id?: UUID;
+}
+
 interface ChatHandleBase {
   id: UUID;
   handle: string;
@@ -87,6 +116,8 @@ interface ChatHandleBase {
   verified: boolean;
   /** True when the caller holds this Handle as a Contact. */
   is_contact: boolean;
+  activity_version?: string;
+  activity?: ChatActivity | null;
 }
 
 export interface UserChatHandle extends ChatHandleBase {
@@ -208,12 +239,17 @@ export type SystemEventType =
   | "group_name_updated"
   | "group_icon_updated"
   | "contact_card_shared"
-  | "call_ended";
+  | "call";
 
 export interface CallMarker {
   id: UUID;
   mode: "audio";
-  end_reason: NonNullable<Call["end_reason"]>;
+  status: Call["status"];
+  answered_at: string | null;
+  ended_at: string | null;
+  from: CallContact;
+  to: [CallContact];
+  end_reason: Call["end_reason"];
   connected: boolean;
   duration_seconds: number | null;
 }
