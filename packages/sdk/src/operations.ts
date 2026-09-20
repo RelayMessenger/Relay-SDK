@@ -176,6 +176,11 @@ export const RELAY_V1_OPERATIONS = [
     "operationId": "deleteWebhookSubscription"
   },
   {
+    "method": "POST",
+    "path": "/v1/contacts/lookup",
+    "operationId": "lookupContact"
+  },
+  {
     "method": "GET",
     "path": "/v1/contact_card",
     "operationId": "getContactCard"

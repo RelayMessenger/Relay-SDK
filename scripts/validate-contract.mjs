@@ -153,7 +153,6 @@ for (const forbidden of [
   "/api/mobile",
   "/socket-mode",
   "/socket-connections",
-  "/v1/contacts",
 ]) {
   assert.equal(
     operationJSON.some((operation) => operation.path.includes(forbidden)),
@@ -161,6 +160,9 @@ for (const forbidden of [
     `unsupported path leaked into SDK: ${forbidden}`,
   );
 }
+assert.deepEqual(operationJSON.filter((operation) => operation.path.startsWith("/v1/contacts")), [
+  { method: "POST", path: "/v1/contacts/lookup", operationId: "lookupContact" },
+]);
 assert.ok(operationJSON.some((operation) =>
   operation.path === "/v1/chats/{chatId}/share_contact_card"));
 assert.equal(operationJSON.some((operation) =>
