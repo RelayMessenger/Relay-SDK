@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server eb83978b6b2c625da82471e4af16acad8de0e618
- * OpenAPI 27698655d12500fb9cd2e10dbf1c94025fbc64c288df6151db673a7649877111
+ * Relay Server 328ba8ae07392d64de2570ba9161d75138bf82d5
+ * OpenAPI 99e4c6315bffe93a2a3fe8f1bc3bffb8fbef087133439bb7c2c3f82263bc16a7
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -161,6 +161,25 @@ export interface RelayReplyTo {
   part_index?: number;
 }
 
+export interface RelayCallContact {
+  id: string;
+  handle: string;
+  kind: "user" | "agent";
+}
+
+export interface RelayCallMarker {
+  id: string;
+  mode: "audio";
+  status: "ringing" | "active" | "ended";
+  answered_at: string | null;
+  ended_at: string | null;
+  from: RelayCallContact;
+  to: [RelayCallContact];
+  end_reason: "completed" | "declined" | "canceled" | "no_answer" | "disconnected" | "failed" | null;
+  connected: boolean;
+  duration_seconds: number | null;
+}
+
 export interface RelayMessage {
   chat_id: string;
   created_at: string;
@@ -176,7 +195,7 @@ export interface RelayMessage {
   reply_to?: RelayReplyTo | null;
   sent_at?: string | null;
   silent?: boolean;
-  system_event?: Record<string, unknown> | null;
+  system_event?: (Record<string, unknown> & { call?: RelayCallMarker | null }) | null;
   updated_at: string;
 }
 
