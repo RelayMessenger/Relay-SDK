@@ -25,10 +25,18 @@ async function fixture() {
   };
   await writeConfig(config, configContext);
   const out: string[] = [], err: string[] = [];
+  const signOut = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    expect(url.pathname).toBe("/api/auth/sign-out");
+    expect(init?.method).toBe("POST");
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer private-access-fixture");
+    return Response.json({ success: true });
+  });
   return {
-    configContext, config, out, err,
+    configContext, config, out, err, signOut,
     dependencies: {
       configContext,
+      fetch: signOut,
       stdout: (value: string) => out.push(value),
       stderr: (value: string) => err.push(value),
     },
@@ -62,6 +70,7 @@ it("logout clears a Console-only session", async () => {
   expect(await runCLI(["--json", "--no-input", "logout"], f.dependencies)).toBe(0);
   expect((await readConfig(f.configContext)).console).toBeUndefined();
   expect(JSON.parse(f.out.join(""))).toMatchObject({ ok: true, console: "removed" });
+  expect(f.signOut).toHaveBeenCalledOnce();
 });
 
 it("logout clears the selected token and Console session but preserves other profiles", async () => {
@@ -75,6 +84,7 @@ it("logout clears the selected token and Console session but preserves other pro
   expect(saved.console).toBeUndefined();
   expect(saved.profiles.default?.agent_token).toBeUndefined();
   expect(saved.profiles.other?.agent_token).toBe("other-token");
+  expect(f.signOut).toHaveBeenCalledOnce();
 });
 
 it("hidden auth logout remains an agent-token-only operation", async () => {
