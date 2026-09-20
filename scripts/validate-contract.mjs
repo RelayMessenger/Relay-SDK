@@ -39,9 +39,10 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "eb83978b6b2c625da82471e4af16acad8de0e618",
+    commit: "268245c52c1167322b2a2749871b9e3759a52c5e",
     path: "contracts/developer/openapi.yaml",
-    sha256: "27698655d12500fb9cd2e10dbf1c94025fbc64c288df6151db673a7649877111",
+    publication_status: "local-only",
+    sha256: "e3f6c4616821a830f0c2aa908ee7e72e46359d6ff30ee4796cbbf651ea7df776",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -100,7 +101,7 @@ assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 38);
 assert.equal(manifest.path_count, 24);
 assert.equal(manifest.source_path_count, 25);
-assert.equal(manifest.source_schema_count, 125);
+assert.equal(manifest.source_schema_count, 130);
 assert.equal(manifest.callback_count, 19);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 24);
 assert.equal(operationJSON.length, 38);
@@ -296,6 +297,51 @@ const validateOpenAPI = () => {
   const document = YAML.parse(bytes.toString("utf8"));
   assert.equal(document.paths["/v1/agents"], undefined);
   assert.equal(document.components.schemas.CreateAgentRequest, undefined);
+  const schemas = document.components.schemas;
+  const option = schemas.SelectionOption;
+  assert.equal(option.additionalProperties, false);
+  assert.deepEqual(option.required, ["value", "label"]);
+  assert.equal(option.properties.value.maxLength, 100);
+  assert.equal(option.properties.value.pattern, "^[A-Za-z0-9][A-Za-z0-9._:-]*$");
+  assert.equal(option.properties.label.maxLength, 80);
+  const selection = schemas.SelectionPart;
+  assert.equal(selection.additionalProperties, false);
+  assert.deepEqual(selection.required, ["type", "options"]);
+  assert.deepEqual(selection.properties.type.enum, ["selection"]);
+  assert.equal(selection.properties.options.minItems, 1);
+  assert.equal(selection.properties.options.maxItems, 25);
+  assert.equal(selection.properties.options.items.$ref, "#/components/schemas/SelectionOption");
+  assert.equal(selection.properties.has_responded, undefined);
+  assert.equal(schemas.SelectionPartResponse.properties.has_responded.readOnly, true);
+  assert.equal(schemas.SelectionPartResponse.properties.reactions.type, "null");
+  const response = schemas.SelectionResponsePart;
+  assert.equal(response.additionalProperties, false);
+  assert.deepEqual(response.required, ["type", "selected_values"]);
+  assert.deepEqual(response.properties.type.enum, ["selection_response"]);
+  assert.equal(response.properties.selected_values.uniqueItems, true);
+  assert.equal(response.properties.selected_values.minItems, 1);
+  assert.equal(response.properties.selected_values.maxItems, 25);
+  assert.equal(response.properties.selected_values.items.pattern, option.properties.value.pattern);
+  assert.equal(response.properties.value, undefined, "metadata must not add visible fallback text");
+  assert.match(response.description, /User-only metadata, exactly the second part after plain text/u);
+  assert.match(response.description, /source-option order/u);
+  assert.match(response.description, /409\/1005/u);
+  assert.deepEqual(schemas.SelectionResponsePartResponse.allOf, [{ $ref: "#/components/schemas/SelectionResponsePart" }]);
+  for (const name of ["SelectionPart", "SelectionResponsePart", "ButtonsPart"]) {
+    assert.ok(schemas.MessagePart.oneOf.some((part) => part.$ref === `#/components/schemas/${name}`));
+  }
+  assert.equal(schemas.MessagePart.discriminator.mapping.selection, "#/components/schemas/SelectionPart");
+  assert.equal(schemas.MessagePart.discriminator.mapping.selection_response, "#/components/schemas/SelectionResponsePart");
+  for (const name of ["Message", "MessageEvent", "SentMessage"]) {
+    const refs = schemas[name].properties.parts.items.oneOf.map((part) => part.$ref);
+    for (const part of ["SelectionPartResponse", "SelectionResponsePartResponse", "ButtonsPartResponse"]) {
+      assert.ok(refs.includes(`#/components/schemas/${part}`), `${name} must carry ${part}`);
+    }
+  }
+  assert.match(declaredTypes, /type: "selection"/u);
+  assert.match(declaredTypes, /type: "selection_response"/u);
+  assert.match(declaredTypes, /selected_values: string\[\]/u);
+
   assert.equal(document.components.schemas.CreateAgentResponse, undefined);
   assert.deepEqual(Object.keys(document.paths["/v1/agents/{handle}"]), ["delete"]);
   assert.equal(document.components.schemas.AgentImageRecipe.oneOf.length, 3);
@@ -691,6 +737,10 @@ const skillLock = JSON.parse(
 const pinned = skillLock.api.public_source;
 let provenanceChecked = false;
 if (!structuralOnly) {
+  assert.notEqual(manifest.upstream.publication_status, "local-only",
+    "Release provenance blocked: candidate Server commit is local-only; use --structural for candidate validation, then pin publicly available matching bytes before release.");
+  assert.equal(skillLock.api.openapi_sha256, manifest.source_openapi_sha256,
+    "Release provenance blocked: historical published skill contract differs from the workspace candidate.");
   assert.match(
     manifest.upstream.commit,
     /^[a-f0-9]{40}$/u,

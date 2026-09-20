@@ -6,7 +6,12 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const expected =
-  "27698655d12500fb9cd2e10dbf1c94025fbc64c288df6151db673a7649877111";
+  "e3f6c4616821a830f0c2aa908ee7e72e46359d6ff30ee4796cbbf651ea7df776";
+const manifest = JSON.parse(await readFile(join(root, "contracts/relay-v1-operations.json"), "utf8"));
+assert.equal(manifest.source_openapi_sha256, expected);
+assert.equal(manifest.upstream.sha256, expected);
+assert.equal(manifest.upstream.commit, "268245c52c1167322b2a2749871b9e3759a52c5e");
+assert.equal(manifest.upstream.publication_status, "local-only");
 const copies = [
   "contracts/relay-v1-openapi.yaml",
   "packages/chat-sdk-adapter/contracts/relay-openapi.yaml",
@@ -27,7 +32,8 @@ const skillLock = JSON.parse(
     "utf8",
   ),
 );
-assert.equal(skillLock.api.openapi_sha256, expected);
+// Historical published skill provenance intentionally remains independent of the local candidate.
+assert.equal(skillLock.api.openapi_sha256, "27698655d12500fb9cd2e10dbf1c94025fbc64c288df6151db673a7649877111");
 assert.equal(skillLock.api.commit, "eb83978b6b2c625da82471e4af16acad8de0e618");
 assert.equal(skillLock.sdk.commit, "79517a1c9fcb1c82b474cd72ba8bc10197ff363f");
 assert.equal(skillLock.sdk.version, "0.3.1-staging.1");
@@ -44,7 +50,9 @@ for (const path of [
 ]) {
   const lock = JSON.parse(await readFile(join(root, path), "utf8"));
   assert.equal(lock.relayServer.sha256, expected, `${path}: Server digest`);
-  assert.equal(lock.relayServer.commit, skillLock.api.commit, `${path}: Server pin`);
+  assert.equal(lock.relayServer.commit, "268245c52c1167322b2a2749871b9e3759a52c5e", `${path}: local Server pin`);
+  assert.equal(lock.relayServer.publicationStatus, "local-only");
+  assert.equal(lock.relaySdk.integrityScope, "historical-published-package; not the local selection candidate");
   assert.equal(lock.relaySdk.workspaceOpenapiSha256, expected, `${path}: workspace digest`);
   assert.equal(lock.relaySdk.version, sdkManifest.version, `${path}: SDK version`);
 }

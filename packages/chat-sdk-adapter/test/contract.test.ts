@@ -9,7 +9,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "27698655d12500fb9cd2e10dbf1c94025fbc64c288df6151db673a7649877111";
+  "e3f6c4616821a830f0c2aa908ee7e72e46359d6ff30ee4796cbbf651ea7df776";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -72,6 +72,26 @@ describe("locked Relay Server contract", () => {
     expect(createHash("sha256").update(source).digest("hex")).toBe(
       OPENAPI_SHA,
     );
+  });
+
+  it("carries selection prompts and metadata separately through request and event contracts", async () => {
+    const document = parse(await readFile(new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8")) as OpenApiDocument;
+    const schemas = document.components.schemas;
+    expect(schemas.SelectionPart).toHaveProperty("additionalProperties", false);
+    expect(schemas.SelectionPart).toHaveProperty("properties.options.minItems", 1);
+    expect(schemas.SelectionPart).toHaveProperty("properties.options.maxItems", 25);
+    expect(schemas.SelectionPartResponse).toHaveProperty("properties.has_responded.readOnly", true);
+    expect(schemas.SelectionResponsePart).toHaveProperty("required", ["type", "selected_values"]);
+    expect(schemas.SelectionResponsePart).toHaveProperty("properties.selected_values.uniqueItems", true);
+    expect(schemas.MessagePart).toHaveProperty("discriminator.mapping.selection", "#/components/schemas/SelectionPart");
+    expect(schemas.MessagePart).toHaveProperty("discriminator.mapping.selection_response", "#/components/schemas/SelectionResponsePart");
+    for (const name of ["Message", "MessageEvent", "SentMessage"]) {
+      expect(schemas[name]).toHaveProperty("properties.parts.items.oneOf", expect.arrayContaining([
+        { $ref: "#/components/schemas/SelectionPartResponse" },
+        { $ref: "#/components/schemas/SelectionResponsePartResponse" },
+        { $ref: "#/components/schemas/ButtonsPartResponse" },
+      ]));
+    }
   });
 
   it("caps both recipient arrays at six without changing generic admission APIs", async () => {
