@@ -21109,6 +21109,29 @@ var Chats = class {
       retryable: true
     });
   }
+  getActivity(chatID, options) {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      options
+    });
+  }
+  setActivity(chatID, body, options) {
+    return this.transport.request({
+      method: "PUT",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      body,
+      options
+    });
+  }
+  clearActivity(chatID, query = {}, options) {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      query,
+      options
+    });
+  }
   /**
    * Explicitly marks the visible Messages in this Chat as Read.
    * The SDK never calls this method automatically.
