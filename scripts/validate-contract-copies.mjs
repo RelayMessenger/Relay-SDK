@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const expected =
-  "e3f6c4616821a830f0c2aa908ee7e72e46359d6ff30ee4796cbbf651ea7df776";
+  "ee47c23cd90cdc1b582bc04f730294d40084ea68b291bddb34aac5584e5d9c32";
 const manifest = JSON.parse(await readFile(join(root, "contracts/relay-v1-operations.json"), "utf8"));
 assert.equal(manifest.source_openapi_sha256, expected);
 assert.equal(manifest.upstream.sha256, expected);
-assert.equal(manifest.upstream.commit, "268245c52c1167322b2a2749871b9e3759a52c5e");
+assert.equal(manifest.upstream.commit, "c8a1fe8d7c988bddb2d72f4780e80f6d9dd82c4e");
 assert.equal(manifest.upstream.publication_status, "local-only");
 const copies = [
   "contracts/relay-v1-openapi.yaml",
@@ -24,6 +25,19 @@ for (const path of copies) {
     .update(await readFile(join(root, path)))
     .digest("hex");
   assert.equal(digest, expected, `${path} drifted from the Relay v1 contract`);
+}
+
+// Coordinated local checkouts carry these exact bytes too. Standalone public
+// SDK checkouts need neither private Server access nor a Docs checkout.
+for (const path of [
+  "../server/contracts/developer/openapi.yaml",
+  "../docs/api-reference/openapi.yaml",
+]) {
+  if (!existsSync(join(root, path))) continue;
+  const digest = createHash("sha256")
+    .update(await readFile(join(root, path)))
+    .digest("hex");
+  assert.equal(digest, expected, `${path} drifted from canonical SDK bytes`);
 }
 
 const skillLock = JSON.parse(
@@ -50,7 +64,7 @@ for (const path of [
 ]) {
   const lock = JSON.parse(await readFile(join(root, path), "utf8"));
   assert.equal(lock.relayServer.sha256, expected, `${path}: Server digest`);
-  assert.equal(lock.relayServer.commit, "268245c52c1167322b2a2749871b9e3759a52c5e", `${path}: local Server pin`);
+  assert.equal(lock.relayServer.commit, "c8a1fe8d7c988bddb2d72f4780e80f6d9dd82c4e", `${path}: local Server pin`);
   assert.equal(lock.relayServer.publicationStatus, "local-only");
   assert.equal(lock.relaySdk.integrityScope, "historical-published-package; not the local selection candidate");
   assert.equal(lock.relaySdk.workspaceOpenapiSha256, expected, `${path}: workspace digest`);

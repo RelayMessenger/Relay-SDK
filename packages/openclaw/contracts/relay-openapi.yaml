@@ -2787,7 +2787,7 @@ components:
     SelectionPart:
       type: object
       additionalProperties: false
-      description: Agent-only multiselect prompt. One selection per Message, with nonblank text and no buttons. Toggling and Clear are local; Send submits once per user.
+      description: Coming soon. Agent-only multiselect prompt. One selection per Message, with nonblank text and no buttons. Tapping a selected option deselects it; toggles are local. The sole submit action is a centered compact light-blue Send button, which submits once per user.
       required: [type, options]
       properties:
         type:
@@ -2819,7 +2819,7 @@ components:
     SelectionResponsePart:
       type: object
       additionalProperties: false
-      description: User-only metadata, exactly the second part after plain text. Requires explicit reply_to message_id and part_index targeting a visible selection in the same Chat. Values are unique, nonempty, known and in source-option order; text equals selected labels joined with ', '. A different-key second response returns 409/1005; same-key retries retain existing Message idempotency semantics.
+      description: Coming soon. User-only metadata, exactly the second part after plain text. Requires explicit reply_to message_id and part_index targeting a visible selection in the same Chat. Values are unique, nonempty, known and in source-option order. Canonical new text is literal '• ' + each selected source label joined with '\n'. The server also accepts exact legacy source labels joined with ', ' only for compatibility; arbitrary label parsing is never accepted. selected_values and source-option order remain authoritative. iOS may display round checked circles as presentation only; portable text remains bullets. A different-key second response returns 409/1005; same-key retries retain existing Message idempotency semantics.
       required: [type, selected_values]
       properties:
         type:

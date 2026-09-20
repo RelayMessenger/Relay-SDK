@@ -39,10 +39,10 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "268245c52c1167322b2a2749871b9e3759a52c5e",
+    commit: "c8a1fe8d7c988bddb2d72f4780e80f6d9dd82c4e",
     path: "contracts/developer/openapi.yaml",
     publication_status: "local-only",
-    sha256: "e3f6c4616821a830f0c2aa908ee7e72e46359d6ff30ee4796cbbf651ea7df776",
+    sha256: "ee47c23cd90cdc1b582bc04f730294d40084ea68b291bddb34aac5584e5d9c32",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -305,6 +305,8 @@ const validateOpenAPI = () => {
   assert.equal(option.properties.value.pattern, "^[A-Za-z0-9][A-Za-z0-9._:-]*$");
   assert.equal(option.properties.label.maxLength, 80);
   const selection = schemas.SelectionPart;
+  assert.match(selection.description, /Coming soon/u);
+  assert.doesNotMatch(selection.description, /Clear/u);
   assert.equal(selection.additionalProperties, false);
   assert.deepEqual(selection.required, ["type", "options"]);
   assert.deepEqual(selection.properties.type.enum, ["selection"]);
@@ -325,6 +327,10 @@ const validateOpenAPI = () => {
   assert.equal(response.properties.value, undefined, "metadata must not add visible fallback text");
   assert.match(response.description, /User-only metadata, exactly the second part after plain text/u);
   assert.match(response.description, /source-option order/u);
+  assert.ok(response.description.includes("literal '• '"));
+  assert.ok(response.description.includes("joined with '\\n'"));
+  assert.match(response.description, /exact legacy source labels/u);
+  assert.match(response.description, /arbitrary label parsing is never accepted/u);
   assert.match(response.description, /409\/1005/u);
   assert.deepEqual(schemas.SelectionResponsePartResponse.allOf, [{ $ref: "#/components/schemas/SelectionResponsePart" }]);
   for (const name of ["SelectionPart", "SelectionResponsePart", "ButtonsPart"]) {
