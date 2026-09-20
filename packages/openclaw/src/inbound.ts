@@ -1,4 +1,4 @@
-import { selectionReply } from "@relaymessenger/sdk";
+import { selectionReply, selectionReplyContext } from "@relaymessenger/sdk";
 import type {
   MessagePartResponse,
   RelayWebhookEvent,
@@ -64,7 +64,9 @@ export function buildRelayInboundFacts(
   ) return null;
 
   const text = renderRelayMessageParts(event.data.parts);
-  if (!text.trim()) return null;
+  const message = { parts: event.data.parts, ...(event.data.reply_to ? { reply_to: event.data.reply_to } : {}) };
+  const richMessage = selectionReplyContext(undefined, message) ? message : undefined;
+  if (!text.trim() && !richMessage) return null;
 
   const mentionHandles = event.data.parts.flatMap((part) =>
     part.type === "text" &&
@@ -78,6 +80,7 @@ export function buildRelayInboundFacts(
   const selection = selectionReply(event.data.parts, event.data.reply_to);
   return {
     ...(selection ? { selection } : {}),
+    ...(richMessage ? { richMessage } : {}),
     eventId: event.event_id,
     messageId: event.data.id,
     chatId: event.data.chat.id,

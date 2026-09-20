@@ -65,8 +65,8 @@ export const downloadInboundMedia = async (
 export const inboundMediaPrompt = async (
   turn: BridgeTurn, options?: Omit<InboundMediaOptions, "chatId">,
 ): Promise<{ text: string; images: string[] }> => {
-  const lines = turn.text ? [turn.text] : [];
-  const context = selectionReplyContext(turn.selection);
+  const lines = turn.text ? [turn.text.slice(0, 10_000)] : [];
+  const context = selectionReplyContext(turn.selection, turn.richMessage);
   if (context) lines.push(context);
   const images: string[] = [];
   const files = options

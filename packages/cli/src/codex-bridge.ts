@@ -82,7 +82,8 @@ export const BUTTONS_INSTRUCTION = `${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INS
 export const codexPrompt = (sender: string, text: string): string => [
   `@${sender} sent you this message on Relay:`,
   "",
-  text.slice(0, MAX_RELAY_TEXT),
+  // Visible text is bounded before metadata is appended by inboundMediaPrompt.
+  text,
   "",
   ANSWER_INSTRUCTION,
   "",
@@ -558,8 +559,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
       await handed;
     },
     onFullSync: async () => {
-      // This process keeps no copy of any chat, so there is nothing to rebuild.
-      input.say("Codex was away longer than Relay keeps its messages. It answers the new ones from now on.");
+      throw new Error("Codex bridge cannot acknowledge FULL sync without a durable Relay inbox");
     },
   });
 };

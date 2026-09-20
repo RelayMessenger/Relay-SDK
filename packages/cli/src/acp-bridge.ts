@@ -389,8 +389,7 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
       await handed;
     },
     onFullSync: async () => {
-      // This process keeps no copy of any chat, so there is nothing to rebuild.
-      input.say(`${input.label} was away longer than Relay keeps its messages. It answers the new ones from now on.`);
+      throw new Error(`${input.label} bridge cannot acknowledge FULL sync without a durable Relay inbox`);
     },
   });
 };

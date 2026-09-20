@@ -154,3 +154,15 @@ it("forwards selection data and native authoring guidance to the admitted OpenCl
     ctxPayload: expect.objectContaining({ BodyForAgent: expect.stringContaining("fenced code block tagged `selection`") }),
   }));
 });
+
+
+it("keeps ordered rich parts in model context, not executable command input", async () => {
+  const result = await dispatch([approvedId], approvedId, "review_sender", { selection: true });
+  expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+    ctxPayload: expect.objectContaining({
+      BodyForAgent: expect.stringContaining('"type":"selection_response"'),
+      CommandBody: "Research",
+      RawBody: "Research",
+    }),
+  }));
+});

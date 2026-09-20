@@ -1879,3 +1879,68 @@ it("forwards selection response metadata through raw while rendering only the re
   expect(response).toEqual({ type: "selection_response", selected_values: ["research", "design"] });
   expect(message.raw.message?.reply_to).toEqual({ message_id: IDS.reply, part_index: 1 });
 });
+
+it("keeps rich parts and explicit targets in both signed ingress and REST history", async () => {
+  const { adapter, chat } = receiptHarness();
+  await adapter.initialize(chat);
+  const data = webhookMessage({
+    parts: [{ type: "text", value: "Research" }, { type: "selection_response", selected_values: ["research"] }],
+    reply_to: { message_id: IDS.reply, part_index: 1 },
+  });
+  await adapter.handleWebhook(await signedRequest(envelope("message.received", data as unknown as Record<string, unknown>)));
+  const delivered = vi.mocked(chat.processMessage).mock.calls[0]?.[2];
+  expect(delivered).toMatchObject({ text: "Research", raw: { message: {
+    parts: data.parts, reply_to: data.reply_to,
+  } } });
+
+  const parts = [{ type: "text", value: "Topics?", reactions: null }, {
+    type: "selection", options: [{ value: "research", label: "Research" }], has_responded: true, reactions: null,
+  }];
+  const history = createRelayAdapter({ token: "test", webhookSecret: WEBHOOK_SECRET,
+    fetch: vi.fn(async () => jsonResponse({ messages: [{
+      id: IDS.message, chat_id: IDS.chat, from_handle: AGENT_HANDLE, is_from_me: false,
+      is_system_message: false, parts, reply_to: { message_id: IDS.reply, part_index: 0 },
+      created_at: "2026-09-20T00:00:00Z", updated_at: "2026-09-20T00:00:00Z",
+    }], next_cursor: null })) as typeof fetch,
+  });
+  const page = await history.fetchMessages(THREAD_ID, { direction: "forward" });
+  expect(page.messages[0]?.text).toBe("Topics?");
+  expect(page.messages[0]?.raw.message?.parts).toEqual(parts);
+  expect(page.messages[0]?.raw.message?.reply_to).toEqual({ message_id: IDS.reply, part_index: 0 });
+});
+
+it("posts native selections on the same idempotency lane as plain text, including replay", async () => {
+  const { adapter, fetchMock } = adapterHarness();
+  const chat = createMockChatInstance();
+  await adapter.initialize(chat);
+  const parts = [
+    { type: "text" as const, value: "Topics?" },
+    { type: "selection" as const, options: [{ value: "research", label: "Research" }] },
+  ];
+  vi.mocked(chat.processMessage).mockImplementation(async () => {
+    await adapter.postMessageParts(THREAD_ID, parts);
+    await adapter.postMessage(THREAD_ID, "Follow-up");
+  });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await adapter.handleWebhook(await signedRequest(envelope()));
+    expect(response.status).toBe(200);
+  }
+  const requests = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+  expect(requests).toHaveLength(4);
+  expect(requests.map(([, init]) => new Headers(init?.headers).get("idempotency-key"))).toEqual([
+    `relay-chat-sdk:${IDS.event}:0`, `relay-chat-sdk:${IDS.event}:1`,
+    `relay-chat-sdk:${IDS.event}:0`, `relay-chat-sdk:${IDS.event}:1`,
+  ]);
+  expect(JSON.parse(String(requests[0]?.[1]?.body)).message.parts).toEqual(parts);
+  expect(requests[0]?.[1]?.body).toEqual(requests[2]?.[1]?.body);
+});
+
+it("requires an external key strategy for native selections just like text", async () => {
+  const fetchMock = vi.fn();
+  const adapter = createRelayAdapter({ token: "test", fetch: fetchMock as typeof fetch });
+  await expect(adapter.postMessageParts(THREAD_ID, [
+    { type: "text", value: "Topics?" },
+    { type: "selection", options: [{ value: "research", label: "Research" }] },
+  ])).rejects.toThrow("idempotencyKeyResolver");
+  expect(fetchMock).not.toHaveBeenCalled();
+});

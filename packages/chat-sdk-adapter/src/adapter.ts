@@ -54,6 +54,7 @@ import type {
   RelayChatHandle,
   RelayMessage,
   RelayMessagePartResponse,
+  RelayOutgoingPart,
   RelayRawMessage,
   RelaySentMessage,
   RelayThreadId,
@@ -478,6 +479,7 @@ export class RelayAdapter
       .filter(
         (part): part is Extract<
           RelayMessagePartResponse,
+  RelayOutgoingPart,
           { type: "media" }
         > => part.type === "media",
       )
@@ -533,20 +535,21 @@ export class RelayAdapter
     threadId: string,
     message: AdapterPostableMessage,
     replyToMessageId?: string,
+    nativeParts?: readonly RelayOutgoingPart[],
   ): Promise<RawMessage<RelayRawMessage>> {
     const { chatId } = this.decodeThreadId(threadId);
     const turn = this.turns.active();
     if (
       !turn &&
       !this.idempotencyKeyResolver &&
-      hasPostableContent(message)
+      (nativeParts ? nativeParts.length > 0 : hasPostableContent(message))
     ) {
       throw new ValidationError(
         "relay",
         "Relay posts outside an inbound webhook require idempotencyKeyResolver",
       );
     }
-    const parts = await buildRelayParts(message, (upload) =>
+    const parts = nativeParts ? [...nativeParts] : await buildRelayParts(message, (upload) =>
       this.client.uploadAttachment(upload),
     );
     if (parts.length === 0) {
@@ -719,6 +722,17 @@ export class RelayAdapter
     message: AdapterPostableMessage,
   ): Promise<RawMessage<RelayRawMessage>> {
     return this.send(threadId, message);
+  }
+
+  /** Native Relay components use the same webhook-turn ordering, idempotency
+   * and external key requirement as ordinary Chat SDK posts. */
+  async postMessageParts(
+    threadId: string,
+    parts: readonly RelayOutgoingPart[],
+    replyToMessageId?: string,
+  ): Promise<RawMessage<RelayRawMessage>> {
+    if (replyToMessageId) assertRelayUuid(replyToMessageId, "messageId");
+    return this.send(threadId, { raw: "" }, replyToMessageId, parts);
   }
 
   async postChannelMessage(

@@ -134,7 +134,7 @@ export const runClaudeBridge = async (input: ClaudeBridgeInput): Promise<void> =
       await handed;
     },
     onFullSync: async () => {
-      input.say("Claude Code was away longer than Relay keeps its messages. It answers the new ones from now on.");
+      throw new Error("Claude Code bridge cannot acknowledge FULL sync without a durable Relay inbox");
     },
   });
 };

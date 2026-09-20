@@ -41,8 +41,10 @@ const textFromEvent = (event: RelayWebhookEvent): string | null => {
   const text = event.data.parts
     .flatMap((part) => part.type === "text" || part.type === "link" ? [part.value] : [])
     .join("\n").trim();
-  if (!text) return null;
-  const context = selectionReplyContext(selectionReply(event.data.parts, event.data.reply_to));
+  const context = selectionReplyContext(selectionReply(event.data.parts, event.data.reply_to), {
+    parts: event.data.parts, ...(event.data.reply_to ? { reply_to: event.data.reply_to } : {}),
+  });
+  if (!text && !context) return null;
   return [text, context].filter(Boolean).join("\n\n");
 };
 /**
@@ -144,6 +146,9 @@ export class PiChannel {
   }
   stop(): void { for (const session of this.#sessions.values()) session.stop(); this.#sessions.clear(); }
   async #handle(event: RelayWebhookEvent, signal?: AbortSignal): Promise<void> {
+    // Concurrent redelivery must await the original handoff, not ACK early.
+    const inflight = this.#inflight.get(event.event_id);
+    if (inflight) return inflight;
     if (this.#seen.has(event.event_id)) return;
     const message = textFromEvent(event);
     if (!message) return;

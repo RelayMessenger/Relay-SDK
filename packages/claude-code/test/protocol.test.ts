@@ -92,6 +92,7 @@ async function startRelayMock(params: {
   readonly onAck?: (frame: { type: string; through_sequence?: string }) => void;
   readonly onFrame?: (frame: { type: string; through_sequence?: string }) => void;
   readonly fullSyncSnapshot?: boolean;
+  readonly fullSyncSelection?: boolean;
 }): Promise<RelayMock> {
   const readCalls: string[] = [];
   const sends: Array<{ key: string | undefined; body: unknown }> = [];
@@ -132,8 +133,11 @@ async function startRelayMock(params: {
           chat_id: CHAT_ID,
           from: data.sender_handle.handle,
           from_handle: data.sender_handle,
-          parts: data.parts,
-          reply_to: null,
+          parts: params.fullSyncSelection ? [
+            { type: "text", value: "Research", reactions: null },
+            { type: "selection_response", selected_values: ["research"] },
+          ] : data.parts,
+          reply_to: params.fullSyncSelection ? { message_id: EVENT_ID, part_index: 1 } : null,
           is_system_message: false,
           system_event: null,
           is_from_me: false,
@@ -230,8 +234,9 @@ interface MCPProcess {
   stop(): Promise<void>;
 }
 
-function startMCP(channelDir: string, baseURL: string): MCPProcess {
-  const child = spawn(process.execPath, ["--import", "tsx", "server.ts"], {
+function startMCP(channelDir: string, baseURL: string, entry = "server.ts"): MCPProcess {
+  const args = entry === "server.ts" ? ["--import", "tsx", entry] : [entry];
+  const child = spawn(process.execPath, args, {
     cwd: ROOT,
     env: {
       ...process.env,
@@ -428,7 +433,8 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     expect(mcp.stderr()).not.toContain(TOKEN);
   });
 
-  it("sends full_sync_complete only after complete REST state and unread delivery commit", async () => {
+  it.each(["server.ts", "runtime/server.mjs", "plugin/runtime/server.mjs"])(
+    "%s preserves FULL-sync selection context and authors native selections", async (entry) => {
     const channelDir = mkdtempSync(join(tmpdir(), "relay-full-sync-protocol-"));
     cleanups.push(() => rmSync(channelDir, { recursive: true, force: true }));
     let completedResolve!: () => void;
@@ -440,6 +446,7 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     const relay = await startRelayMock({
       channelDir,
       fullSyncSnapshot: true,
+      fullSyncSelection: true,
       onSocket(socket) {
         socket.send(JSON.stringify({
           type: "ready",
@@ -484,7 +491,7 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
       },
     });
     cleanups.push(() => relay.close());
-    const mcp = startMCP(channelDir, relay.baseURL);
+    const mcp = startMCP(channelDir, relay.baseURL, entry);
     cleanups.push(() => mcp.stop());
     await initialize(mcp);
     await completed;
@@ -496,7 +503,13 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
       content: string;
       meta: Record<string, string>;
     };
-    expect(params.content).toBe("offline FULL sync message");
+    expect(params.content).toBe("Research");
+    expect(JSON.parse(params.meta.selection_response!)).toEqual({ selected_values: ["research"] });
+    expect(JSON.parse(params.meta.reply_to!)).toEqual({ message_id: EVENT_ID, part_index: 1 });
+    expect(JSON.parse(params.meta.relay_parts!)).toEqual([
+      { type: "text", value: "Research", reactions: null },
+      { type: "selection_response", selected_values: ["research"] },
+    ]);
     expect(params.meta).toMatchObject({
       delivery_id: `fullsync-${MESSAGE_ID}`,
       source_sequence: "42",
@@ -517,6 +530,19 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     );
     expect((began.result as { isError?: boolean }).isError).not.toBe(true);
     expect(relay.readCalls).toEqual([`/v1/chats/${CHAT_ID}/read`]);
+    const selection = [{ value: "next", label: "Next" }];
+    for (const id of [10, 11]) {
+      mcp.send({ jsonrpc: "2.0", id, method: "tools/call", params: {
+        name: "reply", arguments: { chat_id: CHAT_ID, text: "Next?", selection, send_id: "selection-reply" },
+      } });
+      const sent = await mcp.take(message => message.id === id, "native selection reply");
+      expect((sent.result as { isError?: boolean }).isError).not.toBe(true);
+    }
+    expect(relay.sends).toHaveLength(1);
+    expect(relay.sends[0]?.body).toEqual({ message: {
+      parts: [{ type: "text", value: "Next?" }, { type: "selection", options: selection }],
+      idempotency_key: relay.sends[0]?.key,
+    } });
     mcp.send({
       jsonrpc: "2.0",
       id: 3,
@@ -525,7 +551,7 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
         name: "complete_processing",
         arguments: {
           delivery_id: `fullsync-${MESSAGE_ID}`,
-          outcome: "failed",
+          outcome: "completed",
         },
       },
     });
@@ -534,7 +560,7 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
       "FULL-sync complete_processing response",
     );
     expect((ended.result as { isError?: boolean }).isError).not.toBe(true);
-    expect(relay.sends).toHaveLength(0);
+    expect(relay.sends).toHaveLength(1);
     await mcp.stop();
   });
 });

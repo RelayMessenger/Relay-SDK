@@ -1,4 +1,4 @@
-import { selectionReply, type SelectionReply, type ReplyTo, type MediaPartResponse, type MessagePartResponse, type RelayWebhookEvent } from "@relaymessenger/sdk";
+import { selectionReply, selectionReplyContext, type SelectionReply, type ReplyTo, type MediaPartResponse, type MessagePartResponse, type RelayWebhookEvent } from "@relaymessenger/sdk";
 
 /** One message this process answers. */
 export interface BridgeTurn {
@@ -8,6 +8,7 @@ export interface BridgeTurn {
   text: string;
   media: MediaPartResponse[];
   selection?: SelectionReply;
+  richMessage?: { parts: MessagePartResponse[]; reply_to?: ReplyTo | null };
 }
 
 /** An inbound message with text or media in it. */
@@ -29,8 +30,11 @@ export const bridgeTurn = (event: RelayWebhookEvent): BridgeTurn | undefined => 
     .flatMap((part) => part.type === "text" || part.type === "link" ? [part.value] : [])
     .join("\n")
     .trim();
-  if (!chatId || !sender || (!text && media.length === 0)) return undefined;
   const selection = selectionReply(parts, data.reply_to);
-  return { eventId: event.event_id, chatId, sender, text, media, ...(selection ? { selection } : {}) };
+  const message = { parts, ...(data.reply_to ? { reply_to: data.reply_to } : {}) };
+  const richMessage = selectionReplyContext(undefined, message) ? message : undefined;
+  if (!chatId || !sender || (!text && media.length === 0 && !richMessage)) return undefined;
+  return { eventId: event.event_id, chatId, sender, text, media,
+    ...(selection ? { selection } : {}), ...(richMessage ? { richMessage } : {}) };
 };
 

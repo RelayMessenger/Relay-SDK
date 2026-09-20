@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { indexedIdempotencyKey, partsWithButtons, partsWithSelection, selectionReply, type SelectionPart, type ButtonsPart } from "@relaymessenger/sdk";
+import { indexedIdempotencyKey, partsWithButtons, partsWithSelection, selectionReply, selectionReplyContext, type SelectionPart, type ButtonsPart } from "@relaymessenger/sdk";
 import type {
   Chat,
   Message,
@@ -13,12 +13,16 @@ import type { DeliveryCandidate } from "./types.ts";
 
 const MAX_RELAY_TEXT = 10_000;
 
-function selectionMeta(parts: readonly MessagePartResponse[], replyTo: Message["reply_to"]): Record<string, string> {
+function selectionMeta(parts: readonly MessagePartResponse[], replyTo: Message["reply_to"], redactor: Redactor): Record<string, string> {
   const selection = selectionReply(parts, replyTo);
-  return selection ? {
-    selection_response: JSON.stringify({ selected_values: selection.selected_values }),
-    reply_to: JSON.stringify(selection.reply_to),
-  } : {};
+  const rich = selectionReplyContext(undefined, { parts, ...(replyTo ? { reply_to: replyTo } : {}) });
+  return {
+    ...(rich ? { relay_parts: redactor.text(JSON.stringify(parts)), ...(replyTo ? { reply_to: JSON.stringify(replyTo) } : {}) } : {}),
+    ...(selection ? {
+      selection_response: redactor.text(JSON.stringify({ selected_values: selection.selected_values })),
+      reply_to: JSON.stringify(selection.reply_to),
+    } : {}),
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -165,7 +169,7 @@ export function classifyRelayEvent(params: {
     senderHandle,
     content,
     meta: {
-      ...selectionMeta(parts, data.reply_to),
+      ...selectionMeta(parts, data.reply_to, params.redactor),
       chat_id: chatId,
       message_id: messageId,
       sender_id: senderId,
@@ -222,7 +226,7 @@ export function deliveryFromSnapshotMessage(params: {
     senderHandle: sender.handle,
     content: messageContent(parts, params.redactor),
     meta: {
-      ...selectionMeta(parts, message.reply_to),
+      ...selectionMeta(parts, message.reply_to, params.redactor),
       chat_id: message.chat_id,
       message_id: message.id,
       sender_id: sender.id,

@@ -195,3 +195,11 @@ it("retains stable selection values and explicit source separately from visible 
   expect(facts?.selection).toEqual({ selected_values: ["research", "design"], reply_to: { message_id: "source", part_index: 1 } });
   expect(renderRelayMessageParts([input.data.parts[1]!])).toBe("");
 });
+
+it("keeps full component context, including another agent's component-only message", () => {
+  const input = event() as RelayMessageReceivedEvent;
+  input.data.parts = [{ type: "buttons", items: [{ label: "Do not execute this label" }], reactions: null }];
+  const facts = buildRelayInboundFacts(input);
+  expect(facts?.text).toBe("");
+  expect(facts?.richMessage).toEqual({ parts: input.data.parts, reply_to: input.data.reply_to });
+});

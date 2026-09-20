@@ -185,3 +185,33 @@ describe("approved two-tool MCP", () => {
     expect(cancelled).toBe(true);
   });
 });
+
+it("round trips native selection authoring and rich response metadata through execute", async () => {
+  const parts = [
+    { type: "text", value: "Research", reactions: null },
+    { type: "selection_response", selected_values: ["research"] },
+  ];
+  const replyTo = { message_id: CHAT, part_index: 1 };
+  const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => init?.method === "POST"
+    ? Response.json({ chat_id: CHAT, message: { id: "sent" } }, { status: 202 })
+    : Response.json({ messages: [{ id: "response", parts, reply_to: replyTo }], next_cursor: null }));
+  const s = await ready({}, sdk(fetch as never));
+  const sent = await s.execute(`async function run(client) {
+    return await client.chats.messages.send(${JSON.stringify(CHAT)}, { message: {
+      parts: [{ type: "text", value: "Topics?" }, { type: "selection", options: [{ value: "research", label: "Research" }] }],
+      idempotency_key: "mcp-selection"
+    } });
+  }`);
+  expect(sent.isError).not.toBe(true);
+  const request = fetch.mock.calls[0];
+  expect(JSON.parse(String(request?.[1]?.body)).message.parts[1]).toEqual({
+    type: "selection", options: [{ value: "research", label: "Research" }],
+  });
+  expect(new Headers(request?.[1]?.headers).get("idempotency-key")).toBe("mcp-selection");
+  const read = await s.execute(`async function run(client) {
+    const page = await client.chats.messages.list(${JSON.stringify(CHAT)});
+    return page.data;
+  }`);
+  expect(read.isError).not.toBe(true);
+  expect(result(read)).toEqual([{ id: "response", parts, reply_to: replyTo }]);
+});

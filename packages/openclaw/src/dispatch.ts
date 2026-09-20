@@ -244,7 +244,7 @@ export async function dispatchRelayEvent(params: {
     message: {
       inboundEventKind: "user_request",
       body,
-      bodyForAgent: [facts.text, selectionReplyContext(facts.selection),
+      bodyForAgent: [facts.text, selectionReplyContext(facts.selection, facts.richMessage),
         `${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE}`,
       ].filter(Boolean).join("\n\n"),
       rawBody: facts.text,
