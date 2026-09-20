@@ -45,6 +45,14 @@ export interface RelayWebhookEnvelope<TData = Record<string, unknown>> {
   webhook_version: typeof RELAY_WEBHOOK_VERSION;
 }
 
+export interface RelayChatActivity {
+  id: string;
+  text: string;
+  emoji: string | null;
+  updated_at: string;
+  expires_at: string;
+}
+
 export interface RelayChatHandle {
   image_url: string | null;
   display_name: string | null;
@@ -59,6 +67,8 @@ export interface RelayChatHandle {
   verified: boolean;
   /** True when the caller holds this Handle as a Contact. */
   is_contact: boolean;
+  activity_version?: string;
+  activity?: RelayChatActivity | null;
 }
 
 export type RelayReactionType =
