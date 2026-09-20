@@ -118,6 +118,9 @@ try {
     "text", "emoji", "activity_id",
   ]);
   assert.deepEqual(interfaceFields("ChatClearActivityParams"), ["activity_id"]);
+  assert.deepEqual(interfaceFields("ContactLookup"), [
+    "id", "handle", "display_name", "kind", "image_url", "image_color", "about", "verified",
+  ]);
   assert.doesNotMatch(packedTypes, /\bavatar_url\b/u);
   assert.doesNotMatch(packedTypes, /\btagline\b/u);
   assert.doesNotMatch(packedTypes, /AgentCreate(?:ProfileParams|Params|Response)/);
@@ -145,7 +148,7 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 41);
+      assert.equal(RELAY_V1_OPERATIONS.length, 42);
       assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
       const allowedOperations = new Set([
         "POST /v1/chats",
@@ -181,6 +184,7 @@ try {
         "GET /v1/webhook-subscriptions/{subscriptionId}",
         "PUT /v1/webhook-subscriptions/{subscriptionId}",
         "DELETE /v1/webhook-subscriptions/{subscriptionId}",
+        "POST /v1/contacts/lookup",
         "GET /v1/contact_card",
         "POST /v1/contact_card",
         "PATCH /v1/contact_card",
@@ -265,6 +269,7 @@ try {
         "retrieve",
         "update",
       ]);
+      assert.deepEqual(methods(client.contacts), ["lookup"]);
       assert.deepEqual(methods(client.contactCard), [
         "create",
         "retrieve",

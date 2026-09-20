@@ -195,7 +195,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/test/request-shapes.test.ts",
       "source_sha256": "2bf2720f298f464364763c00a84da295fb37fc09f40ec397a51a5ff21fdb02a6",
-      "destination_sha256": "80367ed6476e1f50f4e049b0d4ccc447e58c6479f97c1225278b5cd9029e4866",
+      "destination_sha256": "41967e8beb55307c35ba379898be22bc4b740c8c0fcb7c8b3ecb410424352616",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -734,7 +734,7 @@
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18",
       "source": "scripts/check-contract.mjs",
       "source_sha256": "cd9961f8f6f19fdaafcf0b3cfb47fdf0f6f21426741f91bb3f0e3ca57170cb5b",
-      "destination_sha256": "dafe1ae234143fbea41e6ac7ba9390b9b67abf3f9a08d329b633a326a72badab",
+      "destination_sha256": "87589699f4120d8307de1793c075997b8a0fca48efebe8b05db719710613fd23",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -965,7 +965,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "scripts/check-contract.mjs",
       "source_sha256": "cd9961f8f6f19fdaafcf0b3cfb47fdf0f6f21426741f91bb3f0e3ca57170cb5b",
-      "destination_sha256": "10d6d1999fe1296f248b95431d0faa5c386bcdc36b8fa279bb33dd83b775e8e8",
+      "destination_sha256": "1af6a1c90648a7c3fed5b180ed0b06c9eb755ac068f9216b5898c6f65d06de9c",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1064,7 +1064,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/server.test.ts",
       "source_sha256": "139f264949013c31d667e8e2ef72619ab2a5ead79ce5a896ecf909c10de80dcd",
-      "destination_sha256": "4eed17aca0ff99cf4cee3108a3e89400ec631c7ec6195da9b6d018edfbaeacab",
+      "destination_sha256": "7147774ed13d33f1ac8721722d470ba86d260b823ebac25ae6a6a32bf0b5ed08",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

@@ -216,8 +216,9 @@ relay.responding;
 relay.messages.poll;
 // @ts-expect-error Socket Mode is not Relay vocabulary.
 relay.socketMode;
-// @ts-expect-error Private user Contact operations are not in the Agent SDK.
-relay.contacts;
+void relay.contacts.lookup({ handle: "echo" });
+// @ts-expect-error Contact lookup requires a handle.
+relay.contacts.lookup({});
 // @ts-expect-error Add requests are gone; the first Message is the request.
 relay.contactRequests;
 const withService: MessageContent = {

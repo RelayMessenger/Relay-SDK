@@ -202,6 +202,7 @@ describe("Relay v1 request shapes", () => {
       is_active: false,
     });
     await client.webhookSubscriptions.delete("subscription-id");
+    await client.contacts.lookup({ handle: "echo" });
     await client.contactCard.retrieve({ handle: "echo" });
     await client.contactCard.create({ handle: "echo", first_name: "Echo" });
     await client.contactCard.update({
@@ -241,6 +242,9 @@ describe("Relay v1 request shapes", () => {
         idempotency_key: "chat-create-key",
       },
     });
+
+    const lookup = calls.find((call) => call.url.pathname === "/v1/contacts/lookup")!;
+    expect(JSON.parse(String(lookup.body))).toEqual({ handle: "echo" });
 
     const sharedContactCard = calls.find((call) =>
       call.url.pathname.endsWith("/share_contact_card"))!;
@@ -339,6 +343,7 @@ describe("Relay v1 request shapes", () => {
       "calls",
       "chats",
       "contactCard",
+      "contacts",
       "messages",
       "webhookEvents",
       "webhookSubscriptions",
@@ -389,6 +394,7 @@ describe("Relay v1 request shapes", () => {
       "retrieve",
       "update",
     ]);
+    expect(methods(client.contacts)).toEqual(["lookup"]);
     expect(methods(client.contactCard)).toEqual([
       "create",
       "retrieve",
