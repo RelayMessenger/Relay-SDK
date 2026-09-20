@@ -134,7 +134,7 @@ async function startRelayMock(params: {
           from: data.sender_handle.handle,
           from_handle: data.sender_handle,
           parts: params.fullSyncSelection ? [
-            { type: "text", value: "Research", reactions: null },
+            { type: "text", value: "• Research", reactions: null },
             { type: "selection_response", selected_values: ["research"] },
           ] : data.parts,
           reply_to: params.fullSyncSelection ? { message_id: EVENT_ID, part_index: 1 } : null,
@@ -503,11 +503,11 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
       content: string;
       meta: Record<string, string>;
     };
-    expect(params.content).toBe("Research");
+    expect(params.content).toBe("• Research");
     expect(JSON.parse(params.meta.selection_response!)).toEqual({ selected_values: ["research"] });
     expect(JSON.parse(params.meta.reply_to!)).toEqual({ message_id: EVENT_ID, part_index: 1 });
     expect(JSON.parse(params.meta.relay_parts!)).toEqual([
-      { type: "text", value: "Research", reactions: null },
+      { type: "text", value: "• Research", reactions: null },
       { type: "selection_response", selected_values: ["research"] },
     ]);
     expect(params.meta).toMatchObject({

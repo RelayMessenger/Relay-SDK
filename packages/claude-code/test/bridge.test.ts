@@ -207,16 +207,16 @@ describe("FULL sync reconciliation", () => {
     expect(delivery?.meta.full_sync).toBe("true");
     const selected = deliveryFromSnapshotMessage({
       message: { ...message, parts: [
-        { type: "text", value: "Research", reactions: null },
+        { type: "text", value: "• Research", reactions: null },
         { type: "selection_response", selected_values: ["research"] },
       ], reply_to: { message_id: MESSAGE_ID, part_index: 1 } },
       chat: { id: CHAT_ID, display_name: null, handles: [sender, agent], is_group: false,
         created_at: message.created_at, updated_at: message.updated_at },
       agentMessageIds: new Set(), throughSequence: "42", allowedSenders: parseAllowedSenders(USER_ID), redactor,
     });
-    expect(selected?.content).toBe("Research");
+    expect(selected?.content).toBe("• Research");
     expect(JSON.parse(selected!.meta.relay_parts!)).toEqual([
-      { type: "text", value: "Research", reactions: null },
+      { type: "text", value: "• Research", reactions: null },
       { type: "selection_response", selected_values: ["research"] },
     ]);
     expect(JSON.parse(selected!.meta.selection_response!)).toEqual({ selected_values: ["research"] });
@@ -405,13 +405,13 @@ it("builds selection replies without changing button semantics", () => {
 });
 
 it("keeps readable channel content and forwards selection metadata in notification tags", () => {
-  const input = event("Research, Design");
+  const input = event("• Research\n• Design");
   if (input.event_type !== "message.received") throw new Error("fixture");
   input.data.parts.push({ type: "selection_response", selected_values: ["research", "design"] });
   input.data.reply_to = { message_id: MESSAGE_ID, part_index: 1 };
   const action = classifyRelayEvent({ event: input, sequence: "1", allowedSenders: parseAllowedSenders(USER_ID), redactor: createRedactor("secret") });
   if (action.kind !== "delivery") throw new Error("not delivered");
-  expect(action.delivery.content).toBe("Research, Design");
+  expect(action.delivery.content).toBe("• Research\n• Design");
   expect(JSON.parse(action.delivery.meta.selection_response!)).toEqual({ selected_values: ["research", "design"] });
   expect(JSON.parse(action.delivery.meta.reply_to!)).toEqual(input.data.reply_to);
 });

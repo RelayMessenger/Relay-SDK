@@ -13,7 +13,7 @@ it("projects selection response metadata into Think's model-facing text without 
   const raw: RelayRawMessage = { chatId, message: {
     id: messageId, chat_id: chatId, is_from_me: false, is_system_message: false,
     delivery_status: "sent", created_at: "2026-09-20T00:00:00Z", updated_at: "2026-09-20T00:00:00Z",
-    parts: [{ type: "text", value: "Research, Design", reactions: null },
+    parts: [{ type: "text", value: "• Research\n• Design", reactions: null },
       { type: "selection_response", selected_values: ["research", "design"] }],
     reply_to: { message_id: messageId, part_index: 1 },
   } };

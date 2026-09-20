@@ -8,6 +8,22 @@ Source is maintained in
 [`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/staging/packages/cli)
 under `packages/cli`.
 
+## Selection, coming soon
+
+These are local candidate sources, not a claim that the published package or
+hosted API supports selection yet.
+
+Codex and Claude bridges accept a final `selection` JSON fence after the question.
+The shared ACP bridge uses the same format. Inbound model context preserves
+ordered rich parts, `selected_values`, and `reply_to` as data.
+
+New human reply text is literal `• ` + each selected source label joined with
+`\n`, followed by `selection_response` metadata in source-option order. Dispatch
+with `selected_values` and the explicit source target, never label parsing.
+Exact legacy comma-joined text remains a server compatibility input. Tapping a
+selected option deselects it locally; the sole submit action is a centered
+compact light-blue Send button. iOS checked circles are presentation only.
+
 ## Install
 
 ```sh

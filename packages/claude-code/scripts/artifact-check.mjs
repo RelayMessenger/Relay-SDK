@@ -38,6 +38,9 @@ assert.deepEqual(packageJSON.publishConfig, {
   provenance: true,
 });
 assert.deepEqual(runtime, packagedRuntime, "root and marketplace runtimes differ");
+assert.ok(runtime.includes(Buffer.from("portable text remains bullets")), "rebuild runtime from canonical selection guidance");
+assert.ok(runtime.includes(Buffer.from("Tapping a selected option deselects it")));
+assert.ok(!runtime.includes(Buffer.from("Clear and toggles send nothing")), "stale selection UX in runtime");
 assert.ok(
   runtime.includes(Buffer.from(JSON.stringify(packageJSON.version))),
   "generated runtime does not embed the package version",

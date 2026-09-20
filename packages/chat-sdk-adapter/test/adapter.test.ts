@@ -1870,11 +1870,11 @@ it("forwards selection response metadata through raw while rendering only the re
   const message = adapter.parseMessage({
     chatId: IDS.chat, createdAt: "2026-09-19T00:00:00.000Z", eventType: "message.received",
     message: webhookMessage({
-      parts: [{ type: "text", value: "Research, Design" }, { type: "selection_response", selected_values: ["research", "design"] }],
+      parts: [{ type: "text", value: "• Research\n• Design" }, { type: "selection_response", selected_values: ["research", "design"] }],
       reply_to: { message_id: IDS.reply, part_index: 1 },
     }),
   });
-  expect(message.text).toBe("Research, Design");
+  expect(message.text).toBe("• Research\n• Design");
   const response = message.raw.message?.parts?.find(part => part.type === "selection_response");
   expect(response).toEqual({ type: "selection_response", selected_values: ["research", "design"] });
   expect(message.raw.message?.reply_to).toEqual({ message_id: IDS.reply, part_index: 1 });
@@ -1884,12 +1884,12 @@ it("keeps rich parts and explicit targets in both signed ingress and REST histor
   const { adapter, chat } = receiptHarness();
   await adapter.initialize(chat);
   const data = webhookMessage({
-    parts: [{ type: "text", value: "Research" }, { type: "selection_response", selected_values: ["research"] }],
+    parts: [{ type: "text", value: "• Research" }, { type: "selection_response", selected_values: ["research"] }],
     reply_to: { message_id: IDS.reply, part_index: 1 },
   });
   await adapter.handleWebhook(await signedRequest(envelope("message.received", data as unknown as Record<string, unknown>)));
   const delivered = vi.mocked(chat.processMessage).mock.calls[0]?.[2];
-  expect(delivered).toMatchObject({ text: "Research", raw: { message: {
+  expect(delivered).toMatchObject({ text: "• Research", raw: { message: {
     parts: data.parts, reply_to: data.reply_to,
   } } });
 
@@ -1907,6 +1907,18 @@ it("keeps rich parts and explicit targets in both signed ingress and REST histor
   expect(page.messages[0]?.text).toBe("Topics?");
   expect(page.messages[0]?.raw.message?.parts).toEqual(parts);
   expect(page.messages[0]?.raw.message?.reply_to).toEqual({ message_id: IDS.reply, part_index: 0 });
+
+  const responseHistory = createRelayAdapter({ token: "test", webhookSecret: WEBHOOK_SECRET,
+    fetch: vi.fn(async () => jsonResponse({ messages: [{
+      id: IDS.message, chat_id: IDS.chat, from_handle: AGENT_HANDLE, is_from_me: false,
+      is_system_message: false, parts: data.parts, reply_to: data.reply_to,
+      created_at: "2026-09-20T00:00:00Z", updated_at: "2026-09-20T00:00:00Z",
+    }], next_cursor: null })) as typeof fetch,
+  });
+  const responsePage = await responseHistory.fetchMessages(THREAD_ID, { direction: "forward" });
+  expect(responsePage.messages[0]).toMatchObject({ text: "• Research", raw: { message: {
+    parts: data.parts, reply_to: data.reply_to,
+  } } });
 });
 
 it("posts native selections on the same idempotency lane as plain text, including replay", async () => {

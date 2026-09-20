@@ -9,6 +9,22 @@ Local MCP v2 stdio server with exactly two tools:
 
 There is no `talk` tool and no per-operation `relay_*` tool list.
 
+## Selection, coming soon
+
+These are local candidate sources, not a claim that the published package or
+hosted API supports selection yet.
+
+Use `search_docs` with query `selection` and verbose detail, then `execute`
+with the SDK message-send method and ordered text/selection parts. Incoming
+Message and event results retain `selected_values` and `reply_to`.
+
+New human reply text is literal `• ` + each selected source label joined with
+`\n`, followed by `selection_response` metadata in source-option order. Dispatch
+with `selected_values` and the explicit source target, never label parsing.
+Exact legacy comma-joined text remains a server compatibility input. Tapping a
+selected option deselects it locally; the sole submit action is a centered
+compact light-blue Send button. iOS checked circles are presentation only.
+
 ## Start
 
 Requires Node.js 22.22.3 or newer.

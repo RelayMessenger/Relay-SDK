@@ -24,7 +24,7 @@ const message: Message = {
   id: "00000000-0000-7000-8000-000000000002",
   chat_id: chat.id,
   parts: [
-    { type: "text", value: "Research", reactions: null },
+    { type: "text", value: "• Research", reactions: null },
     { type: "selection_response", selected_values: ["research"] },
   ],
   reply_to: { message_id: "00000000-0000-7000-8000-000000000003", part_index: 1 },

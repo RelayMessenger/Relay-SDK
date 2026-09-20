@@ -17,6 +17,17 @@ WebSockets, partial Message bubbles, Message effects, or copied Relay client.
 Think owns conversation memory, fibers, recovery, and its Action ledger. The
 Relay packages own webhook verification and API calls.
 
+## Selection, coming soon
+
+Selection support here is local, unshipped work. Use `reply.selection` with explicit stable values and labels beside a nonblank
+question. Relay context preserves raw ordered parts and source targets as JSON
+data for the model, including commas inside labels.
+New replies use literal `• ` + each selected source label joined with `\n`;
+`selected_values` and `reply_to` are authoritative, never parsed labels.
+The server also accepts exact legacy comma text for compatibility. A selected
+option toggles off locally; the sole submit action is a centered compact
+light-blue Send button.
+
 ## How a Message moves
 
 1. Relay sends a signed `message.received` webhook.

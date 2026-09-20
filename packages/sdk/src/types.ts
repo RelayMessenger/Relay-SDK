@@ -158,6 +158,7 @@ export interface SelectionOption {
 /** Agent-only, 1–25 options; requires nonblank text and cannot mix with buttons. */
 export interface SelectionPart {
   type: "selection";
+  /** Coming soon. Selected options toggle off locally; the sole submit action is a centered compact light-blue Send button. */
   options: SelectionOption[];
 }
 
@@ -167,10 +168,20 @@ export interface SelectionPartResponse extends SelectionPart {
   reactions: null;
 }
 
-/** User-only second part after exact labels joined with ', ', with explicit reply_to. */
+/**
+ * Coming soon: user-only metadata after canonical text (literal '• ' + each source
+ * label, joined with '\n'), with explicit reply_to. Exact legacy comma-joined
+ * labels are accepted by the server only for compatibility, never parsed for IDs.
+ */
 export interface SelectionResponsePart {
   type: "selection_response";
-  /** Unique known values, nonempty and in source-option order. */
+  /**
+   * Unique known values, nonempty and in source-option order, authoritative with
+   * reply_to. New preceding text is literal '• ' + each source label joined with
+   * '\n'. The server accepts exact legacy comma-joined labels for compatibility
+   * only, never arbitrary label parsing. iOS checked circles are presentation;
+   * portable text remains bullets. Coming soon.
+   */
   selected_values: string[];
 }
 

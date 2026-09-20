@@ -12,7 +12,7 @@ const prompt: SelectionPart = {
 };
 const reply: MessageContent = {
   parts: [
-    { type: "text", value: "Research, Design" },
+    { type: "text", value: "• Research\n• Design" },
     { type: "selection_response", selected_values: ["research", "design"] },
   ],
   reply_to: { message_id: "01993d50-ef7b-7b37-886b-23fd80c7ec13", part_index: 1 },
@@ -25,6 +25,14 @@ describe("selection authoring", () => {
     expect(SELECTION_GUIDANCE).toContain("at most one human user");
     expect(SELECTION_GUIDANCE).toContain("Only the human user can submit a selection response; agents cannot");
     expect(SELECTION_GUIDANCE).toContain("across that user's devices and idempotency keys");
+  });
+  it("teaches canonical bullet text, local deselection, and compatibility without label parsing", () => {
+    expect(SELECTION_GUIDANCE).toContain("literal '• ' + label joined with '\\n'");
+    expect(SELECTION_GUIDANCE).toContain("Tapping a selected option deselects it");
+    expect(SELECTION_GUIDANCE).toContain("centered compact light-blue Send button");
+    expect(SELECTION_GUIDANCE).toContain("exact legacy comma-joined source labels only for compatibility");
+    expect(SELECTION_GUIDANCE).toContain("portable text remains bullets");
+    expect(SELECTION_GUIDANCE).not.toContain("Clear");
   });
   it("trims only labels and preserves independent case-sensitive values", () => {
     expect(selectionPart([{ value: "A", label: " Same " }, { value: "a", label: "Same" }]))
@@ -156,7 +164,7 @@ describe("selection transport", () => {
     if (event.event_type !== "message.received") throw new Error("wrong event");
     expect(event.data.parts.find((part) => part.type === "selection_response")?.selected_values)
       .toEqual(["research", "design"]);
-    expect(event.data.parts.find((part) => part.type === "text")?.value).toBe("Research, Design");
+    expect(event.data.parts.find((part) => part.type === "text")?.value).toBe("• Research\n• Design");
     expect(event.data.reply_to).toEqual(reply.reply_to);
   });
 });
@@ -164,7 +172,7 @@ describe("selection transport", () => {
 
 it("discovers structured replies only with an explicit source part, without guessing from text", () => {
   const parts: MessagePartResponse[] = [
-    { type: "text", value: "Research, Design", reactions: null },
+    { type: "text", value: "• Research\n• Design", reactions: null },
     { type: "selection_response", selected_values: ["research", "design"] },
   ];
   expect(selectionReply(parts)).toBeUndefined();
@@ -191,3 +199,21 @@ it("keeps ordered rich parts and source targets as JSON data without label-deriv
   expect(context).not.toContain("selected_values");
   expect(selectionReplyContext(undefined, { parts: parts.slice(0, 1) })).toBe("");
 });
+
+// Discovery is transport-preserving, not server-side response validation. A
+// historical event may contain comma text; neither form supplies machine IDs.
+it.each(["• Museums, Art\n• Same\n• Same", "Museums, Art, Same, Same"])(
+  "discovers authoritative values without parsing or rewriting visible text: %s", (text) => {
+    const parts: MessagePartResponse[] = [
+      { type: "text", value: text, reactions: null },
+      { type: "selection_response", selected_values: ["museums_art", "A", "a"] },
+    ];
+    const replyTo = { message_id: "source", part_index: 0 };
+    const result = selectionReply(parts, replyTo);
+    expect(result).toEqual({ selected_values: ["museums_art", "A", "a"], reply_to: replyTo });
+    expect(selectionReply(parts.slice(0, 1), replyTo)).toBeUndefined();
+    expect(parts[0]).toEqual({ type: "text", value: text, reactions: null });
+    const context = selectionReplyContext(result, { parts, reply_to: replyTo });
+    expect(context).toContain(JSON.stringify({ parts, reply_to: replyTo }));
+  },
+);

@@ -35,6 +35,8 @@ describe("approved two-tool MCP", () => {
     const found = await client.callTool({ name: "search_docs", arguments: { query: "selection", language: "typescript", detail: "verbose" } });
     expect(text(found)).toContain("SelectionPart");
     expect(text(found)).toContain("selected_values");
+    expect(text(found)).toContain("• ");
+    expect(tools.find(tool => tool.name === "execute")?.description).toContain("portable text remains bullets");
     expect(resolveClient).not.toHaveBeenCalled();
   });
   it("advertises exactly search_docs and execute, without credential arguments or talk", async () => {
@@ -188,7 +190,7 @@ describe("approved two-tool MCP", () => {
 
 it("round trips native selection authoring and rich response metadata through execute", async () => {
   const parts = [
-    { type: "text", value: "Research", reactions: null },
+    { type: "text", value: "• Research", reactions: null },
     { type: "selection_response", selected_values: ["research"] },
   ];
   const replyTo = { message_id: CHAT, part_index: 1 };

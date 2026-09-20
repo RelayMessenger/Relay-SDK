@@ -4,14 +4,17 @@ import {
   readFileSync,
   writeFileSync,
   mkdtempSync,
+  mkdirSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, relative } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const source = process.cwd();
 const temporary = mkdtempSync(join(tmpdir(), "relay-agent-starter-"));
 const installed = join(temporary, "cloudflare-think-agent");
+let candidateTestEnv = {};
 const excluded = new Set([
   ".artifacts",
   ".dev.vars",
@@ -29,7 +32,7 @@ function include(path) {
 function run(command, args) {
   execFileSync(command, args, {
     cwd: installed,
-    env: { ...process.env, CI: "1" },
+    env: { ...process.env, ...candidateTestEnv, CI: "1" },
     stdio: "inherit",
   });
 }
@@ -50,6 +53,20 @@ try {
     const manifestPath = join(installed, "package.json");
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     console.log(JSON.stringify({ validationMode: "local-candidate-not-registry", originalDependencies: manifest.dependencies }));
+    // Carry the unchanged historical receipt and canonical proof helper into
+    // this disposable standalone copy. Child tests must not inherit the root
+    // workspace overlay's lock path.
+    const artifacts = join(installed, ".artifacts");
+    mkdirSync(artifacts, { recursive: true });
+    const lockedFile = join(artifacts, "locked-package-lock.json");
+    cpSync(resolve(process.env.RELAY_THINK_LOCKED_LOCKFILE ?? join(source, "package-lock.json")), lockedFile);
+    const helper = join(artifacts, "candidate-tarball.mjs");
+    cpSync(fileURLToPath(new URL("../../../packages/sdk/scripts/candidate-tarball.mjs", import.meta.url)), helper);
+    candidateTestEnv = {
+      RELAY_THINK_CANDIDATE_HELPER: helper,
+      RELAY_THINK_CANDIDATE_LOCKFILE: join(installed, "package-lock.json"),
+      RELAY_THINK_LOCKED_LOCKFILE: lockedFile,
+    };
     writeFileSync(manifestPath, JSON.stringify(candidateConsumerManifest(manifest, candidates)));
     rmSync(join(installed, "package-lock.json"));
     run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"]);

@@ -420,7 +420,7 @@ describe.skipIf(!realAgent)("the real ACP agent, when one is on PATH", () => {
 });
 
 it("preserves selection context and native authoring across the generic ACP bridge and replay", async () => {
-  const event = received("selected", "chat-1", "Research");
+  const event = received("selected", "chat-1", "• Research");
   if (event.event_type !== "message.received") throw new Error("fixture");
   event.data.parts.push({ type: "selection_response", selected_values: ["research"] });
   event.data.reply_to = { message_id: "source", part_index: 1 };

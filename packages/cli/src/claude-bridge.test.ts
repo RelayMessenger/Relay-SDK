@@ -306,7 +306,7 @@ describe("links in a bridged answer", () => {
 });
 
 it("passes selected values to Claude and authors a native selection through the actual bridge", async () => {
-  const event = received("selected", "chat-1", "Research");
+  const event = received("selected", "chat-1", "• Research");
   if (event.event_type !== "message.received") throw new Error("fixture");
   event.data.parts.push({ type: "selection_response", selected_values: ["research"] });
   event.data.reply_to = { message_id: "source", part_index: 1 };

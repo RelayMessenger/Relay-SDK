@@ -122,7 +122,9 @@ export interface RelaySelectionPartResponse extends RelaySelectionPart {
   reactions: null;
 }
 
-/** User reply metadata, exposed intact through message.raw.message.parts. */
+/** Coming soon: metadata exposed intact through message.raw.message.parts.
+ * Readable text is literal '• ' + each selected source label joined with '\n'.
+ * Dispatch with selected_values and reply_to, never by parsing visible labels. */
 export interface RelaySelectionResponsePart {
   type: "selection_response";
   selected_values: string[];

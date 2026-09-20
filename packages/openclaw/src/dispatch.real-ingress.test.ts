@@ -38,7 +38,7 @@ async function dispatch(allowFrom: string[], contactId = approvedId, handle = "r
     },
   } as RelayWebhookEvent;
   if (options.selection && event.event_type === "message.received") {
-    event.data.parts = [{ type: "text", value: "Research", reactions: null }, { type: "selection_response", selected_values: ["research"] }];
+    event.data.parts = [{ type: "text", value: "• Research", reactions: null }, { type: "selection_response", selected_values: ["research"] }];
     event.data.reply_to = { message_id: "00000000-0000-7000-8000-000000000010", part_index: 1 };
   }
   await dispatchRelayEvent({
@@ -147,11 +147,11 @@ it("forwards selection data and native authoring guidance to the admitted OpenCl
   expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
     ctxPayload: expect.objectContaining({
       BodyForAgent: expect.stringContaining('"selected_values":["research"]'),
-      RawBody: "Research",
+      RawBody: "• Research",
     }),
   }));
   expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
-    ctxPayload: expect.objectContaining({ BodyForAgent: expect.stringContaining("fenced code block tagged `selection`") }),
+    ctxPayload: expect.objectContaining({ BodyForAgent: expect.stringContaining("portable text remains bullets") }),
   }));
 });
 
@@ -161,8 +161,8 @@ it("keeps ordered rich parts in model context, not executable command input", as
   expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
     ctxPayload: expect.objectContaining({
       BodyForAgent: expect.stringContaining('"type":"selection_response"'),
-      CommandBody: "Research",
-      RawBody: "Research",
+      CommandBody: "• Research",
+      RawBody: "• Research",
     }),
   }));
 });

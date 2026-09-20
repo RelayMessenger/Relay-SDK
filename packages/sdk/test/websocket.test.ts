@@ -187,7 +187,7 @@ it("delivers selection response metadata and reply target to the default callbac
   const event = envelope();
   if (event.event_type !== "message.received") throw new Error("wrong fixture");
   event.data.parts = [
-    { type: "text", value: "Research, Design", reactions: null },
+    { type: "text", value: "• Research\n• Design", reactions: null },
     { type: "selection_response", selected_values: ["research", "design"] },
   ];
   event.data.reply_to = { message_id: "source-message", part_index: 1 };

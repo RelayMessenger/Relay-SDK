@@ -186,12 +186,12 @@ it("retains stable selection values and explicit source separately from visible 
   const input = event();
   if (input.event_type !== "message.received") throw new Error("fixture");
   input.data.parts = [
-    { type: "text", value: "Research, Design", reactions: null },
+    { type: "text", value: "• Research\n• Design", reactions: null },
     { type: "selection_response", selected_values: ["research", "design"] },
   ];
   input.data.reply_to = { message_id: "source", part_index: 1 };
   const facts = buildRelayInboundFacts(input);
-  expect(facts?.text).toBe("Research, Design");
+  expect(facts?.text).toBe("• Research\n• Design");
   expect(facts?.selection).toEqual({ selected_values: ["research", "design"], reply_to: { message_id: "source", part_index: 1 } });
   expect(renderRelayMessageParts([input.data.parts[1]!])).toBe("");
 });

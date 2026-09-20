@@ -1,20 +1,34 @@
+import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
+import {
+  candidateTarball,
+  candidateConsumerManifest,
+  assertInstalledCandidate,
+} from "../../sdk/scripts/candidate-tarball.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+const candidate = candidateTarball({
+  name: "@relaymessenger/sdk",
+  version: packageJson.dependencies["@relaymessenger/sdk"],
+  variable: "RELAY_SDK_CANDIDATE_TARBALL",
+});
 const temp = mkdtempSync(join(tmpdir(), "relay-openclaw-gateway-"));
 const home = join(temp, "home");
 const pack = join(temp, "pack");
@@ -40,6 +54,46 @@ if (openclaw === dirname(openclaw) || !existsSync(openclaw)) {
   throw new Error("could not locate the OpenClaw CLI entry");
 }
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+
+function ownedPath(path, owner) {
+  assert.ok(typeof path === "string" && isAbsolute(path), "expected an absolute managed path");
+  const actual = realpathSync(path);
+  const within = relative(realpathSync(owner), actual);
+  assert.ok(
+    within && within !== ".." && !within.startsWith(`..${sep}`) && !isAbsolute(within),
+    `managed path escapes the harness-owned directory: ${path}`,
+  );
+  return actual;
+}
+
+function managedCandidateProject(install, stateDir) {
+  assert.equal(install?.source, "npm", "candidate requires a managed npm install");
+  assert.equal(install?.artifactKind, "npm-pack", "candidate requires the packed plugin");
+  // Resolve the installer receipt, never guess an extensions/ or npm/projects/ path.
+  const owner = ownedPath(stateDir, temp);
+  const installed = ownedPath(install.installPath, owner);
+  const installedManifest = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
+  assert.equal(installedManifest.name, packageJson.name);
+  assert.equal(installedManifest.version, packageJson.version);
+  for (let project = dirname(installed); project !== owner; project = dirname(project)) {
+    ownedPath(project, owner);
+    const manifestPath = join(project, "package.json");
+    const lockPath = join(project, "package-lock.json");
+    if (!existsSync(manifestPath) || !existsSync(lockPath)) continue;
+    for (const path of [manifestPath, lockPath]) {
+      ownedPath(path, project);
+      assert.ok(lstatSync(path).isFile(), "managed manifest and lock must be regular files");
+    }
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+    const key = relative(project, installed).split(sep).join("/");
+    assert.equal(key, `node_modules/${packageJson.name}`, "plugin must belong to the managed project");
+    assert.ok(manifest.dependencies?.[packageJson.name], "managed project must depend on the plugin");
+    assert.equal(lock.packages?.[key]?.version, packageJson.version, "managed lock must contain the plugin");
+    return { project, installed, manifestPath, manifest };
+  }
+  throw new Error("could not locate the managed plugin's package.json + package-lock.json project");
+}
 
 async function freePort() {
   return await new Promise((resolvePort, reject) => {
@@ -129,6 +183,39 @@ try {
   }
   if (!existsSync(join(inspection.install.installPath, "dist", "index.js"))) {
     throw new Error("OpenClaw inspected install is missing dist/index.js");
+  }
+  if (candidate) {
+    // Inspect returns the effective install record; recent OpenClaw versions do
+    // not persist plugins.installs in openclaw.json. Keep its npm/archive proof.
+    const { project, installed, manifestPath, manifest } =
+      managedCandidateProject(inspection.install, stateDir);
+    const pluginManifest = readFileSync(join(installed, "package.json"), "utf8");
+    // Change only the disposable project, not the packed/installed plugin manifest.
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify(candidateConsumerManifest(manifest, [candidate]), null, 2)}\n`,
+    );
+    execFileSync(npm, [
+      "install",
+      "--prefix", project,
+      "--ignore-scripts",
+      "--omit=optional",
+      "--legacy-peer-deps",
+      "--package-lock=true",
+      "--no-audit",
+      "--no-fund",
+    ], { cwd: project, env, stdio: "inherit" });
+    assert.equal(readFileSync(join(installed, "package.json"), "utf8"), pluginManifest);
+    const importer = join(installed, "dist", "index.js");
+    ownedPath(createRequire(importer).resolve("@relaymessenger/sdk/package.json"), project);
+    assertInstalledCandidate(project, importer, candidate);
+    console.log(JSON.stringify({
+      validationMode: "local-candidate-not-registry",
+      proof: "managed plugin resolves retained SDK archive",
+      installPath: installed,
+      project,
+      integrity: candidate.integrity,
+    }));
   }
 
   const relayPort = await freePort();
@@ -297,7 +384,7 @@ try {
   }
 
   console.log(
-    "Relay OpenClaw installed npm-pack inspect + WebSocket gateway harness passed.",
+    `Relay OpenClaw installed npm-pack inspect + WebSocket gateway harness passed (${candidate ? "local candidate; NOT registry/release validation" : "registry dependencies"}).`,
   );
   console.log(
     "Proof: durable cumulative ACK, replay suppression, heartbeat, one model turn, one idempotent Chat Message.",

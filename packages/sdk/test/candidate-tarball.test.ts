@@ -52,3 +52,25 @@ it("rejects registry integrity or installed bytes that differ from the retained 
   writeFileSync(join(consumer, key, "dist/index.js"), "export const candidate = false;\n");
   expect(() => assertInstalledCandidate(consumer, importer, candidate)).toThrow("installed entry differs");
 });
+
+it("uses an explicit overlay install receipt without changing default registry proof", () => {
+  const { root, candidate } = fixture();
+  const consumer = join(root, "consumer");
+  const key = "node_modules/@relaymessenger/sdk";
+  cpSync(join(root, "package"), join(consumer, key), { recursive: true });
+  const importer = join(consumer, "package.json");
+  writeFileSync(importer, "{}");
+  writeFileSync(join(consumer, "package-lock.json"), JSON.stringify({
+    packages: { [key]: { integrity: "historical-registry-integrity" } },
+  }));
+  const lockPath = join(root, "overlay-package-lock.json");
+  writeFileSync(lockPath, JSON.stringify({
+    packages: { [key]: { integrity: candidate.integrity } },
+  }));
+  expect(() => assertInstalledCandidate(consumer, importer, candidate, { lockPath })).not.toThrow();
+  expect(() => assertInstalledCandidate(consumer, importer, candidate)).toThrow("integrity");
+  expect(() => assertInstalledCandidate(consumer, importer, candidate, { lockPath: "relative.json" }))
+    .toThrow("absolute");
+  writeFileSync(lockPath, JSON.stringify({ packages: { [key]: { integrity: "wrong-archive" } } }));
+  expect(() => assertInstalledCandidate(consumer, importer, candidate, { lockPath })).toThrow("integrity");
+});

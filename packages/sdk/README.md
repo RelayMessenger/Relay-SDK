@@ -37,11 +37,17 @@ idempotency keys, without expanding group membership.
 array. It keeps invalid blocks as text with an error and never combines a
 selection with buttons. Existing buttons retain their behavior.
 
-The user's reply is exactly text labels joined with `, `, then
+Tapping a selected option deselects it without sending. The sole submit action
+is a centered compact light-blue **Send** button.
+
+The user's new reply is exactly literal `• ` + each selected source label
+joined with `\n`, then
 `{ type: "selection_response", selected_values: ["research", "design"] }`,
 in source-option order, with explicit `reply_to.message_id` and `part_index`.
 The user client keeps its existing outgoing idempotency identity for retries.
-Metadata has no additional display text. Use `selected_values` and the source
+The server also accepts exact legacy comma-joined source labels only for
+compatibility. iOS may present round checked circles, but portable text stays
+bulleted. Metadata has no additional display text. Use `selected_values` and the source
 reply target to dispatch your own handler, rather than splitting labels.
 Signed webhook `unwrap` and WebSocket `onEvent` default types expose this
 metadata after narrowing to `message.received`.

@@ -31,7 +31,7 @@ export function candidateConsumerManifest(manifest, candidates) {
 }
 
 /** Prove the consuming package actually resolves the retained archive, not registry/nested SDK bytes. */
-export function assertInstalledCandidate(consumer, importer, candidate) {
+export function assertInstalledCandidate(consumer, importer, candidate, { lockPath = join(consumer, "package-lock.json") } = {}) {
   const require = createRequire(resolve(importer));
   const manifestPath = require.resolve(`${candidate.name}/package.json`);
   const directory = dirname(manifestPath);
@@ -41,7 +41,10 @@ export function assertInstalledCandidate(consumer, importer, candidate) {
   assert.equal(manifest.version, candidate.version);
   const key = relative(consumer, directory).replaceAll("\\", "/");
   assert.ok(key.startsWith("node_modules/"), "candidate must resolve inside the isolated consumer");
-  const lock = JSON.parse(readFileSync(join(consumer, "package-lock.json"), "utf8"));
+  // A workspace overlay may retain its install receipt outside the source
+  // checkout so the historical checked-in lock remains unchanged.
+  assert.ok(isAbsolute(lockPath), "candidate install lock must be an absolute path");
+  const lock = JSON.parse(readFileSync(lockPath, "utf8"));
   assert.equal(lock.packages[key]?.integrity, candidate.integrity, "installed dependency must have the candidate archive integrity");
   const entry = manifest.main;
   assert.ok(typeof entry === "string" && !isAbsolute(entry) && !entry.split("/").includes(".."));

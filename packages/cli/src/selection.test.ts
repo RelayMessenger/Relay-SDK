@@ -9,6 +9,8 @@ describe("CLI selection authoring and discovery", () => {
     const prompt = codexPrompt("alice", "send selections");
     expect(prompt).toContain("fenced code block tagged `selection`");
     expect(prompt).toContain("If the person asks for selections");
+    expect(prompt).toContain("literal '• '");
+    expect(prompt).not.toContain("Clear and toggles");
     const warnings: string[] = [];
     expect(answerMessages('Topics?\n```selection\n[{"value":"research","label":"Research"}]\n```', "alice", text => warnings.push(text))).toEqual([
       [{ type: "text", value: "Topics?" }, { type: "selection", options: [{ value: "research", label: "Research" }] }],
@@ -22,21 +24,21 @@ describe("CLI selection authoring and discovery", () => {
       data: {
         direction: "inbound", chat: { id: "chat" }, sender_handle: { handle: "alice" },
         parts: [
-          { type: "text", value: "Research, Design", reactions: null },
+          { type: "text", value: "• Research\n• Design", reactions: null },
           { type: "selection_response", selected_values: ["research", "design"] },
         ],
         reply_to: { message_id: "source", part_index: 1 },
       },
     } as RelayWebhookEvent;
     const turn = bridgeTurn(event)!;
-    expect(turn.text).toBe("Research, Design");
+    expect(turn.text).toBe("• Research\n• Design");
     expect(turn.selection).toEqual({
       selected_values: ["research", "design"], reply_to: { message_id: "source", part_index: 1 },
     });
     const context = await inboundMediaPrompt(turn);
     expect(context.text).toContain('"selected_values":["research","design"]');
     expect(context.text).toContain('"reply_to":{"message_id":"source","part_index":1}');
-    expect(context.text.startsWith("Research, Design")).toBe(true);
+    expect(context.text.startsWith("• Research\n• Design")).toBe(true);
   });
 });
 

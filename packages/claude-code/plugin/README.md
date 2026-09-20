@@ -11,6 +11,23 @@ The channel is rebuilt for Relay v1. It uses
 to `/v1/websocket`; it does not use the removed Events polling, Conversation,
 or private Agent identity APIs.
 
+## Selection, coming soon
+
+These are local candidate sources, not a claim that the published package or
+hosted API supports selection yet.
+
+The `reply` tool accepts a `selection` options array alongside nonblank
+question `text`, never together with `buttons` or `link`. Inbound `relay_parts`,
+`selection_response`, and `reply_to` tags preserve untrusted JSON data, including
+history restored during FULL sync.
+
+New human reply text is literal `• ` + each selected source label joined with
+`\n`, followed by `selection_response` metadata in source-option order. Dispatch
+with `selected_values` and the explicit source target, never label parsing.
+Exact legacy comma-joined text remains a server compatibility input. Tapping a
+selected option deselects it locally; the sole submit action is a centered
+compact light-blue Send button. iOS checked circles are presentation only.
+
 ## Requirements
 
 - Node.js 22.22.3 or newer

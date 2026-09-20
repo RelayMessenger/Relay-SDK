@@ -4,8 +4,9 @@ import {
   readFileSync,
   readdirSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { thinkCandidateMode, verifyThinkCandidates } from "./candidate-contract.js";
 
 const RELAY_SERVER_SHA =
   "c8a1fe8d7c988bddb2d72f4780e80f6d9dd82c4e";
@@ -56,16 +57,25 @@ describe("locked runtime contracts", () => {
     expect(openapiText).not.toMatch(/\btagline\b/u);
   });
 
-  it("pins the coordinated Think and Relay packages", () => {
+  it("pins the coordinated Think and Relay packages or proves explicit local candidate archives", async () => {
     expect(packageVersion("@cloudflare/think")).toBe("0.17.0");
-    expect(packageVersion("@relaymessenger/chat-sdk-adapter"))
-      .toBe("0.3.0");
-    expect(packageVersion("@relaymessenger/sdk")).toBe("0.3.0");
+    if (thinkCandidateMode()) {
+      await verifyThinkCandidates();
+    } else {
+      expect(packageVersion("@relaymessenger/chat-sdk-adapter"))
+        .toBe("0.3.0");
+      expect(packageVersion("@relaymessenger/sdk")).toBe("0.3.0");
+    }
   });
 
   it(`locks the adapter tarball built from Relay Chat SDK ${RELAY_CHAT_SDK_SHA.slice(0, 7)}`, () => {
+    // Candidate installs have a separate receipt; keep testing the original
+    // locked-registry contract as well, never reinterpret it as a candidate.
+    const lockedFile = thinkCandidateMode() && process.env.RELAY_THINK_LOCKED_LOCKFILE
+      ? process.env.RELAY_THINK_LOCKED_LOCKFILE : resolve("package-lock.json");
+    expect(isAbsolute(lockedFile)).toBe(true);
     const lock = JSON.parse(
-      readFileSync("package-lock.json", "utf8"),
+      readFileSync(lockedFile, "utf8"),
     ) as {
       packages?: Record<string, {
         integrity?: string;
