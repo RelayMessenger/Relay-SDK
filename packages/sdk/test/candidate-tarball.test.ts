@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { candidateTarball, candidateConsumerManifest, assertInstalledCandidate } from "../scripts/candidate-tarball.mjs";
 
-const scratch = [];
+const scratch: string[] = [];
 afterEach(() => { for (const path of scratch.splice(0)) rmSync(path, { recursive: true, force: true }); });
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "relay-candidate-proof-"));
@@ -44,7 +44,7 @@ it("rejects registry integrity or installed bytes that differ from the retained 
   cpSync(join(root, "package"), join(consumer, key), { recursive: true });
   const importer = join(consumer, "package.json");
   writeFileSync(importer, "{}");
-  const lock = integrity => writeFileSync(join(consumer, "package-lock.json"), JSON.stringify({ packages: { [key]: { integrity } } }));
+  const lock = (integrity: string) => writeFileSync(join(consumer, "package-lock.json"), JSON.stringify({ packages: { [key]: { integrity } } }));
   lock("registry-bytes");
   expect(() => assertInstalledCandidate(consumer, importer, candidate)).toThrow("integrity");
   lock(candidate.integrity);
