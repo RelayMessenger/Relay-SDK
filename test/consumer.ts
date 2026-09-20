@@ -1,6 +1,5 @@
 import Relay, {
   RELAY_WEBHOOK_EVENT_TYPES,
-  type AgentMessageRequestsFrom,
   type Chat,
   type ChatActivity,
   type ChatActivityResponse,
@@ -35,25 +34,6 @@ const relay = new Relay({
   apiKey: "consumer-token",
   baseURL: "http://127.0.0.1:8790",
 });
-
-const agentAdmissionValues: AgentMessageRequestsFrom[] = [
-  "everyone", "people", "agents", "verified_agents", "nobody",
-];
-for (const message_requests_from of agentAdmissionValues) {
-  const card = await relay.contactCard.update({ handle: "echo", message_requests_from });
-  card.message_requests_from satisfies AgentMessageRequestsFrom | undefined;
-}
-const cards = await relay.contactCard.retrieve({ handle: "echo" });
-cards.contact_cards[0]!.message_requests_from satisfies AgentMessageRequestsFrom | undefined;
-await relay.contactCard.update({ handle: "echo", first_name: "Echo" });
-// @ts-expect-error The canonical agent admission enum has no no_one value.
-await relay.contactCard.update({ handle: "echo", message_requests_from: "no_one" });
-// @ts-expect-error The optional admission field is not nullable.
-await relay.contactCard.update({ handle: "echo", message_requests_from: null });
-// @ts-expect-error The create request does not carry the update-only admission field.
-await relay.contactCard.create({ handle: "echo", first_name: "Echo", message_requests_from: "people" });
-// @ts-expect-error Person settings remain outside the public SDK contract.
-relay.me;
 
 const liveCallMarker: CallMarker = {
   id: "call-id", mode: "audio", status: "ringing",
@@ -237,10 +217,19 @@ relay.responding;
 relay.messages.poll;
 // @ts-expect-error Socket Mode is not Relay vocabulary.
 relay.socketMode;
+// @ts-expect-error Person settings remain outside the public SDK contract.
+relay.me;
+// @ts-expect-error The public Contact Card update has no agent admission field.
+await relay.contactCard.update({ handle: "echo", message_requests_from: "everyone" });
+// @ts-expect-error The public Contact Card create request has no agent admission field.
+await relay.contactCard.create({ handle: "echo", first_name: "Echo", message_requests_from: "everyone" });
+const ownCards = await relay.contactCard.retrieve({ handle: "echo" });
+// @ts-expect-error The public Contact Card response has no agent admission field.
+ownCards.contact_cards[0]!.message_requests_from;
 const lookup: ContactLookupResponse = await relay.contacts.lookup({ handle: "alice" });
 lookup.contact.kind satisfies "user" | "agent";
 lookup.contact.image_color satisfies string | null;
-// @ts-expect-error Public lookup does not carry the agent's Contact Card admission setting.
+// @ts-expect-error Public lookup does not carry person settings or an agent admission field.
 lookup.contact.message_requests_from;
 // @ts-expect-error Lookup requires a Handle.
 await relay.contacts.lookup({});

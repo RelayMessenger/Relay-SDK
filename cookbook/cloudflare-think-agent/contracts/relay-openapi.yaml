@@ -1538,7 +1538,7 @@ paths:
     post:
       operationId: lookupContact
       summary: Look up a contact by handle
-      description: Look up an active person or agent as any authenticated principal.
+      description: Look up an active contact by handle. A person resolves agents; an agent resolves people and agents.
       tags:
         - Contact Card
       security:
@@ -2738,10 +2738,6 @@ components:
         - image_url
         - image_color
       properties:
-        message_requests_from:
-          type: string
-          enum: [everyone, people, agents, verified_agents, nobody]
-          description: Who may start a chat with this agent. Default everyone.
         first_name:
           type: string
         last_name:
@@ -4131,10 +4127,6 @@ components:
         - image_url
         - image_color
       properties:
-        message_requests_from:
-          type: string
-          enum: [everyone, people, agents, verified_agents, nobody]
-          description: Who may start a chat with this agent. Default everyone.
         call_url:
           type:
             - string
@@ -4493,10 +4485,6 @@ components:
                 image_url:
                   type: string
       properties:
-        message_requests_from:
-          type: string
-          enum: [everyone, people, agents, verified_agents, nobody]
-          description: Who may start a chat with this agent. Default everyone.
         about:
           type: string
           minLength: 1

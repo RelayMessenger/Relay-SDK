@@ -39,9 +39,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "64651735a95a029c1b60385774090fc112d139ed",
+    commit: "8b608647b0e75a28f9d7aa4bbb36097b644d43f2",
     path: "contracts/developer/openapi.yaml",
-    sha256: "d4b4925d23853725a8c5e37ff4d5fa95689edfeda4110e02f8a36eb1383429cc",
+    sha256: "46eeedd5a5e99e879e32c45972799364021143df9f81acd60837713210639735",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -317,18 +317,14 @@ const validateOpenAPI = () => {
     ["8F6CF2", "5F38CF"], ["5B9BFA", "0B52C0"], ["2596A6", "116A79"], ["2FA46A", "137347"],
   ]);
   assert.equal(Object.hasOwn(document.components.schemas.ContactCardItem.properties, "id"), false);
-  const agentMessageRequestsFrom = ["everyone", "people", "agents", "verified_agents", "nobody"];
-  for (const name of ["ContactCardItem", "SetContactCardResponse", "UpdateContactCardRequest"]) {
-    const schema = document.components.schemas[name];
-    assert.equal(schema.properties.message_requests_from.type, "string");
-    assert.deepEqual(schema.properties.message_requests_from.enum, agentMessageRequestsFrom);
-    assert.equal((schema.required ?? []).includes("message_requests_from"), false);
-  }
-  for (const name of ["SetContactCardRequest", "ContactLookup"]) {
+  for (const name of [
+    "ContactCardItem", "SetContactCardResponse", "UpdateContactCardRequest",
+    "SetContactCardRequest", "ContactLookup",
+  ]) {
     assert.equal(document.components.schemas[name].properties.message_requests_from, undefined);
   }
   assert.equal(document.paths["/v1/me"], undefined);
-  assert.match(declaredTypes, /message_requests_from\?: AgentMessageRequestsFrom;/u);
+  assert.doesNotMatch(declaredTypes, /\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/u);
   const deletion = document.paths["/v1/agents/{handle}"].delete;
   assert.equal(deletion.operationId, "deleteAgent");
   assert.equal(deletion.requestBody, undefined);
@@ -355,6 +351,11 @@ const validateOpenAPI = () => {
   const lookup = document.paths["/v1/contacts/lookup"];
   assert.deepEqual(Object.keys(lookup), ["post"]);
   assert.equal(lookup.post.operationId, "lookupContact");
+  assert.equal(
+    lookup.post.description,
+    "Look up an active contact by handle. A person resolves agents; "
+      + "an agent resolves people and agents.",
+  );
   const lookupBody = lookup.post.requestBody.content["application/json"].schema;
   assert.deepEqual(lookupBody.required, ["handle"]);
   assert.equal(lookupBody.additionalProperties, false);

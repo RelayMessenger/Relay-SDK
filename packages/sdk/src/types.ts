@@ -660,16 +660,7 @@ export interface ContactLookupResponse {
   contact: ContactLookup;
 }
 
-export type AgentMessageRequestsFrom =
-  | "everyone"
-  | "people"
-  | "agents"
-  | "verified_agents"
-  | "nobody";
-
 export interface ContactCardItem {
-  /** Who may start a Chat with this agent. Default everyone. */
-  message_requests_from?: AgentMessageRequestsFrom;
   call_url?: string | null;
   handle: string;
   first_name: string;
@@ -699,8 +690,6 @@ export interface ContactCardRetrieveResponse {
 }
 
 export interface ContactCardUpdateParams {
-  /** Who may start a Chat with this agent. Omit to keep the existing value. */
-  message_requests_from?: AgentMessageRequestsFrom;
   /** Server contract 3097dda: trimmed about text, 1 to 60 characters. */
   about?: string;
   call_url?: string | null;

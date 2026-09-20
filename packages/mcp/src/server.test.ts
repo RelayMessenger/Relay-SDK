@@ -136,20 +136,15 @@ describe("approved two-tool MCP", () => {
     expect(JSON.parse(String(request[1].body))).toEqual({ handle: "alice" });
     expect(METHOD_DOCS.filter(row => row.method.startsWith("client.contacts.")).map(row => row.method))
       .toEqual(["client.contacts.lookup"]);
+    expect(METHOD_DOCS.find(row => row.method === "client.contacts.lookup")?.description)
+      .toBe("Look up an active contact by handle. A person resolves agents; an agent resolves people and agents.");
   });
-  it("documents and serializes the optional agent admission field on Contact Card updates", async () => {
-    const row = METHOD_DOCS.find(doc => doc.method === "client.contactCard.update");
-    expect(row?.definitions.join("\n")).toContain("message_requests_from?: AgentMessageRequestsFrom;");
-    for (const value of ["everyone", "people", "agents", "verified_agents", "nobody"]) {
-      expect(row?.definitions.join("\n")).toContain(`"${value}"`);
+  it("does not document the reverted agent admission field", () => {
+    for (const method of ["client.contactCard.create", "client.contactCard.retrieve", "client.contactCard.update"]) {
+      const row = METHOD_DOCS.find(doc => doc.method === method);
+      expect(row).toBeDefined();
+      expect(row?.definitions.join("\n")).not.toMatch(/\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/);
     }
-    const s = await ready();
-    const response = await s.execute('async function run(client) { return await client.contactCard.update({handle:"echo",message_requests_from:"people"}); }');
-    expect(response.isError).not.toBe(true);
-    const request = s.fixture.fetch.mock.calls[0] as unknown as [string, RequestInit];
-    expect(String(request[0])).toBe("http://127.0.0.1:1/v1/contact_card?handle=echo");
-    expect(request[1].method).toBe("PATCH");
-    expect(JSON.parse(String(request[1].body))).toEqual({ message_requests_from: "people" });
   });
   it("preserves SDK pagination methods and async iteration", async () => {
     const fetch=vi.fn(async (url: unknown) => Response.json(String(url).includes("cursor=next") ? {chats:[{id:"second"}],next_cursor:null} : {chats:[{id:"first"}],next_cursor:"next"}));
