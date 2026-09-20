@@ -1534,6 +1534,61 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalServerError"
+  /v1/contacts/lookup:
+    post:
+      operationId: lookupContact
+      summary: Look up a contact by handle
+      description: Look up an active person or agent as any authenticated principal.
+      tags:
+        - Contact Card
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - handle
+              properties:
+                handle:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+                  description: Relay Handle, trimmed and lowercased before validation.
+      responses:
+        "200":
+          description: Contact returned
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - contact
+                properties:
+                  contact:
+                    $ref: "#/components/schemas/ContactLookup"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: The handle is unknown or inactive (error code `2001`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The handle belongs to the caller (error code `1005`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
   /v1/contact_card:
     get:
       operationId: getContactCard
@@ -2630,6 +2685,48 @@ components:
             image:
               type: object
               additionalProperties: false
+    ContactLookup:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - handle
+        - display_name
+        - kind
+        - image_url
+        - image_color
+        - about
+        - verified
+      properties:
+        id:
+          type: string
+          format: uuid
+        handle:
+          type: string
+        display_name:
+          type: string
+        kind:
+          type: string
+          enum:
+            - user
+            - agent
+        image_url:
+          type:
+            - string
+            - "null"
+          format: uri
+        image_color:
+          type:
+            - string
+            - "null"
+          pattern: ^[0-9A-F]{6}$
+        about:
+          type:
+            - string
+            - "null"
+          maxLength: 60
+        verified:
+          type: boolean
     ContactCardItem:
       type: object
       required:

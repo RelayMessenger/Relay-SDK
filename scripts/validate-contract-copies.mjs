@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const expected =
-  "0352d85494344137abcdc5dd27287705ea14e87897aedd127f875d8362b83fb6";
+  "f04d3359999ace37219eea0fd63c3ea4249d91ee91efe2ef86fdb63f2e236c69";
 const copies = [
   "contracts/relay-v1-openapi.yaml",
   "packages/chat-sdk-adapter/contracts/relay-openapi.yaml",
@@ -28,7 +28,7 @@ const skillLock = JSON.parse(
   ),
 );
 assert.equal(skillLock.api.openapi_sha256, expected);
-assert.equal(skillLock.api.commit, "1cde828c2dea5ca504d93ee5b7130a5e5f2dcb4b");
+assert.equal(skillLock.api.commit, "e72d4813a531539dae7ffdc8ddd19de3346ea1fe");
 assert.equal(skillLock.sdk.commit, "79517a1c9fcb1c82b474cd72ba8bc10197ff363f");
 assert.equal(skillLock.sdk.version, "0.3.1-staging.1");
 // The lock is what a customer's installed skill reads, on every branch, so its

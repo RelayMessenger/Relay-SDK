@@ -39,9 +39,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "1cde828c2dea5ca504d93ee5b7130a5e5f2dcb4b",
+    commit: "e72d4813a531539dae7ffdc8ddd19de3346ea1fe",
     path: "contracts/developer/openapi.yaml",
-    sha256: "0352d85494344137abcdc5dd27287705ea14e87897aedd127f875d8362b83fb6",
+    sha256: "f04d3359999ace37219eea0fd63c3ea4249d91ee91efe2ef86fdb63f2e236c69",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -83,6 +83,7 @@ const allowedOperationSignatures = [
   "GET /v1/webhook-subscriptions/{subscriptionId}",
   "PUT /v1/webhook-subscriptions/{subscriptionId}",
   "DELETE /v1/webhook-subscriptions/{subscriptionId}",
+  "POST /v1/contacts/lookup",
   "GET /v1/contact_card",
   "POST /v1/contact_card",
   "PATCH /v1/contact_card",
@@ -100,13 +101,13 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 41);
-assert.equal(manifest.path_count, 25);
-assert.equal(manifest.source_path_count, 26);
-assert.equal(manifest.source_schema_count, 128);
+assert.equal(manifest.operation_count, 42);
+assert.equal(manifest.path_count, 26);
+assert.equal(manifest.source_path_count, 27);
+assert.equal(manifest.source_schema_count, 129);
 assert.equal(manifest.callback_count, 19);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 25);
-assert.equal(operationJSON.length, 41);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 26);
+assert.equal(operationJSON.length, 42);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
@@ -152,7 +153,6 @@ for (const forbidden of [
   "/api/mobile",
   "/socket-mode",
   "/socket-connections",
-  "/v1/contacts",
 ]) {
   assert.equal(
     operationJSON.some((operation) => operation.path.includes(forbidden)),
@@ -160,6 +160,11 @@ for (const forbidden of [
     `unsupported path leaked into SDK: ${forbidden}`,
   );
 }
+assert.deepEqual(
+  operationJSON.filter((operation) => /^\/v1\/contacts(?:\/|$)/u.test(operation.path)),
+  [{ method: "POST", path: "/v1/contacts/lookup", operationId: "lookupContact" }],
+  "Only the approved lookup operation may expose the Contacts route",
+);
 assert.ok(operationJSON.some((operation) =>
   operation.path === "/v1/chats/{chatId}/share_contact_card"));
 assert.equal(operationJSON.some((operation) =>
@@ -205,6 +210,7 @@ assert.deepEqual(Object.keys(client).sort(), [
   "calls",
   "chats",
   "contactCard",
+  "contacts",
   "messages",
   "webhookEvents",
   "webhookSubscriptions",
@@ -258,6 +264,7 @@ assert.deepEqual(publicMethods(client.contactCard), [
   "retrieve",
   "update",
 ]);
+assert.deepEqual(publicMethods(client.contacts), ["lookup"]);
 assert.deepEqual(publicMethods(client.blockedHandles), [
   "block",
   "list",
@@ -333,6 +340,25 @@ const validateOpenAPI = () => {
       assert.equal(field in (schema.properties ?? {}), false, `${name}.${field} is private`);
     }
   }
+  const lookup = document.paths["/v1/contacts/lookup"];
+  assert.deepEqual(Object.keys(lookup), ["post"]);
+  assert.equal(lookup.post.operationId, "lookupContact");
+  const lookupBody = lookup.post.requestBody.content["application/json"].schema;
+  assert.deepEqual(lookupBody.required, ["handle"]);
+  assert.equal(lookupBody.additionalProperties, false);
+  assert.equal(lookupBody.properties.handle.type, "string");
+  assert.equal(lookupBody.properties.handle.minLength, 1);
+  assert.equal(lookupBody.properties.handle.maxLength, 255);
+  assert.equal(
+    lookup.post.responses["200"].content["application/json"].schema.properties.contact.$ref,
+    "#/components/schemas/ContactLookup",
+  );
+  const contactLookup = document.components.schemas.ContactLookup;
+  assert.deepEqual(contactLookup.required, [
+    "id", "handle", "display_name", "kind", "image_url", "image_color", "about", "verified",
+  ]);
+  assert.deepEqual(Object.keys(contactLookup.properties), contactLookup.required);
+  assert.deepEqual(contactLookup.properties.kind.enum, ["user", "agent"]);
   assert.equal(
     document.components.schemas.ChatHandle.properties.is_contact.description,
     "Whether the caller holds this member as a Contact. A person's reply "

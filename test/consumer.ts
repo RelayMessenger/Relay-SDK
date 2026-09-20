@@ -12,6 +12,7 @@ import Relay, {
   type ChatSetActivityParams,
   type ContactAddedWebhookEvent,
   type ContactRemovedWebhookEvent,
+  type ContactLookupResponse,
   type DeliveryStatus,
   type Message,
   type MessageContent,
@@ -216,8 +217,23 @@ relay.responding;
 relay.messages.poll;
 // @ts-expect-error Socket Mode is not Relay vocabulary.
 relay.socketMode;
-// @ts-expect-error Private user Contact operations are not in the Agent SDK.
-relay.contacts;
+const lookup: ContactLookupResponse = await relay.contacts.lookup({ handle: "alice" });
+lookup.contact.kind satisfies "user" | "agent";
+lookup.contact.image_color satisfies string | null;
+// @ts-expect-error Lookup requires a Handle.
+await relay.contacts.lookup({});
+// @ts-expect-error Private Contact writes are not public SDK operations.
+relay.contacts.add;
+// @ts-expect-error Private Contact writes are not public SDK operations.
+relay.contacts.remove;
+// @ts-expect-error Private Contact lists are not public SDK operations.
+relay.contacts.list;
+// @ts-expect-error Request lifecycle state is private.
+lookup.contact.is_request;
+// @ts-expect-error Request expiry is private.
+lookup.contact.request_expires_at;
+// @ts-expect-error Request sender identity is private.
+lookup.contact.request_sender_id;
 // @ts-expect-error Add requests are gone; the first Message is the request.
 relay.contactRequests;
 const withService: MessageContent = {
