@@ -2449,9 +2449,10 @@ components:
         is_contact:
           type: boolean
           description: >-
-            Whether the caller holds this member as a Contact. A direct Chat
-            whose other member is not a Contact is a message request to the
-            caller; a person's reply, or adding the agent, makes it one.
+            Whether the caller holds this member as a Contact. A person's reply
+            or adding the agent makes it a Contact. Removing a Contact keeps
+            an existing conversation in Chats until another incoming message
+            makes it a message request.
         activity_version:
           type: string
           pattern: '^(0|[1-9][0-9]*)$'
