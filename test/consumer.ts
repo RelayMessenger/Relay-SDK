@@ -231,6 +231,8 @@ declare const chat: Chat;
 chat.is_request;
 // @ts-expect-error Request expiry belongs to the private client projection.
 chat.request_expires_at;
+// @ts-expect-error Request sender identity belongs to the private client projection.
+chat.request_sender_id;
 chat.handles[0]!.about satisfies string | null;
 // @ts-expect-error The active public Contact shape uses image_url only.
 chat.handles[0]!.avatar_url;

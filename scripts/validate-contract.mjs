@@ -327,9 +327,9 @@ const validateOpenAPI = () => {
   assert.equal(addParticipant.properties.hide_history.type, "boolean");
   assert.equal(addParticipant.properties.hide_history.default, true);
   assert.match(declaredTypes, /hide_history\?: boolean/u);
-  assert.doesNotMatch(declaredTypes, /\b(?:is_hidden|truncated_at|is_request|request_expires_at)\??:/u);
+  assert.doesNotMatch(declaredTypes, /\b(?:is_hidden|truncated_at|is_request|request_expires_at|request_sender_id)\??:/u);
   for (const [name, schema] of Object.entries(document.components.schemas)) {
-    for (const field of ["is_request", "request_expires_at"]) {
+    for (const field of ["is_request", "request_expires_at", "request_sender_id"]) {
       assert.equal(field in (schema.properties ?? {}), false, `${name}.${field} is private`);
     }
   }
