@@ -227,6 +227,10 @@ const withService: MessageContent = {
 };
 void withService;
 declare const chat: Chat;
+// @ts-expect-error Request lifecycle state belongs to the private client projection.
+chat.is_request;
+// @ts-expect-error Request expiry belongs to the private client projection.
+chat.request_expires_at;
 chat.handles[0]!.about satisfies string | null;
 // @ts-expect-error The active public Contact shape uses image_url only.
 chat.handles[0]!.avatar_url;

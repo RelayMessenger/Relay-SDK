@@ -39,9 +39,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "4394ff241d9bb3a25299f8e5364ab9b434861f2d",
+    commit: "1cde828c2dea5ca504d93ee5b7130a5e5f2dcb4b",
     path: "contracts/developer/openapi.yaml",
-    sha256: "1bd3d25ef7aa080a38db903445f83ba173753552ac1369b5aad06e8fba6d6472",
+    sha256: "0352d85494344137abcdc5dd27287705ea14e87897aedd127f875d8362b83fb6",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -327,7 +327,19 @@ const validateOpenAPI = () => {
   assert.equal(addParticipant.properties.hide_history.type, "boolean");
   assert.equal(addParticipant.properties.hide_history.default, true);
   assert.match(declaredTypes, /hide_history\?: boolean/u);
-  assert.doesNotMatch(declaredTypes, /\b(?:is_hidden|truncated_at)\??:/u);
+  assert.doesNotMatch(declaredTypes, /\b(?:is_hidden|truncated_at|is_request|request_expires_at)\??:/u);
+  for (const [name, schema] of Object.entries(document.components.schemas)) {
+    for (const field of ["is_request", "request_expires_at"]) {
+      assert.equal(field in (schema.properties ?? {}), false, `${name}.${field} is private`);
+    }
+  }
+  assert.equal(
+    document.components.schemas.ChatHandle.properties.is_contact.description,
+    "Whether the caller holds this member as a Contact. A person's reply "
+      + "or adding the agent makes it a Contact. Removing a Contact keeps "
+      + "an existing conversation in Chats until another incoming message "
+      + "makes it a message request.",
+  );
   assert.match(
     document.paths["/v1/chats/{chatId}/participants"].post.description,
     /Set hide_history to false to also share earlier retained history/u,
