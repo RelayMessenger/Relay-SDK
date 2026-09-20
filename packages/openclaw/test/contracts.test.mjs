@@ -46,8 +46,8 @@ test("pins the requested OpenClaw and current Relay SDK contracts", () => {
       ? /^\d+\.\d+\.\d+$/u
       : /^\d+\.\d+\.\d+-staging\.\d+$/u,
   );
-  assert.equal(packageJson.devDependencies.openclaw, "2026.8.1");
-  assert.equal(packageJson.openclaw.build.openclawVersion, "2026.8.1");
+  assert.equal(packageJson.devDependencies.openclaw, "2026.9.5");
+  assert.equal(packageJson.openclaw.build.openclawVersion, "2026.9.5");
   assert.equal(
     packageJson.dependencies["@relaymessenger/sdk"],
     contractLock.relaySdk.version,

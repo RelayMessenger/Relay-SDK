@@ -52,7 +52,7 @@ describe("locked runtime contracts", () => {
   });
 
   it("pins the coordinated Think and Relay packages", () => {
-    expect(packageVersion("@cloudflare/think")).toBe("0.17.0");
+    expect(packageVersion("@cloudflare/think")).toBe("0.19.0");
     expect(packageVersion("@relaymessenger/chat-sdk-adapter"))
       .toBe("0.3.0");
     expect(packageVersion("@relaymessenger/sdk")).toBe("0.3.0");
