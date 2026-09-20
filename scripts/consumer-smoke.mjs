@@ -124,6 +124,11 @@ try {
   assert.deepEqual(interfaceFields("ContactLookup"), [
     "id", "handle", "display_name", "kind", "image_url", "image_color", "about", "verified",
   ]);
+  for (const name of ["ContactCardItem", "ContactCardUpdateParams"]) {
+    assert.ok(interfaceFields(name).includes("message_requests_from"));
+  }
+  assert.equal(interfaceFields("ContactCardCreateParams").includes("message_requests_from"), false);
+  assert.match(packedTypes, /message_requests_from\?: AgentMessageRequestsFrom;/u);
   assert.doesNotMatch(packedTypes, /AgentCreate(?:ProfileParams|Params|Response)/);
   assert.doesNotMatch(packedTypes, /\bContactRequestCreate(?:Params|Response)\b/u);
   assert.deepEqual(interfaceFields("MessageContent"), [

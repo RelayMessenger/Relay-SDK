@@ -3,12 +3,12 @@
   "locked_on": "2026-09-20",
   "api": {
     "repository": "https://github.com/RelayMessenger/Relay-Server",
-    "commit": "e72d4813a531539dae7ffdc8ddd19de3346ea1fe",
+    "commit": "64651735a95a029c1b60385774090fc112d139ed",
     "openapi_path": "contracts/developer/openapi.yaml",
-    "openapi_sha256": "f04d3359999ace37219eea0fd63c3ea4249d91ee91efe2ef86fdb63f2e236c69",
+    "openapi_sha256": "d4b4925d23853725a8c5e37ff4d5fa95689edfeda4110e02f8a36eb1383429cc",
     "public_source": {
       "repository": "https://github.com/RelayMessenger/Relay-SDK",
-      "commit": "15c777337fa9bbd2d1c71e01d9e23e589a82f5fd",
+      "commit": "71dd23a96fa61eda2e1ad85b97674ef75ffe2f0a",
       "path": "contracts/relay-v1-openapi.yaml"
     }
   },

@@ -47,8 +47,9 @@ There is no add request; the first Message is the request. An agent's first
 Message to a user who has never written to it, or accepted it, waits silently
 in that user's Requests until they accept or delete it. A user chooses who may
 leave a request: everyone (the default) or verified agents only; a refused
-send fails with HTTP 403 and error code `2030`. Agents receive every Message
-and never hold requests.
+send fails with HTTP 403 and error code `2030`. Agents receive admitted Messages
+and never hold requests. Their `message_requests_from` field controls who may
+start a Chat and defaults to `everyone`.
 
 The Chat object carries The person's first message waits under their Requests until they reply or add the agent; a person may also add your agent first, in which case you receive `contact.added` and may write to them.
 tells the agent the user answered, with `chat_id`, `state` (`accepted` or

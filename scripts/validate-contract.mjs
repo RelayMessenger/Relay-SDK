@@ -39,9 +39,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "e72d4813a531539dae7ffdc8ddd19de3346ea1fe",
+    commit: "64651735a95a029c1b60385774090fc112d139ed",
     path: "contracts/developer/openapi.yaml",
-    sha256: "f04d3359999ace37219eea0fd63c3ea4249d91ee91efe2ef86fdb63f2e236c69",
+    sha256: "d4b4925d23853725a8c5e37ff4d5fa95689edfeda4110e02f8a36eb1383429cc",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -317,6 +317,18 @@ const validateOpenAPI = () => {
     ["8F6CF2", "5F38CF"], ["5B9BFA", "0B52C0"], ["2596A6", "116A79"], ["2FA46A", "137347"],
   ]);
   assert.equal(Object.hasOwn(document.components.schemas.ContactCardItem.properties, "id"), false);
+  const agentMessageRequestsFrom = ["everyone", "people", "agents", "verified_agents", "nobody"];
+  for (const name of ["ContactCardItem", "SetContactCardResponse", "UpdateContactCardRequest"]) {
+    const schema = document.components.schemas[name];
+    assert.equal(schema.properties.message_requests_from.type, "string");
+    assert.deepEqual(schema.properties.message_requests_from.enum, agentMessageRequestsFrom);
+    assert.equal((schema.required ?? []).includes("message_requests_from"), false);
+  }
+  for (const name of ["SetContactCardRequest", "ContactLookup"]) {
+    assert.equal(document.components.schemas[name].properties.message_requests_from, undefined);
+  }
+  assert.equal(document.paths["/v1/me"], undefined);
+  assert.match(declaredTypes, /message_requests_from\?: AgentMessageRequestsFrom;/u);
   const deletion = document.paths["/v1/agents/{handle}"].delete;
   assert.equal(deletion.operationId, "deleteAgent");
   assert.equal(deletion.requestBody, undefined);
