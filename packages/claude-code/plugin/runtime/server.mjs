@@ -20230,7 +20230,7 @@ var StdioServerTransport = class {
   }
 };
 
-// packages/sdk/dist/errors.js
+// node_modules/@relaymessenger/sdk/dist/errors.js
 var RelayAPIError = class extends Error {
   status;
   code;
@@ -20260,7 +20260,7 @@ var RelayWebhookConfiguredError = class extends RelayAPIError {
 };
 var isAbortError = (error2) => error2 instanceof Error && error2.name === "AbortError";
 
-// packages/sdk/dist/pagination.js
+// node_modules/@relaymessenger/sdk/dist/pagination.js
 var RelayPage = class {
   data;
   nextCursor;
@@ -20309,7 +20309,7 @@ var MessagesPage = class extends RelayPage {
   }
 };
 
-// packages/sdk/dist/webhooks.js
+// node_modules/@relaymessenger/sdk/dist/webhooks.js
 var import_standardwebhooks = __toESM(require_dist2(), 1);
 var requiredHeaders = (headers) => {
   const get = (name) => headers instanceof Headers ? headers.get(name) : headers[name];
@@ -20356,7 +20356,7 @@ var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 var wrapper_default = import_websocket.default;
 
-// packages/sdk/dist/operations.js
+// node_modules/@relaymessenger/sdk/dist/operations.js
 var RELAY_WEBHOOK_EVENT_TYPES = [
   "message.sent",
   "message.received",
@@ -20379,7 +20379,7 @@ var RELAY_WEBHOOK_EVENT_TYPES = [
   "call.ended"
 ];
 
-// packages/sdk/dist/websocket.js
+// node_modules/@relaymessenger/sdk/dist/websocket.js
 var wait = (milliseconds, signal) => new Promise((resolve2) => {
   if (signal?.aborted) {
     resolve2();
@@ -20873,7 +20873,7 @@ var runWebSocket = async (baseURL, agentToken, options) => {
   }
 };
 
-// packages/sdk/dist/client.js
+// node_modules/@relaymessenger/sdk/dist/client.js
 var delay = async (milliseconds, signal) => {
   if (milliseconds <= 0)
     return;
@@ -21429,7 +21429,7 @@ var Relay = class {
   }
 };
 
-// packages/sdk/dist/buttons.js
+// node_modules/@relaymessenger/sdk/dist/buttons.js
 var BUTTONS_FENCE = "buttons";
 var BUTTONS_GUIDANCE = [
   "Send buttons when your message ends with a question the person can answer by picking one of 2 to 5 short options you already know: yes or no, choosing between things you named, picking a next step, or a multiple-choice question in a quiz. Each label is a complete answer, so a tap replaces typing. Put the question in text beside the buttons.",
@@ -21497,7 +21497,7 @@ var partsWithButtons = (text2, buttons, limit = Number.POSITIVE_INFINITY) => [
   ...buttons ? [buttons] : []
 ];
 
-// packages/sdk/dist/links.js
+// node_modules/@relaymessenger/sdk/dist/links.js
 var LINK_URL_MAX_LENGTH = 2048;
 var IDEMPOTENCY_KEY_MAX_LENGTH = 255;
 var standaloneLink = (line) => {
@@ -21520,13 +21520,13 @@ var indexedIdempotencyKey = (key, index) => {
   return `${key.slice(0, IDEMPOTENCY_KEY_MAX_LENGTH - suffix.length)}${suffix}`;
 };
 
-// packages/claude-code/src/channel.ts
+// src/channel.ts
 import { createHash as createHash3 } from "node:crypto";
 
-// packages/claude-code/src/bridge.ts
+// src/bridge.ts
 import { createHash as createHash2 } from "node:crypto";
 
-// packages/claude-code/src/config.ts
+// src/config.ts
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -21775,7 +21775,7 @@ var ConsumerLock = class {
   }
 };
 
-// packages/claude-code/src/bridge.ts
+// src/bridge.ts
 var MAX_RELAY_TEXT = 1e4;
 function isRecord2(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -21956,7 +21956,7 @@ function stableHash(value) {
   return createHash2("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-// packages/claude-code/src/fullSync.ts
+// src/fullSync.ts
 async function readCompleteRelaySnapshot(params) {
   const chats = [];
   const seenChats = /* @__PURE__ */ new Set();
@@ -22020,7 +22020,7 @@ async function commitRelayFullSync(params) {
   params.state.replaceWithFullSync(snapshot, deliveries);
 }
 
-// packages/claude-code/src/channel.ts
+// src/channel.ts
 var UUID_PATTERN2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 var SEND_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u;
 function success(text2) {
@@ -22284,7 +22284,7 @@ var RelayChannel = class {
   }
 };
 
-// packages/claude-code/src/redaction.ts
+// src/redaction.ts
 var RELAY_TOKEN_PATTERN = /\b(?:rly|relay)_[A-Za-z0-9._-]{12,}\b/giu;
 var BEARER_PATTERN = /(authorization\s*[:=]\s*bearer\s+)[^\s"']+/giu;
 var ENV_PATTERN = /(RELAY_AGENT_TOKEN\s*=\s*)[^\s"']+/giu;
@@ -22299,7 +22299,7 @@ function createRedactor(agentToken) {
   };
 }
 
-// packages/claude-code/src/state.ts
+// src/state.ts
 import { createHash as createHash4 } from "node:crypto";
 import {
   chmodSync as chmodSync2,
@@ -23043,7 +23043,7 @@ var RelayStateStore = class {
   }
 };
 
-// packages/claude-code/server.ts
+// server.ts
 var VERSION = true ? "0.3.9-staging.11" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
