@@ -1,3 +1,4 @@
+import { candidateTarball, candidateConsumerManifest, assertInstalledCandidate } from "../../sdk/scripts/candidate-tarball.mjs";
 import { execFileSync } from "node:child_process";
 import {
   cpSync,
@@ -10,6 +11,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -21,6 +23,10 @@ const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
 const archiveName = `${packageJson.name
   .replace(/^@/u, "")
   .replaceAll("/", "-")}-${packageJson.version}.tgz`;
+const candidate = candidateTarball({
+  name: "@relaymessenger/sdk", version: packageJson.dependencies["@relaymessenger/sdk"],
+  variable: "RELAY_SDK_CANDIDATE_TARBALL",
+});
 const temp = mkdtempSync(join(tmpdir(), "relay-openclaw-pack-"));
 const source = join(temp, "source");
 const pack = join(temp, "pack");
@@ -89,6 +95,10 @@ try {
 
   const archive = join(pack, archiveName);
   if (!existsSync(archive)) throw new Error(`missing npm pack archive ${archive}`);
+  if (candidate) {
+    mkdirSync(install, { recursive: true });
+    writeFileSync(join(install, "package.json"), JSON.stringify(candidateConsumerManifest({ private: true, type: "module" }, [candidate])));
+  }
   npm(
     [
       "install",
@@ -99,7 +109,7 @@ try {
       "--legacy-peer-deps",
       "--no-audit",
       "--no-fund",
-      "--no-package-lock",
+      ...(candidate ? [] : ["--no-package-lock"]),
       archive,
     ],
     temp,
@@ -110,6 +120,7 @@ try {
     "node_modules",
     ...packageJson.name.split("/"),
   );
+  if (candidate) assertInstalledCandidate(install, join(installed, "package.json"), candidate);
   const installedOpenClaw = join(install, "node_modules", "openclaw");
   if (!existsSync(installedOpenClaw)) {
     symlinkSync(
@@ -177,7 +188,7 @@ try {
   );
 
   console.log(
-    `Relay OpenClaw clean npm pack passed: ${archiveName}, ${files.length} installed files.`,
+    `Relay OpenClaw clean npm pack passed (${candidate ? "local candidate; NOT registry/release validation" : "registry dependencies"}): ${archiveName}, ${files.length} installed files.`,
   );
 } finally {
   rmSync(temp, { recursive: true, force: true, maxRetries: 10 });

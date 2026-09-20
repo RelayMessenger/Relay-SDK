@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import {
   cpSync,
+  readFileSync,
+  writeFileSync,
   mkdtempSync,
   rmSync,
 } from "node:fs";
@@ -34,7 +36,27 @@ function run(command, args) {
 
 try {
   cpSync(source, installed, { filter: include, recursive: true });
-  run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]);
+  const candidateMode = process.env.RELAY_SDK_CANDIDATE_TARBALL !== undefined
+    || process.env.RELAY_CHAT_SDK_CANDIDATE_TARBALL !== undefined;
+  if (candidateMode) {
+    // Monorepo-only candidate experiment, explicitly distinct from the default
+    // standalone locked-registry proof. Never edit the source manifest or lock.
+    const { candidateTarball, candidateConsumerManifest, assertInstalledCandidate } = await import("../../../packages/sdk/scripts/candidate-tarball.mjs");
+    const candidates = [
+      candidateTarball({ name: "@relaymessenger/sdk", variable: "RELAY_SDK_CANDIDATE_TARBALL" }),
+      candidateTarball({ name: "@relaymessenger/chat-sdk-adapter", variable: "RELAY_CHAT_SDK_CANDIDATE_TARBALL" }),
+    ];
+    if (candidates.some(candidate => !candidate)) throw new Error("Think candidate validation requires both SDK and Chat SDK tarballs");
+    const manifestPath = join(installed, "package.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    console.log(JSON.stringify({ validationMode: "local-candidate-not-registry", originalDependencies: manifest.dependencies }));
+    writeFileSync(manifestPath, JSON.stringify(candidateConsumerManifest(manifest, candidates)));
+    rmSync(join(installed, "package-lock.json"));
+    run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"]);
+    for (const candidate of candidates) assertInstalledCandidate(installed, manifestPath, candidate);
+  } else {
+    run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]);
+  }
 
   run("npm", ["run", "types"]);
   run("npm", ["run", "types:check"]);
@@ -43,7 +65,7 @@ try {
   run("npm", ["run", "test:workerd"]);
   run("npm", ["run", "dry-run"]);
 
-  console.log(`installed template ok: ${basename(installed)}`);
+  console.log(`installed template ok (${candidateMode ? "local candidates; NOT registry/release validation" : "locked registry dependencies"}): ${basename(installed)}`);
 } finally {
   if (process.env.RELAY_KEEP_INSTALLED_TEMPLATE !== "1") {
     rmSync(temporary, { force: true, recursive: true });

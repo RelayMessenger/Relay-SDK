@@ -1,3 +1,4 @@
+import { candidateTarball, candidateConsumerManifest, assertInstalledCandidate } from "../../sdk/scripts/candidate-tarball.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -64,12 +65,17 @@ for (const path of listing) {
   assert.doesNotMatch(path, /(?:^|\/)(?:\.env|\.npmrc|src|test|contracts)(?:\/|$)/);
 }
 
+const candidate = candidateTarball({
+  name: "@relaymessenger/sdk", version: sourceManifest.dependencies["@relaymessenger/sdk"],
+  variable: "RELAY_SDK_CANDIDATE_TARBALL",
+});
 const consumer = await mkdtemp(join(tmpdir(), "relay-mcp-consumer-"));
 await writeFile(
   join(consumer, "package.json"),
-  JSON.stringify({ private: true, type: "module" }),
+  JSON.stringify(candidate ? candidateConsumerManifest({ private: true, type: "module" }, [candidate]) : { private: true, type: "module" }),
 );
 run("npm", ["install", "--ignore-scripts", tarball], { cwd: consumer });
+if (candidate) assertInstalledCandidate(consumer, join(consumer, "node_modules/@relaymessenger/mcp/package.json"), candidate);
 const bin = join(
   consumer,
   "node_modules",
@@ -130,4 +136,4 @@ assert.equal(
   sourceManifest.dependencies["@relaymessenger/sdk"],
 );
 assert.equal(installedManifest.dependencies["@modelcontextprotocol/client"], undefined);
-console.log(`MCP tarball install/protocol smoke OK: ${tarball}`);
+console.log(`MCP tarball install/protocol smoke OK (${candidate ? "local candidate; NOT registry/release validation" : "registry dependencies"}): ${tarball}`);
