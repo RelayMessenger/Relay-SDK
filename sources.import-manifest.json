@@ -998,7 +998,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "scripts/tarball-smoke.mjs",
       "source_sha256": "f267c240da6f25c731d832ffdc0038655ea23476ed048d0e84d81ba0f59ccc8f",
-      "destination_sha256": "4f2efbba6dd26c5d73d0c15ca30241cbfebd7335c1394d096bf7426cfa712655",
+      "destination_sha256": "2fec7525b35dc38ea65ed872f8baceaade602749530e91bd506dddec5363712e",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1207,7 +1207,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "scripts/pack-smoke.mjs",
       "source_sha256": "2a3f770c4bacc9acd2a998845ff03303d1e9e52d3aa39b73eb432e88b4668a96",
-      "destination_sha256": "bb8583f50aac048b60546cc3d8fe8448207e523a620d860514c02413468251ee",
+      "destination_sha256": "eaa34524c0e33580b42f19de27b9d080f08a61157c4328f486d1e50f62d72d12",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1724,7 +1724,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "plugin/runtime/server.mjs",
       "source_sha256": "cf0664163b787715525c91d5907e6ae4de61b7c85ec67a3009ba21e3bcc52025",
-      "destination_sha256": "91a5ff6512bafc947a6a1198de9a992e36157b90bc15907a4d2beffe02f2284e",
+      "destination_sha256": "eab2c43897cb1f06b11039481e21ced138346a23de836e0599a2200ddf7a2ea7",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -1735,7 +1735,7 @@
       "commit": "d1dbda5c23ee29158a4e0e5f7ba0fc0fa24b3780",
       "source": "runtime/server.mjs",
       "source_sha256": "cf0664163b787715525c91d5907e6ae4de61b7c85ec67a3009ba21e3bcc52025",
-      "destination_sha256": "a455d360a7134f1b37795871d31a8c4d77526de7f13a138dbd7252459e0d6a4f",
+      "destination_sha256": "eab2c43897cb1f06b11039481e21ced138346a23de836e0599a2200ddf7a2ea7",
       "source_mode": "100755",
       "destination_mode": "100755",
       "status": "canonicalized"
@@ -2560,7 +2560,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "scripts/test-installed-template.mjs",
       "source_sha256": "a7a63ff46c6a310f99e4edef26c1bf02e7a898aa486dbe68a4b1819a1ab45850",
-      "destination_sha256": "a3321dc02aac59f3c47b03e0e77ff8017df8ab18be4eb8e519e3e2c24a90cc4c",
+      "destination_sha256": "af2e3c04e2320c6edc2d67a56143754f21b8604c8b2d0935d31fbb194e064240",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
