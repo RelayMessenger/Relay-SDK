@@ -1,12 +1,14 @@
+import { indexedIdempotencyKey, selectionReply, selectionReplyContext } from "@relaymessenger/sdk";
 import type {
   ChatHandle,
   MessagePartResponse,
   MessageSendParams,
   MessageWebhookData,
   RelayWebhookEvent,
+  ReplyTo,
 } from "@relaymessenger/sdk";
 
-import { renderPlanParts, type ThreadMessage, type TripPlan, type TripPlanner } from "./plan.js";
+import { renderPlanMessages, type ThreadMessage, type TripPlan, type TripPlanner } from "./plan.js";
 
 /** Relay's typing indicator expires, so a long turn has to refresh it. */
 const TYPING_REFRESH_MS = 5_000;
@@ -45,9 +47,9 @@ export function authorName(handle: ChatHandle): string {
   return handle.display_name?.trim() || handle.handle;
 }
 
-/** What the agent is allowed to read: the words, and that a file was shared. */
-export function messageText(parts: MessagePartResponse[]): string {
-  return parts
+/** Readable words plus non-executable structured context, persisted together in history. */
+export function messageText(parts: MessagePartResponse[], replyTo?: ReplyTo | null): string {
+  const text = parts
     .map((part) => {
       if (part.type === "text" || part.type === "link") return part.value;
       if (part.type === "media") return "[attachment]";
@@ -55,6 +57,10 @@ export function messageText(parts: MessagePartResponse[]): string {
     })
     .filter((value) => value.length > 0)
     .join("\n");
+  const context = selectionReplyContext(selectionReply(parts, replyTo), {
+    parts, ...(replyTo ? { reply_to: replyTo } : {}),
+  });
+  return [text, context].filter(Boolean).join("\n\n");
 }
 
 /**
@@ -126,7 +132,7 @@ export async function processAcceptedEvent(
 
   memory.remember(chatId, data.id, {
     author: authorName(data.sender_handle),
-    text: messageText(data.parts),
+    text: messageText(data.parts, data.reply_to),
   });
   await relay.chats.markAsRead(chatId);
 
@@ -138,11 +144,13 @@ export async function processAcceptedEvent(
     memory.savePlannedTurn(event.event_id, chatId, plan);
   }
 
-  await relay.chats.messages.send(chatId, {
-    message: {
-      parts: renderPlanParts(plan),
-      reply_to: { message_id: data.id },
-      idempotency_key: `relay-example:trip-planner:${event.event_id}`,
-    },
-  });
+  for (const [index, parts] of renderPlanMessages(plan).entries()) {
+    await relay.chats.messages.send(chatId, {
+      message: {
+        parts,
+        reply_to: { message_id: data.id },
+        idempotency_key: indexedIdempotencyKey(`relay-example:trip-planner:${event.event_id}`, index),
+      },
+    });
+  }
 }
