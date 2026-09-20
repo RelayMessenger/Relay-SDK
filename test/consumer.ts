@@ -5,6 +5,7 @@ import Relay, {
   type ChatActivityResponse,
   type ChatClearActivityParams,
   type Call,
+  type CallMarker,
   type CallWebhookEvent,
   type ChatHandle,
   type ChatSendVoicememoResponse,
@@ -21,6 +22,7 @@ import Relay, {
   type RelayWebhookEnvelope,
   type RelayWebhookEvent,
   type SentMessage,
+  type SystemEventType,
   type TypingIndicatorWebhookData,
   type TextPartResponse,
   type TextPart,
@@ -31,6 +33,19 @@ const relay = new Relay({
   apiKey: "consumer-token",
   baseURL: "http://127.0.0.1:8790",
 });
+
+const liveCallMarker: CallMarker = {
+  id: "call-id", mode: "audio", status: "ringing",
+  answered_at: null, ended_at: null,
+  from: { id: "caller-id", handle: "caller", kind: "agent" },
+  to: [{ id: "callee-id", handle: "callee", kind: "user" }],
+  end_reason: null, connected: false, duration_seconds: null,
+};
+liveCallMarker.status satisfies Call["status"];
+const callEvent: SystemEventType = "call";
+// @ts-expect-error A call marker represents the whole call, not only its end.
+const retiredCallEvent: SystemEventType = "call_ended";
+void [liveCallMarker, callEvent, retiredCallEvent];
 
 const content: MessageContent = {
   parts: [{ type: "text", value: "Hello" }],

@@ -239,12 +239,17 @@ export type SystemEventType =
   | "group_name_updated"
   | "group_icon_updated"
   | "contact_card_shared"
-  | "call_ended";
+  | "call";
 
 export interface CallMarker {
   id: UUID;
   mode: "audio";
-  end_reason: NonNullable<Call["end_reason"]>;
+  status: Call["status"];
+  answered_at: string | null;
+  ended_at: string | null;
+  from: CallContact;
+  to: [CallContact];
+  end_reason: Call["end_reason"];
   connected: boolean;
   duration_seconds: number | null;
 }

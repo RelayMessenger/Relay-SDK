@@ -39,9 +39,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "PENDING_SERVER_ACTIVITY_COMMIT",
+    commit: "4394ff241d9bb3a25299f8e5364ab9b434861f2d",
     path: "contracts/developer/openapi.yaml",
-    sha256: "ec70d9ca659f6b06010fe3c04ff2c03e3463cf52a0755b97e8506b4110f0ac21",
+    sha256: "1bd3d25ef7aa080a38db903445f83ba173753552ac1369b5aad06e8fba6d6472",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -370,8 +370,14 @@ const validateOpenAPI = () => {
   assert.deepEqual(document.components.schemas.Call.properties.status.enum, ["ringing", "active", "ended"]);
   assert.equal("connected_at" in document.components.schemas.Call.properties, false);
   assert.ok(document.components.schemas.SystemEvent.required.includes("call"));
-  assert.ok(document.components.schemas.SystemEvent.properties.type.enum.includes("call_ended"));
-  assert.deepEqual(document.components.schemas.CallMarker.required, ["id", "mode", "end_reason", "connected", "duration_seconds"]);
+  assert.ok(document.components.schemas.SystemEvent.properties.type.enum.includes("call"));
+  assert.equal(document.components.schemas.SystemEvent.properties.type.enum.includes("call_ended"), false);
+  assert.deepEqual(document.components.schemas.CallMarker.required, [
+    "id", "mode", "status", "answered_at", "ended_at", "from", "to",
+    "end_reason", "connected", "duration_seconds",
+  ]);
+  assert.deepEqual(document.components.schemas.CallMarker.properties.status.enum, ["ringing", "active", "ended"]);
+  assert.deepEqual(document.components.schemas.CallMarker.properties.end_reason.type, ["string", "null"]);
   assert.equal(document.components.schemas.CallCreateRequest.properties.to.minItems, 1);
   assert.equal(document.components.schemas.CallCreateRequest.properties.to.maxItems, 1);
   for (const [event, name] of [
