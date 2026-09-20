@@ -21288,6 +21288,20 @@ var WebhookSubscriptions = class {
     });
   }
 };
+var Contacts = class {
+  transport;
+  constructor(transport2) {
+    this.transport = transport2;
+  }
+  lookup(body, options) {
+    return this.transport.request({
+      method: "POST",
+      path: "/v1/contacts/lookup",
+      body,
+      options
+    });
+  }
+};
 var ContactCard = class {
   transport;
   constructor(transport2) {
@@ -21430,6 +21444,7 @@ var Relay = class {
   webhookEvents;
   webhookSubscriptions;
   contactCard;
+  contacts;
   blockedHandles;
   websocket;
   webhooks;
@@ -21446,6 +21461,7 @@ var Relay = class {
     this.webhookEvents = new WebhookEvents(transport2);
     this.webhookSubscriptions = new WebhookSubscriptions(transport2);
     this.contactCard = new ContactCard(transport2);
+    this.contacts = new Contacts(transport2);
     this.blockedHandles = new BlockedHandles(transport2);
     this.websocket = new WebSocket2(transport2);
     this.webhooks = new Webhooks(options.webhookSecret ?? null);
