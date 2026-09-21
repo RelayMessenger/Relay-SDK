@@ -14,7 +14,6 @@ const call: Call = {
   ringing_at: "2026-09-17T12:00:00Z",
   answered_at: null,
   ended_at: null,
-  end_reason: null,
 };
 
 describe("provider-independent call API", () => {
@@ -120,14 +119,15 @@ describe("provider-independent call API", () => {
 });
 
 
-it.each(["ringing", "active", "ended"] as const)("carries the current %s call marker in a system event", (status) => {
+it.each(["ringing", "in-progress", "completed", "no-answer", "canceled", "busy", "failed"] as const)(
+  "carries the current %s call marker in a system event", (status) => {
+  const answered = status === "in-progress" || status === "completed";
+  const ended = status !== "ringing" && status !== "in-progress";
   const marker = {
     id: call.id, mode: call.mode, status, from: call.from, to: call.to,
-    answered_at: status === "ringing" ? null : "2026-09-20T12:00:00Z",
-    ended_at: status === "ended" ? "2026-09-20T12:00:12Z" : null,
-    end_reason: status === "ended" ? "completed" as const : null,
-    connected: status !== "ringing",
-    duration_seconds: status === "ended" ? 12 : null,
+    answered_at: answered ? "2026-09-20T12:00:00Z" : null,
+    ended_at: ended ? "2026-09-20T12:00:12Z" : null,
+    duration_seconds: status === "completed" ? 12 : null,
   };
   const event: SystemEvent = {
     type: "call", actor: call.from, subject: call.to[0], value: null,

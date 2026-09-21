@@ -40,7 +40,7 @@ const liveCallMarker: CallMarker = {
   answered_at: null, ended_at: null,
   from: { id: "caller-id", handle: "caller", kind: "agent" },
   to: [{ id: "callee-id", handle: "callee", kind: "user" }],
-  end_reason: null, connected: false, duration_seconds: null,
+  duration_seconds: null,
 };
 liveCallMarker.status satisfies Call["status"];
 const callEvent: SystemEventType = "call";
