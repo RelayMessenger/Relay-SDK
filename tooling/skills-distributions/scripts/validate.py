@@ -131,7 +131,7 @@ if claude.get("mcpServers", {}).get("relayDocs", {}).get("url") != (
 
 lock = json_object(LOCK_PATH)
 if lock.get("api", {}).get("commit") != (
-    "8b608647b0e75a28f9d7aa4bbb36097b644d43f2"
+    "a25111520f7fc92c25ecd945d1dfc9afa9f60a1f"
 ):
     fail("Relay Server lock commit drifted")
 if lock.get("docs", {}).get("commit") != (
