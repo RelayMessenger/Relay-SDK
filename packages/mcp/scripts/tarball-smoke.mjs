@@ -11,6 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
@@ -74,8 +75,14 @@ await writeFile(
   join(consumer, "package.json"),
   JSON.stringify(candidate ? candidateConsumerManifest({ private: true, type: "module" }, [candidate]) : { private: true, type: "module" }),
 );
-run("npm", ["install", "--ignore-scripts", tarball], { cwd: consumer });
-if (candidate) assertInstalledCandidate(consumer, join(consumer, "node_modules/@relaymessenger/mcp/package.json"), candidate);
+const sdkRelease = join(release, "sdk");
+await mkdir(sdkRelease);
+run("npm", ["pack", "--ignore-scripts", "--pack-destination", sdkRelease], {
+  cwd: resolve(root, "../sdk"),
+});
+const sdkTarballs = (await readdir(sdkRelease)).filter((name) => name.endsWith(".tgz"));
+assert.equal(sdkTarballs.length, 1);
+run("npm", ["install", "--ignore-scripts", join(sdkRelease, sdkTarballs[0]), tarball], { cwd: consumer });
 const bin = join(
   consumer,
   "node_modules",
@@ -93,13 +100,35 @@ for (const relativePath of ["README.md", "dist/generated-docs.js", "dist/search-
 }
 
 const home = await mkdtemp(join(tmpdir(), "relay-mcp-installed-home-"));
+const activityId = "01995bc0-0000-7000-8000-000000000003";
+const activityRequests = [];
+const fixtureServer = createServer(async (request, response) => {
+  let body = "";
+  for await (const chunk of request) body += chunk;
+  activityRequests.push({ method: request.method, url: request.url, body });
+  if (request.method === "DELETE") {
+    response.writeHead(204).end();
+    return;
+  }
+  response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+    chat_id: "activity-smoke", agent_id: "agent", version: "9007199254740993",
+    activity: { id: activityId, text: "Generating image", emoji: "🖼️",
+      updated_at: "2026-09-20T12:00:00Z", expires_at: "2026-09-20T12:01:30Z" },
+  }));
+});
+await new Promise((resolve, reject) => {
+  fixtureServer.once("error", reject);
+  fixtureServer.listen(0, "127.0.0.1", resolve);
+});
+const fixtureAddress = fixtureServer.address();
+assert.ok(fixtureAddress && typeof fixtureAddress === "object");
 const transport = new StdioClientTransport({
   command: bin,
   env: {
     HOME: home,
     PATH: process.env.PATH ?? "",
     XDG_CONFIG_HOME: join(home, ".config"),
-    RELAY_API_URL: "http://127.0.0.1:1",
+    RELAY_API_URL: `http://127.0.0.1:${fixtureAddress.port}`,
     RELAY_AGENT_TOKEN: "mcp-pack-fixture-not-a-real-token",
   },
   stderr: "pipe",
@@ -121,8 +150,25 @@ try {
   const executed = await client.callTool({ name: "execute", arguments: { code: "async function run(client) { return 6 * 7; }" } });
   assert.notEqual(executed.isError, true);
   assert.equal(executed.structuredContent.result, 42);
+  const activityDocs = await client.callTool({ name: "search_docs", arguments: { query: "activity" } });
+  assert.notEqual(activityDocs.isError, true);
+  assert.match(JSON.stringify(activityDocs), /client\.chats\.setActivity/);
+  const activity = await client.callTool({ name: "execute", arguments: { code: `async function run(client) {
+    const state = await client.chats.setActivity("activity-smoke", {text:"Generating image",emoji:"🖼️"});
+    const current = await client.chats.getActivity("activity-smoke");
+    await client.chats.clearActivity("activity-smoke", {activity_id:state.activity.id});
+    return current.version;
+  }` } });
+  assert.notEqual(activity.isError, true);
+  assert.equal(activity.structuredContent.result, "9007199254740993");
+  assert.deepEqual(activityRequests, [
+    { method: "PUT", url: "/v1/chats/activity-smoke/activity", body: '{"text":"Generating image","emoji":"🖼️"}' },
+    { method: "GET", url: "/v1/chats/activity-smoke/activity", body: "" },
+    { method: "DELETE", url: `/v1/chats/activity-smoke/activity?activity_id=${activityId}`, body: "" },
+  ]);
 } finally {
   await client.close().catch(() => {});
+  await new Promise((resolve, reject) => fixtureServer.close((error) => error ? reject(error) : resolve()));
 }
 
 const installedManifest = JSON.parse(

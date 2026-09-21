@@ -131,10 +131,10 @@ if (
 if (lock.relayServer.publicationStatus !== "local-only") {
   throw new Error("Candidate contract must retain explicit local-only provenance");
 }
-if (lock.relayServer.commit !== "c8a1fe8d7c988bddb2d72f4780e80f6d9dd82c4e") {
+if (lock.relayServer.commit !== "56f31c13956ee41f4e2e5945973645e17faa3338") {
   throw new Error("Relay Server commit lock drifted");
 }
-if (lock.relayServer.sha256 !== "ee47c23cd90cdc1b582bc04f730294d40084ea68b291bddb34aac5584e5d9c32") {
+if (lock.relayServer.sha256 !== "7f1056cd6d5dc81a1cd23f1e40520fc3c0a32b5a577dd222988fc26f92e6c8d4") {
   throw new Error("Relay OpenAPI hash lock drifted");
 }
 if (

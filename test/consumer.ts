@@ -3,13 +3,23 @@ import Relay, {
   partsWithSelection,
   type SelectionPartResponse,
   RELAY_WEBHOOK_EVENT_TYPES,
+  type AgentCategory,
+  type AgentSkill,
+  type AgentVisibility,
   type Chat,
+  type ChatActivity,
+  type ChatActivityResponse,
+  type ChatClearActivityParams,
   type Call,
+  type CallMarker,
   type CallWebhookEvent,
   type ChatHandle,
   type ChatSendVoicememoResponse,
+  type ChatSetActivityParams,
   type ContactAddedWebhookEvent,
   type ContactRemovedWebhookEvent,
+  type ContactLookup,
+  type ContactLookupResponse,
   type DeliveryStatus,
   type Message,
   type MessageContent,
@@ -20,6 +30,7 @@ import Relay, {
   type RelayWebhookEnvelope,
   type RelayWebhookEvent,
   type SentMessage,
+  type SystemEventType,
   type TypingIndicatorWebhookData,
   type TextPartResponse,
   type TextPart,
@@ -54,6 +65,18 @@ if (selectionEvent.event_type === "message.received") {
   const source: string | undefined = selectionEvent.data.reply_to?.message_id;
   void [values, source];
 }
+const liveCallMarker: CallMarker = {
+  id: "call-id", mode: "audio", status: "ringing",
+  answered_at: null, ended_at: null,
+  from: { id: "caller-id", handle: "caller", kind: "agent" },
+  to: [{ id: "callee-id", handle: "callee", kind: "user" }],
+  duration_seconds: null,
+};
+liveCallMarker.status satisfies Call["status"];
+const callEvent: SystemEventType = "call";
+// @ts-expect-error A call marker represents the whole call, not only its end.
+const retiredCallEvent: SystemEventType = "call_ended";
+void [liveCallMarker, callEvent, retiredCallEvent];
 
 const content: MessageContent = {
   parts: [{ type: "text", value: "Hello" }],
@@ -64,6 +87,22 @@ await relay.chats.messages.send("chat-id", { message: content });
 await relay.chats.shareContactCard("chat-id");
 await relay.chats.startTyping("chat-id");
 await relay.chats.stopTyping("chat-id");
+const activityParams: ChatSetActivityParams = { text: "Generating image", emoji: "🖼️" };
+const activityState: ChatActivityResponse = await relay.chats.setActivity("chat-id", activityParams);
+activityState.version satisfies string;
+activityState.activity satisfies ChatActivity | null;
+await relay.chats.getActivity("chat-id") satisfies ChatActivityResponse;
+await relay.chats.setActivity("chat-id", { text: "Working", activity_id: "activity-id", emoji: null });
+const clearActivityParams: ChatClearActivityParams = { activity_id: "activity-id" };
+await relay.chats.clearActivity("chat-id", clearActivityParams) satisfies void;
+await relay.chats.clearActivity("chat-id");
+// @ts-expect-error Activity text is required.
+await relay.chats.setActivity("chat-id", { emoji: "🖼️" });
+// @ts-expect-error An activity guard is a UUID string, not a number.
+await relay.chats.clearActivity("chat-id", { activity_id: 1 });
+// @ts-expect-error Activity is not an agent webhook event.
+const activityEvent: typeof RELAY_WEBHOOK_EVENT_TYPES[number] = "chat.activity.updated";
+void activityEvent;
 await relay.chats.markAsRead("chat-id");
 await relay.chats.participants.add("chat-id", { handle: "research" });
 await relay.chats.participants.add("chat-id", { handle: "research", hide_history: true });
@@ -213,8 +252,42 @@ relay.responding;
 relay.messages.poll;
 // @ts-expect-error Socket Mode is not Relay vocabulary.
 relay.socketMode;
-// @ts-expect-error Private user Contact operations are not in the Agent SDK.
-relay.contacts;
+// @ts-expect-error Person settings remain outside the public SDK contract.
+relay.me;
+// @ts-expect-error The public Contact Card update has no agent admission field.
+await relay.contactCard.update({ handle: "echo", message_requests_from: "everyone" });
+// @ts-expect-error The public Contact Card create request has no agent admission field.
+await relay.contactCard.create({ handle: "echo", first_name: "Echo", message_requests_from: "everyone" });
+const ownCards = await relay.contactCard.retrieve({ handle: "echo" });
+// @ts-expect-error The public Contact Card response has no agent admission field.
+ownCards.contact_cards[0]!.message_requests_from;
+const lookup: ContactLookupResponse = await relay.contacts.lookup({ handle: "alice" });
+if (!("contact" in lookup)) throw new Error("A Handle lookup answers with one contact.");
+lookup.contact.kind satisfies "user" | "agent";
+lookup.contact.image_color satisfies string | null;
+lookup.contact.subtitle satisfies string | null | undefined;
+const byTask: ContactLookupResponse = await relay.contacts.lookup({ task: "book a flight" });
+if (!("contacts" in byTask)) throw new Error("A task search answers with a list.");
+byTask.contacts satisfies ContactLookup[];
+byTask.contacts[0]?.skills satisfies AgentSkill[] | undefined;
+byTask.contacts[0]?.category satisfies AgentCategory | null | undefined;
+byTask.contacts[0]?.visibility satisfies AgentVisibility | undefined;
+// @ts-expect-error Public lookup does not carry person settings or an agent admission field.
+lookup.contact.message_requests_from;
+// @ts-expect-error Lookup requires a Handle or a task.
+await relay.contacts.lookup({});
+// @ts-expect-error Private Contact writes are not public SDK operations.
+relay.contacts.add;
+// @ts-expect-error Private Contact writes are not public SDK operations.
+relay.contacts.remove;
+// @ts-expect-error Private Contact lists are not public SDK operations.
+relay.contacts.list;
+// @ts-expect-error Request lifecycle state is private.
+lookup.contact.is_request;
+// @ts-expect-error Request expiry is private.
+lookup.contact.request_expires_at;
+// @ts-expect-error Request sender identity is private.
+lookup.contact.request_sender_id;
 // @ts-expect-error Add requests are gone; the first Message is the request.
 relay.contactRequests;
 const withService: MessageContent = {
@@ -224,6 +297,12 @@ const withService: MessageContent = {
 };
 void withService;
 declare const chat: Chat;
+// @ts-expect-error Request lifecycle state belongs to the private client projection.
+chat.is_request;
+// @ts-expect-error Request expiry belongs to the private client projection.
+chat.request_expires_at;
+// @ts-expect-error Request sender identity belongs to the private client projection.
+chat.request_sender_id;
 chat.handles[0]!.about satisfies string | null;
 // @ts-expect-error The active public Contact shape uses image_url only.
 chat.handles[0]!.avatar_url;

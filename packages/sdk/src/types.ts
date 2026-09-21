@@ -21,13 +21,24 @@ export interface Call {
   from: CallContact;
   to: [CallContact];
   mode: "audio";
-  status: "ringing" | "active" | "ended";
+  /**
+   * Twilio's Call status words. `ringing` and `in-progress` are live;
+   * `completed`, `no-answer`, `canceled`, `busy` and `failed` are terminal and
+   * set `ended_at`. Relay dials at creation, so `queued` is never sent.
+   */
+  status:
+    | "ringing"
+    | "in-progress"
+    | "completed"
+    | "no-answer"
+    | "canceled"
+    | "busy"
+    | "failed";
   revision: number;
   created_at: string;
   ringing_at: string;
   answered_at: string | null;
   ended_at: string | null;
-  end_reason: "completed" | "declined" | "canceled" | "no_answer" | "disconnected" | "failed" | null;
 }
 
 export interface CallCreateParams {
@@ -73,6 +84,35 @@ export type ReactionType =
   | "question"
   | "custom";
 
+export interface ChatActivity {
+  id: UUID;
+  text: string;
+  emoji: string | null;
+  updated_at: string;
+  expires_at: string;
+}
+
+export interface ChatActivityResponse {
+  chat_id: UUID;
+  agent_id: UUID;
+  version: string;
+  activity: ChatActivity | null;
+}
+
+export interface ChatSetActivityParams {
+  /** 1–21 visible characters, at most 1024 UTF-8 bytes. */
+  text: string;
+  /** One Unicode emoji, or null. */
+  emoji?: string | null;
+  /** Omit to start/replace; supply the current ID to refresh/update. */
+  activity_id?: UUID;
+}
+
+export interface ChatClearActivityParams {
+  /** Clear only this task. A stale or missing activity is a successful no-op. */
+  activity_id?: UUID;
+}
+
 interface ChatHandleBase {
   id: UUID;
   handle: string;
@@ -87,6 +127,8 @@ interface ChatHandleBase {
   verified: boolean;
   /** True when the caller holds this Handle as a Contact. */
   is_contact: boolean;
+  activity_version?: string;
+  activity?: ChatActivity | null;
 }
 
 export interface UserChatHandle extends ChatHandleBase {
@@ -251,13 +293,16 @@ export type SystemEventType =
   | "group_name_updated"
   | "group_icon_updated"
   | "contact_card_shared"
-  | "call_ended";
+  | "call";
 
 export interface CallMarker {
   id: UUID;
   mode: "audio";
-  end_reason: NonNullable<Call["end_reason"]>;
-  connected: boolean;
+  status: Call["status"];
+  answered_at: string | null;
+  ended_at: string | null;
+  from: CallContact;
+  to: [CallContact];
   duration_seconds: number | null;
 }
 
@@ -651,6 +696,77 @@ export interface WebhookSubscriptionUpdateParams {
 export interface WebhookSubscriptionListResponse {
   subscriptions: WebhookSubscription[];
 }
+
+/** Where the directory files the agent. */
+export type AgentCategory =
+  | "productivity"
+  | "business"
+  | "finance"
+  | "shopping"
+  | "travel"
+  | "health-fitness"
+  | "lifestyle"
+  | "social"
+  | "education"
+  | "entertainment"
+  | "utilities"
+  | "developer-tools";
+
+/**
+ * `public` agents are listed in the directory and found by task; `unlisted`
+ * agents answer by handle only.
+ */
+export type AgentVisibility = "public" | "unlisted";
+
+/** One thing the agent does, in the A2A AgentSkill shape. */
+export interface AgentSkill {
+  id: string;
+  name: string;
+  description: string;
+  tags: string[];
+  examples: string[];
+}
+
+export interface ContactLookup {
+  id: UUID;
+  handle: string;
+  display_name: string;
+  kind: "user" | "agent";
+  image_url: string | null;
+  image_color: string | null;
+  verified: boolean;
+  /** The agent's name. Agents only. */
+  name?: string;
+  /** The one line under the agent's name. Agents only. */
+  subtitle?: string | null;
+  /** The agent's paragraph. Agents only. */
+  about?: string | null;
+  /** Where the directory files the agent. Agents only. */
+  category?: AgentCategory | null;
+  /** What the agent does, at most ten skills. Agents only. */
+  skills?: AgentSkill[];
+  /** Whether the agent is listed in the directory. Agents only. */
+  visibility?: AgentVisibility;
+}
+
+/**
+ * Look up one contact by Relay Handle, or find public agents by task. Send
+ * exactly one of the two.
+ */
+export type ContactLookupParams =
+  /** Relay Handle, trimmed and lowercased by the Server before validation. */
+  | { handle: string }
+  /** What you need done, in plain words; at most 200 characters. */
+  | { task: string };
+
+/**
+ * A handle lookup answers with one `contact`; a task search answers with
+ * `contacts`, verified agents first and at most twenty, empty when nothing
+ * matches.
+ */
+export type ContactLookupResponse =
+  | { contact: ContactLookup }
+  | { contacts: ContactLookup[] };
 
 export interface ContactCardItem {
   call_url?: string | null;

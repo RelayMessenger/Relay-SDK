@@ -39,29 +39,30 @@
     "validate": "npm run discovery:validate && npm run sources:check && npm run workflows:check && npm run validate:sdk && npm run validate:pi && npm run contract:check && npm run validate:chat-sdk && npm run validate:cli && npm run validate:mcp && npm run validate:openclaw && npm run validate:claude-code && npm run validate:skills && npm run validate:cookbook && npm run proof:clean"
   },
   "devDependencies": {
-    "@types/node": "^22.20.3",
+    "@types/node": "^26.6.2",
     "@types/ws": "^8.18.1",
     "tsx": "4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^4.0.0",
-    "yaml": "^2.9.1"
+    "yaml": "^2.9.1",
+    "chat": "4.41.0"
   },
   "engines": {
-    "node": ">=22.22.3"
+    "node": ">=24.21.0"
   },
   "packageManager": "npm@11.19.1",
   "allowScripts": {
-    "@google/genai@2.18.0": false,
-    "@modelcontextprotocol/inspector@2.4.0": true,
+    "@google/genai@2.21.0": false,
+    "@modelcontextprotocol/inspector@2.7.0": true,
     "@mongodb-js/zstd@7.0.0": true,
     "core-js-pure@3.50.0": false,
     "esbuild@0.28.1": true,
     "esbuild@0.28.2": true,
-    "koffi@3.1.6": true,
+    "koffi@3.2.1": true,
     "node-liblzma@2.2.0": true,
-    "openclaw@2026.8.1": true,
+    "openclaw@2026.9.5": true,
     "protobufjs@7.6.6": true,
     "tree-sitter-bash@0.25.1": true,
-    "workerd@1.20260828.1": true
+    "workerd@1.20260918.1": true
   }
 }

@@ -14,7 +14,6 @@ const call: Call = {
   ringing_at: "2026-09-17T12:00:00Z",
   answered_at: null,
   ended_at: null,
-  end_reason: null,
 };
 
 describe("provider-independent call API", () => {
@@ -120,15 +119,22 @@ describe("provider-independent call API", () => {
 });
 
 
-it("carries the call outcome in a system event", () => {
-  const event: SystemEvent = {
-    type: "call_ended", actor: call.from, subject: call.to[0], value: null,
-    icon_attachment_id: null, contact_card: null,
-    call: { id: call.id, mode: "audio", end_reason: "completed", connected: true, duration_seconds: 12 },
+it.each(["ringing", "in-progress", "completed", "no-answer", "canceled", "busy", "failed"] as const)(
+  "carries the current %s call marker in a system event", (status) => {
+  const answered = status === "in-progress" || status === "completed";
+  const ended = status !== "ringing" && status !== "in-progress";
+  const marker = {
+    id: call.id, mode: call.mode, status, from: call.from, to: call.to,
+    answered_at: answered ? "2026-09-20T12:00:00Z" : null,
+    ended_at: ended ? "2026-09-20T12:00:12Z" : null,
+    duration_seconds: status === "completed" ? 12 : null,
   };
-  expect(JSON.parse(JSON.stringify(event)).call).toEqual({
-    id: call.id, mode: "audio", end_reason: "completed", connected: true, duration_seconds: 12,
-  });
+  const event: SystemEvent = {
+    type: "call", actor: call.from, subject: call.to[0], value: null,
+    icon_attachment_id: null, contact_card: null,
+    call: marker,
+  };
+  expect(JSON.parse(JSON.stringify(event)).call).toEqual(marker);
 });
 
 it.each(["wss://agent.example/calls", null])("updates the call address to %s", async (call_url) => {

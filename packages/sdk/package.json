@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/sdk",
-  "version": "0.3.6-staging.8",
+  "version": "0.3.6-staging.12",
   "description": "TypeScript SDK for the Relay v1 messaging API and signed webhooks.",
   "type": "module",
   "main": "./dist/index.js",
@@ -33,7 +33,7 @@
   "license": "MIT",
   "dependencies": {
     "standardwebhooks": "^1.1.1",
-    "ws": "^8.21.0"
+    "ws": "^8.21.3"
   },
   "publishConfig": {
     "access": "public",

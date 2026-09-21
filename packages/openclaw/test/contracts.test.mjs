@@ -46,8 +46,8 @@ test("pins the requested OpenClaw and current Relay SDK contracts", () => {
       ? /^\d+\.\d+\.\d+$/u
       : /^\d+\.\d+\.\d+-staging\.\d+$/u,
   );
-  assert.equal(packageJson.devDependencies.openclaw, "2026.8.1");
-  assert.equal(packageJson.openclaw.build.openclawVersion, "2026.8.1");
+  assert.equal(packageJson.devDependencies.openclaw, "2026.9.5");
+  assert.equal(packageJson.openclaw.build.openclawVersion, "2026.9.5");
   assert.equal(
     packageJson.dependencies["@relaymessenger/sdk"],
     contractLock.relaySdk.version,
@@ -72,10 +72,11 @@ test("pins the requested OpenClaw and current Relay SDK contracts", () => {
 test("binds Server, OpenAPI, and the exact SDK tarball integrity", () => {
   assert.deepEqual(contractLock.relayServer, {
     repository: "RelayMessenger/Relay-Server",
-    commit: "c8a1fe8d7c988bddb2d72f4780e80f6d9dd82c4e",
+    commit: "56f31c13956ee41f4e2e5945973645e17faa3338",
     openapiPath: "contracts/developer/openapi.yaml",
+    sha256: "7f1056cd6d5dc81a1cd23f1e40520fc3c0a32b5a577dd222988fc26f92e6c8d4",
+    // The selection candidate pins Server bytes that are not published yet.
     publicationStatus: "local-only",
-    sha256: "ee47c23cd90cdc1b582bc04f730294d40084ea68b291bddb34aac5584e5d9c32",
   });
   assert.equal(
     contractLock.relaySdk.workspaceOpenapiSha256,

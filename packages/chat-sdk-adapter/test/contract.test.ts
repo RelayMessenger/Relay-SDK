@@ -6,10 +6,11 @@ import {
   RELAY_API_VERSION,
   RELAY_WEBHOOK_EVENT_TYPES,
   RELAY_WEBHOOK_VERSION,
+  type RelayChatHandle,
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "ee47c23cd90cdc1b582bc04f730294d40084ea68b291bddb34aac5584e5d9c32";
+  "7f1056cd6d5dc81a1cd23f1e40520fc3c0a32b5a577dd222988fc26f92e6c8d4";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -29,6 +30,31 @@ interface OpenApiDocument {
 }
 
 describe("locked Relay Server contract", () => {
+  it("carries optional Chat activity without inventing an agent event", async () => {
+    const document = parse(await readFile(
+      new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8",
+    )) as OpenApiDocument;
+    const handle = {
+      id: "agent", handle: "fixture", kind: "agent",
+      joined_at: "2026-09-20T12:00:00Z", image_url: null, display_name: null,
+      about: null, verified: false, is_contact: true,
+      activity_version: "9007199254740993",
+      activity: {
+        id: "task", text: "Generating image", emoji: "🖼️",
+        updated_at: "2026-09-20T12:00:00Z", expires_at: "2026-09-20T12:01:30Z",
+      },
+    } satisfies RelayChatHandle;
+    expect(handle.activity_version).toBe("9007199254740993");
+    const chatHandle = document.components.schemas.ChatHandle as {
+      properties: Record<string, unknown>; required: string[];
+    };
+    expect(chatHandle.properties).toHaveProperty("activity_version");
+    expect(chatHandle.properties).toHaveProperty("activity");
+    expect(chatHandle.required).not.toContain("activity");
+    expect(chatHandle.required).not.toContain("activity_version");
+    expect(RELAY_WEBHOOK_EVENT_TYPES).not.toContain("chat.activity.updated");
+  });
+
   it("publishes from the canonical Relay-SDK package directory", async () => {
     const packageJson = JSON.parse(
       await readFile(
@@ -151,14 +177,15 @@ describe("locked Relay Server contract", () => {
       properties: Record<string, unknown>;
       required: string[];
     };
+    // Relay Server 56f31c1 renamed ChatHandle.about to subtitle.
     expect(chatHandle.required).toEqual(expect.arrayContaining([
       "image_url",
-      "about",
+      "subtitle",
     ]));
     expect(chatHandle.required).not.toContain("avatar_url");
     expect(chatHandle.required).not.toContain("tagline");
     expect(chatHandle.properties).toHaveProperty("image_url");
-    expect(chatHandle.properties).toHaveProperty("about");
+    expect(chatHandle.properties).toHaveProperty("subtitle");
     expect(chatHandle.properties).not.toHaveProperty("avatar_url");
     expect(chatHandle.properties).not.toHaveProperty("tagline");
   });

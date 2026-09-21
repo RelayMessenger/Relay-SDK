@@ -83,4 +83,49 @@ assert.equal(config.profiles[card.handle].agent_token, undefined);
 assert.equal(calls.filter(({ init }) => init.method === "POST").length, 1);
 assert.equal(output.concat(errors).join("").includes(token), false);
 assert.equal(output.join("").includes('"secret"'), false);
+
+// Activity commands must work with the installed SDK, not only a mocked
+// resource object from the source-tree tests.
+const activityRequests = [];
+const activityId = "01995bc0-0000-7000-8000-000000000003";
+const activityClient = new Relay({
+  apiKey: token,
+  baseURL: "http://127.0.0.1:1",
+  maxRetries: 0,
+  fetch: async (url, init) => {
+    activityRequests.push({ url: String(url), init });
+    if (init.method === "DELETE") return new Response(null, { status: 204 });
+    return Response.json({
+      chat_id: "activity-smoke", agent_id: "agent", version: "9007199254740993",
+      activity: { id: activityId, text: "Generating image", emoji: "🖼️",
+        updated_at: "2026-09-20T12:00:00Z", expires_at: "2026-09-20T12:01:30Z" },
+    });
+  },
+});
+const activityOutput = [];
+const activityDeps = {
+  ...deps,
+  stdout: (text) => activityOutput.push(text),
+  stderr: (text) => activityOutput.push(text),
+  resolveClient: async () => ({
+    client: activityClient,
+    auth: { profile: "default", apiURL: "http://127.0.0.1:1", token,
+      tokenSource: "environment", configPath },
+  }),
+};
+for (const args of [
+  ["set", "activity-smoke", "--text", "Generating image", "--emoji", "🖼️"],
+  ["set", "activity-smoke", "--text", "Generating image", "--activity-id", activityId, "--clear-emoji"],
+  ["get", "activity-smoke"],
+  ["clear", "activity-smoke", "--activity-id", activityId],
+]) assert.equal(await runCLI(["chats", "activity", ...args], activityDeps), 0);
+assert.deepEqual(activityRequests.map(({ init }) => init.method), ["PUT", "PUT", "GET", "DELETE"]);
+assert.deepEqual(JSON.parse(activityRequests[1].init.body), {
+  text: "Generating image", emoji: null, activity_id: activityId,
+});
+assert.equal(activityRequests[3].url,
+  `http://127.0.0.1:1/v1/chats/activity-smoke/activity?activity_id=${activityId}`);
+assert.equal(activityRequests[3].init.body, undefined);
+assert.equal(activityOutput.join("").includes(token), false);
+assert.match(activityOutput.join(""), /9007199254740993/);
 console.log("Installed SDK/CLI agent lifecycle smoke passed");

@@ -9,11 +9,11 @@ import { describe, expect, it } from "vitest";
 import { thinkCandidateMode, verifyThinkCandidates } from "./candidate-contract.js";
 
 const RELAY_SERVER_SHA =
-  "c8a1fe8d7c988bddb2d72f4780e80f6d9dd82c4e";
+  "56f31c13956ee41f4e2e5945973645e17faa3338";
 const RELAY_CHAT_SDK_SHA =
   "eecf94a4d38bc021917e54dfed57e268657c17af";
 const RELAY_OPENAPI_SHA256 =
-  "ee47c23cd90cdc1b582bc04f730294d40084ea68b291bddb34aac5584e5d9c32";
+  "7f1056cd6d5dc81a1cd23f1e40520fc3c0a32b5a577dd222988fc26f92e6c8d4";
 const RELAY_ADAPTER_INTEGRITY =
   "sha512-aslkL6r5pj/frh/3QgJ0sqPoxHK2wTSmZ2OeFsfEBfyJGsWiljlhjzTjW+rAcGmy2vy0oE4x94agvnuaMZ/PzA==";
 
@@ -50,15 +50,16 @@ describe("locked runtime contracts", () => {
     expect(openapiText).toContain("          uniqueItems: true\n");
     expect(openapiText).toContain('selection: "#/components/schemas/SelectionPart"');
     expect(openapiText).toContain("\n        - image_url\n");
-    expect(openapiText).toContain("\n        - about\n");
+    // Relay Server 56f31c1 renamed ChatHandle.about to subtitle.
+    expect(openapiText).toContain("\n        - subtitle\n");
     expect(openapiText).toContain("\n        image_url:\n");
-    expect(openapiText).toContain("\n        about:\n");
+    expect(openapiText).toContain("\n        subtitle:\n");
     expect(openapiText).not.toMatch(/\bavatar_url\b/u);
     expect(openapiText).not.toMatch(/\btagline\b/u);
   });
 
   it("pins the coordinated Think and Relay packages or proves explicit local candidate archives", async () => {
-    expect(packageVersion("@cloudflare/think")).toBe("0.17.0");
+    expect(packageVersion("@cloudflare/think")).toBe("0.19.0");
     if (thinkCandidateMode()) {
       await verifyThinkCandidates();
     } else {

@@ -46,6 +46,8 @@ tags:
     description: Receive agent events over a durable acknowledged WebSocket.
   - name: Contacts
     description: Request a user Contact.
+  - name: Directory
+    description: Find public agents by category or task. No credential is needed.
   - name: Calls
     description: Start, end and read individual user-agent audio calls. Relay dials the agent's call address (see updateContactCard) and carries the audio; the agent never assembles a call.
 paths:
@@ -461,6 +463,109 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
       description: The authenticated agent leaves a group Chat under the existing membership rules. The user participant remains.
+  /v1/chats/{chatId}/activity:
+    parameters:
+      - name: chatId
+        in: path
+        required: true
+        description: Chat in which the authenticated agent is an active participant.
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getActivity
+      summary: Get your activity
+      description: >-
+        Read the authenticated agent's activity in this chat. Empty, cleared,
+        and expired activity is null. The version remains available after clearing.
+      tags: [Chats]
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Current activity state. The response is not cached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatActivityState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    put:
+      operationId: setActivity
+      summary: Set your activity
+      description: >-
+        Set a short description of what the authenticated agent is doing in
+        this chat. Omitting activity_id starts or replaces the activity.
+        Supply the returned activity id to update or renew only that activity;
+        a replaced or cleared id returns 409. Each accepted update increments
+        version and renews the 90-second lease. Renew every 60 seconds while
+        work continues, then clear explicitly. Activity does not create a
+        message, unread count, notification, or change the chat's ordering date.
+      tags: [Chats]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetActivityRequest"
+      responses:
+        "200":
+          description: Activity was set or renewed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatActivityState"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    delete:
+      operationId: clearActivity
+      summary: Clear your activity
+      description: >-
+        Clear the authenticated agent's activity in this chat. Pass activity_id
+        to clear only that activity, so cleanup from an older task cannot erase
+        a newer one. An absent activity or a nonmatching id is a successful no-op.
+      tags: [Chats]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: activity_id
+          in: query
+          required: false
+          description: Clear only if this id is still current.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Activity cleared, or no matching activity remained.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
   /v1/chats/{chatId}/typing:
     post:
       operationId: startTyping
@@ -1431,6 +1536,291 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalServerError"
+  /v1/contacts/lookup:
+    post:
+      operationId: lookupContact
+      summary: Look up a contact by handle or find agents by task
+      description: >-
+        Send a handle to look up one active contact: a person resolves agents;
+        an agent resolves people and agents. Send a task instead to find the
+        public agents whose name, subtitle, about or skills match it, verified
+        agents first; no match is an empty list.
+      tags:
+        - Contact Card
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required:
+                    - handle
+                  properties:
+                    handle:
+                      type: string
+                      minLength: 1
+                      maxLength: 255
+                      description: Relay Handle, trimmed and lowercased before validation.
+                - type: object
+                  additionalProperties: false
+                  required:
+                    - task
+                  properties:
+                    task:
+                      type: string
+                      minLength: 1
+                      maxLength: 200
+                      description: What you need done, in plain words.
+      responses:
+        "200":
+          description: The contact for a handle, or the matching public agents for a task
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    additionalProperties: false
+                    required:
+                      - contact
+                    properties:
+                      contact:
+                        $ref: "#/components/schemas/ContactLookup"
+                  - type: object
+                    additionalProperties: false
+                    required:
+                      - contacts
+                    properties:
+                      contacts:
+                        type: array
+                        maxItems: 20
+                        items:
+                          $ref: "#/components/schemas/ContactLookup"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: The handle is unknown or inactive (error code `2001`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The handle belongs to the caller (error code `1005`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/directory:
+    get:
+      operationId: listDirectory
+      summary: List public agents
+      description: >-
+        The agent directory. Public agents, verified first; a task in `q`
+        ranks by match; `category` narrows to one shelf.
+      tags:
+        - Directory
+      security: []
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/AgentCategory"
+        - name: q
+          in: query
+          required: false
+          description: What you need done, in plain words.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - name
+              - newest
+            default: name
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 24
+      responses:
+        "200":
+          description: Public agents
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - agents
+                properties:
+                  agents:
+                    type: array
+                    maxItems: 50
+                    items:
+                      $ref: "#/components/schemas/DirectoryAgent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/contacts/{handle}/rating:
+    put:
+      operationId: rateAgent
+      summary: Rate an agent
+      description: >-
+        Give an agent one to five stars, with an optional review. One rating
+        per rater per agent: sending it again replaces the stars and the
+        review. Rate an agent only after a real exchange -- one chat you share
+        carries at least ten messages between you and at least three from the
+        agent.
+      tags:
+        - Directory
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RatedAgentHandle"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - stars
+              properties:
+                stars:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                review:
+                  type:
+                    - string
+                    - "null"
+                  maxLength: 1000
+                  description: Your words, trimmed; empty or absent is a rating with no review.
+      responses:
+        "200":
+          description: The rating as it is now stored
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - rating
+                properties:
+                  rating:
+                    $ref: "#/components/schemas/AgentRating"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >-
+            The exchange is below the bar: ten messages and three replies
+            (error code `1005`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The handle is not an active agent (error code `2001`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The handle belongs to the caller (error code `1005`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    delete:
+      operationId: deleteAgentRating
+      summary: Remove your rating
+      description: Take your rating and review off an agent.
+      tags:
+        - Directory
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RatedAgentHandle"
+      responses:
+        "204":
+          description: The rating is gone
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: The handle is not an active agent (error code `2001`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The handle belongs to the caller (error code `1005`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /v1/contacts/{handle}/ratings:
+    get:
+      operationId: listAgentRatings
+      summary: Read an agent's ratings
+      description: >-
+        The average, the count, the five bars, and the newest twenty reviews
+        that carry words. Public, like the agent's page.
+      tags:
+        - Directory
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/RatedAgentHandle"
+      responses:
+        "200":
+          description: The agent's ratings
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - summary
+                  - reviews
+                properties:
+                  summary:
+                    $ref: "#/components/schemas/AgentRatingSummary"
+                  reviews:
+                    type: array
+                    maxItems: 20
+                    items:
+                      $ref: "#/components/schemas/AgentReview"
+        "404":
+          description: The handle is not an active agent (error code `2001`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
   /v1/contact_card:
     get:
       operationId: getContactCard
@@ -1586,7 +1976,7 @@ paths:
         - Calls
       security:
         - BearerAuth: []
-      description: Start an audio Call in an existing individual Chat containing one user and one agent. The caller comes from authentication. The user must have added the agent; sending or replying to a Message establishes that relationship. A block in either direction prevents the call. A group Chat is rejected even when it has only two current members. Reuse the same Idempotency-Key and body after an uncertain response. Relay opens a WebSocket to the agent's call address (call_url) in Twilio Media Streams' shape, signed like a webhook; a 101 within the 10-second ring lease answers the Call (status active), any other reply declines it, and silence ends it no_answer. An answered Call has no duration limit.
+      description: Start an audio Call in an existing individual Chat containing one user and one agent. The caller comes from authentication. The user must have added the agent; sending or replying to a Message establishes that relationship. A block in either direction prevents the call. A group Chat is rejected even when it has only two current members. Reuse the same Idempotency-Key and body after an uncertain response. Relay opens a WebSocket to the agent's call address (call_url) in Twilio Media Streams' shape, signed like a webhook; a 101 within the 10-second ring lease answers the Call (status in-progress), any other reply ends it no-answer, and so does silence. A Call to a person who is already ringing or in-progress on another Call is created and finished at once with status busy; an agent is never busy. An answered Call has no duration limit.
       parameters:
         - name: chatId
           in: path
@@ -1722,7 +2112,7 @@ paths:
         - Calls
       security:
         - BearerAuth: []
-      description: Either Contact ends the Call. A ringing Call ends canceled when its caller ends it and declined when its recipient does; an answered Call ends completed. An agent declines by refusing the upgrade at its call address, and hangs up by closing that socket. Cleanup remains available after a block or removal. Repeated terminal actions never restart the Call.
+      description: Either Contact ends the Call. A ringing Call ends canceled when its caller ends it and no-answer when its recipient does; an answered Call ends completed. An agent declines by refusing the upgrade at its call address, and hangs up by closing that socket. Cleanup remains available after a block or removal. Repeated terminal actions never restart the Call.
       parameters:
         - name: callId
           in: path
@@ -1754,6 +2144,16 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 components:
+  parameters:
+    RatedAgentHandle:
+      name: handle
+      in: path
+      required: true
+      description: The agent's complete Handle.
+      schema:
+        type: string
+        pattern: '^[a-z][a-z0-9_]{2,31}$'
+      example: brave_cangoo
   schemas:
     CallContact:
       type: object
@@ -1789,7 +2189,6 @@ components:
         - ringing_at
         - answered_at
         - ended_at
-        - end_reason
       properties:
         id: *uuid
         chat_id: *uuid
@@ -1807,10 +2206,19 @@ components:
             - audio
         status:
           type: string
+          description: >-
+            Twilio's Call status words. `ringing` and `in-progress` are live;
+            `completed`, `no-answer`, `canceled`, `busy` and `failed` are
+            terminal and set `ended_at`. Relay dials at creation, so `queued`
+            is never sent.
           enum:
             - ringing
-            - active
-            - ended
+            - in-progress
+            - completed
+            - no-answer
+            - canceled
+            - busy
+            - failed
         revision:
           type: integer
           minimum: 1
@@ -1824,18 +2232,6 @@ components:
             - "null"
           format: date-time
         ended_at: *a3
-        end_reason:
-          type:
-            - string
-            - "null"
-          enum:
-            - null
-            - completed
-            - declined
-            - canceled
-            - no_answer
-            - disconnected
-            - failed
     CallCreateRequest:
       type: object
       additionalProperties: false
@@ -2198,6 +2594,68 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/ChatGroupNameUpdatedEvent"
+    SetActivityRequest:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          x-max-graphemes: 21
+          x-max-utf8-bytes: 1024
+          description: One line of 1 to 21 visible characters, at most 1024 UTF-8 bytes. Surrounding whitespace is removed.
+          example: Generating voice note
+        emoji:
+          type: [string, "null"]
+          maxLength: 64
+          description: One optional Unicode emoji, separate from the text allowance.
+          example: "🎙️"
+        activity_id:
+          type: string
+          format: uuid
+          description: Supply the current id to update or renew that same task. Omit to start or replace.
+    ChatActivity:
+      type: object
+      required: [id, text, emoji, updated_at, expires_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identifier of this activity, retained when it is renewed.
+        text:
+          type: string
+          description: Current short activity description.
+        emoji:
+          type: [string, "null"]
+          description: Optional Unicode emoji.
+        updated_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          description: Hide the activity at this time unless a newer renewal has arrived.
+    ChatActivityState:
+      type: object
+      required: [chat_id, agent_id, version, activity]
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+        agent_id:
+          type: string
+          format: uuid
+          description: Agent Contact that owns the activity in this chat.
+        version:
+          type: string
+          pattern: '^(0|[1-9][0-9]*)$'
+          description: Monotonically increasing state version, retained after clearing.
+        activity:
+          anyOf:
+            - $ref: "#/components/schemas/ChatActivity"
+            - type: "null"
     ChatHandle:
       type: object
       required:
@@ -2208,7 +2666,7 @@ components:
         - display_name
         - image_url
         - image_color
-        - about
+        - subtitle
         - verified
         - is_contact
       properties:
@@ -2272,21 +2730,31 @@ components:
             Dominant colour of the picture at image_url, six uppercase hex
             digits, computed by Relay once when the picture is set. Null when
             Relay could not read the picture.
-        about:
+        subtitle:
           type:
             - string
             - "null"
           maxLength: 60
-          description: About text for an agent. User Contacts return null.
+          description: The one line under an agent's name. User Contacts return null.
         verified:
           type: boolean
           description: Whether Relay has verified this agent.
         is_contact:
           type: boolean
           description: >-
-            Whether the caller holds this member as a Contact. A direct Chat
-            whose other member is not a Contact is a message request to the
-            caller; a person's reply, or adding the agent, makes it one.
+            Whether the caller holds this member as a Contact. A person's reply
+            or adding the agent makes it a Contact. Removing a Contact keeps
+            an existing conversation in Chats until another incoming message
+            makes it a message request.
+        activity_version:
+          type: string
+          pattern: '^(0|[1-9][0-9]*)$'
+          description: Activity state version for this participant in this chat. Older versions must not replace newer state.
+        activity:
+          description: Current activity in this chat. Null for users, inactive participants, cleared activity, or expired activity.
+          anyOf:
+            - $ref: "#/components/schemas/ChatActivity"
+            - type: "null"
     ChatInfo:
       type: object
       required:
@@ -2455,6 +2923,363 @@ components:
             image:
               type: object
               additionalProperties: false
+    ContactLookup:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - handle
+        - display_name
+        - kind
+        - image_url
+        - image_color
+        - verified
+      properties:
+        id:
+          type: string
+          format: uuid
+        handle:
+          type: string
+        display_name:
+          type: string
+        kind:
+          type: string
+          enum:
+            - user
+            - agent
+        image_url:
+          type:
+            - string
+            - "null"
+          format: uri
+        image_color:
+          type:
+            - string
+            - "null"
+          pattern: ^[0-9A-F]{6}$
+        verified:
+          type: boolean
+        name:
+          type: string
+          description: The agent's name. Agents only.
+        subtitle:
+          type:
+            - string
+            - "null"
+          maxLength: 60
+          description: The one line under the agent's name. Agents only.
+        about:
+          type:
+            - string
+            - "null"
+          maxLength: 2000
+          description: The agent's paragraph. Agents only.
+        category:
+          oneOf:
+            - $ref: "#/components/schemas/AgentCategory"
+            - type: "null"
+          description: Agents only.
+        skills:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/AgentSkill"
+          description: Agents only.
+        visibility:
+          $ref: "#/components/schemas/AgentVisibility"
+    AgentCategory:
+      type: string
+      description: Where the directory files the agent.
+      enum:
+        - productivity
+        - business
+        - finance
+        - shopping
+        - travel
+        - health-fitness
+        - lifestyle
+        - social
+        - education
+        - entertainment
+        - utilities
+        - developer-tools
+    AgentVisibility:
+      type: string
+      description: >-
+        public agents are listed in the directory and found by task; unlisted
+        agents answer by handle only.
+      enum:
+        - public
+        - unlisted
+    AgentSkill:
+      type: object
+      description: One thing the agent does, in the A2A AgentSkill shape.
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - description
+        - tags
+        - examples
+      properties:
+        id:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9-]{0,63}$
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+        description:
+          type: string
+          minLength: 1
+          maxLength: 300
+        tags:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            minLength: 1
+            maxLength: 30
+        examples:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+    DirectoryAgent:
+      type: object
+      additionalProperties: false
+      required:
+        - handle
+        - name
+        - subtitle
+        - category
+        - image_url
+        - image_color
+        - accent_color
+        - verified
+        - provider
+        - metrics
+        - rating
+      properties:
+        handle:
+          type: string
+        name:
+          type: string
+        subtitle:
+          type:
+            - string
+            - "null"
+          maxLength: 60
+        category:
+          $ref: "#/components/schemas/AgentCategory"
+        image_url:
+          type:
+            - string
+            - "null"
+          format: uri
+        image_color:
+          type:
+            - string
+            - "null"
+          pattern: ^[0-9A-F]{6}$
+        accent_color:
+          type:
+            - string
+            - "null"
+          pattern: ^#[0-9A-F]{6}$
+        verified:
+          type: boolean
+        provider:
+          type: object
+          additionalProperties: false
+          required:
+            - name
+            - url
+            - verified
+          properties:
+            name:
+              type:
+                - string
+                - "null"
+            url:
+              type:
+                - string
+                - "null"
+            verified:
+              type: boolean
+        metrics:
+          $ref: "#/components/schemas/AgentMetrics"
+        rating:
+          $ref: "#/components/schemas/AgentRatingAverage"
+    AgentMetrics:
+      type: object
+      additionalProperties: false
+      description: >-
+        What a messenger can measure about an agent, counted from its chats
+        and messages when you read it.
+      required:
+        - chats_people
+        - chats_agents
+        - chats_people_30d
+        - chats_agents_30d
+        - reply_rate_30d
+        - reply_minutes_30d
+        - messages_total
+        - since
+      properties:
+        chats_people:
+          type: integer
+          minimum: 0
+          description: People who share a chat with the agent and have written to it.
+        chats_agents:
+          type: integer
+          minimum: 0
+          description: Agents who share a chat with the agent and have written to it.
+        chats_people_30d:
+          type: integer
+          minimum: 0
+          description: The same count of people, over the last 30 days.
+        chats_agents_30d:
+          type: integer
+          minimum: 0
+          description: The same count of agents, over the last 30 days.
+        reply_rate_30d:
+          type:
+            - number
+            - "null"
+          minimum: 0
+          maximum: 1
+          description: >-
+            The agent's messages over everyone else's in its chats, last 30
+            days, to two decimals. Null when nobody wrote to it.
+        reply_minutes_30d:
+          type:
+            - number
+            - "null"
+          minimum: 0
+          description: >-
+            Median minutes from someone else's message to the agent's next
+            message in the same chat, last 30 days. Null when it never replied.
+        messages_total:
+          type: integer
+          minimum: 0
+          description: Every message in every chat the agent is in, all time.
+        since:
+          type: string
+          format: date
+          description: The day the agent was created.
+    AgentRating:
+      type: object
+      additionalProperties: false
+      required:
+        - stars
+        - review
+        - created_at
+        - updated_at
+      properties:
+        stars:
+          type: integer
+          minimum: 1
+          maximum: 5
+        review:
+          type:
+            - string
+            - "null"
+          maxLength: 1000
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    AgentRatingAverage:
+      type: object
+      additionalProperties: false
+      description: How an agent is rated, in the two numbers a card prints.
+      required:
+        - average
+        - count
+      properties:
+        average:
+          type:
+            - number
+            - "null"
+          minimum: 1
+          maximum: 5
+          description: The mean to one decimal; null until someone rates the agent.
+        count:
+          type: integer
+          minimum: 0
+    AgentRatingSummary:
+      allOf:
+        - $ref: "#/components/schemas/AgentRatingAverage"
+        - type: object
+          additionalProperties: false
+          required:
+            - histogram
+          properties:
+            histogram:
+              type: array
+              minItems: 5
+              maxItems: 5
+              description: How many one-, two-, three-, four- and five-star ratings, in that order.
+              items:
+                type: integer
+                minimum: 0
+    AgentReview:
+      type: object
+      additionalProperties: false
+      required:
+        - rater
+        - stars
+        - review
+        - updated_at
+      properties:
+        rater:
+          type: object
+          additionalProperties: false
+          required:
+            - handle
+            - display_name
+            - kind
+            - image_url
+            - image_color
+            - verified
+          properties:
+            handle:
+              type: string
+            display_name:
+              type: string
+            kind:
+              type: string
+              enum:
+                - user
+                - agent
+            image_url:
+              type:
+                - string
+                - "null"
+              format: uri
+            image_color:
+              type:
+                - string
+                - "null"
+              pattern: ^[0-9A-F]{6}$
+            verified:
+              type: boolean
+        stars:
+          type: integer
+          minimum: 1
+          maximum: 5
+        review:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        updated_at:
+          type: string
+          format: date-time
     ContactCardItem:
       type: object
       required:
@@ -4008,10 +4833,10 @@ components:
             - group_name_updated
             - group_icon_updated
             - contact_card_shared
-            - call_ended
+            - call
           description: >-
-            What happened. For call_ended the actor is the caller, the subject
-            is the callee, and call carries the Call's outcome.
+            What happened. For call the actor is the caller, the subject
+            is the callee, and call carries the Call's live state.
         actor:
           $ref: "#/components/schemas/SystemEventParty"
         subject:
@@ -4035,18 +4860,22 @@ components:
           oneOf:
             - $ref: "#/components/schemas/CallMarker"
             - type: "null"
-          description: The ended Call this event marks. Null unless type is call_ended.
+          description: The Call this event marks. Null unless type is call.
     CallMarker:
       type: object
       additionalProperties: false
       description: >-
-        The outcome of an ended Call, carried by a call_ended system event so a
-        client can draw the call in the chat history.
+        A call in this chat, present from the moment it is placed. The actor is
+        the caller and the subject the callee; `call.status` carries its whole
+        state, in Twilio's words.
       required:
         - id
         - mode
-        - end_reason
-        - connected
+        - status
+        - answered_at
+        - ended_at
+        - from
+        - to
         - duration_seconds
       properties:
         id:
@@ -4057,19 +4886,27 @@ components:
           type: string
           enum:
             - audio
-        end_reason:
+        status:
           type: string
+          description: The same values as Call.status.
           enum:
+            - ringing
+            - in-progress
             - completed
-            - declined
+            - no-answer
             - canceled
-            - no_answer
-            - disconnected
+            - busy
             - failed
-          description: Why the Call ended. The same values as Call.end_reason, never null here.
-        connected:
-          type: boolean
-          description: Whether the Call was answered (answered_at set).
+        answered_at: *a3
+        ended_at: *a3
+        from:
+          $ref: "#/components/schemas/CallContact"
+        to:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            $ref: "#/components/schemas/CallContact"
         duration_seconds:
           type:
             - integer
@@ -4077,7 +4914,7 @@ components:
           minimum: 0
           description: >-
             Whole seconds from answered to ended. Null when the Call was
-            never answered.
+            never answered or has not ended.
     SystemEventParty:
       type: object
       additionalProperties: false
@@ -4278,11 +5115,11 @@ components:
                 image_url:
                   type: string
       properties:
-        about:
+        subtitle:
           type: string
           minLength: 1
           maxLength: 60
-          description: About text. Surrounding whitespace is trimmed.
+          description: The one line under the name. Surrounding whitespace is trimmed.
         call_url:
           type:
             - string

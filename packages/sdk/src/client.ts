@@ -14,11 +14,14 @@ import type {
   CallListResponse,
   CallResponse,
   Chat,
+  ChatActivityResponse,
+  ChatClearActivityParams,
   ChatCreateParams,
   ChatCreateResponse,
   ChatListChatsParams,
   ChatSendVoicememoParams,
   ChatSendVoicememoResponse,
+  ChatSetActivityParams,
   ChatUpdateParams,
   ChatUpdateResponse,
   ContactCardItem,
@@ -26,6 +29,8 @@ import type {
   ContactCardRetrieveParams,
   ContactCardRetrieveResponse,
   ContactCardUpdateParams,
+  ContactLookupParams,
+  ContactLookupResponse,
   Message,
   MessageAddReactionParams,
   MessageAddReactionResponse,
@@ -406,6 +411,40 @@ export class Chats {
     });
   }
 
+  getActivity(chatID: string, options?: RequestOptions): Promise<ChatActivityResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      options,
+    });
+  }
+
+  setActivity(
+    chatID: string,
+    body: ChatSetActivityParams,
+    options?: RequestOptions,
+  ): Promise<ChatActivityResponse> {
+    return this.transport.request({
+      method: "PUT",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      body,
+      options,
+    });
+  }
+
+  clearActivity(
+    chatID: string,
+    query: ChatClearActivityParams = {},
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      query,
+      options,
+    });
+  }
+
   /**
    * Explicitly marks the visible Messages in this Chat as Read.
    * The SDK never calls this method automatically.
@@ -614,6 +653,22 @@ export class WebhookSubscriptions {
   }
 }
 
+export class Contacts {
+  constructor(private readonly transport: Transport) {}
+
+  lookup(
+    body: ContactLookupParams,
+    options?: RequestOptions,
+  ): Promise<ContactLookupResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: "/v1/contacts/lookup",
+      body,
+      options,
+    });
+  }
+}
+
 export class ContactCard {
   constructor(private readonly transport: Transport) {}
 
@@ -767,6 +822,7 @@ export class Relay {
   readonly webhookEvents: WebhookEvents;
   readonly webhookSubscriptions: WebhookSubscriptions;
   readonly contactCard: ContactCard;
+  readonly contacts: Contacts;
   readonly blockedHandles: BlockedHandles;
   readonly websocket: WebSocket;
   readonly webhooks: Webhooks;
@@ -783,6 +839,7 @@ export class Relay {
     this.webhookEvents = new WebhookEvents(transport);
     this.webhookSubscriptions = new WebhookSubscriptions(transport);
     this.contactCard = new ContactCard(transport);
+    this.contacts = new Contacts(transport);
     this.blockedHandles = new BlockedHandles(transport);
     this.websocket = new WebSocket(transport);
     this.webhooks = new Webhooks(options.webhookSecret ?? null);

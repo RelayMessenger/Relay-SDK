@@ -8271,7 +8271,7 @@ var require_permessage_deflate = __commonJS({
       acceptAsServer(offers) {
         const opts = this._options;
         const accepted = offers.find((params) => {
-          if (opts.serverNoContextTakeover === false && params.server_no_context_takeover || params.server_max_window_bits && (opts.serverMaxWindowBits === false || typeof opts.serverMaxWindowBits === "number" && opts.serverMaxWindowBits > params.server_max_window_bits) || typeof opts.clientMaxWindowBits === "number" && !params.client_max_window_bits) {
+          if (opts.serverNoContextTakeover === false && params.server_no_context_takeover || params.server_max_window_bits && (opts.serverMaxWindowBits === false || typeof opts.serverMaxWindowBits === "number" && opts.serverMaxWindowBits > params.server_max_window_bits) || typeof opts.clientMaxWindowBits === "number" && (typeof params.client_max_window_bits === "number" ? opts.clientMaxWindowBits > params.client_max_window_bits : !params.client_max_window_bits)) {
             return false;
           }
           return true;
@@ -8791,6 +8791,7 @@ var require_receiver = __commonJS({
         this._opcode = 0;
         this._totalPayloadLength = 0;
         this._messageLength = 0;
+        this._numFragments = 0;
         this._fragments = [];
         this._errored = false;
         this._loop = false;
@@ -9141,23 +9142,23 @@ var require_receiver = __commonJS({
           this.controlMessage(data, cb);
           return;
         }
+        if (this._maxFragments > 0 && ++this._numFragments > this._maxFragments) {
+          const error2 = this.createError(
+            RangeError,
+            "Too many message fragments",
+            false,
+            1008,
+            "WS_ERR_TOO_MANY_BUFFERED_PARTS"
+          );
+          cb(error2);
+          return;
+        }
         if (this._compressed) {
           this._state = INFLATING;
           this.decompress(data, cb);
           return;
         }
         if (data.length) {
-          if (this._maxFragments > 0 && this._fragments.length >= this._maxFragments) {
-            const error2 = this.createError(
-              RangeError,
-              "Too many message fragments",
-              false,
-              1008,
-              "WS_ERR_TOO_MANY_BUFFERED_PARTS"
-            );
-            cb(error2);
-            return;
-          }
           this._messageLength = this._totalPayloadLength;
           this._fragments.push(data);
         }
@@ -9187,17 +9188,6 @@ var require_receiver = __commonJS({
               cb(error2);
               return;
             }
-            if (this._maxFragments > 0 && this._fragments.length >= this._maxFragments) {
-              const error2 = this.createError(
-                RangeError,
-                "Too many message fragments",
-                false,
-                1008,
-                "WS_ERR_TOO_MANY_BUFFERED_PARTS"
-              );
-              cb(error2);
-              return;
-            }
             this._fragments.push(buf);
           }
           this.dataMessage(cb);
@@ -9220,6 +9210,7 @@ var require_receiver = __commonJS({
         this._totalPayloadLength = 0;
         this._messageLength = 0;
         this._fragmented = 0;
+        this._numFragments = 0;
         this._fragments = [];
         if (this._opcode === 2) {
           let data;
@@ -10720,8 +10711,8 @@ var require_websocket = __commonJS({
         autoPong: true,
         closeTimeout: CLOSE_TIMEOUT,
         protocolVersion: protocolVersions[1],
-        maxBufferedChunks: 1024 * 1024,
-        maxFragments: 128 * 1024,
+        maxBufferedChunks: 256 * 1024,
+        maxFragments: 16 * 1024,
         maxPayload: 100 * 1024 * 1024,
         skipUTF8Validation: false,
         perMessageDeflate: true,
@@ -11308,9 +11299,9 @@ var require_websocket_server = __commonJS({
        *     called
        * @param {Function} [options.handleProtocols] A hook to handle protocols
        * @param {String} [options.host] The hostname where to bind the server
-       * @param {Number} [options.maxBufferedChunks=1048576] The maximum number of
+       * @param {Number} [options.maxBufferedChunks=262144] The maximum number of
        *     buffered data chunks
-       * @param {Number} [options.maxFragments=131072] The maximum number of message
+       * @param {Number} [options.maxFragments=16384] The maximum number of message
        *     fragments
        * @param {Number} [options.maxPayload=104857600] The maximum allowed message
        *     size
@@ -11333,8 +11324,8 @@ var require_websocket_server = __commonJS({
         options = {
           allowSynchronousEvents: true,
           autoPong: true,
-          maxBufferedChunks: 1024 * 1024,
-          maxFragments: 128 * 1024,
+          maxBufferedChunks: 256 * 1024,
+          maxFragments: 16 * 1024,
           maxPayload: 100 * 1024 * 1024,
           skipUTF8Validation: false,
           perMessageDeflate: false,
@@ -21118,6 +21109,29 @@ var Chats = class {
       retryable: true
     });
   }
+  getActivity(chatID, options) {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      options
+    });
+  }
+  setActivity(chatID, body, options) {
+    return this.transport.request({
+      method: "PUT",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      body,
+      options
+    });
+  }
+  clearActivity(chatID, query = {}, options) {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      query,
+      options
+    });
+  }
   /**
    * Explicitly marks the visible Messages in this Chat as Read.
    * The SDK never calls this method automatically.
@@ -21274,6 +21288,20 @@ var WebhookSubscriptions = class {
     });
   }
 };
+var Contacts = class {
+  transport;
+  constructor(transport2) {
+    this.transport = transport2;
+  }
+  lookup(body, options) {
+    return this.transport.request({
+      method: "POST",
+      path: "/v1/contacts/lookup",
+      body,
+      options
+    });
+  }
+};
 var ContactCard = class {
   transport;
   constructor(transport2) {
@@ -21416,6 +21444,7 @@ var Relay = class {
   webhookEvents;
   webhookSubscriptions;
   contactCard;
+  contacts;
   blockedHandles;
   websocket;
   webhooks;
@@ -21432,6 +21461,7 @@ var Relay = class {
     this.webhookEvents = new WebhookEvents(transport2);
     this.webhookSubscriptions = new WebhookSubscriptions(transport2);
     this.contactCard = new ContactCard(transport2);
+    this.contacts = new Contacts(transport2);
     this.blockedHandles = new BlockedHandles(transport2);
     this.websocket = new WebSocket2(transport2);
     this.webhooks = new Webhooks(options.webhookSecret ?? null);
@@ -23137,7 +23167,7 @@ var RelayStateStore = class {
 };
 
 // server.ts
-var VERSION = true ? "0.3.9-staging.10" : createRequire(import.meta.url)("./package.json").version;
+var VERSION = true ? "0.3.9-staging.14" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);

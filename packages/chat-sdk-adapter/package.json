@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/chat-sdk-adapter",
-  "version": "0.3.7-staging.9",
+  "version": "0.3.7-staging.13",
   "description": "Vendor-official Relay adapter for Vercel Chat SDK.",
   "keywords": [
     "relay",
@@ -59,21 +59,21 @@
     "wrangler:types:check": "wrangler types --check"
   },
   "peerDependencies": {
-    "chat": "^4.39.0"
+    "chat": "^4.41.0"
   },
   "dependencies": {
-    "@chat-adapter/shared": "4.39.0"
+    "@chat-adapter/shared": "4.41.0"
   },
   "devDependencies": {
-    "@chat-adapter/state-memory": "4.39.0",
-    "@chat-adapter/tests": "4.39.0",
-    "@cloudflare/vitest-plugin": "1.1.8",
-    "@types/node": "26.4.0",
+    "@chat-adapter/state-memory": "4.41.0",
+    "@chat-adapter/tests": "4.41.0",
+    "@cloudflare/vitest-plugin": "1.1.13",
+    "@types/node": "26.6.2",
     "@vitest/coverage-v8": "4.1.11",
-    "chat": "4.39.0",
+    "chat": "4.41.0",
     "typescript": "7.0.2",
     "vitest": "4.1.11",
-    "wrangler": "4.131.1",
-    "yaml": "2.9.0"
+    "wrangler": "4.135.0",
+    "yaml": "2.9.1"
   }
 }

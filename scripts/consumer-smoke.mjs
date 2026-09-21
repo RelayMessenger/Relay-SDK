@@ -99,6 +99,8 @@ try {
     "call_url",
     "verified",
     "is_contact",
+    "activity_version",
+    "activity",
   ]);
   assert.deepEqual(interfaceFields("UserChatHandle"), [
     "kind",
@@ -106,8 +108,27 @@ try {
   assert.deepEqual(interfaceFields("AgentChatHandle"), [
     "kind",
   ]);
+  assert.deepEqual(interfaceFields("ChatActivity"), [
+    "id", "text", "emoji", "updated_at", "expires_at",
+  ]);
+  assert.deepEqual(interfaceFields("ChatActivityResponse"), [
+    "chat_id", "agent_id", "version", "activity",
+  ]);
+  assert.deepEqual(interfaceFields("ChatSetActivityParams"), [
+    "text", "emoji", "activity_id",
+  ]);
+  assert.deepEqual(interfaceFields("ChatClearActivityParams"), ["activity_id"]);
   assert.doesNotMatch(packedTypes, /\bavatar_url\b/u);
   assert.doesNotMatch(packedTypes, /\btagline\b/u);
+  assert.doesNotMatch(packedTypes, /\b(?:is_request|request_expires_at|request_sender_id)\??:/u);
+  assert.deepEqual(interfaceFields("ContactLookup"), [
+    "id", "handle", "display_name", "kind", "image_url", "image_color", "verified",
+    "name", "subtitle", "about", "category", "skills", "visibility",
+  ]);
+  for (const name of ["ContactCardItem", "ContactCardUpdateParams", "ContactCardCreateParams"]) {
+    assert.equal(interfaceFields(name).includes("message_requests_from"), false);
+  }
+  assert.doesNotMatch(packedTypes, /\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/u);
   assert.doesNotMatch(packedTypes, /AgentCreate(?:ProfileParams|Params|Response)/);
   assert.doesNotMatch(packedTypes, /\bContactRequestCreate(?:Params|Response)\b/u);
   assert.deepEqual(interfaceFields("MessageContent"), [
@@ -133,7 +154,7 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 38);
+      assert.equal(RELAY_V1_OPERATIONS.length, 42);
       assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
       const allowedOperations = new Set([
         "POST /v1/chats",
@@ -143,6 +164,9 @@ try {
         "POST /v1/chats/{chatId}/participants",
         "DELETE /v1/chats/{chatId}/participants",
         "POST /v1/chats/{chatId}/leave",
+        "GET /v1/chats/{chatId}/activity",
+        "PUT /v1/chats/{chatId}/activity",
+        "DELETE /v1/chats/{chatId}/activity",
         "POST /v1/chats/{chatId}/typing",
         "DELETE /v1/chats/{chatId}/typing",
         "POST /v1/chats/{chatId}/read",
@@ -166,6 +190,7 @@ try {
         "GET /v1/webhook-subscriptions/{subscriptionId}",
         "PUT /v1/webhook-subscriptions/{subscriptionId}",
         "DELETE /v1/webhook-subscriptions/{subscriptionId}",
+        "POST /v1/contacts/lookup",
         "GET /v1/contact_card",
         "POST /v1/contact_card",
         "PATCH /v1/contact_card",
@@ -210,13 +235,17 @@ try {
           .sort();
       assert.equal("createAgent" in Relay, false);
       assert.deepEqual(methods(client.agents), ["delete"]);
+      assert.deepEqual(methods(client.contacts), ["lookup"]);
       assert.deepEqual(methods(client.chats), [
+        "clearActivity",
         "create",
+        "getActivity",
         "leaveChat",
         "listChats",
         "markAsRead",
         "retrieve",
         "sendVoicememo",
+        "setActivity",
         "shareContactCard",
         "startTyping",
         "stopTyping",
@@ -259,6 +288,32 @@ try {
       ]);
       assert.deepEqual(methods(client.websocket), ["run"]);
       assert.deepEqual(methods(client.webhooks), ["unwrap", "verify"]);
+      const activityRequests = [];
+      const activityState = {
+        chat_id: "chat", agent_id: "agent", version: "9007199254740993",
+        activity: { id: "task", text: "Generating image", emoji: "🖼️",
+          updated_at: "2026-09-20T12:00:00Z", expires_at: "2026-09-20T12:01:30Z" },
+      };
+      const activityClient = new Relay({
+        apiKey: "consumer-test",
+        fetch: async (url, init) => {
+          activityRequests.push({ url: String(url), init });
+          return init.method === "DELETE"
+            ? new Response(null, { status: 204 })
+            : Response.json(activityState);
+        },
+      });
+      const started = await activityClient.chats.setActivity("chat/one", {
+        text: "Generating image", emoji: "🖼️",
+      });
+      assert.deepEqual(started, activityState);
+      assert.deepEqual(await activityClient.chats.getActivity("chat/one"), activityState);
+      await activityClient.chats.clearActivity("chat/one", { activity_id: started.activity.id });
+      assert.deepEqual(activityRequests.map(({ init }) => init.method), ["PUT", "GET", "DELETE"]);
+      assert.equal(new URL(activityRequests[0].url).pathname, "/v1/chats/chat%2Fone/activity");
+      assert.equal(new URL(activityRequests[2].url).searchParams.get("activity_id"), "task");
+      assert.equal(activityRequests[2].init.body, undefined);
+      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.includes("chat.activity.updated"), false);
     `,
   ], { cwd: consumer, stdio: "inherit" });
   console.log(JSON.stringify({

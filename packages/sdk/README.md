@@ -123,6 +123,46 @@ await relay.chats.messages.send(chatId, {
 });
 ```
 
+## Show task activity
+
+Start activity when the work starts. Image generation uses `🖼️ Generating image`;
+voice-note generation uses `🎙️ Generating voice note`.
+
+```ts
+const state = await relay.chats.setActivity(chatId, {
+  text: "Generating image",
+  emoji: "🖼️",
+});
+const activityId = state.activity!.id;
+```
+
+Renew every 60 seconds only while that task remains active. The same ID guards
+updates against replacing a newer task; a replaced or cleared ID returns 409.
+Each successful update renews the 90-second safety lease:
+
+```ts
+await relay.chats.setActivity(chatId, {
+  text: "Generating image",
+  emoji: "🖼️",
+  activity_id: activityId,
+});
+```
+
+Clear when work completes, fails, or is cancelled. Guard cleanup with the task
+ID so an old task cannot clear a newer one. Missing or replaced activity is a
+successful no-op:
+
+```ts
+await relay.chats.clearActivity(chatId, { activity_id: activityId });
+const current = await relay.chats.getActivity(chatId);
+```
+
+GET reads your own state. Text allows 1–21 visible characters and at most
+1024 UTF-8 bytes; `emoji` is one Unicode emoji or `null`. Response `version`
+is a string and `activity` is an object or `null`. Chat handles may also carry
+`activity_version` and `activity`. Typing remains `chats.startTyping` and
+`chats.stopTyping`; activity does not add an agent event or polling transport.
+
 ## Share your Contact Card
 
 ```ts
@@ -165,6 +205,7 @@ Available resource methods:
 - `webhookEvents.list`
 - `webhookSubscriptions.create`, `retrieve`, `update`, `list`, `delete`
 - `contactCard.create`, `retrieve`, `update`
+- `contacts.lookup({ handle })`
 - `blockedHandles.list`, `block`, `unblock`
 - `websocket.run`
 

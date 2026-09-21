@@ -7,11 +7,11 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const expected =
-  "ee47c23cd90cdc1b582bc04f730294d40084ea68b291bddb34aac5584e5d9c32";
+  "7f1056cd6d5dc81a1cd23f1e40520fc3c0a32b5a577dd222988fc26f92e6c8d4";
 const manifest = JSON.parse(await readFile(join(root, "contracts/relay-v1-operations.json"), "utf8"));
 assert.equal(manifest.source_openapi_sha256, expected);
 assert.equal(manifest.upstream.sha256, expected);
-assert.equal(manifest.upstream.commit, "c8a1fe8d7c988bddb2d72f4780e80f6d9dd82c4e");
+assert.equal(manifest.upstream.commit, "56f31c13956ee41f4e2e5945973645e17faa3338");
 assert.equal(manifest.upstream.publication_status, "local-only");
 const copies = [
   "contracts/relay-v1-openapi.yaml",
@@ -47,8 +47,8 @@ const skillLock = JSON.parse(
   ),
 );
 // Historical published skill provenance intentionally remains independent of the local candidate.
-assert.equal(skillLock.api.openapi_sha256, "27698655d12500fb9cd2e10dbf1c94025fbc64c288df6151db673a7649877111");
-assert.equal(skillLock.api.commit, "eb83978b6b2c625da82471e4af16acad8de0e618");
+assert.equal(skillLock.api.openapi_sha256, "9f3e662a13cd0e6b16a52fba4b53c75fe5817d134dcf152e00b054699c37839c");
+assert.equal(skillLock.api.commit, "a25111520f7fc92c25ecd945d1dfc9afa9f60a1f");
 assert.equal(skillLock.sdk.commit, "79517a1c9fcb1c82b474cd72ba8bc10197ff363f");
 assert.equal(skillLock.sdk.version, "0.3.1-staging.1");
 // The lock is what a customer's installed skill reads, on every branch, so its
@@ -64,7 +64,7 @@ for (const path of [
 ]) {
   const lock = JSON.parse(await readFile(join(root, path), "utf8"));
   assert.equal(lock.relayServer.sha256, expected, `${path}: Server digest`);
-  assert.equal(lock.relayServer.commit, "c8a1fe8d7c988bddb2d72f4780e80f6d9dd82c4e", `${path}: local Server pin`);
+  assert.equal(lock.relayServer.commit, "56f31c13956ee41f4e2e5945973645e17faa3338", `${path}: local Server pin`);
   assert.equal(lock.relayServer.publicationStatus, "local-only");
   assert.equal(lock.relaySdk.integrityScope, "historical-published-package; not the local selection candidate");
   assert.equal(lock.relaySdk.workspaceOpenapiSha256, expected, `${path}: workspace digest`);

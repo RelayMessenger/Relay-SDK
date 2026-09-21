@@ -5,6 +5,7 @@ export {
   Chats,
   Calls,
   ContactCard,
+  Contacts,
   Messages,
   Relay,
   WebSocket,
