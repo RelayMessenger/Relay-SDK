@@ -102,7 +102,7 @@ export const answerMessages = (
   say: (line: string) => void,
 ): MessagePart[][] => {
   const { messages, error } = splitAnswer(answer);
-  if (error) say(`The buttons block in the answer to @${sender} was left as text: ${error}.`);
+  if (error) say(`The component block in the answer to @${sender} was left as text: ${error}.`);
   return messages.map((parts) => parts.map((part) => (
     part.type === "text" ? { ...part, value: part.value.slice(0, MAX_RELAY_TEXT) } : part
   )));
@@ -559,7 +559,11 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
       await handed;
     },
     onFullSync: async () => {
-      throw new Error("Codex bridge cannot acknowledge FULL sync without a durable Relay inbox");
+      // This process keeps no copy of any chat, so there is nothing to rebuild.
+      // Throwing here would not stop the bridge: the SDK closes the socket and
+      // reconnects, Relay re-issues the same FULL sync, and no message is ever
+      // answered again. Acknowledge it and answer the new ones.
+      input.say("Codex was away longer than Relay keeps its messages. It answers the new ones from now on.");
     },
   });
 };

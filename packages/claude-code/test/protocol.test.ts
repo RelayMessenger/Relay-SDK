@@ -507,7 +507,6 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     expect(JSON.parse(params.meta.selection_response!)).toEqual({ selected_values: ["research"] });
     expect(JSON.parse(params.meta.reply_to!)).toEqual({ message_id: EVENT_ID, part_index: 1 });
     expect(JSON.parse(params.meta.relay_parts!)).toEqual([
-      { type: "text", value: "• Research", reactions: null },
       { type: "selection_response", selected_values: ["research"] },
     ]);
     expect(params.meta).toMatchObject({

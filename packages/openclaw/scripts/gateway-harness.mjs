@@ -29,7 +29,7 @@ const candidate = candidateTarball({
   version: packageJson.dependencies["@relaymessenger/sdk"],
   variable: "RELAY_SDK_CANDIDATE_TARBALL",
 });
-const temp = mkdtempSync(join(tmpdir(), "relay-openclaw-gateway-"));
+const temp = realpathSync(mkdtempSync(join(tmpdir(), "relay-openclaw-gateway-")));
 const home = join(temp, "home");
 const pack = join(temp, "pack");
 const require = createRequire(import.meta.url);

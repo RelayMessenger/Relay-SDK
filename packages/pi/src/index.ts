@@ -171,7 +171,7 @@ export class PiChannel {
     const answer = response.data?.text?.trim();
     if (!answer) throw new Error("Pi returned no final text answer");
     const messages = answerMessages(answer);
-    if (messages[0]?.error) console.error(`Relay: the buttons block in pi's answer was left as text: ${messages[0].error}.`);
+    if (messages[0]?.error) console.error(`Relay: the component block in pi's answer was left as text: ${messages[0].error}.`);
     for (const [index, message] of messages.entries()) await this.#relay.chats.messages.send(data.chat.id, { message: { parts: message.parts, idempotency_key: `pi-${event.event_id}-${index}` } });
   }
 }

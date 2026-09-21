@@ -125,3 +125,14 @@ describe("indexedIdempotencyKey", () => {
     expect(key.endsWith("-1")).toBe(true);
   });
 });
+
+describe("a rejected selection block keeps link cards", () => {
+  it("still sends each standalone link alone when the selection block is invalid", () => {
+    const answer = 'Words\nhttps://example.com/x\n```selection\n[{"value":"a b","label":"A"}]\n```';
+    const { messages, error } = answerMessages(answer);
+    expect(error).toMatch(/option 1 needs an ASCII token value/u);
+    expect(messages.map((parts) => parts.map((part) => part.type))).toEqual([["text"], ["link"], ["text"]]);
+    expect(messages[1]).toEqual([{ type: "link", value: "https://example.com/x" }]);
+    expect(messages[2]?.[0]).toMatchObject({ type: "text", value: expect.stringContaining("```selection") });
+  });
+});

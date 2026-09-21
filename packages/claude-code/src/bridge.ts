@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { indexedIdempotencyKey, partsWithButtons, partsWithSelection, selectionReply, selectionReplyContext, type SelectionPart, type ButtonsPart } from "@relaymessenger/sdk";
+import { SELECTION_CONTEXT_MAX_LENGTH, componentParts, indexedIdempotencyKey, partsWithButtons, partsWithSelection, selectionReply, type SelectionPart, type ButtonsPart } from "@relaymessenger/sdk";
 import type {
   Chat,
   Message,
@@ -15,9 +15,16 @@ const MAX_RELAY_TEXT = 10_000;
 
 function selectionMeta(parts: readonly MessagePartResponse[], replyTo: Message["reply_to"], redactor: Redactor): Record<string, string> {
   const selection = selectionReply(parts, replyTo);
-  const rich = selectionReplyContext(undefined, { parts, ...(replyTo ? { reply_to: replyTo } : {}) });
+  // Words, links and media are already in `content`; only the parts the
+  // channel cannot show as text ride along, and never past the text cap.
+  const components = componentParts(parts);
+  const rich = components.length ? JSON.stringify(components) : "";
   return {
-    ...(rich ? { relay_parts: redactor.text(JSON.stringify(parts)), ...(replyTo ? { reply_to: JSON.stringify(replyTo) } : {}) } : {}),
+    ...(rich ? {
+      relay_parts: redactor.text(rich.length > SELECTION_CONTEXT_MAX_LENGTH
+        ? `${rich.slice(0, SELECTION_CONTEXT_MAX_LENGTH)}… [truncated]` : rich),
+      ...(replyTo ? { reply_to: JSON.stringify(replyTo) } : {}),
+    } : {}),
     ...(selection ? {
       selection_response: redactor.text(JSON.stringify({ selected_values: selection.selected_values })),
       reply_to: JSON.stringify(selection.reply_to),

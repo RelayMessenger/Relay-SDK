@@ -78,6 +78,8 @@ export {
   SELECTION_MAX_OPTIONS,
   SELECTION_LABEL_MAX_LENGTH,
   SELECTION_VALUE_MAX_LENGTH,
+  SELECTION_CONTEXT_MAX_LENGTH,
+  componentParts,
   selectionPart,
   parseSelectionBlock,
   partsWithSelection,

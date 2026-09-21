@@ -215,8 +215,8 @@ describe("FULL sync reconciliation", () => {
       agentMessageIds: new Set(), throughSequence: "42", allowedSenders: parseAllowedSenders(USER_ID), redactor,
     });
     expect(selected?.content).toBe("• Research");
+    // Only the parts the channel cannot show as words ride in meta; the text is `content`.
     expect(JSON.parse(selected!.meta.relay_parts!)).toEqual([
-      { type: "text", value: "• Research", reactions: null },
       { type: "selection_response", selected_values: ["research"] },
     ]);
     expect(JSON.parse(selected!.meta.selection_response!)).toEqual({ selected_values: ["research"] });
@@ -426,7 +426,9 @@ it("preserves rich parts and a zero-index reply target as channel JSON metadata"
   expect(action.kind).toBe("delivery");
   if (action.kind !== "delivery") return;
   expect(action.delivery.content).toBe("A question");
-  expect(JSON.parse(action.delivery.meta.relay_parts!)).toEqual(input.data.parts);
+  expect(JSON.parse(action.delivery.meta.relay_parts!)).toEqual(
+    input.data.parts.filter((part) => !["text", "link", "media", "system"].includes(part.type)),
+  );
   expect(JSON.parse(action.delivery.meta.reply_to!)).toEqual(input.data.reply_to);
   expect(action.delivery.meta.selection_response).toBeUndefined();
 });

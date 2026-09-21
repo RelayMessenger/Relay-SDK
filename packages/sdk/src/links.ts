@@ -83,7 +83,9 @@ export interface AnswerMessages {
 export const answerMessages = (answer: string): AnswerMessages => {
   const selected = splitSelection(answer);
   if (selected.error) {
-    return { messages: [[{ type: "text", value: answer }]], error: selected.error };
+    // The block stays in the words, but a link still travels alone; a bad
+    // component must not also take the person's link cards away.
+    return { messages: splitLinks(answer).map((segment) => [segment]), error: selected.error };
   }
   if (selected.selection) {
     const messages: MessagePart[][] = splitLinks(selected.text).map((segment) => [segment]);

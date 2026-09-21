@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -39,7 +39,9 @@ export function assertInstalledCandidate(consumer, importer, candidate, { lockPa
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   assert.equal(manifest.name, candidate.name);
   assert.equal(manifest.version, candidate.version);
-  const key = relative(consumer, directory).replaceAll("\\", "/");
+  // Node resolves through symlinked ancestors (macOS keeps its temporary
+  // directories under /private), so compare canonical paths, not spellings.
+  const key = relative(realpathSync(consumer), realpathSync(directory)).replaceAll("\\", "/");
   assert.ok(key.startsWith("node_modules/"), "candidate must resolve inside the isolated consumer");
   // A workspace overlay may retain its install receipt outside the source
   // checkout so the historical checked-in lock remains unchanged.

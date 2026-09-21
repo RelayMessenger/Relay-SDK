@@ -125,7 +125,7 @@ describe("Claude Agent SDK bridge", () => {
     expect(state.relay.sent.map((item) => item.parts)).toEqual([[{ type: "text", value: answer }]]);
     expect(state.said).toEqual([
       "@alice  hi",
-      "The buttons block in the answer to @alice was left as text: the buttons block is not valid JSON.",
+      "The component block in the answer to @alice was left as text: the buttons block is not valid JSON.",
       "Sent the answer to @alice.",
     ]);
   });

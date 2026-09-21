@@ -27,7 +27,9 @@ const candidate = candidateTarball({
   name: "@relaymessenger/sdk", version: packageJson.dependencies["@relaymessenger/sdk"],
   variable: "RELAY_SDK_CANDIDATE_TARBALL",
 });
-const temp = mkdtempSync(join(tmpdir(), "relay-openclaw-pack-"));
+// Canonical path: npm keys its lockfile against the real tree, and macOS keeps
+// the temporary directory behind a /private symlink.
+const temp = realpathSync(mkdtempSync(join(tmpdir(), "relay-openclaw-pack-")));
 const source = join(temp, "source");
 const pack = join(temp, "pack");
 const install = join(temp, "install");
