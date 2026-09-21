@@ -21,13 +21,24 @@ export interface Call {
   from: CallContact;
   to: [CallContact];
   mode: "audio";
-  status: "ringing" | "active" | "ended";
+  /**
+   * Twilio's Call status words. `ringing` and `in-progress` are live;
+   * `completed`, `no-answer`, `canceled`, `busy` and `failed` are terminal and
+   * set `ended_at`. Relay dials at creation, so `queued` is never sent.
+   */
+  status:
+    | "ringing"
+    | "in-progress"
+    | "completed"
+    | "no-answer"
+    | "canceled"
+    | "busy"
+    | "failed";
   revision: number;
   created_at: string;
   ringing_at: string;
   answered_at: string | null;
   ended_at: string | null;
-  end_reason: "completed" | "declined" | "canceled" | "no_answer" | "disconnected" | "failed" | null;
 }
 
 export interface CallCreateParams {
@@ -249,8 +260,6 @@ export interface CallMarker {
   ended_at: string | null;
   from: CallContact;
   to: [CallContact];
-  end_reason: Call["end_reason"];
-  connected: boolean;
   duration_seconds: number | null;
 }
 

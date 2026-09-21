@@ -39,9 +39,9 @@ assert.deepEqual(
   manifest.upstream,
   {
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "8b608647b0e75a28f9d7aa4bbb36097b644d43f2",
+    commit: "a25111520f7fc92c25ecd945d1dfc9afa9f60a1f",
     path: "contracts/developer/openapi.yaml",
-    sha256: "46eeedd5a5e99e879e32c45972799364021143df9f81acd60837713210639735",
+    sha256: "9f3e662a13cd0e6b16a52fba4b53c75fe5817d134dcf152e00b054699c37839c",
   },
   "SDK contract provenance must identify the exact canonical Server source",
 );
@@ -418,17 +418,23 @@ const validateOpenAPI = () => {
   for (const gone of ["connected", "connections", "room", "media", "accept", "decline"]) {
     assert.equal(`/v1/calls/{callId}/${gone}` in document.paths, false, `${gone} REST route is obsolete`);
   }
-  assert.deepEqual(document.components.schemas.Call.properties.status.enum, ["ringing", "active", "ended"]);
+  // Call status copies Twilio's words; `queued` never appears because Relay dials at creation.
+  const callStatus = ["ringing", "in-progress", "completed", "no-answer", "canceled", "busy", "failed"];
+  assert.deepEqual(document.components.schemas.Call.properties.status.enum, callStatus);
   assert.equal("connected_at" in document.components.schemas.Call.properties, false);
+  assert.equal("end_reason" in document.components.schemas.Call.properties, false);
+  assert.equal(document.components.schemas.Call.required.includes("end_reason"), false);
   assert.ok(document.components.schemas.SystemEvent.required.includes("call"));
   assert.ok(document.components.schemas.SystemEvent.properties.type.enum.includes("call"));
   assert.equal(document.components.schemas.SystemEvent.properties.type.enum.includes("call_ended"), false);
   assert.deepEqual(document.components.schemas.CallMarker.required, [
     "id", "mode", "status", "answered_at", "ended_at", "from", "to",
-    "end_reason", "connected", "duration_seconds",
+    "duration_seconds",
   ]);
-  assert.deepEqual(document.components.schemas.CallMarker.properties.status.enum, ["ringing", "active", "ended"]);
-  assert.deepEqual(document.components.schemas.CallMarker.properties.end_reason.type, ["string", "null"]);
+  assert.deepEqual(document.components.schemas.CallMarker.properties.status.enum, callStatus);
+  for (const gone of ["end_reason", "connected"]) {
+    assert.equal(gone in document.components.schemas.CallMarker.properties, false, `CallMarker.${gone} is obsolete`);
+  }
   assert.equal(document.components.schemas.CallCreateRequest.properties.to.minItems, 1);
   assert.equal(document.components.schemas.CallCreateRequest.properties.to.maxItems, 1);
   for (const [event, name] of [
