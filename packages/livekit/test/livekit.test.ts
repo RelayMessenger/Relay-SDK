@@ -5,7 +5,9 @@ import type { CallRoom, CallRoomEventMap, Relay } from "@relaymessenger/sdk";
 import { RelayAudioInput, RelayAudioOutput, RelayLiveKitCall, createRelayLiveKitAudio } from "../src/livekit.js";
 import type {
   RelayAudioFrame,
+  RelayAudioSinkLike,
   RelayCallTransport,
+  RelayInboundAudioFormat,
   RelayPeerConnectionConfig,
   RelayPeerConnectionLike,
   RelayWebRTCFactory,
@@ -244,6 +246,8 @@ class ConnectingRoom {
 
 class ConnectingWebRTC implements RelayWebRTCFactory {
   readonly peerConfigs: RelayPeerConnectionConfig[] = [];
+  readonly peers: RelayPeerConnectionLike[] = [];
+  readonly sinks: Array<{ format: RelayInboundAudioFormat; sink: RelayAudioSinkLike }> = [];
   neverConnects = false;
   createPeerConnection(config?: RelayPeerConnectionConfig): RelayPeerConnectionLike {
     if (config) this.peerConfigs.push(structuredClone(config));
@@ -271,13 +275,16 @@ class ConnectingWebRTC implements RelayWebRTCFactory {
       removeEventListener: () => {},
       close: () => {},
     };
+    this.peers.push(peer);
     return peer;
   }
   createAudioSource() {
     return { createTrack: () => ({ kind: "audio", stop: () => {} }), onData: () => {} };
   }
-  createAudioSink() {
-    return { ondata: null, stop: () => {} };
+  createAudioSink(_track: unknown, format: RelayInboundAudioFormat): RelayAudioSinkLike {
+    const sink: RelayAudioSinkLike = { ondata: null, stop: () => {} };
+    this.sinks.push({ format: { ...format }, sink });
+    return sink;
   }
 }
 
@@ -307,4 +314,49 @@ it("forwards ICE servers, the transport policy and the media timeout through con
     webRTC: stuck,
     mediaConnectTimeoutMs: 20,
   })).rejects.toThrow(/^Timed out connecting Relay WebRTC media \(local: host 0, srflx 0, relay 0; remote: none; states: no connected; in: 0 rtp, 0 bad, 0 frames, no packets, 0\/5s; out: 0 frames, 0 opus, 0 rtp, no packets, 0\/5s, queue 0, pacer n\/a; room: 0 roomState, 0 offer\)$/);
+});
+
+it("asks the engine for LiveKit's 24 kHz mono room input and hands the session mono frames", async () => {
+  const webRTC = new ConnectingWebRTC();
+  const call = await RelayLiveKitCall.connect({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: new ConnectingRoom() as unknown as CallRoom,
+    webRTC,
+  });
+  webRTC.peers[0]!.ontrack?.({ track: { kind: "audio", stop: () => {} } });
+  expect(webRTC.sinks.map(({ format }) => format)).toEqual([{ sampleRate: 24_000, channelCount: 1 }]);
+
+  call.input.setAttached(true);
+  const reader = call.input.stream.getReader();
+  const { sink, format } = webRTC.sinks[0]!;
+  // The fake engine delivers exactly what it was asked for, as werift's decoder does.
+  sink.ondata?.({
+    samples: new Int16Array(480).fill(7),
+    sampleRate: format.sampleRate,
+    bitsPerSample: 16,
+    channelCount: format.channelCount,
+    numberOfFrames: 480 / format.channelCount,
+  });
+  const received = await reader.read();
+  expect(received.value?.channels).toBe(1);
+  expect(received.value?.sampleRate).toBe(24_000);
+  expect(received.value?.samplesPerChannel).toBe(480);
+  reader.releaseLock();
+  await call.close();
+});
+
+it("delivers every inbound frame in order when the transport emits faster than the session reads", async () => {
+  const transport = new FakeTransport();
+  const input = new RelayAudioInput(transport as unknown as RelayCallTransport);
+  input.setAttached(true);
+  for (let i = 0; i < 20; i += 1) {
+    transport.emit({ samples: new Int16Array(480).fill(i), sampleRate: 24_000, channelCount: 1 });
+  }
+  const reader = input.stream.getReader();
+  const seen: number[] = [];
+  for (let i = 0; i < 20; i += 1) seen.push((await reader.read()).value!.data[0]!);
+  expect(seen).toEqual([...Array(20).keys()]);
+  reader.releaseLock();
+  await input.close();
 });

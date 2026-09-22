@@ -123,6 +123,25 @@ export interface RelayIceServer {
 
 export type RelayIceTransportPolicy = "all" | "relay";
 
+/**
+ * PCM format the engine decodes the remote participant's Opus into. The values
+ * are the ones libopus decodes to (`@evan/opus` lib.d.ts: `channels?: 1 | 2`,
+ * `sample_rate?: 8000 | 12000 | 16000 | 24000 | 48000`); the decoder itself
+ * resamples and downmixes, so no PCM is converted by hand.
+ */
+export interface RelayInboundAudioFormat {
+  sampleRate: 8000 | 12000 | 16000 | 24000 | 48000;
+  channelCount: 1 | 2;
+}
+
+/** Opus's native rate and Relay's wire channel count. */
+export const DEFAULT_INBOUND_AUDIO: Readonly<RelayInboundAudioFormat> = Object.freeze({
+  sampleRate: 48_000,
+  channelCount: 2,
+});
+
+const INBOUND_SAMPLE_RATES: ReadonlySet<number> = new Set([8_000, 12_000, 16_000, 24_000, 48_000]);
+
 /** @internal Passed by the transport into every engine's `RTCPeerConnection`. */
 export interface RelayPeerConnectionConfig {
   iceServers: RelayIceServer[];
@@ -133,7 +152,7 @@ export interface RelayPeerConnectionConfig {
 export interface RelayWebRTCFactory {
   createPeerConnection(config?: RelayPeerConnectionConfig): RelayPeerConnectionLike;
   createAudioSource(): RelayAudioSourceLike;
-  createAudioSink(track: RelayMediaStreamTrackLike): RelayAudioSinkLike;
+  createAudioSink(track: RelayMediaStreamTrackLike, format: RelayInboundAudioFormat): RelayAudioSinkLike;
 }
 
 export type RelayCallEngine = "werift" | "wrtc";
@@ -165,6 +184,12 @@ export interface RelayCallTransportOptions {
   mediaConnectTimeoutMs?: number;
   /** @deprecated Use `mediaConnectTimeoutMs`. */
   connectionTimeoutMs?: number;
+  /**
+   * PCM format of the `audio` events: the Opus decoder decodes the remote
+   * track straight to this rate and channel count. Defaults to 48 kHz stereo.
+   * The `"wrtc"` engine delivers libwebrtc's own format and accepts only the default.
+   */
+  inboundAudio?: RelayInboundAudioFormat;
   /**
    * Called once per call when outbound audio is queued but no RTP packet has
    * been written for 2 s while media is connected. Receives the diagnostics
@@ -414,6 +439,7 @@ export class RelayCallTransport {
   readonly #iceGatheringTimeoutMs: number;
   readonly #connectionTimeoutMs: number;
   readonly #peerConfig: RelayPeerConnectionConfig;
+  readonly #inboundAudio: RelayInboundAudioFormat;
   readonly #onWarning: (message: string) => void;
   #connectStartedAt = 0;
   #inboundFrames = 0;
@@ -461,6 +487,21 @@ export class RelayCallTransport {
     if (this.#engine !== "werift" && this.#engine !== "wrtc") {
       throw new Error('engine must be "werift" or "wrtc".');
     }
+    const inbound = options.inboundAudio ?? DEFAULT_INBOUND_AUDIO;
+    if (!INBOUND_SAMPLE_RATES.has(inbound.sampleRate)) {
+      throw new Error("inboundAudio.sampleRate must be 8000, 12000, 16000, 24000 or 48000.");
+    }
+    if (inbound.channelCount !== 1 && inbound.channelCount !== 2) {
+      throw new Error("inboundAudio.channelCount must be 1 or 2.");
+    }
+    const isDefaultInbound = inbound.sampleRate === DEFAULT_INBOUND_AUDIO.sampleRate
+      && inbound.channelCount === DEFAULT_INBOUND_AUDIO.channelCount;
+    if (!options.webRTC && this.#engine === "wrtc" && !isDefaultInbound) {
+      // `@roamhq/wrtc`'s nonstandard RTCAudioSink hands over libwebrtc's own
+      // PCM and takes no format; honouring another one would mean resampling here.
+      throw new Error('The "wrtc" engine cannot decode to inboundAudio; use the "werift" engine.');
+    }
+    this.#inboundAudio = { sampleRate: inbound.sampleRate, channelCount: inbound.channelCount };
     this.#iceGatheringTimeoutMs = options.iceGatheringTimeoutMs ?? DEFAULT_ICE_GATHERING_TIMEOUT_MS;
     this.#connectionTimeoutMs = options.mediaConnectTimeoutMs
       ?? options.connectionTimeoutMs
@@ -820,7 +861,7 @@ export class RelayCallTransport {
   #remoteTrack(track: RelayMediaStreamTrackLike): void {
     if (track.kind !== "audio" || !this.#factory) return;
     this.#remoteSink?.stop();
-    const sink = this.#factory.createAudioSink(track);
+    const sink = this.#factory.createAudioSink(track, this.#inboundAudio);
     this.#remoteSink = sink;
     sink.ondata = (data) => {
       if (this.#closed || this.#remoteSink !== sink) return;

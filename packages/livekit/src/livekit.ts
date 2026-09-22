@@ -9,15 +9,33 @@ import {
   type RelayCallIceDiagnostics,
   type RelayCallTransportOptions,
   type RelayIceServer,
+  type RelayInboundAudioFormat,
   type RelayIceTransportPolicy,
   type RelayWebRTCFactory,
 } from "./transport.js";
+
+/**
+ * The format LiveKit's own room input hands an AgentSession:
+ * `@livekit/agents` dist/voice/room_io/room_io.js:46-48
+ * `DEFAULT_ROOM_INPUT_OPTIONS = { audioSampleRate: 24e3, audioNumChannels: 1 }`,
+ * passed to the participant `AudioStream` (room_io.js:373-374). Plugins
+ * resample assuming the channel count they construct with
+ * (`@livekit/agents-plugin-google` 1.9.0 realtime_api.js:1307-1329
+ * `new AudioResampler(frame.sampleRate, 16000, 1)`; rtc-node's resampler reads
+ * raw bytes and ignores `frame.channels`), so the session must receive mono.
+ */
+export const LIVEKIT_ROOM_INPUT_AUDIO: Readonly<RelayInboundAudioFormat> = Object.freeze({
+  sampleRate: 24_000,
+  channelCount: 1,
+});
 
 /** LiveKit Agents input backed by the remote Relay participant's WebRTC audio. */
 export class RelayAudioInput extends AudioInput {
   readonly #transport: RelayCallTransport;
   readonly #writer: WritableStreamDefaultWriter<AudioFrame>;
   readonly #onAudio: (frame: RelayAudioFrame) => void;
+  /** Serial write chain: each frame waits for the writer, as `pipeTo` does in LiveKit's input. */
+  #writes: Promise<void> = Promise.resolve();
   #attached = false;
   #closed = false;
 
@@ -35,7 +53,16 @@ export class RelayAudioInput extends AudioInput {
         frame.channelCount,
         frame.samples.length / frame.channelCount,
       );
-      void this.#writer.write(audio).catch(() => undefined);
+      // LiveKit's ParticipantAudioInputStream pipes its AudioStream into the
+      // session with `pipeTo(output.writable)` (room_io/_input.js:161-162),
+      // which awaits the writer before each chunk. The transport pushes and
+      // cannot be paused, so the frames wait here in order instead.
+      this.#writes = this.#writes
+        .then(async () => {
+          await this.#writer.ready;
+          await this.#writer.write(audio);
+        })
+        .catch(() => undefined);
     };
     this.#transport.on("audio", this.#onAudio);
   }
@@ -48,6 +75,7 @@ export class RelayAudioInput extends AudioInput {
     if (this.#closed) return;
     this.#closed = true;
     this.#transport.off("audio", this.#onAudio);
+    await this.#writes;
     await this.#writer.close().catch(() => undefined);
     await super.close();
   }
@@ -203,6 +231,7 @@ export class RelayLiveKitCall {
     const transportOptions: RelayCallTransportOptions = {
       relay: options.relay,
       callId: options.callId,
+      inboundAudio: LIVEKIT_ROOM_INPUT_AUDIO,
       ...(options.room ? { room: options.room } : {}),
       ...(options.roomClient ? { roomClient: options.roomClient } : {}),
       ...(options.webRTC ? { webRTC: options.webRTC } : {}),
