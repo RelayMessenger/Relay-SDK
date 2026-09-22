@@ -2,7 +2,7 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server PENDING (staging e60027e plus the selection candidate)
+ * Relay Server b89d90c0b325a94402456de2e91a59b66c7d9603
  * OpenAPI 503646bcd2b3fbc1170046880ef39f4219592fb9e5d9d00cef022b801abbb4bb
  */
 
