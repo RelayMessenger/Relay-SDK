@@ -73,7 +73,9 @@ await transport.writeAudio({
 ```
 
 `RelayCallTransport` consumes the SDK's `CallRoom`; it does not duplicate the
-room protocol. The default Node runtime uses `@roamhq/wrtc`, while the transport
-boundary remains provider-neutral for additional adapters. `@livekit/agents`
+room protocol. The default engine is `werift` (pure TypeScript WebRTC) with
+`@evan/opus` (prebuilt Opus, WASM fallback), so no native WebRTC binding is
+loaded. Pass `engine: "wrtc"` to use the optional `@roamhq/wrtc` binding
+instead. The transport boundary remains provider-neutral for additional adapters. `@livekit/agents`
 and `@livekit/rtc-node` are peer dependencies so the host agent process owns
 those runtimes.

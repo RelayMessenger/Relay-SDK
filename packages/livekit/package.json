@@ -37,7 +37,11 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@evan/opus": "1.0.3",
     "@relaymessenger/sdk": "0.3.6-staging.13",
+    "werift": "0.24.4"
+  },
+  "optionalDependencies": {
     "@roamhq/wrtc": "^0.10.0"
   },
   "peerDependencies": {

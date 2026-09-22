@@ -82,12 +82,19 @@ export interface RelayWebRTCFactory {
   createAudioSink(track: RelayMediaStreamTrackLike): RelayAudioSinkLike;
 }
 
+export type RelayCallEngine = "werift" | "wrtc";
+
 export interface RelayCallTransportOptions {
   relay: Relay;
   callId: string;
   room?: CallRoomOptions;
   /** @internal Supply an already-created Call room in tests. */
   roomClient?: CallRoom;
+  /**
+   * WebRTC engine. `"werift"` (default) is pure TypeScript plus prebuilt Opus
+   * and loads no native binding. `"wrtc"` loads `@roamhq/wrtc` on demand.
+   */
+  engine?: RelayCallEngine;
   /** @internal Inject another standards-compatible Node WebRTC implementation. */
   webRTC?: RelayWebRTCFactory;
   /** @internal */
@@ -128,7 +135,11 @@ export class RelayCallTransportError extends Error {
   }
 }
 
-const defaultWebRTCFactory = async (): Promise<RelayWebRTCFactory> => {
+const loadWebRTCFactory = async (engine: RelayCallEngine): Promise<RelayWebRTCFactory> => {
+  if (engine === "werift") {
+    const { createWeriftWebRTCFactory } = await import("./engine-werift.js");
+    return createWeriftWebRTCFactory();
+  }
   const wrtc = await import("@roamhq/wrtc");
   return {
     createPeerConnection: () => new wrtc.RTCPeerConnection({
@@ -163,6 +174,7 @@ const delay = (milliseconds: number): Promise<void> =>
 export class RelayCallTransport {
   readonly #room: CallRoom;
   readonly #providedFactory: RelayWebRTCFactory | undefined;
+  readonly #engine: RelayCallEngine;
   readonly #iceGatheringTimeoutMs: number;
   readonly #connectionTimeoutMs: number;
   readonly #listeners = new Map<TransportEvent, Set<(...args: any[]) => void>>();
@@ -189,6 +201,10 @@ export class RelayCallTransport {
     if (!options.callId.trim()) throw new Error("callId is required.");
     this.#room = options.roomClient ?? options.relay.calls.room(options.callId, options.room);
     this.#providedFactory = options.webRTC;
+    this.#engine = options.engine ?? "werift";
+    if (this.#engine !== "werift" && this.#engine !== "wrtc") {
+      throw new Error('engine must be "werift" or "wrtc".');
+    }
     this.#iceGatheringTimeoutMs = options.iceGatheringTimeoutMs ?? DEFAULT_ICE_GATHERING_TIMEOUT_MS;
     this.#connectionTimeoutMs = options.connectionTimeoutMs ?? DEFAULT_CONNECTION_TIMEOUT_MS;
     if (!Number.isFinite(this.#iceGatheringTimeoutMs) || this.#iceGatheringTimeoutMs <= 0) {
@@ -227,7 +243,7 @@ export class RelayCallTransport {
       await this.#waitForConnection();
       return;
     }
-    this.#factory = this.#providedFactory ?? await defaultWebRTCFactory();
+    this.#factory = this.#providedFactory ?? await loadWebRTCFactory(this.#engine);
     this.#audioSource = this.#factory.createAudioSource();
     this.#localTrack = this.#audioSource.createTrack();
     if (this.#localTrack.kind !== "audio") {

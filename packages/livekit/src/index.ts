@@ -11,6 +11,8 @@ export {
   RelayCallTransport,
   RelayCallTransportError,
   type RelayAudioFrame,
+  type RelayCallEngine,
   type RelayCallTransportCloseEvent,
   type RelayCallTransportOptions,
 } from "./transport.js";
+export { createWeriftWebRTCFactory } from "./engine-werift.js";
