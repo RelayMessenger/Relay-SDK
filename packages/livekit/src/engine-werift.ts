@@ -127,7 +127,10 @@ export const toWireFormat = (data: {
 /**
  * PCM16 in, paced 20 ms Opus RTP out. Frames are accumulated into whole
  * packets; a timer drains one packet every 20 ms so the wire sees a steady
- * cadence regardless of how the adapter chunks its writes.
+ * cadence regardless of how the adapter chunks its writes. Adapters may push
+ * far ahead of real time: `queuedMs()` is what has not left yet and
+ * `waitForDrain()` resolves once the queue is empty and the pump has stopped
+ * (LiveKit's `AudioSource.queuedDuration` / `waitForPlayout` shape).
  */
 class WeriftAudioSource implements RelayAudioSourceLike {
   readonly #encoder = new Encoder({
@@ -145,6 +148,7 @@ class WeriftAudioSource implements RelayAudioSourceLike {
   #first = true;
   #pump: NodeJS.Timeout | undefined;
   #stopped = false;
+  readonly #drainWaiters = new Set<() => void>();
 
   stats(): RelayAudioSourceStats {
     return {
@@ -163,12 +167,28 @@ class WeriftAudioSource implements RelayAudioSourceLike {
     const stop = track.stop;
     track.stop = () => {
       this.#stopped = true;
-      this.#packets.length = 0;
-      this.#pending = new Int16Array(0);
-      this.#stopPump();
+      this.clear();
       stop();
     };
     return track;
+  }
+
+  queuedMs(): number {
+    return this.#packets.length * WERIFT_PACKET_MS
+      + (this.#pending.length / WERIFT_CHANNEL_COUNT / WERIFT_SAMPLE_RATE) * 1_000;
+  }
+
+  waitForDrain(): Promise<void> {
+    this.#flushPending();
+    if (this.#drained()) return Promise.resolve();
+    return new Promise((resolve) => this.#drainWaiters.add(resolve));
+  }
+
+  clear(): void {
+    this.#packets.length = 0;
+    this.#pending = new Int16Array(0);
+    this.#stopPump();
+    this.#notifyDrained();
   }
 
   onData(data: WeriftAudioSourceData): void {
@@ -188,13 +208,44 @@ class WeriftAudioSource implements RelayAudioSourceLike {
     this.#startPump();
   }
 
+  /** Pad a sub-packet remainder with silence so the tail of a segment reaches the wire. */
+  #flushPending(): void {
+    if (this.#stopped || this.#pending.length === 0) return;
+    const padded = new Int16Array(PACKET_SAMPLES);
+    padded.set(this.#pending);
+    this.#pending = new Int16Array(0);
+    this.#packets.push(Buffer.from(this.#encoder.encode(padded)));
+    this.#opusPackets += 1;
+    this.#startPump();
+  }
+
+  #drained(): boolean {
+    return this.#packets.length === 0 && this.#pending.length === 0 && this.#pump === undefined;
+  }
+
+  #notifyDrained(): void {
+    if (!this.#drained()) return;
+    for (const resolve of [...this.#drainWaiters]) {
+      this.#drainWaiters.delete(resolve);
+      resolve();
+    }
+  }
+
+  /**
+   * The first packet of a run leaves at once; every later one waits for the
+   * 20 ms tick, so a burst pushed faster than real time reaches the wire at
+   * packet cadence. The interval stops one tick after the queue empties, which
+   * is when the last packet has played.
+   */
   #startPump(): void {
     if (this.#pump || this.#packets.length === 0) return;
     this.#sendNext();
-    if (this.#packets.length === 0) return;
     this.#pump = setInterval(() => {
       this.#sendNext();
-      if (this.#packets.length === 0) this.#stopPump();
+      if (this.#packets.length === 0) {
+        this.#stopPump();
+        this.#notifyDrained();
+      }
     }, WERIFT_PACKET_MS);
     this.#pump.unref?.();
   }

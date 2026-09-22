@@ -11,10 +11,16 @@ import type {
   RelayWebRTCFactory,
 } from "../src/transport.js";
 
+/**
+ * Transport stand-in with an engine-shaped queue: `writeAudio` accepts at once,
+ * `drain(ms)` plays that much out, `waitForPlayout` resolves when empty.
+ */
 class FakeTransport {
   readonly listeners = new Set<(frame: RelayAudioFrame) => void>();
   readonly writes: RelayAudioFrame[] = [];
   clears = 0;
+  queuedMs = 0;
+  readonly waiters = new Set<() => void>();
 
   on(event: string, listener: (frame: RelayAudioFrame) => void): this {
     if (event === "audio") this.listeners.add(listener);
@@ -27,11 +33,37 @@ class FakeTransport {
   emit(frame: RelayAudioFrame): void {
     for (const listener of this.listeners) listener(frame);
   }
-  async writeAudio(frame: RelayAudioFrame): Promise<void> {
+  writeAudio(frame: RelayAudioFrame): Promise<void> {
     this.writes.push({ ...frame, samples: frame.samples.slice() });
+    this.queuedMs += (frame.samples.length / frame.channelCount / frame.sampleRate) * 1_000;
+    return Promise.resolve();
   }
-  clearAudio(): void { this.clears += 1; }
+  queuedAudioMs(): number { return this.queuedMs; }
+  waitForPlayout(): Promise<void> {
+    if (this.queuedMs === 0) return Promise.resolve();
+    return new Promise((resolve) => this.waiters.add(resolve));
+  }
+  clearAudio(): void {
+    this.clears += 1;
+    this.queuedMs = 0;
+    this.#release();
+  }
+  /** Play `ms` of queued audio out; releases `waitForPlayout` when the queue empties. */
+  drain(ms: number): void {
+    this.queuedMs = Math.max(0, this.queuedMs - ms);
+    if (this.queuedMs === 0) this.#release();
+  }
+  #release(): void {
+    for (const resolve of [...this.waiters]) {
+      this.waiters.delete(resolve);
+      resolve();
+    }
+  }
 }
+
+const FRAME_MS = 20;
+const frame20ms = (): AudioFrame => new AudioFrame(new Int16Array(960), 48_000, 1, 960);
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 beforeAll(() => initializeLogger({ pretty: false, level: "silent" }));
 
@@ -71,6 +103,101 @@ it("converts LiveKit output frames to Relay PCM and clears interrupted audio", a
 
   output.clearBuffer();
   expect(transport.clears).toBe(1);
+  output.close();
+});
+
+it("accepts 3 s of audio faster than real time and finishes only after the transport drains", async () => {
+  const transport = new FakeTransport();
+  const output = new RelayAudioOutput(transport as unknown as RelayCallTransport);
+  const started = vi.fn();
+  const finished = vi.fn();
+  output.on(RelayAudioOutput.EVENT_PLAYBACK_STARTED, started);
+  output.on(RelayAudioOutput.EVENT_PLAYBACK_FINISHED, finished);
+
+  const begin = performance.now();
+  for (let i = 0; i < 150; i += 1) await output.captureFrame(frame20ms());
+  const pushMs = performance.now() - begin;
+  expect(pushMs).toBeLessThan(200);
+  expect(transport.writes).toHaveLength(150);
+  expect(transport.queuedMs).toBeCloseTo(3_000, 6);
+  expect(started).toHaveBeenCalledTimes(1);
+
+  output.flush();
+  await settle();
+  expect(finished).not.toHaveBeenCalled();
+  transport.drain(1_500);
+  await settle();
+  expect(finished).not.toHaveBeenCalled();
+  transport.drain(1_500);
+  await settle();
+  expect(finished).toHaveBeenCalledTimes(1);
+  expect(finished.mock.calls[0]?.[0]?.playbackPosition).toBeCloseTo(3.0, 6);
+  expect(finished.mock.calls[0]?.[0]?.interrupted).toBe(false);
+  output.close();
+});
+
+it("reports interrupted with the drained portion when cleared mid-segment", async () => {
+  const transport = new FakeTransport();
+  const output = new RelayAudioOutput(transport as unknown as RelayCallTransport);
+  const finished = vi.fn();
+  output.on(RelayAudioOutput.EVENT_PLAYBACK_FINISHED, finished);
+
+  for (let i = 0; i < 150; i += 1) await output.captureFrame(frame20ms());
+  output.flush();
+  transport.drain(1_000);
+  await settle();
+  expect(finished).not.toHaveBeenCalled();
+
+  output.clearBuffer();
+  expect(transport.clears).toBe(1);
+  expect(transport.queuedMs).toBe(0);
+  await settle();
+  expect(finished).toHaveBeenCalledTimes(1);
+  expect(finished.mock.calls[0]?.[0]?.playbackPosition).toBeCloseTo(1.0, 6);
+  expect(finished.mock.calls[0]?.[0]?.interrupted).toBe(true);
+  output.close();
+});
+
+it("clears without a flush and still reports the interrupted segment", async () => {
+  const transport = new FakeTransport();
+  const output = new RelayAudioOutput(transport as unknown as RelayCallTransport);
+  const finished = vi.fn();
+  output.on(RelayAudioOutput.EVENT_PLAYBACK_FINISHED, finished);
+  for (let i = 0; i < 50; i += 1) await output.captureFrame(frame20ms());
+  transport.drain(400);
+  output.clearBuffer();
+  await settle();
+  expect(finished).toHaveBeenCalledTimes(1);
+  expect(finished.mock.calls[0]?.[0]?.playbackPosition).toBeCloseTo(0.4, 6);
+  expect(finished.mock.calls[0]?.[0]?.interrupted).toBe(true);
+  output.close();
+});
+
+it("delivers a second speech to the transport after the first segment flushed", async () => {
+  const transport = new FakeTransport();
+  const output = new RelayAudioOutput(transport as unknown as RelayCallTransport);
+  const started = vi.fn();
+  const finished = vi.fn();
+  output.on(RelayAudioOutput.EVENT_PLAYBACK_STARTED, started);
+  output.on(RelayAudioOutput.EVENT_PLAYBACK_FINISHED, finished);
+
+  for (let i = 0; i < 25; i += 1) await output.captureFrame(frame20ms());
+  output.flush();
+  transport.drain(25 * FRAME_MS);
+  const first = await output.waitForPlayout();
+  expect(first.playbackPosition).toBeCloseTo(0.5, 6);
+  expect(first.interrupted).toBe(false);
+
+  for (let i = 0; i < 40; i += 1) await output.captureFrame(frame20ms());
+  expect(transport.writes).toHaveLength(65);
+  expect(transport.queuedMs).toBeCloseTo(800, 6);
+  expect(started).toHaveBeenCalledTimes(2);
+  output.flush();
+  transport.drain(800);
+  const second = await output.waitForPlayout();
+  expect(second.playbackPosition).toBeCloseTo(0.8, 6);
+  expect(second.interrupted).toBe(false);
+  expect(finished).toHaveBeenCalledTimes(2);
   output.close();
 });
 
