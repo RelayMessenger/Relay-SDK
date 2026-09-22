@@ -6,12 +6,15 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const expected =
-  "262e832ad356375b1a912faa6f9a8ea9c008effa6c24e2618b000ad6b69d858f";
 const manifest = JSON.parse(await readFile(join(root, "contracts/relay-v1-operations.json"), "utf8"));
-assert.equal(manifest.source_openapi_sha256, expected);
+const expected = manifest.source_openapi_sha256;
+assert.match(expected, /^[a-f0-9]{64}$/u);
 assert.equal(manifest.upstream.sha256, expected);
-assert.equal(manifest.upstream.commit, "fe3ec1e91608e923ec5ee0e37896eb8bf24d863a");
+assert.ok(
+  /^[a-f0-9]{40}$/u.test(manifest.upstream.commit)
+    || (manifest.upstream.commit === "PENDING" && manifest.upstream.publication_status === "local-only"),
+  "Server contract commit must be a durable pin or an explicit local candidate",
+);
 const copies = [
   "contracts/relay-v1-openapi.yaml",
   "packages/chat-sdk-adapter/contracts/relay-openapi.yaml",
@@ -46,7 +49,7 @@ const skillLock = JSON.parse(
   ),
 );
 assert.equal(skillLock.api.openapi_sha256, expected);
-assert.equal(skillLock.api.commit, "fe3ec1e91608e923ec5ee0e37896eb8bf24d863a");
+assert.equal(skillLock.api.commit, "b334eba06ce194cee4ee1b6d308145789d90a6fd");
 assert.equal(skillLock.sdk.commit, "79517a1c9fcb1c82b474cd72ba8bc10197ff363f");
 assert.equal(skillLock.sdk.version, "0.3.1-staging.1");
 // The lock is what a customer's installed skill reads, on every branch, so its
@@ -62,7 +65,7 @@ for (const path of [
 ]) {
   const lock = JSON.parse(await readFile(join(root, path), "utf8"));
   assert.equal(lock.relayServer.sha256, expected, `${path}: Server digest`);
-  assert.equal(lock.relayServer.commit, "fe3ec1e91608e923ec5ee0e37896eb8bf24d863a", `${path}: local Server pin`);
+  assert.equal(lock.relayServer.commit, manifest.upstream.commit, `${path}: local Server pin`);
   assert.equal(lock.relaySdk.workspaceOpenapiSha256, expected, `${path}: workspace digest`);
   assert.equal(lock.relaySdk.version, sdkManifest.version, `${path}: SDK version`);
 }

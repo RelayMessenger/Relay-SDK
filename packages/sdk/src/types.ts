@@ -15,25 +15,21 @@ export interface CallContact {
   kind: "user" | "agent";
 }
 
+export type CallTerminalStatus =
+  | "completed"
+  | "no-answer"
+  | "canceled"
+  | "busy"
+  | "failed";
+
 export interface Call {
   id: UUID;
   chat_id: UUID;
   from: CallContact;
   to: [CallContact];
   mode: "audio";
-  /**
-   * Twilio's Call status words. `ringing` and `in-progress` are live;
-   * `completed`, `no-answer`, `canceled`, `busy` and `failed` are terminal and
-   * set `ended_at`. Relay dials at creation, so `queued` is never sent.
-   */
-  status:
-    | "ringing"
-    | "in-progress"
-    | "completed"
-    | "no-answer"
-    | "canceled"
-    | "busy"
-    | "failed";
+  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */
+  status: "ringing" | "in-progress" | CallTerminalStatus;
   revision: number;
   created_at: string;
   ringing_at: string;
@@ -64,6 +60,96 @@ export interface CallListResponse {
 export interface CallResponse {
   call: Call;
 }
+
+export interface CallRoomParticipant {
+  contact_id: UUID;
+  kind: "user" | "agent";
+  attached: boolean;
+  track: "audio" | null;
+  muted: boolean;
+  connected: boolean;
+}
+
+export interface CallRoomJoinFrame {
+  type: "join";
+}
+
+export interface CallRoomPublishOfferFrame {
+  type: "offer";
+  session_description: { type: "offer"; sdp: string };
+  tracks: [{ mid: string; name: "audio" }];
+}
+
+export interface CallRoomAnswerFrame {
+  type: "answer";
+  session_description: { type: "answer"; sdp: string };
+}
+
+export interface CallRoomConnectedFrame {
+  type: "connected";
+}
+
+export interface CallRoomUserUpdateFrame {
+  type: "userUpdate";
+  muted: boolean;
+}
+
+export interface CallRoomEndFrame {
+  type: "end";
+}
+
+export interface CallRoomHeartbeatFrame {
+  type: "heartbeat";
+}
+
+export type CallRoomClientFrame =
+  | CallRoomJoinFrame
+  | CallRoomPublishOfferFrame
+  | CallRoomAnswerFrame
+  | CallRoomConnectedFrame
+  | CallRoomUserUpdateFrame
+  | CallRoomEndFrame
+  | CallRoomHeartbeatFrame;
+
+export interface CallRoomStateFrame {
+  type: "roomState";
+  call: Call;
+  participants: [CallRoomParticipant, CallRoomParticipant];
+}
+
+export interface CallRoomServerAnswerFrame {
+  type: "answer";
+  session_description: { type: "answer"; sdp: string };
+}
+
+export interface CallRoomSubscriptionOfferFrame {
+  type: "offer";
+  session_description: { type: "offer"; sdp: string };
+  track: "audio";
+}
+
+export interface CallRoomEndedFrame {
+  type: "ended";
+  reason: CallTerminalStatus;
+}
+
+export type CallRoomErrorCode =
+  | "invalid_frame"
+  | "not_allowed"
+  | "media_unavailable";
+
+export interface CallRoomErrorFrame {
+  type: "error";
+  code: CallRoomErrorCode;
+  message: string;
+}
+
+export type CallRoomServerFrame =
+  | CallRoomStateFrame
+  | CallRoomServerAnswerFrame
+  | CallRoomSubscriptionOfferFrame
+  | CallRoomEndedFrame
+  | CallRoomErrorFrame;
 
 export type CallWebhookEvent = RelayWebhookEnvelope<
   CallResponse,
@@ -123,7 +209,6 @@ interface ChatHandleBase {
   display_name: string | null;
   image_url: string | null;
   about: string | null;
-  call_url?: string | null;
   verified: boolean;
   /** True when the caller holds this Handle as a Contact. */
   is_contact: boolean;
@@ -770,7 +855,6 @@ export type ContactLookupResponse =
   | { contacts: ContactLookup[] };
 
 export interface ContactCardItem {
-  call_url?: string | null;
   handle: string;
   first_name: string;
   last_name: string | null;
@@ -801,7 +885,6 @@ export interface ContactCardRetrieveResponse {
 export interface ContactCardUpdateParams {
   /** Server contract 3097dda: trimmed about text, 1 to 60 characters. */
   about?: string;
-  call_url?: string | null;
   handle: string;
   first_name?: string;
   last_name?: string | null;

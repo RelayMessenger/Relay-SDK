@@ -48,6 +48,31 @@ export const releasePackages = {
       ],
     },
   },
+  livekit: {
+    directory: "packages/livekit",
+    workspace: "@relaymessenger/livekit",
+    validate: "validate:livekit",
+    tagPrefix: "livekit-v",
+    smoke: {
+      imports: [
+        {
+          specifier: "@relaymessenger/livekit",
+          named: [
+            "RelayAudioInput",
+            "RelayAudioOutput",
+            "RelayCallTransport",
+            "RelayCallTransportError",
+            "RelayLiveKitCall",
+            "createRelayLiveKitAudio",
+          ],
+        },
+        {
+          specifier: "@relaymessenger/livekit/transport",
+          named: ["RelayCallTransport", "RelayCallTransportError"],
+        },
+      ],
+    },
+  },
   "chat-sdk-adapter": {
     directory: "packages/chat-sdk-adapter",
     workspace: "@relaymessenger/chat-sdk-adapter",

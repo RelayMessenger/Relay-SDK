@@ -21,6 +21,7 @@ including the sender (`to` accepts at most 6 recipient Handles).
 ```text
 packages/
   sdk/                    @relaymessenger/sdk
+  livekit/                @relaymessenger/livekit
   chat-sdk-adapter/       @relaymessenger/chat-sdk-adapter
   cli/                    relaymessenger
   mcp/                    @relaymessenger/mcp
@@ -151,11 +152,13 @@ Order and record tags, from [`scripts/release-packages.mjs`](scripts/release-pac
 | Order | Package | Record tag |
 | --- | --- | --- |
 | 1 | `@relaymessenger/sdk` | `sdk-v<version>` |
-| 2 | `@relaymessenger/chat-sdk-adapter` | `chat-sdk-v<version>` |
-| 3 | `relaymessenger` | `relaymessenger-v<version>` |
-| 4 | `@relaymessenger/mcp` | `mcp-v<version>` |
-| 5 | `@relaymessenger/openclaw-plugin` | `openclaw-v<version>` |
-| 6 | `relay-claude-channel` | `claude-channel-v<version>` |
+| 2 | `@relaymessenger/livekit` | `livekit-v<version>` |
+| 3 | `@relaymessenger/chat-sdk-adapter` | `chat-sdk-v<version>` |
+| 4 | `@relaymessenger/pi` | `pi-v<version>` |
+| 5 | `relaymessenger` | `relaymessenger-v<version>` |
+| 6 | `@relaymessenger/mcp` | `mcp-v<version>` |
+| 7 | `@relaymessenger/openclaw-plugin` | `openclaw-v<version>` |
+| 8 | `relay-claude-channel` | `claude-channel-v<version>` |
 
 Dry run first: `workflow_dispatch` on `release.yml` derives every version,
 prints the skip-or-publish decision, packs, and runs `npm publish --dry-run`,

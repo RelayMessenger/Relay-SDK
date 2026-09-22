@@ -72,7 +72,7 @@ import { describeFailure } from "./errors.js";
 import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
 import { verboseFetch } from "./verbose.js";
 import { relayHelpHeading, writeRelayHelpHeading } from "./relay-brand.js";
-import { consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, consoleSignOut, deleteConsoleAgent, setConsoleAgentCallURL } from "./console-auth.js";
+import { consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, consoleSignOut, deleteConsoleAgent } from "./console-auth.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
 // source file may carry its own copy.
@@ -125,12 +125,6 @@ interface GlobalOptions {
 
 const agentModeValue = (value: string): string => {
   if (!(AGENT_MODES as readonly string[]).includes(value)) throw new InvalidArgumentError("Expected auto, yes or no.");
-  return value;
-};
-
-// Console about text and the retained Contact Card update contract: trim, 1–60.
-const callURL = (value: string): string => {
-  if (!value.startsWith("wss://")) throw new InvalidArgumentError("Must start with wss://");
   return value;
 };
 
@@ -499,12 +493,11 @@ export const createProgram = (
     .option("--handle <handle>", "the agent's handle")
     .option("--name <name>", "the display name")
     .option("--about <text>", "the line above the first message", aboutText)
-    .option("--call-url <url>", "the wss:// address Relay rings for voice calls", callURL)
     .option("--image <path-or-url>", "a picture file or https:// address")
     .option("--image-url <url>", "a picture at an https:// address")
     .option("--image-recipe <json-file>", "a Relay picture recipe accompanying the picture")
     .option("--json", "JSON output")
-    .action(async (options: { apiUrl?: string; json?: boolean; handle?: string; name?: string; about?: string; callUrl?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
+    .action(async (options: { apiUrl?: string; json?: boolean; handle?: string; name?: string; about?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
       if (options.handle !== undefined) validateHandle(options.handle);
       if (options.name !== undefined) validateFirstName(options.name);
       if (options.image !== undefined && options.imageUrl !== undefined) throw new Error("Choose --image or --image-url, not both.");
@@ -539,15 +532,6 @@ export const createProgram = (
         ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}),
         ...(configContext.home ? { home: configContext.home } : {}),
       }, agentDeps, dependencies.fetch);
-      if (options.callUrl !== undefined) {
-        try {
-          await setConsoleAgentCallURL({ context: configContext, apiURL: created.result.api_url,
-            ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
-          }, created.result.handle, options.callUrl);
-        } catch {
-          throw new Error(`Agent @${created.result.handle} was created and its token saved, but its call address was not set. Run agents update ${created.result.handle} --call-url with the address. Do not create another agent.`);
-        }
-      }
       const result = { ...created.result, organization_id: session.organization_id };
       const imageUpdate = created.image;
       if (globals(command).json) output({ ...result, ...(imageUpdate ? { image: imageUpdate } : {}) });
@@ -586,22 +570,17 @@ export const createProgram = (
       if (firstFailure) throw firstFailure;
     });
   agents.command("update").argument("<handle>", "agent handle", handle)
-    .description("update an agent's name, about or call address")
+    .description("update an agent's name or about")
     .option("--name <name>", "the display name")
     .option("--about <text>", "the line above the first message", aboutText)
-    .option("--call-url <url>", "the wss:// address Relay rings for voice calls", callURL)
-    .option("--clear-call-url", "remove the voice call address")
     .option("--json", "JSON output")
-    .action(async (agentHandle: string, options: { name?: string; about?: string; callUrl?: string; clearCallUrl?: boolean }, command: Command) => {
-      if (options.callUrl !== undefined && options.clearCallUrl) throw new Error("Choose --call-url or --clear-call-url, not both.");
+    .action(async (agentHandle: string, options: { name?: string; about?: string }, command: Command) => {
       const body = {
         handle: agentHandle,
         ...(options.name === undefined ? {} : { first_name: validateFirstName(options.name) }),
         ...(options.about === undefined ? {} : { about: options.about }),
-        ...(options.callUrl === undefined ? {} : { call_url: options.callUrl }),
-        ...(options.clearCallUrl ? { call_url: null } : {}),
       };
-      if (Object.keys(body).length === 1) throw new Error("Choose --name, --about, --call-url or --clear-call-url.");
+      if (Object.keys(body).length === 1) throw new Error("Choose --name or --about.");
       const auth = await selectAgentAuth(agentHandle, globals(command).profile, agentDeps);
       await agentDeps.client(auth.token, auth.apiURL).contactCard.update(body, { maxRetries: 0 });
       output(safeMetadata({ ok: true, handle: agentHandle, profile: auth.profile, token: "unchanged" }, [auth.token]));
