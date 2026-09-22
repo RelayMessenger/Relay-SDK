@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "3bde6d9d4bc3ff69c8c0024ea3a0037122e6f888", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "979fa43e72abf033442805b112897d0b5fed0533", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -77,6 +77,7 @@ const allowedOperationSignatures = [
   "POST /v1/chats/{chatId}/voicememo",
   "GET /v1/messages/{messageId}",
   "POST /v1/messages/{messageId}/reactions",
+  "PUT /v1/messages/{messageId}/invoice",
   "POST /v1/attachments",
   "GET /v1/attachments/{attachmentId}",
   "DELETE /v1/attachments/{attachmentId}",
@@ -107,13 +108,13 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 42);
-assert.equal(manifest.path_count, 26);
-assert.equal(manifest.source_path_count, 31);
-assert.equal(manifest.source_schema_count, 156);
+assert.equal(manifest.operation_count, 43);
+assert.equal(manifest.path_count, 27);
+assert.equal(manifest.source_path_count, 32);
+assert.equal(manifest.source_schema_count, 161);
 assert.equal(manifest.callback_count, 19);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 26);
-assert.equal(operationJSON.length, 42);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 27);
+assert.equal(operationJSON.length, 43);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),

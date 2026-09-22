@@ -21888,11 +21888,11 @@ var INVOICE_GUIDANCE = [
   "Send an invoice only when the person asked to buy something or has already agreed to a price; never invoice out of the blue.",
   "url must be a real checkout link you were given \u2014 your own Stripe Payment Link, Stripe Checkout, Shopify page, or anything https. Never invent one, and never paste a checkout link in text or a button; send an invoice instead.",
   "Set goods honestly: physical for goods or services used outside the app, digital for anything delivered in chat or used inside an app.",
-  "An invoice must be the only part of its message: no words, no buttons, no selection beside it.",
+  "The invoice card is a message of its own: no buttons or selection beside it, and any words you write arrive in a message before it.",
   "Use recurring for a subscription: interval day, week, month or year, for up to 3 years total.",
   "When your own system learns the payment went through, for example your Stripe webhook, mark it with the status route so the card updates for the person."
 ].join(" ");
-var INVOICE_BLOCK_INSTRUCTION = "To ask the person to pay, end your answer with nothing else and a fenced code block tagged `" + INVOICE_FENCE + '` holding one JSON object: {"title": "...", "amount": 2400, "currency": "usd", "goods": "physical" or "digital", "url": "https://..."}, with an optional "recurring": {"interval": "month", "interval_count": 1} for a subscription. The block is removed from the text and drawn as an invoice card; it must be alone in its message.';
+var INVOICE_BLOCK_INSTRUCTION = "To ask the person to pay, end your answer with a fenced code block tagged `" + INVOICE_FENCE + '` holding one JSON object: {"title": "...", "amount": 2400, "currency": "usd", "goods": "physical" or "digital", "url": "https://..."}, with an optional "recurring": {"interval": "month", "interval_count": 1} for a subscription. The block is removed from your words and drawn as its own invoice card, sent after them.';
 var FENCE2 = new RegExp("(^|\\n)[ \\t]*```[ \\t]*" + INVOICE_FENCE + "(?:[ \\t][^\\r\\n]*)?\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```[ \\t]*(?=\\r?\\n|$)", "gu");
 
 // node_modules/@relaymessenger/sdk/dist/selection.js

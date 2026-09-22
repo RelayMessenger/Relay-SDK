@@ -21,7 +21,7 @@ export const INVOICE_GUIDANCE = [
   "Send an invoice only when the person asked to buy something or has already agreed to a price; never invoice out of the blue.",
   "url must be a real checkout link you were given — your own Stripe Payment Link, Stripe Checkout, Shopify page, or anything https. Never invent one, and never paste a checkout link in text or a button; send an invoice instead.",
   "Set goods honestly: physical for goods or services used outside the app, digital for anything delivered in chat or used inside an app.",
-  "An invoice must be the only part of its message: no words, no buttons, no selection beside it.",
+  "The invoice card is a message of its own: no buttons or selection beside it, and any words you write arrive in a message before it.",
   "Use recurring for a subscription: interval day, week, month or year, for up to 3 years total.",
   "When your own system learns the payment went through, for example your Stripe webhook, mark it with the status route so the card updates for the person.",
 ].join(" ");
@@ -31,11 +31,11 @@ export const INVOICE_GUIDANCE = [
  * that sends the agent's final text for it.
  */
 export const INVOICE_BLOCK_INSTRUCTION =
-  "To ask the person to pay, end your answer with nothing else and a fenced code block tagged `" + INVOICE_FENCE + "` "
+  "To ask the person to pay, end your answer with a fenced code block tagged `" + INVOICE_FENCE + "` "
   + "holding one JSON object: {\"title\": \"...\", \"amount\": 2400, \"currency\": \"usd\", "
   + "\"goods\": \"physical\" or \"digital\", \"url\": \"https://...\"}, with an optional "
   + "\"recurring\": {\"interval\": \"month\", \"interval_count\": 1} for a subscription. "
-  + "The block is removed from the text and drawn as an invoice card; it must be alone in its message.";
+  + "The block is removed from your words and drawn as its own invoice card, sent after them.";
 
 /** The server's limits (Telegram title, Stripe amount/url/recurring span). */
 export const INVOICE_TITLE_MAX_LENGTH = 32;
@@ -61,6 +61,27 @@ export interface SplitInvoice {
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
+// Counted in code points, matching the server's own check, so a 17-32
+// character emoji title (surrogate pairs) is not rejected as too long.
+const invoiceTitleLength = (value: string): number => [...value].length;
+
+/**
+ * A checkout link the card may open: https with a host, and no username or
+ * password (`https://buy.stripe.com@evil.com` is evil.com). Matches the
+ * server's own check and its normalization, so a link the SDK accepts is
+ * never rejected by the API and always reads back the same way.
+ */
+const checkoutUrl = (value: string): URL | undefined => {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname !== "" && url.username === "" && url.password === ""
+      ? url
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const FENCE = new RegExp(
   "(^|\\n)[ \\t]*```[ \\t]*" + INVOICE_FENCE + "(?:[ \\t][^\\r\\n]*)?\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```[ \\t]*(?=\\r?\\n|$)",
   "gu",
@@ -81,7 +102,7 @@ export const invoicePart = (parsed: unknown): InvoicePart | string => {
   if (extra) return `invoice has unknown field ${extra}`;
   if (parsed.type !== undefined && parsed.type !== "invoice") return "invoice part needs type invoice";
   const { title, amount, currency, goods, url, recurring } = parsed;
-  if (typeof title !== "string" || !title.trim() || title.trim().length > INVOICE_TITLE_MAX_LENGTH) {
+  if (typeof title !== "string" || !title.trim() || invoiceTitleLength(title.trim()) > INVOICE_TITLE_MAX_LENGTH) {
     return `invoice needs a trimmed title of 1 to ${INVOICE_TITLE_MAX_LENGTH} characters`;
   }
   if (!Number.isInteger(amount) || (amount as number) < 1 || (amount as number) > INVOICE_MAX_AMOUNT) {
@@ -96,10 +117,9 @@ export const invoicePart = (parsed: unknown): InvoicePart | string => {
   if (typeof url !== "string" || url.length > INVOICE_URL_MAX_LENGTH) {
     return `invoice url is not a string of at most ${INVOICE_URL_MAX_LENGTH} characters`;
   }
-  try {
-    if (new URL(url).protocol !== "https:") throw new Error();
-  } catch {
-    return "invoice url is not an https URL";
+  const normalizedUrl = checkoutUrl(url);
+  if (!normalizedUrl) {
+    return "invoice url must be an https link with a host and no username or password";
   }
   let normalizedRecurring: InvoiceRecurring | undefined;
   if (recurring !== undefined) {
@@ -124,7 +144,7 @@ export const invoicePart = (parsed: unknown): InvoicePart | string => {
     amount: amount as number,
     currency: currency.toLowerCase(),
     goods: goods as InvoiceGoods,
-    url,
+    url: normalizedUrl.href,
     ...(normalizedRecurring ? { recurring: normalizedRecurring } : {}),
   };
 };

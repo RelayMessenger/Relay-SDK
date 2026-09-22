@@ -116,6 +116,11 @@ export const RELAY_V1_OPERATIONS = [
     "operationId": "sendReaction"
   },
   {
+    "method": "PUT",
+    "path": "/v1/messages/{messageId}/invoice",
+    "operationId": "updateInvoiceStatus"
+  },
+  {
     "method": "POST",
     "path": "/v1/attachments",
     "operationId": "requestUpload"

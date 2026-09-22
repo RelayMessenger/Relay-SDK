@@ -179,6 +179,9 @@ describe("Relay v1 request shapes", () => {
       type: "love",
       part_index: 0,
     });
+    await client.messages.invoice.update("message-id", {
+      status: "succeeded",
+    });
     await client.attachments.create({
       filename: "photo.png",
       content_type: "image/png",

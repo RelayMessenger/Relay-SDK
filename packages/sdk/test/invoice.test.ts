@@ -42,8 +42,10 @@ describe("invoicePart", () => {
     [{ ...invoice, currency: "usdd" }, "invoice currency must be a 3-letter code"],
     [{ ...invoice, goods: "service" }, 'invoice goods must be "physical" or "digital"'],
     [{ ...invoice, url: "x".repeat(2_049) }, "invoice url is not a string of at most 2048 characters"],
-    [{ ...invoice, url: "http://buy.stripe.com/test_123" }, "invoice url is not an https URL"],
-    [{ ...invoice, url: "not a url" }, "invoice url is not an https URL"],
+    [{ ...invoice, url: "http://buy.stripe.com/test_123" }, "invoice url must be an https link with a host and no username or password"],
+    [{ ...invoice, url: "not a url" }, "invoice url must be an https link with a host and no username or password"],
+    [{ ...invoice, url: "https://buy.stripe.com@evil.com/x" }, "invoice url must be an https link with a host and no username or password"],
+    [{ ...invoice, url: "https://user:pass@buy.stripe.com/x" }, "invoice url must be an https link with a host and no username or password"],
     [{ ...invoice, recurring: "month" }, "invoice recurring must be an object"],
     [{ ...invoice, recurring: { interval: "month", id: "x" } }, "invoice recurring has unknown field id"],
     [{ ...invoice, recurring: { interval: "century" } }, "invoice recurring interval must be day, week, month or year"],
@@ -63,6 +65,21 @@ describe("invoicePart", () => {
       .toMatchObject({ recurring: { interval: "week", interval_count: 156 } });
     expect(invoicePart({ ...invoice, recurring: { interval: "year", interval_count: 3 } }))
       .toMatchObject({ recurring: { interval: "year", interval_count: 3 } });
+  });
+
+  it("counts the title in code points, so a 17-32 character emoji title is not rejected as too long", () => {
+    // Each emoji is a surrogate pair: 34 UTF-16 code units but 17 code points.
+    expect(invoicePart({ ...invoice, title: "😀".repeat(17) }))
+      .toMatchObject({ title: "😀".repeat(17) });
+    expect(invoicePart({ ...invoice, title: "😀".repeat(33) }))
+      .toBe("invoice needs a trimmed title of 1 to 32 characters");
+  });
+
+  it("normalizes the checkout url the same way the server stores it", () => {
+    expect(invoicePart({ ...invoice, url: "HTTPS://Buy.Stripe.com/test_123" }))
+      .toMatchObject({ url: "https://buy.stripe.com/test_123" });
+    expect(invoicePart({ ...invoice, url: "https:buy.stripe.com/x" }))
+      .toMatchObject({ url: "https://buy.stripe.com/x" });
   });
 });
 
