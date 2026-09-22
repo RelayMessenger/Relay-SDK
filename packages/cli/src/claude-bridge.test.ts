@@ -141,7 +141,7 @@ describe("Claude Agent SDK bridge", () => {
     const prompt = codexPrompt("alice", "hello");
     expect(prompt).toContain("fenced code block tagged `invoice`");
     expect(prompt).toContain("Send an invoice only when the person asked to buy something or has already agreed to a price");
-    expect(prompt).toContain("An invoice must be the only part of its message");
+    expect(prompt).toContain("The invoice card is a message of its own");
   });
 
   it("a photo with no text starts a turn", async () => {
