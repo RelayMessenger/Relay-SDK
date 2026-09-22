@@ -38,14 +38,14 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "b89d90c0b325a94402456de2e91a59b66c7d9603", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "59f1a65adbe27ab1f9aca3bf9de19204942d872a", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
 // carry. The websocket is a transport, not a client method. The directory
 // and rating routes landed on the Server after the last contract carry; the
-// selection candidate pins the Server bytes that include them, and their
-// client methods arrive with their own carry.
+// selection carry pins the Server bytes that include them, and their client
+// methods arrive with their own carry.
 const sourceOnlyOperations = [
   { method: "GET", path: "/v1/websocket", operationId: "connectAgentWebSocket" },
   { method: "GET", path: "/v1/calls/{callId}/room", operationId: "connectCallRoom" },
@@ -323,7 +323,7 @@ const validateOpenAPI = () => {
   assert.equal(option.properties.value.pattern, "^[A-Za-z0-9][A-Za-z0-9._:-]*$");
   assert.equal(option.properties.label.maxLength, 80);
   const selection = schemas.SelectionPart;
-  assert.match(selection.description, /Coming soon/u);
+  assert.doesNotMatch(selection.description, /Coming soon/u);
   assert.doesNotMatch(selection.description, /Clear/u);
   assert.equal(selection.additionalProperties, false);
   assert.deepEqual(selection.required, ["type", "options"]);

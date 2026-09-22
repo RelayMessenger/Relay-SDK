@@ -42,7 +42,7 @@ const relay = new Relay({
   baseURL: "http://127.0.0.1:8790",
 });
 
-// Coming soon: source-consumer example, not a claim about a published version.
+// Source-consumer example, not a claim about a published version.
 const topics = selectionPart([
   { value: "research", label: "Research" },
   { value: "design", label: "Design" },

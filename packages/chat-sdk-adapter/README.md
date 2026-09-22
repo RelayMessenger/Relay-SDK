@@ -17,10 +17,7 @@ record, and its `canonical` field names `Relay-SDK` -- the same repository
 Relay Chats map one-to-one to Chat SDK threads. Provider thread IDs are stable
 `relay:<chat UUID>` values; provider message IDs are bare Relay Message UUIDs.
 
-## Selection, coming soon
-
-These are local candidate sources, not a claim that the published package or
-hosted API supports selection yet.
+## Selection
 
 Send native text/selection parts through `postMessageParts` using the existing
 idempotency strategy. `message.text` retains the readable reply;
@@ -30,9 +27,10 @@ through webhook ingress and history.
 New human reply text is literal `• ` + each selected source label joined with
 `\n`, followed by `selection_response` metadata in source-option order. Dispatch
 with `selected_values` and the explicit source target, never label parsing.
-Exact legacy comma-joined text remains a server compatibility input. Tapping a
-selected option deselects it locally; the sole submit action is a centered
-compact light-blue Send button. iOS checked circles are presentation only.
+Exact legacy comma-joined text remains a server compatibility input. The person
+checks any number of options and submits them once; checking sends nothing, and
+a person answers a given selection once. iOS may draw a checkmark in place of
+each bullet and repeat the prompt's title, as presentation only.
 
 ## Install
 

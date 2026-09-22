@@ -290,7 +290,7 @@ export interface ButtonsPart {
   items: ButtonItem[];
 }
 
-/** Stable machine value and independently editable visible label. Coming soon. */
+/** Stable machine value and independently editable visible label. */
 export interface SelectionOption {
   /** Unique case-sensitive ASCII token, 1–100 characters. Never derived from label. */
   value: string;
@@ -301,18 +301,18 @@ export interface SelectionOption {
 /** Agent-only, 1–25 options; requires nonblank text and cannot mix with buttons. */
 export interface SelectionPart {
   type: "selection";
-  /** Coming soon. Selected options toggle off locally; the sole submit action is a centered compact light-blue Send button. */
+  /** The text is the prompt's title; the person checks any number of options and submits them once, and checking sends nothing. */
   options: SelectionOption[];
 }
 
 export interface SelectionPartResponse extends SelectionPart {
-  /** Durable response state for this viewer across devices. Existing Chat rules allow at most one human user; only that user can respond. */
+  /** Durable response state for this viewer across devices. Existing Chat rules allow at most one human user; only that user can respond, once; reopening an answered selection shows what they chose without letting them change it. */
   readonly has_responded: boolean;
   reactions: null;
 }
 
 /**
- * Coming soon: user-only metadata after canonical text (literal '• ' + each source
+ * User-only metadata after canonical text (literal '• ' + each source
  * label, joined with '\n'), with explicit reply_to. Exact legacy comma-joined
  * labels are accepted by the server only for compatibility, never parsed for IDs.
  */
@@ -322,8 +322,9 @@ export interface SelectionResponsePart {
    * Unique known values, nonempty and in source-option order, authoritative with
    * reply_to. New preceding text is literal '• ' + each source label joined with
    * '\n'. The server accepts exact legacy comma-joined labels for compatibility
-   * only, never arbitrary label parsing. iOS checked circles are presentation;
-   * portable text remains bullets. Coming soon.
+   * only, never arbitrary label parsing. iOS may draw a checkmark in place of
+   * each bullet and repeat the prompt's title, as presentation only; portable
+   * text remains bullets.
    */
   selected_values: string[];
 }

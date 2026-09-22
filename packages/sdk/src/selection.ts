@@ -1,21 +1,20 @@
 import type { MessagePartResponse, ReplyTo, SelectionOption, SelectionPart, TextPart } from "./types.js";
 
-/** Coming soon: selection authoring uses explicit stable values, never label-derived IDs. */
+/** Selection authoring uses explicit stable values, never label-derived IDs. */
 export const SELECTION_MAX_OPTIONS = 25;
 export const SELECTION_LABEL_MAX_LENGTH = 80;
 export const SELECTION_VALUE_MAX_LENGTH = 100;
 export const SELECTION_FENCE = "selection";
 export const SELECTION_GUIDANCE =
-  "Selection is coming soon; this guidance describes the local candidate. "
-  + "Use selection when the person can choose several known options, then Send once. "
+  "Use selection when the person can choose several known options, then Send once. "
   + "If the person asks for selections or multiple choices to submit together, send a selection, not buttons. "
   + "Include a nonblank text question and 1 to 25 options with explicit stable value and readable label. "
   + "Labels are trimmed, 1 to 80 characters; values are unique case-sensitive ASCII tokens of 1 to 100 characters matching ^[A-Za-z0-9][A-Za-z0-9._:-]*$. "
-  + "Do not mix selection with buttons. Tapping a selected option deselects it; toggles send nothing. The only submit action is a centered compact light-blue Send button. "
+  + "Do not mix selection with buttons. The person opens the prompt, checks any number of options and submits them once; checking sends nothing and only the submit does. A person answers a given selection once, and reopening it afterwards shows what they chose without letting them change it. "
   + "Selection inherits existing Chat membership rules: at most one human user, with multiple agents allowed. "
   + "Only the human user can submit a selection response; agents cannot. "
   + "The per-user response claim is shared across that user's devices and idempotency keys; it does not enable multiple humans in a Chat. "
-  + "New replies contain literal '• ' + label joined with '\\n' and selection_response.selected_values in source-option order. iOS may display round checked circles as presentation only; portable text remains bullets. The server accepts exact legacy comma-joined source labels only for compatibility. "
+  + "New replies contain literal '• ' + label joined with '\\n' and selection_response.selected_values in source-option order. iOS may draw a checkmark in place of each bullet, and repeat the prompt's title above the lines, as presentation only; portable text remains bullets. The server accepts exact legacy comma-joined source labels only for compatibility. "
   + "Use those values and reply_to to dispatch your own application handler, not label parsing.";
 export const SELECTION_BLOCK_INSTRUCTION =
   "To offer multiple selections, end your answer with a fenced code block tagged `selection` "

@@ -2,12 +2,11 @@
 
 TypeScript client for Relay v1.
 
-## Selection, coming soon
+## Selection
 
-Selection is local, unshipped work. The candidate SDK exposes `SelectionPart`,
-`SelectionPartResponse` (including read-only viewer-relative `has_responded`),
-and `SelectionResponsePart` through the existing message and event unions.
-This is not a claim about the published package or hosted API.
+The SDK exposes `SelectionPart`, `SelectionPartResponse` (including read-only
+viewer-relative `has_responded`), and `SelectionResponsePart` through the
+existing message and event unions.
 
 ```ts
 import { partsWithSelection } from "@relaymessenger/sdk";
@@ -37,8 +36,10 @@ idempotency keys, without expanding group membership.
 array. It keeps invalid blocks as text with an error and never combines a
 selection with buttons. Existing buttons retain their behavior.
 
-Tapping a selected option deselects it without sending. The sole submit action
-is a centered compact light-blue **Send** button.
+The person opens the prompt, checks any number of options and submits them
+once; checking sends nothing and only the submit does. A person answers a given
+selection once, and reopening it afterwards shows what they chose without
+letting them change it.
 
 The user's new reply is exactly literal `• ` + each selected source label
 joined with `\n`, then
@@ -46,17 +47,16 @@ joined with `\n`, then
 in source-option order, with explicit `reply_to.message_id` and `part_index`.
 The user client keeps its existing outgoing idempotency identity for retries.
 The server also accepts exact legacy comma-joined source labels only for
-compatibility. iOS may present round checked circles, but portable text stays
-bulleted. Metadata has no additional display text. Use `selected_values` and the source
+compatibility. iOS may draw a checkmark in place of each bullet and repeat the
+prompt's title, as presentation only, but portable text stays bulleted.
+Metadata has no additional display text. Use `selected_values` and the source
 reply target to dispatch your own handler, rather than splitting labels.
 Signed webhook `unwrap` and WebSocket `onEvent` default types expose this
 metadata after narrowing to `message.received`.
 
-Local runtime sources include selection guidance and structured inbound discovery
-for CLI, Pi, OpenClaw, the Claude Code channel, MCP, and the Chat SDK adapter.
+The CLI, Pi, OpenClaw, the Claude Code channel, MCP, and the Chat SDK adapter
+include selection guidance and structured inbound discovery.
 `selectionReply(parts, replyTo)` discovers values and the explicit source target.
-These changes remain unshipped; bundled artifacts and disposable-lane validation
-are required before release.
 
 ## Chat permissions
 

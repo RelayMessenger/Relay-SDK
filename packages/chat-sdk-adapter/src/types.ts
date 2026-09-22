@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server b89d90c0b325a94402456de2e91a59b66c7d9603
- * OpenAPI 503646bcd2b3fbc1170046880ef39f4219592fb9e5d9d00cef022b801abbb4bb
+ * Relay Server 59f1a65adbe27ab1f9aca3bf9de19204942d872a
+ * OpenAPI cb3566bd1d6eba35ab4a775ed739d8b829c1b9a8dbad33ba23f85ba314fc8c13
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -117,7 +117,7 @@ export interface RelayButtonsPart {
   items: RelayButtonItem[];
 }
 
-/** Coming soon: values are stable ASCII tokens, independent of trimmed labels. */
+/** Values are stable ASCII tokens, independent of trimmed labels. */
 export interface RelaySelectionPart {
   type: "selection";
   options: Array<{ value: string; label: string }>;
@@ -132,7 +132,7 @@ export interface RelaySelectionPartResponse extends RelaySelectionPart {
   reactions: null;
 }
 
-/** Coming soon: metadata exposed intact through message.raw.message.parts.
+/** Metadata exposed intact through message.raw.message.parts.
  * Readable text is literal '• ' + each selected source label joined with '\n'.
  * Dispatch with selected_values and reply_to, never by parsing visible labels. */
 export interface RelaySelectionResponsePart {
