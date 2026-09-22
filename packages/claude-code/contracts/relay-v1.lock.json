@@ -7,8 +7,8 @@
   },
   "relaySdk": {
     "package": "@relaymessenger/sdk",
-    "version": "0.3.6-staging.17",
-    "integrity": "sha512-3R5mBVvp31Gmv5Lt8umANvYWxuJbovtsFq6jQiJLRKHxsUOQyuRUGxZ8nsoFUNsKZzaicoFfAtK8aYim6nC8/Q==",
+    "version": "0.3.6-staging.18",
+    "integrity": "sha512-+va9OxR5s1quTB+DKvkLroXmBNSso+sVUiP7+UD+fP2eFv+nZy5AMh2n4uSMxG9SVMPoCuuUM/aFcJJZ5TvGbA==",
     "workspaceOpenapiSha256": "0520d2838f14c758f2e3e21d94120a77677b684fbde68d656d0f75f375227586"
   },
   "claudeCode": {
