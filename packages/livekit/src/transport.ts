@@ -11,6 +11,8 @@ import type {
   Relay,
 } from "@relaymessenger/sdk";
 
+type CallStatus = CallRoomStateFrame["call"]["status"];
+
 export interface RelayAudioFrame {
   /** Interleaved signed PCM16 samples. */
   samples: Int16Array;
@@ -124,6 +126,28 @@ export interface RelayIceServer {
 export type RelayIceTransportPolicy = "all" | "relay";
 
 /**
+ * Returns the ICE servers for one peer connection. Called before the first
+ * peer and again before every restart, so short-lived TURN credentials can be
+ * minted per attempt (PartyTracks: a reconnect "will trigger new sessionId,
+ * new ice server credentials and a new peerConnection").
+ */
+export type RelayIceServersProvider = (attempt: {
+  /** 0 for the first peer, then 1, 2, ... for each restart. */
+  restarts: number;
+}) => RelayIceServer[] | Promise<RelayIceServer[]>;
+
+/** Why the transport replaced its peer connection with a new SFU session. */
+export type RelayCallRestartReason = "timeout" | "failed" | "disconnected" | "error";
+
+export interface RelayCallRestartEvent {
+  reason: RelayCallRestartReason;
+  /** Restarts since `connect()`, this one included. */
+  restarts: number;
+  /** Backoff waited before the new peer was built. */
+  delayMs: number;
+}
+
+/**
  * PCM format the engine decodes the remote participant's Opus into. The values
  * are the ones libopus decodes to (`@evan/opus` lib.d.ts: `channels?: 1 | 2`,
  * `sample_rate?: 8000 | 12000 | 16000 | 24000 | 48000`); the decoder itself
@@ -173,14 +197,19 @@ export interface RelayCallTransportOptions {
   /**
    * STUN and TURN servers handed to the engine's `RTCPeerConnection`. Defaults
    * to none: Cloudflare's SFU answers with its own host candidates. Set TURN
-   * servers when the agent runs behind a NAT or firewall that blocks UDP.
+   * servers when the agent runs behind a NAT or firewall that blocks UDP. A
+   * function is called before every peer connection, restarts included, so
+   * it can mint fresh TURN credentials each time.
    */
-  iceServers?: RelayIceServer[];
+  iceServers?: RelayIceServer[] | RelayIceServersProvider;
   /** `"relay"` forces every candidate through TURN. Defaults to `"all"`. */
   iceTransportPolicy?: RelayIceTransportPolicy;
   /** @internal */
   iceGatheringTimeoutMs?: number;
-  /** Maximum wait for the WebRTC peer to become connected. Defaults to 15 seconds. */
+  /**
+   * Maximum wait in `connect()` for WebRTC media to connect, restarts
+   * included. Defaults to 15 seconds.
+   */
   mediaConnectTimeoutMs?: number;
   /** @deprecated Use `mediaConnectTimeoutMs`. */
   connectionTimeoutMs?: number;
@@ -251,6 +280,8 @@ export interface RelayCallIceDiagnostics {
   inbound: RelayCallInboundDiagnostics;
   outbound: RelayCallOutboundDiagnostics;
   room: RelayCallRoomDiagnostics;
+  /** Peer connections replaced by a new SFU session since `connect()`. */
+  restarts: number;
   /** One-line rendering of the fields above. */
   summary: string;
 }
@@ -264,7 +295,11 @@ export interface RelayCallTransportCloseEvent {
 type TransportEventMap = {
   audio: [RelayAudioFrame];
   connected: [];
+  /** A new peer connection published on a new SFU session; audio continues on it. */
+  restarted: [RelayCallRestartEvent];
   roomState: [CallRoomStateFrame];
+  /** The person's camera started (`true`) or stopped (`false`) sending, from `roomState`. */
+  remoteVideo: [boolean];
   ended: [CallRoomEndedFrame];
   error: [Error];
   close: [RelayCallTransportCloseEvent];
@@ -278,6 +313,28 @@ const DEFAULT_CONNECTION_TIMEOUT_MS = 15_000;
 const AUDIO_SLICE_MS = 10;
 const STALL_CHECK_MS = 500;
 const STALL_AFTER_MS = 2_000;
+
+/**
+ * Restart rule, copied from PartyTracks and Cloudflare (PROTOCOL.md section 4):
+ * not `connected` 5 s after the SFU answer (Cloudflare's echo example waits
+ * 5000 ms; SFU operations block up to 5 s awaiting `connected`), `failed`, or
+ * `disconnected` for 7 s (PartyTracks.ts `timeoutSeconds = 7`). Backoff 250 ms
+ * x1.1 per attempt, capped at 10 s (PartyTracks `retryWithBackoff`
+ * `backoffFactor: 1.1`, rxjs-helpers.ts defaults). werift never reports
+ * `failed` on a session whose checks go unanswered (ice.js:983-986), so the
+ * 5 s timer is the trigger that fires in practice.
+ */
+export const RESTART_CONNECT_TIMEOUT_MS = 5_000;
+export const RESTART_DISCONNECTED_MS = 7_000;
+export const RESTART_INITIAL_DELAY_MS = 250;
+export const RESTART_BACKOFF_FACTOR = 1.1;
+export const RESTART_MAX_DELAY_MS = 10_000;
+
+/** Backoff before restart number `attempt` (1-based) since the last connection. */
+export const restartDelayMs = (attempt: number): number =>
+  Math.min(RESTART_INITIAL_DELAY_MS * RESTART_BACKOFF_FACTOR ** (attempt - 1), RESTART_MAX_DELAY_MS);
+
+const ACTIVE_CALL_STATUSES: ReadonlySet<CallStatus> = new Set<CallStatus>(["ringing", "in-progress"]);
 
 export class RelayCallTransportError extends Error {
   readonly code?: string;
@@ -367,7 +424,15 @@ const summarizeRoom = (room: RelayCallRoomDiagnostics): string => {
 
 const summarize = (diagnostics: Omit<RelayCallIceDiagnostics, "summary">): string =>
   `${summarizeIce(diagnostics)}; ${summarizeInbound(diagnostics.inbound)}; `
-  + `${summarizeOutbound(diagnostics.outbound)}; ${summarizeRoom(diagnostics.room)}`;
+  + `${summarizeOutbound(diagnostics.outbound)}; ${summarizeRoom(diagnostics.room)}`
+  + (diagnostics.restarts ? `; restarts ${diagnostics.restarts}` : "");
+
+const copyIceServers = (servers: readonly RelayIceServer[]): RelayIceServer[] =>
+  servers.map((server) => ({
+    urls: Array.isArray(server.urls) ? [...server.urls] : server.urls,
+    ...(server.username === undefined ? {} : { username: server.username }),
+    ...(server.credential === undefined ? {} : { credential: server.credential }),
+  }));
 
 const cloneSamples = (samples: Int16Array): Int16Array => {
   const copy = new Int16Array(samples.length);
@@ -420,6 +485,13 @@ class WrtcAudioSource implements RelayAudioSourceLike {
   }
 }
 
+/** werift's `close()` is async; a rejection there must not become an unhandled one. */
+const closePeer = (peer: RelayPeerConnectionLike): void => {
+  try {
+    void Promise.resolve(peer.close() as unknown).catch(() => undefined);
+  } catch { /* already closed */ }
+};
+
 const delay = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => {
     const timer = setTimeout(resolve, milliseconds);
@@ -430,7 +502,10 @@ const delay = (milliseconds: number): Promise<void> =>
  * Provider-neutral Node WebRTC bridge for Relay Call rooms.
  *
  * The class owns Relay media negotiation internally. Higher-level adapters only
- * exchange PCM16 frames and call lifecycle events.
+ * exchange PCM16 frames and call lifecycle events. When an SFU session never
+ * connects or dies, the transport builds a new peer connection on a new
+ * session (PROTOCOL.md section 4); the audio source and the `audio` events
+ * carry on across the swap, so adapters only hear silence.
  */
 export class RelayCallTransport {
   readonly #room: CallRoom;
@@ -438,7 +513,8 @@ export class RelayCallTransport {
   readonly #engine: RelayCallEngine;
   readonly #iceGatheringTimeoutMs: number;
   readonly #connectionTimeoutMs: number;
-  readonly #peerConfig: RelayPeerConnectionConfig;
+  readonly #iceServers: RelayIceServer[] | RelayIceServersProvider;
+  readonly #iceTransportPolicy: RelayIceTransportPolicy;
   readonly #inboundAudio: RelayInboundAudioFormat;
   readonly #onWarning: (message: string) => void;
   #connectStartedAt = 0;
@@ -451,6 +527,8 @@ export class RelayCallTransport {
   /** Engine stats frozen when media shuts down, so diagnostics survive the call's end. */
   #finalSinkStats: RelayAudioSinkStats | undefined;
   #finalSourceStats: RelayAudioSourceStats | undefined;
+  /** Inbound counts from sinks of peers already replaced by a restart. */
+  #retiredSinkStats: RelayAudioSinkStats | undefined;
   #stallTimer: NodeJS.Timeout | undefined;
   #stallSince: number | undefined;
   #stallWarned = false;
@@ -460,6 +538,10 @@ export class RelayCallTransport {
   readonly #listeners = new Map<TransportEvent, Set<(...args: any[]) => void>>();
   #factory: RelayWebRTCFactory | undefined;
   #peer: RelayPeerConnectionLike | undefined;
+  /** Bumped for every peer built; work started for an older peer stops when it sees a newer one. */
+  #peerGeneration = 0;
+  /** The current peer has reached `connected` since it was built. */
+  #peerConnected = false;
   #audioSource: RelayAudioSourceLike | undefined;
   #localTrack: RelayMediaStreamTrackLike | undefined;
   #remoteSink: RelayAudioSinkLike | undefined;
@@ -467,6 +549,16 @@ export class RelayCallTransport {
   #publishFrame: CallRoomPublishOfferFrame | undefined;
   #initialAnswerSdp: string | undefined;
   #negotiationTail: Promise<void> = Promise.resolve();
+  #restarts = 0;
+  /** Restarts since the last `connected`; sets the backoff. */
+  #failedAttempts = 0;
+  #restartPending = false;
+  #wakeRestart: (() => void) | undefined;
+  #connectTimer: NodeJS.Timeout | undefined;
+  #disconnectTimer: NodeJS.Timeout | undefined;
+  #callStatus: CallStatus | undefined;
+  #remoteVideo = false;
+  #ended = false;
   #audioGeneration = 0;
   /** `waitForPlayout()` callers released early by `clearAudio()` or `close()`. */
   readonly #playoutWaiters = new Set<() => void>();
@@ -510,14 +602,9 @@ export class RelayCallTransport {
     if (policy !== "all" && policy !== "relay") {
       throw new Error('iceTransportPolicy must be "all" or "relay".');
     }
-    this.#peerConfig = {
-      iceServers: (options.iceServers ?? []).map((server) => ({
-        urls: Array.isArray(server.urls) ? [...server.urls] : server.urls,
-        ...(server.username === undefined ? {} : { username: server.username }),
-        ...(server.credential === undefined ? {} : { credential: server.credential }),
-      })),
-      iceTransportPolicy: policy,
-    };
+    this.#iceTransportPolicy = policy;
+    const iceServers = options.iceServers ?? [];
+    this.#iceServers = typeof iceServers === "function" ? iceServers : copyIceServers(iceServers);
     if (!Number.isFinite(this.#iceGatheringTimeoutMs) || this.#iceGatheringTimeoutMs <= 0) {
       throw new Error("iceGatheringTimeoutMs must be greater than zero.");
     }
@@ -550,7 +637,7 @@ export class RelayCallTransport {
     if (this.#closed) throw new Error("Relay Call transport is closed.");
     this.#attachRoomHandlers();
     await this.#room.connect();
-    if (this.#peer) {
+    if (this.#factory) {
       await this.#waitForConnection();
       return;
     }
@@ -561,17 +648,8 @@ export class RelayCallTransport {
       throw new RelayCallTransportError("The WebRTC binding created a non-audio Relay track.");
     }
     this.#connectStartedAt = Date.now();
-    const peer = this.#factory.createPeerConnection(this.#peerConfig);
-    this.#peer = peer;
-    this.#publishTransceiver = peer.addTransceiver(this.#localTrack, { direction: "sendonly" });
-    this.#observeIce(peer);
-    peer.onconnectionstatechange = () => {
-      this.#recordTransition("connection", peer.connectionState);
-      this.#connectionStateChanged();
-    };
-    peer.ontrack = (event) => this.#remoteTrack(event.track);
     try {
-      await this.#publishLocalAudio();
+      await this.#startPeer();
       await this.#waitForConnection();
     } catch (error) {
       this.close();
@@ -588,15 +666,15 @@ export class RelayCallTransport {
   }
 
   /**
-   * ICE candidates, state transitions, packet counts in both directions and
-   * room frame counts recorded for this call, with a one-line summary.
+   * ICE candidates, state transitions, packet counts in both directions,
+   * room frame counts and restarts recorded for this call, with a one-line summary.
    */
   diagnostics(): RelayCallIceDiagnostics {
     const snapshot = {
       local: { ...this.#iceLocal },
       remote: this.#iceRemote.map((candidate) => ({ ...candidate })),
       transitions: this.#iceTransitions.map((transition) => ({ ...transition })),
-      connected: this.#reportedConnected,
+      connected: this.#peerConnected,
       inbound: this.#inboundDiagnostics(),
       outbound: this.#outboundDiagnostics(),
       room: {
@@ -605,6 +683,7 @@ export class RelayCallTransport {
         endedReason: this.#endedReason,
         errors: [...this.#roomErrors],
       },
+      restarts: this.#restarts,
     };
     return { ...snapshot, summary: summarize(snapshot) };
   }
@@ -613,8 +692,23 @@ export class RelayCallTransport {
     return epochMs === undefined ? undefined : epochMs - this.#connectStartedAt;
   }
 
+  /** The live sink's counts added to those of sinks retired by restarts. */
+  #sinkStats(): RelayAudioSinkStats | undefined {
+    const current = this.#remoteSink?.stats?.();
+    const retired = this.#retiredSinkStats;
+    if (!retired) return current;
+    if (!current) return { ...retired, recentRtpPackets: 0 };
+    return {
+      rtpPackets: retired.rtpPackets + current.rtpPackets,
+      decodeFailures: retired.decodeFailures + current.decodeFailures,
+      firstRtpAt: retired.firstRtpAt ?? current.firstRtpAt,
+      lastRtpAt: current.lastRtpAt ?? retired.lastRtpAt,
+      recentRtpPackets: current.recentRtpPackets,
+    };
+  }
+
   #inboundDiagnostics(): RelayCallInboundDiagnostics {
-    const stats = this.#remoteSink?.stats?.() ?? this.#finalSinkStats;
+    const stats = this.#finalSinkStats ?? this.#sinkStats();
     return {
       rtpPackets: stats?.rtpPackets ?? 0,
       decodeFailures: stats?.decodeFailures ?? 0,
@@ -747,18 +841,51 @@ export class RelayCallTransport {
     this.#room.close();
   }
 
-  async #publishLocalAudio(): Promise<void> {
-    const peer = this.#requirePeer();
+  /**
+   * Build a peer connection around the one local track and publish it. The
+   * first peer sends a plain `offer`; every later one is a restart onto a new
+   * SFU session (`restart: true`) with ICE servers fetched again.
+   */
+  async #startPeer(): Promise<void> {
+    const factory = this.#factory;
+    const track = this.#localTrack;
+    if (!factory || !track) throw new Error("Relay Call transport is not connected.");
+    const restarts = this.#restarts;
+    const generation = ++this.#peerGeneration;
+    const iceServers = typeof this.#iceServers === "function"
+      ? copyIceServers(await this.#iceServers({ restarts }))
+      : copyIceServers(this.#iceServers);
+    if (this.#closed || this.#ended || generation !== this.#peerGeneration) return;
+    const peer = factory.createPeerConnection({ iceServers, iceTransportPolicy: this.#iceTransportPolicy });
+    this.#peer = peer;
+    this.#peerConnected = false;
+    this.#initialAnswerSdp = undefined;
+    this.#publishTransceiver = peer.addTransceiver(track, { direction: "sendonly" });
+    this.#observeIce(peer);
+    peer.onconnectionstatechange = () => {
+      if (this.#peer !== peer) return;
+      this.#recordTransition("connection", peer.connectionState);
+      this.#connectionStateChanged(peer);
+    };
+    peer.ontrack = (event) => {
+      if (this.#peer === peer) this.#remoteTrack(event.track);
+    };
+    await this.#publishLocalAudio(peer, restarts > 0);
+  }
+
+  async #publishLocalAudio(peer: RelayPeerConnectionLike, restart: boolean): Promise<void> {
     const offer = await peer.createOffer();
     await peer.setLocalDescription(offer);
     await this.#waitForIceGathering(peer);
-    const description = this.#localDescription("offer");
+    if (this.#peer !== peer) return;
+    const description = this.#localDescription(peer, "offer");
     const mid = this.#publishTransceiver?.mid;
     if (!mid) throw new RelayCallTransportError("Relay audio publication has no WebRTC MID.");
     this.#publishFrame = {
       type: "offer",
       session_description: description,
       tracks: [{ mid, name: "audio" }],
+      ...(restart ? { restart: true } : {}),
     };
     this.#room.send(this.#publishFrame);
   }
@@ -775,7 +902,14 @@ export class RelayCallTransport {
     });
     this.#room.on("roomState", (frame: CallRoomStateFrame) => {
       this.#roomStates += 1;
+      this.#callStatus = frame.call?.status;
+      // A Call has exactly one agent; the transport is that agent, so the
+      // person is the other participant.
+      const video = frame.participants?.find((participant) => participant.kind === "user")?.video === true;
+      const videoChanged = video !== this.#remoteVideo;
+      this.#remoteVideo = video;
       this.#emit("roomState", frame);
+      if (videoChanged) this.#emit("remoteVideo", video);
     });
     this.#room.on("error", (error: CallRoomErrorFrame | Error) => {
       if (error instanceof Error) {
@@ -784,6 +918,7 @@ export class RelayCallTransport {
       } else this.#serverError(error);
     });
     this.#room.on("ended", (frame: CallRoomEndedFrame) => {
+      this.#ended = true;
       this.#endedReason = frame.reason;
       this.#rejectReady(new RelayCallTransportError(`Relay Call ended before media connected (${frame.reason}).`));
       this.clearAudio();
@@ -810,24 +945,36 @@ export class RelayCallTransport {
   }
 
   async #serverAnswer(frame: CallRoomServerAnswerFrame): Promise<void> {
-    const peer = this.#requirePeer();
+    // No peer: the answer is for a session a restart already replaced.
+    const peer = this.#peer;
+    if (!peer) return;
     const sdp = frame.session_description.sdp;
     // Reconnecting the signaling socket replays the exact initial offer. Relay
     // returns its cached answer; applying that answer again in stable state is
     // invalid WebRTC signaling, so recognize and ignore the replay.
     if (peer.signalingState === "stable" && this.#initialAnswerSdp === sdp) return;
-    if (this.#initialAnswerSdp === undefined) this.#recordRemoteCandidates(sdp);
+    const initial = this.#initialAnswerSdp === undefined;
+    if (initial) this.#recordRemoteCandidates(sdp);
     await peer.setRemoteDescription(frame.session_description);
+    if (this.#peer !== peer) return;
     this.#initialAnswerSdp ??= sdp;
+    if (initial && !this.#peerConnected) this.#armConnectTimer(peer);
   }
 
   async #serverOffer(frame: CallRoomSubscriptionOfferFrame): Promise<void> {
-    const peer = this.#requirePeer();
+    const peer = this.#peer;
+    // A pull offer that arrives while this participant's restart offer is
+    // unanswered was sent for the replaced session: the room clears those
+    // pulls on restart and pulls again after the new session connects.
+    if (!peer || peer.signalingState === "have-local-offer") return;
+    // `video` m-lines are answered receive-only by the engine and never decoded
+    // (`#remoteTrack` takes audio only).
     await peer.setRemoteDescription(frame.session_description);
     const answer = await peer.createAnswer();
     await peer.setLocalDescription(answer);
     await this.#waitForIceGathering(peer);
-    this.#room.send({ type: "answer", session_description: this.#localDescription("answer") });
+    if (this.#peer !== peer) return;
+    this.#room.send({ type: "answer", session_description: this.#localDescription(peer, "answer") });
   }
 
   #serverError(frame: CallRoomErrorFrame): void {
@@ -837,25 +984,132 @@ export class RelayCallTransport {
     this.#emit("error", error);
   }
 
-  #connectionStateChanged(): void {
-    const state = this.#peer?.connectionState;
-    if (state === "connected" && !this.#reportedConnected) {
-      this.#reportedConnected = true;
+  #connectionStateChanged(peer: RelayPeerConnectionLike): void {
+    const state = peer.connectionState;
+    if (state === "connected") {
+      this.#clearTimer("connect");
+      this.#clearTimer("disconnect");
+      if (this.#peerConnected) return;
+      this.#peerConnected = true;
+      this.#failedAttempts = 0;
       try {
+        // Sent for every new session: the room re-pulls a restarted participant's
+        // tracks once it reports `connected` (PROTOCOL.md section 2).
         this.#room.connected();
-        this.#resolveReady();
-        this.#startStallGuard();
-        this.#emit("connected");
+        if (!this.#reportedConnected) {
+          this.#reportedConnected = true;
+          this.#resolveReady();
+          this.#startStallGuard();
+          this.#emit("connected");
+        }
       } catch (error) {
         const parsed = error instanceof Error ? error : new Error(String(error));
         this.#rejectReady(parsed);
         this.#emit("error", parsed);
       }
     } else if (state === "failed") {
-      const error = new RelayCallTransportError("Relay WebRTC connection failed.");
-      this.#rejectReady(error);
-      this.#emit("error", error);
+      this.#requestRestart("failed", peer);
+    } else if (state === "disconnected") {
+      if (this.#disconnectTimer) return;
+      this.#disconnectTimer = setTimeout(() => {
+        this.#disconnectTimer = undefined;
+        if (peer.connectionState !== "connected") this.#requestRestart("disconnected", peer);
+      }, RESTART_DISCONNECTED_MS);
+      this.#disconnectTimer.unref?.();
     }
+  }
+
+  #armConnectTimer(peer: RelayPeerConnectionLike): void {
+    this.#clearTimer("connect");
+    this.#connectTimer = setTimeout(() => {
+      this.#connectTimer = undefined;
+      if (!this.#peerConnected) this.#requestRestart("timeout", peer);
+    }, RESTART_CONNECT_TIMEOUT_MS);
+    this.#connectTimer.unref?.();
+  }
+
+  #clearTimer(which: "connect" | "disconnect"): void {
+    if (which === "connect") {
+      clearTimeout(this.#connectTimer);
+      this.#connectTimer = undefined;
+    } else {
+      clearTimeout(this.#disconnectTimer);
+      this.#disconnectTimer = undefined;
+    }
+  }
+
+  #callActive(): boolean {
+    if (this.#closed || this.#ended) return false;
+    return this.#callStatus === undefined || ACTIVE_CALL_STATUSES.has(this.#callStatus);
+  }
+
+  /**
+   * Retire `peer` now, wait the backoff, then publish from a new peer on a new
+   * session. Unlimited while the Call is ringing or in progress; stops on
+   * `ended`, a terminal status, or `close()`.
+   */
+  #requestRestart(reason: RelayCallRestartReason, peer: RelayPeerConnectionLike | undefined): void {
+    if (this.#restartPending || peer !== this.#peer || !this.#callActive()) return;
+    this.#restartPending = true;
+    this.#restarts += 1;
+    this.#failedAttempts += 1;
+    const restarts = this.#restarts;
+    const delayMs = restartDelayMs(this.#failedAttempts);
+    this.#retirePeer();
+    this.#queueNegotiation(async () => {
+      await this.#restartBackoff(delayMs);
+      this.#restartPending = false;
+      if (!this.#callActive()) return;
+      try {
+        await this.#startPeer();
+      } catch (error) {
+        if (!this.#callActive()) return;
+        const parsed = error instanceof Error ? error : new Error(String(error));
+        this.#emit("error", new RelayCallTransportError(
+          `Relay WebRTC restart ${restarts} failed: ${parsed.message}`,
+          "restart_failed",
+        ));
+        this.#requestRestart("error", this.#peer);
+        return;
+      }
+      if (this.#peer) this.#emit("restarted", { reason, restarts, delayMs });
+    });
+  }
+
+  #restartBackoff(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => {
+      const wake = (): void => {
+        clearTimeout(timer);
+        if (this.#wakeRestart === wake) this.#wakeRestart = undefined;
+        resolve();
+      };
+      const timer = setTimeout(wake, milliseconds);
+      timer.unref?.();
+      this.#wakeRestart = wake;
+    });
+  }
+
+  /** Close the current peer and its sink; the audio source and local track stay for the next peer. */
+  #retirePeer(): void {
+    this.#clearTimer("connect");
+    this.#clearTimer("disconnect");
+    const peer = this.#peer;
+    this.#peer = undefined;
+    this.#peerConnected = false;
+    this.#publishTransceiver = undefined;
+    this.#initialAnswerSdp = undefined;
+    if (this.#remoteSink) {
+      this.#retiredSinkStats = this.#sinkStats();
+      this.#remoteSink.stop();
+      this.#remoteSink = undefined;
+    }
+    if (!peer) return;
+    peer.onconnectionstatechange = null;
+    peer.ontrack = null;
+    peer.onicecandidate = null;
+    peer.onicegatheringstatechange = null;
+    peer.oniceconnectionstatechange = null;
+    closePeer(peer);
   }
 
   #remoteTrack(track: RelayMediaStreamTrackLike): void {
@@ -993,28 +1247,29 @@ export class RelayCallTransport {
     this.#readyReject?.(error);
   }
 
-  #localDescription<T extends "offer" | "answer">(type: T): { type: T; sdp: string } {
-    const local = this.#requirePeer().localDescription;
+  #localDescription<T extends "offer" | "answer">(
+    peer: RelayPeerConnectionLike,
+    type: T,
+  ): { type: T; sdp: string } {
+    const local = peer.localDescription;
     if (!local || local.type !== type || !local.sdp) {
       throw new RelayCallTransportError(`Relay WebRTC did not produce a complete ${type} SDP.`);
     }
     return { type, sdp: local.sdp };
   }
 
-  #requirePeer(): RelayPeerConnectionLike {
-    if (!this.#peer) throw new Error("Relay Call transport is not connected.");
-    return this.#peer;
-  }
-
   #shutdownMedia(): void {
     this.#stopStallGuard();
-    this.#finalSinkStats ??= this.#remoteSink?.stats?.();
+    this.#clearTimer("connect");
+    this.#clearTimer("disconnect");
+    this.#wakeRestart?.();
+    this.#finalSinkStats ??= this.#sinkStats();
     this.#finalSourceStats ??= this.#audioSource?.stats?.();
     this.#remoteSink?.stop();
     this.#remoteSink = undefined;
     this.#localTrack?.stop();
     this.#localTrack = undefined;
-    this.#peer?.close();
+    if (this.#peer) closePeer(this.#peer);
     this.#peer = undefined;
     this.#audioSource = undefined;
   }

@@ -395,3 +395,147 @@ it("counts RTP both ways in diagnostics() over a werift loopback through the tra
   expect(diagnostics.room).toEqual({ roomStates: 0, offers: 1, endedReason: undefined, errors: [] });
   expect(diagnostics.summary).toMatch(/in: \d+ rtp, 0 bad, \d+ frames, first \d+\.\ds last \d+\.\ds, \d+\/5s; out: 100 frames, 50 opus, \d+ rtp, first \d+\.\ds last \d+\.\ds, \d+\/5s, queue 0, pacer idle; room: 0 roomState, 1 offer/);
 }, 30_000);
+
+/** A werift peer playing the SFU: answers the transport's publish offer. */
+const answerAsSfu = async (
+  factory: ReturnType<typeof createWeriftWebRTCFactory>,
+  room: LoopbackRoom,
+  offer: Record<string, any>,
+) => {
+  const sfu = factory.createPeerConnection();
+  const track = new Promise<RelayMediaStreamTrackLike>((resolve) => {
+    sfu.ontrack = (event) => resolve(event.track);
+  });
+  await sfu.setRemoteDescription(offer.session_description);
+  const answer = await sfu.createAnswer();
+  await sfu.setLocalDescription(answer);
+  await waitForIce(sfu);
+  room.emit("answer", { type: "answer", session_description: { type: "answer", sdp: sfu.localDescription!.sdp } });
+  return { sfu, track };
+};
+
+it("restarts onto a new werift session when the first never connects; the tone reaches the new session", async () => {
+  const factory = createWeriftWebRTCFactory();
+  const room = new LoopbackRoom();
+  const transport = new RelayCallTransport({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: room as unknown as CallRoom,
+    webRTC: factory,
+  });
+  const restarts: string[] = [];
+  transport.on("restarted", (event) => restarts.push(event.reason));
+
+  // First session: answered, then its far side is gone, so no STUN check is
+  // ever answered: the dead-session shape measured on Cloudflare 2026-09-22.
+  const firstOffer = room.next("offer");
+  const connecting = transport.connect();
+  const dead = await answerAsSfu(factory, room, await firstOffer);
+  const restartOffer = room.next("offer");
+  await sleep(50);
+  dead.sfu.close();
+
+  const second = await restartOffer;
+  expect(second.restart).toBe(true);
+  expect(second.tracks).toEqual([{ mid: "0", name: "audio" }]);
+  const live = await answerAsSfu(factory, room, second);
+  await connecting;
+  expect(restarts).toHaveLength(1);
+  expect(transport.diagnostics().restarts).toBe(1);
+
+  const decoded: Int16Array[] = [];
+  const sink = factory.createAudioSink(await live.track, {
+    sampleRate: WERIFT_SAMPLE_RATE,
+    channelCount: WERIFT_CHANNEL_COUNT,
+  });
+  sink.ondata = (data) => decoded.push(data.samples);
+  for (let slice = 0; slice < SLICES; slice += 1) {
+    await transport.writeAudio({
+      samples: sineSlice(slice, TONE_AMPLITUDE),
+      sampleRate: WERIFT_SAMPLE_RATE,
+      channelCount: WERIFT_CHANNEL_COUNT,
+    });
+  }
+  await transport.waitForPlayout();
+  await sleep(300);
+  transport.close();
+  sink.stop();
+  live.sfu.close();
+
+  expect(decoded.length).toBeGreaterThanOrEqual(40);
+  const all = new Int16Array(decoded.reduce((n, frame) => n + frame.length, 0));
+  let offset = 0;
+  for (const frame of decoded) {
+    all.set(frame, offset);
+    offset += frame.length;
+  }
+  const steady = all.subarray(WERIFT_SAMPLE_RATE * WERIFT_CHANNEL_COUNT / 5);
+  expect(rms(steady)).toBeGreaterThan(1_000);
+  const hz = dominantHz(steady);
+  expect(hz).toBeGreaterThanOrEqual(TONE_HZ - 50);
+  expect(hz).toBeLessThanOrEqual(TONE_HZ + 50);
+}, 30_000);
+
+it("answers a pull offer carrying a video m-line receive-only and keeps receiving audio", async () => {
+  const factory = createWeriftWebRTCFactory();
+  const room = new LoopbackRoom();
+  const transport = new RelayCallTransport({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: room as unknown as CallRoom,
+    webRTC: factory,
+  });
+  const errors: Error[] = [];
+  transport.on("error", (error) => errors.push(error));
+  const inbound: Int16Array[] = [];
+  transport.on("audio", (frame) => inbound.push(frame.samples));
+
+  const offer = room.next("offer");
+  const connecting = transport.connect();
+  const { sfu } = await answerAsSfu(factory, room, await offer);
+  await connecting;
+
+  // The SFU pulls the person's audio and camera into this session: two
+  // sendonly m-lines, video with werift's default video codecs.
+  const { MediaStreamTrack } = await import("werift");
+  const personAudio = factory.createAudioSource();
+  const personAudioTrack = personAudio.createTrack();
+  sfu.addTransceiver(personAudioTrack, { direction: "sendonly" });
+  sfu.addTransceiver(new MediaStreamTrack({ kind: "video" }) as unknown as RelayMediaStreamTrackLike, {
+    direction: "sendonly",
+  });
+  const pullOffer = await sfu.createOffer();
+  await sfu.setLocalDescription(pullOffer);
+  await waitForIce(sfu);
+  const videoOffer = sfu.localDescription!.sdp;
+  expect(videoOffer).toMatch(/m=video /u);
+  const pullAnswer = room.next("answer");
+  room.emit("offer", {
+    type: "offer",
+    session_description: { type: "offer", sdp: videoOffer },
+    track: "video",
+  });
+  const answer = (await pullAnswer).session_description.sdp as string;
+  const videoSection = answer.slice(answer.indexOf("m=video"));
+  expect(videoSection).toMatch(/^m=video [1-9]/u);
+  expect(videoSection).toMatch(/a=recvonly/u);
+  await sfu.setRemoteDescription({ type: "answer", sdp: answer });
+
+  for (let slice = 0; slice < 50; slice += 1) {
+    personAudio.onData({
+      samples: sineSlice(slice, TONE_AMPLITUDE),
+      sampleRate: WERIFT_SAMPLE_RATE,
+      bitsPerSample: 16,
+      channelCount: WERIFT_CHANNEL_COUNT,
+      numberOfFrames: (WERIFT_SAMPLE_RATE * SLICE_MS) / 1000,
+    });
+    await sleep(SLICE_MS);
+  }
+  await sleep(300);
+  transport.close();
+  personAudioTrack.stop();
+  sfu.close();
+
+  expect(errors).toEqual([]);
+  expect(inbound.length).toBeGreaterThan(15);
+}, 30_000);

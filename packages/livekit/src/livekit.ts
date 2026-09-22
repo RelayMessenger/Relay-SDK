@@ -9,6 +9,7 @@ import {
   type RelayCallIceDiagnostics,
   type RelayCallTransportOptions,
   type RelayIceServer,
+  type RelayIceServersProvider,
   type RelayInboundAudioFormat,
   type RelayIceTransportPolicy,
   type RelayWebRTCFactory,
@@ -195,8 +196,11 @@ export interface RelayLiveKitConnectOptions extends RelayLiveKitAudioOptions {
   roomClient?: CallRoom;
   /** @internal */
   webRTC?: RelayWebRTCFactory;
-  /** STUN and TURN servers for the agent's WebRTC peer. Defaults to none. */
-  iceServers?: RelayIceServer[];
+  /**
+   * STUN and TURN servers for the agent's WebRTC peer. Defaults to none. A
+   * function is called again before every restart, to mint fresh TURN credentials.
+   */
+  iceServers?: RelayIceServer[] | RelayIceServersProvider;
   /** `"relay"` forces TURN. Defaults to `"all"`. */
   iceTransportPolicy?: RelayIceTransportPolicy;
   /** @internal */
