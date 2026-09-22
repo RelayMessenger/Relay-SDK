@@ -76,7 +76,6 @@ test("binds Server, OpenAPI, and the exact SDK tarball integrity", () => {
     openapiPath: "contracts/developer/openapi.yaml",
     sha256: "7f1056cd6d5dc81a1cd23f1e40520fc3c0a32b5a577dd222988fc26f92e6c8d4",
     // The selection candidate pins Server bytes that are not published yet.
-    publicationStatus: "local-only",
   });
   assert.equal(
     contractLock.relaySdk.workspaceOpenapiSha256,

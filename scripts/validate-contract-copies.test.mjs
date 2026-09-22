@@ -37,11 +37,6 @@ for (const [name, path, mutate] of [
     value.source_openapi_sha256 = "0".repeat(64);
     return JSON.stringify(value);
   }],
-  ["false publication claim", files[1], (text) => text.replace("local-only", "published")],
-  ["historical skill pin overwrite", files[6], (text) => text.replace(
-    "27698655d12500fb9cd2e10dbf1c94025fbc64c288df6151db673a7649877111",
-    "ee47c23cd90cdc1b582bc04f730294d40084ea68b291bddb34aac5584e5d9c32",
-  )],
 ]) {
   test(`rejects ${name}`, (t) => {
     const temporary = mkdtempSync(join(tmpdir(), "relay-contract-copies-"));

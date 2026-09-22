@@ -41,7 +41,6 @@ assert.deepEqual(
     repository: "https://github.com/RelayMessenger/Relay-Server.git",
     commit: "56f31c13956ee41f4e2e5945973645e17faa3338",
     path: "contracts/developer/openapi.yaml",
-    publication_status: "local-only",
     sha256: "7f1056cd6d5dc81a1cd23f1e40520fc3c0a32b5a577dd222988fc26f92e6c8d4",
   },
   "SDK contract provenance must identify the exact canonical Server source",

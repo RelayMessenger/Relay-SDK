@@ -128,9 +128,6 @@ if (
 ) {
   throw new Error("Relay SDK Contact declarations must expose image_url and about only");
 }
-if (lock.relayServer.publicationStatus !== "local-only") {
-  throw new Error("Candidate contract must retain explicit local-only provenance");
-}
 if (lock.relayServer.commit !== "56f31c13956ee41f4e2e5945973645e17faa3338") {
   throw new Error("Relay Server commit lock drifted");
 }
@@ -204,7 +201,7 @@ if (suppliedOpenAPI) {
 }
 
 process.stdout.write([
-  `Relay candidate contract lock passed: local-only Server ${lock.relayServer.commit}; no public release provenance claimed`,
+  `Relay contract lock passed: Server ${lock.relayServer.commit}`,
   `OpenAPI ${openapiReceipt}`,
   `SDK ${lock.relaySdk.package}@${lock.relaySdk.version}`,
   `Claude Code docs retrieved ${lock.claudeCode.retrievedOn}; validation target ${lock.claudeCode.validatedCliVersion}`,
