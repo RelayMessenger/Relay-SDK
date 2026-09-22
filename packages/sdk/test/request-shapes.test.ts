@@ -209,7 +209,7 @@ describe("Relay v1 request shapes", () => {
       handle: "echo",
       first_name: "New Echo",
     });
-    await client.calls.create("chat-id", { to: ["bob"], mode: "audio" }, {
+    await client.calls.create("chat-id", { to: ["bob"] }, {
       idempotencyKey: "call-create-key",
     });
     await client.calls.list("chat-id");

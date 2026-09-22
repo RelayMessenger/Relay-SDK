@@ -3,7 +3,7 @@ import type { MethodDoc } from "./search-docs.js";
 export const DOCS_SOURCE = {
   "contract": "0520d2838f14c758f2e3e21d94120a77677b684fbde68d656d0f75f375227586",
   "client": "5ab7e7362a137e5d5714ae64c626f8fe1ceaeb6a772dfab67d3b8b4648b43d2f",
-  "types": "104d27d838db9bec9e3b5eef7c120aea3c1a11a22f19df0e3eb3b308356e891b"
+  "types": "a014de91edd1911a45805f1e7450d1da11e3bb257d23715a0e7a1bde3ac1b943"
 };
 export const METHOD_DOCS: readonly MethodDoc[] = [
   {
@@ -192,11 +192,11 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
     "summary": "Start an individual call",
     "description": "Start an audio Call in an existing individual Chat containing exactly one user and one agent. The caller comes from authentication. The user must have added the agent; sending or replying to a Message establishes that relationship. A block in either direction prevents the call. A group Chat is rejected even when it has only two current members. Reuse the same Idempotency-Key and body after an uncertain response. Relay emits `call.created` through the agent's configured event transport. Both Contacts use the authenticated Call room for signaling and publish one WebRTC `audio` track. The callee answers by sending `join` within the 10-second ring lease; silence ends `no-answer`. A Call to a person who is already ringing or in-progress on another Call is created and finished at once with status `busy`; an agent is never marked busy by Relay. An answered Call has no duration limit.",
     "definitions": [
-      "export interface CallCreateParams {\n  to: [string];\n  mode: \"audio\";\n}",
+      "export interface CallCreateParams {\n  to: [string];\n}",
       "export interface CallCreateOptions extends RequestOptions {\n  /** Reuse this key and request after an uncertain response. */\n  idempotencyKey: string;\n}",
       "export interface RequestOptions {\n  signal?: AbortSignal;\n  timeout?: number;\n  maxRetries?: number;\n  headers?: HeadersInit;\n}",
       "export interface CallResponse {\n  call: Call;\n}",
-      "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  mode: \"audio\";\n  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */\n  status: \"ringing\" | \"in-progress\" | CallTerminalStatus;\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n}",
+      "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */\n  status: \"ringing\" | \"in-progress\" | CallTerminalStatus;\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n}",
       "export type UUID = string;",
       "export interface CallContact {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
       "export type CallTerminalStatus =\n  | \"completed\"\n  | \"no-answer\"\n  | \"canceled\"\n  | \"busy\"\n  | \"failed\";"
@@ -229,7 +229,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
     "definitions": [
       "export interface RequestOptions {\n  signal?: AbortSignal;\n  timeout?: number;\n  maxRetries?: number;\n  headers?: HeadersInit;\n}",
       "export interface CallResponse {\n  call: Call;\n}",
-      "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  mode: \"audio\";\n  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */\n  status: \"ringing\" | \"in-progress\" | CallTerminalStatus;\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n}",
+      "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */\n  status: \"ringing\" | \"in-progress\" | CallTerminalStatus;\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n}",
       "export type UUID = string;",
       "export interface CallContact {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
       "export type CallTerminalStatus =\n  | \"completed\"\n  | \"no-answer\"\n  | \"canceled\"\n  | \"busy\"\n  | \"failed\";"
@@ -264,7 +264,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface CallListParams {\n  cursor?: string;\n  limit?: number;\n}",
       "export interface RequestOptions {\n  signal?: AbortSignal;\n  timeout?: number;\n  maxRetries?: number;\n  headers?: HeadersInit;\n}",
       "export interface CallListResponse {\n  calls: Call[];\n  next_cursor: string | null;\n}",
-      "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  mode: \"audio\";\n  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */\n  status: \"ringing\" | \"in-progress\" | CallTerminalStatus;\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n}",
+      "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */\n  status: \"ringing\" | \"in-progress\" | CallTerminalStatus;\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n}",
       "export type UUID = string;",
       "export interface CallContact {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
       "export type CallTerminalStatus =\n  | \"completed\"\n  | \"no-answer\"\n  | \"canceled\"\n  | \"busy\"\n  | \"failed\";"
@@ -288,7 +288,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
     "definitions": [
       "export interface RequestOptions {\n  signal?: AbortSignal;\n  timeout?: number;\n  maxRetries?: number;\n  headers?: HeadersInit;\n}",
       "export interface CallResponse {\n  call: Call;\n}",
-      "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  mode: \"audio\";\n  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */\n  status: \"ringing\" | \"in-progress\" | CallTerminalStatus;\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n}",
+      "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */\n  status: \"ringing\" | \"in-progress\" | CallTerminalStatus;\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n}",
       "export type UUID = string;",
       "export interface CallContact {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
       "export type CallTerminalStatus =\n  | \"completed\"\n  | \"no-answer\"\n  | \"canceled\"\n  | \"busy\"\n  | \"failed\";"
@@ -361,7 +361,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\"\n  | \"call\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
       "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface CallMarker {\n  id: UUID;\n  mode: \"audio\";\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  duration_seconds: number | null;\n}",
+      "export interface CallMarker {\n  id: UUID;\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  duration_seconds: number | null;\n}",
       "export type DeliveryStatus =\n  | \"sent\"\n  | \"delivered\"\n  | \"read\";",
       "export interface MessageDelivery {\n  contact: ChatHandle;\n  delivered_at: string | null;\n  read_at: string | null;\n}",
       "export interface Chat {\n  id: UUID;\n  display_name: string | null;\n  group_chat_icon?: string | null;\n  handles: ChatHandle[];\n  is_group: boolean;\n  /**\n   * The caller's side of a message request on this Chat: `pending` while a\n   * sender with no Contact edge to the caller wrote to them and they have not\n   * answered, `accepted` or `deleted` once they have. Absent when the caller\n   * was never asked; an agent never is.\n   */\n  created_at: string;\n  updated_at: string;\n}",
@@ -516,8 +516,8 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\"\n  | \"call\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
       "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface CallMarker {\n  id: UUID;\n  mode: \"audio\";\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  duration_seconds: number | null;\n}",
-      "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  mode: \"audio\";\n  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */\n  status: \"ringing\" | \"in-progress\" | CallTerminalStatus;\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n}",
+      "export interface CallMarker {\n  id: UUID;\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  duration_seconds: number | null;\n}",
+      "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */\n  status: \"ringing\" | \"in-progress\" | CallTerminalStatus;\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n}",
       "export interface CallContact {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
       "export type CallTerminalStatus =\n  | \"completed\"\n  | \"no-answer\"\n  | \"canceled\"\n  | \"busy\"\n  | \"failed\";",
       "export type DeliveryStatus =\n  | \"sent\"\n  | \"delivered\"\n  | \"read\";",
@@ -570,7 +570,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\"\n  | \"call\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
       "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface CallMarker {\n  id: UUID;\n  mode: \"audio\";\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  duration_seconds: number | null;\n}",
+      "export interface CallMarker {\n  id: UUID;\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  duration_seconds: number | null;\n}",
       "export type DeliveryStatus =\n  | \"sent\"\n  | \"delivered\"\n  | \"read\";",
       "export interface MessageDelivery {\n  contact: ChatHandle;\n  delivered_at: string | null;\n  read_at: string | null;\n}",
       "export interface Chat {\n  id: UUID;\n  display_name: string | null;\n  group_chat_icon?: string | null;\n  handles: ChatHandle[];\n  is_group: boolean;\n  /**\n   * The caller's side of a message request on this Chat: `pending` while a\n   * sender with no Contact edge to the caller wrote to them and they have not\n   * answered, `accepted` or `deleted` once they have. Absent when the caller\n   * was never asked; an agent never is.\n   */\n  created_at: string;\n  updated_at: string;\n}",
@@ -1078,7 +1078,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\"\n  | \"call\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
       "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface CallMarker {\n  id: UUID;\n  mode: \"audio\";\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  duration_seconds: number | null;\n}",
+      "export interface CallMarker {\n  id: UUID;\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  duration_seconds: number | null;\n}",
       "export type DeliveryStatus =\n  | \"sent\"\n  | \"delivered\"\n  | \"read\";",
       "export interface MessageDelivery {\n  contact: ChatHandle;\n  delivered_at: string | null;\n  read_at: string | null;\n}",
       "export interface Chat {\n  id: UUID;\n  display_name: string | null;\n  group_chat_icon?: string | null;\n  handles: ChatHandle[];\n  is_group: boolean;\n  /**\n   * The caller's side of a message request on this Chat: `pending` while a\n   * sender with no Contact edge to the caller wrote to them and they have not\n   * answered, `accepted` or `deleted` once they have. Absent when the caller\n   * was never asked; an agent never is.\n   */\n  created_at: string;\n  updated_at: string;\n}",
@@ -1146,8 +1146,8 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\"\n  | \"call\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
       "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface CallMarker {\n  id: UUID;\n  mode: \"audio\";\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  duration_seconds: number | null;\n}",
-      "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  mode: \"audio\";\n  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */\n  status: \"ringing\" | \"in-progress\" | CallTerminalStatus;\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n}",
+      "export interface CallMarker {\n  id: UUID;\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  duration_seconds: number | null;\n}",
+      "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */\n  status: \"ringing\" | \"in-progress\" | CallTerminalStatus;\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n}",
       "export interface CallContact {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
       "export type CallTerminalStatus =\n  | \"completed\"\n  | \"no-answer\"\n  | \"canceled\"\n  | \"busy\"\n  | \"failed\";",
       "export type DeliveryStatus =\n  | \"sent\"\n  | \"delivered\"\n  | \"read\";",
@@ -1201,8 +1201,8 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export type SystemEventType =\n  | \"chat_created\"\n  | \"participant_added\"\n  | \"participant_removed\"\n  | \"group_name_updated\"\n  | \"group_icon_updated\"\n  | \"contact_card_shared\"\n  | \"call\";",
       "export interface SystemEventParty {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
       "export interface ContactCardItem {\n  handle: string;\n  first_name: string;\n  last_name: string | null;\n  image_url: string | null;\n  is_active: boolean;\n  kind: \"user\" | \"agent\";\n}",
-      "export interface CallMarker {\n  id: UUID;\n  mode: \"audio\";\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  duration_seconds: number | null;\n}",
-      "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  mode: \"audio\";\n  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */\n  status: \"ringing\" | \"in-progress\" | CallTerminalStatus;\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n}",
+      "export interface CallMarker {\n  id: UUID;\n  status: Call[\"status\"];\n  answered_at: string | null;\n  ended_at: string | null;\n  from: CallContact;\n  to: [CallContact];\n  duration_seconds: number | null;\n}",
+      "export interface Call {\n  id: UUID;\n  chat_id: UUID;\n  from: CallContact;\n  to: [CallContact];\n  /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */\n  status: \"ringing\" | \"in-progress\" | CallTerminalStatus;\n  revision: number;\n  created_at: string;\n  ringing_at: string;\n  answered_at: string | null;\n  ended_at: string | null;\n}",
       "export interface CallContact {\n  id: UUID;\n  handle: string;\n  kind: \"user\" | \"agent\";\n}",
       "export type CallTerminalStatus =\n  | \"completed\"\n  | \"no-answer\"\n  | \"canceled\"\n  | \"busy\"\n  | \"failed\";",
       "export type DeliveryStatus =\n  | \"sent\"\n  | \"delivered\"\n  | \"read\";",

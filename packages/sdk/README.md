@@ -278,7 +278,7 @@ attachment rules are at <https://docs.relayapp.im>.
 ## Individual audio Calls (staging)
 
 Calls join one user and one agent in an existing individual Chat. Use
-`relay.calls.create(chatId, { to: [handle], mode: "audio" }, { idempotencyKey })`;
+`relay.calls.create(chatId, { to: [handle] }, { idempotencyKey })`;
 keep the same key and body when retrying an uncertain create response.
 
 `relay.calls` also exposes `retrieve`, `list`, `room`, and `end`. Receive typed

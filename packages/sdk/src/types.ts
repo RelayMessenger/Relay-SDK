@@ -27,7 +27,6 @@ export interface Call {
   chat_id: UUID;
   from: CallContact;
   to: [CallContact];
-  mode: "audio";
   /** `ringing` and `in-progress` are live. Terminal states set `ended_at`. */
   status: "ringing" | "in-progress" | CallTerminalStatus;
   revision: number;
@@ -39,7 +38,6 @@ export interface Call {
 
 export interface CallCreateParams {
   to: [string];
-  mode: "audio";
 }
 
 export interface CallCreateOptions extends RequestOptions {
@@ -401,7 +399,6 @@ export type SystemEventType =
 
 export interface CallMarker {
   id: UUID;
-  mode: "audio";
   status: Call["status"];
   answered_at: string | null;
   ended_at: string | null;
