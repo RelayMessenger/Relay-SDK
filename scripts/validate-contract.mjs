@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "59f1a65adbe27ab1f9aca3bf9de19204942d872a", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "3bde6d9d4bc3ff69c8c0024ea3a0037122e6f888", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -333,6 +333,10 @@ const validateOpenAPI = () => {
   assert.equal(selection.properties.options.items.$ref, "#/components/schemas/SelectionOption");
   assert.equal(selection.properties.has_responded, undefined);
   assert.equal(schemas.SelectionPartResponse.properties.has_responded.readOnly, true);
+  assert.equal(selection.properties.selected_values, undefined);
+  assert.equal(schemas.SelectionPartResponse.properties.selected_values.readOnly, true);
+  assert.deepEqual(schemas.SelectionPartResponse.properties.selected_values.type, ["array", "null"]);
+  assert.ok(schemas.SelectionPartResponse.required.includes("selected_values"));
   assert.equal(schemas.SelectionPartResponse.properties.reactions.type, "null");
   const response = schemas.SelectionResponsePart;
   assert.equal(response.additionalProperties, false);
@@ -514,8 +518,8 @@ const validateOpenAPI = () => {
     assert.equal(`/v1/calls/{callId}/${gone}` in document.paths, false, `${gone} REST route is obsolete`);
   }
   assert.equal(document.paths["/v1/calls/{callId}/room"].get.operationId, "connectCallRoom");
-  assert.equal(document.components.schemas.CallRoomPublishOfferFrame.properties.tracks.items.properties.name.const, "audio");
-  assert.equal(document.components.schemas.CallRoomSubscriptionOfferFrame.properties.track.const, "audio");
+  assert.deepEqual(document.components.schemas.CallRoomPublishOfferFrame.properties.tracks.items.properties.name.enum, ["audio", "video"]);
+  assert.deepEqual(document.components.schemas.CallRoomSubscriptionOfferFrame.properties.track.enum, ["audio", "video"]);
   assert.equal(document.components.schemas.CallRoomStateFrame.properties.participants.minItems, 2);
   assert.equal(document.components.schemas.CallRoomStateFrame.properties.participants.maxItems, 2);
   assert.equal("call_url" in document.components.schemas.SetContactCardResponse.properties, false);
@@ -530,7 +534,7 @@ const validateOpenAPI = () => {
   assert.ok(document.components.schemas.SystemEvent.properties.type.enum.includes("call"));
   assert.equal(document.components.schemas.SystemEvent.properties.type.enum.includes("call_ended"), false);
   assert.deepEqual(document.components.schemas.CallMarker.required, [
-    "id", "mode", "status", "answered_at", "ended_at", "from", "to",
+    "id", "status", "answered_at", "ended_at", "from", "to",
     "duration_seconds",
   ]);
   assert.deepEqual(document.components.schemas.CallMarker.properties.status.enum, callStatus);

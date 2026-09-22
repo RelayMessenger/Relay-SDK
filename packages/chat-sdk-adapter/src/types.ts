@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 59f1a65adbe27ab1f9aca3bf9de19204942d872a
- * OpenAPI cb3566bd1d6eba35ab4a775ed739d8b829c1b9a8dbad33ba23f85ba314fc8c13
+ * Relay Server 3bde6d9d4bc3ff69c8c0024ea3a0037122e6f888
+ * OpenAPI 0520d2838f14c758f2e3e21d94120a77677b684fbde68d656d0f75f375227586
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -129,6 +129,8 @@ export interface RelayButtonsPartResponse extends RelayButtonsPart {
 
 export interface RelaySelectionPartResponse extends RelaySelectionPart {
   readonly has_responded: boolean;
+  /** The values the authenticated viewer chose, in source-option order, identical on every one of that user's devices; null until the viewer answers, when the answer Message no longer exists, and always for an agent viewer. */
+  readonly selected_values: string[] | null;
   reactions: null;
 }
 

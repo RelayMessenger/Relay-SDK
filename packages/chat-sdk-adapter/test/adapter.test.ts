@@ -1894,7 +1894,7 @@ it("keeps rich parts and explicit targets in both signed ingress and REST histor
   } } });
 
   const parts = [{ type: "text", value: "Topics?", reactions: null }, {
-    type: "selection", options: [{ value: "research", label: "Research" }], has_responded: true, reactions: null,
+    type: "selection", options: [{ value: "research", label: "Research" }], has_responded: true, selected_values: null, reactions: null,
   }];
   const history = createRelayAdapter({ token: "test", webhookSecret: WEBHOOK_SECRET,
     fetch: vi.fn(async () => jsonResponse({ messages: [{

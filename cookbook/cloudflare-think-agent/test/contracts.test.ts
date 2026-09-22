@@ -9,11 +9,11 @@ import { describe, expect, it } from "vitest";
 import { thinkCandidateMode, verifyThinkCandidates } from "./candidate-contract.js";
 
 const RELAY_SERVER_SHA =
-  "59f1a65adbe27ab1f9aca3bf9de19204942d872a";
+  "3bde6d9d4bc3ff69c8c0024ea3a0037122e6f888";
 const RELAY_CHAT_SDK_SHA =
   "eecf94a4d38bc021917e54dfed57e268657c17af";
 const RELAY_OPENAPI_SHA256 =
-  "cb3566bd1d6eba35ab4a775ed739d8b829c1b9a8dbad33ba23f85ba314fc8c13";
+  "0520d2838f14c758f2e3e21d94120a77677b684fbde68d656d0f75f375227586";
 const RELAY_ADAPTER_INTEGRITY =
   "sha512-aslkL6r5pj/frh/3QgJ0sqPoxHK2wTSmZ2OeFsfEBfyJGsWiljlhjzTjW+rAcGmy2vy0oE4x94agvnuaMZ/PzA==";
 

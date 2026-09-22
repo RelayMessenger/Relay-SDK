@@ -54,10 +54,12 @@ const selectionMessage: MessageContent = {
 };
 await relay.chats.messages.send("chat-id", { message: selectionMessage });
 const viewerSelection: SelectionPartResponse = {
-  ...topics, has_responded: false, reactions: null,
+  ...topics, has_responded: false, selected_values: null, reactions: null,
 };
 // @ts-expect-error Viewer state is read-only.
 viewerSelection.has_responded = true;
+// @ts-expect-error The viewer's answer is read-only.
+viewerSelection.selected_values = ["research"];
 const selectionEvent = relay.webhooks.unwrap("{}", { headers: {} });
 if (selectionEvent.event_type === "message.received") {
   const values: string[] | undefined = selectionEvent.data.parts

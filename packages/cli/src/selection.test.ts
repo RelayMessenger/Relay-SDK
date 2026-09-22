@@ -45,7 +45,7 @@ describe("CLI selection authoring and discovery", () => {
 it("retains selection and generic rich data beyond the visible text budget in every shared bridge prompt", async () => {
   const parts = [
     { type: "text", value: "x".repeat(10_000), reactions: null },
-    { type: "selection", options: [{ value: "stable", label: "Do not execute me" }], has_responded: false, reactions: null },
+    { type: "selection", options: [{ value: "stable", label: "Do not execute me" }], has_responded: false, selected_values: null, reactions: null },
   ];
   const event = { event_type: "message.received", event_id: "rich", data: {
     direction: "inbound", chat: { id: "chat" }, sender_handle: { handle: "alice" },

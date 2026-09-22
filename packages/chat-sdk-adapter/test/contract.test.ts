@@ -10,7 +10,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "cb3566bd1d6eba35ab4a775ed739d8b829c1b9a8dbad33ba23f85ba314fc8c13";
+  "0520d2838f14c758f2e3e21d94120a77677b684fbde68d656d0f75f375227586";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -107,6 +107,7 @@ describe("locked Relay Server contract", () => {
     expect(schemas.SelectionPart).toHaveProperty("properties.options.minItems", 1);
     expect(schemas.SelectionPart).toHaveProperty("properties.options.maxItems", 25);
     expect(schemas.SelectionPartResponse).toHaveProperty("properties.has_responded.readOnly", true);
+    expect(schemas.SelectionPartResponse).toHaveProperty("properties.selected_values.readOnly", true);
     expect(schemas.SelectionResponsePart).toHaveProperty("required", ["type", "selected_values"]);
     expect(schemas.SelectionResponsePart).toHaveProperty("properties.selected_values.uniqueItems", true);
     expect(schemas.MessagePart).toHaveProperty("discriminator.mapping.selection", "#/components/schemas/SelectionPart");

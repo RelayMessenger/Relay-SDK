@@ -292,6 +292,8 @@ export interface SelectionPart {
 export interface SelectionPartResponse extends SelectionPart {
   /** Durable response state for this viewer across devices. Existing Chat rules allow at most one human user; only that user can respond, once; reopening an answered selection shows what they chose without letting them change it. */
   readonly has_responded: boolean;
+  /** The values the authenticated viewer chose, in source-option order, identical on every one of that user's devices; null until the viewer answers, when the answer Message no longer exists, and always for an agent viewer. */
+  readonly selected_values: string[] | null;
   reactions: null;
 }
 
