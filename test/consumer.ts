@@ -68,7 +68,7 @@ if (selectionEvent.event_type === "message.received") {
   void [values, source];
 }
 const liveCallMarker: CallMarker = {
-  id: "call-id", mode: "audio", status: "ringing",
+  id: "call-id", status: "ringing",
   answered_at: null, ended_at: null,
   from: { id: "caller-id", handle: "caller", kind: "agent" },
   to: [{ id: "callee-id", handle: "callee", kind: "user" }],
@@ -212,15 +212,15 @@ async function receiveCall(event: CallWebhookEvent): Promise<void> {
   await relay.calls.end(event.data.call.id);
 }
 void receiveCall;
-await relay.calls.create("chat-id", { to: ["agent"], mode: "audio" }, {
+await relay.calls.create("chat-id", { to: ["agent"] }, {
   idempotencyKey: "one-call",
 });
 // @ts-expect-error Call creation requires a stable idempotency key.
-await relay.calls.create("chat-id", { to: ["agent"], mode: "audio" });
+await relay.calls.create("chat-id", { to: ["agent"] });
 // @ts-expect-error Individual Calls have exactly one recipient.
-await relay.calls.create("chat-id", { to: ["one", "two"], mode: "audio" }, { idempotencyKey: "one" });
-// @ts-expect-error Calls are audio-only.
-await relay.calls.create("chat-id", { to: ["agent"], mode: "video" }, { idempotencyKey: "one" });
+await relay.calls.create("chat-id", { to: ["one", "two"] }, { idempotencyKey: "one" });
+// @ts-expect-error Call creation takes only the recipient; Relay rejects any other key.
+await relay.calls.create("chat-id", { to: ["agent"], mode: "audio" }, { idempotencyKey: "one" });
 
 const envelope: RelayWebhookEnvelope = {
   api_version: "v1",

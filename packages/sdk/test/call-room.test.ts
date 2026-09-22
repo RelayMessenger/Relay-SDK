@@ -59,7 +59,6 @@ const call: Call = {
   chat_id: "01995bc0-0000-7000-8000-000000000002",
   from: { id: "01995bc0-0000-7000-8000-000000000003", handle: "alice", kind: "user" },
   to: [{ id: "01995bc0-0000-7000-8000-000000000004", handle: "echo", kind: "agent" }],
-  mode: "audio",
   status: "in-progress",
   revision: 2,
   created_at: "2026-09-22T07:00:00Z",

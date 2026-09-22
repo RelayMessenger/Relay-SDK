@@ -306,7 +306,6 @@ it("forwards room state and sends call end through the Relay control room", asyn
       chat_id: "01995bc0-0000-7000-8000-000000000002",
       from: { id: "user", handle: "alice", kind: "user" },
       to: [{ id: "agent", handle: "relay", kind: "agent" }],
-      mode: "audio",
       status: "in-progress",
       revision: 2,
       created_at: "2026-09-22T00:00:00Z",
