@@ -1,0 +1,79 @@
+# `@relaymessenger/livekit`
+
+`@relaymessenger/livekit` connects Relay Calls to TypeScript LiveKit Agents.
+Relay stays responsible for the Call resource and signaling; the package owns
+the Node WebRTC peer and translates audio between Relay and LiveKit `AudioFrame`
+objects. Application code does not handle Cloudflare, SDP, ICE, or SFU
+credentials.
+
+Install it next to the Relay SDK and the LiveKit Agents runtime:
+
+```sh
+npm install @relaymessenger/sdk @relaymessenger/livekit \
+  @livekit/agents @livekit/rtc-node
+```
+
+## Answer a Relay Call
+
+Agents receive `call.created` through the normal Relay Webhook or acknowledged
+Agent WebSocket. Joining that Call's authenticated room answers it; there is no
+agent call URL or separate accept endpoint.
+
+```ts
+import { AgentSession } from "@livekit/agents";
+import Relay from "@relaymessenger/sdk";
+import { RelayLiveKitCall } from "@relaymessenger/livekit";
+
+const relay = new Relay({ apiKey: process.env.RELAY_AGENT_TOKEN! });
+
+async function answerCall(callId: string, session: AgentSession) {
+  const call = await RelayLiveKitCall.connect({ relay, callId });
+  call.attach(session);
+
+  call.transport.on("ended", () => {
+    void call.close();
+  });
+
+  return call;
+}
+```
+
+`RelayLiveKitCall.connect()` does not resolve until the WebRTC media peer has
+reached `connected`. `RelayAudioInput` converts the remote participant's PCM16
+audio to LiveKit frames. `RelayAudioOutput` publishes LiveKit TTS frames to
+Relay, pacing larger frames into 10 ms WebRTC source slices. `clearBuffer()`
+drops queued outbound audio that has not yet reached WebRTC.
+
+Use `setMuted(true)` to publish participant mute state, `end()` to end the Relay
+Call, and `close()` for local cleanup. If the signaling connection is replaced,
+`call.transport.reconnect()` keeps the existing media peer and replays the same
+audio publication so Relay can return its cached answer.
+
+## Provider-neutral transport
+
+The WebRTC/PCM layer is a separate public entry point for future adapters that
+do not use LiveKit Agents:
+
+```ts
+import { RelayCallTransport } from "@relaymessenger/livekit/transport";
+
+const room = relay.calls.room(callId);
+const transport = new RelayCallTransport({ room });
+
+transport.on("audio", ({ samples, sampleRate, channelCount }) => {
+  // Interleaved signed PCM16 from the remote Relay participant.
+});
+
+await transport.connect();
+await transport.writeAudio({
+  samples,
+  sampleRate: 48_000,
+  channelCount: 1,
+});
+```
+
+`RelayCallTransport` consumes the SDK's `CallRoom`; it does not duplicate the
+room protocol. The default Node runtime uses `@roamhq/wrtc`, while the transport
+boundary remains provider-neutral for additional adapters. `@livekit/agents`
+and `@livekit/rtc-node` are peer dependencies so the host agent process owns
+those runtimes.
