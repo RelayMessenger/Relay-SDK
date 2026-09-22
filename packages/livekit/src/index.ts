@@ -16,10 +16,13 @@ export {
   type RelayCallIceDiagnostics,
   type RelayCallInboundDiagnostics,
   type RelayCallOutboundDiagnostics,
+  type RelayCallRestartEvent,
+  type RelayCallRestartReason,
   type RelayCallRoomDiagnostics,
   type RelayCallTransportCloseEvent,
   type RelayCallTransportOptions,
   type RelayIceServer,
+  type RelayIceServersProvider,
   type RelayIceTransportPolicy,
   type RelayInboundAudioFormat,
 } from "./transport.js";

@@ -9,6 +9,7 @@ import {
   type RelayCallIceDiagnostics,
   type RelayCallTransportOptions,
   type RelayIceServer,
+  type RelayIceServersProvider,
   type RelayInboundAudioFormat,
   type RelayIceTransportPolicy,
   type RelayWebRTCFactory,
@@ -195,16 +196,26 @@ export interface RelayLiveKitConnectOptions extends RelayLiveKitAudioOptions {
   roomClient?: CallRoom;
   /** @internal */
   webRTC?: RelayWebRTCFactory;
-  /** STUN and TURN servers for the agent's WebRTC peer. Defaults to none. */
-  iceServers?: RelayIceServer[];
+  /**
+   * STUN and TURN servers for the agent's WebRTC peer. Defaults to none. A
+   * function is called again before every restart, to mint fresh TURN credentials.
+   */
+  iceServers?: RelayIceServer[] | RelayIceServersProvider;
   /** `"relay"` forces TURN. Defaults to `"all"`. */
   iceTransportPolicy?: RelayIceTransportPolicy;
   /** @internal */
   iceGatheringTimeoutMs?: number;
-  /** Maximum wait for WebRTC media to connect. Defaults to 15 seconds. */
+  /**
+   * How long one SFU session has to connect before the transport restarts onto
+   * a new one. Defaults to 5 seconds. `connect()` has no overall deadline.
+   */
+  sessionConnectTimeoutMs?: number;
+  /** @deprecated Use `sessionConnectTimeoutMs`; now the per-session wait, not a `connect()` deadline. */
   mediaConnectTimeoutMs?: number;
-  /** @deprecated Use `mediaConnectTimeoutMs`. */
+  /** @deprecated Use `sessionConnectTimeoutMs`. */
   connectionTimeoutMs?: number;
+  /** Aborting stops `connect()` and closes the transport; the Call itself is not ended. */
+  signal?: AbortSignal;
 }
 
 type AgentSessionAudioTarget = Pick<AgentSession, "input" | "output">;
@@ -240,6 +251,9 @@ export class RelayLiveKitCall {
       ...(options.iceGatheringTimeoutMs === undefined
         ? {}
         : { iceGatheringTimeoutMs: options.iceGatheringTimeoutMs }),
+      ...(options.sessionConnectTimeoutMs === undefined
+        ? {}
+        : { sessionConnectTimeoutMs: options.sessionConnectTimeoutMs }),
       ...(options.mediaConnectTimeoutMs === undefined
         ? {}
         : { mediaConnectTimeoutMs: options.mediaConnectTimeoutMs }),
@@ -248,7 +262,7 @@ export class RelayLiveKitCall {
         : { connectionTimeoutMs: options.connectionTimeoutMs }),
     };
     const transport = new RelayCallTransport(transportOptions);
-    await transport.connect();
+    await transport.connect(options.signal ? { signal: options.signal } : {});
     return new RelayLiveKitCall(transport, createRelayLiveKitAudio(transport, options));
   }
 
@@ -265,6 +279,15 @@ export class RelayLiveKitCall {
     if (this.#session.input.audio === this.input) this.#session.input.audio = null;
     if (this.#session.output.audio === this.output) this.#session.output.audio = null;
     this.#session = undefined;
+  }
+
+  /**
+   * Resolves once the person's audio has arrived and the room shows them
+   * connected (the transport's `peerAudio`). Await it before starting the
+   * AgentSession so the greeting is heard.
+   */
+  waitForPeerAudio(timeoutMs: number): Promise<void> {
+    return this.transport.waitForPeerAudio(timeoutMs);
   }
 
   /** ICE candidates and state transitions for this call, with a one-line summary for logs. */

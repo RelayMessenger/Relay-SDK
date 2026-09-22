@@ -61,6 +61,9 @@ export interface CallResponse {
   call: Call;
 }
 
+/** A participant's published local track, named on the SFU. */
+export type CallRoomTrackName = "audio" | "video";
+
 export interface CallRoomParticipant {
   contact_id: UUID;
   kind: "user" | "agent";
@@ -68,6 +71,10 @@ export interface CallRoomParticipant {
   track: "audio" | null;
   muted: boolean;
   connected: boolean;
+  /** Camera sending, from this participant's `userUpdate`. */
+  video?: boolean;
+  /** Tracks this participant has published: `[]` before its first offer, then `["audio"]` or `["audio", "video"]`. */
+  tracks?: CallRoomTrackName[];
 }
 
 export interface CallRoomJoinFrame {
@@ -77,7 +84,13 @@ export interface CallRoomJoinFrame {
 export interface CallRoomPublishOfferFrame {
   type: "offer";
   session_description: { type: "offer"; sdp: string };
-  tracks: [{ mid: string; name: "audio" }];
+  /** One or two tracks, `audio` first, no duplicate names. */
+  tracks:
+    | [{ mid: string; name: "audio" }]
+    | [{ mid: string; name: "audio" }, { mid: string; name: "video" }]
+    | [{ mid: string; name: "video" }];
+  /** The previous session is dead: publish on a brand-new session from a new peer connection. */
+  restart?: boolean;
 }
 
 export interface CallRoomAnswerFrame {
@@ -92,6 +105,8 @@ export interface CallRoomConnectedFrame {
 export interface CallRoomUserUpdateFrame {
   type: "userUpdate";
   muted: boolean;
+  /** Camera sending. Omitted keeps the last value. */
+  video?: boolean;
 }
 
 export interface CallRoomEndFrame {
@@ -125,7 +140,8 @@ export interface CallRoomServerAnswerFrame {
 export interface CallRoomSubscriptionOfferFrame {
   type: "offer";
   session_description: { type: "offer"; sdp: string };
-  track: "audio";
+  /** The other participant's track this renegotiation pulls. */
+  track: CallRoomTrackName;
 }
 
 export interface CallRoomEndedFrame {

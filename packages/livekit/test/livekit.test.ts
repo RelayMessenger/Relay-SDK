@@ -288,7 +288,7 @@ class ConnectingWebRTC implements RelayWebRTCFactory {
   }
 }
 
-it("forwards ICE servers, the transport policy and the media timeout through connect", async () => {
+it("forwards ICE servers, the transport policy, the session timeout and the abort signal through connect", async () => {
   const webRTC = new ConnectingWebRTC();
   const iceServers = [{ urls: "turn:turn.cloudflare.com:3478?transport=tcp", username: "u", credential: "c" }];
   const call = await RelayLiveKitCall.connect({
@@ -298,7 +298,7 @@ it("forwards ICE servers, the transport policy and the media timeout through con
     webRTC,
     iceServers,
     iceTransportPolicy: "relay",
-    mediaConnectTimeoutMs: 500,
+    sessionConnectTimeoutMs: 500,
   });
   expect(webRTC.peerConfigs).toEqual([{ iceServers, iceTransportPolicy: "relay" }]);
   expect(call.diagnostics().connected).toBe(true);
@@ -307,13 +307,19 @@ it("forwards ICE servers, the transport policy and the media timeout through con
 
   const stuck = new ConnectingWebRTC();
   stuck.neverConnects = true;
-  await expect(RelayLiveKitCall.connect({
+  const controller = new AbortController();
+  const connecting = RelayLiveKitCall.connect({
     relay: {} as Relay,
     callId: "01995bc0-0000-7000-8000-000000000001",
     roomClient: new ConnectingRoom() as unknown as CallRoom,
     webRTC: stuck,
-    mediaConnectTimeoutMs: 20,
-  })).rejects.toThrow(/^Timed out connecting Relay WebRTC media \(local: host 0, srflx 0, relay 0; remote: none; states: no connected; in: 0 rtp, 0 bad, 0 frames, no packets, 0\/5s; out: 0 frames, 0 opus, 0 rtp, no packets, 0\/5s, queue 0, pacer n\/a; room: 0 roomState, 0 offer\)$/);
+    sessionConnectTimeoutMs: 20,
+    signal: controller.signal,
+  });
+  // Each dead session is replaced after 20 ms; connect() keeps going until aborted.
+  while (stuck.peers.length < 3) await new Promise((resolve) => setTimeout(resolve, 10));
+  controller.abort();
+  await expect(connecting).rejects.toThrow("Relay Call connect was aborted.");
 });
 
 it("asks the engine for LiveKit's 24 kHz mono room input and hands the session mono frames", async () => {
@@ -343,6 +349,36 @@ it("asks the engine for LiveKit's 24 kHz mono room input and hands the session m
   expect(received.value?.sampleRate).toBe(24_000);
   expect(received.value?.samplesPerChannel).toBe(480);
   reader.releaseLock();
+  await call.close();
+});
+
+it("exposes the transport's peerAudio wait on RelayLiveKitCall", async () => {
+  const webRTC = new ConnectingWebRTC();
+  const room = new ConnectingRoom();
+  const call = await RelayLiveKitCall.connect({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: room as unknown as CallRoom,
+    webRTC,
+  });
+  let resolved = false;
+  const waiting = call.waitForPeerAudio(5_000).then(() => { resolved = true; });
+  webRTC.peers[0]!.ontrack?.({ track: { kind: "audio", stop: () => {} } });
+  webRTC.sinks[0]!.sink.ondata?.({ samples: new Int16Array(480), sampleRate: 24_000, bitsPerSample: 16, channelCount: 1 });
+  await Promise.resolve();
+  expect(resolved).toBe(false);
+  for (const listener of room.listeners.get("roomState") ?? []) {
+    listener({
+      type: "roomState",
+      call: { status: "in-progress" },
+      participants: [
+        { contact_id: "user", kind: "user", attached: true, track: "audio", muted: false, connected: true },
+        { contact_id: "agent", kind: "agent", attached: true, track: "audio", muted: false, connected: true },
+      ],
+    });
+  }
+  await waiting;
+  expect(resolved).toBe(true);
   await call.close();
 });
 
