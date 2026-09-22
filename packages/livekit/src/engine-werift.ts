@@ -41,7 +41,9 @@ import {
 } from "werift";
 import type {
   RelayAudioSinkLike,
+  RelayAudioSinkStats,
   RelayAudioSourceLike,
+  RelayAudioSourceStats,
   RelayMediaStreamTrackLike,
   RelayPeerConnectionConfig,
   RelayPeerConnectionLike,
@@ -59,6 +61,37 @@ const PACKET_SAMPLES = PACKET_FRAMES * WERIFT_CHANNEL_COUNT;
 const LOCAL_PAYLOAD_TYPE = 111;
 
 export type WeriftAudioSourceData = Parameters<RelayAudioSourceLike["onData"]>[0];
+
+/** Packets counted for `diagnostics()`; the recent window is the last 5 s. */
+export const STATS_WINDOW_MS = 5_000;
+
+/** Monotone packet counter with first/last epoch timestamps and a 5 s window. */
+class PacketClock {
+  count = 0;
+  firstAt: number | undefined;
+  lastAt: number | undefined;
+  readonly #recent: number[] = [];
+
+  mark(now = Date.now()): void {
+    this.count += 1;
+    this.firstAt ??= now;
+    this.lastAt = now;
+    this.#recent.push(now);
+    this.#prune(now);
+  }
+
+  recent(now = Date.now()): number {
+    this.#prune(now);
+    return this.#recent.length;
+  }
+
+  #prune(now: number): void {
+    const floor = now - STATS_WINDOW_MS;
+    let drop = 0;
+    while (drop < this.#recent.length && this.#recent[drop]! < floor) drop += 1;
+    if (drop) this.#recent.splice(0, drop);
+  }
+}
 
 /** Convert any PCM16 frame to interleaved 48 kHz stereo by linear interpolation. */
 export const toWireFormat = (data: {
@@ -104,12 +137,26 @@ class WeriftAudioSource implements RelayAudioSourceLike {
   });
   readonly #track = new MediaStreamTrack({ kind: "audio", id: "microphone", streamId: "relay-call" });
   readonly #packets: Buffer[] = [];
+  readonly #rtp = new PacketClock();
+  #opusPackets = 0;
   #pending = new Int16Array(0);
   #sequenceNumber = 1;
   #timestamp = 0;
   #first = true;
   #pump: NodeJS.Timeout | undefined;
   #stopped = false;
+
+  stats(): RelayAudioSourceStats {
+    return {
+      opusPackets: this.#opusPackets,
+      rtpPackets: this.#rtp.count,
+      firstRtpAt: this.#rtp.firstAt,
+      lastRtpAt: this.#rtp.lastAt,
+      recentRtpPackets: this.#rtp.recent(),
+      queued: this.#packets.length,
+      pacerAlive: this.#pump !== undefined,
+    };
+  }
 
   createTrack(): RelayMediaStreamTrackLike {
     const track = this.#track;
@@ -134,6 +181,7 @@ class WeriftAudioSource implements RelayAudioSourceLike {
     while (merged.length - offset >= PACKET_SAMPLES) {
       const frame = merged.subarray(offset, offset + PACKET_SAMPLES);
       this.#packets.push(Buffer.from(this.#encoder.encode(frame)));
+      this.#opusPackets += 1;
       offset += PACKET_SAMPLES;
     }
     this.#pending = merged.slice(offset);
@@ -171,6 +219,7 @@ class WeriftAudioSource implements RelayAudioSourceLike {
     this.#sequenceNumber = (this.#sequenceNumber + 1) & 0xffff;
     this.#timestamp = (this.#timestamp + PACKET_FRAMES) >>> 0;
     this.#track.writeRtp(new RtpPacket(header, payload));
+    this.#rtp.mark();
   }
 }
 
@@ -178,10 +227,23 @@ class WeriftAudioSource implements RelayAudioSourceLike {
 class WeriftAudioSink implements RelayAudioSinkLike {
   ondata: RelayAudioSinkLike["ondata"] = null;
   readonly #decoder = new Decoder({ channels: WERIFT_CHANNEL_COUNT, sample_rate: WERIFT_SAMPLE_RATE });
+  readonly #rtp = new PacketClock();
+  #decodeFailures = 0;
   readonly #unsubscribe: () => void;
+
+  stats(): RelayAudioSinkStats {
+    return {
+      rtpPackets: this.#rtp.count,
+      decodeFailures: this.#decodeFailures,
+      firstRtpAt: this.#rtp.firstAt,
+      lastRtpAt: this.#rtp.lastAt,
+      recentRtpPackets: this.#rtp.recent(),
+    };
+  }
 
   constructor(track: MediaStreamTrack) {
     const { unSubscribe } = track.onReceiveRtp.subscribe((rtp) => {
+      this.#rtp.mark();
       const handler = this.ondata;
       if (!handler || !rtp.payload?.length) return;
       const packet = OpusRtpPayload.deSerialize(rtp.payload);
@@ -189,6 +251,7 @@ class WeriftAudioSink implements RelayAudioSinkLike {
       try {
         bytes = this.#decoder.decode(packet.payload);
       } catch {
+        this.#decodeFailures += 1;
         return;
       }
       const samples = new Int16Array(bytes.byteLength >> 1);

@@ -18,6 +18,30 @@ export interface RelayAudioFrame {
   channelCount: number;
 }
 
+/** @internal Outbound packet counts an engine reports; timestamps are epoch ms. */
+export interface RelayAudioSourceStats {
+  opusPackets: number;
+  rtpPackets: number;
+  firstRtpAt: number | undefined;
+  lastRtpAt: number | undefined;
+  /** RTP packets written in the last 5 s. */
+  recentRtpPackets: number;
+  /** Encoded packets waiting for the pacer. */
+  queued: number;
+  /** Whether the 20 ms pacer timer is running. */
+  pacerAlive: boolean;
+}
+
+/** @internal Inbound packet counts an engine reports; timestamps are epoch ms. */
+export interface RelayAudioSinkStats {
+  rtpPackets: number;
+  decodeFailures: number;
+  firstRtpAt: number | undefined;
+  lastRtpAt: number | undefined;
+  /** RTP packets received in the last 5 s. */
+  recentRtpPackets: number;
+}
+
 /** @internal */
 export interface RelayAudioSourceLike {
   createTrack(): RelayMediaStreamTrackLike;
@@ -28,6 +52,8 @@ export interface RelayAudioSourceLike {
     channelCount: number;
     numberOfFrames: number;
   }): void;
+  /** Engines that own the RTP path report packet counts; `@roamhq/wrtc` does not. */
+  stats?(): RelayAudioSourceStats;
 }
 
 /** @internal */
@@ -40,6 +66,8 @@ export interface RelayAudioSinkLike {
     numberOfFrames?: number;
   }) => void) | null;
   stop(): void;
+  /** Engines that own the RTP path report packet counts; `@roamhq/wrtc` does not. */
+  stats?(): RelayAudioSinkStats;
 }
 
 /** @internal */
@@ -131,6 +159,53 @@ export interface RelayCallTransportOptions {
   mediaConnectTimeoutMs?: number;
   /** @deprecated Use `mediaConnectTimeoutMs`. */
   connectionTimeoutMs?: number;
+  /**
+   * Called once per call when outbound audio is queued but no RTP packet has
+   * been written for 2 s while media is connected. Receives the diagnostics
+   * summary. Defaults to a no-op; nothing is restarted.
+   */
+  onWarning?: (message: string) => void;
+}
+
+/** Packet counts for the other participant's track, as seen by this participant. */
+export interface RelayCallInboundDiagnostics {
+  /** RTP packets received on the subscribed track. */
+  rtpPackets: number;
+  /** Opus packets the decoder rejected. */
+  decodeFailures: number;
+  /** PCM frames handed to the `audio` listeners. */
+  frames: number;
+  /** ms since `connect()` for the first and last RTP packet; undefined until one arrives. */
+  firstPacketAtMs: number | undefined;
+  lastPacketAtMs: number | undefined;
+  /** RTP packets received in the 5 s before `diagnostics()` was called. */
+  recentRtpPackets: number;
+}
+
+/** Packet counts for this participant's published track. */
+export interface RelayCallOutboundDiagnostics {
+  /** PCM slices accepted from the caller and handed to the engine source. */
+  frames: number;
+  opusPackets: number;
+  rtpPackets: number;
+  firstPacketAtMs: number | undefined;
+  lastPacketAtMs: number | undefined;
+  /** RTP packets written in the 5 s before `diagnostics()` was called. */
+  recentRtpPackets: number;
+  /** Encoded packets waiting for the 20 ms pacer. */
+  queued: number;
+  /** `undefined` when the engine does not expose its pacer (`wrtc`). */
+  pacerAlive: boolean | undefined;
+}
+
+/** Room signaling frames counted since `connect()`. */
+export interface RelayCallRoomDiagnostics {
+  roomStates: number;
+  /** Subscription (pull) offers received from the room. */
+  offers: number;
+  endedReason: string | undefined;
+  /** `error` frame messages, in order. */
+  errors: string[];
 }
 
 /** ICE facts recorded for one call, for logs and for the connect timeout error. */
@@ -142,6 +217,9 @@ export interface RelayCallIceDiagnostics {
   /** ICE gathering, ICE connection and peer connection state changes since `connect()`. */
   transitions: Array<{ kind: "gathering" | "ice" | "connection"; state: string; atMs: number }>;
   connected: boolean;
+  inbound: RelayCallInboundDiagnostics;
+  outbound: RelayCallOutboundDiagnostics;
+  room: RelayCallRoomDiagnostics;
   /** One-line rendering of the fields above. */
   summary: string;
 }
@@ -167,6 +245,8 @@ type TransportListener<K extends TransportEvent> = (...args: TransportEventMap[K
 const DEFAULT_ICE_GATHERING_TIMEOUT_MS = 10_000;
 const DEFAULT_CONNECTION_TIMEOUT_MS = 15_000;
 const AUDIO_SLICE_MS = 10;
+const STALL_CHECK_MS = 500;
+const STALL_AFTER_MS = 2_000;
 
 export class RelayCallTransportError extends Error {
   readonly code?: string;
@@ -231,6 +311,31 @@ const summarizeIce = (diagnostics: Omit<RelayCallIceDiagnostics, "summary">): st
   return `${localPart}; ${remotePart}; states: ${states.join(", ")}`;
 };
 
+const span = (first: number | undefined, last: number | undefined): string =>
+  first === undefined || last === undefined ? "no packets" : `first ${seconds(first)} last ${seconds(last)}`;
+
+const summarizeInbound = (inbound: RelayCallInboundDiagnostics): string =>
+  `in: ${inbound.rtpPackets} rtp, ${inbound.decodeFailures} bad, ${inbound.frames} frames, `
+  + `${span(inbound.firstPacketAtMs, inbound.lastPacketAtMs)}, ${inbound.recentRtpPackets}/5s`;
+
+const summarizeOutbound = (outbound: RelayCallOutboundDiagnostics): string =>
+  `out: ${outbound.frames} frames, ${outbound.opusPackets} opus, ${outbound.rtpPackets} rtp, `
+  + `${span(outbound.firstPacketAtMs, outbound.lastPacketAtMs)}, ${outbound.recentRtpPackets}/5s, `
+  + `queue ${outbound.queued}, pacer ${
+    outbound.pacerAlive === undefined ? "n/a" : outbound.pacerAlive ? "alive" : "idle"
+  }`;
+
+const summarizeRoom = (room: RelayCallRoomDiagnostics): string => {
+  const parts = [`${room.roomStates} roomState`, `${room.offers} offer`];
+  if (room.endedReason !== undefined) parts.push(`ended ${room.endedReason}`);
+  if (room.errors.length) parts.push(`error ${room.errors.map((text) => JSON.stringify(text)).join(", ")}`);
+  return `room: ${parts.join(", ")}`;
+};
+
+const summarize = (diagnostics: Omit<RelayCallIceDiagnostics, "summary">): string =>
+  `${summarizeIce(diagnostics)}; ${summarizeInbound(diagnostics.inbound)}; `
+  + `${summarizeOutbound(diagnostics.outbound)}; ${summarizeRoom(diagnostics.room)}`;
+
 const cloneSamples = (samples: Int16Array): Int16Array => {
   const copy = new Int16Array(samples.length);
   copy.set(samples);
@@ -256,7 +361,20 @@ export class RelayCallTransport {
   readonly #iceGatheringTimeoutMs: number;
   readonly #connectionTimeoutMs: number;
   readonly #peerConfig: RelayPeerConnectionConfig;
+  readonly #onWarning: (message: string) => void;
   #connectStartedAt = 0;
+  #inboundFrames = 0;
+  #outboundFrames = 0;
+  #roomStates = 0;
+  #roomOffers = 0;
+  #endedReason: string | undefined;
+  readonly #roomErrors: string[] = [];
+  /** Engine stats frozen when media shuts down, so diagnostics survive the call's end. */
+  #finalSinkStats: RelayAudioSinkStats | undefined;
+  #finalSourceStats: RelayAudioSourceStats | undefined;
+  #stallTimer: NodeJS.Timeout | undefined;
+  #stallSince: number | undefined;
+  #stallWarned = false;
   #iceLocal = { host: 0, srflx: 0, relay: 0, other: 0 };
   #iceRemote: Array<{ transport: string; port: number }> = [];
   #iceTransitions: RelayCallIceDiagnostics["transitions"] = [];
@@ -285,6 +403,7 @@ export class RelayCallTransport {
     this.#room = options.roomClient ?? options.relay.calls.room(options.callId, options.room);
     this.#providedFactory = options.webRTC;
     this.#engine = options.engine ?? "werift";
+    this.#onWarning = options.onWarning ?? (() => undefined);
     if (this.#engine !== "werift" && this.#engine !== "wrtc") {
       throw new Error('engine must be "werift" or "wrtc".');
     }
@@ -373,15 +492,87 @@ export class RelayCallTransport {
     this.#room.send(this.#publishFrame);
   }
 
-  /** ICE candidates and state transitions recorded for this call, with a one-line summary. */
+  /**
+   * ICE candidates, state transitions, packet counts in both directions and
+   * room frame counts recorded for this call, with a one-line summary.
+   */
   diagnostics(): RelayCallIceDiagnostics {
     const snapshot = {
       local: { ...this.#iceLocal },
       remote: this.#iceRemote.map((candidate) => ({ ...candidate })),
       transitions: this.#iceTransitions.map((transition) => ({ ...transition })),
       connected: this.#reportedConnected,
+      inbound: this.#inboundDiagnostics(),
+      outbound: this.#outboundDiagnostics(),
+      room: {
+        roomStates: this.#roomStates,
+        offers: this.#roomOffers,
+        endedReason: this.#endedReason,
+        errors: [...this.#roomErrors],
+      },
     };
-    return { ...snapshot, summary: summarizeIce(snapshot) };
+    return { ...snapshot, summary: summarize(snapshot) };
+  }
+
+  #sinceConnect(epochMs: number | undefined): number | undefined {
+    return epochMs === undefined ? undefined : epochMs - this.#connectStartedAt;
+  }
+
+  #inboundDiagnostics(): RelayCallInboundDiagnostics {
+    const stats = this.#remoteSink?.stats?.() ?? this.#finalSinkStats;
+    return {
+      rtpPackets: stats?.rtpPackets ?? 0,
+      decodeFailures: stats?.decodeFailures ?? 0,
+      frames: this.#inboundFrames,
+      firstPacketAtMs: this.#sinceConnect(stats?.firstRtpAt),
+      lastPacketAtMs: this.#sinceConnect(stats?.lastRtpAt),
+      recentRtpPackets: stats?.recentRtpPackets ?? 0,
+    };
+  }
+
+  #outboundDiagnostics(): RelayCallOutboundDiagnostics {
+    const stats = this.#audioSource?.stats?.() ?? this.#finalSourceStats;
+    return {
+      frames: this.#outboundFrames,
+      opusPackets: stats?.opusPackets ?? 0,
+      rtpPackets: stats?.rtpPackets ?? 0,
+      firstPacketAtMs: this.#sinceConnect(stats?.firstRtpAt),
+      lastPacketAtMs: this.#sinceConnect(stats?.lastRtpAt),
+      recentRtpPackets: stats?.recentRtpPackets ?? 0,
+      queued: stats?.queued ?? 0,
+      pacerAlive: stats?.pacerAlive,
+    };
+  }
+
+  /**
+   * Outbound stall guard: audio is queued for the pacer but no RTP packet has
+   * left for 2 s while connected. Warns once with the summary; restarts nothing.
+   */
+  #checkStall(): void {
+    if (this.#stallWarned || !this.#reportedConnected) return;
+    const stats = this.#audioSource?.stats?.();
+    if (!stats || stats.queued === 0) {
+      this.#stallSince = undefined;
+      return;
+    }
+    const now = Date.now();
+    const idleSince = stats.lastRtpAt ?? (this.#stallSince ??= now);
+    if (now - idleSince < STALL_AFTER_MS) return;
+    this.#stallWarned = true;
+    this.#stopStallGuard();
+    this.#onWarning(`Relay outbound audio stalled (${this.diagnostics().summary})`);
+  }
+
+  #startStallGuard(): void {
+    if (this.#stallTimer) return;
+    this.#stallTimer = setInterval(() => this.#checkStall(), STALL_CHECK_MS);
+    this.#stallTimer.unref?.();
+  }
+
+  #stopStallGuard(): void {
+    if (!this.#stallTimer) return;
+    clearInterval(this.#stallTimer);
+    this.#stallTimer = undefined;
   }
 
   /**
@@ -456,9 +647,11 @@ export class RelayCallTransport {
       this.#queueNegotiation(() => this.#serverAnswer(frame));
     });
     this.#room.on("offer", (frame: CallRoomSubscriptionOfferFrame) => {
+      this.#roomOffers += 1;
       this.#queueNegotiation(() => this.#serverOffer(frame));
     });
     this.#room.on("roomState", (frame: CallRoomStateFrame) => {
+      this.#roomStates += 1;
       this.#emit("roomState", frame);
     });
     this.#room.on("error", (error: CallRoomErrorFrame | Error) => {
@@ -468,6 +661,7 @@ export class RelayCallTransport {
       } else this.#serverError(error);
     });
     this.#room.on("ended", (frame: CallRoomEndedFrame) => {
+      this.#endedReason = frame.reason;
       this.#rejectReady(new RelayCallTransportError(`Relay Call ended before media connected (${frame.reason}).`));
       this.clearAudio();
       this.#shutdownMedia();
@@ -514,6 +708,7 @@ export class RelayCallTransport {
   }
 
   #serverError(frame: CallRoomErrorFrame): void {
+    this.#roomErrors.push(frame.message);
     const error = new RelayCallTransportError(frame.message, frame.code);
     this.#rejectReady(error);
     this.#emit("error", error);
@@ -526,6 +721,7 @@ export class RelayCallTransport {
       try {
         this.#room.connected();
         this.#resolveReady();
+        this.#startStallGuard();
         this.#emit("connected");
       } catch (error) {
         const parsed = error instanceof Error ? error : new Error(String(error));
@@ -553,6 +749,7 @@ export class RelayCallTransport {
         ));
         return;
       }
+      this.#inboundFrames += 1;
       this.#emit("audio", {
         samples: cloneSamples(data.samples),
         sampleRate: data.sampleRate,
@@ -578,6 +775,7 @@ export class RelayCallTransport {
         channelCount: frame.channelCount,
         numberOfFrames: samplesPerChannel,
       });
+      this.#outboundFrames += 1;
       await delay(AUDIO_SLICE_MS);
     }
   }
@@ -683,6 +881,9 @@ export class RelayCallTransport {
   }
 
   #shutdownMedia(): void {
+    this.#stopStallGuard();
+    this.#finalSinkStats ??= this.#remoteSink?.stats?.();
+    this.#finalSourceStats ??= this.#audioSource?.stats?.();
     this.#remoteSink?.stop();
     this.#remoteSink = undefined;
     this.#localTrack?.stop();

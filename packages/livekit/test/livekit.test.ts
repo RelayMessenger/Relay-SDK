@@ -179,5 +179,5 @@ it("forwards ICE servers, the transport policy and the media timeout through con
     roomClient: new ConnectingRoom() as unknown as CallRoom,
     webRTC: stuck,
     mediaConnectTimeoutMs: 20,
-  })).rejects.toThrow(/^Timed out connecting Relay WebRTC media \(local: host 0, srflx 0, relay 0; remote: none; states: no connected\)$/);
+  })).rejects.toThrow(/^Timed out connecting Relay WebRTC media \(local: host 0, srflx 0, relay 0; remote: none; states: no connected; in: 0 rtp, 0 bad, 0 frames, no packets, 0\/5s; out: 0 frames, 0 opus, 0 rtp, no packets, 0\/5s, queue 0, pacer n\/a; room: 0 roomState, 0 offer\)$/);
 });
