@@ -349,6 +349,16 @@ it("counts RTP both ways in diagnostics() over a werift loopback through the tra
   });
   await far.setRemoteDescription((await pullAnswer).session_description);
 
+  // Before any application audio: the published track already carries RTP,
+  // Opus silence every 20 ms, as a live microphone does. Cloudflare's SFU
+  // refuses to pull a track that has carried none (empty_track_error).
+  expect(transport.diagnostics().outbound.frames).toBe(0);
+  await sleep(300);
+  expect(farSink.stats!().rtpPackets).toBeGreaterThanOrEqual(10);
+  expect(decoded.length).toBeGreaterThanOrEqual(10);
+  expect(transport.diagnostics().outbound.silencePackets).toBeGreaterThanOrEqual(10);
+  expect(transport.diagnostics().outbound.rtpPackets).toBe(0);
+
   // Push the whole second at once (LiveKit pushes faster than real time); the
   // engine's 20 ms pump paces the wire and waitForPlayout() reports the drain.
   const pushStarted = performance.now();
@@ -385,6 +395,7 @@ it("counts RTP both ways in diagnostics() over a werift loopback through the tra
   expect(diagnostics.outbound.frames).toBe(SLICES);
   expect(diagnostics.outbound.opusPackets).toBe(SLICES / 2);
   expect(diagnostics.outbound.rtpPackets).toBe(SLICES / 2);
+  expect(diagnostics.outbound.silencePackets).toBeGreaterThanOrEqual(25);
   expect(diagnostics.outbound.queued).toBe(0);
   expect(diagnostics.outbound.firstPacketAtMs).toBeGreaterThan(0);
   expect(diagnostics.inbound.rtpPackets).toBeGreaterThan(40);
@@ -393,7 +404,7 @@ it("counts RTP both ways in diagnostics() over a werift loopback through the tra
   expect(inbound.length).toBeGreaterThan(40);
   expect(decoded.length).toBeGreaterThan(40);
   expect(diagnostics.room).toEqual({ roomStates: 0, offers: 1, endedReason: undefined, errors: [] });
-  expect(diagnostics.summary).toMatch(/in: \d+ rtp, 0 bad, \d+ frames, first \d+\.\ds last \d+\.\ds, \d+\/5s; out: 100 frames, 50 opus, \d+ rtp, first \d+\.\ds last \d+\.\ds, \d+\/5s, queue 0, pacer idle; room: 0 roomState, 1 offer/);
+  expect(diagnostics.summary).toMatch(/in: \d+ rtp, 0 bad, \d+ frames, first \d+\.\ds last \d+\.\ds, \d+\/5s; out: 100 frames, 50 opus, 50 rtp, silence \d+, first \d+\.\ds last \d+\.\ds, \d+\/5s, queue 0, pacer alive; room: 0 roomState, 1 offer/);
 }, 30_000);
 
 /** A werift peer playing the SFU: answers the transport's publish offer. */
