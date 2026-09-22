@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/livekit",
-  "version": "0.1.0-staging.1",
+  "version": "0.1.0-staging.2",
   "description": "Relay WebRTC audio transport and LiveKit Agents integration for Node.js.",
   "type": "module",
   "sideEffects": false,
