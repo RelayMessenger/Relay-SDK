@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Webhook } from "standardwebhooks";
-import Relay, { type Call, type CallResponse, type CallWebhookEvent, type SystemEvent, type ContactCardUpdateParams } from "../src/index.js";
+import Relay, { type Call, type CallResponse, type CallWebhookEvent, type SystemEvent } from "../src/index.js";
 
 const call: Call = {
   id: "01995bc0-0000-7000-8000-000000000001",
@@ -135,16 +135,4 @@ it.each(["ringing", "in-progress", "completed", "no-answer", "canceled", "busy",
     call: marker,
   };
   expect(JSON.parse(JSON.stringify(event)).call).toEqual(marker);
-});
-
-it.each(["wss://agent.example/calls", null])("updates the call address to %s", async (call_url) => {
-  const observed: Array<{ url: string; body: unknown }> = [];
-  const client = new Relay({ apiKey: "token", fetch: async (url, init) => {
-    observed.push({ url: String(url), body: JSON.parse(String(init?.body)) });
-    return Response.json({ handle: "echo", call_url });
-  } });
-  const params: ContactCardUpdateParams = { handle: "echo", call_url };
-  await client.contactCard.update(params);
-  expect(new URL(observed[0]!.url).searchParams.get("handle")).toBe("echo");
-  expect(observed[0]!.body).toEqual({ call_url });
 });

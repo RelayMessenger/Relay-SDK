@@ -123,9 +123,19 @@ jobs:
     secrets:
       NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
 
-  chat-sdk-adapter:
+  livekit:
     needs: [bump, sdk]
-    if: ${{ !cancelled() && needs.bump.result == 'success' && needs.sdk.result != 'failure' && contains(needs.bump.outputs.changed, ',chat-sdk-adapter,') }}
+    if: ${{ !cancelled() && needs.bump.result == 'success' && needs.sdk.result != 'failure' && contains(needs.bump.outputs.changed, ',livekit,') }}
+    uses: ./.github/workflows/staging-package.yml
+    with:
+      package: livekit
+      sha: ${{ needs.bump.outputs.sha }}
+    secrets:
+      NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+
+  chat-sdk-adapter:
+    needs: [bump, sdk, livekit]
+    if: ${{ !cancelled() && needs.bump.result == 'success' && needs.sdk.result != 'failure' && needs.livekit.result != 'failure' && contains(needs.bump.outputs.changed, ',chat-sdk-adapter,') }}
     uses: ./.github/workflows/staging-package.yml
     with:
       package: chat-sdk-adapter

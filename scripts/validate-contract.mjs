@@ -35,16 +35,10 @@ assert.equal(
   canonicalSourcePath,
   "SDK contract source must remain the carried canonical Server OpenAPI",
 );
-assert.deepEqual(
-  manifest.upstream,
-  {
-    repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "56f31c13956ee41f4e2e5945973645e17faa3338",
-    path: "contracts/developer/openapi.yaml",
-    sha256: "7f1056cd6d5dc81a1cd23f1e40520fc3c0a32b5a577dd222988fc26f92e6c8d4",
-  },
-  "SDK contract provenance must identify the exact canonical Server source",
-);
+assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
+assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
+assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
+assert.equal(manifest.upstream.commit, "b89d90c0b325a94402456de2e91a59b66c7d9603", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -54,6 +48,7 @@ assert.deepEqual(
 // client methods arrive with their own carry.
 const sourceOnlyOperations = [
   { method: "GET", path: "/v1/websocket", operationId: "connectAgentWebSocket" },
+  { method: "GET", path: "/v1/calls/{callId}/room", operationId: "connectCallRoom" },
   { method: "GET", path: "/v1/directory", operationId: "listDirectory" },
   { method: "PUT", path: "/v1/contacts/{handle}/rating", operationId: "rateAgent" },
   { method: "DELETE", path: "/v1/contacts/{handle}/rating", operationId: "deleteAgentRating" },
@@ -114,8 +109,8 @@ const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }))
 assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 42);
 assert.equal(manifest.path_count, 26);
-assert.equal(manifest.source_path_count, 30);
-assert.equal(manifest.source_schema_count, 143);
+assert.equal(manifest.source_path_count, 31);
+assert.equal(manifest.source_schema_count, 156);
 assert.equal(manifest.callback_count, 19);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 26);
 assert.equal(operationJSON.length, 42);
@@ -231,7 +226,7 @@ assert.deepEqual(Object.keys(client).sort(), [
 assert.equal("createAgent" in Relay, false);
 assert.deepEqual(publicMethods(client.agents), ["delete"]);
 assert.deepEqual(publicMethods(client.calls), [
-  "create", "end", "list", "retrieve",
+  "create", "end", "list", "retrieve", "room",
 ]);
 assert.deepEqual(publicMethods(client.chats), [
   "clearActivity",
@@ -507,17 +502,25 @@ const validateOpenAPI = () => {
     /existing membership rules/u,
   );
   assert.equal(document.openapi, "3.1.0");
-  // Calls are answered through the configured call_url, not a room or media API.
+  // Calls use one signaling-only WebSocket room. The retired REST media and
+  // connection APIs stay gone; media itself remains WebRTC.
   for (const gone of [
     "CallOffer", "CallAnswer", "CallAudioFormat", "CallConnectionRequest",
     "CallConnectionResult", "CallSubscribeResult", "CallRenegotiateRequest",
   ]) {
     assert.equal(gone in document.components.schemas, false, `${gone} is obsolete`);
   }
-  for (const gone of ["connected", "connections", "room", "media", "accept", "decline"]) {
+  for (const gone of ["connected", "connections", "media", "accept", "decline"]) {
     assert.equal(`/v1/calls/{callId}/${gone}` in document.paths, false, `${gone} REST route is obsolete`);
   }
-  // Call status copies Twilio's words; `queued` never appears because Relay dials at creation.
+  assert.equal(document.paths["/v1/calls/{callId}/room"].get.operationId, "connectCallRoom");
+  assert.equal(document.components.schemas.CallRoomPublishOfferFrame.properties.tracks.items.properties.name.const, "audio");
+  assert.equal(document.components.schemas.CallRoomSubscriptionOfferFrame.properties.track.const, "audio");
+  assert.equal(document.components.schemas.CallRoomStateFrame.properties.participants.minItems, 2);
+  assert.equal(document.components.schemas.CallRoomStateFrame.properties.participants.maxItems, 2);
+  assert.equal("call_url" in document.components.schemas.SetContactCardResponse.properties, false);
+  assert.equal("call_url" in document.components.schemas.UpdateContactCardRequest.properties, false);
+  // Call status remains a small Relay lifecycle vocabulary; there is no queued state.
   const callStatus = ["ringing", "in-progress", "completed", "no-answer", "canceled", "busy", "failed"];
   assert.deepEqual(document.components.schemas.Call.properties.status.enum, callStatus);
   assert.equal("connected_at" in document.components.schemas.Call.properties, false);
