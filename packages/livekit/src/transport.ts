@@ -57,10 +57,15 @@ export interface RelayRtpTransceiverLike {
 export interface RelayPeerConnectionLike {
   readonly connectionState: string;
   readonly iceGatheringState: string;
+  readonly iceConnectionState?: string;
   readonly signalingState: string;
   readonly localDescription: RTCSessionDescription | null;
   readonly remoteDescription: RTCSessionDescription | null;
   onconnectionstatechange: (() => void) | null;
+  /** W3C ICE events; werift and `@roamhq/wrtc` both expose these setters. */
+  onicecandidate?: ((event: { candidate?: { candidate: string } | null }) => void) | null;
+  onicegatheringstatechange?: ((event?: unknown) => void) | null;
+  oniceconnectionstatechange?: (() => void) | null;
   ontrack: ((event: { track: RelayMediaStreamTrackLike }) => void) | null;
   addTransceiver(
     track: RelayMediaStreamTrackLike,
@@ -75,9 +80,24 @@ export interface RelayPeerConnectionLike {
   close(): void;
 }
 
+/** Standard `RTCIceServer` shape: STUN or TURN URLs with optional credentials. */
+export interface RelayIceServer {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
+export type RelayIceTransportPolicy = "all" | "relay";
+
+/** @internal Passed by the transport into every engine's `RTCPeerConnection`. */
+export interface RelayPeerConnectionConfig {
+  iceServers: RelayIceServer[];
+  iceTransportPolicy: RelayIceTransportPolicy;
+}
+
 /** @internal */
 export interface RelayWebRTCFactory {
-  createPeerConnection(): RelayPeerConnectionLike;
+  createPeerConnection(config?: RelayPeerConnectionConfig): RelayPeerConnectionLike;
   createAudioSource(): RelayAudioSourceLike;
   createAudioSink(track: RelayMediaStreamTrackLike): RelayAudioSinkLike;
 }
@@ -97,10 +117,33 @@ export interface RelayCallTransportOptions {
   engine?: RelayCallEngine;
   /** @internal Inject another standards-compatible Node WebRTC implementation. */
   webRTC?: RelayWebRTCFactory;
+  /**
+   * STUN and TURN servers handed to the engine's `RTCPeerConnection`. Defaults
+   * to none: Cloudflare's SFU answers with its own host candidates. Set TURN
+   * servers when the agent runs behind a NAT or firewall that blocks UDP.
+   */
+  iceServers?: RelayIceServer[];
+  /** `"relay"` forces every candidate through TURN. Defaults to `"all"`. */
+  iceTransportPolicy?: RelayIceTransportPolicy;
   /** @internal */
   iceGatheringTimeoutMs?: number;
   /** Maximum wait for the WebRTC peer to become connected. Defaults to 15 seconds. */
+  mediaConnectTimeoutMs?: number;
+  /** @deprecated Use `mediaConnectTimeoutMs`. */
   connectionTimeoutMs?: number;
+}
+
+/** ICE facts recorded for one call, for logs and for the connect timeout error. */
+export interface RelayCallIceDiagnostics {
+  /** Local candidates gathered, counted by type. */
+  local: { host: number; srflx: number; relay: number; other: number };
+  /** Remote candidates from the SFU answer: transport and port only, never the address. */
+  remote: Array<{ transport: string; port: number }>;
+  /** ICE gathering, ICE connection and peer connection state changes since `connect()`. */
+  transitions: Array<{ kind: "gathering" | "ice" | "connection"; state: string; atMs: number }>;
+  connected: boolean;
+  /** One-line rendering of the fields above. */
+  summary: string;
 }
 
 export interface RelayCallTransportCloseEvent {
@@ -135,6 +178,8 @@ export class RelayCallTransportError extends Error {
   }
 }
 
+const DEFAULT_PEER_CONFIG: RelayPeerConnectionConfig = { iceServers: [], iceTransportPolicy: "all" };
+
 const loadWebRTCFactory = async (engine: RelayCallEngine): Promise<RelayWebRTCFactory> => {
   if (engine === "werift") {
     const { createWeriftWebRTCFactory } = await import("./engine-werift.js");
@@ -142,15 +187,48 @@ const loadWebRTCFactory = async (engine: RelayCallEngine): Promise<RelayWebRTCFa
   }
   const wrtc = await import("@roamhq/wrtc");
   return {
-    createPeerConnection: () => new wrtc.RTCPeerConnection({
+    createPeerConnection: (config = DEFAULT_PEER_CONFIG) => new wrtc.RTCPeerConnection({
       bundlePolicy: "max-bundle",
-      iceServers: [],
+      iceServers: config.iceServers,
+      iceTransportPolicy: config.iceTransportPolicy,
     }) as unknown as RelayPeerConnectionLike,
     createAudioSource: () => new wrtc.nonstandard.RTCAudioSource() as unknown as RelayAudioSourceLike,
     createAudioSink: (track) => new wrtc.nonstandard.RTCAudioSink(
       track as unknown as MediaStreamTrack,
     ) as unknown as RelayAudioSinkLike,
   };
+};
+
+/** `candidate:<foundation> <component> <transport> <priority> <address> <port> typ <type> ...` (RFC 5245 §15.1). */
+const parseCandidate = (line: string): { transport: string; port: number; type: string } | undefined => {
+  const match = /candidate:\S+\s+\d+\s+(\S+)\s+\d+\s+\S+\s+(\d+)\s+typ\s+(\S+)/i.exec(line);
+  if (!match) return undefined;
+  return { transport: match[1]!.toLowerCase(), port: Number(match[2]), type: match[3]!.toLowerCase() };
+};
+
+const seconds = (milliseconds: number): string => `${(milliseconds / 1000).toFixed(1)}s`;
+
+const summarizeIce = (diagnostics: Omit<RelayCallIceDiagnostics, "summary">): string => {
+  const { local, remote, transitions, connected } = diagnostics;
+  const localPart = `local: host ${local.host}, srflx ${local.srflx}, relay ${local.relay}`
+    + (local.other ? `, other ${local.other}` : "");
+  const remotePart = remote.length
+    ? `remote: ${remote.map((candidate) => `${candidate.transport} ${candidate.port}`).join(", ")}`
+    : "remote: none";
+  const states: string[] = [];
+  let lastGathering = "new";
+  for (const transition of transitions) {
+    if (transition.kind === "gathering") {
+      states.push(`${lastGathering}\u2192${transition.state} ${seconds(transition.atMs)}`);
+      lastGathering = transition.state;
+    } else if (transition.kind === "ice") {
+      states.push(`ice ${transition.state} ${seconds(transition.atMs)}`);
+    } else {
+      states.push(`${transition.state} ${seconds(transition.atMs)}`);
+    }
+  }
+  if (!connected) states.push("no connected");
+  return `${localPart}; ${remotePart}; states: ${states.join(", ")}`;
 };
 
 const cloneSamples = (samples: Int16Array): Int16Array => {
@@ -177,6 +255,11 @@ export class RelayCallTransport {
   readonly #engine: RelayCallEngine;
   readonly #iceGatheringTimeoutMs: number;
   readonly #connectionTimeoutMs: number;
+  readonly #peerConfig: RelayPeerConnectionConfig;
+  #connectStartedAt = 0;
+  #iceLocal = { host: 0, srflx: 0, relay: 0, other: 0 };
+  #iceRemote: Array<{ transport: string; port: number }> = [];
+  #iceTransitions: RelayCallIceDiagnostics["transitions"] = [];
   readonly #listeners = new Map<TransportEvent, Set<(...args: any[]) => void>>();
   #factory: RelayWebRTCFactory | undefined;
   #peer: RelayPeerConnectionLike | undefined;
@@ -206,12 +289,26 @@ export class RelayCallTransport {
       throw new Error('engine must be "werift" or "wrtc".');
     }
     this.#iceGatheringTimeoutMs = options.iceGatheringTimeoutMs ?? DEFAULT_ICE_GATHERING_TIMEOUT_MS;
-    this.#connectionTimeoutMs = options.connectionTimeoutMs ?? DEFAULT_CONNECTION_TIMEOUT_MS;
+    this.#connectionTimeoutMs = options.mediaConnectTimeoutMs
+      ?? options.connectionTimeoutMs
+      ?? DEFAULT_CONNECTION_TIMEOUT_MS;
+    const policy = options.iceTransportPolicy ?? "all";
+    if (policy !== "all" && policy !== "relay") {
+      throw new Error('iceTransportPolicy must be "all" or "relay".');
+    }
+    this.#peerConfig = {
+      iceServers: (options.iceServers ?? []).map((server) => ({
+        urls: Array.isArray(server.urls) ? [...server.urls] : server.urls,
+        ...(server.username === undefined ? {} : { username: server.username }),
+        ...(server.credential === undefined ? {} : { credential: server.credential }),
+      })),
+      iceTransportPolicy: policy,
+    };
     if (!Number.isFinite(this.#iceGatheringTimeoutMs) || this.#iceGatheringTimeoutMs <= 0) {
       throw new Error("iceGatheringTimeoutMs must be greater than zero.");
     }
     if (!Number.isFinite(this.#connectionTimeoutMs) || this.#connectionTimeoutMs <= 0) {
-      throw new Error("connectionTimeoutMs must be greater than zero.");
+      throw new Error("mediaConnectTimeoutMs must be greater than zero.");
     }
     this.#ready = new Promise<void>((resolve, reject) => {
       this.#readyResolve = resolve;
@@ -249,10 +346,15 @@ export class RelayCallTransport {
     if (this.#localTrack.kind !== "audio") {
       throw new RelayCallTransportError("The WebRTC binding created a non-audio Relay track.");
     }
-    const peer = this.#factory.createPeerConnection();
+    this.#connectStartedAt = Date.now();
+    const peer = this.#factory.createPeerConnection(this.#peerConfig);
     this.#peer = peer;
     this.#publishTransceiver = peer.addTransceiver(this.#localTrack, { direction: "sendonly" });
-    peer.onconnectionstatechange = () => this.#connectionStateChanged();
+    this.#observeIce(peer);
+    peer.onconnectionstatechange = () => {
+      this.#recordTransition("connection", peer.connectionState);
+      this.#connectionStateChanged();
+    };
     peer.ontrack = (event) => this.#remoteTrack(event.track);
     try {
       await this.#publishLocalAudio();
@@ -269,6 +371,17 @@ export class RelayCallTransport {
     if (!this.#publishFrame) throw new Error("Relay Call transport is not connected.");
     await this.#room.reconnect();
     this.#room.send(this.#publishFrame);
+  }
+
+  /** ICE candidates and state transitions recorded for this call, with a one-line summary. */
+  diagnostics(): RelayCallIceDiagnostics {
+    const snapshot = {
+      local: { ...this.#iceLocal },
+      remote: this.#iceRemote.map((candidate) => ({ ...candidate })),
+      transitions: this.#iceTransitions.map((transition) => ({ ...transition })),
+      connected: this.#reportedConnected,
+    };
+    return { ...snapshot, summary: summarizeIce(snapshot) };
   }
 
   /**
@@ -386,6 +499,7 @@ export class RelayCallTransport {
     // returns its cached answer; applying that answer again in stable state is
     // invalid WebRTC signaling, so recognize and ignore the replay.
     if (peer.signalingState === "stable" && this.#initialAnswerSdp === sdp) return;
+    if (this.#initialAnswerSdp === undefined) this.#recordRemoteCandidates(sdp);
     await peer.setRemoteDescription(frame.session_description);
     this.#initialAnswerSdp ??= sdp;
   }
@@ -494,7 +608,9 @@ export class RelayCallTransport {
     if (this.#reportedConnected) return;
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new RelayCallTransportError("Timed out connecting Relay WebRTC media."));
+        reject(new RelayCallTransportError(
+          `Timed out connecting Relay WebRTC media (${this.diagnostics().summary})`,
+        ));
       }, this.#connectionTimeoutMs);
       timeout.unref?.();
       this.#ready.then(
@@ -508,6 +624,37 @@ export class RelayCallTransport {
         },
       );
     });
+  }
+
+  /**
+   * werift emits these as W3C-style handler calls (peerConnection.js:314-341:
+   * `onicegatheringstatechange`, `oniceconnectionstatechange`,
+   * `onconnectionstatechange`, `onicecandidate` with `{ candidate }`).
+   */
+  #observeIce(peer: RelayPeerConnectionLike): void {
+    peer.onicecandidate = (event) => {
+      const line = event?.candidate?.candidate;
+      if (!line) return;
+      const type = parseCandidate(line)?.type;
+      if (type === "host" || type === "srflx" || type === "relay") this.#iceLocal[type] += 1;
+      else this.#iceLocal.other += 1;
+    };
+    peer.onicegatheringstatechange = () => this.#recordTransition("gathering", peer.iceGatheringState);
+    peer.oniceconnectionstatechange = () => {
+      if (peer.iceConnectionState !== undefined) this.#recordTransition("ice", peer.iceConnectionState);
+    };
+  }
+
+  #recordTransition(kind: RelayCallIceDiagnostics["transitions"][number]["kind"], state: string): void {
+    this.#iceTransitions.push({ kind, state, atMs: Date.now() - this.#connectStartedAt });
+  }
+
+  #recordRemoteCandidates(sdp: string): void {
+    for (const line of sdp.split(/\r?\n/)) {
+      if (!line.startsWith("a=candidate:")) continue;
+      const parsed = parseCandidate(line);
+      if (parsed) this.#iceRemote.push({ transport: parsed.transport, port: parsed.port });
+    }
   }
 
   #resolveReady(): void {

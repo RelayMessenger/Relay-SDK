@@ -1,8 +1,15 @@
 import { beforeAll, expect, it, vi } from "vitest";
 import { AgentSession, initializeLogger } from "@livekit/agents";
 import { AudioFrame } from "@livekit/rtc-node";
-import { RelayAudioInput, RelayAudioOutput, createRelayLiveKitAudio } from "../src/livekit.js";
-import type { RelayAudioFrame, RelayCallTransport } from "../src/transport.js";
+import type { CallRoom, CallRoomEventMap, Relay } from "@relaymessenger/sdk";
+import { RelayAudioInput, RelayAudioOutput, RelayLiveKitCall, createRelayLiveKitAudio } from "../src/livekit.js";
+import type {
+  RelayAudioFrame,
+  RelayCallTransport,
+  RelayPeerConnectionConfig,
+  RelayPeerConnectionLike,
+  RelayWebRTCFactory,
+} from "../src/transport.js";
 
 class FakeTransport {
   readonly listeners = new Set<(frame: RelayAudioFrame) => void>();
@@ -81,4 +88,96 @@ it("installs the reusable Relay audio pair on an existing AgentSession", async (
   session.output.audio = null;
   await audio.input.close();
   audio.output.close();
+});
+
+/** Minimal room + WebRTC fakes: the answer arrives at once and the peer connects. */
+class ConnectingRoom {
+  readonly listeners = new Map<string, Set<(...args: any[]) => void>>();
+  async connect(): Promise<void> {}
+  async reconnect(): Promise<void> {}
+  send(frame: { type: string }): void {
+    if (frame.type !== "offer") return;
+    queueMicrotask(() => {
+      for (const listener of this.listeners.get("answer") ?? []) {
+        listener({ type: "answer", session_description: { type: "answer", sdp: "relay-answer" } });
+      }
+    });
+  }
+  connected(): void {}
+  userUpdate(): void {}
+  end(): void {}
+  close(): void {}
+  on<K extends Extract<keyof CallRoomEventMap, string>>(event: K, listener: (...args: any[]) => void): this {
+    const listeners = this.listeners.get(event) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(event, listeners);
+    return this;
+  }
+}
+
+class ConnectingWebRTC implements RelayWebRTCFactory {
+  readonly peerConfigs: RelayPeerConnectionConfig[] = [];
+  neverConnects = false;
+  createPeerConnection(config?: RelayPeerConnectionConfig): RelayPeerConnectionLike {
+    if (config) this.peerConfigs.push(structuredClone(config));
+    const peer: RelayPeerConnectionLike = {
+      connectionState: "new",
+      iceGatheringState: "complete",
+      signalingState: "stable",
+      localDescription: null,
+      remoteDescription: null,
+      onconnectionstatechange: null,
+      ontrack: null,
+      addTransceiver: () => ({ mid: "0" }),
+      createOffer: async () => ({ type: "offer", sdp: "offer-sdp" }),
+      createAnswer: async () => ({ type: "answer", sdp: "answer-sdp" }),
+      setLocalDescription: async (description) => {
+        (peer as { localDescription: RTCSessionDescription | null }).localDescription =
+          description as RTCSessionDescription;
+      },
+      setRemoteDescription: async () => {
+        if (this.neverConnects) return;
+        (peer as { connectionState: string }).connectionState = "connected";
+        queueMicrotask(() => peer.onconnectionstatechange?.());
+      },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      close: () => {},
+    };
+    return peer;
+  }
+  createAudioSource() {
+    return { createTrack: () => ({ kind: "audio", stop: () => {} }), onData: () => {} };
+  }
+  createAudioSink() {
+    return { ondata: null, stop: () => {} };
+  }
+}
+
+it("forwards ICE servers, the transport policy and the media timeout through connect", async () => {
+  const webRTC = new ConnectingWebRTC();
+  const iceServers = [{ urls: "turn:turn.cloudflare.com:3478?transport=tcp", username: "u", credential: "c" }];
+  const call = await RelayLiveKitCall.connect({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: new ConnectingRoom() as unknown as CallRoom,
+    webRTC,
+    iceServers,
+    iceTransportPolicy: "relay",
+    mediaConnectTimeoutMs: 500,
+  });
+  expect(webRTC.peerConfigs).toEqual([{ iceServers, iceTransportPolicy: "relay" }]);
+  expect(call.diagnostics().connected).toBe(true);
+  expect(call.diagnostics().summary).toContain("local: host 0, srflx 0, relay 0");
+  await call.close();
+
+  const stuck = new ConnectingWebRTC();
+  stuck.neverConnects = true;
+  await expect(RelayLiveKitCall.connect({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: new ConnectingRoom() as unknown as CallRoom,
+    webRTC: stuck,
+    mediaConnectTimeoutMs: 20,
+  })).rejects.toThrow(/^Timed out connecting Relay WebRTC media \(local: host 0, srflx 0, relay 0; remote: none; states: no connected\)$/);
 });

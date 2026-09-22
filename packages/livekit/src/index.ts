@@ -12,7 +12,10 @@ export {
   RelayCallTransportError,
   type RelayAudioFrame,
   type RelayCallEngine,
+  type RelayCallIceDiagnostics,
   type RelayCallTransportCloseEvent,
   type RelayCallTransportOptions,
+  type RelayIceServer,
+  type RelayIceTransportPolicy,
 } from "./transport.js";
 export { createWeriftWebRTCFactory } from "./engine-werift.js";
