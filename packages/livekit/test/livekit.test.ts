@@ -5,16 +5,24 @@ import type { CallRoom, CallRoomEventMap, Relay } from "@relaymessenger/sdk";
 import { RelayAudioInput, RelayAudioOutput, RelayLiveKitCall, createRelayLiveKitAudio } from "../src/livekit.js";
 import type {
   RelayAudioFrame,
+  RelayAudioSinkLike,
   RelayCallTransport,
+  RelayInboundAudioFormat,
   RelayPeerConnectionConfig,
   RelayPeerConnectionLike,
   RelayWebRTCFactory,
 } from "../src/transport.js";
 
+/**
+ * Transport stand-in with an engine-shaped queue: `writeAudio` accepts at once,
+ * `drain(ms)` plays that much out, `waitForPlayout` resolves when empty.
+ */
 class FakeTransport {
   readonly listeners = new Set<(frame: RelayAudioFrame) => void>();
   readonly writes: RelayAudioFrame[] = [];
   clears = 0;
+  queuedMs = 0;
+  readonly waiters = new Set<() => void>();
 
   on(event: string, listener: (frame: RelayAudioFrame) => void): this {
     if (event === "audio") this.listeners.add(listener);
@@ -27,11 +35,37 @@ class FakeTransport {
   emit(frame: RelayAudioFrame): void {
     for (const listener of this.listeners) listener(frame);
   }
-  async writeAudio(frame: RelayAudioFrame): Promise<void> {
+  writeAudio(frame: RelayAudioFrame): Promise<void> {
     this.writes.push({ ...frame, samples: frame.samples.slice() });
+    this.queuedMs += (frame.samples.length / frame.channelCount / frame.sampleRate) * 1_000;
+    return Promise.resolve();
   }
-  clearAudio(): void { this.clears += 1; }
+  queuedAudioMs(): number { return this.queuedMs; }
+  waitForPlayout(): Promise<void> {
+    if (this.queuedMs === 0) return Promise.resolve();
+    return new Promise((resolve) => this.waiters.add(resolve));
+  }
+  clearAudio(): void {
+    this.clears += 1;
+    this.queuedMs = 0;
+    this.#release();
+  }
+  /** Play `ms` of queued audio out; releases `waitForPlayout` when the queue empties. */
+  drain(ms: number): void {
+    this.queuedMs = Math.max(0, this.queuedMs - ms);
+    if (this.queuedMs === 0) this.#release();
+  }
+  #release(): void {
+    for (const resolve of [...this.waiters]) {
+      this.waiters.delete(resolve);
+      resolve();
+    }
+  }
 }
+
+const FRAME_MS = 20;
+const frame20ms = (): AudioFrame => new AudioFrame(new Int16Array(960), 48_000, 1, 960);
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 beforeAll(() => initializeLogger({ pretty: false, level: "silent" }));
 
@@ -71,6 +105,101 @@ it("converts LiveKit output frames to Relay PCM and clears interrupted audio", a
 
   output.clearBuffer();
   expect(transport.clears).toBe(1);
+  output.close();
+});
+
+it("accepts 3 s of audio faster than real time and finishes only after the transport drains", async () => {
+  const transport = new FakeTransport();
+  const output = new RelayAudioOutput(transport as unknown as RelayCallTransport);
+  const started = vi.fn();
+  const finished = vi.fn();
+  output.on(RelayAudioOutput.EVENT_PLAYBACK_STARTED, started);
+  output.on(RelayAudioOutput.EVENT_PLAYBACK_FINISHED, finished);
+
+  const begin = performance.now();
+  for (let i = 0; i < 150; i += 1) await output.captureFrame(frame20ms());
+  const pushMs = performance.now() - begin;
+  expect(pushMs).toBeLessThan(200);
+  expect(transport.writes).toHaveLength(150);
+  expect(transport.queuedMs).toBeCloseTo(3_000, 6);
+  expect(started).toHaveBeenCalledTimes(1);
+
+  output.flush();
+  await settle();
+  expect(finished).not.toHaveBeenCalled();
+  transport.drain(1_500);
+  await settle();
+  expect(finished).not.toHaveBeenCalled();
+  transport.drain(1_500);
+  await settle();
+  expect(finished).toHaveBeenCalledTimes(1);
+  expect(finished.mock.calls[0]?.[0]?.playbackPosition).toBeCloseTo(3.0, 6);
+  expect(finished.mock.calls[0]?.[0]?.interrupted).toBe(false);
+  output.close();
+});
+
+it("reports interrupted with the drained portion when cleared mid-segment", async () => {
+  const transport = new FakeTransport();
+  const output = new RelayAudioOutput(transport as unknown as RelayCallTransport);
+  const finished = vi.fn();
+  output.on(RelayAudioOutput.EVENT_PLAYBACK_FINISHED, finished);
+
+  for (let i = 0; i < 150; i += 1) await output.captureFrame(frame20ms());
+  output.flush();
+  transport.drain(1_000);
+  await settle();
+  expect(finished).not.toHaveBeenCalled();
+
+  output.clearBuffer();
+  expect(transport.clears).toBe(1);
+  expect(transport.queuedMs).toBe(0);
+  await settle();
+  expect(finished).toHaveBeenCalledTimes(1);
+  expect(finished.mock.calls[0]?.[0]?.playbackPosition).toBeCloseTo(1.0, 6);
+  expect(finished.mock.calls[0]?.[0]?.interrupted).toBe(true);
+  output.close();
+});
+
+it("clears without a flush and still reports the interrupted segment", async () => {
+  const transport = new FakeTransport();
+  const output = new RelayAudioOutput(transport as unknown as RelayCallTransport);
+  const finished = vi.fn();
+  output.on(RelayAudioOutput.EVENT_PLAYBACK_FINISHED, finished);
+  for (let i = 0; i < 50; i += 1) await output.captureFrame(frame20ms());
+  transport.drain(400);
+  output.clearBuffer();
+  await settle();
+  expect(finished).toHaveBeenCalledTimes(1);
+  expect(finished.mock.calls[0]?.[0]?.playbackPosition).toBeCloseTo(0.4, 6);
+  expect(finished.mock.calls[0]?.[0]?.interrupted).toBe(true);
+  output.close();
+});
+
+it("delivers a second speech to the transport after the first segment flushed", async () => {
+  const transport = new FakeTransport();
+  const output = new RelayAudioOutput(transport as unknown as RelayCallTransport);
+  const started = vi.fn();
+  const finished = vi.fn();
+  output.on(RelayAudioOutput.EVENT_PLAYBACK_STARTED, started);
+  output.on(RelayAudioOutput.EVENT_PLAYBACK_FINISHED, finished);
+
+  for (let i = 0; i < 25; i += 1) await output.captureFrame(frame20ms());
+  output.flush();
+  transport.drain(25 * FRAME_MS);
+  const first = await output.waitForPlayout();
+  expect(first.playbackPosition).toBeCloseTo(0.5, 6);
+  expect(first.interrupted).toBe(false);
+
+  for (let i = 0; i < 40; i += 1) await output.captureFrame(frame20ms());
+  expect(transport.writes).toHaveLength(65);
+  expect(transport.queuedMs).toBeCloseTo(800, 6);
+  expect(started).toHaveBeenCalledTimes(2);
+  output.flush();
+  transport.drain(800);
+  const second = await output.waitForPlayout();
+  expect(second.playbackPosition).toBeCloseTo(0.8, 6);
+  expect(second.interrupted).toBe(false);
+  expect(finished).toHaveBeenCalledTimes(2);
   output.close();
 });
 
@@ -117,6 +246,8 @@ class ConnectingRoom {
 
 class ConnectingWebRTC implements RelayWebRTCFactory {
   readonly peerConfigs: RelayPeerConnectionConfig[] = [];
+  readonly peers: RelayPeerConnectionLike[] = [];
+  readonly sinks: Array<{ format: RelayInboundAudioFormat; sink: RelayAudioSinkLike }> = [];
   neverConnects = false;
   createPeerConnection(config?: RelayPeerConnectionConfig): RelayPeerConnectionLike {
     if (config) this.peerConfigs.push(structuredClone(config));
@@ -144,13 +275,16 @@ class ConnectingWebRTC implements RelayWebRTCFactory {
       removeEventListener: () => {},
       close: () => {},
     };
+    this.peers.push(peer);
     return peer;
   }
   createAudioSource() {
     return { createTrack: () => ({ kind: "audio", stop: () => {} }), onData: () => {} };
   }
-  createAudioSink() {
-    return { ondata: null, stop: () => {} };
+  createAudioSink(_track: unknown, format: RelayInboundAudioFormat): RelayAudioSinkLike {
+    const sink: RelayAudioSinkLike = { ondata: null, stop: () => {} };
+    this.sinks.push({ format: { ...format }, sink });
+    return sink;
   }
 }
 
@@ -179,5 +313,50 @@ it("forwards ICE servers, the transport policy and the media timeout through con
     roomClient: new ConnectingRoom() as unknown as CallRoom,
     webRTC: stuck,
     mediaConnectTimeoutMs: 20,
-  })).rejects.toThrow(/^Timed out connecting Relay WebRTC media \(local: host 0, srflx 0, relay 0; remote: none; states: no connected\)$/);
+  })).rejects.toThrow(/^Timed out connecting Relay WebRTC media \(local: host 0, srflx 0, relay 0; remote: none; states: no connected; in: 0 rtp, 0 bad, 0 frames, no packets, 0\/5s; out: 0 frames, 0 opus, 0 rtp, no packets, 0\/5s, queue 0, pacer n\/a; room: 0 roomState, 0 offer\)$/);
+});
+
+it("asks the engine for LiveKit's 24 kHz mono room input and hands the session mono frames", async () => {
+  const webRTC = new ConnectingWebRTC();
+  const call = await RelayLiveKitCall.connect({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: new ConnectingRoom() as unknown as CallRoom,
+    webRTC,
+  });
+  webRTC.peers[0]!.ontrack?.({ track: { kind: "audio", stop: () => {} } });
+  expect(webRTC.sinks.map(({ format }) => format)).toEqual([{ sampleRate: 24_000, channelCount: 1 }]);
+
+  call.input.setAttached(true);
+  const reader = call.input.stream.getReader();
+  const { sink, format } = webRTC.sinks[0]!;
+  // The fake engine delivers exactly what it was asked for, as werift's decoder does.
+  sink.ondata?.({
+    samples: new Int16Array(480).fill(7),
+    sampleRate: format.sampleRate,
+    bitsPerSample: 16,
+    channelCount: format.channelCount,
+    numberOfFrames: 480 / format.channelCount,
+  });
+  const received = await reader.read();
+  expect(received.value?.channels).toBe(1);
+  expect(received.value?.sampleRate).toBe(24_000);
+  expect(received.value?.samplesPerChannel).toBe(480);
+  reader.releaseLock();
+  await call.close();
+});
+
+it("delivers every inbound frame in order when the transport emits faster than the session reads", async () => {
+  const transport = new FakeTransport();
+  const input = new RelayAudioInput(transport as unknown as RelayCallTransport);
+  input.setAttached(true);
+  for (let i = 0; i < 20; i += 1) {
+    transport.emit({ samples: new Int16Array(480).fill(i), sampleRate: 24_000, channelCount: 1 });
+  }
+  const reader = input.stream.getReader();
+  const seen: number[] = [];
+  for (let i = 0; i < 20; i += 1) seen.push((await reader.read()).value!.data[0]!);
+  expect(seen).toEqual([...Array(20).keys()]);
+  reader.releaseLock();
+  await input.close();
 });

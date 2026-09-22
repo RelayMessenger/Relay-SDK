@@ -11,7 +11,9 @@ import {
   RelayCallTransport,
   RelayCallTransportError,
   type RelayAudioSinkLike,
+  type RelayAudioSinkStats,
   type RelayAudioSourceLike,
+  type RelayAudioSourceStats,
   type RelayMediaStreamTrackLike,
   type RelayPeerConnectionConfig,
   type RelayPeerConnectionLike,
@@ -54,16 +56,30 @@ class FakeTrack implements RelayMediaStreamTrackLike {
 class FakeAudioSource implements RelayAudioSourceLike {
   readonly track = new FakeTrack();
   readonly data: Parameters<RelayAudioSourceLike["onData"]>[0][] = [];
+  /** Set to make the fake engine report outbound packet counts. */
+  sourceStats: RelayAudioSourceStats | undefined;
   createTrack(): RelayMediaStreamTrackLike { return this.track; }
   onData(data: Parameters<RelayAudioSourceLike["onData"]>[0]): void {
     this.data.push({ ...data, samples: data.samples.slice() });
+  }
+  stats(): RelayAudioSourceStats {
+    return this.sourceStats ?? {
+      opusPackets: 0, rtpPackets: 0, firstRtpAt: undefined, lastRtpAt: undefined,
+      recentRtpPackets: 0, queued: 0, pacerAlive: false,
+    };
   }
 }
 
 class FakeAudioSink implements RelayAudioSinkLike {
   ondata: RelayAudioSinkLike["ondata"] = null;
   stopped = false;
+  sinkStats: RelayAudioSinkStats | undefined;
   stop(): void { this.stopped = true; }
+  stats(): RelayAudioSinkStats {
+    return this.sinkStats ?? {
+      rtpPackets: 0, decodeFailures: 0, firstRtpAt: undefined, lastRtpAt: undefined, recentRtpPackets: 0,
+    };
+  }
 }
 
 class FakePeer implements RelayPeerConnectionLike {
@@ -393,7 +409,9 @@ it("names the gathered candidates and ICE states when media never connects", asy
   expect(error).toBeInstanceOf(RelayCallTransportError);
   expect(error?.message).toBe(
     "Timed out connecting Relay WebRTC media (local: host 2, srflx 1, relay 0; remote: udp 1473; "
-    + "states: new\u2192complete 0.2s, ice checking 0.3s, connecting 0.3s, no connected)",
+    + "states: new\u2192complete 0.2s, ice checking 0.3s, connecting 0.3s, no connected; "
+    + "in: 0 rtp, 0 bad, 0 frames, no packets, 0/5s; "
+    + "out: 0 frames, 0 opus, 0 rtp, no packets, 0/5s, queue 0, pacer idle; room: 0 roomState, 0 offer)",
   );
   expect(error?.message).not.toContain("198.51.100");
   const diagnostics = transport.diagnostics();
@@ -402,4 +420,139 @@ it("names the gathered candidates and ICE states when media never connects", asy
   expect(diagnostics.connected).toBe(false);
   expect(error?.message).toContain(diagnostics.summary);
   expect(webRTC.peer.closed).toBe(true);
+});
+
+it("counts packets both ways, room frames, and renders one clause per direction", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(100_000);
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  const errors: Error[] = [];
+  transport.on("error", (error) => errors.push(error));
+  await connectTransport(transport, room);
+  const connectedAt = Date.now();
+
+  webRTC.peer.ontrack?.({ track: new FakeTrack() });
+  const sink = webRTC.sinks[0]!;
+  for (let i = 0; i < 3; i += 1) {
+    sink.ondata?.({ samples: new Int16Array(960), sampleRate: 48_000, bitsPerSample: 16, channelCount: 2 });
+  }
+  sink.sinkStats = {
+    rtpPackets: 1234, decodeFailures: 2, firstRtpAt: connectedAt + 900, lastRtpAt: connectedAt + 41_200,
+    recentRtpPackets: 250,
+  };
+  webRTC.source.sourceStats = {
+    opusPackets: 2050, rtpPackets: 2049, firstRtpAt: connectedAt + 1_100, lastRtpAt: connectedAt + 41_000,
+    recentRtpPackets: 249, queued: 1, pacerAlive: true,
+  };
+  const outgoing = transport.writeAudio({ samples: new Int16Array(1920), sampleRate: 48_000, channelCount: 1 });
+  await vi.advanceTimersByTimeAsync(50);
+  await outgoing;
+
+  room.emit("roomState", { type: "roomState", call: { status: "in-progress" }, participants: [] } as unknown as CallRoomStateFrame);
+  room.emit("roomState", { type: "roomState", call: { status: "in-progress" }, participants: [] } as unknown as CallRoomStateFrame);
+  room.emit("offer", { type: "offer", session_description: { type: "offer", sdp: "relay-subscription" }, track: "audio" });
+  await flush();
+  room.emit("error", { type: "error", code: "media_unavailable", message: "media down" });
+  room.emit("ended", { type: "ended", reason: "completed" });
+
+  const diagnostics = transport.diagnostics();
+  expect(diagnostics.inbound).toEqual({
+    rtpPackets: 1234, decodeFailures: 2, frames: 3, firstPacketAtMs: 900, lastPacketAtMs: 41_200, recentRtpPackets: 250,
+  });
+  expect(diagnostics.outbound).toEqual({
+    frames: 4, opusPackets: 2050, rtpPackets: 2049, firstPacketAtMs: 1_100, lastPacketAtMs: 41_000,
+    recentRtpPackets: 249, queued: 1, pacerAlive: true,
+  });
+  expect(diagnostics.room).toEqual({ roomStates: 2, offers: 1, endedReason: "completed", errors: ["media down"] });
+  expect(diagnostics.summary).toContain("in: 1234 rtp, 2 bad, 3 frames, first 0.9s last 41.2s, 250/5s");
+  expect(diagnostics.summary).toContain(
+    "out: 4 frames, 2050 opus, 2049 rtp, first 1.1s last 41.0s, 249/5s, queue 1, pacer alive",
+  );
+  expect(diagnostics.summary).toContain('room: 2 roomState, 1 offer, ended completed, error "media down"');
+  expect(errors).toHaveLength(1);
+  transport.close();
+});
+
+it("warns once when outbound audio is queued but no RTP leaves for 2 s", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(200_000);
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const warnings: string[] = [];
+  const transport = new RelayCallTransport({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: room as unknown as CallRoom,
+    webRTC,
+    onWarning: (message) => warnings.push(message),
+  });
+  await connectTransport(transport, room);
+  const lastRtpAt = Date.now();
+  webRTC.source.sourceStats = {
+    opusPackets: 10, rtpPackets: 5, firstRtpAt: lastRtpAt - 100, lastRtpAt, recentRtpPackets: 5,
+    queued: 5, pacerAlive: false,
+  };
+  await vi.advanceTimersByTimeAsync(1_500);
+  expect(warnings).toEqual([]);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toMatch(/^Relay outbound audio stalled \(local: /);
+  expect(warnings[0]).toContain("out: 0 frames, 10 opus, 5 rtp, first -0.1s last 0.0s, 5/5s, queue 5, pacer idle");
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(warnings).toHaveLength(1);
+  expect(webRTC.peer.closed).toBe(false);
+  transport.close();
+});
+
+it("does not warn while the pacer keeps draining the queue", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const warnings: string[] = [];
+  const transport = new RelayCallTransport({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: room as unknown as CallRoom,
+    webRTC,
+    onWarning: (message) => warnings.push(message),
+  });
+  await connectTransport(transport, room);
+  for (let tick = 0; tick < 10; tick += 1) {
+    const now = Date.now();
+    webRTC.source.sourceStats = {
+      opusPackets: tick, rtpPackets: tick, firstRtpAt: now, lastRtpAt: now, recentRtpPackets: 1,
+      queued: 3, pacerAlive: true,
+    };
+    await vi.advanceTimersByTimeAsync(500);
+  }
+  expect(warnings).toEqual([]);
+  transport.close();
+});
+
+it("refuses an inbound format the wrtc engine cannot decode to, and bad formats on any engine", () => {
+  const base = {
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: new FakeRoom() as unknown as CallRoom,
+  };
+  expect(() => new RelayCallTransport({
+    ...base,
+    engine: "wrtc",
+    inboundAudio: { sampleRate: 24_000, channelCount: 1 },
+  })).toThrow('The "wrtc" engine cannot decode to inboundAudio; use the "werift" engine.');
+  expect(() => new RelayCallTransport({
+    ...base,
+    engine: "wrtc",
+    inboundAudio: { sampleRate: 48_000, channelCount: 2 },
+  })).not.toThrow();
+  expect(() => new RelayCallTransport({
+    ...base,
+    inboundAudio: { sampleRate: 44_100 as 48_000, channelCount: 1 },
+  })).toThrow("inboundAudio.sampleRate must be 8000, 12000, 16000, 24000 or 48000.");
+  expect(() => new RelayCallTransport({
+    ...base,
+    inboundAudio: { sampleRate: 24_000, channelCount: 3 as 1 },
+  })).toThrow("inboundAudio.channelCount must be 1 or 2.");
 });

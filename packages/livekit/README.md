@@ -39,10 +39,21 @@ async function answerCall(callId: string, session: AgentSession) {
 ```
 
 `RelayLiveKitCall.connect()` does not resolve until the WebRTC media peer has
-reached `connected`. `RelayAudioInput` converts the remote participant's PCM16
-audio to LiveKit frames. `RelayAudioOutput` publishes LiveKit TTS frames to
-Relay, pacing larger frames into 10 ms WebRTC source slices. `clearBuffer()`
-drops queued outbound audio that has not yet reached WebRTC.
+reached `connected`. `RelayAudioInput` hands the AgentSession the remote
+participant's audio as 24 kHz mono PCM16 frames, the format of LiveKit's own
+room input; the Opus decoder produces that format directly.
+
+`RelayAudioOutput` has the shape of LiveKit's own `ParticipantAudioOutput`:
+`captureFrame()` hands the frame to the transport and returns at once, so the
+AgentSession may push a whole reply faster than real time; the engine's 20 ms
+pump paces the wire. `flush()` closes the segment and reports
+`playbackFinished` only after the transport has drained. `clearBuffer()` drops
+audio that has not reached the wire and reports the segment as interrupted at
+the position that actually played.
+
+On the transport, `writeAudio()` resolves once its 10 ms slices are queued,
+`queuedAudioMs()` is what has not left yet, and `waitForPlayout()` resolves when
+the queue is empty and the pump is idle (early on `clearAudio()`).
 
 Use `setMuted(true)` to publish participant mute state, `end()` to end the Relay
 Call, and `close()` for local cleanup. If the signaling connection is replaced,
@@ -63,6 +74,9 @@ const transport = new RelayCallTransport({ room });
 transport.on("audio", ({ samples, sampleRate, channelCount }) => {
   // Interleaved signed PCM16 from the remote Relay participant.
 });
+// Inbound audio is 48 kHz stereo unless you pass
+// `inboundAudio: { sampleRate: 8000 | 12000 | 16000 | 24000 | 48000, channelCount: 1 | 2 }`;
+// the `"wrtc"` engine accepts only the default.
 
 await transport.connect();
 await transport.writeAudio({
@@ -70,6 +84,7 @@ await transport.writeAudio({
   sampleRate: 48_000,
   channelCount: 1,
 });
+await transport.waitForPlayout();
 ```
 
 ## ICE servers, TURN, and diagnostics
@@ -108,7 +123,20 @@ The same facts are available at any time from `call.diagnostics()` or
 `transport.diagnostics()`: local candidate counts by type, the remote
 candidates' transport and port (never their address), the ICE gathering, ICE
 connection and peer connection state changes with their offsets from
-`connect()`, and the one-line `summary`.
+`connect()`, packet counts in both directions (`inbound`: RTP received, Opus
+decode failures, PCM frames delivered, first and last packet offsets, packets
+in the last 5 s; `outbound`: PCM frames accepted, Opus packets, RTP written,
+first and last packet offsets, packets in the last 5 s, paced queue size,
+pacer state), the room frames seen (`roomState` count, pull `offer` count,
+`ended` reason, `error` messages), and the one-line `summary`, for example
+`…; in: 1234 rtp, 0 bad, 1234 frames, first 0.9s last 41.2s, 250/5s; out: 2050 frames, 2050 opus, 2050 rtp, first 1.1s last 41.0s, 250/5s, queue 0, pacer alive; room: 3 roomState, 1 offer`.
+Packet counts come from the `werift` engine; `wrtc` reports zero packets and
+`pacer n/a`.
+
+`onWarning` is called once per call, with the summary, when outbound audio is
+queued but no RTP packet has been written for 2 s while media is connected.
+Nothing is restarted; the callback exists so the failing direction is named in
+the agent's logs.
 
 `RelayCallTransport` consumes the SDK's `CallRoom`; it does not duplicate the
 room protocol. The default engine is `werift` (pure TypeScript WebRTC) with
