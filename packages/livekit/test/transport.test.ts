@@ -530,3 +530,29 @@ it("does not warn while the pacer keeps draining the queue", async () => {
   expect(warnings).toEqual([]);
   transport.close();
 });
+
+it("refuses an inbound format the wrtc engine cannot decode to, and bad formats on any engine", () => {
+  const base = {
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: new FakeRoom() as unknown as CallRoom,
+  };
+  expect(() => new RelayCallTransport({
+    ...base,
+    engine: "wrtc",
+    inboundAudio: { sampleRate: 24_000, channelCount: 1 },
+  })).toThrow('The "wrtc" engine cannot decode to inboundAudio; use the "werift" engine.');
+  expect(() => new RelayCallTransport({
+    ...base,
+    engine: "wrtc",
+    inboundAudio: { sampleRate: 48_000, channelCount: 2 },
+  })).not.toThrow();
+  expect(() => new RelayCallTransport({
+    ...base,
+    inboundAudio: { sampleRate: 44_100 as 48_000, channelCount: 1 },
+  })).toThrow("inboundAudio.sampleRate must be 8000, 12000, 16000, 24000 or 48000.");
+  expect(() => new RelayCallTransport({
+    ...base,
+    inboundAudio: { sampleRate: 24_000, channelCount: 3 as 1 },
+  })).toThrow("inboundAudio.channelCount must be 1 or 2.");
+});

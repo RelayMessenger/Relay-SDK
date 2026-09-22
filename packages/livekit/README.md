@@ -39,8 +39,9 @@ async function answerCall(callId: string, session: AgentSession) {
 ```
 
 `RelayLiveKitCall.connect()` does not resolve until the WebRTC media peer has
-reached `connected`. `RelayAudioInput` converts the remote participant's PCM16
-audio to LiveKit frames.
+reached `connected`. `RelayAudioInput` hands the AgentSession the remote
+participant's audio as 24 kHz mono PCM16 frames, the format of LiveKit's own
+room input; the Opus decoder produces that format directly.
 
 `RelayAudioOutput` has the shape of LiveKit's own `ParticipantAudioOutput`:
 `captureFrame()` hands the frame to the transport and returns at once, so the
@@ -73,6 +74,9 @@ const transport = new RelayCallTransport({ room });
 transport.on("audio", ({ samples, sampleRate, channelCount }) => {
   // Interleaved signed PCM16 from the remote Relay participant.
 });
+// Inbound audio is 48 kHz stereo unless you pass
+// `inboundAudio: { sampleRate: 8000 | 12000 | 16000 | 24000 | 48000, channelCount: 1 | 2 }`;
+// the `"wrtc"` engine accepts only the default.
 
 await transport.connect();
 await transport.writeAudio({

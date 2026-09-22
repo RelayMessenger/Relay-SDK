@@ -1,6 +1,7 @@
 export {
   RelayAudioInput,
   RelayAudioOutput,
+  LIVEKIT_ROOM_INPUT_AUDIO,
   RelayLiveKitCall,
   createRelayLiveKitAudio,
   type RelayLiveKitAudio,
@@ -20,5 +21,6 @@ export {
   type RelayCallTransportOptions,
   type RelayIceServer,
   type RelayIceTransportPolicy,
+  type RelayInboundAudioFormat,
 } from "./transport.js";
 export { createWeriftWebRTCFactory } from "./engine-werift.js";

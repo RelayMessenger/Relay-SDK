@@ -21,7 +21,11 @@
  *   offsets sequenceNumber/timestamp, so the local track starts both at 0.
  * - ../../rtp/src/codec/opus.d.ts: `OpusRtpPayload.deSerialize(buffer)`.
  * - node_modules/@evan/opus/lib.d.ts: `Encoder.encode(pcm16)` returns one Opus
- *   packet; `Decoder.decode(packet)` returns interleaved PCM16 bytes.
+ *   packet; `Decoder.decode(packet)` returns interleaved PCM16 bytes;
+ *   `new Decoder({ channels?: 1 | 2, sample_rate?: 8000 | 12000 | 16000 |
+ *   24000 | 48000 })` decodes any Opus stream to that count and rate (libopus
+ *   `opus_decoder_create(Fs, channels)`), which is how the sink honours
+ *   `RelayInboundAudioFormat`.
  * Participant shapes copied from the headless phone that joined Relay's room
  * through Cloudflare's SFU on 2026-09-21 (_runtime/bin/headless-phone-webrtc.mjs
  * lines 93-160): `bundlePolicy: "max-bundle", iceServers: []` (Cloudflare
@@ -44,6 +48,7 @@ import type {
   RelayAudioSinkStats,
   RelayAudioSourceLike,
   RelayAudioSourceStats,
+  RelayInboundAudioFormat,
   RelayMediaStreamTrackLike,
   RelayPeerConnectionConfig,
   RelayPeerConnectionLike,
@@ -274,10 +279,10 @@ class WeriftAudioSource implements RelayAudioSourceLike {
   }
 }
 
-/** Opus RTP in, PCM16 (48 kHz stereo) out, one `ondata` per packet. */
+/** Opus RTP in, PCM16 in the requested format (default 48 kHz stereo) out, one `ondata` per packet. */
 class WeriftAudioSink implements RelayAudioSinkLike {
   ondata: RelayAudioSinkLike["ondata"] = null;
-  readonly #decoder = new Decoder({ channels: WERIFT_CHANNEL_COUNT, sample_rate: WERIFT_SAMPLE_RATE });
+  readonly #decoder: Decoder;
   readonly #rtp = new PacketClock();
   #decodeFailures = 0;
   readonly #unsubscribe: () => void;
@@ -292,7 +297,12 @@ class WeriftAudioSink implements RelayAudioSinkLike {
     };
   }
 
-  constructor(track: MediaStreamTrack) {
+  constructor(
+    track: MediaStreamTrack,
+    format: RelayInboundAudioFormat = { sampleRate: WERIFT_SAMPLE_RATE, channelCount: WERIFT_CHANNEL_COUNT },
+  ) {
+    const { sampleRate, channelCount } = format;
+    this.#decoder = new Decoder({ channels: channelCount, sample_rate: sampleRate });
     const { unSubscribe } = track.onReceiveRtp.subscribe((rtp) => {
       this.#rtp.mark();
       const handler = this.ondata;
@@ -309,10 +319,10 @@ class WeriftAudioSink implements RelayAudioSinkLike {
       new Uint8Array(samples.buffer).set(bytes.subarray(0, samples.byteLength));
       handler({
         samples,
-        sampleRate: WERIFT_SAMPLE_RATE,
+        sampleRate,
         bitsPerSample: 16,
-        channelCount: WERIFT_CHANNEL_COUNT,
-        numberOfFrames: samples.length / WERIFT_CHANNEL_COUNT,
+        channelCount,
+        numberOfFrames: samples.length / channelCount,
       });
     });
     this.#unsubscribe = unSubscribe;
@@ -345,5 +355,5 @@ export const createWeriftPeerConnection = (
 export const createWeriftWebRTCFactory = (): RelayWebRTCFactory => ({
   createPeerConnection: (config) => createWeriftPeerConnection(config) as unknown as RelayPeerConnectionLike,
   createAudioSource: () => new WeriftAudioSource(),
-  createAudioSink: (track) => new WeriftAudioSink(track as unknown as MediaStreamTrack),
+  createAudioSink: (track, format) => new WeriftAudioSink(track as unknown as MediaStreamTrack, format),
 });

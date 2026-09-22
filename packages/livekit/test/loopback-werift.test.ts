@@ -122,7 +122,10 @@ it("carries a 1 kHz sine from A to B over werift + Opus on loopback", async () =
   await a.setRemoteDescription({ type: "answer", sdp: b.localDescription!.sdp });
   await Promise.all([aConnected, bConnected]);
 
-  const sink = factory.createAudioSink(await remoteTrack);
+  const sink = factory.createAudioSink(await remoteTrack, {
+    sampleRate: WERIFT_SAMPLE_RATE,
+    channelCount: WERIFT_CHANNEL_COUNT,
+  });
   sink.ondata = (data) => {
     expect(data.sampleRate).toBe(WERIFT_SAMPLE_RATE);
     expect(data.channelCount).toBe(WERIFT_CHANNEL_COUNT);
@@ -159,6 +162,98 @@ it("carries a 1 kHz sine from A to B over werift + Opus on loopback", async () =
   const hz = dominantHz(steady);
   expect(hz).toBeGreaterThanOrEqual(TONE_HZ - 50);
   expect(hz).toBeLessThanOrEqual(TONE_HZ + 50);
+}, 30_000);
+
+/** Two werift peers, A sendonly to B, wired by hand. */
+const connectPair = async (factory: ReturnType<typeof createWeriftWebRTCFactory>) => {
+  const a = factory.createPeerConnection();
+  const b = factory.createPeerConnection();
+  const source = factory.createAudioSource();
+  const localTrack = source.createTrack();
+  a.addTransceiver(localTrack, { direction: "sendonly" });
+  const remoteTrack = new Promise<RelayMediaStreamTrackLike>((resolve) => {
+    b.ontrack = (event) => resolve(event.track);
+  });
+  const aConnected = waitForConnected(a);
+  const bConnected = waitForConnected(b);
+  const offer = await a.createOffer();
+  await a.setLocalDescription(offer);
+  await waitForIce(a);
+  await b.setRemoteDescription({ type: "offer", sdp: a.localDescription!.sdp });
+  const answer = await b.createAnswer();
+  await b.setLocalDescription(answer);
+  await waitForIce(b);
+  await a.setRemoteDescription({ type: "answer", sdp: b.localDescription!.sdp });
+  await Promise.all([aConnected, bConnected]);
+  return { a, b, source, localTrack, remoteTrack: await remoteTrack };
+};
+
+/** Sign changes in mono PCM16, zeros skipped; a sine at f Hz has 2f per second. */
+const zeroCrossings = (samples: Int16Array): number => {
+  let crossings = 0;
+  let previous = 0;
+  for (const sample of samples) {
+    if (sample === 0) continue;
+    const sign = sample > 0 ? 1 : -1;
+    if (previous !== 0 && sign !== previous) crossings += 1;
+    previous = sign;
+  }
+  return crossings;
+};
+
+it("decodes 48 kHz stereo Opus straight to 24 kHz mono when the sink asks for it", async () => {
+  const toneHz = 440;
+  const factory = createWeriftWebRTCFactory();
+  const { a, b, source, localTrack, remoteTrack } = await connectPair(factory);
+  const sink = factory.createAudioSink(remoteTrack, { sampleRate: 24_000, channelCount: 1 });
+  const formats = new Set<string>();
+  const decoded: Int16Array[] = [];
+  sink.ondata = (data) => {
+    formats.add(`${data.sampleRate}/${data.channelCount}/${data.numberOfFrames === data.samples.length}`);
+    decoded.push(data.samples);
+  };
+
+  // Send 1.5 s of a 440 Hz stereo tone at 48 kHz, the wire format.
+  const frames = (WERIFT_SAMPLE_RATE * SLICE_MS) / 1000;
+  for (let slice = 0; slice < 150; slice += 1) {
+    const out = new Int16Array(frames * WERIFT_CHANNEL_COUNT);
+    for (let frame = 0; frame < frames; frame += 1) {
+      const t = (slice * frames + frame) / WERIFT_SAMPLE_RATE;
+      const value = Math.round(TONE_AMPLITUDE * Math.sin(2 * Math.PI * toneHz * t));
+      out[frame * 2] = value;
+      out[frame * 2 + 1] = value;
+    }
+    source.onData({
+      samples: out,
+      sampleRate: WERIFT_SAMPLE_RATE,
+      bitsPerSample: 16,
+      channelCount: WERIFT_CHANNEL_COUNT,
+      numberOfFrames: frames,
+    });
+    await sleep(SLICE_MS);
+  }
+  await sleep(300);
+  sink.stop();
+  localTrack.stop();
+  a.close();
+  b.close();
+
+  expect([...formats]).toEqual(["24000/1/true"]);
+  const all = new Int16Array(decoded.reduce((n, frame) => n + frame.length, 0));
+  let offset = 0;
+  for (const frame of decoded) {
+    all.set(frame, offset);
+    offset += frame.length;
+  }
+  // Skip 200 ms of Opus warm-up, then measure exactly one second: 24000 samples.
+  const second = all.subarray(4_800, 4_800 + 24_000);
+  expect(second.length).toBe(24_000);
+  expect(rms(second)).toBeGreaterThan(1_000);
+  const crossings = zeroCrossings(second);
+  expect(crossings).toBeGreaterThanOrEqual(880 * 0.9);
+  expect(crossings).toBeLessThanOrEqual(880 * 1.1);
+  // One 20 ms Opus packet decodes to 480 mono samples at 24 kHz.
+  expect(decoded.every((frame) => frame.length === 480)).toBe(true);
 }, 30_000);
 
 type RoomEvent = Extract<keyof CallRoomEventMap, string>;
@@ -235,7 +330,10 @@ it("counts RTP both ways in diagnostics() over a werift loopback through the tra
   await connecting;
   expect(transport.diagnostics().connected).toBe(true);
 
-  const farSink = factory.createAudioSink(await farRemote);
+  const farSink = factory.createAudioSink(await farRemote, {
+    sampleRate: WERIFT_SAMPLE_RATE,
+    channelCount: WERIFT_CHANNEL_COUNT,
+  });
   farSink.ondata = (data) => decoded.push(data.samples);
 
   // Pull: the far side renegotiates with a sendonly track, as the SFU's subscription offer does.
