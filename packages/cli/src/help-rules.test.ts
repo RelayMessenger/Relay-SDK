@@ -22,11 +22,7 @@ it("every help description fits the CLI help rules", () => {
     expect(withoutProducts.split(/\s+/u).slice(1).join(" "), `${path}: lowercase after first word`).toBe(withoutProducts.split(/\s+/u).slice(1).join(" ").toLowerCase());
     for (const option of command.createHelp().visibleOptions(command)) {
       options++;
-      // The call-address wording is specified verbatim for these two commands.
-      const prescribedCallURL = option.flags === "--call-url <url>"
-        && ["relaymessenger agents create", "relaymessenger agents update"].includes(path);
-      if (prescribedCallURL) expect(option.description).toBe("the wss:// address Relay rings for voice calls");
-      check(option.description, prescribedCallURL ? 8 : 7, `${path} ${option.flags}`);
+      check(option.description, 7, `${path} ${option.flags}`);
     }
     // Hidden flags are still supported help descriptions and must obey the rules.
     for (const option of command.options.filter((option) => option.hidden)) {

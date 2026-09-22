@@ -281,45 +281,50 @@ Calls join one user and one agent in an existing individual Chat. Use
 `relay.calls.create(chatId, { to: [handle], mode: "audio" }, { idempotencyKey })`;
 keep the same key and body when retrying an uncertain create response.
 
-`relay.calls` also exposes `retrieve`, `list`, `accept`, `decline`, and `end`.
-Receive typed `call.created`, `call.updated`, and `call.ended` events through
-the existing signed Webhook or Agent WebSocket.
+`relay.calls` also exposes `retrieve`, `list`, `room`, and `end`. Receive typed
+`call.created`, `call.updated`, and `call.ended` events through the existing
+signed Webhook or acknowledged Agent WebSocket. Agents do not configure a call
+URL; receiving `call.created` and joining that Call's room is the answer path.
 
-Every participant holds one socket to the Call room. `relay.calls.room(callId)`
-opens `GET /v1/calls/{callId}/room` with the same bearer as every REST route,
-sends `join`, and keeps `room.state` at the latest `roomState` the room pushed
-after every change. Nothing is polled.
+Every participant holds one signaling socket to the Call room.
+`relay.calls.room(callId)` targets `GET /v1/calls/{callId}/room` with the same
+bearer as every REST route. Register handlers, call `connect()`, and the SDK
+sends `join`; `room.state` then tracks the latest `roomState`. Nothing is polled
+and no audio bytes pass through this WebSocket.
 
 ```ts
 const room = relay.calls.room(event.data.call.id);
-room.on("roomState", ({ call, participants, media }) => {
-  // `media` (the audio-socket url and short-lived token) is present only on
-  // the agent's own socket. Open it, then accept.
-  if (call.status === "ringing" && media) room.accept();
+room.on("roomState", ({ call, participants }) => {
+  // Each participant has track: "audio" | null, muted and connected state.
+});
+room.on("answer", ({ session_description }) => {
+  // Apply Relay's answer to the local WebRTC publication.
 });
 room.on("offer", ({ session_description, track }) => {
-  // The room started pulling the other side's track; answer it.
+  // Relay subscribed this participant to the other side's `audio` track.
+  // Apply the offer, create a WebRTC answer, gather ICE, then send it:
   room.send({ type: "answer", session_description: { type: "answer", sdp } });
 });
 room.on("ended", ({ reason }) => { /* the socket closes right after */ });
-room.connected();
-room.userUpdate({ muted: true });
-room.end();
+await room.connect(); // sends { type: "join" }; a callee answers here
 ```
 
-`room.send(frame)` takes any client frame from the contract (`join`, `offer`,
-`answer`, `userUpdate`, `accept`, `decline`, `end`, `connected`, `heartbeat`);
-`accept()`, `decline()`, `end()`, `connected()` and `userUpdate()` send the
-matching frame. The client sends `heartbeat` every 15 s until `close()`. An
-invalid room frame closes the socket 4400 and fires `error`.
+The stable client frames are `join`, `offer`, `answer`, `connected`,
+`userUpdate`, `end`, and `heartbeat`. A publishing `offer` has exactly one
+`tracks` entry, `{ mid, name: "audio" }`. Stable server frames are `roomState`,
+`answer`, `offer` with `track: "audio"`, `ended`, and `error`; every
+`roomState.participants[]` item reports `track: "audio" | null`. The SDK sends
+`heartbeat` every 15 seconds until `close()`. `connected()`, `userUpdate()` and
+`end()` are convenience methods for those frames, and `reconnect()` replaces
+the signaling socket without first dropping the old one.
 
-The agent's audio flows on the media socket named in `roomState.media`, with
-`Authorization: Bearer <media.token>`: raw PCM16 little-endian, 48 kHz stereo
-binary frames. The server sends JSON `start` with the format, then `ready`.
-Send `{"type":"clear"}` to discard unsent speech. An `ended` frame terminates
-the media socket. Both sockets are separate from `relay.websocket.run`, which
-carries durable events. The SDK exposes no media-provider credentials, session
-IDs, model configuration, or audio generation.
+WebRTC carries the audio. Relay's server owns SFU/provider details, so clients
+only exchange SDP in the room protocol and never receive Cloudflare
+credentials, session IDs, or ICE-provider configuration. Node agents that want
+this SDP/ICE and PCM plumbing handled for them can use
+`@relaymessenger/livekit`, whose provider-neutral `RelayCallTransport` uses a
+standards-compatible Node WebRTC binding and whose LiveKit adapter plugs the
+result into LiveKit Agents audio input/output.
 
 ## Webhooks
 

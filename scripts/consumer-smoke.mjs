@@ -96,7 +96,6 @@ try {
     "display_name",
     "image_url",
     "about",
-    "call_url",
     "verified",
     "is_contact",
     "activity_version",

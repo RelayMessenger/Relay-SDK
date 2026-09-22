@@ -376,6 +376,7 @@ describe("Relay v1 request shapes", () => {
       "end",
       "list",
       "retrieve",
+      "room",
     ]);
     expect(methods(client.attachments)).toEqual([
       "create",

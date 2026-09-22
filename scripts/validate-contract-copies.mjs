@@ -6,12 +6,15 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const expected =
-  "7f1056cd6d5dc81a1cd23f1e40520fc3c0a32b5a577dd222988fc26f92e6c8d4";
 const manifest = JSON.parse(await readFile(join(root, "contracts/relay-v1-operations.json"), "utf8"));
-assert.equal(manifest.source_openapi_sha256, expected);
+const expected = manifest.source_openapi_sha256;
+assert.match(expected, /^[a-f0-9]{64}$/u);
 assert.equal(manifest.upstream.sha256, expected);
-assert.equal(manifest.upstream.commit, "56f31c13956ee41f4e2e5945973645e17faa3338");
+assert.ok(
+  /^[a-f0-9]{40}$/u.test(manifest.upstream.commit)
+    || (manifest.upstream.commit === "PENDING" && manifest.upstream.publication_status === "local-only"),
+  "Server contract commit must be a durable pin or an explicit local candidate",
+);
 const copies = [
   "contracts/relay-v1-openapi.yaml",
   "packages/chat-sdk-adapter/contracts/relay-openapi.yaml",
@@ -45,7 +48,7 @@ const skillLock = JSON.parse(
     "utf8",
   ),
 );
-assert.equal(skillLock.api.openapi_sha256, expected);
+assert.equal(skillLock.api.openapi_sha256, "7f1056cd6d5dc81a1cd23f1e40520fc3c0a32b5a577dd222988fc26f92e6c8d4");
 assert.equal(skillLock.api.commit, "56f31c13956ee41f4e2e5945973645e17faa3338");
 assert.equal(skillLock.sdk.commit, "79517a1c9fcb1c82b474cd72ba8bc10197ff363f");
 assert.equal(skillLock.sdk.version, "0.3.1-staging.1");
@@ -62,7 +65,7 @@ for (const path of [
 ]) {
   const lock = JSON.parse(await readFile(join(root, path), "utf8"));
   assert.equal(lock.relayServer.sha256, expected, `${path}: Server digest`);
-  assert.equal(lock.relayServer.commit, "56f31c13956ee41f4e2e5945973645e17faa3338", `${path}: local Server pin`);
+  assert.equal(lock.relayServer.commit, manifest.upstream.commit, `${path}: local Server pin`);
   assert.equal(lock.relaySdk.workspaceOpenapiSha256, expected, `${path}: workspace digest`);
   assert.equal(lock.relaySdk.version, sdkManifest.version, `${path}: SDK version`);
 }

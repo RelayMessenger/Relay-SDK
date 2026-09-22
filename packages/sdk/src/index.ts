@@ -14,6 +14,13 @@ export {
   type RelayOptions,
 } from "./client.js";
 export {
+  CallRoom,
+  parseCallRoomServerFrame,
+  type CallRoomCloseEvent,
+  type CallRoomEventMap,
+  type CallRoomOptions,
+} from "./call-room.js";
+export {
   RelayAPIError,
   RelayWebhookConfiguredError,
   type RelayAPIErrorOptions,

@@ -1,5 +1,6 @@
 import { RelayAPIError, isAbortError } from "./errors.js";
 import { ChatsPage, MessagesPage } from "./pagination.js";
+import { CallRoom, type CallRoomOptions } from "./call-room.js";
 import type {
   AcceptedResponse,
   Attachment,
@@ -126,6 +127,10 @@ class Transport {
     this.#maxRetries = options.maxRetries ?? 2;
     this.#timeout = options.timeout ?? 15_000;
     this.#retryBaseDelayMs = options.retryBaseDelayMs ?? 250;
+  }
+
+  callRoom(callID: string, options?: CallRoomOptions): CallRoom {
+    return new CallRoom(callID, this.baseURL, this.#apiKey, options);
   }
 
   async request<T>(request: InternalRequest): Promise<T> {
@@ -800,6 +805,11 @@ export class Calls {
     return this.transport.request({
       method: "GET", path: `/v1/chats/${pathID(chatID)}/calls`, query, options,
     });
+  }
+
+  /** Authenticated WebRTC signaling room for this Call participant. */
+  room(callID: string, options?: CallRoomOptions): CallRoom {
+    return this.transport.callRoom(callID, options);
   }
 
 
