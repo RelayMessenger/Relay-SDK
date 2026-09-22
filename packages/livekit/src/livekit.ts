@@ -271,6 +271,15 @@ export class RelayLiveKitCall {
     this.#session = undefined;
   }
 
+  /**
+   * Resolves once the person's audio has arrived and the room shows them
+   * connected (the transport's `peerAudio`). Await it before starting the
+   * AgentSession so the greeting is heard.
+   */
+  waitForPeerAudio(timeoutMs: number): Promise<void> {
+    return this.transport.waitForPeerAudio(timeoutMs);
+  }
+
   /** ICE candidates and state transitions for this call, with a one-line summary for logs. */
   diagnostics(): RelayCallIceDiagnostics {
     return this.transport.diagnostics();

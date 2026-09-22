@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import type { CallRoom, CallRoomEventMap, Relay } from "@relaymessenger/sdk";
+import type { CallRoom, CallRoomEventMap, CallRoomStateFrame, Relay } from "@relaymessenger/sdk";
 import {
   RelayCallTransport,
   type RelayMediaStreamTrackLike,
@@ -538,4 +538,62 @@ it("answers a pull offer carrying a video m-line receive-only and keeps receivin
 
   expect(errors).toEqual([]);
   expect(inbound.length).toBeGreaterThan(15);
+}, 30_000);
+
+it("resolves waitForPeerAudio after the person's pulled audio arrives over werift and the room shows them connected", async () => {
+  const factory = createWeriftWebRTCFactory();
+  const room = new LoopbackRoom();
+  const transport = new RelayCallTransport({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: room as unknown as CallRoom,
+    webRTC: factory,
+  });
+  const offer = room.next("offer");
+  const connecting = transport.connect();
+  const { sfu } = await answerAsSfu(factory, room, await offer);
+  await connecting;
+  let peerAudioAt: number | undefined;
+  transport.on("peerAudio", () => { peerAudioAt = performance.now(); });
+  const waiting = transport.waitForPeerAudio(10_000);
+
+  const roomState = (connected: boolean) => ({
+    type: "roomState",
+    call: { id: "call", chat_id: "chat", status: "in-progress" },
+    participants: [
+      { contact_id: "user", kind: "user", attached: true, track: "audio", muted: false, connected },
+      { contact_id: "agent", kind: "agent", attached: true, track: "audio", muted: false, connected: true },
+    ],
+  }) as unknown as CallRoomStateFrame;
+  room.emit("roomState", roomState(true));
+
+  // The pull: the SFU offers the person's track into this session.
+  const personAudio = factory.createAudioSource();
+  const personTrack = personAudio.createTrack();
+  sfu.addTransceiver(personTrack, { direction: "sendonly" });
+  await sfu.setLocalDescription(await sfu.createOffer());
+  await waitForIce(sfu);
+  const pullAnswer = room.next("answer");
+  room.emit("offer", { type: "offer", session_description: { type: "offer", sdp: sfu.localDescription!.sdp }, track: "audio" });
+  await sfu.setRemoteDescription((await pullAnswer).session_description);
+  await sleep(300);
+  expect(peerAudioAt).toBeUndefined();
+
+  const speakingFrom = performance.now();
+  for (let slice = 0; slice < 30; slice += 1) {
+    personAudio.onData({
+      samples: sineSlice(slice, TONE_AMPLITUDE),
+      sampleRate: WERIFT_SAMPLE_RATE,
+      bitsPerSample: 16,
+      channelCount: WERIFT_CHANNEL_COUNT,
+      numberOfFrames: (WERIFT_SAMPLE_RATE * SLICE_MS) / 1000,
+    });
+    await sleep(SLICE_MS);
+  }
+  await waiting;
+  expect(peerAudioAt).toBeGreaterThanOrEqual(speakingFrom);
+  expect(transport.diagnostics().inbound.rtpPackets).toBeGreaterThan(0);
+  transport.close();
+  personTrack.stop();
+  sfu.close();
 }, 30_000);

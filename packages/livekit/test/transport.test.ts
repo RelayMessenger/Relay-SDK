@@ -866,3 +866,77 @@ it("answers a pull offer that adds the person's video, never decodes it, and rep
   expect(errors).toEqual([]);
   transport.close();
 });
+
+it("fires peerAudio once, only when the person's audio has arrived and roomState shows them connected", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  let fired = 0;
+  transport.on("peerAudio", () => { fired += 1; });
+  await connectTransport(transport, room);
+  let resolved = false;
+  const waiting = transport.waitForPeerAudio(10_000).then(() => { resolved = true; });
+
+  // Our own media is connected, the person is not, and no audio of theirs has arrived.
+  room.emit("roomState", roomStateFrame("in-progress", { connected: false }));
+  webRTC.peer.ontrack?.({ track: new FakeTrack() });
+  await flush();
+  expect(fired).toBe(0);
+
+  // Their audio arrives, but the room still shows them not connected.
+  const frame = { samples: new Int16Array([5, 5]), sampleRate: 48_000, bitsPerSample: 16, channelCount: 1 };
+  webRTC.sinks[0]!.ondata?.(frame);
+  await flush();
+  expect(fired).toBe(0);
+  expect(resolved).toBe(false);
+
+  room.emit("roomState", roomStateFrame("in-progress", { connected: true }));
+  await waiting;
+  expect(fired).toBe(1);
+  webRTC.sinks[0]!.ondata?.(frame);
+  room.emit("roomState", roomStateFrame("in-progress", { connected: true }));
+  expect(fired).toBe(1);
+  await expect(transport.waitForPeerAudio(1)).resolves.toBeUndefined();
+  transport.close();
+});
+
+it("fires peerAudio when the person is connected first and their audio arrives second", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  await connectTransport(transport, room);
+  const waiting = transport.waitForPeerAudio(10_000);
+  room.emit("roomState", roomStateFrame("in-progress", { connected: true }));
+  webRTC.peer.ontrack?.({ track: new FakeTrack() });
+  webRTC.sinks[0]!.ondata?.({ samples: new Int16Array([1]), sampleRate: 48_000, bitsPerSample: 16, channelCount: 1 });
+  await expect(waiting).resolves.toBeUndefined();
+  transport.close();
+});
+
+it("rejects waitForPeerAudio on timeout, on the Call ending, and on close", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  await connectTransport(transport, room);
+  room.emit("roomState", roomStateFrame("in-progress", { connected: true }));
+
+  const timedOut = transport.waitForPeerAudio(3_000).then(() => undefined, (error: Error) => error);
+  await vi.advanceTimersByTimeAsync(2_999);
+  const ending = transport.waitForPeerAudio(60_000).then(() => undefined, (error: Error) => error);
+  await vi.advanceTimersByTimeAsync(1);
+  expect((await timedOut)?.message).toMatch(/^Timed out waiting for the person's audio \(local: /);
+  room.emit("ended", { type: "ended", reason: "canceled" });
+  expect((await ending)?.message).toBe("Relay Call ended before the person's audio arrived (canceled).");
+  await expect(transport.waitForPeerAudio(1_000)).rejects.toThrow(/ended before the person's audio/);
+  transport.close();
+
+  const closing = new FakeRoom();
+  const other = makeTransport(closing, new FakeWebRTC());
+  await connectTransport(other, closing);
+  const pending = other.waitForPeerAudio(60_000);
+  other.close();
+  await expect(pending).rejects.toThrow("Relay Call transport closed before the person's audio arrived.");
+  await expect(other.waitForPeerAudio(0)).rejects.toThrow("waitForPeerAudio timeoutMs must be greater than zero.");
+});

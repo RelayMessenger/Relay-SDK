@@ -346,6 +346,36 @@ it("asks the engine for LiveKit's 24 kHz mono room input and hands the session m
   await call.close();
 });
 
+it("exposes the transport's peerAudio wait on RelayLiveKitCall", async () => {
+  const webRTC = new ConnectingWebRTC();
+  const room = new ConnectingRoom();
+  const call = await RelayLiveKitCall.connect({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: room as unknown as CallRoom,
+    webRTC,
+  });
+  let resolved = false;
+  const waiting = call.waitForPeerAudio(5_000).then(() => { resolved = true; });
+  webRTC.peers[0]!.ontrack?.({ track: { kind: "audio", stop: () => {} } });
+  webRTC.sinks[0]!.sink.ondata?.({ samples: new Int16Array(480), sampleRate: 24_000, bitsPerSample: 16, channelCount: 1 });
+  await Promise.resolve();
+  expect(resolved).toBe(false);
+  for (const listener of room.listeners.get("roomState") ?? []) {
+    listener({
+      type: "roomState",
+      call: { status: "in-progress" },
+      participants: [
+        { contact_id: "user", kind: "user", attached: true, track: "audio", muted: false, connected: true },
+        { contact_id: "agent", kind: "agent", attached: true, track: "audio", muted: false, connected: true },
+      ],
+    });
+  }
+  await waiting;
+  expect(resolved).toBe(true);
+  await call.close();
+});
+
 it("delivers every inbound frame in order when the transport emits faster than the session reads", async () => {
   const transport = new FakeTransport();
   const input = new RelayAudioInput(transport as unknown as RelayCallTransport);

@@ -300,6 +300,14 @@ type TransportEventMap = {
   roomState: [CallRoomStateFrame];
   /** The person's camera started (`true`) or stopped (`false`) sending, from `roomState`. */
   remoteVideo: [boolean];
+  /**
+   * Once per call: the person's audio has reached this peer (first inbound
+   * frame on the pulled track) and `roomState` shows the person connected. The
+   * room pulls both directions together, so from here the person hears what is
+   * written; start speaking after this, as LiveKit Agents start a session once
+   * the participant is in the room.
+   */
+  peerAudio: [];
   ended: [CallRoomEndedFrame];
   error: [Error];
   close: [RelayCallTransportCloseEvent];
@@ -558,6 +566,10 @@ export class RelayCallTransport {
   #disconnectTimer: NodeJS.Timeout | undefined;
   #callStatus: CallStatus | undefined;
   #remoteVideo = false;
+  #personConnected = false;
+  #peerAudioArrived = false;
+  #peerAudioReady = false;
+  readonly #peerAudioWaiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>();
   #ended = false;
   #audioGeneration = 0;
   /** `waitForPlayout()` callers released early by `clearAudio()` or `close()`. */
@@ -823,6 +835,42 @@ export class RelayCallTransport {
     this.#releasePlayoutWaiters();
   }
 
+  /**
+   * Resolves once `peerAudio` has fired (at once if it already has). Rejects
+   * after `timeoutMs`, or when the Call ends or the transport closes first.
+   */
+  waitForPeerAudio(timeoutMs: number): Promise<void> {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      return Promise.reject(new Error("waitForPeerAudio timeoutMs must be greater than zero."));
+    }
+    if (this.#peerAudioReady) return Promise.resolve();
+    if (this.#closed || this.#ended) {
+      return Promise.reject(new RelayCallTransportError("Relay Call ended before the person's audio arrived."));
+    }
+    return new Promise<void>((resolve, reject) => {
+      const waiter = {
+        resolve: () => { clearTimeout(timer); this.#peerAudioWaiters.delete(waiter); resolve(); },
+        reject: (error: Error) => { clearTimeout(timer); this.#peerAudioWaiters.delete(waiter); reject(error); },
+      };
+      const timer = setTimeout(() => waiter.reject(new RelayCallTransportError(
+        `Timed out waiting for the person's audio (${this.diagnostics().summary})`,
+      )), timeoutMs);
+      timer.unref?.();
+      this.#peerAudioWaiters.add(waiter);
+    });
+  }
+
+  #checkPeerAudio(): void {
+    if (this.#peerAudioReady || !this.#peerAudioArrived || !this.#personConnected) return;
+    this.#peerAudioReady = true;
+    for (const waiter of [...this.#peerAudioWaiters]) waiter.resolve();
+    this.#emit("peerAudio");
+  }
+
+  #rejectPeerAudio(error: Error): void {
+    for (const waiter of [...this.#peerAudioWaiters]) waiter.reject(error);
+  }
+
   setMuted(muted: boolean): void {
     this.#room.userUpdate({ muted });
   }
@@ -835,6 +883,7 @@ export class RelayCallTransport {
     if (this.#closed) return;
     this.#closed = true;
     this.#rejectReady(new RelayCallTransportError("Relay Call transport closed before media connected."));
+    this.#rejectPeerAudio(new RelayCallTransportError("Relay Call transport closed before the person's audio arrived."));
     this.#audioGeneration += 1;
     this.#shutdownMedia();
     this.#releasePlayoutWaiters();
@@ -905,11 +954,14 @@ export class RelayCallTransport {
       this.#callStatus = frame.call?.status;
       // A Call has exactly one agent; the transport is that agent, so the
       // person is the other participant.
-      const video = frame.participants?.find((participant) => participant.kind === "user")?.video === true;
+      const person = frame.participants?.find((participant) => participant.kind === "user");
+      const video = person?.video === true;
       const videoChanged = video !== this.#remoteVideo;
       this.#remoteVideo = video;
+      this.#personConnected = person?.connected === true;
       this.#emit("roomState", frame);
       if (videoChanged) this.#emit("remoteVideo", video);
+      this.#checkPeerAudio();
     });
     this.#room.on("error", (error: CallRoomErrorFrame | Error) => {
       if (error instanceof Error) {
@@ -921,6 +973,9 @@ export class RelayCallTransport {
       this.#ended = true;
       this.#endedReason = frame.reason;
       this.#rejectReady(new RelayCallTransportError(`Relay Call ended before media connected (${frame.reason}).`));
+      this.#rejectPeerAudio(new RelayCallTransportError(
+        `Relay Call ended before the person's audio arrived (${frame.reason}).`,
+      ));
       this.clearAudio();
       this.#shutdownMedia();
       this.#emit("ended", frame);
@@ -1132,6 +1187,10 @@ export class RelayCallTransport {
         sampleRate: data.sampleRate,
         channelCount,
       });
+      if (!this.#peerAudioArrived) {
+        this.#peerAudioArrived = true;
+        this.#checkPeerAudio();
+      }
     };
   }
 
