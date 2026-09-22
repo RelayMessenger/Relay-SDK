@@ -108,7 +108,20 @@ The same facts are available at any time from `call.diagnostics()` or
 `transport.diagnostics()`: local candidate counts by type, the remote
 candidates' transport and port (never their address), the ICE gathering, ICE
 connection and peer connection state changes with their offsets from
-`connect()`, and the one-line `summary`.
+`connect()`, packet counts in both directions (`inbound`: RTP received, Opus
+decode failures, PCM frames delivered, first and last packet offsets, packets
+in the last 5 s; `outbound`: PCM frames accepted, Opus packets, RTP written,
+first and last packet offsets, packets in the last 5 s, paced queue size,
+pacer state), the room frames seen (`roomState` count, pull `offer` count,
+`ended` reason, `error` messages), and the one-line `summary`, for example
+`…; in: 1234 rtp, 0 bad, 1234 frames, first 0.9s last 41.2s, 250/5s; out: 2050 frames, 2050 opus, 2050 rtp, first 1.1s last 41.0s, 250/5s, queue 0, pacer alive; room: 3 roomState, 1 offer`.
+Packet counts come from the `werift` engine; `wrtc` reports zero packets and
+`pacer n/a`.
+
+`onWarning` is called once per call, with the summary, when outbound audio is
+queued but no RTP packet has been written for 2 s while media is connected.
+Nothing is restarted; the callback exists so the failing direction is named in
+the agent's logs.
 
 `RelayCallTransport` consumes the SDK's `CallRoom`; it does not duplicate the
 room protocol. The default engine is `werift` (pure TypeScript WebRTC) with
