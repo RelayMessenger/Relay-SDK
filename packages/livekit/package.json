@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/livekit",
-  "version": "0.1.0-staging.6",
+  "version": "0.1.0-staging.7",
   "description": "Relay WebRTC audio transport and LiveKit Agents integration for Node.js.",
   "type": "module",
   "sideEffects": false,
@@ -38,7 +38,7 @@
   "license": "MIT",
   "dependencies": {
     "@evan/opus": "1.0.3",
-    "@relaymessenger/sdk": "0.3.6-staging.16",
+    "@relaymessenger/sdk": "0.3.6-staging.17",
     "werift": "0.24.4"
   },
   "optionalDependencies": {
