@@ -205,10 +205,17 @@ export interface RelayLiveKitConnectOptions extends RelayLiveKitAudioOptions {
   iceTransportPolicy?: RelayIceTransportPolicy;
   /** @internal */
   iceGatheringTimeoutMs?: number;
-  /** Maximum wait for WebRTC media to connect. Defaults to 15 seconds. */
+  /**
+   * How long one SFU session has to connect before the transport restarts onto
+   * a new one. Defaults to 5 seconds. `connect()` has no overall deadline.
+   */
+  sessionConnectTimeoutMs?: number;
+  /** @deprecated Use `sessionConnectTimeoutMs`; now the per-session wait, not a `connect()` deadline. */
   mediaConnectTimeoutMs?: number;
-  /** @deprecated Use `mediaConnectTimeoutMs`. */
+  /** @deprecated Use `sessionConnectTimeoutMs`. */
   connectionTimeoutMs?: number;
+  /** Aborting stops `connect()` and closes the transport; the Call itself is not ended. */
+  signal?: AbortSignal;
 }
 
 type AgentSessionAudioTarget = Pick<AgentSession, "input" | "output">;
@@ -244,6 +251,9 @@ export class RelayLiveKitCall {
       ...(options.iceGatheringTimeoutMs === undefined
         ? {}
         : { iceGatheringTimeoutMs: options.iceGatheringTimeoutMs }),
+      ...(options.sessionConnectTimeoutMs === undefined
+        ? {}
+        : { sessionConnectTimeoutMs: options.sessionConnectTimeoutMs }),
       ...(options.mediaConnectTimeoutMs === undefined
         ? {}
         : { mediaConnectTimeoutMs: options.mediaConnectTimeoutMs }),
@@ -252,7 +262,7 @@ export class RelayLiveKitCall {
         : { connectionTimeoutMs: options.connectionTimeoutMs }),
     };
     const transport = new RelayCallTransport(transportOptions);
-    await transport.connect();
+    await transport.connect(options.signal ? { signal: options.signal } : {});
     return new RelayLiveKitCall(transport, createRelayLiveKitAudio(transport, options));
   }
 

@@ -111,14 +111,30 @@ const call = await RelayLiveKitCall.connect({
     },
   ],
   iceTransportPolicy: "all",
-  mediaConnectTimeoutMs: 15_000,
 });
 ```
 
-`mediaConnectTimeoutMs` bounds the wait for the media peer to reach
-`connected` (15 seconds by default). When that wait expires, the error message
-carries what ICE saw, for example
-`Timed out connecting Relay WebRTC media (local: host 2, srflx 0, relay 0; remote: udp 1473; states: new→complete 0.2s, connecting 0.3s, no connected)`.
+`iceServers` may also be a function; it is called before every peer
+connection, so it can mint fresh TURN credentials for each restart.
+
+`connect()` resolves when media first reaches `connected`. It has no overall
+deadline: when an SFU session is not `connected` within
+`sessionConnectTimeoutMs` (5 seconds by default) of its answer, becomes
+`failed`, or stays `disconnected` for 7 seconds, the transport closes that
+peer, waits 250 ms (x1.1 per further attempt, at most 10 s), and publishes
+from a new peer on a new session, for as long as the Call is ringing or in
+progress. Outgoing audio keeps flowing into the new peer. `connect()` rejects
+only when the Call ends, the room or transport closes, the room reports an
+error, or the `signal` passed to it aborts. Each replacement emits
+`restarted` with the reason and the replaced session's summary, for example
+`local: host 2, srflx 0, relay 0; remote: udp 1473; states: new→complete 0.2s, connecting 0.3s, no connected; …`,
+and `diagnostics().restarts` counts them. `mediaConnectTimeoutMs` and
+`connectionTimeoutMs` are deprecated names for `sessionConnectTimeoutMs`.
+
+`call.waitForPeerAudio(timeoutMs)` resolves once the person's audio has
+arrived and the room shows them connected (the transport's `peerAudio` event);
+start the agent's session after it so the first words are heard.
+
 The same facts are available at any time from `call.diagnostics()` or
 `transport.diagnostics()`: local candidate counts by type, the remote
 candidates' transport and port (never their address), the ICE gathering, ICE

@@ -141,6 +141,8 @@ export type RelayCallRestartReason = "timeout" | "failed" | "disconnected" | "er
 
 export interface RelayCallRestartEvent {
   reason: RelayCallRestartReason;
+  /** `diagnostics().summary` of the session being replaced, taken as it was given up. */
+  summary: string;
   /** Restarts since `connect()`, this one included. */
   restarts: number;
   /** Backoff waited before the new peer was built. */
@@ -207,11 +209,15 @@ export interface RelayCallTransportOptions {
   /** @internal */
   iceGatheringTimeoutMs?: number;
   /**
-   * Maximum wait in `connect()` for WebRTC media to connect, restarts
-   * included. Defaults to 15 seconds.
+   * How long one SFU session has, after its answer is applied, to reach
+   * `connected` before the transport restarts onto a new session. Defaults to
+   * 5 seconds. `connect()` itself has no deadline: it waits through restarts
+   * until media connects, the Call ends, `close()` is called, or its signal aborts.
    */
+  sessionConnectTimeoutMs?: number;
+  /** @deprecated Use `sessionConnectTimeoutMs`; now the per-session wait, not a `connect()` deadline. */
   mediaConnectTimeoutMs?: number;
-  /** @deprecated Use `mediaConnectTimeoutMs`. */
+  /** @deprecated Use `sessionConnectTimeoutMs`. */
   connectionTimeoutMs?: number;
   /**
    * PCM format of the `audio` events: the Opus decoder decodes the remote
@@ -317,7 +323,6 @@ type TransportEvent = keyof TransportEventMap;
 type TransportListener<K extends TransportEvent> = (...args: TransportEventMap[K]) => void;
 
 const DEFAULT_ICE_GATHERING_TIMEOUT_MS = 10_000;
-const DEFAULT_CONNECTION_TIMEOUT_MS = 15_000;
 const AUDIO_SLICE_MS = 10;
 const STALL_CHECK_MS = 500;
 const STALL_AFTER_MS = 2_000;
@@ -338,7 +343,12 @@ export const RESTART_INITIAL_DELAY_MS = 250;
 export const RESTART_BACKOFF_FACTOR = 1.1;
 export const RESTART_MAX_DELAY_MS = 10_000;
 
-/** Backoff before restart number `attempt` (1-based) since the last connection. */
+/**
+ * Backoff before restart number `attempt` (1-based) counted since the last
+ * session that connected. PartyTracks passes `resetOnSuccess: true` to rxjs
+ * `retry` (rxjs-helpers.ts:18, :39); this transport reads "success" as a
+ * session reaching `connected`.
+ */
 export const restartDelayMs = (attempt: number): number =>
   Math.min(RESTART_INITIAL_DELAY_MS * RESTART_BACKOFF_FACTOR ** (attempt - 1), RESTART_MAX_DELAY_MS);
 
@@ -520,7 +530,7 @@ export class RelayCallTransport {
   readonly #providedFactory: RelayWebRTCFactory | undefined;
   readonly #engine: RelayCallEngine;
   readonly #iceGatheringTimeoutMs: number;
-  readonly #connectionTimeoutMs: number;
+  readonly #sessionConnectTimeoutMs: number;
   readonly #iceServers: RelayIceServer[] | RelayIceServersProvider;
   readonly #iceTransportPolicy: RelayIceTransportPolicy;
   readonly #inboundAudio: RelayInboundAudioFormat;
@@ -607,9 +617,10 @@ export class RelayCallTransport {
     }
     this.#inboundAudio = { sampleRate: inbound.sampleRate, channelCount: inbound.channelCount };
     this.#iceGatheringTimeoutMs = options.iceGatheringTimeoutMs ?? DEFAULT_ICE_GATHERING_TIMEOUT_MS;
-    this.#connectionTimeoutMs = options.mediaConnectTimeoutMs
+    this.#sessionConnectTimeoutMs = options.sessionConnectTimeoutMs
+      ?? options.mediaConnectTimeoutMs
       ?? options.connectionTimeoutMs
-      ?? DEFAULT_CONNECTION_TIMEOUT_MS;
+      ?? RESTART_CONNECT_TIMEOUT_MS;
     const policy = options.iceTransportPolicy ?? "all";
     if (policy !== "all" && policy !== "relay") {
       throw new Error('iceTransportPolicy must be "all" or "relay".');
@@ -620,8 +631,8 @@ export class RelayCallTransport {
     if (!Number.isFinite(this.#iceGatheringTimeoutMs) || this.#iceGatheringTimeoutMs <= 0) {
       throw new Error("iceGatheringTimeoutMs must be greater than zero.");
     }
-    if (!Number.isFinite(this.#connectionTimeoutMs) || this.#connectionTimeoutMs <= 0) {
-      throw new Error("mediaConnectTimeoutMs must be greater than zero.");
+    if (!Number.isFinite(this.#sessionConnectTimeoutMs) || this.#sessionConnectTimeoutMs <= 0) {
+      throw new Error("sessionConnectTimeoutMs must be greater than zero.");
     }
     this.#ready = new Promise<void>((resolve, reject) => {
       this.#readyResolve = resolve;
@@ -645,12 +656,36 @@ export class RelayCallTransport {
     return this;
   }
 
-  async connect(): Promise<void> {
+  /**
+   * Join the room, publish, and resolve on the first `connected`. Dead SFU
+   * sessions are replaced as they are found (PROTOCOL.md section 4), with no
+   * overall deadline: this rejects only when the Call ends, the room or
+   * transport closes, the room reports an error, or `signal` aborts (which
+   * also closes the transport).
+   */
+  async connect(options: { signal?: AbortSignal } = {}): Promise<void> {
     if (this.#closed) throw new Error("Relay Call transport is closed.");
+    const { signal } = options;
+    const aborted = (): RelayCallTransportError =>
+      new RelayCallTransportError("Relay Call connect was aborted.", "aborted");
+    if (signal?.aborted) throw aborted();
+    const abort = (): void => {
+      this.#rejectReady(aborted());
+      this.close();
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    try {
+      await this.#connect();
+    } finally {
+      signal?.removeEventListener("abort", abort);
+    }
+  }
+
+  async #connect(): Promise<void> {
     this.#attachRoomHandlers();
     await this.#room.connect();
     if (this.#factory) {
-      await this.#waitForConnection();
+      await this.#ready;
       return;
     }
     this.#factory = this.#providedFactory ?? await loadWebRTCFactory(this.#engine);
@@ -662,7 +697,7 @@ export class RelayCallTransport {
     this.#connectStartedAt = Date.now();
     try {
       await this.#startPeer();
-      await this.#waitForConnection();
+      await this.#ready;
     } catch (error) {
       this.close();
       throw error;
@@ -1079,7 +1114,7 @@ export class RelayCallTransport {
     this.#connectTimer = setTimeout(() => {
       this.#connectTimer = undefined;
       if (!this.#peerConnected) this.#requestRestart("timeout", peer);
-    }, RESTART_CONNECT_TIMEOUT_MS);
+    }, this.#sessionConnectTimeoutMs);
     this.#connectTimer.unref?.();
   }
 
@@ -1105,6 +1140,7 @@ export class RelayCallTransport {
    */
   #requestRestart(reason: RelayCallRestartReason, peer: RelayPeerConnectionLike | undefined): void {
     if (this.#restartPending || peer !== this.#peer || !this.#callActive()) return;
+    const summary = this.diagnostics().summary;
     this.#restartPending = true;
     this.#restarts += 1;
     this.#failedAttempts += 1;
@@ -1127,7 +1163,7 @@ export class RelayCallTransport {
         this.#requestRestart("error", this.#peer);
         return;
       }
-      if (this.#peer) this.#emit("restarted", { reason, restarts, delayMs });
+      if (this.#peer) this.#emit("restarted", { reason, summary, restarts, delayMs });
     });
   }
 
@@ -1238,28 +1274,6 @@ export class RelayCallTransport {
       };
       peer.addEventListener("icegatheringstatechange", changed);
       changed();
-    });
-  }
-
-  async #waitForConnection(): Promise<void> {
-    if (this.#reportedConnected) return;
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new RelayCallTransportError(
-          `Timed out connecting Relay WebRTC media (${this.diagnostics().summary})`,
-        ));
-      }, this.#connectionTimeoutMs);
-      timeout.unref?.();
-      this.#ready.then(
-        () => {
-          clearTimeout(timeout);
-          resolve();
-        },
-        (error: unknown) => {
-          clearTimeout(timeout);
-          reject(error);
-        },
-      );
     });
   }
 
