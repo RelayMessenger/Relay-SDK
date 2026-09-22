@@ -334,6 +334,16 @@ class WeriftAudioSink implements RelayAudioSinkLike {
   }
 }
 
+/**
+ * Video codecs the peer can accept in a pull offer. Nothing decodes video: the
+ * transport only answers the person's `video` m-line receive-only and ignores
+ * the track (PROTOCOL.md section 5). werift matches a remote codec by MIME
+ * type alone (`findCodecByMimeType` in `TransceiverManager.setRemoteRTP`) and
+ * throws "negotiate codecs failed." for a media section with no local codec
+ * of its kind, so an audio-only codec list cannot answer a video m-line.
+ */
+const RECEIVE_VIDEO_MIME_TYPES = ["video/VP8", "video/VP9", "video/H264", "video/AV1"] as const;
+
 export const createWeriftPeerConnection = (
   config: RelayPeerConnectionConfig = { iceServers: [], iceTransportPolicy: "all" },
 ): RTCPeerConnection =>
@@ -349,6 +359,7 @@ export const createWeriftPeerConnection = (
           channels: WERIFT_CHANNEL_COUNT,
         }),
       ],
+      video: RECEIVE_VIDEO_MIME_TYPES.map((mimeType) => new RTCRtpCodecParameters({ mimeType, clockRate: 90_000 })),
     },
   });
 

@@ -8,8 +8,11 @@ import type {
   Relay,
 } from "@relaymessenger/sdk";
 import {
+  RESTART_MAX_DELAY_MS,
   RelayCallTransport,
   RelayCallTransportError,
+  restartDelayMs,
+  type RelayCallRestartEvent,
   type RelayAudioSinkLike,
   type RelayAudioSinkStats,
   type RelayAudioSourceLike,
@@ -98,12 +101,14 @@ class FakePeer implements RelayPeerConnectionLike {
   neverConnects = false;
   readonly transceiver = { mid: "0" };
   direction: "sendonly" | undefined;
+  track: RelayMediaStreamTrackLike | undefined;
   closed = false;
 
   addTransceiver(
-    _track: RelayMediaStreamTrackLike,
+    track: RelayMediaStreamTrackLike,
     init: { direction: "sendonly" },
   ): { mid: string } {
+    this.track = track;
     this.direction = init.direction;
     return this.transceiver;
   }
@@ -131,15 +136,24 @@ class FakePeer implements RelayPeerConnectionLike {
 }
 
 class FakeWebRTC implements RelayWebRTCFactory {
-  readonly peer = new FakePeer();
+  /** Every peer connection built, in order; a restart builds a new one. */
+  readonly peers: FakePeer[] = [];
+  /** The peer the next `createPeerConnection` returns; configure it before it is built. */
+  nextPeer = new FakePeer();
   readonly source = new FakeAudioSource();
+  sourcesCreated = 0;
   readonly sinks: FakeAudioSink[] = [];
   readonly peerConfigs: RelayPeerConnectionConfig[] = [];
+  /** The latest peer built, or the one about to be. */
+  get peer(): FakePeer { return this.peers.at(-1) ?? this.nextPeer; }
   createPeerConnection(config?: RelayPeerConnectionConfig): RelayPeerConnectionLike {
     if (config) this.peerConfigs.push(structuredClone(config));
-    return this.peer;
+    const peer = this.nextPeer;
+    this.peers.push(peer);
+    this.nextPeer = new FakePeer();
+    return peer;
   }
-  createAudioSource(): RelayAudioSourceLike { return this.source; }
+  createAudioSource(): RelayAudioSourceLike { this.sourcesCreated += 1; return this.source; }
   createAudioSink(): RelayAudioSinkLike {
     const sink = new FakeAudioSink();
     this.sinks.push(sink);
@@ -366,7 +380,7 @@ it("hands ICE servers and the transport policy to the WebRTC factory", async () 
   transport.close();
 });
 
-it("names the gathered candidates and ICE states when media never connects", async () => {
+it("names the gathered candidates and ICE states of a session it gives up on", async () => {
   vi.useFakeTimers();
   const room = new FakeRoom();
   const webRTC = new FakeWebRTC();
@@ -376,8 +390,10 @@ it("names the gathered candidates and ICE states when media never connects", asy
     callId: "01995bc0-0000-7000-8000-000000000001",
     roomClient: room as unknown as CallRoom,
     webRTC,
-    mediaConnectTimeoutMs: 2_000,
+    sessionConnectTimeoutMs: 2_000,
   });
+  const restarted: RelayCallRestartEvent[] = [];
+  transport.on("restarted", (event) => restarted.push(event));
   const connecting = transport.connect();
   const failed = connecting.then(() => undefined, (error: unknown) => error as Error);
   await flush();
@@ -403,23 +419,29 @@ it("names the gathered candidates and ICE states when media never connects", asy
   peer.oniceconnectionstatechange?.();
   peer.connectionState = "connecting";
   peer.onconnectionstatechange?.();
-  await vi.advanceTimersByTimeAsync(2_000);
+  const diagnostics = transport.diagnostics();
+  await vi.advanceTimersByTimeAsync(1_999);
+  expect(peer.closed).toBe(false);
+  await vi.advanceTimersByTimeAsync(1 + 250);
+  await flush();
 
-  const error = await failed;
-  expect(error).toBeInstanceOf(RelayCallTransportError);
-  expect(error?.message).toBe(
-    "Timed out connecting Relay WebRTC media (local: host 2, srflx 1, relay 0; remote: udp 1473; "
+  expect(peer.closed).toBe(true);
+  expect(restarted).toHaveLength(1);
+  expect(restarted[0]!.summary).toBe(
+    "local: host 2, srflx 1, relay 0; remote: udp 1473; "
     + "states: new\u2192complete 0.2s, ice checking 0.3s, connecting 0.3s, no connected; "
     + "in: 0 rtp, 0 bad, 0 frames, no packets, 0/5s; "
-    + "out: 0 frames, 0 opus, 0 rtp, no packets, 0/5s, queue 0, pacer idle; room: 0 roomState, 0 offer)",
+    + "out: 0 frames, 0 opus, 0 rtp, no packets, 0/5s, queue 0, pacer idle; room: 0 roomState, 0 offer",
   );
-  expect(error?.message).not.toContain("198.51.100");
-  const diagnostics = transport.diagnostics();
+  expect(restarted[0]!.summary).toBe(diagnostics.summary);
+  expect(restarted[0]!.summary).not.toContain("198.51.100");
   expect(diagnostics.local).toEqual({ host: 2, srflx: 1, relay: 0, other: 0 });
   expect(diagnostics.remote).toEqual([{ transport: "udp", port: 1473 }]);
   expect(diagnostics.connected).toBe(false);
-  expect(error?.message).toContain(diagnostics.summary);
-  expect(webRTC.peer.closed).toBe(true);
+  transport.close();
+  const error = await failed;
+  expect(error).toBeInstanceOf(RelayCallTransportError);
+  expect(error?.message).toBe("Relay Call transport closed before media connected.");
 });
 
 it("counts packets both ways, room frames, and renders one clause per direction", async () => {
@@ -555,4 +577,441 @@ it("refuses an inbound format the wrtc engine cannot decode to, and bad formats 
     ...base,
     inboundAudio: { sampleRate: 24_000, channelCount: 3 as 1 },
   })).toThrow("inboundAudio.channelCount must be 1 or 2.");
+});
+
+const answerLatest = (room: FakeRoom, sdp = "relay-answer"): void => {
+  room.emit("answer", { type: "answer", session_description: { type: "answer", sdp } });
+};
+
+const offersSent = (room: FakeRoom): Array<Record<string, unknown>> =>
+  room.sent.filter((frame) => (frame as { type: string }).type === "offer") as Array<Record<string, unknown>>;
+
+const roomStateFrame = (
+  status: string,
+  person: Record<string, unknown> = {},
+): CallRoomStateFrame => ({
+  type: "roomState",
+  call: { id: "call", chat_id: "chat", status },
+  participants: [
+    { contact_id: "user", kind: "user", attached: true, track: "audio", muted: false, connected: true, ...person },
+    { contact_id: "agent", kind: "agent", attached: true, track: "audio", muted: false, connected: true },
+  ],
+} as unknown as CallRoomStateFrame);
+
+it("restarts onto a new session when the first never connects, and the same source feeds the new peer", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  webRTC.nextPeer.neverConnects = true;
+  const iceCalls: number[] = [];
+  const transport = new RelayCallTransport({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: room as unknown as CallRoom,
+    webRTC,
+    iceServers: async ({ restarts }) => {
+      iceCalls.push(restarts);
+      return [{ urls: "turn:turn.cloudflare.com:3478", username: `u${restarts}`, credential: "c" }];
+    },
+  });
+  const restarted: RelayCallRestartEvent[] = [];
+  transport.on("restarted", (event) => restarted.push(event));
+  const inbound: number[] = [];
+  transport.on("audio", (frame) => inbound.push(frame.samples[0]!));
+  let connected = false;
+  const connecting = transport.connect().then(() => { connected = true; });
+  await flush();
+  answerLatest(room);
+  await flush();
+  const first = webRTC.peers[0]!;
+  expect(offersSent(room)).toEqual([{
+    type: "offer",
+    session_description: { type: "offer", sdp: "offer-sdp" },
+    tracks: [{ mid: "0", name: "audio" }],
+  }]);
+
+  // Audio written while the first session is dead goes into the one source.
+  await transport.writeAudio({ samples: new Int16Array(480).fill(1), sampleRate: 48_000, channelCount: 1 });
+  await vi.advanceTimersByTimeAsync(4_999);
+  expect(webRTC.peers).toHaveLength(1);
+  expect(first.closed).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(first.closed).toBe(true);
+  expect(webRTC.peers).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(250);
+  await flush();
+
+  const second = webRTC.peers[1]!;
+  expect(webRTC.peers).toHaveLength(2);
+  expect(offersSent(room).at(-1)).toEqual({
+    type: "offer",
+    session_description: { type: "offer", sdp: "offer-sdp" },
+    tracks: [{ mid: "0", name: "audio" }],
+    restart: true,
+  });
+  expect(iceCalls).toEqual([0, 1]);
+  expect(webRTC.peerConfigs.map((config) => config.iceServers[0]?.username)).toEqual(["u0", "u1"]);
+  expect(restarted).toMatchObject([{ reason: "timeout", restarts: 1, delayMs: 250 }]);
+  expect(connected).toBe(false);
+
+  answerLatest(room, "relay-answer-2");
+  await connecting;
+  expect(connected).toBe(true);
+  expect(second.remoteDescription?.sdp).toBe("relay-answer-2");
+  expect(room.sent.filter((frame) => (frame as { type: string }).type === "connected")).toHaveLength(1);
+
+  // One source and one local track for the whole call, handed to each new peer.
+  expect(webRTC.sourcesCreated).toBe(1);
+  expect(first.track).toBe(webRTC.source.track);
+  expect(second.track).toBe(webRTC.source.track);
+  expect(webRTC.source.track.stopped).toBe(false);
+  await transport.writeAudio({ samples: new Int16Array(480).fill(2), sampleRate: 48_000, channelCount: 1 });
+  expect(webRTC.source.data.map((frame) => frame.samples[0])).toEqual([1, 2]);
+
+  // The new peer's remote track feeds the same `audio` event.
+  second.ontrack?.({ track: new FakeTrack() });
+  webRTC.sinks.at(-1)?.ondata?.({ samples: new Int16Array([7, 7]), sampleRate: 48_000, bitsPerSample: 16, channelCount: 1 });
+  expect(inbound).toEqual([7]);
+  expect(transport.diagnostics().restarts).toBe(1);
+  expect(transport.diagnostics().summary).toMatch(/; restarts 1$/);
+  transport.close();
+});
+
+it("restarts at once when the connection state becomes failed, and ignores the retired peer", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  const restarted: RelayCallRestartEvent[] = [];
+  transport.on("restarted", (event) => restarted.push(event));
+  const errors: Error[] = [];
+  transport.on("error", (error) => errors.push(error));
+  await connectTransport(transport, room);
+  const first = webRTC.peers[0]!;
+  const firstSink = (first.ontrack?.({ track: new FakeTrack() }), webRTC.sinks[0]!);
+
+  first.connectionState = "failed";
+  first.onconnectionstatechange?.();
+  expect(first.closed).toBe(true);
+  expect(firstSink.stopped).toBe(true);
+  expect(first.onconnectionstatechange).toBeNull();
+  await vi.advanceTimersByTimeAsync(250);
+  await flush();
+  expect(webRTC.peers).toHaveLength(2);
+  expect(offersSent(room).at(-1)?.restart).toBe(true);
+  expect(restarted).toMatchObject([{ reason: "failed", restarts: 1, delayMs: 250 }]);
+  expect(errors).toEqual([]);
+  transport.close();
+});
+
+it("restarts after the connection stays disconnected for 7 s, not when it recovers", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  const restarted: RelayCallRestartEvent[] = [];
+  transport.on("restarted", (event) => restarted.push(event));
+  await connectTransport(transport, room);
+  const first = webRTC.peers[0]!;
+
+  first.connectionState = "disconnected";
+  first.onconnectionstatechange?.();
+  await vi.advanceTimersByTimeAsync(3_000);
+  first.connectionState = "connected";
+  first.onconnectionstatechange?.();
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(webRTC.peers).toHaveLength(1);
+  expect(room.sent.filter((frame) => (frame as { type: string }).type === "connected")).toHaveLength(1);
+
+  first.connectionState = "disconnected";
+  first.onconnectionstatechange?.();
+  await vi.advanceTimersByTimeAsync(6_999);
+  expect(first.closed).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(first.closed).toBe(true);
+  await vi.advanceTimersByTimeAsync(250);
+  await flush();
+  expect(webRTC.peers).toHaveLength(2);
+  expect(restarted).toMatchObject([{ reason: "disconnected", restarts: 1, delayMs: 250 }]);
+  transport.close();
+});
+
+it("backs off 250 ms x1.1 per dead session, capped at 10 s, resets on connect, and stops when the Call ends", async () => {
+  expect(restartDelayMs(1)).toBe(250);
+  expect(restartDelayMs(2)).toBeCloseTo(275, 9);
+  expect(restartDelayMs(3)).toBeCloseTo(302.5, 9);
+  expect(restartDelayMs(40)).toBe(RESTART_MAX_DELAY_MS);
+  expect(RESTART_MAX_DELAY_MS).toBe(10_000);
+
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  webRTC.nextPeer.neverConnects = true;
+  const transport = new RelayCallTransport({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: room as unknown as CallRoom,
+    webRTC,
+  });
+  const delays: number[] = [];
+  transport.on("restarted", (event) => delays.push(event.delayMs));
+  const connecting = transport.connect();
+  await flush();
+  room.emit("roomState", roomStateFrame("ringing"));
+  const offerTimes: number[] = [];
+  const started = Date.now();
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    webRTC.nextPeer.neverConnects = true;
+    offerTimes.push(Date.now() - started);
+    answerLatest(room);
+    await flush();
+    const before = webRTC.peers.length;
+    while (webRTC.peers.length === before) await vi.advanceTimersByTimeAsync(1);
+    await flush();
+  }
+  expect(delays.map((ms) => Math.round(ms * 100) / 100)).toEqual([250, 275, 302.5, 332.75]);
+  // Answer applied at once, so each gap is the 5 s connect wait plus that backoff.
+  const gaps = offerTimes.slice(1).map((ms, index) => ms - offerTimes[index]!);
+  [5_250, 5_275, 5_302.5].forEach((expected, index) => expect(Math.abs(gaps[index]! - expected)).toBeLessThanOrEqual(1));
+
+  // A session that connects resets the backoff to 250 ms.
+  webRTC.peer.neverConnects = false;
+  answerLatest(room);
+  await connecting;
+  const live = webRTC.peers.at(-1)!;
+  live.connectionState = "failed";
+  live.onconnectionstatechange?.();
+  await vi.advanceTimersByTimeAsync(250);
+  await flush();
+  expect(delays.at(-1)).toBe(250);
+
+  // Terminal status: the dead session is not replaced.
+  room.emit("roomState", roomStateFrame("completed"));
+  const peersBefore = webRTC.peers.length;
+  const last = webRTC.peers.at(-1)!;
+  last.connectionState = "failed";
+  last.onconnectionstatechange?.();
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect(webRTC.peers).toHaveLength(peersBefore);
+  expect(last.closed).toBe(false);
+  transport.close();
+});
+
+it("stops a pending restart when the Call ends during the backoff", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  const errors: Error[] = [];
+  transport.on("error", (error) => errors.push(error));
+  await connectTransport(transport, room);
+  const first = webRTC.peers[0]!;
+  first.connectionState = "failed";
+  first.onconnectionstatechange?.();
+  room.emit("ended", { type: "ended", reason: "completed" });
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(webRTC.peers).toHaveLength(1);
+  expect(offersSent(room)).toHaveLength(1);
+  expect(transport.diagnostics().restarts).toBe(1);
+  expect(errors).toEqual([]);
+  transport.close();
+});
+
+it("drops a pull offer for the replaced session while the restart offer is unanswered", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  const errors: Error[] = [];
+  transport.on("error", (error) => errors.push(error));
+  await connectTransport(transport, room);
+  const first = webRTC.peers[0]!;
+  first.connectionState = "failed";
+  first.onconnectionstatechange?.();
+  room.emit("offer", { type: "offer", session_description: { type: "offer", sdp: "old-pull" }, track: "audio" });
+  await vi.advanceTimersByTimeAsync(250);
+  await flush();
+  const second = webRTC.peers[1]!;
+  expect(second.signalingState).toBe("have-local-offer");
+  expect(second.remoteDescription).toBeNull();
+  expect(room.sent.filter((frame) => (frame as { type: string }).type === "answer")).toEqual([]);
+  expect(errors).toEqual([]);
+  transport.close();
+});
+
+it("answers a pull offer that adds the person's video, never decodes it, and reports the camera from roomState", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  const errors: Error[] = [];
+  transport.on("error", (error) => errors.push(error));
+  const video: boolean[] = [];
+  transport.on("remoteVideo", (on) => video.push(on));
+  await connectTransport(transport, room);
+
+  room.emit("roomState", roomStateFrame("in-progress", { video: false, tracks: ["audio"] }));
+  room.emit("offer", {
+    type: "offer",
+    session_description: { type: "offer", sdp: "relay-subscription-with-video" },
+    track: "video",
+  });
+  await flush();
+  expect(webRTC.peer.remoteDescription?.sdp).toBe("relay-subscription-with-video");
+  expect(room.sent.at(-1)).toEqual({ type: "answer", session_description: { type: "answer", sdp: "answer-sdp" } });
+
+  const videoTrack = new FakeTrack();
+  videoTrack.kind = "video";
+  webRTC.peer.ontrack?.({ track: videoTrack });
+  expect(webRTC.sinks).toHaveLength(0);
+  webRTC.peer.ontrack?.({ track: new FakeTrack() });
+  expect(webRTC.sinks).toHaveLength(1);
+
+  room.emit("roomState", roomStateFrame("in-progress", { video: true, tracks: ["audio", "video"] }));
+  room.emit("roomState", roomStateFrame("in-progress", { video: true, tracks: ["audio", "video"] }));
+  room.emit("roomState", roomStateFrame("in-progress", { video: false, tracks: ["audio", "video"] }));
+  expect(video).toEqual([true, false]);
+  expect(errors).toEqual([]);
+  transport.close();
+});
+
+it("fires peerAudio once, only when the person's audio has arrived and roomState shows them connected", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  let fired = 0;
+  transport.on("peerAudio", () => { fired += 1; });
+  await connectTransport(transport, room);
+  let resolved = false;
+  const waiting = transport.waitForPeerAudio(10_000).then(() => { resolved = true; });
+
+  // Our own media is connected, the person is not, and no audio of theirs has arrived.
+  room.emit("roomState", roomStateFrame("in-progress", { connected: false }));
+  webRTC.peer.ontrack?.({ track: new FakeTrack() });
+  await flush();
+  expect(fired).toBe(0);
+
+  // Their audio arrives, but the room still shows them not connected.
+  const frame = { samples: new Int16Array([5, 5]), sampleRate: 48_000, bitsPerSample: 16, channelCount: 1 };
+  webRTC.sinks[0]!.ondata?.(frame);
+  await flush();
+  expect(fired).toBe(0);
+  expect(resolved).toBe(false);
+
+  room.emit("roomState", roomStateFrame("in-progress", { connected: true }));
+  await waiting;
+  expect(fired).toBe(1);
+  webRTC.sinks[0]!.ondata?.(frame);
+  room.emit("roomState", roomStateFrame("in-progress", { connected: true }));
+  expect(fired).toBe(1);
+  await expect(transport.waitForPeerAudio(1)).resolves.toBeUndefined();
+  transport.close();
+});
+
+it("fires peerAudio when the person is connected first and their audio arrives second", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  await connectTransport(transport, room);
+  const waiting = transport.waitForPeerAudio(10_000);
+  room.emit("roomState", roomStateFrame("in-progress", { connected: true }));
+  webRTC.peer.ontrack?.({ track: new FakeTrack() });
+  webRTC.sinks[0]!.ondata?.({ samples: new Int16Array([1]), sampleRate: 48_000, bitsPerSample: 16, channelCount: 1 });
+  await expect(waiting).resolves.toBeUndefined();
+  transport.close();
+});
+
+it("rejects waitForPeerAudio on timeout, on the Call ending, and on close", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  await connectTransport(transport, room);
+  room.emit("roomState", roomStateFrame("in-progress", { connected: true }));
+
+  const timedOut = transport.waitForPeerAudio(3_000).then(() => undefined, (error: Error) => error);
+  await vi.advanceTimersByTimeAsync(2_999);
+  const ending = transport.waitForPeerAudio(60_000).then(() => undefined, (error: Error) => error);
+  await vi.advanceTimersByTimeAsync(1);
+  expect((await timedOut)?.message).toMatch(/^Timed out waiting for the person's audio \(local: /);
+  room.emit("ended", { type: "ended", reason: "canceled" });
+  expect((await ending)?.message).toBe("Relay Call ended before the person's audio arrived (canceled).");
+  await expect(transport.waitForPeerAudio(1_000)).rejects.toThrow(/ended before the person's audio/);
+  transport.close();
+
+  const closing = new FakeRoom();
+  const other = makeTransport(closing, new FakeWebRTC());
+  await connectTransport(other, closing);
+  const pending = other.waitForPeerAudio(60_000);
+  other.close();
+  await expect(pending).rejects.toThrow("Relay Call transport closed before the person's audio arrived.");
+  await expect(other.waitForPeerAudio(0)).rejects.toThrow("waitForPeerAudio timeoutMs must be greater than zero.");
+});
+
+it("connect() has no deadline: three dead sessions then a live one resolves it", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  const restarted: RelayCallRestartEvent[] = [];
+  transport.on("restarted", (event) => restarted.push(event));
+  let settled: string | undefined;
+  const connecting = transport.connect().then(() => { settled = "resolved"; }, (error: Error) => { settled = error.message; });
+  await flush();
+  room.emit("roomState", roomStateFrame("ringing"));
+  for (let dead = 0; dead < 3; dead += 1) {
+    webRTC.peer.neverConnects = true;
+    answerLatest(room);
+    await flush();
+    const before = webRTC.peers.length;
+    while (webRTC.peers.length === before) await vi.advanceTimersByTimeAsync(10);
+    await flush();
+  }
+  // Three dead sessions: well past the old 15 s connect() deadline.
+  expect(Date.now()).toBeGreaterThan(15_000);
+  expect(settled).toBeUndefined();
+  expect(restarted.map((event) => event.reason)).toEqual(["timeout", "timeout", "timeout"]);
+  answerLatest(room);
+  await connecting;
+  expect(settled).toBe("resolved");
+  expect(webRTC.peers).toHaveLength(4);
+  expect(offersSent(room).map((offer) => offer.restart ?? false)).toEqual([false, true, true, true]);
+  transport.close();
+});
+
+it("connect() rejects when the Call ends in the middle of a restart", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  webRTC.nextPeer.neverConnects = true;
+  const transport = makeTransport(room, webRTC);
+  const connecting = transport.connect().then(() => undefined, (error: Error) => error);
+  await flush();
+  answerLatest(room);
+  await vi.advanceTimersByTimeAsync(5_100);
+  expect(webRTC.peers[0]!.closed).toBe(true);
+  room.emit("ended", { type: "ended", reason: "canceled" });
+  const error = await connecting;
+  expect(error?.message).toBe("Relay Call ended before media connected (canceled).");
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(webRTC.peers).toHaveLength(1);
+});
+
+it("connect() rejects and closes the transport when its signal aborts", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  webRTC.nextPeer.neverConnects = true;
+  const transport = makeTransport(room, webRTC);
+  const controller = new AbortController();
+  const connecting = transport.connect({ signal: controller.signal }).then(() => undefined, (error: Error) => error);
+  await flush();
+  answerLatest(room);
+  await vi.advanceTimersByTimeAsync(60_000);
+  controller.abort();
+  const error = await connecting;
+  expect(error).toBeInstanceOf(RelayCallTransportError);
+  expect((error as RelayCallTransportError).code).toBe("aborted");
+  expect(room.closes).toBe(1);
+  await expect(transport.connect({ signal: AbortSignal.abort() })).rejects.toThrow("Relay Call transport is closed.");
 });

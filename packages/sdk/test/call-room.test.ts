@@ -122,10 +122,12 @@ it("joins the authenticated signaling room and exposes every stable server frame
 
   room.connected();
   room.userUpdate({ muted: true });
+  room.userUpdate({ muted: false, video: true });
   room.end();
   expect(socket.sent.slice(1).map(JSON.parse)).toEqual([
     { type: "connected" },
     { type: "userUpdate", muted: true },
+    { type: "userUpdate", muted: false, video: true },
     { type: "end" },
   ]);
   room.close();
@@ -162,12 +164,44 @@ it("sends heartbeat frames and closes malformed server frames with 4400", async 
     { type: "join" }, { type: "heartbeat" }, { type: "heartbeat" },
   ]);
 
-  socket.message({ type: "offer", session_description: { type: "offer", sdp: "v=0" }, track: "video" });
+  socket.message({ type: "offer", session_description: { type: "offer", sdp: "v=0" }, track: "screen" });
   await Promise.resolve();
   await Promise.resolve();
   expect(errors[0]?.message).toMatch(/invalid frame/u);
   expect(socket.closeCalls).toContainEqual({ code: 4400, reason: "invalid frame" });
   room.close();
+});
+
+it("accepts the video pull offer and the participant video and track fields", () => {
+  const offer = { type: "offer", session_description: { type: "offer", sdp: "v=0\r\n" }, track: "video" };
+  expect(parseCallRoomServerFrame(offer)).toEqual(offer);
+  const withVideo = {
+    ...roomState,
+    participants: [
+      { ...roomState.participants[0], video: true, tracks: ["audio", "video"] },
+      { ...roomState.participants[1], video: false, tracks: ["audio"] },
+    ],
+  };
+  expect(parseCallRoomServerFrame(withVideo)).toEqual(withVideo);
+  const drifted = (participant: Record<string, unknown>) => ({
+    ...roomState,
+    participants: [{ ...roomState.participants[0], ...participant }, roomState.participants[1]],
+  });
+  expect(() => parseCallRoomServerFrame(drifted({ video: "yes", tracks: ["audio"] }))).toThrow(/invalid frame/u);
+  expect(() => parseCallRoomServerFrame(drifted({ video: true, tracks: ["audio", "audio"] }))).toThrow(/invalid frame/u);
+  expect(() => parseCallRoomServerFrame(drifted({ video: true, tracks: ["screen"] }))).toThrow(/invalid frame/u);
+  expect(() => parseCallRoomServerFrame(drifted({ video: true }))).toThrow(/invalid frame/u);
+});
+
+it("parses the roomState staging sent before either participant published (tracks: [])", async () => {
+  // Captured from staging (Relay-Server 1241f83d) by the calls test ladder, 2026-09-22.
+  const { readFile } = await import("node:fs/promises");
+  const frame = JSON.parse(await readFile(
+    new URL("./fixtures/staging-roomstate-before-publish.json", import.meta.url),
+    "utf8",
+  )) as Record<string, any>;
+  expect(frame.participants.map((participant: { tracks: unknown }) => participant.tracks)).toEqual([[], []]);
+  expect(parseCallRoomServerFrame(frame)).toEqual(frame);
 });
 
 it("rejects server frames whose stable shapes drift", () => {

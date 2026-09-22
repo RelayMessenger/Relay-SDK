@@ -80,9 +80,21 @@ const validCall = (value: unknown): value is Call => {
     && (status === "ringing" || status === "in-progress" || TERMINAL_STATUSES.has(status as CallTerminalStatus));
 };
 
+const PARTICIPANT_KEYS = ["contact_id", "kind", "attached", "track", "muted", "connected"] as const;
+
+/** `[]` before the participant's first offer, then `["audio"]` or `["audio", "video"]` (PROTOCOL.md section 3). */
+const validTracks = (value: unknown): boolean =>
+  Array.isArray(value)
+  && value.length <= 2
+  && value.every((name) => name === "audio" || name === "video")
+  && new Set(value).size === value.length;
+
 const validParticipant = (value: unknown): value is CallRoomParticipant =>
   isRecord(value)
-  && hasExactKeys(value, ["contact_id", "kind", "attached", "track", "muted", "connected"])
+  && (hasExactKeys(value, PARTICIPANT_KEYS)
+    || hasExactKeys(value, [...PARTICIPANT_KEYS, "video", "tracks"]))
+  && (value.video === undefined || typeof value.video === "boolean")
+  && (value.tracks === undefined || validTracks(value.tracks))
   && typeof value.contact_id === "string"
   && (value.kind === "user" || value.kind === "agent")
   && typeof value.attached === "boolean"
@@ -118,7 +130,7 @@ export const parseCallRoomServerFrame = (value: unknown): CallRoomServerFrame | 
       return value as unknown as CallRoomServerAnswerFrame;
     case "offer":
       if (!hasExactKeys(value, ["type", "session_description", "track"])
-        || value.track !== "audio"
+        || (value.track !== "audio" && value.track !== "video")
         || !validDescription(value.session_description, "offer")) break;
       return value as unknown as CallRoomSubscriptionOfferFrame;
     case "ended":
@@ -237,8 +249,12 @@ export class CallRoom {
     this.send({ type: "connected" });
   }
 
-  userUpdate(update: { muted: boolean }): void {
-    this.send({ type: "userUpdate", muted: update.muted });
+  userUpdate(update: { muted: boolean; video?: boolean }): void {
+    this.send({
+      type: "userUpdate",
+      muted: update.muted,
+      ...(update.video === undefined ? {} : { video: update.video }),
+    });
   }
 
   end(): void {
