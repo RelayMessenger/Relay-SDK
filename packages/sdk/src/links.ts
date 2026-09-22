@@ -1,4 +1,5 @@
 import { splitButtons } from "./buttons.js";
+import { splitInvoice } from "./invoice.js";
 import { splitSelection } from "./selection.js";
 import type { ButtonsPart, LinkPart, MessagePart, TextPart } from "./types.js";
 
@@ -75,12 +76,26 @@ export interface AnswerMessages {
 }
 
 /**
- * The Messages a text-only agent's answer becomes: a buttons or selection
- * block is lifted out, then each link on its own line becomes its own Message.
- * The component accompanies the last Message of words. Selection requires a
- * nonblank question; conflicting components remain text with an error.
+ * The Messages a text-only agent's answer becomes: an invoice, buttons or
+ * selection block is lifted out, then each link on its own line becomes its
+ * own Message. Buttons and selection accompany the last Message of words; an
+ * invoice never does — it must be the only part of its Message, so the words
+ * around it are sent first and the invoice follows as its own, final Message.
+ * Selection requires a nonblank question; conflicting components remain text
+ * with an error.
  */
 export const answerMessages = (answer: string): AnswerMessages => {
+  const invoiced = splitInvoice(answer);
+  if (invoiced.error) {
+    // The block stays in the words, but a link still travels alone; a bad
+    // component must not also take the person's link cards away.
+    return { messages: splitLinks(answer).map((segment) => [segment]), error: invoiced.error };
+  }
+  if (invoiced.invoice) {
+    const messages: MessagePart[][] = splitLinks(invoiced.text).map((segment) => [segment]);
+    messages.push([invoiced.invoice]);
+    return { messages };
+  }
   const selected = splitSelection(answer);
   if (selected.error) {
     // The block stays in the words, but a link still travels alone; a bad

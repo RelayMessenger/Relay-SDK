@@ -37,6 +37,8 @@ import type {
   MessageAddReactionResponse,
   MessageCreateParams,
   MessageCreateResponse,
+  MessageInvoiceUpdateParams,
+  MessageInvoiceUpdateResponse,
   MessageListParams,
   MessageSendParams,
   MessageSendResponse,
@@ -485,8 +487,29 @@ export class Chats {
   }
 }
 
-export class Messages {
+class MessageInvoice {
   constructor(private readonly transport: Transport) {}
+
+  update(
+    messageID: string,
+    body: MessageInvoiceUpdateParams,
+    options?: RequestOptions,
+  ): Promise<MessageInvoiceUpdateResponse> {
+    return this.transport.request({
+      method: "PUT",
+      path: `/v1/messages/${pathID(messageID)}/invoice`,
+      body,
+      options,
+    });
+  }
+}
+
+export class Messages {
+  readonly invoice: MessageInvoice;
+
+  constructor(private readonly transport: Transport) {
+    this.invoice = new MessageInvoice(transport);
+  }
 
   create(
     params: MessageCreateParams,

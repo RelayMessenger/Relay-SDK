@@ -21486,10 +21486,26 @@ var Chats = class {
     });
   }
 };
-var Messages = class {
+var MessageInvoice = class {
   transport;
   constructor(transport2) {
     this.transport = transport2;
+  }
+  update(messageID, body, options) {
+    return this.transport.request({
+      method: "PUT",
+      path: `/v1/messages/${pathID(messageID)}/invoice`,
+      body,
+      options
+    });
+  }
+};
+var Messages = class {
+  transport;
+  invoice;
+  constructor(transport2) {
+    this.transport = transport2;
+    this.invoice = new MessageInvoice(transport2);
   }
   create(params, options) {
     const { "Idempotency-Key": headerKey, ...body } = params;
@@ -21865,6 +21881,19 @@ var partsWithButtons = (text3, buttons, limit = Number.POSITIVE_INFINITY) => [
   ...text3.length > 0 ? [{ type: "text", value: text3.slice(0, limit) }] : [],
   ...buttons ? [buttons] : []
 ];
+
+// node_modules/@relaymessenger/sdk/dist/invoice.js
+var INVOICE_FENCE = "invoice";
+var INVOICE_GUIDANCE = [
+  "Send an invoice only when the person asked to buy something or has already agreed to a price; never invoice out of the blue.",
+  "url must be a real checkout link you were given \u2014 your own Stripe Payment Link, Stripe Checkout, Shopify page, or anything https. Never invent one, and never paste a checkout link in text or a button; send an invoice instead.",
+  "Set goods honestly: physical for goods or services used outside the app, digital for anything delivered in chat or used inside an app.",
+  "An invoice must be the only part of its message: no words, no buttons, no selection beside it.",
+  "Use recurring for a subscription: interval day, week, month or year, for up to 3 years total.",
+  "When your own system learns the payment went through, for example your Stripe webhook, mark it with the status route so the card updates for the person."
+].join(" ");
+var INVOICE_BLOCK_INSTRUCTION = "To ask the person to pay, end your answer with nothing else and a fenced code block tagged `" + INVOICE_FENCE + '` holding one JSON object: {"title": "...", "amount": 2400, "currency": "usd", "goods": "physical" or "digital", "url": "https://..."}, with an optional "recurring": {"interval": "month", "interval_count": 1} for a subscription. The block is removed from the text and drawn as an invoice card; it must be alone in its message.';
+var FENCE2 = new RegExp("(^|\\n)[ \\t]*```[ \\t]*" + INVOICE_FENCE + "(?:[ \\t][^\\r\\n]*)?\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```[ \\t]*(?=\\r?\\n|$)", "gu");
 
 // node_modules/@relaymessenger/sdk/dist/selection.js
 var SELECTION_MAX_OPTIONS = 25;

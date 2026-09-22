@@ -334,13 +334,54 @@ export interface SelectionResponsePart {
 /** Metadata only: contributes no visible fallback text. */
 export interface SelectionResponsePartResponse extends SelectionResponsePart {}
 
+/** Stripe's own recurring shape: interval plus how many of it. */
+export interface InvoiceRecurring {
+  interval: "day" | "week" | "month" | "year";
+  /** Defaults to 1. Total span is capped at 3 years (1095 days / 156 weeks / 36 months / 3 years). */
+  interval_count?: number;
+}
+
+/** physical = goods or in-person services used outside the app (Apple 3.1.3(e)); digital = anything delivered in chat or used in an app. */
+export type InvoiceGoods = "physical" | "digital";
+
+export type InvoiceStatus = "requested" | "succeeded" | "canceled" | "expired" | "refunded";
+
+/**
+ * Agent-only: asks the person to pay via the developer's own checkout link
+ * (Stripe Payment Link, Stripe Checkout, Shopify, anything https). Relay
+ * never touches money, has no Stripe account, and takes no fee. An invoice
+ * must be the only part of its message (Linq: "a card is the whole message").
+ */
+export interface InvoicePart {
+  type: "invoice";
+  /** Trimmed, 1–32 characters (Telegram sendInvoice). */
+  title: string;
+  /** Minor units, 1..99,999,999 (Stripe's max). */
+  amount: number;
+  /** 3-letter ISO code, sent in either case, always returned lowercase. */
+  currency: string;
+  goods: InvoiceGoods;
+  /** The developer's own checkout link. https only, at most 2048 characters. */
+  url: string;
+  /** Omit for a one-time charge. */
+  recurring?: InvoiceRecurring;
+}
+
+export interface InvoicePartResponse extends InvoicePart {
+  recurring?: Required<InvoiceRecurring>;
+  /** Defaults to "requested". Only the sending agent's own status PUT changes it. */
+  status: InvoiceStatus;
+  reactions: Reaction[] | null;
+}
+
 export type MessagePart =
   | TextPart
   | MediaPart
   | LinkPart
   | ButtonsPart
   | SelectionPart
-  | SelectionResponsePart;
+  | SelectionResponsePart
+  | InvoicePart;
 
 export interface TextPartResponse extends TextPart {
   mentions?: Array<{
@@ -433,6 +474,7 @@ export type MessagePartResponse =
   | ButtonsPartResponse
   | SelectionPartResponse
   | SelectionResponsePartResponse
+  | InvoicePartResponse
   | SystemPartResponse;
 
 /** Ordinary replies target text, media, or link, never system. A buttons part
@@ -472,6 +514,7 @@ export interface SentMessage {
     | ButtonsPartResponse
     | SelectionPartResponse
     | SelectionResponsePartResponse
+    | InvoicePartResponse
   >;
   created_at: string;
   sent_at: string | null;
@@ -630,7 +673,11 @@ export interface MessageListParams {
 
 export type MessageThreadParams = MessageListParams;
 
-/** Target text, media, or link; buttons, selection, selection_response and system cannot receive reactions. */
+/**
+ * Target text, media, link, or invoice; buttons, selection, selection_response
+ * and system cannot receive reactions. An invoice only accepts a reaction from
+ * a person (Apple Cash allows tapbacks); an agent reacting to one gets a 403.
+ */
 export interface MessageAddReactionParams {
   operation: "add" | "remove";
   type: ReactionType;
@@ -639,6 +686,15 @@ export interface MessageAddReactionParams {
 }
 
 export type MessageAddReactionResponse = AcceptedResponse;
+
+export interface MessageInvoiceUpdateParams {
+  status: InvoiceStatus;
+}
+
+/** Same shape as other message reads: the updated Message projection. */
+export interface MessageInvoiceUpdateResponse {
+  message: Message;
+}
 
 export type ChatSendVoicememoParams =
   | { attachment_id: UUID; voice_memo_url?: never }

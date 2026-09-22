@@ -137,6 +137,13 @@ describe("Claude Agent SDK bridge", () => {
     expect(prompt).toContain("If the person asks for buttons, send them.");
   });
 
+  it("tells the agent how to send an invoice and when", () => {
+    const prompt = codexPrompt("alice", "hello");
+    expect(prompt).toContain("fenced code block tagged `invoice`");
+    expect(prompt).toContain("Send an invoice only when the person asked to buy something or has already agreed to a price");
+    expect(prompt).toContain("An invoice must be the only part of its message");
+  });
+
   it("a photo with no text starts a turn", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relay-claude-media-"));
     const calls: Parameters<typeof query>[0][] = [];
