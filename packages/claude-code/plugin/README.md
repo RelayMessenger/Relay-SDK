@@ -11,10 +11,7 @@ The channel is rebuilt for Relay v1. It uses
 to `/v1/websocket`; it does not use the removed Events polling, Conversation,
 or private Agent identity APIs.
 
-## Selection, coming soon
-
-These are local candidate sources, not a claim that the published package or
-hosted API supports selection yet.
+## Selection
 
 The `reply` tool accepts a `selection` options array alongside nonblank
 question `text`, never together with `buttons` or `link`. Inbound `relay_parts`,

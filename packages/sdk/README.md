@@ -2,12 +2,11 @@
 
 TypeScript client for Relay v1.
 
-## Selection, coming soon
+## Selection
 
-Selection is local, unshipped work. The candidate SDK exposes `SelectionPart`,
-`SelectionPartResponse` (including read-only viewer-relative `has_responded`),
-and `SelectionResponsePart` through the existing message and event unions.
-This is not a claim about the published package or hosted API.
+The SDK exposes `SelectionPart`, `SelectionPartResponse` (including read-only
+viewer-relative `has_responded`), and `SelectionResponsePart` through the
+existing message and event unions.
 
 ```ts
 import { partsWithSelection } from "@relaymessenger/sdk";
@@ -55,11 +54,9 @@ reply target to dispatch your own handler, rather than splitting labels.
 Signed webhook `unwrap` and WebSocket `onEvent` default types expose this
 metadata after narrowing to `message.received`.
 
-Local runtime sources include selection guidance and structured inbound discovery
-for CLI, Pi, OpenClaw, the Claude Code channel, MCP, and the Chat SDK adapter.
+The CLI, Pi, OpenClaw, the Claude Code channel, MCP, and the Chat SDK adapter
+include selection guidance and structured inbound discovery.
 `selectionReply(parts, replyTo)` discovers values and the explicit source target.
-These changes remain unshipped; bundled artifacts and disposable-lane validation
-are required before release.
 
 ## Chat permissions
 

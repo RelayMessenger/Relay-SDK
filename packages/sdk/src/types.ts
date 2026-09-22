@@ -274,7 +274,7 @@ export interface ButtonsPart {
   items: ButtonItem[];
 }
 
-/** Stable machine value and independently editable visible label. Coming soon. */
+/** Stable machine value and independently editable visible label. */
 export interface SelectionOption {
   /** Unique case-sensitive ASCII token, 1–100 characters. Never derived from label. */
   value: string;
@@ -285,7 +285,7 @@ export interface SelectionOption {
 /** Agent-only, 1–25 options; requires nonblank text and cannot mix with buttons. */
 export interface SelectionPart {
   type: "selection";
-  /** Coming soon. The text is the prompt's title; the person checks any number of options and submits them once, and checking sends nothing. */
+  /** The text is the prompt's title; the person checks any number of options and submits them once, and checking sends nothing. */
   options: SelectionOption[];
 }
 
@@ -296,7 +296,7 @@ export interface SelectionPartResponse extends SelectionPart {
 }
 
 /**
- * Coming soon: user-only metadata after canonical text (literal '• ' + each source
+ * User-only metadata after canonical text (literal '• ' + each source
  * label, joined with '\n'), with explicit reply_to. Exact legacy comma-joined
  * labels are accepted by the server only for compatibility, never parsed for IDs.
  */
@@ -308,7 +308,7 @@ export interface SelectionResponsePart {
    * '\n'. The server accepts exact legacy comma-joined labels for compatibility
    * only, never arbitrary label parsing. iOS may draw a checkmark in place of
    * each bullet and repeat the prompt's title, as presentation only; portable
-   * text remains bullets. Coming soon.
+   * text remains bullets.
    */
   selected_values: string[];
 }

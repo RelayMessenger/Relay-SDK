@@ -9,10 +9,7 @@ Local MCP v2 stdio server with exactly two tools:
 
 There is no `talk` tool and no per-operation `relay_*` tool list.
 
-## Selection, coming soon
-
-These are local candidate sources, not a claim that the published package or
-hosted API supports selection yet.
+## Selection
 
 Use `search_docs` with query `selection` and verbose detail, then `execute`
 with the SDK message-send method and ordered text/selection parts. Incoming

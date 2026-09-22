@@ -12,10 +12,7 @@ delivers events over its v1 WebSocket, and the plugin sends replies through
 the Relay v1 REST Message API. The plugin imports `@relaymessenger/sdk`; it
 does not contain a copied Relay client or protocol implementation.
 
-## Selection, coming soon
-
-These are local candidate sources, not a claim that the published package or
-hosted API supports selection yet.
+## Selection
 
 End the final answer with a `selection` JSON fence after the question.
 `BodyForAgent` carries structured response and rich-message JSON; `RawBody` and

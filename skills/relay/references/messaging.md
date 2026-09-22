@@ -50,11 +50,7 @@ A Message contains ordered `parts`:
 Adjacent text parts are invalid. Replies use `reply_to.message_id` and optional
 `reply_to.part_index`.
 
-## Selection, coming soon
-
-Selection is a local, unshipped SDK/API candidate, not a capability of the
-historical published contract pinned by this skill. Check the installed runtime
-and matching contract before using it; do not infer availability from staging.
+## Selection
 
 - Author one `selection` part beside a nonblank text question, with 1 to 25
   options. Each has an explicit unique case-sensitive ASCII token `value`

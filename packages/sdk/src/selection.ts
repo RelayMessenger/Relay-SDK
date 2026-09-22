@@ -1,13 +1,12 @@
 import type { MessagePartResponse, ReplyTo, SelectionOption, SelectionPart, TextPart } from "./types.js";
 
-/** Coming soon: selection authoring uses explicit stable values, never label-derived IDs. */
+/** Selection authoring uses explicit stable values, never label-derived IDs. */
 export const SELECTION_MAX_OPTIONS = 25;
 export const SELECTION_LABEL_MAX_LENGTH = 80;
 export const SELECTION_VALUE_MAX_LENGTH = 100;
 export const SELECTION_FENCE = "selection";
 export const SELECTION_GUIDANCE =
-  "Selection is coming soon; this guidance describes the local candidate. "
-  + "Use selection when the person can choose several known options, then Send once. "
+  "Use selection when the person can choose several known options, then Send once. "
   + "If the person asks for selections or multiple choices to submit together, send a selection, not buttons. "
   + "Include a nonblank text question and 1 to 25 options with explicit stable value and readable label. "
   + "Labels are trimmed, 1 to 80 characters; values are unique case-sensitive ASCII tokens of 1 to 100 characters matching ^[A-Za-z0-9][A-Za-z0-9._:-]*$. "

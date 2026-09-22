@@ -16,10 +16,7 @@ pi install npm:@relaymessenger/pi
 Set `RELAY_AGENT_TOKEN` before using `/relay-connect`. Set
 `RELAY_BASE_URL` when the Agent belongs to a non-default API environment.
 
-## Selection, coming soon
-
-These are local candidate sources, not a claim that the published package or
-hosted API supports selection yet.
+## Selection
 
 End the final Pi answer with a `selection` JSON fence after the question.
 The RPC prompt preserves ordered rich parts, `selected_values`, and `reply_to`
