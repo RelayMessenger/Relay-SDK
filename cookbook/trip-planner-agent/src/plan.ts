@@ -1,4 +1,4 @@
-import { answerMessages, type MessagePart } from "@relaymessenger/sdk";
+import type { MessagePart } from "@relaymessenger/sdk";
 
 /** One line of conversation the planner is allowed to read. */
 export interface ThreadMessage {
@@ -20,8 +20,6 @@ export interface TripPlan {
   days: TripDay[];
   /** Constraints nobody has settled yet. Asked, never invented. */
   open_questions: string[];
-  /** Optional for previously saved plans. A question followed by a selection fence. */
-  selection_prompt?: string;
 }
 
 export interface PlanRequest {
@@ -71,17 +69,4 @@ export function renderPlanParts(plan: TripPlan): MessagePart[] {
     .slice(0, MAX_PARTS);
 
   return sections.map((value) => ({ type: "text", value: clamp(value) }));
-}
-
-
-/** Keep the ordinary plan intact; native choices follow it using the shared
- * runtime authoring parser. Invalid fences remain readable text, never actions. */
-export function renderPlanMessages(plan: TripPlan): MessagePart[][] {
-  const messages = [renderPlanParts(plan)];
-  if (!plan.selection_prompt?.trim()) return messages;
-  const authored = answerMessages(plan.selection_prompt);
-  for (const parts of authored.messages) {
-    messages.push(parts.map(part => part.type === "text" ? { ...part, value: clamp(part.value) } : part));
-  }
-  return messages;
 }

@@ -14,17 +14,6 @@ changed it.
 In a direct Chat it answers every Message, because the Chat holds only you and
 this agent, so no mention gate is needed.
 
-## Selection, coming soon
-
-Selection support here is local, unshipped work. Use a nonblank question followed by a `selection` JSON fence in
-`selection_prompt`. Saved plans retain the exact send body and indexed retry
-keys; live and FULL-sync history preserve response metadata for future turns.
-New replies use literal `• ` + each selected source label joined with `\n`;
-`selected_values` and `reply_to` are authoritative, never parsed labels.
-The server also accepts exact legacy comma text for compatibility. A selected
-option toggles off locally; the sole submit action is a centered compact
-light-blue Send button.
-
 ## Run
 
 The agent needs two credentials and no others: a Relay Agent Token and an

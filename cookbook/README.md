@@ -26,16 +26,6 @@ Chats allow at most 7 total participants, including the sender (`to`: at most 6)
 | [Send a voice memo](send-a-voice-memo/) | Upload one audio file and send it as a voice memo. |
 | [Trip planner agent](trip-planner-agent/) | Plan a group trip in the Chat: answer when mentioned, remember the rest, and update the plan when a constraint changes. |
 
-## Selection, coming soon
-
-The local Think and trip-planner sources author selections and preserve
-structured responses. The webhook and WebSocket metrics recipes persist the
-original event, count only readable text/media, and do not dispatch selection
-handlers. One-shot send recipes have no inbound runtime. These recipes make no
-claim that an independently installed published package includes selection.
-New human response text is literal `• ` + each selected label joined with `\n`;
-use `selected_values` and `reply_to`, never text parsing, to handle choices.
-
 ## Run a recipe on its own
 
 Every folder is a complete project. Copy it anywhere, then:
