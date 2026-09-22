@@ -1,4 +1,4 @@
-import { AudioInput, AudioOutput, type AgentSession } from "@livekit/agents";
+import { AudioInput, AudioOutput, Future, type AgentSession } from "@livekit/agents";
 import { AudioFrame } from "@livekit/rtc-node";
 import { TransformStream, type WritableStreamDefaultWriter } from "node:stream/web";
 import type Relay from "@relaymessenger/sdk";
@@ -53,12 +53,25 @@ export class RelayAudioInput extends AudioInput {
   }
 }
 
-/** LiveKit Agents output that publishes TTS PCM to the Relay participant. */
+/**
+ * LiveKit Agents output that publishes TTS PCM to the Relay participant.
+ *
+ * Shape copied from `@livekit/agents` `ParticipantAudioOutput`
+ * (dist/voice/room_io/_output.js): `captureFrame` hands the frame to the
+ * transport and returns without waiting for playout, `flush()` starts a playout
+ * task that reports `onPlaybackFinished` only once the transport has drained,
+ * and `clearBuffer()` resolves the interruption future so that task reports
+ * `interrupted: true` with the position actually played.
+ */
 export class RelayAudioOutput extends AudioOutput {
   readonly #transport: RelayCallTransport;
-  #segmentDuration = 0;
-  #segmentStarted = false;
-  #segmentStartedAt = 0;
+  /** Seconds pushed to the transport in the open segment. */
+  #pushedDuration = 0;
+  #firstFrameEmitted = false;
+  #flushTask: Promise<void> | undefined;
+  #flushDone = true;
+  /** Resolved by `clearBuffer()` with the milliseconds still queued at that moment. */
+  #interruptedFuture = new Future<number>();
   #closed = false;
 
   constructor(transport: RelayCallTransport, sampleRate = 48_000) {
@@ -68,13 +81,17 @@ export class RelayAudioOutput extends AudioOutput {
 
   override async captureFrame(frame: AudioFrame): Promise<void> {
     if (this.#closed) throw new Error("Relay LiveKit audio output is closed.");
-    await super.captureFrame(frame);
-    if (!this.#segmentStarted) {
-      this.#segmentStarted = true;
-      this.#segmentStartedAt = Date.now();
-      this.onPlaybackStarted(this.#segmentStartedAt);
+    if (this.#flushTask && !this.#flushDone) {
+      this.logger.error("captureFrame called while flush is in progress");
+      await this.#flushTask;
     }
-    this.#segmentDuration += frame.samplesPerChannel / frame.sampleRate;
+    await super.captureFrame(frame);
+    if (!this.#firstFrameEmitted) {
+      this.#firstFrameEmitted = true;
+      this.onPlaybackStarted(Date.now());
+    }
+    this.#pushedDuration += frame.samplesPerChannel / frame.sampleRate;
+    // Resolves once the slices are queued; the engine's pump paces the wire.
     await this.#transport.writeAudio({
       samples: frame.data,
       sampleRate: frame.sampleRate,
@@ -82,27 +99,25 @@ export class RelayAudioOutput extends AudioOutput {
     });
   }
 
+  /** Mark the segment complete; `onPlaybackFinished` fires once the transport has drained. */
   override flush(): void {
     super.flush();
-    if (!this.#segmentStarted) return;
-    this.onPlaybackFinished({
-      playbackPosition: this.#segmentDuration,
-      interrupted: false,
+    if (!this.#pushedDuration) return;
+    if (this.#flushTask && !this.#flushDone) return;
+    this.#flushDone = false;
+    this.#flushTask = this.#waitForPlayoutTask().finally(() => {
+      this.#flushDone = true;
     });
-    this.#resetSegment();
+    void this.#flushTask.catch(() => undefined);
   }
 
   override clearBuffer(): void {
+    const queuedMs = this.#transport.queuedAudioMs();
     this.#transport.clearAudio();
-    if (!this.#segmentStarted) return;
-    this.onPlaybackFinished({
-      playbackPosition: Math.min(
-        this.#segmentDuration,
-        Math.max(0, (Date.now() - this.#segmentStartedAt) / 1_000),
-      ),
-      interrupted: true,
-    });
-    this.#resetSegment();
+    if (this.#interruptedFuture.done) return;
+    if (this.#pushedDuration === 0 && this.pendingPlayoutSegments === 0) return;
+    if (!this.#flushTask || this.#flushDone) this.flush();
+    if (!this.#interruptedFuture.done) this.#interruptedFuture.resolve(queuedMs);
   }
 
   close(): void {
@@ -111,10 +126,18 @@ export class RelayAudioOutput extends AudioOutput {
     this.clearBuffer();
   }
 
-  #resetSegment(): void {
-    this.#segmentDuration = 0;
-    this.#segmentStarted = false;
-    this.#segmentStartedAt = 0;
+  async #waitForPlayoutTask(): Promise<void> {
+    const interruptedFuture = this.#interruptedFuture;
+    await Promise.race([this.#transport.waitForPlayout(), interruptedFuture.await]);
+    const interrupted = interruptedFuture.done;
+    let playbackPosition = this.#pushedDuration;
+    if (interrupted) {
+      playbackPosition = Math.max(0, playbackPosition - interruptedFuture.result / 1_000);
+    }
+    this.#pushedDuration = 0;
+    this.#firstFrameEmitted = false;
+    if (this.#interruptedFuture === interruptedFuture) this.#interruptedFuture = new Future<number>();
+    this.onPlaybackFinished({ playbackPosition, interrupted });
   }
 }
 

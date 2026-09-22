@@ -40,9 +40,19 @@ async function answerCall(callId: string, session: AgentSession) {
 
 `RelayLiveKitCall.connect()` does not resolve until the WebRTC media peer has
 reached `connected`. `RelayAudioInput` converts the remote participant's PCM16
-audio to LiveKit frames. `RelayAudioOutput` publishes LiveKit TTS frames to
-Relay, pacing larger frames into 10 ms WebRTC source slices. `clearBuffer()`
-drops queued outbound audio that has not yet reached WebRTC.
+audio to LiveKit frames.
+
+`RelayAudioOutput` has the shape of LiveKit's own `ParticipantAudioOutput`:
+`captureFrame()` hands the frame to the transport and returns at once, so the
+AgentSession may push a whole reply faster than real time; the engine's 20 ms
+pump paces the wire. `flush()` closes the segment and reports
+`playbackFinished` only after the transport has drained. `clearBuffer()` drops
+audio that has not reached the wire and reports the segment as interrupted at
+the position that actually played.
+
+On the transport, `writeAudio()` resolves once its 10 ms slices are queued,
+`queuedAudioMs()` is what has not left yet, and `waitForPlayout()` resolves when
+the queue is empty and the pump is idle (early on `clearAudio()`).
 
 Use `setMuted(true)` to publish participant mute state, `end()` to end the Relay
 Call, and `close()` for local cleanup. If the signaling connection is replaced,
@@ -70,6 +80,7 @@ await transport.writeAudio({
   sampleRate: 48_000,
   channelCount: 1,
 });
+await transport.waitForPlayout();
 ```
 
 ## ICE servers, TURN, and diagnostics

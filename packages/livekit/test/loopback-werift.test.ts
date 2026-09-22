@@ -251,8 +251,11 @@ it("counts RTP both ways in diagnostics() over a werift loopback through the tra
   });
   await far.setRemoteDescription((await pullAnswer).session_description);
 
+  // Push the whole second at once (LiveKit pushes faster than real time); the
+  // engine's 20 ms pump paces the wire and waitForPlayout() reports the drain.
+  const pushStarted = performance.now();
   for (let slice = 0; slice < SLICES; slice += 1) {
-    void transport.writeAudio({
+    await transport.writeAudio({
       samples: sineSlice(slice, TONE_AMPLITUDE),
       sampleRate: WERIFT_SAMPLE_RATE,
       channelCount: WERIFT_CHANNEL_COUNT,
@@ -264,9 +267,16 @@ it("counts RTP both ways in diagnostics() over a werift loopback through the tra
       channelCount: WERIFT_CHANNEL_COUNT,
       numberOfFrames: (WERIFT_SAMPLE_RATE * SLICE_MS) / 1000,
     });
-    await sleep(SLICE_MS);
   }
-  await sleep(1_300);
+  const pushMs = performance.now() - pushStarted;
+  expect(pushMs).toBeLessThan(200);
+  expect(transport.queuedAudioMs()).toBeGreaterThan(900);
+  await transport.waitForPlayout();
+  const playoutMs = performance.now() - pushStarted;
+  expect(playoutMs).toBeGreaterThanOrEqual(900);
+  expect(playoutMs).toBeLessThanOrEqual(1_600);
+  expect(transport.queuedAudioMs()).toBe(0);
+  await sleep(300);
 
   const diagnostics = transport.diagnostics();
   transport.close();
@@ -276,7 +286,7 @@ it("counts RTP both ways in diagnostics() over a werift loopback through the tra
 
   expect(diagnostics.outbound.frames).toBe(SLICES);
   expect(diagnostics.outbound.opusPackets).toBe(SLICES / 2);
-  expect(diagnostics.outbound.rtpPackets).toBeGreaterThan(40);
+  expect(diagnostics.outbound.rtpPackets).toBe(SLICES / 2);
   expect(diagnostics.outbound.queued).toBe(0);
   expect(diagnostics.outbound.firstPacketAtMs).toBeGreaterThan(0);
   expect(diagnostics.inbound.rtpPackets).toBeGreaterThan(40);

@@ -54,6 +54,12 @@ export interface RelayAudioSourceLike {
   }): void;
   /** Engines that own the RTP path report packet counts; `@roamhq/wrtc` does not. */
   stats?(): RelayAudioSourceStats;
+  /** Milliseconds accepted by `onData` but not yet written to RTP (encoded queue plus any un-encoded remainder). */
+  queuedMs?(): number;
+  /** Resolves once everything accepted so far has been written to RTP and the pacer is idle. */
+  waitForDrain?(): Promise<void>;
+  /** Drop audio accepted but not yet written to RTP. */
+  clear?(): void;
 }
 
 /** @internal */
@@ -272,7 +278,9 @@ const loadWebRTCFactory = async (engine: RelayCallEngine): Promise<RelayWebRTCFa
       iceServers: config.iceServers,
       iceTransportPolicy: config.iceTransportPolicy,
     }) as unknown as RelayPeerConnectionLike,
-    createAudioSource: () => new wrtc.nonstandard.RTCAudioSource() as unknown as RelayAudioSourceLike,
+    createAudioSource: () => new WrtcAudioSource(
+      new wrtc.nonstandard.RTCAudioSource() as unknown as RelayAudioSourceLike,
+    ),
     createAudioSink: (track) => new wrtc.nonstandard.RTCAudioSink(
       track as unknown as MediaStreamTrack,
     ) as unknown as RelayAudioSinkLike,
@@ -342,6 +350,51 @@ const cloneSamples = (samples: Int16Array): Int16Array => {
   return copy;
 };
 
+/**
+ * `@roamhq/wrtc`'s `RTCAudioSource` plays each 10 ms slice through libwebrtc's
+ * own clock and exposes no queue, so this wrapper estimates it from wall time:
+ * queued = accepted since the run started minus the time elapsed. Best effort;
+ * the werift engine (the default) reports its real queue.
+ */
+class WrtcAudioSource implements RelayAudioSourceLike {
+  readonly #inner: RelayAudioSourceLike;
+  #runStartedAt = 0;
+  #runAcceptedMs = 0;
+
+  constructor(inner: RelayAudioSourceLike) {
+    this.#inner = inner;
+  }
+
+  createTrack(): RelayMediaStreamTrackLike {
+    return this.#inner.createTrack();
+  }
+
+  onData(data: Parameters<RelayAudioSourceLike["onData"]>[0]): void {
+    const now = Date.now();
+    if (this.queuedMs() === 0) {
+      this.#runStartedAt = now;
+      this.#runAcceptedMs = 0;
+    }
+    this.#runAcceptedMs += (data.numberOfFrames / data.sampleRate) * 1_000;
+    this.#inner.onData(data);
+  }
+
+  queuedMs(): number {
+    if (this.#runAcceptedMs === 0) return 0;
+    return Math.max(0, this.#runAcceptedMs - (Date.now() - this.#runStartedAt));
+  }
+
+  async waitForDrain(): Promise<void> {
+    const remaining = this.queuedMs();
+    if (remaining > 0) await delay(remaining);
+  }
+
+  clear(): void {
+    // libwebrtc keeps slices already handed over; only the estimate can be reset.
+    this.#runAcceptedMs = 0;
+  }
+}
+
 const delay = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => {
     const timer = setTimeout(resolve, milliseconds);
@@ -388,8 +441,9 @@ export class RelayCallTransport {
   #publishFrame: CallRoomPublishOfferFrame | undefined;
   #initialAnswerSdp: string | undefined;
   #negotiationTail: Promise<void> = Promise.resolve();
-  #outputTail: Promise<void> = Promise.resolve();
   #audioGeneration = 0;
+  /** `waitForPlayout()` callers released early by `clearAudio()` or `close()`. */
+  readonly #playoutWaiters = new Set<() => void>();
   #reportedConnected = false;
   #readySettled = false;
   #readyResolve: (() => void) | undefined;
@@ -577,7 +631,10 @@ export class RelayCallTransport {
 
   /**
    * Feed interleaved PCM16 audio into Relay. Frames are split into 10 ms WebRTC
-   * source slices and paced in real time, so adapters may push larger chunks.
+   * source slices and handed to the engine at once; the engine's 20 ms pump
+   * paces the wire, so adapters may push faster than real time (LiveKit's
+   * `AudioSource.captureFrame` shape). Resolves once the slices are queued;
+   * `waitForPlayout()` tells when they have left.
    */
   writeAudio(frame: RelayAudioFrame): Promise<void> {
     if (this.#closed) return Promise.reject(new Error("Relay Call transport is closed."));
@@ -596,15 +653,39 @@ export class RelayCallTransport {
       sampleRate: frame.sampleRate,
       channelCount: frame.channelCount,
     };
-    const generation = this.#audioGeneration;
-    const queued = this.#outputTail.then(() => this.#writeAudio(captured, generation));
-    this.#outputTail = queued.catch(() => undefined);
-    return queued;
+    this.#writeAudio(captured, this.#audioGeneration);
+    return Promise.resolve();
   }
 
-  /** Drop queued outgoing PCM. At most one already-submitted 10 ms slice remains. */
+  /** Milliseconds of audio accepted by `writeAudio` but not yet written to RTP. */
+  queuedAudioMs(): number {
+    return this.#audioSource?.queuedMs?.() ?? 0;
+  }
+
+  /**
+   * Resolves when every accepted slice has been written to RTP and the engine's
+   * pump is idle; immediately when nothing is queued; early on `clearAudio()`
+   * or `close()` (the caller reads `queuedAudioMs()` to learn what was dropped).
+   */
+  waitForPlayout(): Promise<void> {
+    const source = this.#audioSource;
+    if (!source || this.#closed || this.queuedAudioMs() === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const release = (): void => {
+        this.#playoutWaiters.delete(release);
+        resolve();
+      };
+      this.#playoutWaiters.add(release);
+      const drained = source.waitForDrain?.() ?? Promise.resolve();
+      drained.then(release, release);
+    });
+  }
+
+  /** Drop outgoing PCM that has not reached RTP and release `waitForPlayout()` callers. */
   clearAudio(): void {
     this.#audioGeneration += 1;
+    this.#audioSource?.clear?.();
+    this.#releasePlayoutWaiters();
   }
 
   setMuted(muted: boolean): void {
@@ -619,8 +700,9 @@ export class RelayCallTransport {
     if (this.#closed) return;
     this.#closed = true;
     this.#rejectReady(new RelayCallTransportError("Relay Call transport closed before media connected."));
-    this.clearAudio();
+    this.#audioGeneration += 1;
     this.#shutdownMedia();
+    this.#releasePlayoutWaiters();
     this.#room.close();
   }
 
@@ -758,10 +840,10 @@ export class RelayCallTransport {
     };
   }
 
-  async #writeAudio(frame: RelayAudioFrame, generation: number): Promise<void> {
+  #writeAudio(frame: RelayAudioFrame, generation: number): void {
     const source = this.#audioSource;
     if (!source || generation !== this.#audioGeneration) return;
-    const samplesPerChannel = frame.sampleRate / 100;
+    const samplesPerChannel = (frame.sampleRate * AUDIO_SLICE_MS) / 1000;
     const sliceSamples = samplesPerChannel * frame.channelCount;
     for (let offset = 0; offset < frame.samples.length; offset += sliceSamples) {
       if (this.#closed || generation !== this.#audioGeneration) return;
@@ -776,8 +858,11 @@ export class RelayCallTransport {
         numberOfFrames: samplesPerChannel,
       });
       this.#outboundFrames += 1;
-      await delay(AUDIO_SLICE_MS);
     }
+  }
+
+  #releasePlayoutWaiters(): void {
+    for (const release of [...this.#playoutWaiters]) release();
   }
 
   async #waitForIceGathering(peer: RelayPeerConnectionLike): Promise<void> {
