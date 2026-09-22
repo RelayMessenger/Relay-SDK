@@ -37,8 +37,10 @@ idempotency keys, without expanding group membership.
 array. It keeps invalid blocks as text with an error and never combines a
 selection with buttons. Existing buttons retain their behavior.
 
-Tapping a selected option deselects it without sending. The sole submit action
-is a centered compact light-blue **Send** button.
+The person opens the prompt, checks any number of options and submits them
+once; checking sends nothing and only the submit does. A person answers a given
+selection once, and reopening it afterwards shows what they chose without
+letting them change it.
 
 The user's new reply is exactly literal `• ` + each selected source label
 joined with `\n`, then
@@ -46,8 +48,9 @@ joined with `\n`, then
 in source-option order, with explicit `reply_to.message_id` and `part_index`.
 The user client keeps its existing outgoing idempotency identity for retries.
 The server also accepts exact legacy comma-joined source labels only for
-compatibility. iOS may present round checked circles, but portable text stays
-bulleted. Metadata has no additional display text. Use `selected_values` and the source
+compatibility. iOS may draw a checkmark in place of each bullet and repeat the
+prompt's title, as presentation only, but portable text stays bulleted.
+Metadata has no additional display text. Use `selected_values` and the source
 reply target to dispatch your own handler, rather than splitting labels.
 Signed webhook `unwrap` and WebSocket `onEvent` default types expose this
 metadata after narrowing to `message.received`.

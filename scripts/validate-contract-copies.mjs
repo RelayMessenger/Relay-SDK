@@ -7,11 +7,11 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const expected =
-  "7f1056cd6d5dc81a1cd23f1e40520fc3c0a32b5a577dd222988fc26f92e6c8d4";
+  "262e832ad356375b1a912faa6f9a8ea9c008effa6c24e2618b000ad6b69d858f";
 const manifest = JSON.parse(await readFile(join(root, "contracts/relay-v1-operations.json"), "utf8"));
 assert.equal(manifest.source_openapi_sha256, expected);
 assert.equal(manifest.upstream.sha256, expected);
-assert.equal(manifest.upstream.commit, "56f31c13956ee41f4e2e5945973645e17faa3338");
+assert.equal(manifest.upstream.commit, "fe3ec1e91608e923ec5ee0e37896eb8bf24d863a");
 const copies = [
   "contracts/relay-v1-openapi.yaml",
   "packages/chat-sdk-adapter/contracts/relay-openapi.yaml",
@@ -46,7 +46,7 @@ const skillLock = JSON.parse(
   ),
 );
 assert.equal(skillLock.api.openapi_sha256, expected);
-assert.equal(skillLock.api.commit, "56f31c13956ee41f4e2e5945973645e17faa3338");
+assert.equal(skillLock.api.commit, "fe3ec1e91608e923ec5ee0e37896eb8bf24d863a");
 assert.equal(skillLock.sdk.commit, "79517a1c9fcb1c82b474cd72ba8bc10197ff363f");
 assert.equal(skillLock.sdk.version, "0.3.1-staging.1");
 // The lock is what a customer's installed skill reads, on every branch, so its
@@ -62,7 +62,7 @@ for (const path of [
 ]) {
   const lock = JSON.parse(await readFile(join(root, path), "utf8"));
   assert.equal(lock.relayServer.sha256, expected, `${path}: Server digest`);
-  assert.equal(lock.relayServer.commit, "56f31c13956ee41f4e2e5945973645e17faa3338", `${path}: local Server pin`);
+  assert.equal(lock.relayServer.commit, "fe3ec1e91608e923ec5ee0e37896eb8bf24d863a", `${path}: local Server pin`);
   assert.equal(lock.relaySdk.workspaceOpenapiSha256, expected, `${path}: workspace digest`);
   assert.equal(lock.relaySdk.version, sdkManifest.version, `${path}: SDK version`);
 }

@@ -26,10 +26,12 @@ describe("selection authoring", () => {
     expect(SELECTION_GUIDANCE).toContain("Only the human user can submit a selection response; agents cannot");
     expect(SELECTION_GUIDANCE).toContain("across that user's devices and idempotency keys");
   });
-  it("teaches canonical bullet text, local deselection, and compatibility without label parsing", () => {
+  it("teaches canonical bullet text, one submit per person, and compatibility without label parsing", () => {
     expect(SELECTION_GUIDANCE).toContain("literal '• ' + label joined with '\\n'");
-    expect(SELECTION_GUIDANCE).toContain("Tapping a selected option deselects it");
-    expect(SELECTION_GUIDANCE).toContain("centered compact light-blue Send button");
+    expect(SELECTION_GUIDANCE).toContain("checking sends nothing and only the submit does");
+    expect(SELECTION_GUIDANCE).toContain("A person answers a given selection once");
+    expect(SELECTION_GUIDANCE).toContain("draw a checkmark in place of each bullet");
+    expect(SELECTION_GUIDANCE).not.toContain("light-blue");
     expect(SELECTION_GUIDANCE).toContain("exact legacy comma-joined source labels only for compatibility");
     expect(SELECTION_GUIDANCE).toContain("portable text remains bullets");
     expect(SELECTION_GUIDANCE).not.toContain("Clear");

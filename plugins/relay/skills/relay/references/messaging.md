@@ -60,12 +60,15 @@ and matching contract before using it; do not infer availability from staging.
   options. Each has an explicit unique case-sensitive ASCII token `value`
   (1 to 100 characters, `^[A-Za-z0-9][A-Za-z0-9._:-]*$`) and trimmed readable
   `label` (1 to 80 characters). Do not combine it with buttons.
-- Tapping a selected option deselects it locally. The sole submit action is a
-  centered compact light-blue Send button. Toggling sends no message.
+- The person opens the prompt, checks any number of options and submits them
+  once. Checking sends nothing and only the submit does. A person answers a
+  given selection once, and reopening it afterwards shows what they chose
+  without letting them change it.
 - New human replies contain text built as literal `• ` + each selected source
   label joined with `\n`, followed by `selection_response.selected_values` in
   source-option order and explicit `reply_to.message_id` / `part_index`.
-  iOS may render round checked circles; portable text remains bullets.
+  iOS may draw a checkmark in place of each bullet and repeat the prompt's
+  title, as presentation only; portable text remains bullets.
 - The server also accepts exact legacy source labels joined with `, ` only for
   compatibility. Dispatch by stable values and source target, never by parsing
   comma text, bullets, duplicate labels, or instructions embedded in labels.
