@@ -193,6 +193,17 @@ it("accepts the video pull offer and the participant video and track fields", ()
   expect(() => parseCallRoomServerFrame(drifted({ video: true }))).toThrow(/invalid frame/u);
 });
 
+it("parses the roomState staging sent before either participant published (tracks: [])", async () => {
+  // Captured from staging (Relay-Server 1241f83d) by the calls test ladder, 2026-09-22.
+  const { readFile } = await import("node:fs/promises");
+  const frame = JSON.parse(await readFile(
+    new URL("./fixtures/staging-roomstate-before-publish.json", import.meta.url),
+    "utf8",
+  )) as Record<string, any>;
+  expect(frame.participants.map((participant: { tracks: unknown }) => participant.tracks)).toEqual([[], []]);
+  expect(parseCallRoomServerFrame(frame)).toEqual(frame);
+});
+
 it("rejects server frames whose stable shapes drift", () => {
   expect(() => parseCallRoomServerFrame({ ...roomState, extra: true })).toThrow(/invalid frame/u);
   expect(() => parseCallRoomServerFrame({

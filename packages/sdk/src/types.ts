@@ -73,7 +73,7 @@ export interface CallRoomParticipant {
   connected: boolean;
   /** Camera sending, from this participant's `userUpdate`. */
   video?: boolean;
-  /** Tracks this participant has published: `["audio"]` or `["audio", "video"]`. */
+  /** Tracks this participant has published: `[]` before its first offer, then `["audio"]` or `["audio", "video"]`. */
   tracks?: CallRoomTrackName[];
 }
 

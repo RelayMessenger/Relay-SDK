@@ -82,9 +82,9 @@ const validCall = (value: unknown): value is Call => {
 
 const PARTICIPANT_KEYS = ["contact_id", "kind", "attached", "track", "muted", "connected"] as const;
 
+/** `[]` before the participant's first offer, then `["audio"]` or `["audio", "video"]` (PROTOCOL.md section 3). */
 const validTracks = (value: unknown): boolean =>
   Array.isArray(value)
-  && value.length >= 1
   && value.length <= 2
   && value.every((name) => name === "audio" || name === "video")
   && new Set(value).size === value.length;

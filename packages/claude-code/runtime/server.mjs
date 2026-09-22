@@ -20349,7 +20349,7 @@ var validCall = (value) => {
   return typeof value.id === "string" && typeof value.chat_id === "string" && (status === "ringing" || status === "in-progress" || TERMINAL_STATUSES.has(status));
 };
 var PARTICIPANT_KEYS = ["contact_id", "kind", "attached", "track", "muted", "connected"];
-var validTracks = (value) => Array.isArray(value) && value.length >= 1 && value.length <= 2 && value.every((name) => name === "audio" || name === "video") && new Set(value).size === value.length;
+var validTracks = (value) => Array.isArray(value) && value.length <= 2 && value.every((name) => name === "audio" || name === "video") && new Set(value).size === value.length;
 var validParticipant = (value) => isRecord(value) && (hasExactKeys(value, PARTICIPANT_KEYS) || hasExactKeys(value, [...PARTICIPANT_KEYS, "video", "tracks"])) && (value.video === void 0 || typeof value.video === "boolean") && (value.tracks === void 0 || validTracks(value.tracks)) && typeof value.contact_id === "string" && (value.kind === "user" || value.kind === "agent") && typeof value.attached === "boolean" && (value.track === "audio" || value.track === null) && typeof value.muted === "boolean" && typeof value.connected === "boolean";
 var parseCallRoomServerFrame = (value) => {
   if (!isRecord(value) || typeof value.type !== "string") {
