@@ -131,11 +131,21 @@ export const toWireFormat = (data: {
 
 /**
  * PCM16 in, paced 20 ms Opus RTP out. Frames are accumulated into whole
- * packets; a timer drains one packet every 20 ms so the wire sees a steady
+ * packets; a timer writes one packet every 20 ms so the wire sees a steady
  * cadence regardless of how the adapter chunks its writes. Adapters may push
  * far ahead of real time: `queuedMs()` is what has not left yet and
- * `waitForDrain()` resolves once the queue is empty and the pump has stopped
- * (LiveKit's `AudioSource.queuedDuration` / `waitForPlayout` shape).
+ * `waitForDrain()` resolves once the queued application audio has been
+ * written (LiveKit's `AudioSource.queuedDuration` / `waitForPlayout` shape).
+ *
+ * From `start()` (the transport calls it when the peer first connects) until
+ * the track stops, the pump never pauses: a tick with no application audio
+ * queued writes an Opus silence frame instead, as a live microphone track
+ * does. Cloudflare's SFU refuses to pull a published track that has carried
+ * no RTP: `tracks/new` for the remote track returned `empty_track_error` "No
+ * track data from remote peer" after about 8.2 s on staging 2026-09-22, and
+ * the same pull returned in about 470 ms with silence flowing. Silence and
+ * application packets share one sequence and timestamp line, so queued audio
+ * replaces silence on the next tick with no gap and no jump.
  */
 class WeriftAudioSource implements RelayAudioSourceLike {
   readonly #encoder = new Encoder({
@@ -143,22 +153,29 @@ class WeriftAudioSource implements RelayAudioSourceLike {
     sample_rate: WERIFT_SAMPLE_RATE,
     application: "voip",
   });
+  /** 20 ms of digital silence, encoded once by the same encoder and reused. */
+  readonly #silence = Buffer.from(this.#encoder.encode(new Int16Array(PACKET_SAMPLES)));
   readonly #track = new MediaStreamTrack({ kind: "audio", id: "microphone", streamId: "relay-call" });
   readonly #packets: Buffer[] = [];
+  /** Every RTP packet written, silence included. */
   readonly #rtp = new PacketClock();
   #opusPackets = 0;
+  #applicationRtpPackets = 0;
+  #silencePackets = 0;
   #pending = new Int16Array(0);
   #sequenceNumber = 1;
   #timestamp = 0;
   #first = true;
   #pump: NodeJS.Timeout | undefined;
+  #started = false;
   #stopped = false;
   readonly #drainWaiters = new Set<() => void>();
 
   stats(): RelayAudioSourceStats {
     return {
       opusPackets: this.#opusPackets,
-      rtpPackets: this.#rtp.count,
+      rtpPackets: this.#applicationRtpPackets,
+      silencePackets: this.#silencePackets,
       firstRtpAt: this.#rtp.firstAt,
       lastRtpAt: this.#rtp.lastAt,
       recentRtpPackets: this.#rtp.recent(),
@@ -173,9 +190,16 @@ class WeriftAudioSource implements RelayAudioSourceLike {
     track.stop = () => {
       this.#stopped = true;
       this.clear();
+      this.#stopPump();
       stop();
     };
     return track;
+  }
+
+  start(): void {
+    if (this.#started || this.#stopped) return;
+    this.#started = true;
+    this.#startPump();
   }
 
   queuedMs(): number {
@@ -192,7 +216,7 @@ class WeriftAudioSource implements RelayAudioSourceLike {
   clear(): void {
     this.#packets.length = 0;
     this.#pending = new Int16Array(0);
-    this.#stopPump();
+    if (!this.#started) this.#stopPump();
     this.#notifyDrained();
   }
 
@@ -224,8 +248,11 @@ class WeriftAudioSource implements RelayAudioSourceLike {
     this.#startPump();
   }
 
+  /** Application audio only: the silence the started pump keeps writing never counts. */
   #drained(): boolean {
-    return this.#packets.length === 0 && this.#pending.length === 0 && this.#pump === undefined;
+    return this.#packets.length === 0
+      && this.#pending.length === 0
+      && (this.#started || this.#pump === undefined);
   }
 
   #notifyDrained(): void {
@@ -239,16 +266,17 @@ class WeriftAudioSource implements RelayAudioSourceLike {
   /**
    * The first packet of a run leaves at once; every later one waits for the
    * 20 ms tick, so a burst pushed faster than real time reaches the wire at
-   * packet cadence. The interval stops one tick after the queue empties, which
-   * is when the last packet has played.
+   * packet cadence. Before `start()` the interval stops once the queue is
+   * empty; after it, the interval runs until the track stops.
    */
   #startPump(): void {
-    if (this.#pump || this.#packets.length === 0) return;
+    if (this.#pump || this.#stopped) return;
+    if (!this.#started && this.#packets.length === 0) return;
     this.#sendNext();
     this.#pump = setInterval(() => {
       this.#sendNext();
       if (this.#packets.length === 0) {
-        this.#stopPump();
+        if (!this.#started) this.#stopPump();
         this.#notifyDrained();
       }
     }, WERIFT_PACKET_MS);
@@ -262,8 +290,9 @@ class WeriftAudioSource implements RelayAudioSourceLike {
   }
 
   #sendNext(): void {
-    const payload = this.#packets.shift();
-    if (!payload || this.#stopped) return;
+    if (this.#stopped) return;
+    const application = this.#packets.shift();
+    if (!application && !this.#started) return;
     const header = new RtpHeader({
       payloadType: LOCAL_PAYLOAD_TYPE,
       sequenceNumber: this.#sequenceNumber,
@@ -274,7 +303,9 @@ class WeriftAudioSource implements RelayAudioSourceLike {
     this.#first = false;
     this.#sequenceNumber = (this.#sequenceNumber + 1) & 0xffff;
     this.#timestamp = (this.#timestamp + PACKET_FRAMES) >>> 0;
-    this.#track.writeRtp(new RtpPacket(header, payload));
+    this.#track.writeRtp(new RtpPacket(header, application ?? this.#silence));
+    if (application) this.#applicationRtpPackets += 1;
+    else this.#silencePackets += 1;
     this.#rtp.mark();
   }
 }

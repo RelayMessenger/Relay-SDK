@@ -23,10 +23,14 @@ export interface RelayAudioFrame {
 /** @internal Outbound packet counts an engine reports; timestamps are epoch ms. */
 export interface RelayAudioSourceStats {
   opusPackets: number;
+  /** RTP packets carrying application audio. */
   rtpPackets: number;
+  /** RTP packets carrying the silence frame sent while nothing is queued. */
+  silencePackets: number;
+  /** First and last RTP packet of either kind. */
   firstRtpAt: number | undefined;
   lastRtpAt: number | undefined;
-  /** RTP packets written in the last 5 s. */
+  /** RTP packets of either kind written in the last 5 s. */
   recentRtpPackets: number;
   /** Encoded packets waiting for the pacer. */
   queued: number;
@@ -56,6 +60,12 @@ export interface RelayAudioSourceLike {
   }): void;
   /** Engines that own the RTP path report packet counts; `@roamhq/wrtc` does not. */
   stats?(): RelayAudioSourceStats;
+  /**
+   * The peer is connected: from now until the track stops, write one packet
+   * every 20 ms, silence when nothing is queued, as a live microphone does.
+   * Idempotent. `@roamhq/wrtc` has no such clock (see `WrtcAudioSource`).
+   */
+  start?(): void;
   /** Milliseconds accepted by `onData` but not yet written to RTP (encoded queue plus any un-encoded remainder). */
   queuedMs?(): number;
   /** Resolves once everything accepted so far has been written to RTP and the pacer is idle. */
@@ -253,10 +263,14 @@ export interface RelayCallOutboundDiagnostics {
   /** PCM slices accepted from the caller and handed to the engine source. */
   frames: number;
   opusPackets: number;
+  /** RTP packets carrying the caller's audio. */
   rtpPackets: number;
+  /** RTP packets carrying Opus silence, written while nothing was queued. */
+  silencePackets: number;
+  /** ms since `connect()` for the first and last RTP packet of either kind. */
   firstPacketAtMs: number | undefined;
   lastPacketAtMs: number | undefined;
-  /** RTP packets written in the 5 s before `diagnostics()` was called. */
+  /** RTP packets of either kind written in the 5 s before `diagnostics()` was called. */
   recentRtpPackets: number;
   /** Encoded packets waiting for the 20 ms pacer. */
   queued: number;
@@ -428,6 +442,7 @@ const summarizeInbound = (inbound: RelayCallInboundDiagnostics): string =>
 
 const summarizeOutbound = (outbound: RelayCallOutboundDiagnostics): string =>
   `out: ${outbound.frames} frames, ${outbound.opusPackets} opus, ${outbound.rtpPackets} rtp, `
+  + `silence ${outbound.silencePackets}, `
   + `${span(outbound.firstPacketAtMs, outbound.lastPacketAtMs)}, ${outbound.recentRtpPackets}/5s, `
   + `queue ${outbound.queued}, pacer ${
     outbound.pacerAlive === undefined ? "n/a" : outbound.pacerAlive ? "alive" : "idle"
@@ -463,6 +478,16 @@ const cloneSamples = (samples: Int16Array): Int16Array => {
  * own clock and exposes no queue, so this wrapper estimates it from wall time:
  * queued = accepted since the run started minus the time elapsed. Best effort;
  * the werift engine (the default) reports its real queue.
+ *
+ * It sends no silence of its own. The source has no timer: `onData` hands the
+ * slice to the track's sinks and returns (`RTCAudioSource::OnData` ->
+ * `PushData`, node-webrtc src/interfaces/rtc_audio_source.cc and
+ * rtc_audio_source.hh, the repository @roamhq/wrtc 0.10.0 is published
+ * from), so libwebrtc receives audio only while the caller writes it, and
+ * this wrapper has no `start()`. What libwebrtc puts on the wire between
+ * writes was not measured; a caller of this
+ * engine that needs the track to carry data between utterances writes
+ * silence itself.
  */
 class WrtcAudioSource implements RelayAudioSourceLike {
   readonly #inner: RelayAudioSourceLike;
@@ -772,6 +797,7 @@ export class RelayCallTransport {
       frames: this.#outboundFrames,
       opusPackets: stats?.opusPackets ?? 0,
       rtpPackets: stats?.rtpPackets ?? 0,
+      silencePackets: stats?.silencePackets ?? 0,
       firstPacketAtMs: this.#sinceConnect(stats?.firstRtpAt),
       lastPacketAtMs: this.#sinceConnect(stats?.lastRtpAt),
       recentRtpPackets: stats?.recentRtpPackets ?? 0,
@@ -1082,6 +1108,9 @@ export class RelayCallTransport {
       if (this.#peerConnected) return;
       this.#peerConnected = true;
       this.#failedAttempts = 0;
+      // The SFU will not pull a track that has carried no RTP, so the source
+      // sends silence from here on until it is closed.
+      this.#audioSource?.start?.();
       try {
         // Sent for every new session: the room re-pulls a restarted participant's
         // tracks once it reports `connected` (PROTOCOL.md section 2).
