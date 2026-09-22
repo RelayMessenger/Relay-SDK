@@ -13,6 +13,7 @@ import {
   type RelayAudioSinkLike,
   type RelayAudioSourceLike,
   type RelayMediaStreamTrackLike,
+  type RelayPeerConnectionConfig,
   type RelayPeerConnectionLike,
   type RelayWebRTCFactory,
 } from "../src/transport.js";
@@ -68,11 +69,17 @@ class FakeAudioSink implements RelayAudioSinkLike {
 class FakePeer implements RelayPeerConnectionLike {
   connectionState = "new";
   iceGatheringState = "complete";
+  iceConnectionState = "new";
   signalingState = "stable";
   localDescription: RTCSessionDescription | null = null;
   remoteDescription: RTCSessionDescription | null = null;
   onconnectionstatechange: (() => void) | null = null;
+  onicecandidate: ((event: { candidate?: { candidate: string } | null }) => void) | null = null;
+  onicegatheringstatechange: ((event?: unknown) => void) | null = null;
+  oniceconnectionstatechange: (() => void) | null = null;
   ontrack: ((event: { track: RelayMediaStreamTrackLike }) => void) | null = null;
+  /** Set to true to simulate a peer whose ICE never completes. */
+  neverConnects = false;
   readonly transceiver = { mid: "0" };
   direction: "sendonly" | undefined;
   closed = false;
@@ -97,6 +104,7 @@ class FakePeer implements RelayPeerConnectionLike {
       this.signalingState = "have-remote-offer";
     } else {
       this.signalingState = "stable";
+      if (this.neverConnects) return;
       this.connectionState = "connected";
       queueMicrotask(() => this.onconnectionstatechange?.());
     }
@@ -110,7 +118,11 @@ class FakeWebRTC implements RelayWebRTCFactory {
   readonly peer = new FakePeer();
   readonly source = new FakeAudioSource();
   readonly sinks: FakeAudioSink[] = [];
-  createPeerConnection(): RelayPeerConnectionLike { return this.peer; }
+  readonly peerConfigs: RelayPeerConnectionConfig[] = [];
+  createPeerConnection(config?: RelayPeerConnectionConfig): RelayPeerConnectionLike {
+    if (config) this.peerConfigs.push(structuredClone(config));
+    return this.peer;
+  }
   createAudioSource(): RelayAudioSourceLike { return this.source; }
   createAudioSink(): RelayAudioSinkLike {
     const sink = new FakeAudioSink();
@@ -296,4 +308,98 @@ it("reports abnormal signaling closure without destroying the WebRTC peer", asyn
   expect(closes).toEqual([1006]);
   expect(webRTC.peer.closed).toBe(false);
   transport.close();
+});
+
+it("hands ICE servers and the transport policy to the WebRTC factory", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const defaults = makeTransport(room, webRTC);
+  await connectTransport(defaults, room);
+  expect(webRTC.peerConfigs).toEqual([{ iceServers: [], iceTransportPolicy: "all" }]);
+  defaults.close();
+
+  const turnRoom = new FakeRoom();
+  const turnWebRTC = new FakeWebRTC();
+  const transport = new RelayCallTransport({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: turnRoom as unknown as CallRoom,
+    webRTC: turnWebRTC,
+    iceServers: [
+      { urls: "stun:stun.cloudflare.com:3478" },
+      {
+        urls: ["turn:turn.cloudflare.com:3478?transport=udp", "turns:turn.cloudflare.com:443?transport=tcp"],
+        username: "user",
+        credential: "secret",
+      },
+    ],
+    iceTransportPolicy: "relay",
+  });
+  await connectTransport(transport, turnRoom);
+  expect(turnWebRTC.peerConfigs).toEqual([{
+    iceServers: [
+      { urls: "stun:stun.cloudflare.com:3478" },
+      {
+        urls: ["turn:turn.cloudflare.com:3478?transport=udp", "turns:turn.cloudflare.com:443?transport=tcp"],
+        username: "user",
+        credential: "secret",
+      },
+    ],
+    iceTransportPolicy: "relay",
+  }]);
+  transport.close();
+});
+
+it("names the gathered candidates and ICE states when media never connects", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  webRTC.peer.neverConnects = true;
+  const transport = new RelayCallTransport({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: room as unknown as CallRoom,
+    webRTC,
+    mediaConnectTimeoutMs: 2_000,
+  });
+  const connecting = transport.connect();
+  const failed = connecting.then(() => undefined, (error: unknown) => error as Error);
+  await flush();
+
+  const peer = webRTC.peer;
+  peer.onicecandidate?.({ candidate: { candidate: "candidate:1 1 udp 2130706431 10.0.0.2 51000 typ host" } });
+  peer.onicecandidate?.({ candidate: { candidate: "candidate:2 1 udp 2130706431 10.0.0.3 51001 typ host" } });
+  peer.onicecandidate?.({ candidate: { candidate: "candidate:3 1 udp 1694498815 203.0.113.9 40000 typ srflx raddr 10.0.0.2 rport 51000" } });
+  peer.onicecandidate?.({ candidate: null });
+  await vi.advanceTimersByTimeAsync(200);
+  peer.iceGatheringState = "complete";
+  peer.onicegatheringstatechange?.();
+  await vi.advanceTimersByTimeAsync(100);
+  room.emit("answer", {
+    type: "answer",
+    session_description: {
+      type: "answer",
+      sdp: "v=0\r\na=ice-lite\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=candidate:1 1 udp 2130706431 198.51.100.7 1473 typ host\r\n",
+    },
+  });
+  await flush();
+  peer.iceConnectionState = "checking";
+  peer.oniceconnectionstatechange?.();
+  peer.connectionState = "connecting";
+  peer.onconnectionstatechange?.();
+  await vi.advanceTimersByTimeAsync(2_000);
+
+  const error = await failed;
+  expect(error).toBeInstanceOf(RelayCallTransportError);
+  expect(error?.message).toBe(
+    "Timed out connecting Relay WebRTC media (local: host 2, srflx 1, relay 0; remote: udp 1473; "
+    + "states: new\u2192complete 0.2s, ice checking 0.3s, connecting 0.3s, no connected)",
+  );
+  expect(error?.message).not.toContain("198.51.100");
+  const diagnostics = transport.diagnostics();
+  expect(diagnostics.local).toEqual({ host: 2, srflx: 1, relay: 0, other: 0 });
+  expect(diagnostics.remote).toEqual([{ transport: "udp", port: 1473 }]);
+  expect(diagnostics.connected).toBe(false);
+  expect(error?.message).toContain(diagnostics.summary);
+  expect(webRTC.peer.closed).toBe(true);
 });

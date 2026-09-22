@@ -2,11 +2,14 @@ import { AudioInput, AudioOutput, type AgentSession } from "@livekit/agents";
 import { AudioFrame } from "@livekit/rtc-node";
 import { TransformStream, type WritableStreamDefaultWriter } from "node:stream/web";
 import type Relay from "@relaymessenger/sdk";
-import type { CallRoomOptions } from "@relaymessenger/sdk";
+import type { CallRoom, CallRoomOptions } from "@relaymessenger/sdk";
 import {
   RelayCallTransport,
   type RelayAudioFrame,
+  type RelayCallIceDiagnostics,
   type RelayCallTransportOptions,
+  type RelayIceServer,
+  type RelayIceTransportPolicy,
   type RelayWebRTCFactory,
 } from "./transport.js";
 
@@ -137,10 +140,19 @@ export interface RelayLiveKitConnectOptions extends RelayLiveKitAudioOptions {
   relay: Relay;
   callId: string;
   room?: CallRoomOptions;
+  /** @internal Supply an already-created Call room in tests. */
+  roomClient?: CallRoom;
   /** @internal */
   webRTC?: RelayWebRTCFactory;
+  /** STUN and TURN servers for the agent's WebRTC peer. Defaults to none. */
+  iceServers?: RelayIceServer[];
+  /** `"relay"` forces TURN. Defaults to `"all"`. */
+  iceTransportPolicy?: RelayIceTransportPolicy;
   /** @internal */
   iceGatheringTimeoutMs?: number;
+  /** Maximum wait for WebRTC media to connect. Defaults to 15 seconds. */
+  mediaConnectTimeoutMs?: number;
+  /** @deprecated Use `mediaConnectTimeoutMs`. */
   connectionTimeoutMs?: number;
 }
 
@@ -169,10 +181,16 @@ export class RelayLiveKitCall {
       relay: options.relay,
       callId: options.callId,
       ...(options.room ? { room: options.room } : {}),
+      ...(options.roomClient ? { roomClient: options.roomClient } : {}),
       ...(options.webRTC ? { webRTC: options.webRTC } : {}),
+      ...(options.iceServers ? { iceServers: options.iceServers } : {}),
+      ...(options.iceTransportPolicy ? { iceTransportPolicy: options.iceTransportPolicy } : {}),
       ...(options.iceGatheringTimeoutMs === undefined
         ? {}
         : { iceGatheringTimeoutMs: options.iceGatheringTimeoutMs }),
+      ...(options.mediaConnectTimeoutMs === undefined
+        ? {}
+        : { mediaConnectTimeoutMs: options.mediaConnectTimeoutMs }),
       ...(options.connectionTimeoutMs === undefined
         ? {}
         : { connectionTimeoutMs: options.connectionTimeoutMs }),
@@ -195,6 +213,11 @@ export class RelayLiveKitCall {
     if (this.#session.input.audio === this.input) this.#session.input.audio = null;
     if (this.#session.output.audio === this.output) this.#session.output.audio = null;
     this.#session = undefined;
+  }
+
+  /** ICE candidates and state transitions for this call, with a one-line summary for logs. */
+  diagnostics(): RelayCallIceDiagnostics {
+    return this.transport.diagnostics();
   }
 
   setMuted(muted: boolean): void {

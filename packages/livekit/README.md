@@ -72,6 +72,44 @@ await transport.writeAudio({
 });
 ```
 
+## ICE servers, TURN, and diagnostics
+
+By default the peer gathers host candidates only and Cloudflare's SFU supplies
+its own candidates in the answer. Inside a container or behind a firewall that
+blocks outbound UDP, pass TURN servers in the standard `RTCIceServer` shape and,
+if every path must go through TURN, `iceTransportPolicy: "relay"`. Both options
+are accepted by `RelayLiveKitCall.connect()` and `RelayCallTransport`.
+
+```ts
+const call = await RelayLiveKitCall.connect({
+  relay,
+  callId,
+  iceServers: [
+    {
+      urls: [
+        "turn:turn.cloudflare.com:3478?transport=udp",
+        "turn:turn.cloudflare.com:3478?transport=tcp",
+        "turns:turn.cloudflare.com:5349?transport=tcp",
+      ],
+      username: process.env.TURN_USERNAME!,
+      credential: process.env.TURN_CREDENTIAL!,
+    },
+  ],
+  iceTransportPolicy: "all",
+  mediaConnectTimeoutMs: 15_000,
+});
+```
+
+`mediaConnectTimeoutMs` bounds the wait for the media peer to reach
+`connected` (15 seconds by default). When that wait expires, the error message
+carries what ICE saw, for example
+`Timed out connecting Relay WebRTC media (local: host 2, srflx 0, relay 0; remote: udp 1473; states: new→complete 0.2s, connecting 0.3s, no connected)`.
+The same facts are available at any time from `call.diagnostics()` or
+`transport.diagnostics()`: local candidate counts by type, the remote
+candidates' transport and port (never their address), the ICE gathering, ICE
+connection and peer connection state changes with their offsets from
+`connect()`, and the one-line `summary`.
+
 `RelayCallTransport` consumes the SDK's `CallRoom`; it does not duplicate the
 room protocol. The default engine is `werift` (pure TypeScript WebRTC) with
 `@evan/opus` (prebuilt Opus, WASM fallback), so no native WebRTC binding is

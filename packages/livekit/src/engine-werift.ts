@@ -8,6 +8,13 @@
  *   `onconnectionstatechange`, `localDescription`, `close()`, and the
  *   `"icegatheringstatechange"` / `"connectionstatechange"` events emitted
  *   through `EventTarget.addEventListener` (peerConnection.js:317, :330).
+ *   `RTCConfiguration.iceServers: RTCIceServer[]` ({ urls, username?,
+ *   credential? }) and `iceTransportPolicy: "all" | "relay"` (peerConnection.d.ts
+ *   :264-273); utils.js:110-179 parses `stun|stuns|turn|turns:` URLs with
+ *   `?transport=`, and `secureTransportManager.js:121` maps `"relay"` to
+ *   `forceTurn`. The W3C setters `onicecandidate`, `onicegatheringstatechange`
+ *   and `oniceconnectionstatechange` (peerConnection.d.ts:67-82, fired at
+ *   peerConnection.js:314-341) feed the transport's ICE diagnostics.
  * - media/track.d.ts: `MediaStreamTrack({ kind })`, `writeRtp(RtpPacket)`,
  *   `onReceiveRtp: Event<[RtpPacket, Extensions?]>` with `subscribe()`.
  * - media/rtpSender.js:544-549: the sender rewrites ssrc and payloadType and
@@ -36,6 +43,7 @@ import type {
   RelayAudioSinkLike,
   RelayAudioSourceLike,
   RelayMediaStreamTrackLike,
+  RelayPeerConnectionConfig,
   RelayPeerConnectionLike,
   RelayWebRTCFactory,
 } from "./transport.js";
@@ -202,10 +210,13 @@ class WeriftAudioSink implements RelayAudioSinkLike {
   }
 }
 
-export const createWeriftPeerConnection = (): RTCPeerConnection =>
+export const createWeriftPeerConnection = (
+  config: RelayPeerConnectionConfig = { iceServers: [], iceTransportPolicy: "all" },
+): RTCPeerConnection =>
   new RTCPeerConnection({
     bundlePolicy: "max-bundle",
-    iceServers: [],
+    iceServers: config.iceServers,
+    iceTransportPolicy: config.iceTransportPolicy,
     codecs: {
       audio: [
         new RTCRtpCodecParameters({
@@ -218,7 +229,7 @@ export const createWeriftPeerConnection = (): RTCPeerConnection =>
   });
 
 export const createWeriftWebRTCFactory = (): RelayWebRTCFactory => ({
-  createPeerConnection: () => createWeriftPeerConnection() as unknown as RelayPeerConnectionLike,
+  createPeerConnection: (config) => createWeriftPeerConnection(config) as unknown as RelayPeerConnectionLike,
   createAudioSource: () => new WeriftAudioSource(),
   createAudioSink: (track) => new WeriftAudioSink(track as unknown as MediaStreamTrack),
 });
