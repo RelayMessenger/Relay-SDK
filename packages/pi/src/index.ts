@@ -11,7 +11,10 @@ import Relay, {
   SELECTION_BLOCK_INSTRUCTION,
   LINK_LINE_INSTRUCTION,
   answerMessages as splitAnswer,
+  createPaymentPart,
+  RelayAPIError,
   type MessagePart,
+  type PaymentRequestCreateParams,
   type MessageWebhookData,
   type RelayWebhookEvent,
 } from "@relaymessenger/sdk";
@@ -63,9 +66,9 @@ export const piPrompt = (message: string): string =>
  * asked for under the last words. A block pi wrote that cannot be read stays
  * in the words, so nothing the person was told is lost.
  */
-export const answerMessages = (answer: string): { parts: MessagePart[]; error?: string }[] => {
+export const answerMessages = (answer: string): { parts: MessagePart[]; error?: string; payment?: PaymentRequestCreateParams }[] => {
   const split = splitAnswer(answer);
-  const messages: { parts: MessagePart[]; error?: string }[] = [];
+  const messages: { parts: MessagePart[]; error?: string; payment?: PaymentRequestCreateParams }[] = [];
   for (const [first, ...rest] of split.messages) {
     if (first?.type !== "text" || first.value.length <= 10_000) {
       messages.push({ parts: first ? [first, ...rest] : rest });
@@ -77,6 +80,9 @@ export const answerMessages = (answer: string): { parts: MessagePart[]; error?: 
     }
   }
   if (split.error && messages[0]) messages[0].error = split.error;
+  // The payment request the block described: created with the card's own key
+  // and sent as the last Message.
+  if (split.payment) messages.push({ parts: [], payment: split.payment });
   return messages;
 };
 
@@ -174,7 +180,20 @@ export class PiChannel {
     if (!answer) throw new Error("Pi returned no final text answer");
     const messages = answerMessages(answer);
     if (messages[0]?.error) console.error(`Relay: the component block in pi's answer was left as text: ${messages[0].error}.`);
-    for (const [index, message] of messages.entries()) await this.#relay.chats.messages.send(data.chat.id, { message: { parts: message.parts, idempotency_key: `pi-${event.event_id}-${index}` } });
+    for (const [index, message] of messages.entries()) {
+      const key = `pi-${event.event_id}-${index}`;
+      let parts = message.parts;
+      if (message.payment) {
+        try {
+          parts = [await createPaymentPart(this.#relay, message.payment, key)];
+        } catch (error) {
+          if (!(error instanceof RelayAPIError) || error.retryable) throw error;
+          console.error(`Relay: the payment in pi's answer was not sent: ${error.message}`);
+          continue;
+        }
+      }
+      await this.#relay.chats.messages.send(data.chat.id, { message: { parts, idempotency_key: key } });
+    }
   }
 }
 export const runPiChannel = (options: PiChannelOptions, signal?: AbortSignal): Promise<void> => new PiChannel(options).run(signal);

@@ -32,7 +32,8 @@ each bullet and repeat the prompt's title, as presentation only.
 
 ## Payment
 
-After creating a payment request (`POST /v1/payment_requests`), the agent ends
-the final Pi answer with a `payment` JSON fence holding the request's
-`checkout_url`; the words go first and the payment card follows as its own
-Message.
+The agent ends the final Pi answer with a `payment` JSON fence holding the
+payment request's fields (`description`, `category`, and `amount` with
+`currency`, or `mode: "subscription"` with `price_id`). The plugin creates the
+request with its own Relay token, on the card's own idempotency key; the words
+go first and the payment card follows as its own Message.

@@ -7,7 +7,7 @@ import { bridgeTurn, codexPrompt, sendAnswer, type BridgeTurn } from "./codex-br
 import type { ClaudeThreadStore } from "./claude-threads.js";
 
 export interface ClaudeBridgeInput {
-  client: Pick<Relay, "chats" | "websocket">;
+  client: Pick<Relay, "chats" | "paymentRequests" | "websocket">;
   media?: Omit<InboundMediaOptions, "chatId">;
   claude: { executable: string };
   cwd: string;

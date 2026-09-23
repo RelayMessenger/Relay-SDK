@@ -94,6 +94,8 @@ function fakeRelay(events: readonly RelayWebhookEvent[]) {
   const typing: string[] = [];
   const sent: Array<{ chatId: string; text: string; key: string | undefined; parts?: unknown[]; replyTo?: unknown }> = [];
   let sendFails = false;
+  const created: Array<{ body: unknown; key: string | undefined }> = [];
+  let createRefusal: Error | undefined;
   const client = {
     chats: {
       startTyping: async (chatID: string) => { typing.push(`start ${chatID}`); },
@@ -106,13 +108,20 @@ function fakeRelay(events: readonly RelayWebhookEvent[]) {
         },
       },
     },
+    paymentRequests: {
+      create: async (body: unknown, options?: { idempotencyKey?: string }) => {
+        if (createRefusal) throw createRefusal;
+        created.push({ body, key: options?.idempotencyKey });
+        return { checkout_url: "https://pay.relayapp.im/pr_token_123" };
+      },
+    },
     websocket: {
       run: async (options: { onEvent(event: RelayWebhookEvent, context: { sequence: string }): Promise<void> }) => {
         for (const [index, event] of events.entries()) await options.onEvent(event, { sequence: String(index + 1) });
       },
     },
-  } as unknown as Pick<Relay, "chats" | "websocket">;
-  return { client, typing, sent, failSends: () => { sendFails = true; } };
+  } as unknown as Pick<Relay, "chats" | "paymentRequests" | "websocket">;
+  return { client, typing, sent, created, refuseCreate: (error: Error) => { createRefusal = error; }, failSends: () => { sendFails = true; } };
 }
 
 /** Every way one message can end on the terminal. */
@@ -441,7 +450,7 @@ it("teaches the ACP agent the payment block and sends a payment answer as the wo
   if (event.event_type !== "message.received") throw new Error("fixture");
   event.data.reply_to = { message_id: "source", part_index: 0 };
   const agent = await fakeAcpAgent({ answers: [
-    'That is $24.\n```payment\n{"checkout_url": "https://pay.relayapp.im/pr_token_123"}\n```',
+    'That is $24.\n```payment\n{"description": "House blend, 250 g", "category": "physical_goods", "amount": 2400, "currency": "usd"}\n```',
   ] });
   const result = await runBridge({ ...agent, events: [event, event], endings: 1 });
   const prompt = (await agent.log()).find(line => line.in === "session/prompt")?.params?.prompt as Array<{ text?: string }>;
@@ -454,6 +463,8 @@ it("teaches the ACP agent the payment block and sends a payment answer as the wo
       type: "payment", checkout_url: "https://pay.relayapp.im/pr_token_123",
     }]],
   ]);
+  // The bridge created the request once, on the card's own key, from the block's fields.
+  expect(result.relay.created).toEqual([{ body: { description: "House blend, 250 g", category: "physical_goods", amount: 2400, currency: "usd" }, key: "acp-bridge-pay-1" }]);
   // The reply_to that came in is context for the agent, not a quote on the answer.
   expect(result.relay.sent.map((message) => message.replyTo)).toEqual([undefined, undefined]);
 });

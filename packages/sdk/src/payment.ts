@@ -1,50 +1,52 @@
-import type { PaymentPart } from "./types.js";
+import type { Relay } from "./client.js";
+import type { PaymentCategory, PaymentPart, PaymentRequestCreateParams, RequestOptions } from "./types.js";
 
 /**
- * The fence tag a text-only agent uses to send a payment card. The block body
- * is one JSON object, the `payment` part exactly as the API takes it:
+ * The fence tag a text-only agent uses to ask someone to pay. The block body
+ * is one JSON object, the payment request's fields as `POST
+ * /v1/payment_requests` takes them; the bridge creates the request with its
+ * own token and sends the card:
  *
  * ```payment
- * {"checkout_url": "https://pay.relayapp.im/..."}
+ * {"description": "House blend, 250 g", "category": "physical_goods", "amount": 2400, "currency": "usd"}
  * ```
  */
 export const PAYMENT_FENCE = "payment";
 
 /**
- * When and how an agent asks someone to pay. One text, carried verbatim by
- * every runtime's tool description or prompt. The flow is the server's: a
- * payment request on the organization's connected Stripe account returns
- * `checkout_url`, and a `payment` part carrying it draws the card (Linq Agent
- * Pay: `POST /v3/payment_requests`, then the card; the card's amount is read
- * from the request, never from the sender). The categories are the contract's
- * `PaymentCategory`, which cites Apple 3.1.3(e), 3.1.1(a) and 3.2.2(iv).
+ * How an agent asks someone to pay, for every runtime whose bridge creates the
+ * payment request for the model (the model never holds the Relay token). Only
+ * what the model cannot know: the fields, where the card goes, and the three
+ * categories, one line each, from the contract's `PaymentCategory`.
  */
 export const PAYMENT_GUIDANCE = [
-  "Ask a person to pay only when they asked to buy something or have already agreed to a price.",
-  "First create a payment request (POST /v1/payment_requests) with a description of 1 to 32 characters, a category, and an amount in minor units plus a currency, or mode subscription with a price_id; it returns checkout_url, Relay's pay page on your organization's own connected Stripe account.",
-  "Then send that checkout_url unchanged as a payment part; the card reads its amount and title from the request.",
-  "Set category honestly: physical_goods for goods and services used in the real world, digital_goods for anything used in an app or online (payable only on the United States storefront), donation for a charity or a fundraiser.",
-  "The payment card is a message of its own: no buttons or selection beside it, and any words you write arrive in a message before it.",
-  "When the person pays, the request moves to succeeded, you get payment.succeeded, and a payment_receipt message from the payer arrives as a reply to the card. An unpaid request expires after 23 hours (payment.expired); cancel one with POST /v1/payment_requests/{id}/cancel (payment.canceled).",
+  "A payment asks the person to pay through your Stripe account, drawn as a card in its own message after your words, never beside buttons or a selection.",
+  "Give description (the card's title, 1 to 32 characters), category, and amount in minor units (2400 is 24.00) with a 3-letter currency; for a subscription, give mode subscription and a price_id from your Stripe account, with an optional quantity, instead of amount and currency. image_url, an https picture of the product, is optional.",
+  "category physical_goods: physical things and real-world services.",
+  "category digital_goods: digital content and tips.",
+  "category donation: a charity or a fundraiser.",
+  "When the person pays, a payment_receipt message from them arrives.",
 ].join(" ");
 
 /**
- * How a text-only agent sends a payment card: the same words for every bridge
+ * How a text-only agent asks someone to pay: the same words for every bridge
  * that sends the agent's final text for it.
  */
 export const PAYMENT_BLOCK_INSTRUCTION =
-  "To send a payment card for a payment request you created, end your answer with a fenced code block tagged `" + PAYMENT_FENCE + "` "
-  + "holding one JSON object: {\"checkout_url\": \"...\"}, the checkout_url exactly as the request returned it. "
-  + "The block is removed from your words and drawn as its own payment card, sent after them.";
+  "To ask the person to pay, end your answer with a fenced code block tagged `" + PAYMENT_FENCE + "` "
+  + "holding one JSON object: {\"description\": \"...\", \"category\": \"physical_goods\", \"amount\": 2400, \"currency\": \"usd\"}. "
+  + "The block is removed from your words; Relay creates the payment and sends its card after them.";
 
-/** The server's limit on a `payment` part's checkout_url. */
-export const PAYMENT_CHECKOUT_URL_MAX_LENGTH = 2_048;
+/** The server's limits on the fields a model supplies. */
+export const PAYMENT_DESCRIPTION_MAX_LENGTH = 32;
+export const PAYMENT_IMAGE_URL_MAX_LENGTH = 2_048;
+export const PAYMENT_CATEGORIES = ["physical_goods", "digital_goods", "donation"] as const satisfies readonly PaymentCategory[];
 
 export interface SplitPayment {
   /** The answer with the fenced block removed and the edges trimmed. */
   text: string;
-  /** The payment part the block described, when there was a valid one. */
-  payment?: PaymentPart;
+  /** The payment request the block described, when there was a valid one. */
+  payment?: PaymentRequestCreateParams;
   /** Why a block that was there could not be used. The text then keeps it. */
   error?: string;
 }
@@ -52,40 +54,81 @@ export interface SplitPayment {
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
-const FENCE = new RegExp(
-  "(^|\\n)[ \\t]*```[ \\t]*" + PAYMENT_FENCE + "(?:[ \\t][^\\r\\n]*)?\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```[ \\t]*(?=\\r?\\n|$)",
-  "gu",
-);
-
-const BUTTONS_OR_SELECTION_FENCE = /(^|\n)[ \t]*```[ \t]*(?:buttons|selection)(?:[ \t][^\r\n]*)?\r?\n/u;
+const MODEL_FIELDS = new Set(["description", "category", "amount", "currency", "mode", "price_id", "quantity", "image_url"]);
 
 /**
- * Turns a decoded value, `{checkout_url}` or the whole part, into a `payment`
- * part, or explains why it cannot. Which request the url names, and whether it
- * is still `requested`, only the server knows.
+ * Turns the fields a model supplied into `POST /v1/payment_requests`'s body,
+ * or explains why it cannot. Only the fields a model can know are accepted;
+ * `metadata`, `customer_id` and `discount` belong to the developer's own
+ * code. Stripe's own checks (minimum amount, an unknown price) stay with the
+ * server, which returns them as a 400 carrying Stripe's message.
  */
-export const paymentPart = (parsed: unknown): PaymentPart | string => {
+export const paymentRequestFields = (parsed: unknown): PaymentRequestCreateParams | string => {
   if (!record(parsed)) return "the payment block must be a JSON object";
-  const extra = Object.keys(parsed).find((key) => key !== "type" && key !== "checkout_url");
+  const extra = Object.keys(parsed).find((key) => !MODEL_FIELDS.has(key));
   if (extra) return `payment has unknown field ${extra}`;
-  if (parsed.type !== undefined && parsed.type !== "payment") return "payment part needs type payment";
-  const { checkout_url } = parsed;
-  if (typeof checkout_url !== "string" || !checkout_url || checkout_url.length > PAYMENT_CHECKOUT_URL_MAX_LENGTH) {
-    return `payment needs the checkout_url of a payment request, at most ${PAYMENT_CHECKOUT_URL_MAX_LENGTH} characters`;
+  const { description, category, amount, currency, mode, price_id, quantity, image_url } = parsed;
+  if (typeof description !== "string" || !description.trim()
+    || [...description.trim()].length > PAYMENT_DESCRIPTION_MAX_LENGTH) {
+    return `payment needs a description of 1 to ${PAYMENT_DESCRIPTION_MAX_LENGTH} characters`;
   }
-  return { type: "payment", checkout_url };
+  if (!(PAYMENT_CATEGORIES as readonly unknown[]).includes(category)) {
+    return `payment category must be ${PAYMENT_CATEGORIES.join(", ")}`;
+  }
+  if (mode !== undefined && mode !== "payment" && mode !== "subscription") {
+    return "payment mode must be payment or subscription";
+  }
+  if (image_url !== undefined && (typeof image_url !== "string" || !image_url.startsWith("https://")
+    || image_url.length > PAYMENT_IMAGE_URL_MAX_LENGTH)) {
+    return `payment image_url must be an https address of at most ${PAYMENT_IMAGE_URL_MAX_LENGTH} characters`;
+  }
+  const fields: PaymentRequestCreateParams = {
+    description: description.trim(),
+    category: category as PaymentCategory,
+    ...(image_url !== undefined ? { image_url: image_url as string } : {}),
+  };
+  if (mode === "subscription") {
+    if (amount !== undefined || currency !== undefined) {
+      return "a subscription takes its amount and currency from price_id; omit amount and currency";
+    }
+    if (typeof price_id !== "string" || !price_id) return "a subscription needs a price_id";
+    if (quantity !== undefined && (!Number.isInteger(quantity) || (quantity as number) < 1)) {
+      return "payment quantity must be a whole number of at least 1";
+    }
+    return {
+      ...fields, mode: "subscription", price_id,
+      ...(quantity !== undefined ? { quantity: quantity as number } : {}),
+    };
+  }
+  if (price_id !== undefined || quantity !== undefined) {
+    return "price_id and quantity are for mode subscription";
+  }
+  if (!Number.isInteger(amount) || (amount as number) < 1) {
+    return "payment amount must be a whole number of minor units, at least 1";
+  }
+  if (typeof currency !== "string" || !/^[A-Za-z]{3}$/u.test(currency)) {
+    return "payment currency must be a 3-letter code";
+  }
+  return { ...fields, amount: amount as number, currency: currency.toLowerCase() };
 };
 
-/** Parses the body of a payment block, JSON, into a `payment` part. */
-export const parsePaymentBlock = (body: string): PaymentPart | string => {
+/** Parses the body of a payment block, JSON, into a payment request's fields. */
+export const parsePaymentBlock = (body: string): PaymentRequestCreateParams | string => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
   } catch {
     return "the payment block is not valid JSON";
   }
-  return paymentPart(parsed);
+  return paymentRequestFields(parsed);
 };
+
+const FENCE = new RegExp(
+  "(^|\\n)[ \\t]*```[ \\t]*" + PAYMENT_FENCE + "(?:[ \\t][^\\r\\n]*)?\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```[ \\t]*(?=\\r?\\n|$)",
+  "gu",
+);
+
+const BUTTONS_OR_SELECTION_FENCE = /(^|\n)[ \t]*```[ \t]*(?:buttons|selection)(?:[ \t][^\r\n]*)?\r?\n/u;
 
 /**
  * Lifts the one ```payment block out of an agent's answer. A payment must be
@@ -109,4 +152,22 @@ export const splitPayment = (answer: string): SplitPayment => {
   const after = answer.slice(match.index + match[0].length).trimStart();
   const text = [before, after].filter(Boolean).join("\n\n");
   return { text, payment: parsed };
+};
+
+/**
+ * Creates the payment request a model described and returns the `payment`
+ * part that carries it. `idempotencyKey` is the card Message's own key, so a
+ * retry of the same answer returns the same request (the server scopes the
+ * key to this agent's payment requests). A refusal (403 until Stripe is
+ * connected, 400 with Stripe's message) is thrown as the API error for the
+ * bridge to hand back.
+ */
+export const createPaymentPart = async (
+  client: Pick<Relay, "paymentRequests">,
+  fields: PaymentRequestCreateParams,
+  idempotencyKey: string,
+  options?: RequestOptions,
+): Promise<PaymentPart> => {
+  const request = await client.paymentRequests.create(fields, { ...options, idempotencyKey });
+  return { type: "payment", checkout_url: request.checkout_url };
 };

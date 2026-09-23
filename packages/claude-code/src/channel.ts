@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { buttonsPart, paymentPart, selectionPart, standaloneLink } from "@relaymessenger/sdk";
+import { RelayAPIError, buttonsPart, createPaymentPart, indexedIdempotencyKey, paymentRequestFields, selectionPart, standaloneLink } from "@relaymessenger/sdk";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import Relay, { type RelayWebhookEvent } from "@relaymessenger/sdk";
 import {
@@ -281,7 +281,7 @@ export class RelayChannel {
     const selection = args?.selection === undefined ? undefined : selectionPart(args.selection);
     if (typeof selection === "string") return failure(`selection: ${selection}`);
     if (selection && (buttons || link)) return failure("selection cannot be combined with buttons or link");
-    const payment = args?.payment === undefined ? undefined : paymentPart(args.payment);
+    const payment = args?.payment === undefined ? undefined : paymentRequestFields(args.payment);
     if (typeof payment === "string") return failure(`payment: ${payment}`);
     if (payment && (buttons || selection)) return failure("a payment is a Message of its own; send it without buttons or selection");
     const sendId = args && typeof args.send_id === "string" ? args.send_id : "";
@@ -303,9 +303,16 @@ export class RelayChannel {
     const idempotencyKey = `claude-reply-${createHash("sha256")
       .update(`${this.#config.accountKey}\0${this.#config.sessionKey}\0${sendId}`)
       .digest("hex")}`;
-    const bodies = buildReplyMessages(redactedText, idempotencyKey, replyTo, buttons, link, selection, payment);
-    const body = bodies[0]!;
-    const payloadHash = stableHash(bodies.length === 1 ? { chatId, body } : { chatId, bodies });
+    // The words and link are known now; the payment card's checkout_url only
+    // after Relay creates the request, so the hash covers the fields the
+    // model gave, and the card sits on the key the last Message will carry.
+    const plannedBodies = payment && !redactedText && !link
+      ? []
+      : buildReplyMessages(redactedText, idempotencyKey, replyTo, buttons, link, selection);
+    const body = plannedBodies[0];
+    const payloadHash = stableHash(payment
+      ? { chatId, bodies: plannedBodies, payment }
+      : plannedBodies.length === 1 ? { chatId, body } : { chatId, bodies: plannedBodies });
     const existing = this.#state.existingOutboundSend({
       sendId,
       payloadHash,
@@ -318,6 +325,22 @@ export class RelayChannel {
     }
     if (replyTo !== undefined && replyTo !== origin.messageId) {
       return failure("reply_to_message_id is not the Message that originated the active Relay turn");
+    }
+    let bodies = plannedBodies;
+    if (payment) {
+      // Created before anything is sent, on the key its card will carry, so
+      // a refusal reaches the model with nothing half-sent, and a retry of
+      // this reply returns the same request.
+      const cardKey = indexedIdempotencyKey(idempotencyKey, (redactedText ? 1 : 0) + (link ? 1 : 0));
+      try {
+        const card = await createPaymentPart(this.relay, payment, cardKey);
+        bodies = buildReplyMessages(redactedText, idempotencyKey, replyTo, buttons, link, selection, card);
+      } catch (error) {
+        if (error instanceof RelayAPIError && !error.retryable) {
+          return failure(`payment request refused: ${this.#redactor.text(error)}. Nothing was sent; fix the payment or reply without it, with a new send_id.`);
+        }
+        return failure(`payment request failed: ${this.#redactor.text(error)}. Retry with the same send_id, chat_id, text, link, payment, and reply_to_message_id.`);
+      }
     }
     try {
       const registered = this.#state.registerOutboundSend({

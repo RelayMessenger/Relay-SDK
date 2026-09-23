@@ -8,8 +8,11 @@ import {
   SELECTION_BLOCK_INSTRUCTION,
   LINK_LINE_INSTRUCTION,
   answerMessages as splitAnswer,
+  createPaymentPart,
   indexedIdempotencyKey,
+  RelayAPIError,
   type MessagePart,
+  type PaymentRequestCreateParams,
   type Relay,
 } from "@relaymessenger/sdk";
 import { bridgeTurn, type BridgeTurn } from "./bridge-turn.js";
@@ -95,38 +98,59 @@ export const codexPrompt = (sender: string, text: string): string => [
 /**
  * The messages an answer becomes: its words as text, each link written alone
  * on a line as its own message, and the buttons its fenced block asked for
- * under the last words. A block the SDK cannot read stays in the words, so
- * the person still gets the answer, and the terminal says why.
+ * under the last words, plus any payment request its fenced block described,
+ * which is created and sent after them. A block the SDK cannot read stays in
+ * the words, so the person still gets the answer, and the terminal says why.
  */
 export const answerMessages = (
   answer: string,
   sender: string,
   say: (line: string) => void,
-): MessagePart[][] => {
-  const { messages, error } = splitAnswer(answer);
+): { messages: MessagePart[][]; payment?: PaymentRequestCreateParams } => {
+  const { messages, payment, error } = splitAnswer(answer);
   if (error) say(`The component block in the answer to @${sender} was left as text: ${error}.`);
-  return messages.map((parts) => parts.map((part) => (
-    part.type === "text" ? { ...part, value: part.value.slice(0, MAX_RELAY_TEXT) } : part
-  )));
+  return {
+    messages: messages.map((parts) => parts.map((part) => (
+      part.type === "text" ? { ...part, value: part.value.slice(0, MAX_RELAY_TEXT) } : part
+    ))),
+    ...(payment ? { payment } : {}),
+  };
 };
 
 /**
  * Sends an answer, one message at a time in order. The message that arrived
  * is the key, so a retry after a dropped connection cannot answer the same
- * person twice; each message past the first carries its index.
+ * person twice; each message past the first carries its index. A payment
+ * request is created with the card's own key after the words go out; when
+ * Relay refuses it (Stripe not connected, Stripe's own 400) the terminal says
+ * why and no card is sent.
  */
 export const sendAnswer = async (
-  client: Pick<Relay, "chats">,
+  client: Pick<Relay, "chats" | "paymentRequests">,
   turn: Pick<BridgeTurn, "chatId" | "eventId" | "sender">,
   answer: string,
   say: (line: string) => void,
   key: string = replyKey(turn.eventId),
 ): Promise<void> => {
-  for (const [index, parts] of answerMessages(answer, turn.sender, say).entries()) {
+  const { messages, payment } = answerMessages(answer, turn.sender, say);
+  for (const [index, parts] of messages.entries()) {
     await client.chats.messages.send(turn.chatId, {
       message: { parts, idempotency_key: indexedIdempotencyKey(key, index) },
     });
   }
+  if (!payment) return;
+  const cardKey = indexedIdempotencyKey(key, messages.length);
+  let card: MessagePart;
+  try {
+    card = await createPaymentPart(client, payment, cardKey);
+  } catch (error) {
+    if (!(error instanceof RelayAPIError) || error.retryable) throw error;
+    say(`The payment in the answer to @${turn.sender} was not sent: ${error.message.replace(/\.$/u, "")}.`);
+    return;
+  }
+  await client.chats.messages.send(turn.chatId, {
+    message: { parts: [card], idempotency_key: cardKey },
+  });
 };
 
 /**
@@ -390,7 +414,7 @@ export const runTurn = async (
 };
 
 export interface CodexBridgeInput {
-  client: Pick<Relay, "chats" | "websocket">;
+  client: Pick<Relay, "chats" | "paymentRequests" | "websocket">;
   media?: Omit<InboundMediaOptions, "chatId">;
   /** The `codex` to run, and the folder to run it in. */
   codex: CodexCommand;

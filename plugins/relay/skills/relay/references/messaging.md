@@ -100,8 +100,10 @@ Adjacent text parts are invalid. Replies use `reply_to.message_id` and optional
   request. A paid request also adds a `payment_receipt` message from the payer,
   a reply to the card, that arrives as `message.received`.
 - Text runtimes end the answer with one fenced code block tagged `payment`
-  holding `{"checkout_url": "..."}`; `answerMessages` sends the words first and
-  the payment as its own final Message.
+  holding the request's fields (`description`, `category`, `amount` and
+  `currency`, or `mode: "subscription"` with `price_id`); the bridge creates
+  the request with its own token and sends the words first, then the card as
+  its own final Message.
 
 ## Attachments
 

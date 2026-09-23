@@ -90,12 +90,16 @@ or your cancel, and arrives as `payment.succeeded`, `payment.canceled` or
 `payment.expired`; a paid request also adds a `payment_receipt` message from
 the payer, which arrives as `message.received`.
 
-`answerMessages` accepts one `payment` fenced JSON block, `{"checkout_url":
-"..."}`, and sends it as its own Message after the words. A second payment, or
-a payment beside buttons or a selection, stays text with an error.
-`PAYMENT_GUIDANCE` is the when-to-ask-for-payment text the CLI, Pi, OpenClaw,
-MCP and the Claude Code channel carry; the text bridges also carry
-`PAYMENT_BLOCK_INSTRUCTION`.
+A model inside a bridge never holds the Relay token, so it gives the request's
+fields and the bridge creates it. `answerMessages` lifts one `payment` fenced
+JSON block (`description`, `category`, `amount` and `currency`, or
+`mode: "subscription"` with `price_id`) out of the words and returns it as
+`payment`, checked by `paymentRequestFields`; `createPaymentPart` creates the
+request on the card Message's own idempotency key and returns the `payment`
+part to send last. A second payment, or a payment beside buttons or a
+selection, stays text with an error. `PAYMENT_GUIDANCE` is the text the CLI,
+Pi, OpenClaw, MCP and the Claude Code channel carry; the text bridges also
+carry `PAYMENT_BLOCK_INSTRUCTION`.
 
 ## Chat permissions
 

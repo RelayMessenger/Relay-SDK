@@ -100,16 +100,19 @@ it("teaches selection authoring and passes structured inbound values to Pi", asy
   ], idempotency_key: "pi-selection-0" } });
 });
 
-it("teaches payment authoring and sends the payment as its own Message after the words", async () => {
+it("teaches payment authoring, creates the request on the card's key and sends the card after the words", async () => {
   expect(piPrompt("hello")).toContain("fenced code block tagged `payment`");
-  expect(piPrompt("hello")).toContain("have already agreed to a price");
-  const payment = { type: "payment", checkout_url: "https://pay.relayapp.im/pr_token_123" };
-  const process = fakePi(records('Here is your order.\n```payment\n{"checkout_url": "https://pay.relayapp.im/pr_token_123"}\n```'));
+  expect(piPrompt("hello")).toContain("category donation: a charity or a fundraiser.");
+  const fields = { description: "House blend, 250 g", category: "physical_goods", amount: 2400, currency: "usd" };
+  const process = fakePi(records('Here is your order.\n```payment\n' + JSON.stringify(fields) + '\n```'));
   const { relay, send } = relayFor([makeEvent("payment", "chat")]);
+  const create = vi.fn().mockResolvedValue({ checkout_url: "https://pay.relayapp.im/pr_token_123" });
+  (relay as unknown as { paymentRequests: { create: typeof create } }).paymentRequests = { create };
   await new PiChannel({ agentToken: "test", relay, spawnPi: () => process }).run();
+  expect(create.mock.calls).toEqual([[fields, { idempotencyKey: "pi-payment-1" }]]);
   expect(send.mock.calls).toEqual([
     ["chat", { message: { parts: [{ type: "text", value: "Here is your order." }], idempotency_key: "pi-payment-0" } }],
-    ["chat", { message: { parts: [payment], idempotency_key: "pi-payment-1" } }],
+    ["chat", { message: { parts: [{ type: "payment", checkout_url: "https://pay.relayapp.im/pr_token_123" }], idempotency_key: "pi-payment-1" } }],
   ]);
 });
 

@@ -55,6 +55,8 @@ import type {
   RelayMessage,
   RelayMessagePartResponse,
   RelayOutgoingPart,
+  RelayPaymentPartResponse,
+  RelayPaymentReceiptPartResponse,
   RelayRawMessage,
   RelaySentMessage,
   RelayThreadId,
@@ -186,6 +188,30 @@ function messageParts(
   return (message.parts ?? []) as RelayMessagePartResponse[];
 }
 
+/** An amount in the currency's minor units, written the way a person reads it. */
+function money(amount: number, currency: string): string {
+  const format = new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase() });
+  return format.format(amount / 10 ** (format.resolvedOptions().maximumFractionDigits ?? 2));
+}
+
+function renewal(part: { mode: string; recurring?: { interval: string; interval_count: number } }): string {
+  if (part.mode !== "subscription" || !part.recurring) return "";
+  const { interval, interval_count: count } = part.recurring;
+  return count === 1 ? `, renewing every ${interval}` : `, renewing every ${count} ${interval}s`;
+}
+
+/**
+ * A payment card and the payer's receipt carry no text of their own, so the
+ * model reads one short factual line built from the part's fields; the part
+ * itself stays intact in `raw`.
+ */
+function paymentLine(part: RelayPaymentPartResponse | RelayPaymentReceiptPartResponse): string {
+  const what = `${money(part.amount, part.currency)} for ${part.description}${renewal(part)}`;
+  return part.type === "payment_receipt"
+    ? `Paid ${what}`
+    : `Payment request: ${what} (${part.status})`;
+}
+
 function textAndLinks(parts: RelayMessagePartResponse[]): {
   links: LinkPreview[];
   value: string;
@@ -201,6 +227,8 @@ function textAndLinks(parts: RelayMessagePartResponse[]): {
     } else if (part.type === "link") {
       pieces.push(part.value);
       links.push({ url: part.value });
+    } else if (part.type === "payment" || part.type === "payment_receipt") {
+      pieces.push(paymentLine(part));
     }
   }
   return { links, value: pieces.join("\n\n") };

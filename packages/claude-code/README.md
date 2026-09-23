@@ -28,15 +28,16 @@ each bullet and repeat the prompt's title, as presentation only.
 
 ## Payment
 
-The agent asks the person to pay in two steps. It creates a payment request on
-its organization's connected Stripe account with
-`relay.paymentRequests.create({ amount, currency, description, category })`,
-then passes the returned `checkout_url` to the `reply` tool as
-`payment: { checkout_url }`, never together with `buttons` or `selection`. The
-payment card is always a Message of its own, sent after the text and any link
-on the next indexed idempotency key. Its status moves only on Stripe's word or
-`relay.paymentRequests.cancel(id)`; a paid request adds a `payment_receipt`
-message from the payer, which arrives like any message.
+The `reply` tool's `payment` argument asks the person to pay: `description`,
+`category` (`physical_goods`, `digital_goods` or `donation`), and `amount` in
+minor units with a `currency`, or `mode: "subscription"` with a `price_id` and
+optional `quantity`, plus an optional `image_url`. The channel creates the
+payment request with its own Relay token before anything is sent, on the key
+the card will carry, then sends the card as its own Message after the text and
+any link; never together with `buttons` or `selection`. A refusal (Stripe not
+connected, Stripe's own 400) comes back as the tool result with nothing sent.
+A paid request adds a `payment_receipt` message from the payer, which arrives
+like any message.
 
 ## Requirements
 

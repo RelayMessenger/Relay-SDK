@@ -82,11 +82,14 @@ export {
 } from "./links.js";
 export {
   PAYMENT_BLOCK_INSTRUCTION,
-  PAYMENT_CHECKOUT_URL_MAX_LENGTH,
+  PAYMENT_CATEGORIES,
+  PAYMENT_DESCRIPTION_MAX_LENGTH,
   PAYMENT_FENCE,
   PAYMENT_GUIDANCE,
-  paymentPart,
+  PAYMENT_IMAGE_URL_MAX_LENGTH,
+  createPaymentPart,
   parsePaymentBlock,
+  paymentRequestFields,
   splitPayment,
   type SplitPayment,
 } from "./payment.js";

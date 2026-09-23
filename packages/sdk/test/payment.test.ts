@@ -1,40 +1,54 @@
 import { describe, expect, it } from "vitest";
-import Relay, { answerMessages } from "../src/index.js";
-import { PAYMENT_CHECKOUT_URL_MAX_LENGTH, parsePaymentBlock, paymentPart, splitPayment } from "../src/payment.js";
+import Relay, { answerMessages, RelayAPIError } from "../src/index.js";
+import { createPaymentPart, parsePaymentBlock, paymentRequestFields, PAYMENT_GUIDANCE, splitPayment } from "../src/payment.js";
 import type { PaymentPartResponse, PaymentReceiptPartResponse, PaymentRequest, PaymentWebhookEvent } from "../src/types.js";
 
+const fields = { description: "House blend, 250 g", category: "physical_goods" as const, amount: 2_400, currency: "usd" };
 const payment = { type: "payment" as const, checkout_url: "https://pay.relayapp.im/pr_token_123" };
 const block = (body: unknown) => "```payment\n" + JSON.stringify(body) + "\n```";
 
-describe("paymentPart", () => {
-  it("accepts the whole part or only its checkout_url", () => {
-    expect(paymentPart(payment)).toEqual(payment);
-    expect(paymentPart({ checkout_url: payment.checkout_url })).toEqual(payment);
+describe("PAYMENT_GUIDANCE", () => {
+  it("names each category on its own line", () => {
+    expect(PAYMENT_GUIDANCE).toContain("category physical_goods: physical things and real-world services.");
+    expect(PAYMENT_GUIDANCE).toContain("category digital_goods: digital content and tips.");
+    expect(PAYMENT_GUIDANCE).toContain("category donation: a charity or a fundraiser.");
+  });
+});
+
+describe("paymentRequestFields", () => {
+  it("accepts a one-time payment, trims the description and lowercases the currency", () => {
+    expect(paymentRequestFields({ ...fields, description: "  House blend, 250 g  ", currency: "USD" })).toEqual(fields);
   });
 
-  it("passes the checkout_url through unchanged, since only the server knows which request it names", () => {
-    const url = "https://pay.staging.relayapp.im/Tok?x=1";
-    expect(paymentPart({ checkout_url: url })).toEqual({ type: "payment", checkout_url: url });
+  it("accepts a subscription from a price, with an optional quantity and picture", () => {
+    const subscription = { description: "Monthly plan", category: "digital_goods", mode: "subscription", price_id: "price_123", quantity: 2, image_url: "https://example.com/plan.png" };
+    expect(paymentRequestFields(subscription)).toEqual(subscription);
+  });
+
+  it("counts the description in code points, the server's own measure", () => {
+    const title = "\u{1F600}".repeat(32);
+    expect(paymentRequestFields({ ...fields, description: title })).toEqual({ ...fields, description: title });
   });
 
   it.each([
-    [{ ...payment, amount: 2_400 }, "payment has unknown field amount"],
-    [{ ...payment, type: "buttons" }, "payment part needs type payment"],
-    [{ type: "payment" }, "payment needs the checkout_url of a payment request, at most 2048 characters"],
-    [{ checkout_url: "" }, "payment needs the checkout_url of a payment request, at most 2048 characters"],
-    [{ checkout_url: 7 }, "payment needs the checkout_url of a payment request, at most 2048 characters"],
-    [{ checkout_url: "x".repeat(PAYMENT_CHECKOUT_URL_MAX_LENGTH + 1) }, "payment needs the checkout_url of a payment request, at most 2048 characters"],
+    [{ ...fields, checkout_url: "https://pay.relayapp.im/x" }, "payment has unknown field checkout_url"],
+    [{ ...fields, metadata: {} }, "payment has unknown field metadata"],
+    [{ ...fields, description: " " }, "payment needs a description of 1 to 32 characters"],
+    [{ ...fields, description: "x".repeat(33) }, "payment needs a description of 1 to 32 characters"],
+    [{ ...fields, category: "service" }, "payment category must be physical_goods, digital_goods, donation"],
+    [{ ...fields, mode: "one_time" }, "payment mode must be payment or subscription"],
+    [{ ...fields, amount: 0 }, "payment amount must be a whole number of minor units, at least 1"],
+    [{ ...fields, amount: 1.5 }, "payment amount must be a whole number of minor units, at least 1"],
+    [{ ...fields, currency: "usdd" }, "payment currency must be a 3-letter code"],
+    [{ ...fields, price_id: "price_1" }, "price_id and quantity are for mode subscription"],
+    [{ ...fields, mode: "subscription", price_id: "price_1" }, "a subscription takes its amount and currency from price_id; omit amount and currency"],
+    [{ description: "Plan", category: "digital_goods", mode: "subscription" }, "a subscription needs a price_id"],
+    [{ description: "Plan", category: "digital_goods", mode: "subscription", price_id: "price_1", quantity: 0 }, "payment quantity must be a whole number of at least 1"],
+    [{ ...fields, image_url: "http://example.com/a.png" }, "payment image_url must be an https address of at most 2048 characters"],
     [null, "the payment block must be a JSON object"],
-    ["payment", "the payment block must be a JSON object"],
     [[], "the payment block must be a JSON object"],
   ])("rejects malformed input %#", (value, error) => {
-    expect(paymentPart(value)).toBe(error);
-  });
-
-  it("accepts a checkout_url at the server's length cap", () => {
-    const url = "https://pay.relayapp.im/" + "x".repeat(PAYMENT_CHECKOUT_URL_MAX_LENGTH - 24);
-    expect(url).toHaveLength(PAYMENT_CHECKOUT_URL_MAX_LENGTH);
-    expect(paymentPart({ checkout_url: url })).toEqual({ type: "payment", checkout_url: url });
+    expect(paymentRequestFields(value)).toBe(error);
   });
 });
 
@@ -44,27 +58,22 @@ describe("parsePaymentBlock", () => {
   });
 
   it("parses a valid block body", () => {
-    expect(parsePaymentBlock(JSON.stringify({ checkout_url: payment.checkout_url }))).toEqual(payment);
+    expect(parsePaymentBlock(JSON.stringify(fields))).toEqual(fields);
   });
 });
 
 describe("splitPayment", () => {
   it("lifts a fenced payment block out of the answer and keeps the surrounding words", () => {
-    const answer = "Ready to check out?\n\n" + block(payment);
-    expect(splitPayment(answer)).toEqual({ text: "Ready to check out?", payment });
+    expect(splitPayment("Ready to check out?\n\n" + block(fields))).toEqual({ text: "Ready to check out?", payment: fields });
   });
 
   it("keeps text on both sides of the block and collapses the gap", () => {
-    expect(splitPayment("Before\n" + block(payment) + "\nAfter").text).toBe("Before\n\nAfter");
-  });
-
-  it("returns a payment-only split when the answer is only the block", () => {
-    expect(splitPayment(block(payment))).toEqual({ text: "", payment });
+    expect(splitPayment("Before\n" + block(fields) + "\nAfter").text).toBe("Before\n\nAfter");
   });
 
   it("lifts a block written with CRLF line endings", () => {
-    const answer = "Pay here:\r\n```payment\r\n" + JSON.stringify(payment) + "\r\n```\r\nThanks";
-    expect(splitPayment(answer)).toEqual({ text: "Pay here:\n\nThanks", payment });
+    const answer = "Pay here:\r\n```payment\r\n" + JSON.stringify(fields) + "\r\n```\r\nThanks";
+    expect(splitPayment(answer)).toEqual({ text: "Pay here:\n\nThanks", payment: fields });
   });
 
   it("leaves an answer without a block alone, a payment_receipt fence included", () => {
@@ -80,34 +89,35 @@ describe("splitPayment", () => {
 
   it("rejects more than one payment block, or one beside buttons or selection, as a conflict", () => {
     const error = "send one payment and nothing else in the same message";
-    const twice = block(payment) + "\n" + block(payment);
+    const twice = block(fields) + "\n" + block(fields);
     expect(splitPayment(twice)).toEqual({ text: twice, error });
-    const withButtons = block(payment) + '\n```buttons\n[{"label": "Yes"}]\n```';
+    const withButtons = block(fields) + '\n```buttons\n[{"label": "Yes"}]\n```';
     expect(splitPayment(withButtons)).toEqual({ text: withButtons, error });
-    const withSelection = block(payment) + '\n```selection\n[{"value": "a", "label": "A"}]\n```';
+    const withSelection = block(fields) + '\n```selection\n[{"value": "a", "label": "A"}]\n```';
     expect(splitPayment(withSelection)).toEqual({ text: withSelection, error });
   });
 });
 
-describe("answerMessages carries a payment as its own, final Message", () => {
-  it("sends leftover words first, then the payment alone", () => {
-    expect(answerMessages("Ready to check out?\n\n" + block(payment))).toEqual({
-      messages: [[{ type: "text", value: "Ready to check out?" }], [payment]],
+describe("answerMessages returns the payment request beside the words", () => {
+  it("sends leftover words as Messages and hands the request back for the bridge to create", () => {
+    expect(answerMessages("Ready to check out?\n\n" + block(fields))).toEqual({
+      messages: [[{ type: "text", value: "Ready to check out?" }]],
+      payment: fields,
     });
   });
 
-  it("sends a payment-only answer as a single Message", () => {
-    expect(answerMessages(block(payment))).toEqual({ messages: [[payment]] });
+  it("returns no Messages for a payment-only answer", () => {
+    expect(answerMessages(block(fields))).toEqual({ messages: [], payment: fields });
   });
 
   it("still sends a standalone link as its own Message ahead of the payment", () => {
-    const answer = "Here's the order:\nhttps://example.com/cart\n\n" + block(payment);
+    const answer = "Here's the order:\nhttps://example.com/cart\n\n" + block(fields);
     expect(answerMessages(answer)).toEqual({
       messages: [
         [{ type: "text", value: "Here's the order:" }],
         [{ type: "link", value: "https://example.com/cart" }],
-        [payment],
       ],
+      payment: fields,
     });
   });
 
@@ -115,14 +125,35 @@ describe("answerMessages carries a payment as its own, final Message", () => {
     const answer = "Pay here\n" + block("bad");
     const result = answerMessages(answer);
     expect(result.error).toBe("the payment block must be a JSON object");
+    expect(result.payment).toBeUndefined();
     expect(result.messages).toEqual([[{ type: "text", value: answer }]]);
   });
 
   it("keeps payment+buttons conflicts as text, but still sends a standalone link", () => {
-    const answer = "https://example.com/x\n" + block(payment) + '\n```buttons\n[{"label": "Yes"}]\n```';
+    const answer = "https://example.com/x\n" + block(fields) + '\n```buttons\n[{"label": "Yes"}]\n```';
     const { messages, error } = answerMessages(answer);
     expect(error).toBe("send one payment and nothing else in the same message");
     expect(messages.map((parts) => parts.map((part) => part.type))).toEqual([["link"], ["text"]]);
+  });
+});
+
+describe("createPaymentPart", () => {
+  it("creates the request on the card's key and returns the payment part carrying it", async () => {
+    const calls: Array<{ body: unknown; key: string | null }> = [];
+    const relay = new Relay({ apiKey: "test", maxRetries: 0, fetch: async (_, init) => {
+      calls.push({ body: JSON.parse(String(init?.body)), key: new Headers(init?.headers).get("idempotency-key") });
+      return Response.json({ checkout_url: payment.checkout_url }, { status: 201 });
+    } });
+    await expect(createPaymentPart(relay, fields, "answer-1")).resolves.toEqual(payment);
+    expect(calls).toEqual([{ body: fields, key: "answer-1" }]);
+  });
+
+  it("throws a refusal as the API error for the bridge to hand back", async () => {
+    const relay = new Relay({ apiKey: "test", maxRetries: 0, fetch: async () =>
+      Response.json({ error: { code: 2003, message: "Connect Stripe in the Relay Console first." } }, { status: 403 }) });
+    const refusal = await createPaymentPart(relay, fields, "answer-1").catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(RelayAPIError);
+    expect((refusal as RelayAPIError).status).toBe(403);
   });
 });
 

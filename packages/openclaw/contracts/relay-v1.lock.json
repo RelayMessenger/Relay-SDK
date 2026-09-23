@@ -9,7 +9,7 @@
     "package": "@relaymessenger/sdk",
     "version": "0.3.6-staging.23",
     "integrity": "sha512-RMmC0V1lmQywsFFtHmBH6epoXvDqAsbOzRW65n+3ivUcpHCptAhvLd4spoYVLwPjZoMScr2BmF/m71pNXD91Tg==",
-    "operationsSha256": "5d9cc3d0eed738d85deb3842b6efc0db5fe720299aa53e959f87e83c8585be36",
+    "operationsSha256": "2480be91815b2e9e35305026b0a6ef61ddf2bb6db1b349d2a6da3eb875f4707f",
     "workspaceOpenapiSha256": "7b41c21bebd99d28d103da1c3fe380642542e5b6243bb4319e501d7609d8ab0f",
     "usedOperations": [
       {

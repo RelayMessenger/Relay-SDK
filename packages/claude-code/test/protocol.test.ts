@@ -83,6 +83,7 @@ interface RelayMock {
   readonly baseURL: string;
   readonly readCalls: string[];
   readonly sends: Array<{ key: string | undefined; body: unknown }>;
+  readonly paymentRequests: Array<{ key: string | undefined; body: unknown }>;
   close(): Promise<void>;
 }
 
@@ -96,6 +97,7 @@ async function startRelayMock(params: {
 }): Promise<RelayMock> {
   const readCalls: string[] = [];
   const sends: Array<{ key: string | undefined; body: unknown }> = [];
+  const paymentRequests: Array<{ key: string | undefined; body: unknown }> = [];
   const server = createServer(async (req, res) => {
     if (req.headers.authorization !== `Bearer ${TOKEN}`) {
       json(res, 401, { error: { message: "bad token" } });
@@ -174,6 +176,13 @@ async function startRelayMock(params: {
       res.end();
       return;
     }
+    if (req.method === "POST" && url.pathname === "/v1/payment_requests") {
+      const key = typeof req.headers["idempotency-key"] === "string" ? req.headers["idempotency-key"] : undefined;
+      const replay = paymentRequests.some((request) => request.key === key);
+      if (!replay) paymentRequests.push({ key, body: await requestBody(req) });
+      json(res, replay ? 200 : 201, { id: "00000000-0000-7000-8000-0000000000c0", object: "payment_request", checkout_url: "https://pay.relayapp.im/pr_token_123" });
+      return;
+    }
     if (req.method === "POST" && url.pathname === `/v1/chats/${CHAT_ID}/messages`) {
       sends.push({
         key: typeof req.headers["idempotency-key"] === "string"
@@ -218,6 +227,7 @@ async function startRelayMock(params: {
     baseURL: `http://127.0.0.1:${port}`,
     readCalls,
     sends,
+    paymentRequests,
     close: async () => {
       for (const client of wss.clients) client.close();
       await new Promise<void>((resolvePromise) => wss.close(() => resolvePromise()));
@@ -585,13 +595,13 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     const mcp = startMCP(channelDir, relay.baseURL, entry);
     cleanups.push(() => mcp.stop());
     const initialized = await initialize(mcp);
-    expect((initialized.result as { instructions?: string }).instructions).toContain("First create a payment request (POST /v1/payment_requests)");
+    expect((initialized.result as { instructions?: string }).instructions).toContain("category physical_goods: physical things and real-world services.");
     mcp.send({ jsonrpc: "2.0", id: 101, method: "tools/list", params: {} });
     const listed = await mcp.take(message => message.id === 101, "payment reply schema");
     const tools = (listed.result as { tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }> }).tools;
     expect(tools.find(tool => tool.name === "reply")?.inputSchema.properties.payment).toMatchObject({
-      type: "object", additionalProperties: false, required: ["checkout_url"],
-      properties: { checkout_url: { type: "string", minLength: 1, maxLength: 2048 } },
+      type: "object", additionalProperties: false, required: ["description", "category"],
+      properties: { description: { maxLength: 32 }, category: { enum: ["physical_goods", "digital_goods", "donation"] }, amount: { type: "integer", minimum: 1 } },
     });
     await mcp.take((message) => message.method === "notifications/claude/channel", "channel notification");
     mcp.send({
@@ -602,7 +612,7 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     });
     const began = await mcp.take((message) => message.id === 2, "begin_processing response");
     expect((began.result as { isError?: boolean }).isError).not.toBe(true);
-    const payment = { checkout_url: "https://pay.relayapp.im/pr_token_123" };
+    const payment = { description: "House blend, 250 g", category: "physical_goods", amount: 2400, currency: "usd" };
     for (const id of [10, 11]) {
       mcp.send({ jsonrpc: "2.0", id, method: "tools/call", params: {
         name: "reply",
@@ -616,9 +626,11 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     expect(key).toMatch(/^claude-reply-[a-f0-9]{64}$/u);
     expect(relay.sends.map((send) => send.body)).toEqual([
       { message: { parts: [{ type: "text", value: "Here is your order." }], idempotency_key: key, reply_to: { message_id: MESSAGE_ID } } },
-      { message: { parts: [{ type: "payment", ...payment }], idempotency_key: `${key}-1` } },
+      { message: { parts: [{ type: "payment", checkout_url: "https://pay.relayapp.im/pr_token_123" }], idempotency_key: `${key}-1` } },
     ]);
     expect(relay.sends[1]?.key).toBe(`${key}-1`);
+    // Created once, before any send, on the card's key; the replay reused it.
+    expect(relay.paymentRequests).toEqual([{ key: `${key}-1`, body: payment }]);
     await mcp.stop();
   });
 });

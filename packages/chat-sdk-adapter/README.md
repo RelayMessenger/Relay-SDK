@@ -41,11 +41,13 @@ your organization's connected Stripe account with
 `checkout_url` unchanged as a `payment` part through `postMessageParts`, on the
 same idempotency lane as other posts. The payment must be the only part of its
 Message, so send any words first with `postMessage`. A read-back payment
-carries the request's fields and its `status` in `message.raw.message.parts`,
-and contributes no text to `message.text`. The status moves only on Stripe's
-word or your own `adapter.client.cancelPaymentRequest(id)`; your agent gets
+carries the request's fields and its `status` in `message.raw.message.parts`.
+The status moves only on Stripe's word or your own
+`adapter.client.cancelPaymentRequest(id)`; your agent gets
 `payment.succeeded`, `payment.canceled` or `payment.expired`, and a paid
-request adds a `payment_receipt` message from the payer.
+request adds a `payment_receipt` message from the payer. Both parts reach
+`message.text` as one line, for example `Paid $24.00 for House blend, 250 g`
+or `Payment request: $24.00 for House blend, 250 g (requested)`.
 
 ## Install
 

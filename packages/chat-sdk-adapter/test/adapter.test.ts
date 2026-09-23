@@ -1960,7 +1960,7 @@ it("requires an external key strategy for native selections just like text", asy
 const PAYMENT_PART = { type: "payment" as const, checkout_url: "https://pay.relayapp.im/pr_token_123" };
 const PAYMENT_REQUEST_ID = "0199a000-0000-7000-8000-00000000c0de";
 
-it("keeps a read-back payment and its receipt intact in raw and adds no readable text of their own", async () => {
+it("keeps a read-back payment and its receipt intact in raw and gives the model one factual line for each", async () => {
   const part = {
     ...PAYMENT_PART, payment_request_id: PAYMENT_REQUEST_ID, amount: 2400, currency: "usd",
     description: "House blend, 250 g", category: "physical_goods" as const, mode: "payment" as const,
@@ -1974,9 +1974,22 @@ it("keeps a read-back payment and its receipt intact in raw and adds no readable
     chatId: IDS.chat, createdAt: "2026-09-22T00:00:00.000Z", eventType: "message.received",
     message: webhookMessage({ parts: [receipt], sender_handle: { ...AGENT_HANDLE, is_me: false } }),
   });
-  expect(inbound.text).toBe("");
+  // A receipt-only message reaches the model as words, not as empty text.
+  expect(inbound.text).toBe("Paid $24.00 for House blend, 250 g");
   expect(inbound.attachments).toEqual([]);
   expect(inbound.raw.message?.parts).toEqual([receipt]);
+  const euro = createRelayAdapter({ token: "test", webhookSecret: WEBHOOK_SECRET }).parseMessage({
+    chatId: IDS.chat, createdAt: "2026-09-22T00:00:00.000Z", eventType: "message.received",
+    message: webhookMessage({ parts: [{
+      ...receipt, currency: "eur", mode: "subscription" as const, recurring: { interval: "month" as const, interval_count: 3 },
+    }], sender_handle: { ...AGENT_HANDLE, is_me: false } }),
+  });
+  expect(euro.text).toBe("Paid €24.00 for House blend, 250 g, renewing every 3 months");
+  const yen = createRelayAdapter({ token: "test", webhookSecret: WEBHOOK_SECRET }).parseMessage({
+    chatId: IDS.chat, createdAt: "2026-09-22T00:00:00.000Z", eventType: "message.received",
+    message: webhookMessage({ parts: [{ ...receipt, amount: 500, currency: "jpy" }], sender_handle: { ...AGENT_HANDLE, is_me: false } }),
+  });
+  expect(yen.text).toBe("Paid ¥500 for House blend, 250 g");
 
   const history = createRelayAdapter({ token: "test", webhookSecret: WEBHOOK_SECRET,
     fetch: vi.fn(async () => jsonResponse({ messages: [
@@ -1993,7 +2006,9 @@ it("keeps a read-back payment and its receipt intact in raw and adds no readable
     ], next_cursor: null })) as typeof fetch,
   });
   const page = await history.fetchMessages(THREAD_ID, { direction: "forward" });
-  expect(page.messages.map(message => message.text)).toEqual(["Here is your order.", ""]);
+  expect(page.messages.map(message => message.text)).toEqual([
+    "Here is your order.", "Payment request: $24.00 for House blend, 250 g (succeeded)",
+  ]);
   const payment = page.messages[1]?.raw.message?.parts?.find(item => item.type === "payment");
   expect(payment).toEqual(part);
 });

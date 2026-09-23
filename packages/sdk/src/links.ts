@@ -1,7 +1,7 @@
 import { splitButtons } from "./buttons.js";
 import { splitPayment } from "./payment.js";
 import { splitSelection } from "./selection.js";
-import type { ButtonsPart, LinkPart, MessagePart, TextPart } from "./types.js";
+import type { ButtonsPart, LinkPart, MessagePart, PaymentRequestCreateParams, TextPart } from "./types.js";
 
 /**
  * How a text-only agent sends a link: the URL alone on its own line, the way
@@ -71,6 +71,12 @@ export const splitLinks = (text: string): AnswerSegment[] => {
 export interface AnswerMessages {
   /** The Messages the answer becomes, in order; each is one parts array. */
   messages: MessagePart[][];
+  /**
+   * A payment request the answer asked for. The bridge creates it with its
+   * own token (`createPaymentPart`) and sends the card as its own, final
+   * Message after `messages`.
+   */
+  payment?: PaymentRequestCreateParams;
   /** Why a component block could not be used. The text then keeps it. */
   error?: string;
 }
@@ -80,7 +86,8 @@ export interface AnswerMessages {
  * selection block is lifted out, then each link on its own line becomes its
  * own Message. Buttons and selection accompany the last Message of words; a
  * payment never does — it must be the only part of its Message, so the words
- * around it are sent first and the payment follows as its own, final Message.
+ * around it are sent first, and the payment request it describes is returned
+ * beside them for the bridge to create and send as its own, final Message.
  * Selection requires a nonblank question; conflicting components remain text
  * with an error.
  */
@@ -92,9 +99,7 @@ export const answerMessages = (answer: string): AnswerMessages => {
     return { messages: splitLinks(answer).map((segment) => [segment]), error: paid.error };
   }
   if (paid.payment) {
-    const messages: MessagePart[][] = splitLinks(paid.text).map((segment) => [segment]);
-    messages.push([paid.payment]);
-    return { messages };
+    return { messages: splitLinks(paid.text).map((segment) => [segment]), payment: paid.payment };
   }
   const selected = splitSelection(answer);
   if (selected.error) {
