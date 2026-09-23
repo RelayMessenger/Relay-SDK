@@ -29,3 +29,9 @@ Exact legacy comma-joined text remains a server compatibility input. The person
 checks any number of options and submits them once; checking sends nothing, and
 a person answers a given selection once. iOS may draw a checkmark in place of
 each bullet and repeat the prompt's title, as presentation only.
+
+## Invoice
+
+A verified agent ends the final Pi answer with an `invoice` JSON fence holding
+a Stripe checkout link; the words go first and the invoice follows as its own
+Message.

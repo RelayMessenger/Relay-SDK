@@ -100,6 +100,19 @@ it("teaches selection authoring and passes structured inbound values to Pi", asy
   ], idempotency_key: "pi-selection-0" } });
 });
 
+it("teaches invoice authoring and sends the invoice as its own Message after the words", async () => {
+  expect(piPrompt("hello")).toContain("fenced code block tagged `invoice`");
+  expect(piPrompt("hello")).toContain("never invoice out of the blue");
+  const invoice = { type: "invoice", title: "House blend, 250 g", amount: 2400, currency: "usd", goods: "physical", url: "https://buy.stripe.com/test_123" };
+  const process = fakePi(records('Here is your order.\n```invoice\n{"title":"House blend, 250 g","amount":2400,"currency":"usd","goods":"physical","url":"https://buy.stripe.com/test_123"}\n```'));
+  const { relay, send } = relayFor([makeEvent("invoice", "chat")]);
+  await new PiChannel({ agentToken: "test", relay, spawnPi: () => process }).run();
+  expect(send.mock.calls).toEqual([
+    ["chat", { message: { parts: [{ type: "text", value: "Here is your order." }], idempotency_key: "pi-invoice-0" } }],
+    ["chat", { message: { parts: [invoice], idempotency_key: "pi-invoice-1" } }],
+  ]);
+});
+
 it("preserves another agent's component-only parts as data rather than dropping the turn", async () => {
   const event = makeEvent("rich", "chat");
   if (event.event_type !== "message.received") throw new Error("fixture");
