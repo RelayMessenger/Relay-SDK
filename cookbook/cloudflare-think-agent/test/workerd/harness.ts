@@ -11,6 +11,17 @@ export { ThinkMessengerStateAgent } from "../../src/index";
 
 export const TEST_REPLY_TEXT = "A complete test reply.";
 
+/** An inbound Message carrying this word makes the test model ask to pay. */
+export const TEST_PAYMENT_TRIGGER = "invoice me";
+export const TEST_PAYMENT = {
+  amount: 2400,
+  category: "physical_goods",
+  currency: "usd",
+  description: "House blend, 250 g",
+} as const;
+/** The test model's second answer starts with this and quotes the result it read. */
+export const TEST_AFTER_REFUSAL_PREFIX = "Could not ask you to pay: ";
+
 const TEST_ACTION_RETRY_LEASE_MS = 0;
 
 interface ActionLedgerRow {
@@ -80,9 +91,40 @@ function replyActionKey(messageId: string): string {
   return `action:reply:message:${messageId}`;
 }
 
+type TestPrompt = Array<{
+  content: unknown;
+  role: string;
+}>;
+
+function lastUserText(prompt: TestPrompt): string {
+  const user = prompt.filter((message) => message.role === "user").at(-1);
+  if (!user || !Array.isArray(user.content)) return "";
+  return user.content
+    .map((part: { text?: unknown }) =>
+      typeof part.text === "string" ? part.text : "")
+    .join(" ");
+}
+
+/**
+ * The model the tests run: it answers with TEST_REPLY_TEXT, adds TEST_PAYMENT
+ * when the inbound Message asks to pay, and, when its last step's reply came
+ * back as a result instead of a sent Message, answers again quoting it.
+ */
+function replyInput(prompt: TestPrompt): Record<string, unknown> {
+  const last = prompt.at(-1);
+  if (last?.role === "tool") {
+    return {
+      text: TEST_AFTER_REFUSAL_PREFIX + JSON.stringify(last.content),
+    };
+  }
+  return lastUserText(prompt).includes(TEST_PAYMENT_TRIGGER)
+    ? { text: TEST_REPLY_TEXT, payment: TEST_PAYMENT }
+    : { text: TEST_REPLY_TEXT };
+}
+
 function testModel(): MockLanguageModelV3 {
   return new MockLanguageModelV3({
-    doStream: async () => {
+    doStream: async ({ prompt }) => {
       const toolCallId = crypto.randomUUID();
       return {
         stream: simulateReadableStream({
@@ -93,7 +135,7 @@ function testModel(): MockLanguageModelV3 {
               warnings: [],
             },
             {
-              input: JSON.stringify({ text: TEST_REPLY_TEXT }),
+              input: JSON.stringify(replyInput(prompt as TestPrompt)),
               toolCallId,
               toolName: "reply",
               type: "tool-call" as const,

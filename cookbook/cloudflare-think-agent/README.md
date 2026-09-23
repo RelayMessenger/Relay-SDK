@@ -10,7 +10,8 @@ It uses:
 - one root Think conversation per Relay Chat;
 - signed Standard Webhooks ingress at `POST /webhooks/relay`;
 - direct-message replies and canonical structured mentions in groups;
-- one buffered, idempotent Relay Message per model turn.
+- one buffered, idempotent Relay Message per model turn;
+- payments: the model asks the person to pay, the Worker creates the request.
 
 There are no application-owned event or send tables, polling loops, outbound
 WebSockets, partial Message bubbles, Message effects, or copied Relay client.
@@ -41,6 +42,30 @@ Relay packages own webhook verification and API calls.
    Worker holds one Relay client. Its idempotency key is the adapter's own
    `relay-chat-sdk:<event_id>:<ordinal>`, derived from the event that caused
    the send.
+
+## Payments
+
+The `reply` Action takes an optional `payment`: the fields of
+`POST /v1/payment_requests` a model can know (`description`, `category`,
+`amount` and `currency`, or `mode: "subscription"` with `price_id` and an
+optional `quantity`, and an optional `image_url`). The system prompt carries
+the SDK's `PAYMENT_GUIDANCE`, the same words every other Relay runtime uses.
+
+The Worker checks the fields with the SDK's `paymentRequestFields`, then
+creates the request with the adapter's `createPaymentRequest` before anything
+is sent. Its `Idempotency-Key` is
+`relay-agent-starter:<message_id>:payment:<sha256 of the fields>`, so a retry of
+the same answer returns the same request. The words go out as one Message, then
+the card as its own Message carrying only `{ type: "payment", checkout_url }`.
+
+When Relay does not create the request (403 until Stripe is connected in Relay
+Console, Stripe's own 400, or a temporary failure), nothing is sent: the error
+is the Action's result, and the turn allows the model one more step to call
+`reply` again, with the payment fixed or without it. Every other turn ends
+after its one `reply`.
+
+A paid request arrives as a `payment_receipt` Message, which the adapter reads
+as one line of text.
 
 ## Known limits in Think 0.17.0
 
@@ -87,10 +112,10 @@ Message instead of creating a duplicate.
 - a staging agent and Agent Token from Relay Console
 
 The adapter release used by this staging branch is
-`@relaymessenger/chat-sdk-adapter@0.3.0`, published to npm with
-provenance from Relay-SDK commit
-`4ac9a455b4d6d3703eb62530f55ba136373ae088`. Its imported adapter source is
-Relay Chat SDK commit `eecf94a4d38bc021917e54dfed57e268657c17af`.
+`@relaymessenger/chat-sdk-adapter@0.3.7-staging.19`, published to npm by the
+staging release of Relay-SDK commit
+`e8e705782eb21c712e243e93a196f0d84f877257`, with
+`@relaymessenger/sdk@0.3.6-staging.25` from the same commit.
 
 ## Local setup
 
@@ -324,9 +349,10 @@ Run neither guarded command without your own review and credentials.
 This revision is tested against:
 
 - Relay Server `8247505bd5f8dffccf8047b91317a68a91632068`
-- Relay Chat SDK `eecf94a4d38bc021917e54dfed57e268657c17af`
-- `@relaymessenger/chat-sdk-adapter@0.3.0` npm integrity
-  `sha512-aslkL6r5pj/frh/3QgJ0sqPoxHK2wTSmZ2OeFsfEBfyJGsWiljlhjzTjW+rAcGmy2vy0oE4x94agvnuaMZ/PzA==`
+- Relay-SDK `e8e705782eb21c712e243e93a196f0d84f877257`
+- `@relaymessenger/chat-sdk-adapter@0.3.7-staging.19` npm integrity
+  `sha512-kkhB9eQOa9GrMCsq6QIKNGQTbiJhbzBX99xFXQzep1Cfy5v5NNsqdygqQNA3S0JHh54p1da+96jbN4phX8uYpw==`
+- `@relaymessenger/sdk@0.3.6-staging.25`
 - OpenAPI SHA-256
   `f1d3f19b12e068ad68b95b41650b62af6f921ec263e37dd2d24f59a72903ce30`
 - public `ChatHandle.image_url` and `ChatHandle.about` fields, with no legacy

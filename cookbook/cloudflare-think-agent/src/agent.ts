@@ -14,6 +14,8 @@ import {
   decodeRelayThreadId,
   type RelayAdapter,
 } from "@relaymessenger/chat-sdk-adapter";
+import { PAYMENT_GUIDANCE } from "@relaymessenger/sdk";
+import type { StopCondition, ToolSet } from "ai";
 
 import type { Bindings } from "./env";
 import {
@@ -24,6 +26,7 @@ import {
 import { starterModel } from "./model";
 import {
   createReplyAction,
+  RELAY_PAYMENT_NOT_CREATED,
   type RelayTurnIdentity,
 } from "./reply";
 
@@ -34,6 +37,21 @@ const RELAY_WEBHOOK_PATH = "/webhooks/relay";
 const ACTION_RETRY_LEASE_MS = 0;
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+// One step answers. A second exists only for a payment Relay did not create:
+// nothing was sent, so the model reads why and calls reply again.
+const MAX_STEPS = 2;
+
+function paymentNotCreated(output: unknown): boolean {
+  if (typeof output !== "object" || output === null) return false;
+  const error = (output as { error?: unknown }).error;
+  return typeof error === "object" && error !== null
+    && (error as { name?: unknown }).name === RELAY_PAYMENT_NOT_CREATED;
+}
+
+/** Stop after every step except one whose reply created no payment. */
+export const stopUnlessPaymentNotCreated: StopCondition<ToolSet> = ({ steps }) =>
+  !(steps.at(-1)?.toolResults ?? []).some((result) =>
+    result.toolName === "reply" && paymentNotCreated(result.output));
 
 /**
  * The Worker's single Relay client.
@@ -119,7 +137,7 @@ export class RelayChatAgent extends Think<Bindings> {
     terminalMessage: "",
   };
   override includeMcpTools = false;
-  override maxSteps = 1;
+  override maxSteps = MAX_STEPS;
   override sendReasoning = false;
   override workspaceBash = false;
 
@@ -132,6 +150,7 @@ export class RelayChatAgent extends Think<Bindings> {
       "You are a helpful agent in Relay Messenger.",
       "Answer naturally and call reply exactly once with the complete response.",
       "Do not emit a second answer after the reply Action.",
+      `reply can ask the person to pay through its payment argument. ${PAYMENT_GUIDANCE}`,
     ].join(" ");
   }
 
@@ -160,8 +179,9 @@ export class RelayChatAgent extends Think<Bindings> {
     // this turn was ever scheduled. Nothing to do here but shape the turn.
     return {
       activeTools: _context.tools.reply ? ["reply"] : [],
-      maxSteps: 1,
+      maxSteps: MAX_STEPS,
       sendReasoning: false,
+      stopWhen: stopUnlessPaymentNotCreated,
       toolChoice: "required",
     };
   }
