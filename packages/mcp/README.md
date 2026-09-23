@@ -23,6 +23,11 @@ checks any number of options and submits them once; checking sends nothing, and
 a person answers a given selection once. iOS may draw a checkmark in place of
 each bullet and repeat the prompt's title, as presentation only.
 
+## Invoice
+
+Use `search_docs` with query `invoice`, then `execute` a message send whose only
+part is the invoice; update its status with `client.messages.invoice.update`.
+
 ## Start
 
 Requires Node.js 22.22.3 or newer.

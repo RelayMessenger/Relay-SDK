@@ -1,5 +1,5 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import Relay from "@relaymessenger/sdk";
+import Relay, { INVOICE_GUIDANCE } from "@relaymessenger/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultApiURL } from "./auth.js";
 import { createRelayMcpServer, PACKAGE_VERSION, type RelayMcpServerOptions } from "./server.js";
@@ -37,6 +37,17 @@ describe("approved two-tool MCP", () => {
     expect(text(found)).toContain("selected_values");
     expect(text(found)).toContain("• ");
     expect(tools.find(tool => tool.name === "execute")?.description).toContain("portable text remains bullets");
+    expect(resolveClient).not.toHaveBeenCalled();
+  });
+  it("discovers the invoice part and its status route without resolving credentials", async () => {
+    const resolveClient = vi.fn(async () => { throw new Error("must not resolve auth for search"); });
+    const client = await connect({ resolveClient });
+    const tools = (await client.listTools()).tools;
+    expect(tools.find(tool => tool.name === "execute")?.description).toContain(INVOICE_GUIDANCE);
+    const found = await client.callTool({ name: "search_docs", arguments: { query: "invoice", language: "typescript", detail: "verbose" } });
+    expect(text(found)).toContain("InvoicePart");
+    expect(text(found)).toContain("client.messages.invoice.update");
+    expect(text(found)).toContain("MessageInvoiceUpdateParams");
     expect(resolveClient).not.toHaveBeenCalled();
   });
   it("advertises exactly search_docs and execute, without credential arguments or talk", async () => {
@@ -273,4 +284,23 @@ it("round trips native selection authoring and rich response metadata through ex
   }`);
   expect(read.isError).not.toBe(true);
   expect(result(read)).toEqual([{ id: "response", parts, reply_to: replyTo }]);
+});
+
+it("sends a solo invoice part and updates its status through execute", async () => {
+  const invoice = { type: "invoice", title: "House blend, 250 g", amount: 2400, currency: "usd", goods: "physical", url: "https://buy.stripe.com/test_123" };
+  const fetch = vi.fn(async () => Response.json({ chat_id: CHAT, message: { id: "sent" } }, { status: 202 }));
+  const s = await ready({}, sdk(fetch as never));
+  const sent = await s.execute(`async function run(client) {
+    const sent = await client.chats.messages.send(${JSON.stringify(CHAT)}, { message: {
+      parts: [${JSON.stringify(invoice)}], idempotency_key: "mcp-invoice"
+    } });
+    return await client.messages.invoice.update(sent.message.id, { status: "succeeded" });
+  }`);
+  expect(sent.isError).not.toBe(true);
+  const [send, update] = fetch.mock.calls as unknown as [string, RequestInit][];
+  expect(JSON.parse(String(send?.[1]?.body)).message.parts).toEqual([invoice]);
+  expect(new Headers(send?.[1]?.headers).get("idempotency-key")).toBe("mcp-invoice");
+  expect(String(update?.[0])).toBe("http://127.0.0.1:1/v1/messages/sent/invoice");
+  expect(update?.[1]?.method).toBe("PUT");
+  expect(JSON.parse(String(update?.[1]?.body))).toEqual({ status: "succeeded" });
 });
