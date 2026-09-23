@@ -20925,7 +20925,9 @@ var RELAY_WEBHOOK_EVENT_TYPES = [
   "call.ended",
   "payment.succeeded",
   "payment.canceled",
-  "payment.expired"
+  "payment.expired",
+  "location.sharing.started",
+  "location.sharing.stopped"
 ];
 
 // node_modules/@relaymessenger/sdk/dist/websocket.js
@@ -21596,14 +21598,48 @@ var ChatParticipants = class {
     });
   }
 };
+var ChatLocation = class {
+  transport;
+  constructor(transport2) {
+    this.transport = transport2;
+  }
+  /**
+   * Asks the person in this one-to-one chat to share their location. The chat
+   * gets a Message from your agent with one `location_request` part; nothing is
+   * returned about the person's answer. Returns 409 while the person is already
+   * sharing, and in a group chat or a chat with no person; 429 with
+   * `Retry-After` after one request in the same chat in the last 60 seconds.
+   */
+  request(chatID, options) {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/chats/${pathID(chatID)}/location/request`,
+      options
+    });
+  }
+  /**
+   * Reads the current location of everyone sharing with your agent in this
+   * chat, one Feature per person. `data.features` is empty when nobody is
+   * sharing. Use `properties.updated_at` to judge freshness.
+   */
+  retrieve(chatID, options) {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/chats/${pathID(chatID)}/location`,
+      options
+    });
+  }
+};
 var Chats = class {
   transport;
   messages;
   participants;
+  location;
   constructor(transport2) {
     this.transport = transport2;
     this.messages = new ChatMessages(transport2);
     this.participants = new ChatParticipants(transport2);
+    this.location = new ChatLocation(transport2);
   }
   create(body, options) {
     return this.transport.request({

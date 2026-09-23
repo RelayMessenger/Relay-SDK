@@ -15,6 +15,8 @@ import Relay, {
   type CallWebhookEvent,
   type PaymentRequest,
   type PaymentStatus,
+  type LocationFeature,
+  type LocationSharingStartedWebhookEvent,
   type ChatHandle,
   type ChatSendVoicememoResponse,
   type ChatSetActivityParams,
@@ -207,6 +209,8 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "payment.succeeded",
   "payment.canceled",
   "payment.expired",
+  "location.sharing.started",
+  "location.sharing.stopped",
 ];
 
 // Compile-only payment request exercise: create, then send its checkout_url.
@@ -223,6 +227,16 @@ async function requestPayment(chatId: string): Promise<void> {
   (await relay.paymentRequests.cancel(request.id)).status satisfies PaymentStatus;
 }
 void requestPayment;
+
+// Compile-only location exercise: ask, then read once the person shares.
+async function readLocation(event: LocationSharingStartedWebhookEvent): Promise<void> {
+  event.data.ends_at satisfies string | null;
+  (await relay.chats.location.request(event.data.chat_id)).message satisfies "Location request sent";
+  const read = await relay.chats.location.retrieve(event.data.chat_id);
+  read.data.features satisfies LocationFeature[];
+  read.data.features[0]?.geometry.coordinates satisfies [number, number] | undefined;
+}
+void readLocation;
 
 // Compile-only call event and REST exercise.
 async function receiveCall(event: CallWebhookEvent): Promise<void> {

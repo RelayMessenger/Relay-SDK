@@ -10,7 +10,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "7b41c21bebd99d28d103da1c3fe380642542e5b6243bb4319e501d7609d8ab0f";
+  "02c61e10ee5e2834a77baf01a215a511f3bce219ac72a5f66ba15f5e1b02ee7d";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -152,6 +152,23 @@ describe("locked Relay Server contract", () => {
     expect(document.paths["/v1/payment_requests"]).toHaveProperty("get.operationId", "listPaymentRequests");
     expect(document.paths["/v1/payment_requests/{paymentRequestId}"]).toHaveProperty("get.operationId", "getPaymentRequest");
     expect(document.paths["/v1/payment_requests/{paymentRequestId}/cancel"]).toHaveProperty("post.operationId", "cancelPaymentRequest");
+  });
+
+  it("carries the location parts, both location events and the two location routes", async () => {
+    const document = parse(await readFile(new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8")) as OpenApiDocument;
+    const schemas = document.components.schemas;
+    expect(schemas.LocationRequestPartResponse).toHaveProperty("required", ["type", "reactions"]);
+    expect(schemas.LocationPartResponse).toHaveProperty("required", ["type", "state", "began_at", "ends_at", "ended_at", "reactions"]);
+    expect(schemas.LocationPartResponse).toHaveProperty("properties.state.enum", ["live", "ended"]);
+    for (const name of ["Message", "MessageEvent", "SentMessage"]) {
+      expect(schemas[name]).toHaveProperty("properties.parts.items.oneOf", expect.arrayContaining([
+        { $ref: "#/components/schemas/LocationRequestPartResponse" },
+        { $ref: "#/components/schemas/LocationPartResponse" },
+      ]));
+    }
+    expect(schemas.WebhookEventType).toHaveProperty("enum", expect.arrayContaining(["location.sharing.started", "location.sharing.stopped"]));
+    expect(document.paths["/v1/chats/{chatId}/location/request"]).toHaveProperty("post.operationId", "requestLocation");
+    expect(document.paths["/v1/chats/{chatId}/location"]).toHaveProperty("get.operationId", "getLocation");
   });
 
   it("caps both recipient arrays at six without changing generic admission APIs", async () => {

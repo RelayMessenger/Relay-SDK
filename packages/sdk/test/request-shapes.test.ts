@@ -146,6 +146,8 @@ describe("Relay v1 request shapes", () => {
     await client.chats.getActivity("chat-id");
     await client.chats.setActivity("chat-id", { text: "Working" });
     await client.chats.clearActivity("chat-id");
+    await client.chats.location.request("chat-id");
+    await client.chats.location.retrieve("chat-id");
     await client.chats.startTyping("chat-id");
     await client.chats.stopTyping("chat-id");
     await client.chats.markAsRead("chat-id");
