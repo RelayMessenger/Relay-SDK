@@ -1,25 +1,19 @@
-"""Relay Calls for LiveKit Agents in Python.
+"""Relay Calls for Python: join a Relay Call as a WebRTC participant.
 
-Python twin of the npm package ``@relaymessenger/livekit`` plus the call-room
-client of ``@relaymessenger/sdk``, over Relay's public API only. The call
-core (room, media peer, audio, video) is ``relaymessenger-calls``.
+The framework-neutral core under ``relaymessenger-livekit`` and
+``relaymessenger-pipecat``: the Call room client, the aiortc media peer, PCM16
+audio both ways and video, over Relay's public API only.
 """
 
-from relaymessenger_calls._engine import RelayIceServer
-from relaymessenger_calls.room import (
+from ._engine import RelayIceServer
+from ._events import EventEmitter
+from .room import (
+    DEFAULT_BASE_URL,
     CallRoom,
     CallRoomCloseEvent,
     CallRoomError,
     CallRoomReconnectingEvent,
     parse_call_room_server_frame,
-)
-
-from .agents import (
-    LIVEKIT_ROOM_INPUT_AUDIO,
-    RelayAudioInput,
-    RelayAudioOutput,
-    RelayLiveKitCall,
-    RelayVideoInput,
 )
 from .transport import (
     RelayAudioFrame,
@@ -28,40 +22,43 @@ from .transport import (
     RelayCallTransport,
     RelayCallTransportError,
     RelayCallVideoStats,
+    RelayIceServersProvider,
     RelayInboundAudioFormat,
     restart_delay_ms,
 )
 from .video import (
     LocalVideoTrack,
+    RelayVideoFrame,
     RemoteVideoTrack,
     TrackPublishOptions,
     VideoEncoding,
+    VideoFrameEvent,
     VideoSource,
     VideoStream,
 )
 
 __all__ = [
+    "DEFAULT_BASE_URL",
     "CallRoom",
     "CallRoomCloseEvent",
     "CallRoomError",
     "CallRoomReconnectingEvent",
-    "LIVEKIT_ROOM_INPUT_AUDIO",
+    "EventEmitter",
     "LocalVideoTrack",
     "RelayAudioFrame",
-    "RelayAudioInput",
-    "RelayAudioOutput",
     "RelayCallDiagnostics",
     "RelayCallRestartEvent",
     "RelayCallTransport",
     "RelayCallTransportError",
     "RelayCallVideoStats",
     "RelayIceServer",
+    "RelayIceServersProvider",
     "RelayInboundAudioFormat",
-    "RelayLiveKitCall",
-    "RelayVideoInput",
+    "RelayVideoFrame",
     "RemoteVideoTrack",
     "TrackPublishOptions",
     "VideoEncoding",
+    "VideoFrameEvent",
     "VideoSource",
     "VideoStream",
     "parse_call_room_server_frame",

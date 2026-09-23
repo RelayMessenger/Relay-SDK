@@ -16,8 +16,8 @@ from typing import Any, Optional, Union
 from livekit import rtc
 from livekit.agents.utils import aio
 from livekit.agents.voice.io import AudioInput, AudioOutput, AudioOutputCapabilities, VideoInput
+from relaymessenger_calls.room import DEFAULT_BASE_URL, CallRoom
 
-from .room import DEFAULT_BASE_URL, CallRoom
 from .transport import (
     RESTART_CONNECT_TIMEOUT_MS,
     RelayAudioFrame,

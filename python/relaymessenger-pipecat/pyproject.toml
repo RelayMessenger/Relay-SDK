@@ -1,33 +1,28 @@
 [project]
-name = "relaymessenger-livekit"
+name = "relaymessenger-pipecat"
 version = "0.1.0.dev1"
-description = "Relay WebRTC audio and video transport and LiveKit Agents integration for Python."
+description = "Relay Calls for Pipecat: a transport that joins a Relay Call as the agent."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [{ name = "Companion Inc." }]
-keywords = ["relay", "livekit", "webrtc", "voice", "video", "agents"]
+keywords = ["relay", "pipecat", "webrtc", "voice", "video", "agents"]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Typing :: Typed",
 ]
 dependencies = [
-  "aiortc>=1.15,<2",
-  "av>=14",
-  "livekit>=1.1,<2",
-  "livekit-agents>=1.8,<2",
   "numpy>=1.26",
+  "pipecat-ai>=1.11,<2",
   "relaymessenger-calls>=0.1.0.dev1",
-  "websockets>=14",
 ]
 
 [project.urls]
-Homepage = "https://github.com/RelayMessenger/Relay-SDK/tree/main/python/relaymessenger-livekit#readme"
+Homepage = "https://github.com/RelayMessenger/Relay-SDK/tree/main/python/relaymessenger-pipecat#readme"
 Repository = "https://github.com/RelayMessenger/Relay-SDK"
 
 [dependency-groups]
@@ -42,7 +37,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/relaymessenger_livekit"]
+packages = ["src/relaymessenger_pipecat"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -53,4 +48,4 @@ testpaths = ["tests"]
 python_version = "3.12"
 strict = true
 ignore_missing_imports = true
-files = ["src/relaymessenger_livekit"]
+files = ["src/relaymessenger_pipecat"]
