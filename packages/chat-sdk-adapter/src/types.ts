@@ -2,7 +2,7 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 26e0ceac6bacb217f36af4033811e0c4b6b90f1e
+ * Relay Server 5c0dd48e0af87c29ff2ea68b5572f27025ff837e
  * OpenAPI 02c61e10ee5e2834a77baf01a215a511f3bce219ac72a5f66ba15f5e1b02ee7d
  */
 

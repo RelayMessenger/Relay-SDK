@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { thinkCandidateMode, verifyThinkCandidates } from "./candidate-contract.js";
 
 const RELAY_SERVER_SHA =
-  "26e0ceac6bacb217f36af4033811e0c4b6b90f1e";
+  "5c0dd48e0af87c29ff2ea68b5572f27025ff837e";
 const RELAY_CHAT_SDK_SHA =
   "eecf94a4d38bc021917e54dfed57e268657c17af";
 const RELAY_OPENAPI_SHA256 =
