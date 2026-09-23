@@ -1,5 +1,5 @@
 import { splitButtons } from "./buttons.js";
-import { splitInvoice } from "./invoice.js";
+import { splitPayment } from "./payment.js";
 import { splitSelection } from "./selection.js";
 import type { ButtonsPart, LinkPart, MessagePart, TextPart } from "./types.js";
 
@@ -76,24 +76,24 @@ export interface AnswerMessages {
 }
 
 /**
- * The Messages a text-only agent's answer becomes: an invoice, buttons or
+ * The Messages a text-only agent's answer becomes: a payment, buttons or
  * selection block is lifted out, then each link on its own line becomes its
- * own Message. Buttons and selection accompany the last Message of words; an
- * invoice never does — it must be the only part of its Message, so the words
- * around it are sent first and the invoice follows as its own, final Message.
+ * own Message. Buttons and selection accompany the last Message of words; a
+ * payment never does — it must be the only part of its Message, so the words
+ * around it are sent first and the payment follows as its own, final Message.
  * Selection requires a nonblank question; conflicting components remain text
  * with an error.
  */
 export const answerMessages = (answer: string): AnswerMessages => {
-  const invoiced = splitInvoice(answer);
-  if (invoiced.error) {
+  const paid = splitPayment(answer);
+  if (paid.error) {
     // The block stays in the words, but a link still travels alone; a bad
     // component must not also take the person's link cards away.
-    return { messages: splitLinks(answer).map((segment) => [segment]), error: invoiced.error };
+    return { messages: splitLinks(answer).map((segment) => [segment]), error: paid.error };
   }
-  if (invoiced.invoice) {
-    const messages: MessagePart[][] = splitLinks(invoiced.text).map((segment) => [segment]);
-    messages.push([invoiced.invoice]);
+  if (paid.payment) {
+    const messages: MessagePart[][] = splitLinks(paid.text).map((segment) => [segment]);
+    messages.push([paid.payment]);
     return { messages };
   }
   const selected = splitSelection(answer);

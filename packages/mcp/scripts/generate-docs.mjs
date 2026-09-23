@@ -67,7 +67,7 @@ function walk(className, prefix) {
       description: request.operation.description ?? "", definitions: definitions(signature),
       requestBody: request.operation.requestBody ?? null, executable: !isStatic,
       optionsIndex: member.parameters.findIndex(p =>
-        ["RequestOptions", "CallCreateOptions"].includes(p.type?.getText(clientFile) ?? "")),
+        ["RequestOptions", "CallCreateOptions", "PaymentRequestCreateOptions"].includes(p.type?.getText(clientFile) ?? "")),
     });
   }
 }

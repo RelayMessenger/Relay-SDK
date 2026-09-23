@@ -3,8 +3,8 @@ import { createInterface } from "node:readline";
 import Relay, {
   BUTTONS_BLOCK_INSTRUCTION,
   BUTTONS_GUIDANCE,
-  INVOICE_BLOCK_INSTRUCTION,
-  INVOICE_GUIDANCE,
+  PAYMENT_BLOCK_INSTRUCTION,
+  PAYMENT_GUIDANCE,
   selectionReply,
   selectionReplyContext,
   SELECTION_GUIDANCE,
@@ -55,7 +55,7 @@ const textFromEvent = (event: RelayWebhookEvent): string | null => {
  * rules every other runtime carries.
  */
 export const piPrompt = (message: string): string =>
-  `${message}\n\nWrite your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself. Write chat text. Inline Markdown draws: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.\n\n${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE} ${INVOICE_BLOCK_INSTRUCTION} ${INVOICE_GUIDANCE}`;
+  `${message}\n\nWrite your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself. Write chat text. Inline Markdown draws: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.\n\n${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE} ${PAYMENT_BLOCK_INSTRUCTION} ${PAYMENT_GUIDANCE}`;
 
 /**
  * The messages an answer becomes: each link written alone on a line as its

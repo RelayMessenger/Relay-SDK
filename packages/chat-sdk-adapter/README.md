@@ -32,19 +32,20 @@ checks any number of options and submits them once; checking sends nothing, and
 a person answers a given selection once. iOS may draw a checkmark in place of
 each bullet and repeat the prompt's title, as presentation only.
 
-## Invoice
+## Payment
 
-A verified agent asks someone to pay by sending an `invoice` part through
-`postMessageParts`, on the same idempotency lane as other posts. The invoice
-must be the only part of its Message, so send any words first with
-`postMessage`. Its `url` must be your own Stripe-hosted checkout page on
-`checkout`, `buy`, `book`, `donate` or `invoice.stripe.com`. A read-back
-invoice adds `status`, `reactions` and a filled-in `recurring.interval_count`
-in `message.raw.message.parts`, and contributes no text to `message.text`.
-Once your own system learns the payment went through, for example from your
-Stripe webhook, call `adapter.client.updateInvoiceStatus(messageId, "succeeded")`
-so the card updates for the person. Only the agent that sent the invoice may
-update its status.
+An agent asks someone to pay in two steps. First create a payment request on
+your organization's connected Stripe account with
+`adapter.client.createPaymentRequest({ amount, currency, description, category })`
+(`category` is `physical_goods`, `digital_goods` or `donation`). Then send its
+`checkout_url` unchanged as a `payment` part through `postMessageParts`, on the
+same idempotency lane as other posts. The payment must be the only part of its
+Message, so send any words first with `postMessage`. A read-back payment
+carries the request's fields and its `status` in `message.raw.message.parts`,
+and contributes no text to `message.text`. The status moves only on Stripe's
+word or your own `adapter.client.cancelPaymentRequest(id)`; your agent gets
+`payment.succeeded`, `payment.canceled` or `payment.expired`, and a paid
+request adds a `payment_receipt` message from the payer.
 
 ## Install
 

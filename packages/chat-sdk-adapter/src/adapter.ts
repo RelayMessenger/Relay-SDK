@@ -1263,6 +1263,12 @@ export class RelayAdapter
       case "call.updated":
       case "call.ended":
         return;
+      // The Chat SDK has no payment primitive either; the payer's receipt
+      // still arrives as an ordinary `message.received`.
+      case "payment.succeeded":
+      case "payment.canceled":
+      case "payment.expired":
+        return;
       default:
         return assertExhaustiveEvent(envelope.event_type);
     }

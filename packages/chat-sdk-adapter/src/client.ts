@@ -18,12 +18,14 @@ import type {
   RelayAttachmentAllocation,
   RelayChat,
   RelayGetMessagesResult,
-  RelayInvoiceStatus,
+  RelayCreatePaymentRequest,
   RelayMessage,
   RelayOutgoingPart,
+  RelayPaymentRequest,
+  RelayPaymentRequestList,
+  RelayPaymentStatus,
   RelayReactionType,
   RelaySendMessageResponse,
-  RelayUpdateInvoiceStatusResponse,
 } from "./types.js";
 
 export const RELAY_DEFAULT_BASE_URL = "https://api.relayapp.im";
@@ -332,21 +334,58 @@ export class RelayClient {
   }
 
   /**
-   * Move an `invoice` part's status, for example to `succeeded` once the
-   * developer's own Stripe webhook reports the payment. Only the agent that
-   * sent the invoice may call this; setting the current status is a no-op.
+   * Create a payment request on the organization's connected Stripe account.
+   * Send the returned `checkout_url` as a `payment` part.
    */
-  async updateInvoiceStatus(
-    messageId: string,
-    status: RelayInvoiceStatus,
-  ): Promise<RelayUpdateInvoiceStatusResponse> {
-    assertRelayUuid(messageId, "messageId");
-    return this.request<RelayUpdateInvoiceStatusResponse>(
-      `/v1/messages/${encodeURIComponent(messageId)}/invoice`,
+  async createPaymentRequest(
+    body: RelayCreatePaymentRequest,
+    options: { idempotencyKey?: string } = {},
+  ): Promise<RelayPaymentRequest> {
+    return this.request<RelayPaymentRequest>("/v1/payment_requests", {
+      body: JSON.stringify(body),
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.idempotencyKey
+          ? { "Idempotency-Key": options.idempotencyKey }
+          : {}),
+      },
+      method: "POST",
+    });
+  }
+
+  async listPaymentRequests(options: {
+    cursor?: string;
+    limit?: number;
+    status?: RelayPaymentStatus;
+  } = {}): Promise<RelayPaymentRequestList> {
+    const query = new URLSearchParams();
+    if (options.cursor) query.set("cursor", options.cursor);
+    if (options.limit !== undefined) query.set("limit", String(options.limit));
+    if (options.status) query.set("status", options.status);
+    const suffix = query.size ? `?${query.toString()}` : "";
+    return this.request<RelayPaymentRequestList>(
+      `/v1/payment_requests${suffix}`,
+      { method: "GET" },
+    );
+  }
+
+  async getPaymentRequest(paymentRequestId: string): Promise<RelayPaymentRequest> {
+    assertRelayUuid(paymentRequestId, "paymentRequestId");
+    return this.request<RelayPaymentRequest>(
+      `/v1/payment_requests/${encodeURIComponent(paymentRequestId)}`,
+      { method: "GET" },
+    );
+  }
+
+  /** Cancel a request that has not been paid; the card changes in place. */
+  async cancelPaymentRequest(paymentRequestId: string): Promise<RelayPaymentRequest> {
+    assertRelayUuid(paymentRequestId, "paymentRequestId");
+    return this.request<RelayPaymentRequest>(
+      `/v1/payment_requests/${encodeURIComponent(paymentRequestId)}/cancel`,
       {
-        body: JSON.stringify({ status }),
+        body: "{}",
         headers: { "Content-Type": "application/json" },
-        method: "PUT",
+        method: "POST",
       },
     );
   }

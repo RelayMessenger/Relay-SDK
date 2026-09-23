@@ -193,6 +193,102 @@ export type CallWebhookEvent = RelayWebhookEnvelope<
   "call.created" | "call.updated" | "call.ended"
 >;
 
+/** Subscription mode only. One coupon or one promotion code from your connected Stripe account, never both. */
+export interface PaymentDiscount {
+  /** The id of a coupon on your connected Stripe account. */
+  coupon?: string;
+  /** The id of a promotion code (`promo_...`), not the code a customer types. */
+  promotion_code?: string;
+  /** Your own name for the discount, stored and returned with the request. */
+  label?: string;
+}
+
+/**
+ * `POST /v1/payment_requests`. Payment mode needs `amount` and `currency`;
+ * subscription mode needs `price_id` and takes the currency from the price.
+ */
+export interface PaymentRequestCreateParams {
+  /** Payment mode: what to charge, in the currency's minor units. */
+  amount?: number;
+  /** Payment mode: a 3-letter ISO 4217 code, returned lowercase. */
+  currency?: string;
+  /** The card's title line and the checkout's product name. Trimmed; 1 to 32 characters. */
+  description: string;
+  category: PaymentCategory;
+  /** Up to 49 keys of your own; keys starting with `relay_` are reserved. */
+  metadata?: Record<string, string>;
+  /** Defaults to `payment`. */
+  mode?: PaymentMode;
+  /** Subscription mode: an active recurring Price on your connected Stripe account. */
+  price_id?: string;
+  /** Subscription mode: units of the price. Defaults to 1. */
+  quantity?: number;
+  /** An existing Customer on your connected Stripe account (`cus_...`). */
+  customer_id?: string;
+  discount?: PaymentDiscount;
+  /** Optional HTTPS product picture; Relay copies it into its own image store. */
+  image_url?: string;
+}
+
+export interface PaymentRequestCreateOptions extends RequestOptions {
+  /** Reusing a key with the same body returns the first request (200); with a different body, 409. */
+  idempotencyKey?: string;
+}
+
+/** The ids of the Stripe objects on your connected account. */
+export interface PaymentRequestStripe {
+  /** The one PaymentIntent the person pays (`pi_...`). */
+  payment_intent_id: string;
+  customer_id?: string;
+  /** Subscription mode (`sub_...`). */
+  subscription_id?: string;
+}
+
+export interface PaymentRequest {
+  id: UUID;
+  object: "payment_request";
+  status: PaymentStatus;
+  mode: PaymentMode;
+  /** What the person is charged at checkout, in minor units. */
+  amount: number;
+  currency: string;
+  description: string;
+  category: PaymentCategory;
+  /** Relay's pay page for this request. Send it back unchanged in a `payment` part. */
+  checkout_url: string;
+  /** 23 hours after creation; the request then moves to `expired`. */
+  expires_at: string;
+  metadata: Record<string, string>;
+  image_url?: string;
+  price_id?: string;
+  quantity?: number;
+  interval?: PaymentRecurring["interval"];
+  interval_count?: number;
+  discount?: PaymentDiscount;
+  stripe: PaymentRequestStripe;
+  /** Absent until the request succeeds. */
+  paid_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PaymentRequestListParams {
+  cursor?: string;
+  /** 1 to 100; defaults to 20. */
+  limit?: number;
+  status?: PaymentStatus;
+}
+
+export interface PaymentRequestListResponse {
+  payment_requests: PaymentRequest[];
+  next_cursor: string | null;
+}
+
+export type PaymentWebhookEvent = RelayWebhookEnvelope<
+  PaymentRequest,
+  "payment.succeeded" | "payment.canceled" | "payment.expired"
+>;
+
 export type DeliveryStatus =
   | "sent"
   | "delivered"
@@ -355,43 +451,69 @@ export interface SelectionResponsePart {
 /** Metadata only: contributes no visible fallback text. */
 export interface SelectionResponsePartResponse extends SelectionResponsePart {}
 
-/** Stripe's own recurring shape: interval plus how many of it. */
-export interface InvoiceRecurring {
+/** What is being paid for (PayPal Orders v2 `items[].category`); App Store rules decide where each is payable. */
+export type PaymentCategory = "physical_goods" | "digital_goods" | "donation";
+
+/** A payment request's lifecycle. It leaves `requested` exactly once, only on Stripe's word or your cancel. */
+export type PaymentStatus = "requested" | "succeeded" | "canceled" | "expired";
+
+/** `payment` collects one charge; `subscription` starts a Stripe subscription from a recurring price. */
+export type PaymentMode = "payment" | "subscription";
+
+/** A subscription's renewal cadence, read from its Stripe Price. */
+export interface PaymentRecurring {
   interval: "day" | "week" | "month" | "year";
-  /** Defaults to 1. Total span is capped at 3 years (1095 days / 156 weeks / 36 months / 3 years). */
-  interval_count?: number;
+  /** Intervals per renewal (3 with `month` is quarterly). */
+  interval_count: number;
 }
-
-/** physical = goods or in-person services used outside the app (Apple 3.1.3(e)); digital = anything delivered in chat or used in an app. */
-export type InvoiceGoods = "physical" | "digital";
-
-export type InvoiceStatus = "requested" | "succeeded" | "canceled" | "expired" | "refunded";
 
 /**
- * Verified agents only: asks the person to pay via the developer's own Stripe
- * checkout link (Payment Link, Checkout Session, or hosted invoice). Relay
- * never touches money, has no Stripe account, and takes no fee. An invoice
- * must be the only part of its message (Linq: "a card is the whole message").
+ * A request to pay, drawn as a card. `checkout_url` is the only field: pass
+ * back exactly what `paymentRequests.create` returned. The card's amount and
+ * title are read from that request, never from the message. Sent only by the
+ * agent that created the request, while it is `requested`; it must be the only
+ * part of its message.
  */
-export interface InvoicePart {
-  type: "invoice";
-  /** Trimmed, 1–32 characters (Telegram sendInvoice). */
-  title: string;
-  /** Minor units, 1..99,999,999 (Stripe's max). */
-  amount: number;
-  /** 3-letter ISO code, sent in either case, always returned lowercase. */
-  currency: string;
-  goods: InvoiceGoods;
-  /** The developer's own Stripe checkout link on checkout, buy, book, donate or invoice.stripe.com; at most 2048 characters. */
-  url: string;
-  /** Omit for a one-time charge. */
-  recurring?: InvoiceRecurring;
+export interface PaymentPart {
+  type: "payment";
+  /** At most 2048 characters. */
+  checkout_url: string;
 }
 
-export interface InvoicePartResponse extends InvoicePart {
-  recurring?: Required<InvoiceRecurring>;
-  /** Defaults to "requested". Only the sending agent's own status PUT changes it. */
-  status: InvoiceStatus;
+/** A payment card as every reader sees it, read from the payment request. `status` changes in place. */
+export interface PaymentPartResponse {
+  type: "payment";
+  payment_request_id: UUID;
+  checkout_url: string;
+  /** Minor units. For a subscription, what the first period costs. */
+  amount: number;
+  currency: string;
+  /** The card's title line. */
+  description: string;
+  category: PaymentCategory;
+  mode: PaymentMode;
+  recurring?: PaymentRecurring;
+  /** The request's product picture, when it has one. */
+  image_url?: string;
+  status: PaymentStatus;
+  /** Only a person can react to a payment. */
+  reactions: Reaction[] | null;
+}
+
+/**
+ * The payer's receipt: Relay adds one message from the person who paid, a
+ * reply to the `payment` card, when a request succeeds. It arrives as
+ * `message.received`. Only Relay writes this part.
+ */
+export interface PaymentReceiptPartResponse {
+  type: "payment_receipt";
+  payment_request_id: UUID;
+  description: string;
+  /** What was paid, in minor units. For a subscription, what the first period cost. */
+  amount: number;
+  currency: string;
+  mode: PaymentMode;
+  recurring?: PaymentRecurring;
   reactions: Reaction[] | null;
 }
 
@@ -402,7 +524,7 @@ export type MessagePart =
   | ButtonsPart
   | SelectionPart
   | SelectionResponsePart
-  | InvoicePart;
+  | PaymentPart;
 
 export interface TextPartResponse extends TextPart {
   mentions?: Array<{
@@ -494,7 +616,8 @@ export type MessagePartResponse =
   | ButtonsPartResponse
   | SelectionPartResponse
   | SelectionResponsePartResponse
-  | InvoicePartResponse
+  | PaymentPartResponse
+  | PaymentReceiptPartResponse
   | SystemPartResponse;
 
 /** Ordinary replies target text, media, or link, never system. A buttons part
@@ -534,7 +657,8 @@ export interface SentMessage {
     | ButtonsPartResponse
     | SelectionPartResponse
     | SelectionResponsePartResponse
-    | InvoicePartResponse
+    | PaymentPartResponse
+    | PaymentReceiptPartResponse
   >;
   created_at: string;
   sent_at: string | null;
@@ -694,9 +818,9 @@ export interface MessageListParams {
 export type MessageThreadParams = MessageListParams;
 
 /**
- * Target text, media, link, or invoice; buttons, selection, selection_response
- * and system cannot receive reactions. An invoice only accepts a reaction from
- * a person (Apple Cash allows tapbacks); an agent reacting to one gets a 403.
+ * Target text, media, link, or payment; buttons, selection, selection_response
+ * and system cannot receive reactions. Only a person can react to a payment;
+ * an agent reacting to one gets a 403.
  */
 export interface MessageAddReactionParams {
   operation: "add" | "remove";
@@ -706,15 +830,6 @@ export interface MessageAddReactionParams {
 }
 
 export type MessageAddReactionResponse = AcceptedResponse;
-
-export interface MessageInvoiceUpdateParams {
-  status: InvoiceStatus;
-}
-
-/** Same shape as other message reads: the updated Message projection. */
-export interface MessageInvoiceUpdateResponse {
-  message: Message;
-}
 
 export type ChatSendVoicememoParams =
   | { attachment_id: UUID; voice_memo_url?: never }
@@ -1193,6 +1308,9 @@ type OtherWebhookEventType = Exclude<
   | "call.created"
   | "call.updated"
   | "call.ended"
+  | "payment.succeeded"
+  | "payment.canceled"
+  | "payment.expired"
 >;
 
 export type RelayWebhookEvent =
@@ -1205,6 +1323,7 @@ export type RelayWebhookEvent =
   | ContactAddedWebhookEvent
   | ContactRemovedWebhookEvent
   | CallWebhookEvent
+  | PaymentWebhookEvent
   | RelayWebhookEnvelope<Record<string, unknown>, OtherWebhookEventType>;
 
 /** Existing Relay avatar gradient pairs, ordered top then base. */

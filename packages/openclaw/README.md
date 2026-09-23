@@ -26,10 +26,11 @@ checks any number of options and submits them once; checking sends nothing, and
 a person answers a given selection once. iOS may draw a checkmark in place of
 each bullet and repeat the prompt's title, as presentation only.
 
-## Invoice
+## Payment
 
-A verified agent ends the final answer with an `invoice` JSON fence holding a
-Stripe checkout link; the words go first and the invoice follows as its own
+After creating a payment request (`POST /v1/payment_requests`), the agent ends
+the final answer with a `payment` JSON fence holding the request's
+`checkout_url`; the words go first and the payment card follows as its own
 Message.
 
 ## Install

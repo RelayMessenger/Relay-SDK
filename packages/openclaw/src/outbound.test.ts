@@ -208,32 +208,32 @@ it("sends a real selection part from a selection fence with the existing idempot
   ], idempotency_key: "selection-operation" } }]);
 });
 
-it("sends an invoice fence as its own final Message after the words, with the reply anchor on the words", async () => {
+it("sends a payment fence as its own final Message after the words, with the reply anchor on the words", async () => {
   const requests: unknown[] = [];
   const relay = new Relay({ apiKey: "test", fetch: async (_, init) => {
     requests.push(JSON.parse(String(init?.body)));
     return Response.json({ message: { id: `sent-${requests.length}` } }, { status: 202 });
   } });
-  const response = await sendRelayText({ relay, chatId: "chat", replyToId: "source", idempotencyKey: "invoice-operation", text:
-    'Here is your order.\n```invoice\n{"title":"House blend, 250 g","amount":2400,"currency":"usd","goods":"physical","url":"https://buy.stripe.com/test_123"}\n```' });
+  const response = await sendRelayText({ relay, chatId: "chat", replyToId: "source", idempotencyKey: "payment-operation", text:
+    'Here is your order.\n```payment\n{"checkout_url": "https://pay.relayapp.im/pr_token_123"}\n```' });
   expect(requests).toEqual([
-    { message: { parts: [{ type: "text", value: "Here is your order." }], idempotency_key: "invoice-operation", reply_to: { message_id: "source" } } },
+    { message: { parts: [{ type: "text", value: "Here is your order." }], idempotency_key: "payment-operation", reply_to: { message_id: "source" } } },
     { message: { parts: [
-      { type: "invoice", title: "House blend, 250 g", amount: 2400, currency: "usd", goods: "physical", url: "https://buy.stripe.com/test_123" },
-    ], idempotency_key: "invoice-operation-1" } },
+      { type: "payment", checkout_url: "https://pay.relayapp.im/pr_token_123" },
+    ], idempotency_key: "payment-operation-1" } },
   ]);
   expect(response.message.id).toBe("sent-1");
 });
 
-it("anchors the reply on the invoice when the answer is only an invoice fence", async () => {
+it("anchors the reply on the payment when the answer is only a payment fence", async () => {
   const requests: unknown[] = [];
   const relay = new Relay({ apiKey: "test", fetch: async (_, init) => {
     requests.push(JSON.parse(String(init?.body)));
     return Response.json({ message: { id: "sent" } }, { status: 202 });
   } });
-  await sendRelayText({ relay, chatId: "chat", replyToId: "source", idempotencyKey: "invoice-only", text:
-    '```invoice\n{"title":"House blend, 250 g","amount":2400,"currency":"usd","goods":"physical","url":"https://buy.stripe.com/test_123"}\n```' });
+  await sendRelayText({ relay, chatId: "chat", replyToId: "source", idempotencyKey: "payment-only", text:
+    '```payment\n{"checkout_url": "https://pay.relayapp.im/pr_token_123"}\n```' });
   expect(requests).toEqual([{ message: { parts: [
-    { type: "invoice", title: "House blend, 250 g", amount: 2400, currency: "usd", goods: "physical", url: "https://buy.stripe.com/test_123" },
-  ], idempotency_key: "invoice-only", reply_to: { message_id: "source" } } }]);
+    { type: "payment", checkout_url: "https://pay.relayapp.im/pr_token_123" },
+  ], idempotency_key: "payment-only", reply_to: { message_id: "source" } } }]);
 });

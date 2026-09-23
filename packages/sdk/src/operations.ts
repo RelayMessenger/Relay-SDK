@@ -116,9 +116,24 @@ export const RELAY_V1_OPERATIONS = [
     "operationId": "sendReaction"
   },
   {
-    "method": "PUT",
-    "path": "/v1/messages/{messageId}/invoice",
-    "operationId": "updateInvoiceStatus"
+    "method": "POST",
+    "path": "/v1/payment_requests",
+    "operationId": "createPaymentRequest"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/payment_requests",
+    "operationId": "listPaymentRequests"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/payment_requests/{paymentRequestId}",
+    "operationId": "getPaymentRequest"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/payment_requests/{paymentRequestId}/cancel",
+    "operationId": "cancelPaymentRequest"
   },
   {
     "method": "POST",
@@ -242,4 +257,7 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "call.created",
   "call.updated",
   "call.ended",
+  "payment.succeeded",
+  "payment.canceled",
+  "payment.expired",
 ] as const;

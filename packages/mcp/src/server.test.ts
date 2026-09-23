@@ -1,5 +1,5 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import Relay, { INVOICE_GUIDANCE } from "@relaymessenger/sdk";
+import Relay, { PAYMENT_GUIDANCE } from "@relaymessenger/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultApiURL } from "./auth.js";
 import { createRelayMcpServer, PACKAGE_VERSION, type RelayMcpServerOptions } from "./server.js";
@@ -39,15 +39,15 @@ describe("approved two-tool MCP", () => {
     expect(tools.find(tool => tool.name === "execute")?.description).toContain("portable text remains bullets");
     expect(resolveClient).not.toHaveBeenCalled();
   });
-  it("discovers the invoice part and its status route without resolving credentials", async () => {
+  it("discovers the payment part and the payment request routes without resolving credentials", async () => {
     const resolveClient = vi.fn(async () => { throw new Error("must not resolve auth for search"); });
     const client = await connect({ resolveClient });
     const tools = (await client.listTools()).tools;
-    expect(tools.find(tool => tool.name === "execute")?.description).toContain(INVOICE_GUIDANCE);
-    const found = await client.callTool({ name: "search_docs", arguments: { query: "invoice", language: "typescript", detail: "verbose" } });
-    expect(text(found)).toContain("InvoicePart");
-    expect(text(found)).toContain("client.messages.invoice.update");
-    expect(text(found)).toContain("MessageInvoiceUpdateParams");
+    expect(tools.find(tool => tool.name === "execute")?.description).toContain(PAYMENT_GUIDANCE);
+    const found = await client.callTool({ name: "search_docs", arguments: { query: "payment", language: "typescript", detail: "verbose" } });
+    expect(text(found)).toContain("client.paymentRequests.create");
+    expect(text(found)).toContain("PaymentRequestCreateParams");
+    expect(text(found)).toContain("PaymentPart");
     expect(resolveClient).not.toHaveBeenCalled();
   });
   it("advertises exactly search_docs and execute, without credential arguments or talk", async () => {
@@ -286,21 +286,26 @@ it("round trips native selection authoring and rich response metadata through ex
   expect(result(read)).toEqual([{ id: "response", parts, reply_to: replyTo }]);
 });
 
-it("sends a solo invoice part and updates its status through execute", async () => {
-  const invoice = { type: "invoice", title: "House blend, 250 g", amount: 2400, currency: "usd", goods: "physical", url: "https://buy.stripe.com/test_123" };
-  const fetch = vi.fn(async () => Response.json({ chat_id: CHAT, message: { id: "sent" } }, { status: 202 }));
+it("creates a payment request and sends its checkout_url as a solo payment part through execute", async () => {
+  const fetch = vi.fn(async (input: string | URL | Request) => String(input).endsWith("/v1/payment_requests")
+    ? Response.json({ id: "request", object: "payment_request", checkout_url: "https://pay.relayapp.im/pr_token_123" }, { status: 201 })
+    : Response.json({ chat_id: CHAT, message: { id: "sent" } }, { status: 202 }));
   const s = await ready({}, sdk(fetch as never));
   const sent = await s.execute(`async function run(client) {
-    const sent = await client.chats.messages.send(${JSON.stringify(CHAT)}, { message: {
-      parts: [${JSON.stringify(invoice)}], idempotency_key: "mcp-invoice"
+    const request = await client.paymentRequests.create(
+      { amount: 2400, currency: "usd", description: "House blend, 250 g", category: "physical_goods" },
+      { idempotencyKey: "mcp-payment-request" },
+    );
+    return await client.chats.messages.send(${JSON.stringify(CHAT)}, { message: {
+      parts: [{ type: "payment", checkout_url: request.checkout_url }], idempotency_key: "mcp-payment"
     } });
-    return await client.messages.invoice.update(sent.message.id, { status: "succeeded" });
   }`);
   expect(sent.isError).not.toBe(true);
-  const [send, update] = fetch.mock.calls as unknown as [string, RequestInit][];
-  expect(JSON.parse(String(send?.[1]?.body)).message.parts).toEqual([invoice]);
-  expect(new Headers(send?.[1]?.headers).get("idempotency-key")).toBe("mcp-invoice");
-  expect(String(update?.[0])).toBe("http://127.0.0.1:1/v1/messages/sent/invoice");
-  expect(update?.[1]?.method).toBe("PUT");
-  expect(JSON.parse(String(update?.[1]?.body))).toEqual({ status: "succeeded" });
+  const [create, send] = fetch.mock.calls as unknown as [string, RequestInit][];
+  expect(String(create?.[0])).toBe("http://127.0.0.1:1/v1/payment_requests");
+  expect(create?.[1]?.method).toBe("POST");
+  expect(new Headers(create?.[1]?.headers).get("idempotency-key")).toBe("mcp-payment-request");
+  expect(JSON.parse(String(create?.[1]?.body))).toEqual({ amount: 2400, currency: "usd", description: "House blend, 250 g", category: "physical_goods" });
+  expect(JSON.parse(String(send?.[1]?.body)).message.parts).toEqual([{ type: "payment", checkout_url: "https://pay.relayapp.im/pr_token_123" }]);
+  expect(new Headers(send?.[1]?.headers).get("idempotency-key")).toBe("mcp-payment");
 });

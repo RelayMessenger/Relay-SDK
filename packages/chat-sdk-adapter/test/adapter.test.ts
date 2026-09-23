@@ -1957,22 +1957,26 @@ it("requires an external key strategy for native selections just like text", asy
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
-const INVOICE_PART = {
-  type: "invoice" as const, title: "House blend, 250 g", amount: 2400, currency: "usd",
-  goods: "physical" as const, url: "https://buy.stripe.com/test_123",
-};
+const PAYMENT_PART = { type: "payment" as const, checkout_url: "https://pay.relayapp.im/pr_token_123" };
+const PAYMENT_REQUEST_ID = "0199a000-0000-7000-8000-00000000c0de";
 
-it("keeps a read-back invoice intact in raw and adds no readable text of its own", async () => {
+it("keeps a read-back payment and its receipt intact in raw and adds no readable text of their own", async () => {
   const part = {
-    ...INVOICE_PART, recurring: { interval: "month" as const, interval_count: 1 }, status: "succeeded" as const, reactions: null,
+    ...PAYMENT_PART, payment_request_id: PAYMENT_REQUEST_ID, amount: 2400, currency: "usd",
+    description: "House blend, 250 g", category: "physical_goods" as const, mode: "payment" as const,
+    status: "succeeded" as const, reactions: null,
+  };
+  const receipt = {
+    type: "payment_receipt" as const, payment_request_id: PAYMENT_REQUEST_ID, description: "House blend, 250 g",
+    amount: 2400, currency: "usd", mode: "payment" as const, reactions: null,
   };
   const inbound = createRelayAdapter({ token: "test", webhookSecret: WEBHOOK_SECRET }).parseMessage({
     chatId: IDS.chat, createdAt: "2026-09-22T00:00:00.000Z", eventType: "message.received",
-    message: webhookMessage({ parts: [part], sender_handle: { ...AGENT_HANDLE, is_me: false } }),
+    message: webhookMessage({ parts: [receipt], sender_handle: { ...AGENT_HANDLE, is_me: false } }),
   });
   expect(inbound.text).toBe("");
   expect(inbound.attachments).toEqual([]);
-  expect(inbound.raw.message?.parts).toEqual([part]);
+  expect(inbound.raw.message?.parts).toEqual([receipt]);
 
   const history = createRelayAdapter({ token: "test", webhookSecret: WEBHOOK_SECRET,
     fetch: vi.fn(async () => jsonResponse({ messages: [
@@ -1990,17 +1994,17 @@ it("keeps a read-back invoice intact in raw and adds no readable text of its own
   });
   const page = await history.fetchMessages(THREAD_ID, { direction: "forward" });
   expect(page.messages.map(message => message.text)).toEqual(["Here is your order.", ""]);
-  const invoice = page.messages[1]?.raw.message?.parts?.find(item => item.type === "invoice");
-  expect(invoice).toEqual(part);
+  const payment = page.messages[1]?.raw.message?.parts?.find(item => item.type === "payment");
+  expect(payment).toEqual(part);
 });
 
-it("posts an invoice alone and unchanged on the same idempotency lane as the words before it", async () => {
+it("posts a payment alone and unchanged on the same idempotency lane as the words before it", async () => {
   const { adapter, fetchMock } = adapterHarness();
   const chat = createMockChatInstance();
   await adapter.initialize(chat);
   vi.mocked(chat.processMessage).mockImplementation(async () => {
     await adapter.postMessage(THREAD_ID, "Here is your order.");
-    await adapter.postMessageParts(THREAD_ID, [INVOICE_PART]);
+    await adapter.postMessageParts(THREAD_ID, [PAYMENT_PART]);
   });
   const response = await adapter.handleWebhook(await signedRequest(envelope()));
   expect(response.status).toBe(200);
@@ -2009,22 +2013,22 @@ it("posts an invoice alone and unchanged on the same idempotency lane as the wor
   expect(requests.map(([, init]) => new Headers(init?.headers).get("idempotency-key"))).toEqual([
     `relay-chat-sdk:${IDS.event}:0`, `relay-chat-sdk:${IDS.event}:1`,
   ]);
-  expect(JSON.parse(String(requests[1]?.[1]?.body)).message.parts).toEqual([INVOICE_PART]);
+  expect(JSON.parse(String(requests[1]?.[1]?.body)).message.parts).toEqual([PAYMENT_PART]);
 });
 
-it("requires an external key strategy for an invoice just like text", async () => {
+it("requires an external key strategy for a payment just like text", async () => {
   const fetchMock = vi.fn();
   const adapter = createRelayAdapter({ token: "test", fetch: fetchMock as typeof fetch });
-  await expect(adapter.postMessageParts(THREAD_ID, [INVOICE_PART])).rejects.toThrow("idempotencyKeyResolver");
+  await expect(adapter.postMessageParts(THREAD_ID, [PAYMENT_PART])).rejects.toThrow("idempotencyKeyResolver");
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
-it("reaches the invoice status route through the adapter's own client, outside any turn", async () => {
-  const fetchMock = vi.fn(async () => jsonResponse({ message: { id: IDS.message } }));
+it("reaches the payment request routes through the adapter's own client, outside any turn", async () => {
+  const fetchMock = vi.fn(async () => jsonResponse({ id: PAYMENT_REQUEST_ID, status: "canceled" }));
   const adapter = createRelayAdapter({ token: "test", fetch: fetchMock as typeof fetch });
-  await adapter.client.updateInvoiceStatus(IDS.message, "refunded");
+  await adapter.client.cancelPaymentRequest(PAYMENT_REQUEST_ID);
   expect(fetchMock).toHaveBeenCalledWith(
-    `https://api.relayapp.im/v1/messages/${IDS.message}/invoice`,
-    expect.objectContaining({ body: JSON.stringify({ status: "refunded" }), method: "PUT" }),
+    `https://api.relayapp.im/v1/payment_requests/${PAYMENT_REQUEST_ID}/cancel`,
+    expect.objectContaining({ body: "{}", method: "POST" }),
   );
 });

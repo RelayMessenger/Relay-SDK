@@ -627,33 +627,31 @@ it("validates selection tool arguments and sends the native part on the existing
   } finally { state.close(); }
 });
 
-it("validates invoice tool arguments and sends the invoice as its own Message after the words", async () => {
+it("validates payment tool arguments and sends the payment as its own Message after the words", async () => {
   const { state, fake, channel } = fixture();
   try {
     const origin = event({ sequence: 1, text: "I'll take the house blend" });
     accept(state, origin, 1);
     await channel.flush();
     await channel.beginProcessing({ delivery_id: origin.event_id });
-    const invoice = { title: " House blend ", amount: 2400, currency: "USD", goods: "physical", url: "https://buy.stripe.com/test_123" };
-    const args = { chat_id: CHAT_A, text: "Here is your invoice.", send_id: "invoice-1", invoice };
+    const payment = { checkout_url: "https://pay.relayapp.im/pr_token_123" };
+    const args = { chat_id: CHAT_A, text: "Here is your order.", send_id: "payment-1", payment };
     for (const bad of [
       [],
-      { ...invoice, url: "https://example.com/pay" },
-      { ...invoice, url: "https://buy.stripe.com@evil.example/pay" },
-      { ...invoice, amount: 0 },
-      { ...invoice, goods: "service" },
-      { ...invoice, title: "x".repeat(33) },
-      { ...invoice, extra: true },
+      {},
+      { checkout_url: "" },
+      { checkout_url: "x".repeat(2049) },
+      { ...payment, amount: 2400 },
+      { ...payment, type: "link" },
     ]) {
-      expect((await channel.reply({ ...args, invoice: bad })).isError).toBe(true);
+      expect((await channel.reply({ ...args, payment: bad })).isError).toBe(true);
     }
     expect((await channel.reply({ ...args, buttons: [{ label: "Pay" }] })).isError).toBe(true);
     expect((await channel.reply({ ...args, selection: [{ value: "a", label: "A" }] })).isError).toBe(true);
     expect(fake.sends).toHaveLength(0);
     expect((await channel.reply(args)).isError).not.toBe(true);
-    const part = { type: "invoice", title: "House blend", amount: 2400, currency: "usd", goods: "physical", url: "https://buy.stripe.com/test_123" };
     expect(fake.sends.map((send) => send.body.message.parts)).toEqual([
-      [{ type: "text", value: "Here is your invoice." }], [part],
+      [{ type: "text", value: "Here is your order." }], [{ type: "payment", ...payment }],
     ]);
     const key = fake.sends[0]!.body.message.idempotency_key!;
     expect(fake.sends[1]!.body.message.idempotency_key).toBe(`${key}-1`);
@@ -662,17 +660,15 @@ it("validates invoice tool arguments and sends the invoice as its own Message af
   } finally { state.close(); }
 });
 
-it("sends an invoice-only reply as one Message", async () => {
+it("sends a payment-only reply as one Message", async () => {
   const { state, fake, channel } = fixture();
   try {
-    const origin = event({ sequence: 1, text: "invoice me" });
+    const origin = event({ sequence: 1, text: "how do I pay?" });
     accept(state, origin, 1);
     await channel.flush();
     await channel.beginProcessing({ delivery_id: origin.event_id });
-    const invoice = { title: "Plan", amount: 900, currency: "eur", goods: "digital", url: "https://checkout.stripe.com/c/pay/cs_test_1", recurring: { interval: "month" } };
-    expect((await channel.reply({ chat_id: CHAT_A, send_id: "invoice-only", invoice })).isError).not.toBe(true);
-    expect(fake.sends.map((send) => send.body.message.parts)).toEqual([
-      [{ type: "invoice", ...invoice, recurring: { interval: "month", interval_count: 1 } }],
-    ]);
+    const payment = { type: "payment", checkout_url: "https://pay.relayapp.im/pr_token_123" };
+    expect((await channel.reply({ chat_id: CHAT_A, send_id: "payment-only", payment })).isError).not.toBe(true);
+    expect(fake.sends.map((send) => send.body.message.parts)).toEqual([[payment]]);
   } finally { state.close(); }
 });

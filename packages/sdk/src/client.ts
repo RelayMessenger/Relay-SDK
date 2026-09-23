@@ -37,14 +37,17 @@ import type {
   MessageAddReactionResponse,
   MessageCreateParams,
   MessageCreateResponse,
-  MessageInvoiceUpdateParams,
-  MessageInvoiceUpdateResponse,
   MessageListParams,
   MessageSendParams,
   MessageSendResponse,
   MessageThreadParams,
   ParticipantAddParams,
   ParticipantRemoveParams,
+  PaymentRequest,
+  PaymentRequestCreateOptions,
+  PaymentRequestCreateParams,
+  PaymentRequestListParams,
+  PaymentRequestListResponse,
   RequestOptions,
   UnblockHandleParams,
   WebhookEventListResponse,
@@ -487,29 +490,8 @@ export class Chats {
   }
 }
 
-class MessageInvoice {
-  constructor(private readonly transport: Transport) {}
-
-  update(
-    messageID: string,
-    body: MessageInvoiceUpdateParams,
-    options?: RequestOptions,
-  ): Promise<MessageInvoiceUpdateResponse> {
-    return this.transport.request({
-      method: "PUT",
-      path: `/v1/messages/${pathID(messageID)}/invoice`,
-      body,
-      options,
-    });
-  }
-}
-
 export class Messages {
-  readonly invoice: MessageInvoice;
-
-  constructor(private readonly transport: Transport) {
-    this.invoice = new MessageInvoice(transport);
-  }
+  constructor(private readonly transport: Transport) {}
 
   create(
     params: MessageCreateParams,
@@ -571,6 +553,57 @@ export class Messages {
     );
   }
 
+}
+
+/**
+ * Payment requests on the organization's own connected Stripe account. Create
+ * one, then send its `checkout_url` as a `payment` message part.
+ */
+export class PaymentRequests {
+  constructor(private readonly transport: Transport) {}
+
+  create(
+    body: PaymentRequestCreateParams,
+    options?: PaymentRequestCreateOptions,
+  ): Promise<PaymentRequest> {
+    const { idempotencyKey, ...requestOptions } = options ?? {};
+    return this.transport.request({
+      method: "POST",
+      path: "/v1/payment_requests",
+      body,
+      options: requestOptions,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    });
+  }
+
+  list(
+    query: PaymentRequestListParams = {},
+    options?: RequestOptions,
+  ): Promise<PaymentRequestListResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/payment_requests",
+      query,
+      options,
+    });
+  }
+
+  retrieve(paymentRequestID: string, options?: RequestOptions): Promise<PaymentRequest> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/payment_requests/${pathID(paymentRequestID)}`,
+      options,
+    });
+  }
+
+  cancel(paymentRequestID: string, options?: RequestOptions): Promise<PaymentRequest> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/payment_requests/${pathID(paymentRequestID)}/cancel`,
+      body: {},
+      options,
+    });
+  }
 }
 
 export class Attachments {
@@ -851,6 +884,7 @@ export class Relay {
   readonly chats: Chats;
   readonly calls: Calls;
   readonly messages: Messages;
+  readonly paymentRequests: PaymentRequests;
   readonly attachments: Attachments;
   readonly webhookEvents: WebhookEvents;
   readonly webhookSubscriptions: WebhookSubscriptions;
@@ -868,6 +902,7 @@ export class Relay {
     this.chats = new Chats(transport);
     this.calls = new Calls(transport);
     this.messages = new Messages(transport);
+    this.paymentRequests = new PaymentRequests(transport);
     this.attachments = new Attachments(transport);
     this.webhookEvents = new WebhookEvents(transport);
     this.webhookSubscriptions = new WebhookSubscriptions(transport);
