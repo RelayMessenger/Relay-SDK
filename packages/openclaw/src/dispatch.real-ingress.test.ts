@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { RelayWebhookEvent } from "@relaymessenger/sdk";
+import { INVOICE_BLOCK_INSTRUCTION, INVOICE_GUIDANCE, type RelayWebhookEvent } from "@relaymessenger/sdk";
 import { dispatchRelayEvent } from "./dispatch.js";
 
 // Deliberately use the installed OpenClaw resolver, route builder and identity
@@ -152,6 +152,16 @@ it("forwards selection data and native authoring guidance to the admitted OpenCl
   }));
   expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
     ctxPayload: expect.objectContaining({ BodyForAgent: expect.stringContaining("portable text remains bullets") }),
+  }));
+});
+
+it("teaches the admitted OpenClaw turn how and when to send an invoice", async () => {
+  const result = await dispatch([approvedId], approvedId, "review_sender");
+  expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+    ctxPayload: expect.objectContaining({ BodyForAgent: expect.stringContaining(INVOICE_BLOCK_INSTRUCTION) }),
+  }));
+  expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+    ctxPayload: expect.objectContaining({ BodyForAgent: expect.stringContaining(INVOICE_GUIDANCE) }),
   }));
 });
 

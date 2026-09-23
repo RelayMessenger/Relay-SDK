@@ -207,3 +207,33 @@ it("sends a real selection part from a selection fence with the existing idempot
     { type: "text", value: "Topics?" }, { type: "selection", options: [{ value: "research", label: "Research" }] },
   ], idempotency_key: "selection-operation" } }]);
 });
+
+it("sends an invoice fence as its own final Message after the words, with the reply anchor on the words", async () => {
+  const requests: unknown[] = [];
+  const relay = new Relay({ apiKey: "test", fetch: async (_, init) => {
+    requests.push(JSON.parse(String(init?.body)));
+    return Response.json({ message: { id: `sent-${requests.length}` } }, { status: 202 });
+  } });
+  const response = await sendRelayText({ relay, chatId: "chat", replyToId: "source", idempotencyKey: "invoice-operation", text:
+    'Here is your order.\n```invoice\n{"title":"House blend, 250 g","amount":2400,"currency":"usd","goods":"physical","url":"https://buy.stripe.com/test_123"}\n```' });
+  expect(requests).toEqual([
+    { message: { parts: [{ type: "text", value: "Here is your order." }], idempotency_key: "invoice-operation", reply_to: { message_id: "source" } } },
+    { message: { parts: [
+      { type: "invoice", title: "House blend, 250 g", amount: 2400, currency: "usd", goods: "physical", url: "https://buy.stripe.com/test_123" },
+    ], idempotency_key: "invoice-operation-1" } },
+  ]);
+  expect(response.message.id).toBe("sent-1");
+});
+
+it("anchors the reply on the invoice when the answer is only an invoice fence", async () => {
+  const requests: unknown[] = [];
+  const relay = new Relay({ apiKey: "test", fetch: async (_, init) => {
+    requests.push(JSON.parse(String(init?.body)));
+    return Response.json({ message: { id: "sent" } }, { status: 202 });
+  } });
+  await sendRelayText({ relay, chatId: "chat", replyToId: "source", idempotencyKey: "invoice-only", text:
+    '```invoice\n{"title":"House blend, 250 g","amount":2400,"currency":"usd","goods":"physical","url":"https://buy.stripe.com/test_123"}\n```' });
+  expect(requests).toEqual([{ message: { parts: [
+    { type: "invoice", title: "House blend, 250 g", amount: 2400, currency: "usd", goods: "physical", url: "https://buy.stripe.com/test_123" },
+  ], idempotency_key: "invoice-only", reply_to: { message_id: "source" } } }]);
+});
