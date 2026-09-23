@@ -503,6 +503,14 @@ async def test_restart_uses_the_room_latest_ice_servers_and_an_application_value
     await own.aclose()
 
 
+async def until(condition: Callable[[], bool], timeout_s: float = 5.0) -> None:
+    """Wait on real timers for ``condition``, so a loaded machine cannot race the assertion."""
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while not condition():
+        assert asyncio.get_running_loop().time() < deadline, "condition not met in time"
+        await asyncio.sleep(0.005)
+
+
 def receiving_state(receiving: list[str]) -> dict[str, Any]:
     person = {**PERSON, "video": False, "tracks": ["audio"], "receiving": receiving}
     return {"type": "roomState", "call": {"id": "c", "chat_id": "c", "status": "in-progress"}, "participants": [person, AGENT]}
@@ -526,10 +534,9 @@ async def test_subscribed_needs_receiving_audio_after_this_peers_answer_and_a_re
     assert transport.subscribed is False
     room.emit("room_state", receiving_state(["audio"]))
     assert transport.subscribed is True
-    # The session never connects: the restart resets it until the new session is pulled.
-    await asyncio.sleep(0.03 + 0.02)
+    # The session never connects (30 ms): the restart resets it until the new session is pulled.
+    await until(lambda: len(FakePeer.instances) == 2)
     assert transport.subscribed is False
-    await asyncio.sleep(0.25 + 0.05)
     await settle()
     room.emit("answer", answer("v=0 second\r\n"))
     await settle()
