@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 51bc3ecd9b203a3fc75fe0ab7a105b6751080678
- * OpenAPI 7b41c21bebd99d28d103da1c3fe380642542e5b6243bb4319e501d7609d8ab0f
+ * Relay Server 26e0ceac6bacb217f36af4033811e0c4b6b90f1e
+ * OpenAPI 02c61e10ee5e2834a77baf01a215a511f3bce219ac72a5f66ba15f5e1b02ee7d
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -32,6 +32,8 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "payment.succeeded",
   "payment.canceled",
   "payment.expired",
+  "location.sharing.started",
+  "location.sharing.stopped",
 ] as const;
 
 export type RelayWebhookEventType =
@@ -197,6 +199,22 @@ export interface RelayPaymentReceiptPartResponse {
   reactions: RelayReaction[] | null;
 }
 
+/** An agent's request for the person's location; carries no text and cannot be sent as a part. */
+export interface RelayLocationRequestPartResponse {
+  type: "location_request";
+  reactions: RelayReaction[] | null;
+}
+
+/** A person's location share card: its state, never its position. */
+export interface RelayLocationPartResponse {
+  type: "location";
+  state: "live" | "ended";
+  began_at: string | null;
+  ends_at: string | null;
+  ended_at: string | null;
+  reactions: RelayReaction[] | null;
+}
+
 /** `POST /v1/payment_requests`. */
 export interface RelayCreatePaymentRequest {
   amount?: number;
@@ -297,7 +315,9 @@ export type RelayMessagePartResponse =
   | RelaySelectionPartResponse
   | RelaySelectionResponsePart
   | RelayPaymentPartResponse
-  | RelayPaymentReceiptPartResponse;
+  | RelayPaymentReceiptPartResponse
+  | RelayLocationRequestPartResponse
+  | RelayLocationPartResponse;
 
 export interface RelayReplyTo {
   message_id: string;
@@ -342,6 +362,8 @@ export interface RelayWebhookMessageEvent {
     | RelaySelectionResponsePart
     | RelayPaymentPartResponse
     | RelayPaymentReceiptPartResponse
+    | RelayLocationRequestPartResponse
+    | RelayLocationPartResponse
   >;
   read_at?: string | null;
   reply_to?: RelayReplyTo | null;
@@ -365,6 +387,8 @@ export interface RelaySentMessage {
     | RelaySelectionResponsePart
     | RelayPaymentPartResponse
     | RelayPaymentReceiptPartResponse
+    | RelayLocationRequestPartResponse
+    | RelayLocationPartResponse
   >;
   reply_to?: RelayReplyTo | null;
   sent_at: string | null;

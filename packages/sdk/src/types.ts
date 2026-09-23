@@ -284,6 +284,74 @@ export interface PaymentRequestListResponse {
   next_cursor: string | null;
 }
 
+/** `POST /v1/chats/{chatId}/location/request` answers with this once the request is in the chat. */
+export interface LocationRequestResponse {
+  success: true;
+  message: "Location request sent";
+}
+
+/** One person sharing their location with your agent, as a GeoJSON Feature (RFC 7946). */
+export interface LocationFeature {
+  type: "Feature";
+  geometry: {
+    type: "Point";
+    /** `[longitude, latitude]`, longitude first. */
+    coordinates: [number, number];
+  };
+  properties: {
+    /** Handle of the person sharing. */
+    handle: string;
+    /** When this position arrived. */
+    updated_at: string;
+  };
+}
+
+/**
+ * `GET /v1/chats/{chatId}/location`: one Feature per person sharing with your
+ * agent in the chat; `features` is empty when nobody is sharing.
+ */
+export interface GetChatLocationResponse {
+  success: true;
+  data: {
+    type: "FeatureCollection";
+    features: LocationFeature[];
+  };
+}
+
+/** `location.sharing.started`: a person started sharing their location with your agent. */
+export interface LocationSharingStartedEvent {
+  /** Handle of the person who started sharing. */
+  shared_by: string;
+  /** Handle of your agent. */
+  shared_with: string;
+  chat_id: UUID;
+  began_at: string;
+  /** When the share ends by itself; null when it has no end. */
+  ends_at: string | null;
+}
+
+/** `location.sharing.stopped`: the person stopped sharing, or the share reached its end. */
+export interface LocationSharingStoppedEvent {
+  /** Handle of the person who stopped sharing. */
+  shared_by: string;
+  /** Handle of your agent. */
+  shared_with: string;
+  chat_id: UUID;
+  began_at: string;
+  /** When the share ended. Equals the share's `ends_at` when it ran out. */
+  ended_at: string;
+}
+
+export type LocationSharingStartedWebhookEvent = RelayWebhookEnvelope<
+  LocationSharingStartedEvent,
+  "location.sharing.started"
+>;
+
+export type LocationSharingStoppedWebhookEvent = RelayWebhookEnvelope<
+  LocationSharingStoppedEvent,
+  "location.sharing.stopped"
+>;
+
 export type PaymentWebhookEvent = RelayWebhookEnvelope<
   PaymentRequest,
   "payment.succeeded" | "payment.canceled" | "payment.expired"
@@ -517,6 +585,33 @@ export interface PaymentReceiptPartResponse {
   reactions: Reaction[] | null;
 }
 
+/**
+ * An agent's request for the person's location, sent with
+ * `chats.location.request`. It cannot be sent as a message part. A client that
+ * does not draw it shows the Message's text, "<agent display name> requested
+ * your location".
+ */
+export interface LocationRequestPartResponse {
+  type: "location_request";
+  reactions: Reaction[] | null;
+}
+
+/**
+ * A person's location share, the card the person's app draws. It carries the
+ * share's state, never its position: read the position with
+ * `chats.location.retrieve`. It cannot be sent as a message part. A share whose
+ * `ends_at` has passed reads as `ended` with `ended_at` equal to `ends_at`.
+ */
+export interface LocationPartResponse {
+  type: "location";
+  state: "live" | "ended";
+  began_at: string | null;
+  /** When the share ends by itself; null when it has no end. */
+  ends_at: string | null;
+  ended_at: string | null;
+  reactions: Reaction[] | null;
+}
+
 export type MessagePart =
   | TextPart
   | MediaPart
@@ -618,6 +713,8 @@ export type MessagePartResponse =
   | SelectionResponsePartResponse
   | PaymentPartResponse
   | PaymentReceiptPartResponse
+  | LocationRequestPartResponse
+  | LocationPartResponse
   | SystemPartResponse;
 
 /** Ordinary replies target text, media, or link, never system. A buttons part
@@ -659,6 +756,8 @@ export interface SentMessage {
     | SelectionResponsePartResponse
     | PaymentPartResponse
     | PaymentReceiptPartResponse
+    | LocationRequestPartResponse
+    | LocationPartResponse
   >;
   created_at: string;
   sent_at: string | null;
@@ -1311,6 +1410,8 @@ type OtherWebhookEventType = Exclude<
   | "payment.succeeded"
   | "payment.canceled"
   | "payment.expired"
+  | "location.sharing.started"
+  | "location.sharing.stopped"
 >;
 
 export type RelayWebhookEvent =
@@ -1324,6 +1425,8 @@ export type RelayWebhookEvent =
   | ContactRemovedWebhookEvent
   | CallWebhookEvent
   | PaymentWebhookEvent
+  | LocationSharingStartedWebhookEvent
+  | LocationSharingStoppedWebhookEvent
   | RelayWebhookEnvelope<Record<string, unknown>, OtherWebhookEventType>;
 
 /** Existing Relay avatar gradient pairs, ordered top then base. */

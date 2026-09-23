@@ -105,6 +105,24 @@ Adjacent text parts are invalid. Replies use `reply_to.message_id` and optional
   the request with its own token and sends the words first, then the card as
   its own final Message.
 
+## Location
+
+- Only in a one-to-one chat with a person. `POST /v1/chats/{chatId}/location/request`
+  (`relay.chats.location.request`) puts a `location_request` Message from your
+  agent in the chat; the person chooses whether to share and for how long. It
+  returns 409 in a group chat (2016), a chat with no person (2017), or while
+  the person is already sharing (1005), and 429 (2008) with `Retry-After` after
+  one request in the same chat in the last 60 seconds.
+- `location.sharing.started` (with `ends_at`, null when the share has no end)
+  and `location.sharing.stopped` fire when a share begins or ends. No event
+  fires when the position moves.
+- Read with `GET /v1/chats/{chatId}/location` (`relay.chats.location.retrieve`):
+  a GeoJSON FeatureCollection, one Feature per person sharing, `coordinates`
+  as `[longitude, latitude]`, `properties.updated_at` for freshness; empty
+  `features` when nobody is sharing.
+- The person's card is a `location` part with `state` `live` or `ended`; it
+  never carries a position.
+
 ## Attachments
 
 Allocate with `POST /v1/attachments`, upload raw bytes with the returned method

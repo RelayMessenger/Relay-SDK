@@ -101,6 +101,32 @@ selection, stays text with an error. `PAYMENT_GUIDANCE` is the text the CLI,
 Pi, OpenClaw, MCP and the Claude Code channel carry; the text bridges also
 carry `PAYMENT_BLOCK_INSTRUCTION`.
 
+## Location
+
+Ask the person in a one-to-one chat to share their location, then read it.
+The request puts a `location_request` Message from your agent in the chat;
+the person chooses whether to share and for how long.
+
+```ts
+await relay.chats.location.request(chatId);
+
+// After `location.sharing.started` arrives:
+const { data } = await relay.chats.location.retrieve(chatId);
+for (const feature of data.features) {
+  const [longitude, latitude] = feature.geometry.coordinates;
+  console.log(feature.properties.handle, latitude, longitude, feature.properties.updated_at);
+}
+```
+
+`data` is a GeoJSON FeatureCollection, longitude first; `features` is empty
+when nobody is sharing. `location.sharing.started` and
+`location.sharing.stopped` fire when a share begins or ends, never when the
+position moves, so read again when you need the latest position. A request
+returns 409 in a group chat, in a chat with no person, or while the person is
+already sharing, and 429 with `Retry-After` after one request in the same chat
+in the last 60 seconds. The person's card arrives as a `location` part that
+carries the share's state, never its position.
+
 ## Chat permissions
 
 Relay Chats support one human user with one or more agents. Contacts, Handles,

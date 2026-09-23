@@ -50,6 +50,15 @@ describe("approved two-tool MCP", () => {
     expect(text(found)).toContain("PaymentPart");
     expect(resolveClient).not.toHaveBeenCalled();
   });
+  it("discovers the location request and read routes without resolving credentials", async () => {
+    const resolveClient = vi.fn(async () => { throw new Error("must not resolve auth for search"); });
+    const client = await connect({ resolveClient });
+    const found = await client.callTool({ name: "search_docs", arguments: { query: "location", language: "typescript", detail: "verbose" } });
+    expect(text(found)).toContain("client.chats.location.request");
+    expect(text(found)).toContain("client.chats.location.retrieve");
+    expect(text(found)).toContain("GetChatLocationResponse");
+    expect(resolveClient).not.toHaveBeenCalled();
+  });
   it("advertises exactly search_docs and execute, without credential arguments or talk", async () => {
     const client = await connect(); const tools = (await client.listTools()).tools;
     expect(tools.map(x=>x.name).sort()).toEqual(["execute","search_docs"]);
@@ -77,7 +86,7 @@ describe("approved two-tool MCP", () => {
     expect(r.isError).not.toBe(true); expect(text(r)).not.toContain(TOKEN); expect(text(r)).toContain("[REDACTED]");
   });
   it("indexes every HTTP operation and exposes only initialized client methods", () => {
-    expect(new Set(METHOD_DOCS.map(x=>`${x.httpMethod} ${x.path}`)).size).toBe(46);
+    expect(new Set(METHOD_DOCS.map(x=>`${x.httpMethod} ${x.path}`)).size).toBe(48);
     expect(METHOD_DOCS.some(x=>x.method==="Relay.createAgent")).toBe(false);
     expect(METHOD_DOCS.some(x=>x.httpMethod==="POST"&&x.path==="/v1/agents")).toBe(false);
     const relay=sdk().client;

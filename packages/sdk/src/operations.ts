@@ -62,6 +62,16 @@ export const RELAY_V1_OPERATIONS = [
   },
   {
     "method": "POST",
+    "path": "/v1/chats/{chatId}/location/request",
+    "operationId": "requestLocation"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/chats/{chatId}/location",
+    "operationId": "getLocation"
+  },
+  {
+    "method": "POST",
     "path": "/v1/chats/{chatId}/typing",
     "operationId": "startTyping"
   },
@@ -260,4 +270,6 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "payment.succeeded",
   "payment.canceled",
   "payment.expired",
+  "location.sharing.started",
+  "location.sharing.stopped",
 ] as const;

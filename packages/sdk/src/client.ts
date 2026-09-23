@@ -32,6 +32,8 @@ import type {
   ContactCardUpdateParams,
   ContactLookupParams,
   ContactLookupResponse,
+  GetChatLocationResponse,
+  LocationRequestResponse,
   Message,
   MessageAddReactionParams,
   MessageAddReactionResponse,
@@ -334,13 +336,53 @@ class ChatParticipants {
   }
 }
 
+/**
+ * Location sharing in a one-to-one chat with a person. Coordinates are GeoJSON,
+ * `[longitude, latitude]`. Reading is poll-based: `location.sharing.started`
+ * and `location.sharing.stopped` fire when a share begins or ends, never when
+ * the position moves.
+ */
+class ChatLocation {
+  constructor(private readonly transport: Transport) {}
+
+  /**
+   * Asks the person in this one-to-one chat to share their location. The chat
+   * gets a Message from your agent with one `location_request` part; nothing is
+   * returned about the person's answer. Returns 409 while the person is already
+   * sharing, and in a group chat or a chat with no person; 429 with
+   * `Retry-After` after one request in the same chat in the last 60 seconds.
+   */
+  request(chatID: string, options?: RequestOptions): Promise<LocationRequestResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/chats/${pathID(chatID)}/location/request`,
+      options,
+    });
+  }
+
+  /**
+   * Reads the current location of everyone sharing with your agent in this
+   * chat, one Feature per person. `data.features` is empty when nobody is
+   * sharing. Use `properties.updated_at` to judge freshness.
+   */
+  retrieve(chatID: string, options?: RequestOptions): Promise<GetChatLocationResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/chats/${pathID(chatID)}/location`,
+      options,
+    });
+  }
+}
+
 export class Chats {
   readonly messages: ChatMessages;
   readonly participants: ChatParticipants;
+  readonly location: ChatLocation;
 
   constructor(private readonly transport: Transport) {
     this.messages = new ChatMessages(transport);
     this.participants = new ChatParticipants(transport);
+    this.location = new ChatLocation(transport);
   }
 
   create(body: ChatCreateParams, options?: RequestOptions): Promise<ChatCreateResponse> {

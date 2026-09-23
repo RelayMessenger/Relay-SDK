@@ -1297,6 +1297,11 @@ export class RelayAdapter
       case "payment.canceled":
       case "payment.expired":
         return;
+      // Nor a location primitive; read the position with
+      // GET /v1/chats/{chatId}/location through the SDK client.
+      case "location.sharing.started":
+      case "location.sharing.stopped":
+        return;
       default:
         return assertExhaustiveEvent(envelope.event_type);
     }

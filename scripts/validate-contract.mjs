@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "51bc3ecd9b203a3fc75fe0ab7a105b6751080678", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "26e0ceac6bacb217f36af4033811e0c4b6b90f1e", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -66,6 +66,8 @@ const allowedOperationSignatures = [
   "GET /v1/chats/{chatId}/activity",
   "PUT /v1/chats/{chatId}/activity",
   "DELETE /v1/chats/{chatId}/activity",
+  "POST /v1/chats/{chatId}/location/request",
+  "GET /v1/chats/{chatId}/location",
   "POST /v1/chats/{chatId}/typing",
   "DELETE /v1/chats/{chatId}/typing",
   "POST /v1/chats/{chatId}/read",
@@ -111,14 +113,14 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 46);
-assert.equal(manifest.path_count, 29);
-assert.equal(manifest.source_path_count, 34);
-assert.equal(manifest.source_schema_count, 171);
-assert.equal(manifest.callback_count, 22);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 29);
-assert.equal(operationJSON.length, 46);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 22);
+assert.equal(manifest.operation_count, 48);
+assert.equal(manifest.path_count, 31);
+assert.equal(manifest.source_path_count, 36);
+assert.equal(manifest.source_schema_count, 180);
+assert.equal(manifest.callback_count, 24);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 31);
+assert.equal(operationJSON.length, 48);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 24);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
