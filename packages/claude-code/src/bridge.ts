@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { SELECTION_CONTEXT_MAX_LENGTH, componentParts, indexedIdempotencyKey, partsWithButtons, partsWithSelection, selectionReply, type SelectionPart, type ButtonsPart } from "@relaymessenger/sdk";
+import { SELECTION_CONTEXT_MAX_LENGTH, componentParts, indexedIdempotencyKey, partsWithButtons, partsWithSelection, selectionReply, type SelectionPart, type ButtonsPart, type InvoicePart } from "@relaymessenger/sdk";
 import type {
   Chat,
   Message,
+  MessagePart,
   MessagePartResponse,
   MessageSendParams,
   RelayWebhookEvent,
@@ -270,8 +271,9 @@ export function buildReply(
 /**
  * The Messages one reply becomes: the words (with any buttons) first, then
  * the link as its own Message, which the server requires and the app draws
- * as a card. A reply that is only a link is one Message. Each Message past
- * the first carries its index in the key.
+ * as a card, then any invoice, which must also be the only part of its
+ * Message. A reply that is only a link or only an invoice is one Message.
+ * Each Message past the first carries its index in the key.
  */
 export function buildReplyMessages(
   text: string,
@@ -280,18 +282,24 @@ export function buildReplyMessages(
   buttons?: ButtonsPart,
   link?: string,
   selection?: SelectionPart,
+  invoice?: InvoicePart,
 ): MessageSendParams[] {
   if (selection && (buttons || link)) throw new Error("selection cannot be combined with buttons or link");
-  if (!link) return [buildReply(text, idempotencyKey, replyTo, buttons, selection)];
+  if (invoice && (buttons || selection)) throw new Error("an invoice cannot be combined with buttons or selection");
+  if (!link && !invoice) return [buildReply(text, idempotencyKey, replyTo, buttons, selection)];
   const messages: MessageSendParams[] = [];
   if (text || buttons) messages.push(buildReply(text, idempotencyKey, replyTo, buttons));
-  messages.push({
-    message: {
-      parts: [{ type: "link", value: link }],
-      idempotency_key: indexedIdempotencyKey(idempotencyKey, messages.length),
-      ...(messages.length === 0 && replyTo ? { reply_to: { message_id: replyTo } } : {}),
-    },
-  });
+  const solo = (part: MessagePart): void => {
+    messages.push({
+      message: {
+        parts: [part],
+        idempotency_key: indexedIdempotencyKey(idempotencyKey, messages.length),
+        ...(messages.length === 0 && replyTo ? { reply_to: { message_id: replyTo } } : {}),
+      },
+    });
+  };
+  if (link) solo({ type: "link", value: link });
+  if (invoice) solo(invoice);
   return messages;
 }
 

@@ -562,4 +562,63 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     expect(relay.sends).toHaveLength(1);
     await mcp.stop();
   });
+  it.each(["server.ts", "runtime/server.mjs", "plugin/runtime/server.mjs"])(
+    "%s advertises the invoice argument and sends the invoice alone after the words", async (entry) => {
+    const channelDir = mkdtempSync(join(tmpdir(), "relay-invoice-protocol-"));
+    cleanups.push(() => rmSync(channelDir, { recursive: true, force: true }));
+    const relay = await startRelayMock({
+      channelDir,
+      onSocket(socket) {
+        socket.send(JSON.stringify({
+          type: "ready",
+          connection_id: CONNECTION_ID,
+          acked_through: "0",
+          full_sync_required: false,
+          full_sync_through: null,
+          heartbeat_interval_ms: 30_000,
+          max_in_flight: 16,
+        }));
+        socket.send(JSON.stringify({ type: "event", sequence: "1", event: inboundEvent("I'll take it") }));
+      },
+    });
+    cleanups.push(() => relay.close());
+    const mcp = startMCP(channelDir, relay.baseURL, entry);
+    cleanups.push(() => mcp.stop());
+    const initialized = await initialize(mcp);
+    expect((initialized.result as { instructions?: string }).instructions).toContain("Only a verified agent can send an invoice");
+    mcp.send({ jsonrpc: "2.0", id: 101, method: "tools/list", params: {} });
+    const listed = await mcp.take(message => message.id === 101, "invoice reply schema");
+    const tools = (listed.result as { tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }> }).tools;
+    expect(tools.find(tool => tool.name === "reply")?.inputSchema.properties.invoice).toMatchObject({
+      type: "object", additionalProperties: false, required: ["title", "amount", "currency", "goods", "url"],
+      properties: { title: { maxLength: 32 }, amount: { type: "integer", minimum: 1 }, goods: { enum: ["physical", "digital"] } },
+    });
+    await mcp.take((message) => message.method === "notifications/claude/channel", "channel notification");
+    mcp.send({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "begin_processing", arguments: { delivery_id: EVENT_ID } },
+    });
+    const began = await mcp.take((message) => message.id === 2, "begin_processing response");
+    expect((began.result as { isError?: boolean }).isError).not.toBe(true);
+    const invoice = { title: "House blend", amount: 2400, currency: "usd", goods: "physical", url: "https://buy.stripe.com/test_123" };
+    for (const id of [10, 11]) {
+      mcp.send({ jsonrpc: "2.0", id, method: "tools/call", params: {
+        name: "reply",
+        arguments: { chat_id: CHAT_ID, text: "Here is your invoice.", invoice, send_id: "invoice-reply", reply_to_message_id: MESSAGE_ID },
+      } });
+      const sent = await mcp.take(message => message.id === id, "invoice reply");
+      expect((sent.result as { isError?: boolean }).isError).not.toBe(true);
+    }
+    expect(relay.sends).toHaveLength(2);
+    const key = relay.sends[0]?.key;
+    expect(key).toMatch(/^claude-reply-[a-f0-9]{64}$/u);
+    expect(relay.sends.map((send) => send.body)).toEqual([
+      { message: { parts: [{ type: "text", value: "Here is your invoice." }], idempotency_key: key, reply_to: { message_id: MESSAGE_ID } } },
+      { message: { parts: [{ type: "invoice", ...invoice }], idempotency_key: `${key}-1` } },
+    ]);
+    expect(relay.sends[1]?.key).toBe(`${key}-1`);
+    await mcp.stop();
+  });
 });

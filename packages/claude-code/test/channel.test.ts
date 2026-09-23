@@ -626,3 +626,53 @@ it("validates selection tool arguments and sends the native part on the existing
     expect(fake.sends).toHaveLength(1);
   } finally { state.close(); }
 });
+
+it("validates invoice tool arguments and sends the invoice as its own Message after the words", async () => {
+  const { state, fake, channel } = fixture();
+  try {
+    const origin = event({ sequence: 1, text: "I'll take the house blend" });
+    accept(state, origin, 1);
+    await channel.flush();
+    await channel.beginProcessing({ delivery_id: origin.event_id });
+    const invoice = { title: " House blend ", amount: 2400, currency: "USD", goods: "physical", url: "https://buy.stripe.com/test_123" };
+    const args = { chat_id: CHAT_A, text: "Here is your invoice.", send_id: "invoice-1", invoice };
+    for (const bad of [
+      [],
+      { ...invoice, url: "https://example.com/pay" },
+      { ...invoice, url: "https://buy.stripe.com@evil.example/pay" },
+      { ...invoice, amount: 0 },
+      { ...invoice, goods: "service" },
+      { ...invoice, title: "x".repeat(33) },
+      { ...invoice, extra: true },
+    ]) {
+      expect((await channel.reply({ ...args, invoice: bad })).isError).toBe(true);
+    }
+    expect((await channel.reply({ ...args, buttons: [{ label: "Pay" }] })).isError).toBe(true);
+    expect((await channel.reply({ ...args, selection: [{ value: "a", label: "A" }] })).isError).toBe(true);
+    expect(fake.sends).toHaveLength(0);
+    expect((await channel.reply(args)).isError).not.toBe(true);
+    const part = { type: "invoice", title: "House blend", amount: 2400, currency: "usd", goods: "physical", url: "https://buy.stripe.com/test_123" };
+    expect(fake.sends.map((send) => send.body.message.parts)).toEqual([
+      [{ type: "text", value: "Here is your invoice." }], [part],
+    ]);
+    const key = fake.sends[0]!.body.message.idempotency_key!;
+    expect(fake.sends[1]!.body.message.idempotency_key).toBe(`${key}-1`);
+    expect((await channel.reply(args)).isError).not.toBe(true);
+    expect(fake.sends).toHaveLength(2);
+  } finally { state.close(); }
+});
+
+it("sends an invoice-only reply as one Message", async () => {
+  const { state, fake, channel } = fixture();
+  try {
+    const origin = event({ sequence: 1, text: "invoice me" });
+    accept(state, origin, 1);
+    await channel.flush();
+    await channel.beginProcessing({ delivery_id: origin.event_id });
+    const invoice = { title: "Plan", amount: 900, currency: "eur", goods: "digital", url: "https://checkout.stripe.com/c/pay/cs_test_1", recurring: { interval: "month" } };
+    expect((await channel.reply({ chat_id: CHAT_A, send_id: "invoice-only", invoice })).isError).not.toBe(true);
+    expect(fake.sends.map((send) => send.body.message.parts)).toEqual([
+      [{ type: "invoice", ...invoice, recurring: { interval: "month", interval_count: 1 } }],
+    ]);
+  } finally { state.close(); }
+});
