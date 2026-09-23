@@ -61,13 +61,15 @@ class FakeAudioSource implements RelayAudioSourceLike {
   readonly data: Parameters<RelayAudioSourceLike["onData"]>[0][] = [];
   /** Set to make the fake engine report outbound packet counts. */
   sourceStats: RelayAudioSourceStats | undefined;
+  starts = 0;
   createTrack(): RelayMediaStreamTrackLike { return this.track; }
+  start(): void { this.starts += 1; }
   onData(data: Parameters<RelayAudioSourceLike["onData"]>[0]): void {
     this.data.push({ ...data, samples: data.samples.slice() });
   }
   stats(): RelayAudioSourceStats {
     return this.sourceStats ?? {
-      opusPackets: 0, rtpPackets: 0, firstRtpAt: undefined, lastRtpAt: undefined,
+      opusPackets: 0, rtpPackets: 0, silencePackets: 0, firstRtpAt: undefined, lastRtpAt: undefined,
       recentRtpPackets: 0, queued: 0, pacerAlive: false,
     };
   }
@@ -306,7 +308,6 @@ it("forwards room state and sends call end through the Relay control room", asyn
       chat_id: "01995bc0-0000-7000-8000-000000000002",
       from: { id: "user", handle: "alice", kind: "user" },
       to: [{ id: "agent", handle: "relay", kind: "agent" }],
-      mode: "audio",
       status: "in-progress",
       revision: 2,
       created_at: "2026-09-22T00:00:00Z",
@@ -431,7 +432,7 @@ it("names the gathered candidates and ICE states of a session it gives up on", a
     "local: host 2, srflx 1, relay 0; remote: udp 1473; "
     + "states: new\u2192complete 0.2s, ice checking 0.3s, connecting 0.3s, no connected; "
     + "in: 0 rtp, 0 bad, 0 frames, no packets, 0/5s; "
-    + "out: 0 frames, 0 opus, 0 rtp, no packets, 0/5s, queue 0, pacer idle; room: 0 roomState, 0 offer",
+    + "out: 0 frames, 0 opus, 0 rtp, silence 0, no packets, 0/5s, queue 0, pacer idle; room: 0 roomState, 0 offer",
   );
   expect(restarted[0]!.summary).toBe(diagnostics.summary);
   expect(restarted[0]!.summary).not.toContain("198.51.100");
@@ -465,8 +466,8 @@ it("counts packets both ways, room frames, and renders one clause per direction"
     recentRtpPackets: 250,
   };
   webRTC.source.sourceStats = {
-    opusPackets: 2050, rtpPackets: 2049, firstRtpAt: connectedAt + 1_100, lastRtpAt: connectedAt + 41_000,
-    recentRtpPackets: 249, queued: 1, pacerAlive: true,
+    opusPackets: 2050, rtpPackets: 2049, silencePackets: 300, firstRtpAt: connectedAt + 1_100,
+    lastRtpAt: connectedAt + 41_000, recentRtpPackets: 249, queued: 1, pacerAlive: true,
   };
   const outgoing = transport.writeAudio({ samples: new Int16Array(1920), sampleRate: 48_000, channelCount: 1 });
   await vi.advanceTimersByTimeAsync(50);
@@ -484,16 +485,29 @@ it("counts packets both ways, room frames, and renders one clause per direction"
     rtpPackets: 1234, decodeFailures: 2, frames: 3, firstPacketAtMs: 900, lastPacketAtMs: 41_200, recentRtpPackets: 250,
   });
   expect(diagnostics.outbound).toEqual({
-    frames: 4, opusPackets: 2050, rtpPackets: 2049, firstPacketAtMs: 1_100, lastPacketAtMs: 41_000,
-    recentRtpPackets: 249, queued: 1, pacerAlive: true,
+    frames: 4, opusPackets: 2050, rtpPackets: 2049, silencePackets: 300, firstPacketAtMs: 1_100,
+    lastPacketAtMs: 41_000, recentRtpPackets: 249, queued: 1, pacerAlive: true,
   });
   expect(diagnostics.room).toEqual({ roomStates: 2, offers: 1, endedReason: "completed", errors: ["media down"] });
   expect(diagnostics.summary).toContain("in: 1234 rtp, 2 bad, 3 frames, first 0.9s last 41.2s, 250/5s");
   expect(diagnostics.summary).toContain(
-    "out: 4 frames, 2050 opus, 2049 rtp, first 1.1s last 41.0s, 249/5s, queue 1, pacer alive",
+    "out: 4 frames, 2050 opus, 2049 rtp, silence 300, first 1.1s last 41.0s, 249/5s, queue 1, pacer alive",
   );
   expect(diagnostics.summary).toContain('room: 2 roomState, 1 offer, ended completed, error "media down"');
   expect(errors).toHaveLength(1);
+  transport.close();
+});
+
+it("starts the audio source's silence when the peer connects, not before", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  const connecting = transport.connect();
+  await flush();
+  expect(webRTC.source.starts).toBe(0);
+  room.emit("answer", { type: "answer", session_description: { type: "answer", sdp: "relay-answer" } });
+  await connecting;
+  expect(webRTC.source.starts).toBe(1);
   transport.close();
 });
 
@@ -513,15 +527,15 @@ it("warns once when outbound audio is queued but no RTP leaves for 2 s", async (
   await connectTransport(transport, room);
   const lastRtpAt = Date.now();
   webRTC.source.sourceStats = {
-    opusPackets: 10, rtpPackets: 5, firstRtpAt: lastRtpAt - 100, lastRtpAt, recentRtpPackets: 5,
-    queued: 5, pacerAlive: false,
+    opusPackets: 10, rtpPackets: 5, silencePackets: 0, firstRtpAt: lastRtpAt - 100, lastRtpAt,
+    recentRtpPackets: 5, queued: 5, pacerAlive: false,
   };
   await vi.advanceTimersByTimeAsync(1_500);
   expect(warnings).toEqual([]);
   await vi.advanceTimersByTimeAsync(1_000);
   expect(warnings).toHaveLength(1);
   expect(warnings[0]).toMatch(/^Relay outbound audio stalled \(local: /);
-  expect(warnings[0]).toContain("out: 0 frames, 10 opus, 5 rtp, first -0.1s last 0.0s, 5/5s, queue 5, pacer idle");
+  expect(warnings[0]).toContain("out: 0 frames, 10 opus, 5 rtp, silence 0, first -0.1s last 0.0s, 5/5s, queue 5, pacer idle");
   await vi.advanceTimersByTimeAsync(10_000);
   expect(warnings).toHaveLength(1);
   expect(webRTC.peer.closed).toBe(false);
@@ -544,8 +558,8 @@ it("does not warn while the pacer keeps draining the queue", async () => {
   for (let tick = 0; tick < 10; tick += 1) {
     const now = Date.now();
     webRTC.source.sourceStats = {
-      opusPackets: tick, rtpPackets: tick, firstRtpAt: now, lastRtpAt: now, recentRtpPackets: 1,
-      queued: 3, pacerAlive: true,
+      opusPackets: tick, rtpPackets: tick, silencePackets: 0, firstRtpAt: now, lastRtpAt: now,
+      recentRtpPackets: 1, queued: 3, pacerAlive: true,
     };
     await vi.advanceTimersByTimeAsync(500);
   }

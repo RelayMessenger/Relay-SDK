@@ -7,7 +7,6 @@ const call: Call = {
   chat_id: "01995bc0-0000-7000-8000-000000000002",
   from: { id: "01995bc0-0000-7000-8000-000000000003", handle: "alice", kind: "user" },
   to: [{ id: "01995bc0-0000-7000-8000-000000000004", handle: "echo", kind: "agent" }],
-  mode: "audio",
   status: "ringing",
   revision: 1,
   created_at: "2026-09-17T12:00:00Z",
@@ -30,7 +29,7 @@ describe("provider-independent call API", () => {
       },
     });
     const result = await client.calls.create(call.chat_id, {
-      to: ["echo"], mode: "audio",
+      to: ["echo"],
     }, { idempotencyKey: "same-call-request" });
     expect(result.call).toEqual(call);
     expect(requests).toHaveLength(2);
@@ -39,7 +38,8 @@ describe("provider-independent call API", () => {
       const headers = new Headers(request.init.headers);
       expect(headers.get("idempotency-key")).toBe("same-call-request");
       expect(headers.get("authorization")).toBe("Bearer agent-test-token");
-      expect(JSON.parse(String(request.init.body))).toEqual({ to: ["echo"], mode: "audio" });
+      expect(Object.keys(JSON.parse(String(request.init.body)))).toEqual(["to"]);
+      expect(JSON.parse(String(request.init.body))).toEqual({ to: ["echo"] });
     }
   });
 
@@ -49,7 +49,7 @@ describe("provider-independent call API", () => {
       fetch: async () => { throw new Error("Must not send"); },
     });
     expect(() => client.calls.create(call.chat_id, {
-      to: ["echo"], mode: "audio",
+      to: ["echo"],
     }, { idempotencyKey: "" })).toThrow(/idempotencyKey/);
   });
 

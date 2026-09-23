@@ -141,13 +141,21 @@ candidates' transport and port (never their address), the ICE gathering, ICE
 connection and peer connection state changes with their offsets from
 `connect()`, packet counts in both directions (`inbound`: RTP received, Opus
 decode failures, PCM frames delivered, first and last packet offsets, packets
-in the last 5 s; `outbound`: PCM frames accepted, Opus packets, RTP written,
-first and last packet offsets, packets in the last 5 s, paced queue size,
-pacer state), the room frames seen (`roomState` count, pull `offer` count,
+in the last 5 s; `outbound`: PCM frames accepted, Opus packets, RTP written
+with the caller's audio, RTP written with silence, first and last packet
+offsets, packets in the last 5 s, paced queue size, pacer state), the room frames seen (`roomState` count, pull `offer` count,
 `ended` reason, `error` messages), and the one-line `summary`, for example
-`…; in: 1234 rtp, 0 bad, 1234 frames, first 0.9s last 41.2s, 250/5s; out: 2050 frames, 2050 opus, 2050 rtp, first 1.1s last 41.0s, 250/5s, queue 0, pacer alive; room: 3 roomState, 1 offer`.
+`…; in: 1234 rtp, 0 bad, 1234 frames, first 0.9s last 41.2s, 250/5s; out: 2600 frames, 1300 opus, 1300 rtp, silence 700, first 1.1s last 41.0s, 250/5s, queue 0, pacer alive; room: 3 roomState, 1 offer`.
 Packet counts come from the `werift` engine; `wrtc` reports zero packets and
 `pacer n/a`.
+
+Like a live microphone, the `werift` engine's published track sends one Opus
+packet every 20 ms from the moment media connects until the transport closes:
+the caller's audio when some is queued, Opus silence otherwise. Cloudflare's
+SFU will not let the person's side pull a track that has carried no RTP, so a
+silent agent track would never be heard. Silence never counts toward
+`queuedAudioMs()` or `waitForPlayout()`. The `wrtc` engine sends only the
+audio written to it; write silence yourself if you use it.
 
 `onWarning` is called once per call, with the summary, when outbound audio is
 queued but no RTP packet has been written for 2 s while media is connected.
