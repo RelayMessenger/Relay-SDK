@@ -98,6 +98,57 @@ class PacketClock {
   }
 }
 
+/**
+ * A pacer more than this far behind its clock re-anchors instead of bursting
+ * the backlog. LiveKit's native `AudioSource` (rust-sdks
+ * webrtc-sys/src/audio_track.cpp:161-188) runs a 10 ms libwebrtc
+ * `RepeatingTask`, which schedules against an absolute run time and makes up
+ * every lost tick with zero delay, unbounded (rtc_base/task_utils/
+ * repeating_task.cc:86-89, `delay -= lost_time; delay = max(delay, 0)`). The
+ * bound is ours: 10 packets, so an event-loop hiccup is made up in full and a
+ * real stall does not dump seconds of audio on the receiver at once.
+ * Sources saved under _sources/audio-pacing-20260922.
+ */
+export const WERIFT_MAX_CATCH_UP_MS = 200;
+
+/**
+ * Wall-clock RTP audio pacing: packet `n` of a run is due at `start + n × 20 ms`,
+ * so the average rate is exactly one packet per 20 ms however late the timer
+ * fires. `take(now)` returns how many packets are due and counts them as sent.
+ */
+export class RtpAudioPacer {
+  #startedAt: number | undefined;
+  #sent = 0;
+
+  constructor(
+    readonly packetMs = WERIFT_PACKET_MS,
+    readonly maxCatchUpMs = WERIFT_MAX_CATCH_UP_MS,
+  ) {}
+
+  /** Packets due by `now` and not yet sent; the first call of a run sends one at once. */
+  take(now: number): number {
+    if (this.#startedAt === undefined || now - this.nextDueAt() > this.maxCatchUpMs) {
+      this.#startedAt = now;
+      this.#sent = 0;
+    }
+    const due = Math.floor((now - this.#startedAt) / this.packetMs) + 1 - this.#sent;
+    if (due <= 0) return 0;
+    this.#sent += due;
+    return due;
+  }
+
+  /** When the next packet is due; `-Infinity` before the first `take` of a run. */
+  nextDueAt(): number {
+    return this.#startedAt === undefined ? -Infinity : this.#startedAt + this.#sent * this.packetMs;
+  }
+
+  /** Forget the run; the next `take` starts a new clock. */
+  reset(): void {
+    this.#startedAt = undefined;
+    this.#sent = 0;
+  }
+}
+
 /** Convert any PCM16 frame to interleaved 48 kHz stereo by linear interpolation. */
 export const toWireFormat = (data: {
   samples: Int16Array;
@@ -131,8 +182,12 @@ export const toWireFormat = (data: {
 
 /**
  * PCM16 in, paced 20 ms Opus RTP out. Frames are accumulated into whole
- * packets; a timer writes one packet every 20 ms so the wire sees a steady
- * cadence regardless of how the adapter chunks its writes. Adapters may push
+ * packets; an `RtpAudioPacer` on the monotonic clock decides how many are
+ * due, so the wire sees exactly 50 packets/s regardless of how the adapter
+ * chunks its writes or how late the timer fires. A timer that fired once per
+ * packet (the old `setInterval`) lost every late tick while the RTP timestamp
+ * still advanced 960 per packet: @relay's calls on 2026-09-22 sent 48.66-48.98
+ * packets/s and the phone's jitter buffer ran dry. Adapters may push
  * far ahead of real time: `queuedMs()` is what has not left yet and
  * `waitForDrain()` resolves once the queued application audio has been
  * written (LiveKit's `AudioSource.queuedDuration` / `waitForPlayout` shape).
@@ -167,6 +222,7 @@ class WeriftAudioSource implements RelayAudioSourceLike {
   #timestamp = 0;
   #first = true;
   #pump: NodeJS.Timeout | undefined;
+  readonly #pacer = new RtpAudioPacer();
   #started = false;
   #stopped = false;
   readonly #drainWaiters = new Set<() => void>();
@@ -264,35 +320,49 @@ class WeriftAudioSource implements RelayAudioSourceLike {
   }
 
   /**
-   * The first packet of a run leaves at once; every later one waits for the
-   * 20 ms tick, so a burst pushed faster than real time reaches the wire at
-   * packet cadence. Before `start()` the interval stops once the queue is
-   * empty; after it, the interval runs until the track stops.
+   * The first packet of a run leaves at once; after that each wake sends
+   * every packet the pacer says is due and sleeps until the next one is due,
+   * the absolute schedule of libwebrtc's `RepeatingTask`. Before `start()` the
+   * pump stops once the queue is empty; after it, the pump runs until the
+   * track stops.
    */
   #startPump(): void {
     if (this.#pump || this.#stopped) return;
     if (!this.#started && this.#packets.length === 0) return;
-    this.#sendNext();
-    this.#pump = setInterval(() => {
-      this.#sendNext();
-      if (this.#packets.length === 0) {
-        if (!this.#started) this.#stopPump();
+    this.#tick();
+  }
+
+  #tick(): void {
+    if (this.#stopped) return;
+    const due = this.#pacer.take(performance.now());
+    for (let sent = 0; sent < due; sent += 1) {
+      if (!this.#sendNext()) break;
+    }
+    if (this.#packets.length === 0) {
+      if (!this.#started) {
+        this.#stopPump();
         this.#notifyDrained();
+        return;
       }
-    }, WERIFT_PACKET_MS);
+      this.#notifyDrained();
+    }
+    const delay = Math.max(0, Math.ceil(this.#pacer.nextDueAt() - performance.now()));
+    this.#pump = setTimeout(() => this.#tick(), delay);
     this.#pump.unref?.();
   }
 
   #stopPump(): void {
+    this.#pacer.reset();
     if (!this.#pump) return;
-    clearInterval(this.#pump);
+    clearTimeout(this.#pump);
     this.#pump = undefined;
   }
 
-  #sendNext(): void {
-    if (this.#stopped) return;
+  /** Writes one packet, queued audio first, else silence once started; false when nothing was written. */
+  #sendNext(): boolean {
+    if (this.#stopped) return false;
     const application = this.#packets.shift();
-    if (!application && !this.#started) return;
+    if (!application && !this.#started) return false;
     const header = new RtpHeader({
       payloadType: LOCAL_PAYLOAD_TYPE,
       sequenceNumber: this.#sequenceNumber,
@@ -307,6 +377,7 @@ class WeriftAudioSource implements RelayAudioSourceLike {
     if (application) this.#applicationRtpPackets += 1;
     else this.#silencePackets += 1;
     this.#rtp.mark();
+    return true;
   }
 }
 

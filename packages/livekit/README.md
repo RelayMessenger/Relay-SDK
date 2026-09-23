@@ -89,8 +89,12 @@ await transport.waitForPlayout();
 
 ## ICE servers, TURN, and diagnostics
 
-By default the peer gathers host candidates only and Cloudflare's SFU supplies
-its own candidates in the answer. Inside a container or behind a firewall that
+By default the peer uses Cloudflare's STUN server
+(`stun:stun.cloudflare.com:3478`), as Cloudflare's own Realtime echo example
+does, and Cloudflare's SFU supplies its own candidates in the answer. The offer
+leaves as soon as the first local candidate exists, without waiting for ICE
+gathering to finish: the SFU is ICE-lite and learns the agent's address from
+its connectivity checks. Inside a container or behind a firewall that
 blocks outbound UDP, pass TURN servers in the standard `RTCIceServer` shape and,
 if every path must go through TURN, `iceTransportPolicy: "relay"`. Both options
 are accepted by `RelayLiveKitCall.connect()` and `RelayCallTransport`.
@@ -150,7 +154,10 @@ Packet counts come from the `werift` engine; `wrtc` reports zero packets and
 `pacer n/a`.
 
 Like a live microphone, the `werift` engine's published track sends one Opus
-packet every 20 ms from the moment media connects until the transport closes:
+packet every 20 ms from the moment media connects until the transport closes,
+paced by the monotonic clock: a timer that fires late sends every packet due
+by then, so the wire carries exactly 50 packets a second; a stall longer than
+200 ms restarts the clock instead of bursting. The track carries
 the caller's audio when some is queued, Opus silence otherwise. Cloudflare's
 SFU will not let the person's side pull a track that has carried no RTP, so a
 silent agent track would never be heard. Silence never counts toward

@@ -2,6 +2,7 @@ import { Decoder } from "@evan/opus";
 import type { MediaStreamTrack, RtpPacket } from "werift";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
+  RtpAudioPacer,
   WERIFT_CHANNEL_COUNT,
   WERIFT_SAMPLE_RATE,
   createWeriftWebRTCFactory,
@@ -64,7 +65,10 @@ const expectContiguous = (written: Written[]): void => {
 };
 
 beforeEach(() => vi.useFakeTimers());
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 it("writes nothing before start(), then one Opus silence packet every 20 ms with nothing queued", async () => {
   const { source, track, written } = openSource();
@@ -159,4 +163,89 @@ it("returns to silence at once on clear() and releases waitForDrain", async () =
   const after = written.slice(clearedAt);
   expect(after.length).toBeGreaterThanOrEqual(10);
   expect(after.every((packet) => packet.payload.equals(silence))).toBe(true);
+});
+
+/** Deterministic jitter: mulberry32. */
+const seeded = (seed: number) => () => {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+};
+
+it("pacer: sends one at once, then exactly the packets due by the clock", () => {
+  const pacer = new RtpAudioPacer();
+  expect(pacer.take(1_000)).toBe(1);
+  expect(pacer.nextDueAt()).toBe(1_020);
+  expect(pacer.take(1_019)).toBe(0);
+  expect(pacer.take(1_020)).toBe(1);
+  // A tick that fires 35 ms late (due at 1 040, runs at 1 075) sends 2 packets: 1 040 and 1 060.
+  expect(pacer.take(1_075)).toBe(2);
+  expect(pacer.nextDueAt()).toBe(1_080);
+});
+
+it("pacer: 10 s of jittered, late ticks sends 500 ± 1 packets", () => {
+  const random = seeded(7);
+  const pacer = new RtpAudioPacer();
+  let sent = 0;
+  let now = 0;
+  for (let tick = 0; ; tick += 1) {
+    // Each tick is 0-40 ms late, never earlier than the one before.
+    now = Math.max(now, tick * 20 + random() * 40);
+    if (now >= 10_000) break;
+    sent += pacer.take(now);
+  }
+  expect(Math.abs(sent - 500)).toBeLessThanOrEqual(1);
+});
+
+it("pacer: makes up a 200 ms stall in full, re-anchors after a longer one", () => {
+  const pacer = new RtpAudioPacer();
+  pacer.take(0);
+  // Next due at 20; a wake at 220 is 200 ms behind: 11 packets (20 … 220).
+  expect(pacer.take(220)).toBe(11);
+  // Next due at 240; a wake at 1 000 is 760 ms behind: re-anchor, one packet now.
+  expect(pacer.take(1_000)).toBe(1);
+  expect(pacer.nextDueAt()).toBe(1_020);
+});
+
+/**
+ * Late timers on the fake clock: `performance.now()` runs `skew` ms ahead of
+ * the fake timer clock, so a timer set for the next packet fires `skew` late,
+ * as it does when the event loop is busy.
+ */
+const skewClock = () => {
+  const fakeNow = performance.now.bind(performance);
+  const clock = { skew: 0, now: () => fakeNow() + clock.skew };
+  vi.spyOn(performance, "now").mockImplementation(() => clock.now());
+  return clock;
+};
+
+it("source: a tick that fires 35 ms late writes 2 packets, timestamps 960 apart", async () => {
+  const clock = skewClock();
+  const { source, track, written } = openSource();
+  source.start!();
+  await vi.advanceTimersByTimeAsync(100);
+  const before = written.length;
+  clock.skew += 35;
+  await vi.advanceTimersByTimeAsync(20);
+  expect(written.length - before).toBe(2);
+  expectContiguous(written);
+  track.stop();
+});
+
+it("source: 10 s of late ticks writes 500 ± 1 packets on one contiguous line", async () => {
+  const clock = skewClock();
+  const random = seeded(11);
+  const { source, track, written } = openSource();
+  const startedAt = clock.now();
+  source.start!();
+  writeTone(source, 3);
+  while (clock.now() - startedAt < 9_990) {
+    clock.skew += random() * 4;
+    await vi.advanceTimersByTimeAsync(5);
+  }
+  track.stop();
+  expect(Math.abs(written.length - 500)).toBeLessThanOrEqual(1);
+  expectContiguous(written);
+  expect(source.stats!().rtpPackets).toBe(150);
 });
