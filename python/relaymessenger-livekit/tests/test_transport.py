@@ -287,6 +287,73 @@ async def test_publish_track_sends_an_add_track_offer_then_user_update() -> None
     await transport.aclose()
 
 
+async def test_publish_track_before_connect_sends_audio_and_video_in_the_first_offer() -> None:
+    # Cloudflare's echo example pushes audio and video with one tracks/new; an
+    # add-track offer right after join crossed the room's pull and got HTTP 406.
+    transport, room = make()
+    track = LocalVideoTrack.create_video_track("camera", VideoSource(64, 48))
+    await transport.publish_track(track)
+    assert room.sent == []
+    await (await connected(transport, room))
+    offers = room.offers()
+    assert len(offers) == 1
+    assert offers[0]["tracks"] == [{"mid": "0", "name": "audio"}, {"mid": "1", "name": "video"}]
+    assert room.sent.index({"type": "userUpdate", "muted": False, "video": True}) < room.sent.index(offers[0])
+    assert FakePeer.instances[0].transceivers[1].sender.track is not None
+    await transport.aclose()
+
+
+#: Cloudflare's answer to an audio + video offer (staging, 2026-09-23), address
+#: moved to TEST-NET: candidates only in the BUNDLE-tagged section (RFC 9143 7.1.3).
+CLOUDFLARE_AUDIO_VIDEO_ANSWER = "\r\n".join([
+    "v=0", "o=- 5156661386025904969 1790184677 IN IP4 0.0.0.0", "s=-", "t=0 0", "a=msid-semantic:WMS*",
+    "a=fingerprint:sha-256 8A:77:80:9B:AC:80:96:9C:FF:EF:7C:1B:1F:B5:4A:5A:8F:37:FF:B7:F1:EE:D7:86:B0:DE:25:5A:E8:E6:80:59",
+    "a=ice-lite", "a=group:BUNDLE 0 1",
+    "m=audio 9 UDP/TLS/RTP/SAVPF 96 0 8", "c=IN IP4 0.0.0.0", "a=setup:passive", "a=mid:0",
+    "a=ice-ufrag:2777758f", "a=ice-pwd:0123456789abcdef012345", "a=rtcp-mux", "a=rtcp-rsize",
+    "a=rtpmap:96 opus/48000/2", "a=rtpmap:0 PCMU/8000", "a=rtpmap:8 PCMA/8000", "a=recvonly",
+    "a=candidate:513273236 1 udp 2130706431 192.0.2.1 1473 typ host",
+    "a=candidate:513273236 2 udp 2130706431 192.0.2.1 1473 typ host", "a=end-of-candidates",
+    "m=video 9 UDP/TLS/RTP/SAVPF 101 102", "c=IN IP4 0.0.0.0", "a=setup:passive", "a=mid:1",
+    "a=ice-ufrag:2777758f", "a=ice-pwd:0123456789abcdef012345", "a=rtcp-mux", "a=rtcp-rsize",
+    "a=rtpmap:101 H264/90000", "a=fmtp:101 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+    "a=rtcp-fb:101 nack", "a=rtcp-fb:101 nack pli", "a=rtpmap:102 rtx/90000", "a=fmtp:102 apt=101", "a=recvonly", "",
+])
+
+
+async def test_an_audio_video_answer_gives_the_real_peer_its_candidates() -> None:
+    # aiortc hands the shared transport the LAST bundled section's candidates
+    # (aiortc issue 1437); Cloudflare puts them only in the first, so without
+    # addIceCandidate the peer never sends a connectivity check.
+    from relaymessenger_calls._engine import create_peer_connection
+
+    room = FakeRoom()
+    room.ice_servers = []
+    peers: list[Any] = []
+
+    def factory(config: PeerConfig) -> Any:
+        peers.append(create_peer_connection(config))
+        return peers[-1]
+
+    transport = RelayCallTransport(call_id="call_1", room=room, _peer_factory=factory)  # type: ignore[arg-type]
+    await transport.publish_track(LocalVideoTrack.create_video_track("camera", VideoSource(64, 48)))
+    task = asyncio.ensure_future(transport.connect())
+    for _ in range(100):
+        if room.offers():
+            break
+        await asyncio.sleep(0.01)
+    assert room.offers()[0]["tracks"] == [{"mid": "0", "name": "audio"}, {"mid": "1", "name": "video"}]
+    room.emit("answer", answer(CLOUDFLARE_AUDIO_VIDEO_ANSWER))
+    for _ in range(100):
+        await asyncio.sleep(0.01)
+        ice = peers[0].getTransceivers()[0].receiver.transport.transport
+        if ice.getRemoteCandidates():
+            break
+    assert [(c.ip, c.port, c.component) for c in ice.getRemoteCandidates()][:1] == [("192.0.2.1", 1473, 1)]
+    task.cancel()
+    await transport.aclose()
+
+
 async def test_write_audio_slices_into_10_ms_and_validates() -> None:
     import numpy as np
 

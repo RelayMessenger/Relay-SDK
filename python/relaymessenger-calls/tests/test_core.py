@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import fractions
 import sys
+import time
 from typing import Any
 
 import av
@@ -21,7 +22,8 @@ from relaymessenger_calls import (
     VideoSource,
     VideoStream,
 )
-from relaymessenger_calls.video import TrackPublishOptions, _VideoSender
+from relaymessenger_calls._engine import PeerConfig, RelayIceServer, create_peer_connection, media_ssrc, turn_only
+from relaymessenger_calls.video import TrackPublishOptions, _VideoSender, request_keyframes
 
 
 def test_the_core_imports_no_livekit() -> None:
@@ -139,3 +141,70 @@ async def test_the_transport_is_an_emitter_and_makes_neutral_remote_tracks() -> 
     assert isinstance(transport, EventEmitter)
     assert type(transport._new_remote_video_track()) is RemoteVideoTrack
     transport.close()
+
+
+async def test_the_offer_does_not_wait_for_stun() -> None:
+    # aioice waits up to 5 s for a STUN answer on every IPv4 interface before
+    # aiortc lets the offer out; the SFU is ICE-lite and never uses the
+    # server-reflexive candidate, so the peer is built with TURN URLs only.
+    servers = [
+        RelayIceServer(urls="stun:192.0.2.1:3478"),
+        RelayIceServer(urls=["stun:192.0.2.1:3478", "turn:192.0.2.1:3478?transport=udp"], username="u", credential="c"),
+    ]
+    assert turn_only(servers) == [RelayIceServer(urls=["turn:192.0.2.1:3478?transport=udp"], username="u", credential="c")]
+    peer = create_peer_connection(PeerConfig(ice_servers=servers[:1]))
+    peer.addTransceiver("audio", direction="sendonly")
+    started = time.monotonic()
+    await peer.setLocalDescription(await peer.createOffer())
+    assert time.monotonic() - started < 1
+    assert "typ srflx" not in peer.localDescription.sdp
+    await peer.close()
+
+
+def test_media_ssrc_reads_the_fid_group_then_the_first_ssrc() -> None:
+    sdp = (
+        "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\na=ssrc:7 cname:x\r\n"
+        "m=video 9 UDP/TLS/RTP/SAVPF 96 97\r\na=mid:1\r\na=ssrc:11 cname:x\r\na=ssrc-group:FID 22 33\r\n"
+    )
+    assert media_ssrc(sdp, "1") == 22
+    assert media_ssrc(sdp, "0") == 7
+    assert media_ssrc(sdp, "2") is None
+
+
+class FakeReceiver:
+    def __init__(self) -> None:
+        self.packets = 0
+        self.plis: list[tuple[float, int]] = []
+
+    async def getStats(self) -> dict[str, Any]:
+        stat = type("Stat", (), {"type": "inbound-rtp", "packetsReceived": self.packets, "ssrc": 99})()
+        return {"inbound": stat}
+
+    async def _send_rtcp_pli(self, ssrc: int) -> None:
+        self.plis.append((time.monotonic(), ssrc))
+
+
+async def test_a_subscribed_video_asks_for_keyframes_until_one_decodes() -> None:
+    # libwebrtc's rule (video_receive_stream2.cc): packets arriving but no frame
+    # decoded for 200 ms -> PLI, repeated every 200 ms; 3 s once frames flow.
+    receiver = FakeReceiver()
+    transceiver = type("T", (), {"receiver": receiver, "mid": "1"})()
+    peer = type("P", (), {"remoteDescription": type("D", (), {"sdp": "v=0\r\nm=video 9 X 96\r\na=mid:1\r\na=ssrc:42 cname:x\r\n"})()})()
+    remote = RemoteVideoTrack()
+    task = asyncio.ensure_future(request_keyframes(peer, transceiver, remote))
+    await asyncio.sleep(0.5)
+    assert receiver.plis == []  # no packets yet: nothing to ask for
+    receiver.packets = 10
+    await asyncio.sleep(1.05)
+    times = [t for t, _ in receiver.plis]
+    assert [s for _, s in receiver.plis][:1] == [42]
+    assert 3 <= len(times) <= 6
+    assert all(0.15 < b - a < 0.45 for a, b in zip(times, times[1:]))
+    assert remote.stats().keyframe_requests == len(times)
+    remote._frames_decoded = 1
+    await asyncio.sleep(0.5)
+    asked = len(receiver.plis)
+    receiver.packets = 20
+    await asyncio.sleep(1.0)
+    assert len(receiver.plis) == asked  # frames decode: no request inside 3 s
+    task.cancel()

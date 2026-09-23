@@ -50,6 +50,7 @@ class FakeCall(EventEmitter[str]):
 
     async def publish_track(self, track: Any) -> None:
         self.published.append(track)
+        self.published_before_connect = self.connects == 0
 
     async def write_audio(self, frame: RelayAudioFrame) -> None:
         self.written.append(frame)
@@ -203,7 +204,8 @@ async def test_output_writes_audio_and_video_into_the_call_and_clears_on_interru
 
     async def during() -> None:
         call = FakeCall.instances[0]
-        assert call.published == []  # the camera waits for the person
+        # The camera was published before connect(), so it rides the first offer.
+        assert len(call.published) == 1 and call.published_before_connect
         call.emit("room_state", room_state("in-progress"))
         call.emit("peer_audio")
         await worker.queue_frame(OutputAudioRawFrame(audio=tone.tobytes(), sample_rate=24_000, num_channels=1))
