@@ -271,3 +271,33 @@ it("accepts the STUN-only fallback iceServers frame and rejects drifted ones", (
   expect(drifted([{ urls: ["turn:x"], username: 1 }])).toThrow(/invalid frame/u);
   expect(drifted([{ urls: ["turn:x"], credentialType: "password" }])).toThrow(/invalid frame/u);
 });
+
+it("ignores unknown server frame types, warns once per type and keeps the socket (Orange Meets useRoom default case)", async () => {
+  const warnings: string[] = [];
+  const client = new Relay({ apiKey: "agent-token" });
+  const room = client.calls.room(call.id, {
+    WebSocket: FakeWebSocket, heartbeatIntervalMs: 60_000, onWarning: (message) => warnings.push(message),
+  });
+  const errors: unknown[] = [];
+  const states: unknown[] = [];
+  room.on("error", (error) => errors.push(error));
+  room.on("roomState", (frame) => states.push(frame));
+  const socket = await connect(room);
+
+  socket.message({ type: "futureFrame", x: 1 });
+  socket.message({ type: "futureFrame", x: 2 });
+  socket.message({ type: "otherFrame" });
+  socket.message(roomState);
+  for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+
+  expect(errors).toEqual([]);
+  expect(socket.closeCalls).toEqual([]);
+  expect(room.connectionState).toBe("open");
+  expect(states).toEqual([roomState]);
+  expect(warnings).toEqual([
+    'Relay Call room ignored a server frame of unknown type "futureFrame".',
+    'Relay Call room ignored a server frame of unknown type "otherFrame".',
+  ]);
+  expect(parseCallRoomServerFrame({ type: "futureFrame", anything: [1] })).toBeNull();
+  room.close();
+});

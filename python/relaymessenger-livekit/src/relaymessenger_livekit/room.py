@@ -34,6 +34,10 @@ DEFAULT_BASE_URL = "https://api.relayapp.im"
 TERMINAL_STATUSES = frozenset({"completed", "no-answer", "canceled", "busy", "failed"})
 ROOM_ERROR_CODES = frozenset({"invalid_frame", "not_allowed", "media_unavailable"})
 _ICE_URL = re.compile(r"^(stun|turns?):")
+#: Server frame types this client decodes. Any other type is a frame a newer
+#: Relay added: it is ignored and the socket stays open, as Orange Meets' room
+#: client does (`app/hooks/useRoom.ts` ``onMessage``: its ``default`` case only breaks).
+KNOWN_SERVER_FRAME_TYPES = frozenset({"heartbeat", "iceServers", "roomState", "answer", "offer", "ended", "error"})
 PARTICIPANT_KEYS = frozenset({"contact_id", "kind", "attached", "track", "muted", "connected"})
 
 CallRoomConnectionState = Literal["idle", "connecting", "open", "reconnecting", "closed"]
@@ -168,12 +172,16 @@ def _valid_ice_server(value: Any) -> bool:
 def parse_call_room_server_frame(value: Any) -> Optional[dict[str, Any]]:
     """Validate one server frame before exposing it to application code.
 
-    Returns ``None`` for Relay's echoed heartbeat, which is not part of the
-    public server-frame union; raises `CallRoomError` for anything invalid.
+    Returns ``None`` for Relay's echoed heartbeat (not part of the public
+    server-frame union) and for a frame type this client does not know (a newer
+    Relay's frame, ignored); raises `CallRoomError` for a known frame type whose
+    shape is invalid.
     """
     if not isinstance(value, dict) or not isinstance(value.get("type"), str):
         raise CallRoomError("Relay Call room received an invalid frame.")
     kind = value["type"]
+    if kind not in KNOWN_SERVER_FRAME_TYPES:
+        return None
     if kind == "heartbeat":
         if _has_exact_keys(value, {"type"}):
             return None
@@ -271,6 +279,8 @@ class CallRoom(rtc.EventEmitter[CallRoomEvent]):
         self.url = call_room_url(base_url, call_id)
         #: The last validated ``roomState`` frame.
         self.state: Optional[dict[str, Any]] = None
+        # Unknown server frame types already logged, so each is logged once.
+        self._unknown_frame_types: set[str] = set()
         #: The STUN/TURN servers of the room's latest ``iceServers`` frame, or
         #: ``None`` before the first. Relay sends fresh ones on every join,
         #: reconnects included, so read this again before each new peer.
@@ -630,7 +640,13 @@ class CallRoom(rtc.EventEmitter[CallRoomEvent]):
 
     def _message(self, data: Union[str, bytes]) -> None:
         text = data.decode("utf-8") if isinstance(data, (bytes, bytearray)) else data
-        frame = parse_call_room_server_frame(json.loads(text))
+        value = json.loads(text)
+        if isinstance(value, dict) and isinstance(value.get("type"), str) and value["type"] not in KNOWN_SERVER_FRAME_TYPES:
+            if value["type"] not in self._unknown_frame_types:
+                self._unknown_frame_types.add(value["type"])
+                logger.warning("Relay Call room ignored a server frame of unknown type %r.", value["type"])
+            return
+        frame = parse_call_room_server_frame(value)
         if frame is None:
             return
         kind = frame["type"]

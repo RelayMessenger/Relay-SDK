@@ -58,7 +58,6 @@ def test_room_state_accepts_the_three_track_shapes() -> None:
         {"type": "iceServers", "ice_servers": [{"urls": ["http://turn.example"]}]},
         {"type": "iceServers", "ice_servers": [{"urls": ["stun:x"]}] * 9},
         {"type": "iceServers", "ice_servers": [{"urls": ["stun:x"] * 17}]},
-        {"type": "unknown"},
         [],
     ],
 )
@@ -86,6 +85,10 @@ def test_ice_servers_frame_and_its_stun_only_fallback_parse() -> None:
     fallback = {"type": "iceServers", "ice_servers": [{"urls": ["stun:stun.cloudflare.com:3478"]}]}
     assert parse_call_room_server_frame(fallback) == fallback
     assert parse_call_room_server_frame(ice_servers_frame("u")) == ice_servers_frame("u")
+
+
+def test_an_unknown_frame_type_parses_to_none() -> None:
+    assert parse_call_room_server_frame({"type": "futureFrame", "anything": [1, 2]}) is None
 
 
 def test_heartbeat_echo_is_not_a_frame() -> None:
@@ -333,3 +336,43 @@ async def test_ice_servers_frame_is_exposed_and_replaced_after_every_join() -> N
     await settle()
     assert seen == [ice_servers_frame("u0"), ice_servers_frame("u1")]
     assert h.room.ice_servers == ice_servers_frame("u1")["ice_servers"]
+
+
+async def test_unknown_frame_types_are_ignored_logged_once_each_and_keep_the_socket(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    h = Harness()
+    errors: list[Any] = []
+    states: list[Any] = []
+    h.room.on("error", errors.append)
+    h.room.on("room_state", states.append)
+    await h.room.connect()
+    await settle()
+    socket = h.sockets[0]
+    with caplog.at_level("WARNING", logger="relaymessenger.livekit"):
+        socket.push({"type": "futureFrame", "x": 1})
+        socket.push({"type": "futureFrame", "x": 2})
+        socket.push({"type": "otherFrame"})
+        socket.push(room_state())
+        await settle()
+    assert errors == []
+    assert socket.closed_with is None
+    assert h.room.connection_state == "open"
+    assert len(states) == 1  # frames after the unknown ones still arrive
+    warnings = [r.getMessage() for r in caplog.records if "unknown type" in r.getMessage()]
+    assert warnings == [
+        "Relay Call room ignored a server frame of unknown type 'futureFrame'.",
+        "Relay Call room ignored a server frame of unknown type 'otherFrame'.",
+    ]
+
+
+async def test_a_known_frame_type_with_a_bad_shape_still_closes_4400() -> None:
+    h = Harness()
+    errors: list[Any] = []
+    h.room.on("error", errors.append)
+    await h.room.connect()
+    await settle()
+    h.sockets[0].push({"type": "roomState", "call": CALL, "participants": [PARTICIPANT]})
+    await settle()
+    assert isinstance(errors[0], CallRoomError)
+    assert h.sockets[0].closed_with == (4400, "invalid frame")
