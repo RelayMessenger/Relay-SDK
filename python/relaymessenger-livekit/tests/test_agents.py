@@ -26,6 +26,18 @@ class FakeTransport(rtc.EventEmitter[str]):
         self.cleared = 0
         self.playout = asyncio.get_running_loop().create_future()
         self.remote_video_track: Any = None
+        #: The person is receiving the agent's audio; tests that start before it set this False.
+        self.subscribed = True
+        self._subscription = asyncio.Event()
+
+    def subscribe(self) -> None:
+        """The person's roomState ``receiving`` now contains ``audio``."""
+        self.subscribed = True
+        self._subscription.set()
+
+    async def wait_for_subscription(self) -> None:
+        if not self.subscribed:
+            await self._subscription.wait()
 
     async def write_audio(self, frame: RelayAudioFrame) -> None:
         self.written.append(frame)
@@ -195,3 +207,42 @@ async def test_attach_sets_a_real_agent_sessions_audio_video_and_output() -> Non
     assert session.input.audio is None and session.input.video is None and session.output.audio is None
     await call.input.aclose()
     await call.video_input.aclose()
+
+
+def tagged(value: int) -> rtc.AudioFrame:
+    n = 480
+    return rtc.AudioFrame(data=np.full(n, value, dtype=np.int16).tobytes(), sample_rate=24_000, num_channels=1, samples_per_channel=n)
+
+
+async def test_speech_waits_for_the_person_to_receive_audio_then_plays_all_of_it_from_the_start() -> None:
+    transport = FakeTransport()
+    transport.subscribed = False
+    output = RelayAudioOutput(transport)  # type: ignore[arg-type]
+    started: list[Any] = []
+    output.on("playback_started", started.append)
+
+    async def speak() -> None:  # AgentSession awaits each capture in order
+        for i in range(1, 6):
+            await output.capture_frame(tagged(i))
+
+    task = asyncio.ensure_future(speak())
+    await settle()
+    assert transport.written == [] and started == []
+    transport.subscribe()
+    await task
+    assert [int(f.samples[0]) for f in transport.written] == [1, 2, 3, 4, 5]
+    assert len(started) == 1
+
+
+async def test_a_frame_held_for_subscription_is_dropped_when_the_speech_is_interrupted() -> None:
+    transport = FakeTransport()
+    transport.subscribed = False
+    output = RelayAudioOutput(transport)  # type: ignore[arg-type]
+    held = asyncio.ensure_future(output.capture_frame(tagged(7)))
+    await settle()
+    output.clear_buffer()
+    transport.subscribe()
+    await held
+    assert transport.written == []
+    await output.capture_frame(tagged(8))
+    assert [int(f.samples[0]) for f in transport.written] == [8]

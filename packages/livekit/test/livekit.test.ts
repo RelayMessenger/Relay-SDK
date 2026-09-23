@@ -23,6 +23,20 @@ class FakeTransport {
   clears = 0;
   queuedMs = 0;
   readonly waiters = new Set<() => void>();
+  /** The person is receiving the agent's audio; `hold()` makes a test start before it is. */
+  subscribed = true;
+  readonly subscriptionWaiters = new Set<() => void>();
+
+  hold(): void { this.subscribed = false; }
+  /** The person's roomState `receiving` now contains `audio`. */
+  subscribe(): void {
+    this.subscribed = true;
+    for (const resolve of [...this.subscriptionWaiters]) { this.subscriptionWaiters.delete(resolve); resolve(); }
+  }
+  waitForSubscription(): Promise<void> {
+    if (this.subscribed) return Promise.resolve();
+    return new Promise((resolve) => this.subscriptionWaiters.add(resolve));
+  }
 
   on(event: string, listener: (frame: RelayAudioFrame) => void): this {
     if (event === "audio") this.listeners.add(listener);
@@ -402,4 +416,39 @@ it("delivers every inbound frame in order when the transport emits faster than t
   expect(seen).toEqual([...Array(20).keys()]);
   reader.releaseLock();
   await input.close();
+});
+
+it("holds speech until the person receives the agent's audio, then plays all of it from the start (LiveKit capture_frame waits for subscription)", async () => {
+  const transport = new FakeTransport();
+  transport.hold();
+  const output = new RelayAudioOutput(transport as unknown as RelayCallTransport);
+  const started = vi.fn();
+  output.on(RelayAudioOutput.EVENT_PLAYBACK_STARTED, started);
+  const frames = Array.from({ length: 5 }, (_, i) => new AudioFrame(new Int16Array(480).fill(i + 1), 48_000, 1, 480));
+  // The agent pipeline pushes frames in order, each capture awaited, as AgentSession does.
+  const pushing = (async () => { for (const frame of frames) await output.captureFrame(frame); })();
+  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+  expect(transport.writes).toHaveLength(0);
+  expect(started).not.toHaveBeenCalled();
+
+  transport.subscribe();
+  await pushing;
+  expect(transport.writes.map((write) => write.samples[0])).toEqual([1, 2, 3, 4, 5]);
+  expect(started).toHaveBeenCalledTimes(1);
+  output.close();
+});
+
+it("drops a frame held for subscription when the speech is interrupted meanwhile", async () => {
+  const transport = new FakeTransport();
+  transport.hold();
+  const output = new RelayAudioOutput(transport as unknown as RelayCallTransport);
+  const held = output.captureFrame(new AudioFrame(new Int16Array(480), 48_000, 1, 480));
+  await Promise.resolve();
+  output.clearBuffer();
+  transport.subscribe();
+  await held;
+  expect(transport.writes).toHaveLength(0);
+  await output.captureFrame(new AudioFrame(new Int16Array(480), 48_000, 1, 480));
+  expect(transport.writes).toHaveLength(1);
+  output.close();
 });

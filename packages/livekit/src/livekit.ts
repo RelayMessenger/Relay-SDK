@@ -101,6 +101,8 @@ export class RelayAudioOutput extends AudioOutput {
   #flushDone = true;
   /** Resolved by `clearBuffer()` with the milliseconds still queued at that moment. */
   #interruptedFuture = new Future<number>();
+  /** Bumped by `clearBuffer()`; a frame held for subscription across it is dropped (agents-js `interruptionGeneration`). */
+  #interruptionGeneration = 0;
   #closed = false;
 
   constructor(transport: RelayCallTransport, sampleRate = 48_000) {
@@ -108,8 +110,21 @@ export class RelayAudioOutput extends AudioOutput {
     this.#transport = transport;
   }
 
+  /**
+   * Waits until the person is receiving the agent's audio before playing the
+   * frame, as LiveKit's room audio output waits for the track's subscription
+   * (agents-js `voice/room_io/_output.ts` `captureFrame` awaits `startedFuture`,
+   * resolved by `publication.waitForSubscription()`; Python
+   * `room_io/_output.py` `capture_frame` awaits `_subscribed_fut`). The
+   * transport sends silence meanwhile; nothing captured is skipped.
+   */
   override async captureFrame(frame: AudioFrame): Promise<void> {
     if (this.#closed) throw new Error("Relay LiveKit audio output is closed.");
+    const interruptionGeneration = this.#interruptionGeneration;
+    if (!this.#transport.subscribed) {
+      await this.#transport.waitForSubscription();
+      if (interruptionGeneration !== this.#interruptionGeneration) return;
+    }
     if (this.#flushTask && !this.#flushDone) {
       this.logger.error("captureFrame called while flush is in progress");
       await this.#flushTask;
@@ -141,6 +156,7 @@ export class RelayAudioOutput extends AudioOutput {
   }
 
   override clearBuffer(): void {
+    this.#interruptionGeneration += 1;
     const queuedMs = this.#transport.queuedAudioMs();
     this.#transport.clearAudio();
     if (this.#interruptedFuture.done) return;

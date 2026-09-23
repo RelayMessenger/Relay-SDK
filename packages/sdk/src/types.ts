@@ -73,6 +73,11 @@ export interface CallRoomParticipant {
   video?: boolean;
   /** Tracks this participant has published: `[]` before its first offer, then `["audio"]` or `["audio", "video"]`. */
   tracks?: CallRoomTrackName[];
+  /**
+   * The other participant's tracks this participant is receiving now: its
+   * pull answer is applied and it sent `connected` for it. Reset on restart.
+   */
+  receiving?: CallRoomTrackName[];
 }
 
 export interface CallRoomJoinFrame {

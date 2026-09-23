@@ -43,8 +43,11 @@ reached `connected`. `RelayAudioInput` hands the AgentSession the remote
 participant's audio as 24 kHz mono PCM16 frames, the format of LiveKit's own
 room input; the Opus decoder produces that format directly.
 
-`RelayAudioOutput` has the shape of LiveKit's own `ParticipantAudioOutput`:
-`captureFrame()` hands the frame to the transport and returns at once, so the
+`RelayAudioOutput` has the shape of LiveKit's own `ParticipantAudioOutput`.
+Like LiveKit's, it holds the first frame until the person is receiving the
+agent's audio, so a greeting that starts early is not cut; the transport sends
+silence meanwhile and nothing is skipped. Then `captureFrame()` hands each
+frame to the transport and returns at once, so the
 AgentSession may push a whole reply faster than real time; the engine's 20 ms
 pump paces the wire. `flush()` closes the segment and reports
 `playbackFinished` only after the transport has drained. `clearBuffer()` drops

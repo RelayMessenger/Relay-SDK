@@ -129,7 +129,11 @@ const validCall = (value: unknown): value is Call => {
 
 const PARTICIPANT_KEYS = ["contact_id", "kind", "attached", "track", "muted", "connected"] as const;
 
-/** `[]` before the participant's first offer, then `["audio"]` or `["audio", "video"]` (PROTOCOL.md section 3). */
+/**
+ * `tracks`: `[]` before the participant's first offer, then `["audio"]` or
+ * `["audio", "video"]` (PROTOCOL.md section 3). `receiving` has the same shape
+ * (section 6b).
+ */
 const validTracks = (value: unknown): boolean =>
   Array.isArray(value)
   && value.length <= 2
@@ -139,9 +143,11 @@ const validTracks = (value: unknown): boolean =>
 const validParticipant = (value: unknown): value is CallRoomParticipant =>
   isRecord(value)
   && (hasExactKeys(value, PARTICIPANT_KEYS)
-    || hasExactKeys(value, [...PARTICIPANT_KEYS, "video", "tracks"]))
+    || hasExactKeys(value, [...PARTICIPANT_KEYS, "video", "tracks"])
+    || hasExactKeys(value, [...PARTICIPANT_KEYS, "video", "tracks", "receiving"]))
   && (value.video === undefined || typeof value.video === "boolean")
   && (value.tracks === undefined || validTracks(value.tracks))
+  && (value.receiving === undefined || validTracks(value.receiving))
   && typeof value.contact_id === "string"
   && (value.kind === "user" || value.kind === "agent")
   && typeof value.attached === "boolean"
