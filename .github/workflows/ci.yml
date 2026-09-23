@@ -56,6 +56,28 @@ jobs:
       - run: uv run --locked pytest -q
       - run: uv build
 
+  # relaymessenger-pipecat, the Pipecat transport for Relay Calls: types and
+  # unit tests on Linux from the locked environment, then a wheel and sdist
+  # build. Nothing is published.
+  python-pipecat:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: python/relaymessenger-pipecat
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: 0.12.8
+          enable-cache: false
+      - run: uv sync --locked --python 3.12
+      - run: uv run --locked mypy
+      - run: uv run --locked pytest -q
+      - run: uv build
+
   # relaymessenger-livekit, the Python twin of @relaymessenger/livekit: types
   # and unit tests on Linux from the locked environment, then a wheel and sdist
   # build. Nothing is published.
