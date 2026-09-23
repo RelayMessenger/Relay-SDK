@@ -208,10 +208,10 @@ export interface RelayCallTransportOptions {
   webRTC?: RelayWebRTCFactory;
   /**
    * STUN and TURN servers handed to the engine's `RTCPeerConnection`. Defaults
-   * to none: Cloudflare's SFU answers with its own host candidates. Set TURN
-   * servers when the agent runs behind a NAT or firewall that blocks UDP. A
-   * function is called before every peer connection, restarts included, so
-   * it can mint fresh TURN credentials each time.
+   * to Cloudflare's STUN server, the configuration of Cloudflare's own Realtime
+   * echo example. Set TURN servers when the agent runs behind a NAT or firewall
+   * that blocks UDP. A function is called before every peer connection,
+   * restarts included, so it can mint fresh TURN credentials each time.
    */
   iceServers?: RelayIceServer[] | RelayIceServersProvider;
   /** `"relay"` forces every candidate through TURN. Defaults to `"all"`. */
@@ -379,6 +379,12 @@ export class RelayCallTransportError extends Error {
 }
 
 const DEFAULT_PEER_CONFIG: RelayPeerConnectionConfig = { iceServers: [], iceTransportPolicy: "all" };
+
+/**
+ * Cloudflare Realtime's echo example builds its peer with exactly this list
+ * (cloudflare/realtime-examples echo/index.html `createPeerConnection`).
+ */
+const DEFAULT_ICE_SERVERS: RelayIceServer[] = [{ urls: "stun:stun.cloudflare.com:3478" }];
 
 const loadWebRTCFactory = async (engine: RelayCallEngine): Promise<RelayWebRTCFactory> => {
   if (engine === "werift") {
@@ -587,7 +593,11 @@ export class RelayCallTransport {
   #peerConnected = false;
   #audioSource: RelayAudioSourceLike | undefined;
   #localTrack: RelayMediaStreamTrackLike | undefined;
+  /** Set while an offer waits for its first local candidate. */
+  #firstLocalCandidate: (() => void) | undefined;
   #remoteSink: RelayAudioSinkLike | undefined;
+  /** The track `#remoteSink` decodes; a repeated `ontrack` for it keeps the sink. */
+  #remoteSinkTrack: RelayMediaStreamTrackLike | undefined;
   #publishTransceiver: RelayRtpTransceiverLike | undefined;
   #publishFrame: CallRoomPublishOfferFrame | undefined;
   #initialAnswerSdp: string | undefined;
@@ -651,7 +661,7 @@ export class RelayCallTransport {
       throw new Error('iceTransportPolicy must be "all" or "relay".');
     }
     this.#iceTransportPolicy = policy;
-    const iceServers = options.iceServers ?? [];
+    const iceServers = options.iceServers ?? DEFAULT_ICE_SERVERS;
     this.#iceServers = typeof iceServers === "function" ? iceServers : copyIceServers(iceServers);
     if (!Number.isFinite(this.#iceGatheringTimeoutMs) || this.#iceGatheringTimeoutMs <= 0) {
       throw new Error("iceGatheringTimeoutMs must be greater than zero.");
@@ -983,10 +993,19 @@ export class RelayCallTransport {
     await this.#publishLocalAudio(peer, restarts > 0);
   }
 
+  /**
+   * Sends the offer without waiting for ICE gathering, as Cloudflare's echo
+   * example does (`setLocalDescription(offer)`, then `tracks/new` at once): the
+   * SFU is ICE-lite and learns this peer's address from its connectivity
+   * checks. werift's `setLocalDescription` resolves only after every host,
+   * STUN and TURN candidate has settled (peerConnection.js `await
+   * this.gatherCandidates()`; ice.js `await Promise.allSettled(candidatePromises)`),
+   * which took 6.6 s on a staging call on 2026-09-22, so the offer leaves as
+   * soon as the description is applied and the first local candidate exists.
+   */
   async #publishLocalAudio(peer: RelayPeerConnectionLike, restart: boolean): Promise<void> {
     const offer = await peer.createOffer();
-    await peer.setLocalDescription(offer);
-    await this.#waitForIceGathering(peer);
+    await this.#applyLocalOffer(peer, offer);
     if (this.#peer !== peer) return;
     const description = this.#localDescription(peer, "offer");
     const mid = this.#publishTransceiver?.mid;
@@ -1088,7 +1107,6 @@ export class RelayCallTransport {
     await peer.setRemoteDescription(frame.session_description);
     const answer = await peer.createAnswer();
     await peer.setLocalDescription(answer);
-    await this.#waitForIceGathering(peer);
     if (this.#peer !== peer) return;
     this.#room.send({ type: "answer", session_description: this.#localDescription(peer, "answer") });
   }
@@ -1222,6 +1240,7 @@ export class RelayCallTransport {
       this.#retiredSinkStats = this.#sinkStats();
       this.#remoteSink.stop();
       this.#remoteSink = undefined;
+      this.#remoteSinkTrack = undefined;
     }
     if (!peer) return;
     peer.onconnectionstatechange = null;
@@ -1232,11 +1251,23 @@ export class RelayCallTransport {
     closePeer(peer);
   }
 
+  /**
+   * werift fires `ontrack` again for every sending m-line on each
+   * `setRemoteDescription` (transceiverManager.js `setRemoteRTP`), so a pull
+   * offer that adds the person's video re-announces the audio track already
+   * decoded. That track keeps its sink, decoder and packet counts; a different
+   * audio track retires the old sink's counts into the call totals, as a restart does.
+   */
   #remoteTrack(track: RelayMediaStreamTrackLike): void {
     if (track.kind !== "audio" || !this.#factory) return;
-    this.#remoteSink?.stop();
+    if (this.#remoteSink && this.#remoteSinkTrack === track) return;
+    if (this.#remoteSink) {
+      this.#retiredSinkStats = this.#sinkStats();
+      this.#remoteSink.stop();
+    }
     const sink = this.#factory.createAudioSink(track, this.#inboundAudio);
     this.#remoteSink = sink;
+    this.#remoteSinkTrack = track;
     sink.ondata = (data) => {
       if (this.#closed || this.#remoteSink !== sink) return;
       const channelCount = data.channelCount ?? 1;
@@ -1284,26 +1315,44 @@ export class RelayCallTransport {
     for (const release of [...this.#playoutWaiters]) release();
   }
 
-  async #waitForIceGathering(peer: RelayPeerConnectionLike): Promise<void> {
-    if (peer.iceGatheringState === "complete") return;
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        cleanup();
-        reject(new RelayCallTransportError("Timed out gathering Relay WebRTC ICE candidates."));
-      }, this.#iceGatheringTimeoutMs);
-      timeout.unref?.();
-      const changed = (): void => {
-        if (peer.iceGatheringState !== "complete") return;
-        cleanup();
-        resolve();
-      };
-      const cleanup = (): void => {
-        clearTimeout(timeout);
-        peer.removeEventListener("icegatheringstatechange", changed);
-      };
-      peer.addEventListener("icegatheringstatechange", changed);
-      changed();
+  /**
+   * Resolves once the offer is applied and has a first local candidate, or
+   * once `setLocalDescription` resolves (W3C engines resolve before gathering),
+   * whichever comes first.
+   */
+  async #applyLocalOffer(peer: RelayPeerConnectionLike, offer: RTCSessionDescriptionInit): Promise<void> {
+    const applied = peer.setLocalDescription(offer);
+    let settled = false;
+    applied.catch((error: unknown) => {
+      if (!settled || this.#peer !== peer) return;
+      const parsed = error instanceof Error ? error : new Error(String(error));
+      this.#rejectReady(parsed);
+      this.#emit("error", parsed);
     });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new RelayCallTransportError("Timed out gathering Relay WebRTC ICE candidates."));
+        }, this.#iceGatheringTimeoutMs);
+        timeout.unref?.();
+        const cleanup = (): void => {
+          clearTimeout(timeout);
+          if (this.#firstLocalCandidate === done) this.#firstLocalCandidate = undefined;
+        };
+        const done = (): void => {
+          cleanup();
+          resolve();
+        };
+        this.#firstLocalCandidate = done;
+        applied.then(done, (error: unknown) => {
+          cleanup();
+          reject(error);
+        });
+      });
+    } finally {
+      settled = true;
+    }
   }
 
   /**
@@ -1318,6 +1367,7 @@ export class RelayCallTransport {
       const type = parseCandidate(line)?.type;
       if (type === "host" || type === "srflx" || type === "relay") this.#iceLocal[type] += 1;
       else this.#iceLocal.other += 1;
+      if (this.#peer === peer && peer.localDescription) this.#firstLocalCandidate?.();
     };
     peer.onicegatheringstatechange = () => this.#recordTransition("gathering", peer.iceGatheringState);
     peer.oniceconnectionstatechange = () => {
@@ -1369,6 +1419,7 @@ export class RelayCallTransport {
     this.#finalSourceStats ??= this.#audioSource?.stats?.();
     this.#remoteSink?.stop();
     this.#remoteSink = undefined;
+    this.#remoteSinkTrack = undefined;
     this.#localTrack?.stop();
     this.#localTrack = undefined;
     if (this.#peer) closePeer(this.#peer);

@@ -137,6 +137,28 @@ class FakePeer implements RelayPeerConnectionLike {
   close(): void { this.closed = true; this.connectionState = "closed"; }
 }
 
+/**
+ * werift's shape: `setLocalDescription` applies the description at once but
+ * resolves only when gathering completes (peerConnection.js `await
+ * this.gatherCandidates()`), and a later description on the same transport
+ * resolves at once. `finishGathering()` completes the first.
+ */
+class SlowGatherPeer extends FakePeer {
+  override iceGatheringState = "new";
+  #finish: (() => void) | undefined;
+  override async setLocalDescription(description: RTCSessionDescriptionInit): Promise<void> {
+    await super.setLocalDescription(description);
+    // RTCIceTransport.gather() runs once, from "new" (transport/ice.js).
+    if (this.iceGatheringState !== "new") return;
+    this.iceGatheringState = "gathering";
+    await new Promise<void>((resolve) => { this.#finish = resolve; });
+  }
+  finishGathering(): void {
+    this.iceGatheringState = "complete";
+    this.#finish?.();
+  }
+}
+
 class FakeWebRTC implements RelayWebRTCFactory {
   /** Every peer connection built, in order; a restart builds a new one. */
   readonly peers: FakePeer[] = [];
@@ -346,7 +368,11 @@ it("hands ICE servers and the transport policy to the WebRTC factory", async () 
   const webRTC = new FakeWebRTC();
   const defaults = makeTransport(room, webRTC);
   await connectTransport(defaults, room);
-  expect(webRTC.peerConfigs).toEqual([{ iceServers: [], iceTransportPolicy: "all" }]);
+  // Cloudflare Realtime's echo example: `iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }]`.
+  expect(webRTC.peerConfigs).toEqual([{
+    iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }],
+    iceTransportPolicy: "all",
+  }]);
   defaults.close();
 
   const turnRoom = new FakeRoom();
@@ -1028,4 +1054,68 @@ it("connect() rejects and closes the transport when its signal aborts", async ()
   expect((error as RelayCallTransportError).code).toBe("aborted");
   expect(room.closes).toBe(1);
   await expect(transport.connect({ signal: AbortSignal.abort() })).rejects.toThrow("Relay Call transport is closed.");
+});
+
+it("sends the offer at the first local candidate, before ICE gathering completes", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const peer = new SlowGatherPeer();
+  webRTC.nextPeer = peer;
+  const transport = makeTransport(room, webRTC);
+  const connecting = transport.connect();
+  await flush();
+  expect(peer.signalingState).toBe("have-local-offer");
+  expect(room.sent).toEqual([]);
+
+  peer.onicecandidate?.({ candidate: { candidate: "candidate:1 1 udp 2130706431 10.0.0.2 51000 typ host" } });
+  await flush();
+  expect(peer.iceGatheringState).toBe("gathering");
+  expect(room.sent).toEqual([{
+    type: "offer",
+    session_description: { type: "offer", sdp: "offer-sdp" },
+    tracks: [{ mid: "0", name: "audio" }],
+  }]);
+
+  room.emit("answer", { type: "answer", session_description: { type: "answer", sdp: "relay-answer" } });
+  await connecting;
+  // A pull offer while gathering is still running is answered at once too.
+  room.emit("offer", {
+    type: "offer", session_description: { type: "offer", sdp: "relay-subscription" }, track: "audio",
+  });
+  await flush();
+  expect(room.sent.at(-1)).toEqual({ type: "answer", session_description: { type: "answer", sdp: "answer-sdp" } });
+  expect(peer.iceGatheringState).toBe("gathering");
+  peer.finishGathering();
+  transport.close();
+});
+
+it("keeps the person's audio sink and its packet count when ontrack fires again for the same track", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  await connectTransport(transport, room);
+  const audio = new FakeTrack();
+  webRTC.peer.ontrack?.({ track: audio });
+  const sink = webRTC.sinks[0]!;
+  sink.sinkStats = {
+    rtpPackets: 300, decodeFailures: 0, firstRtpAt: Date.now(), lastRtpAt: Date.now(), recentRtpPackets: 250,
+  };
+
+  // werift re-announces every sending m-line when a pull offer adds video.
+  const video = Object.assign(new FakeTrack(), { kind: "video" });
+  webRTC.peer.ontrack?.({ track: audio });
+  webRTC.peer.ontrack?.({ track: video });
+  expect(webRTC.sinks).toHaveLength(1);
+  expect(sink.stopped).toBe(false);
+  expect(transport.diagnostics().inbound.rtpPackets).toBe(300);
+
+  // A different audio track replaces the sink; the call total keeps the old count.
+  webRTC.peer.ontrack?.({ track: new FakeTrack() });
+  expect(webRTC.sinks).toHaveLength(2);
+  expect(sink.stopped).toBe(true);
+  webRTC.sinks[1]!.sinkStats = {
+    rtpPackets: 50, decodeFailures: 0, firstRtpAt: Date.now(), lastRtpAt: Date.now(), recentRtpPackets: 50,
+  };
+  expect(transport.diagnostics().inbound.rtpPackets).toBe(350);
+  transport.close();
 });
