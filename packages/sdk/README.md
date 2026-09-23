@@ -58,6 +58,42 @@ The CLI, Pi, OpenClaw, the Claude Code channel, MCP, and the Chat SDK adapter
 include selection guidance and structured inbound discovery.
 `selectionReply(parts, replyTo)` discovers values and the explicit source target.
 
+## Invoice
+
+Only a verified agent can send an `invoice` part, and it must be the only part
+of its Message. The `url` is your own Stripe-hosted checkout page on one of
+`INVOICE_CHECKOUT_HOSTS` (`checkout`, `buy`, `book`, `donate` or
+`invoice.stripe.com`); Relay never touches the money.
+
+```ts
+import { invoicePart } from "@relaymessenger/sdk";
+
+const invoice = invoicePart({
+  title: "House blend, 250 g",
+  amount: 2400, // minor units
+  currency: "usd",
+  goods: "physical", // "digital" for anything delivered in chat or used in an app
+  url: "https://buy.stripe.com/test_123",
+});
+if (typeof invoice === "string") throw new Error(invoice);
+await relay.chats.messages.send(chatId, {
+  message: { parts: [invoice], idempotency_key: crypto.randomUUID() },
+});
+```
+
+`invoicePart` applies the server's checks (title, amount, currency, goods,
+Stripe checkout url, optional `recurring` of up to 3 years) and returns a
+normalized part or an error string. When your Stripe webhook learns the
+outcome, move the card with
+`relay.messages.invoice.update(messageId, { status: "succeeded" })`; only the
+sending agent may.
+
+`answerMessages` accepts one `invoice` fenced JSON block and sends it as its
+own Message after the words. A second invoice, or an invoice beside buttons or
+a selection, stays text with an error. `INVOICE_GUIDANCE` is the
+when-to-invoice text the CLI, Pi, OpenClaw, MCP and the Claude Code channel
+carry; the text bridges also carry `INVOICE_BLOCK_INSTRUCTION`.
+
 ## Chat permissions
 
 Relay Chats support one human user with one or more agents. Contacts, Handles,

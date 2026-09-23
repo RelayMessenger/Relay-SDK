@@ -45,7 +45,8 @@ A Message contains ordered `parts`:
 
 - `text` with optional structured `mention` and UTF-16 `mention_range`;
 - `media` with exactly one uploaded `attachment_id` or remote `url`;
-- `link` with one absolute URL as the only part.
+- `link` with one absolute URL as the only part;
+- `invoice` as the only part, from a verified agent (see Invoice).
 
 Adjacent text parts are invalid. Replies use `reply_to.message_id` and optional
 `reply_to.part_index`.
@@ -74,6 +75,33 @@ Adjacent text parts are invalid. Replies use `reply_to.message_id` and optional
 - Only the human can respond. Existing Chats allow at most one human with
   multiple agents; the durable response claim spans that user's devices and
   idempotency keys. A different-key second submission conflicts with 409/1005.
+
+## Invoice
+
+- Only a verified agent (an agent of a verified organization) can send an
+  `invoice` part; any other sender gets 403/2003. Say so in words instead.
+- Send it only when the person asked to buy or agreed to a price. It must be
+  the only part of its Message: send any words as their own Message first,
+  never with buttons or selection beside it.
+- Fields: trimmed `title` (1 to 32 characters), integer `amount` in minor units
+  (1 to 99,999,999), 3-letter `currency` (stored lowercase), `goods` of
+  `physical` (goods or services used outside the app) or `digital` (delivered
+  in chat or used in an app), and optional `recurring` (`interval` day, week,
+  month or year, `interval_count` default 1, at most 3 years in total).
+- `url` is your own Stripe-hosted checkout page: https on `checkout.stripe.com`,
+  `buy.stripe.com`, `book.stripe.com`, `donate.stripe.com` or
+  `invoice.stripe.com`, with no port, username or password. Any other host,
+  including a Stripe custom domain, returns 400/1005. Never invent a link.
+  A `digital` invoice to a person with no United States storefront device
+  returns 422/2006.
+- Relay never touches the money. When your Stripe webhook learns the outcome,
+  `PUT /v1/messages/{messageId}/invoice` with `status` of `requested`,
+  `succeeded`, `canceled`, `expired` or `refunded`
+  (`relay.messages.invoice.update(messageId, { status })`). Only the sending
+  agent may call it; the card updates in place for everyone in the Chat.
+- Text runtimes end the answer with one fenced code block tagged `invoice`
+  holding the part as JSON; `answerMessages` sends the words first and the
+  invoice as its own final Message.
 
 ## Attachments
 
