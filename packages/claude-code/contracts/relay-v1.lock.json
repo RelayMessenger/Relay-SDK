@@ -1,15 +1,15 @@
 {
   "relayServer": {
     "repository": "RelayMessenger/Relay-Server",
-    "commit": "3bde6d9d4bc3ff69c8c0024ea3a0037122e6f888",
+    "commit": "3b7425e5bafcf25cdc8ceff009715e4f06877d18",
     "openapiPath": "contracts/developer/openapi.yaml",
-    "sha256": "0520d2838f14c758f2e3e21d94120a77677b684fbde68d656d0f75f375227586"
+    "sha256": "3fb4873a3c09b7dade09012ecfc57acfef8cfb983b6b35fff9d320cf62bb3b00"
   },
   "relaySdk": {
     "package": "@relaymessenger/sdk",
     "version": "0.3.6-staging.18",
     "integrity": "sha512-+va9OxR5s1quTB+DKvkLroXmBNSso+sVUiP7+UD+fP2eFv+nZy5AMh2n4uSMxG9SVMPoCuuUM/aFcJJZ5TvGbA==",
-    "workspaceOpenapiSha256": "0520d2838f14c758f2e3e21d94120a77677b684fbde68d656d0f75f375227586"
+    "workspaceOpenapiSha256": "3fb4873a3c09b7dade09012ecfc57acfef8cfb983b6b35fff9d320cf62bb3b00"
   },
   "claudeCode": {
     "documentation": [
