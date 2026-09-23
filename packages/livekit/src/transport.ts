@@ -10,6 +10,32 @@ import type {
   CallRoomSubscriptionOfferFrame,
   Relay,
 } from "@relaymessenger/sdk";
+import {
+  type LocalVideoTrack,
+  type RelayVideoReceiverStats,
+  type RelayVideoSenderLike,
+  type RelayVideoSenderStats,
+  RemoteVideoTrack,
+  type TrackPublishOptions,
+} from "./video.js";
+import type { RelayVideoFactory } from "./video.js";
+
+export {
+  LocalVideoTrack,
+  RemoteVideoTrack,
+  VideoBufferType,
+  VideoCodec,
+  VideoFrame,
+  VideoRotation,
+  VideoSource,
+  VideoStream,
+  type RelayVideoReceiverStats,
+  type RelayVideoSenderStats,
+  type TrackPublishOptions,
+  type VideoEncoding,
+  type VideoFrameEvent,
+  type VideoStreamOptions,
+} from "./video.js";
 
 type CallStatus = CallRoomStateFrame["call"]["status"];
 
@@ -112,7 +138,7 @@ export interface RelayPeerConnectionLike {
   onicecandidate?: ((event: { candidate?: { candidate: string } | null }) => void) | null;
   onicegatheringstatechange?: ((event?: unknown) => void) | null;
   oniceconnectionstatechange?: (() => void) | null;
-  ontrack: ((event: { track: RelayMediaStreamTrackLike }) => void) | null;
+  ontrack: ((event: { track: RelayMediaStreamTrackLike; transceiver?: unknown }) => void) | null;
   addTransceiver(
     track: RelayMediaStreamTrackLike,
     init: { direction: "sendonly" },
@@ -186,11 +212,17 @@ export interface RelayPeerConnectionConfig {
   iceTransportPolicy: RelayIceTransportPolicy;
 }
 
-/** @internal */
-export interface RelayWebRTCFactory {
+/** @internal Video is optional: an engine without it (`wrtc`) neither sends nor decodes video. */
+export interface RelayWebRTCFactory extends Partial<RelayVideoFactory> {
   createPeerConnection(config?: RelayPeerConnectionConfig): RelayPeerConnectionLike;
   createAudioSource(): RelayAudioSourceLike;
   createAudioSink(track: RelayMediaStreamTrackLike, format: RelayInboundAudioFormat): RelayAudioSinkLike;
+}
+
+/** Counters for both video directions; `undefined` for a direction that has no track. */
+export interface RelayCallVideoStats {
+  outbound: RelayVideoSenderStats | undefined;
+  inbound: RelayVideoReceiverStats | undefined;
 }
 
 export type RelayCallEngine = "werift" | "wrtc";
@@ -328,6 +360,13 @@ type TransportEventMap = {
   roomState: [CallRoomStateFrame];
   /** The person's camera started (`true`) or stopped (`false`) sending, from `roomState`. */
   remoteVideo: [boolean];
+  /**
+   * The person's video track reached this peer (LiveKit `RoomEvent.TrackSubscribed`);
+   * read it with `new VideoStream(track)`. Once per call: restarts reuse the track.
+   */
+  trackSubscribed: [RemoteVideoTrack];
+  /** The call is over; every `VideoStream` of the track has ended. */
+  trackUnsubscribed: [RemoteVideoTrack];
   /**
    * Once per call: the person's audio has reached this peer (first inbound
    * frame on the pulled track) and `roomState` shows the person connected. The
@@ -636,6 +675,17 @@ export class RelayCallTransport {
   readonly #ready: Promise<void>;
   #handlersAttached = false;
   #closed = false;
+  #muted = false;
+  /** The published camera: one per call, kept across restarts (PROTOCOL.md section 1). */
+  #video: { track: LocalVideoTrack; sender: RelayVideoSenderLike; detach: () => void } | undefined;
+  #videoTransceiver: RelayRtpTransceiverLike | undefined;
+  #remoteVideoTrack: RemoteVideoTrack | undefined;
+  /** The engine track the current video receiver reads. */
+  #remoteVideoEngineTrack: RelayMediaStreamTrackLike | undefined;
+  /** An add-track offer is out; a pull offer that crosses it waits for its answer. */
+  #addTrackPending = false;
+  #deferredOffer: CallRoomSubscriptionOfferFrame | undefined;
+  #lastAnswerSdp: string | undefined;
 
   constructor(options: RelayCallTransportOptions) {
     if (!options.callId.trim()) throw new Error("callId is required.");
@@ -954,7 +1004,81 @@ export class RelayCallTransport {
   }
 
   setMuted(muted: boolean): void {
+    this.#muted = muted;
     this.#room.userUpdate({ muted });
+  }
+
+  /**
+   * Publish the camera (LiveKit `LocalParticipant.publishTrack`). The first
+   * call adds a `video` track to the SFU session with an add-track offer, then
+   * announces `userUpdate { video: true }`; later calls, after
+   * `unpublishTrack`, only resume sending and announce it again
+   * (PROTOCOL.md sections 1-2). Requires `connect()` and the werift engine.
+   */
+  async publishTrack(track: LocalVideoTrack, options: TrackPublishOptions = {}): Promise<void> {
+    if (this.#closed || this.#ended) throw new Error("Relay Call transport is closed.");
+    if (!this.#factory || !this.#reportedConnected) throw new Error("Relay Call transport is not connected.");
+    if (this.#video) {
+      if (this.#video.track !== track) throw new RelayCallTransportError("A Relay call publishes one video track.");
+      this.#video.sender.setEnabled(true);
+      this.#room.userUpdate({ muted: this.#muted, video: true });
+      return;
+    }
+    const factory = this.#factory;
+    if (!factory.createVideoSender) {
+      throw new RelayCallTransportError('This engine cannot send video; use the "werift" engine.');
+    }
+    const sender = await factory.createVideoSender(options);
+    if (this.#closed || this.#ended) {
+      sender.close();
+      throw new Error("Relay Call transport is closed.");
+    }
+    const detach = track.source._attach((frame, timestampUs, rotation) => sender.capture(frame, timestampUs, rotation));
+    this.#video = { track, sender, detach };
+    await this.#negotiate(async () => {
+      // No peer: a restart is pending, and the next peer publishes video with audio.
+      const peer = this.#peer;
+      if (!peer) return;
+      this.#addVideoTransceiver(peer);
+      await this.#publishLocalAudio(peer, false);
+      this.#addTrackPending = this.#peer === peer;
+    });
+    this.#room.userUpdate({ muted: this.#muted, video: true });
+  }
+
+  /**
+   * Stop sending the camera and announce `userUpdate { video: false }`. The
+   * track stays negotiated on the SFU (PROTOCOL.md section 1), so a later
+   * `publishTrack` with the same track resumes it without renegotiating.
+   */
+  async unpublishTrack(track: LocalVideoTrack): Promise<void> {
+    if (!this.#video || this.#video.track !== track) return;
+    this.#video.sender.setEnabled(false);
+    if (!this.#closed && !this.#ended) this.#room.userUpdate({ muted: this.#muted, video: false });
+  }
+
+  /** The person's video track, once it has reached this peer. */
+  get remoteVideoTrack(): RemoteVideoTrack | undefined {
+    return this.#remoteVideoTrack;
+  }
+
+  /** Frame, packet and keyframe counters for both video directions. */
+  videoStats(): RelayCallVideoStats {
+    return { outbound: this.#video?.sender.stats(), inbound: this.#remoteVideoTrack?.stats() };
+  }
+
+  /** Runs `work` in the negotiation queue and hands its result or error to the caller. */
+  #negotiate<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.#negotiationTail.then(work);
+    this.#negotiationTail = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  #addVideoTransceiver(peer: RelayPeerConnectionLike): void {
+    const video = this.#video;
+    if (!video) return;
+    this.#videoTransceiver = peer.addTransceiver(video.sender.track, { direction: "sendonly" });
+    video.sender.bind(this.#videoTransceiver, peer);
   }
 
   end(): void {
@@ -992,6 +1116,7 @@ export class RelayCallTransport {
     this.#peerConnected = false;
     this.#initialAnswerSdp = undefined;
     this.#publishTransceiver = peer.addTransceiver(track, { direction: "sendonly" });
+    this.#addVideoTransceiver(peer);
     this.#observeIce(peer);
     peer.onconnectionstatechange = () => {
       if (this.#peer !== peer) return;
@@ -999,7 +1124,7 @@ export class RelayCallTransport {
       this.#connectionStateChanged(peer);
     };
     peer.ontrack = (event) => {
-      if (this.#peer === peer) this.#remoteTrack(event.track);
+      if (this.#peer === peer) this.#remoteTrack(event.track, event.transceiver);
     };
     await this.#publishLocalAudio(peer, restarts > 0);
   }
@@ -1021,10 +1146,12 @@ export class RelayCallTransport {
     const description = this.#localDescription(peer, "offer");
     const mid = this.#publishTransceiver?.mid;
     if (!mid) throw new RelayCallTransportError("Relay audio publication has no WebRTC MID.");
+    const videoMid = this.#video ? this.#videoTransceiver?.mid : undefined;
+    if (this.#video && !videoMid) throw new RelayCallTransportError("Relay video publication has no WebRTC MID.");
     this.#publishFrame = {
       type: "offer",
       session_description: description,
-      tracks: [{ mid, name: "audio" }],
+      tracks: videoMid ? [{ mid, name: "audio" }, { mid: videoMid, name: "video" }] : [{ mid, name: "audio" }],
       ...(restart ? { restart: true } : {}),
     };
     this.#room.send(this.#publishFrame);
@@ -1098,23 +1225,36 @@ export class RelayCallTransport {
     // Reconnecting the signaling socket replays the exact initial offer. Relay
     // returns its cached answer; applying that answer again in stable state is
     // invalid WebRTC signaling, so recognize and ignore the replay.
-    if (peer.signalingState === "stable" && this.#initialAnswerSdp === sdp) return;
+    if (peer.signalingState === "stable" && (this.#initialAnswerSdp === sdp || this.#lastAnswerSdp === sdp)) return;
     const initial = this.#initialAnswerSdp === undefined;
     if (initial) this.#recordRemoteCandidates(sdp);
     await peer.setRemoteDescription(frame.session_description);
     if (this.#peer !== peer) return;
     this.#initialAnswerSdp ??= sdp;
+    this.#lastAnswerSdp = sdp;
     if (initial && !this.#peerConnected) this.#armConnectTimer(peer);
+    if (this.#addTrackPending) {
+      this.#addTrackPending = false;
+      const deferred = this.#deferredOffer;
+      this.#deferredOffer = undefined;
+      if (deferred) await this.#serverOffer(deferred);
+    }
   }
 
   async #serverOffer(frame: CallRoomSubscriptionOfferFrame): Promise<void> {
     const peer = this.#peer;
+    // A pull offer that crosses this participant's add-track offer is for the
+    // live session: it is answered once the add-track answer is applied.
+    if (peer && this.#addTrackPending) {
+      this.#deferredOffer = frame;
+      return;
+    }
     // A pull offer that arrives while this participant's restart offer is
     // unanswered was sent for the replaced session: the room clears those
     // pulls on restart and pulls again after the new session connects.
     if (!peer || peer.signalingState === "have-local-offer") return;
-    // `video` m-lines are answered receive-only by the engine and never decoded
-    // (`#remoteTrack` takes audio only).
+    // `video` m-lines are answered receive-only; `#remoteTrack` decodes them
+    // when the engine has video.
     await peer.setRemoteDescription(frame.session_description);
     const answer = await peer.createAnswer();
     await peer.setLocalDescription(answer);
@@ -1247,7 +1387,13 @@ export class RelayCallTransport {
     this.#peer = undefined;
     this.#peerConnected = false;
     this.#publishTransceiver = undefined;
+    this.#videoTransceiver = undefined;
     this.#initialAnswerSdp = undefined;
+    this.#lastAnswerSdp = undefined;
+    this.#addTrackPending = false;
+    this.#deferredOffer = undefined;
+    this.#remoteVideoTrack?._detach();
+    this.#remoteVideoEngineTrack = undefined;
     if (this.#remoteSink) {
       this.#retiredSinkStats = this.#sinkStats();
       this.#remoteSink.stop();
@@ -1270,7 +1416,11 @@ export class RelayCallTransport {
    * decoded. That track keeps its sink, decoder and packet counts; a different
    * audio track retires the old sink's counts into the call totals, as a restart does.
    */
-  #remoteTrack(track: RelayMediaStreamTrackLike): void {
+  #remoteTrack(track: RelayMediaStreamTrackLike, transceiver?: unknown): void {
+    if (track.kind === "video") {
+      this.#subscribeRemoteVideo(track, transceiver);
+      return;
+    }
     if (track.kind !== "audio" || !this.#factory) return;
     if (this.#remoteSink && this.#remoteSinkTrack === track) return;
     if (this.#remoteSink) {
@@ -1300,6 +1450,25 @@ export class RelayCallTransport {
         this.#checkPeerAudio();
       }
     };
+  }
+
+  /**
+   * One `RemoteVideoTrack` per call; each new session's receiver is attached
+   * to it. werift fires `ontrack` again for every sending m-line on each
+   * `setRemoteDescription` (transceiverManager.js `setRemoteRTP`), so the
+   * track already being decoded keeps its receiver.
+   */
+  #subscribeRemoteVideo(track: RelayMediaStreamTrackLike, transceiver: unknown): void {
+    const factory = this.#factory;
+    if (!factory?.createVideoReceiver || this.#closed) return;
+    if (this.#remoteVideoEngineTrack === track) return;
+    this.#remoteVideoEngineTrack = track;
+    const receiver = factory.createVideoReceiver(track, transceiver);
+    const existing = this.#remoteVideoTrack;
+    const remote = existing ?? new RemoteVideoTrack();
+    this.#remoteVideoTrack = remote;
+    remote._attach(receiver);
+    if (!existing) this.#emit("trackSubscribed", remote);
   }
 
   #writeAudio(frame: RelayAudioFrame, generation: number): void {
@@ -1461,6 +1630,15 @@ export class RelayCallTransport {
     this.#remoteSinkTrack = undefined;
     this.#localTrack?.stop();
     this.#localTrack = undefined;
+    if (this.#video) {
+      this.#video.detach();
+      this.#video.sender.close();
+    }
+    const remoteVideo = this.#remoteVideoTrack;
+    if (remoteVideo) {
+      remoteVideo._end();
+      this.#emit("trackUnsubscribed", remoteVideo);
+    }
     if (this.#peer) closePeer(this.#peer);
     this.#peer = undefined;
     this.#audioSource = undefined;

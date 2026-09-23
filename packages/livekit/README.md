@@ -3,7 +3,7 @@
 `@relaymessenger/livekit` connects Relay Calls to TypeScript LiveKit Agents.
 Relay stays responsible for the Call resource and signaling; the package owns
 the Node WebRTC peer and translates audio between Relay and LiveKit `AudioFrame`
-objects. Application code does not handle Cloudflare, SDP, ICE, or SFU
+objects, and sends and receives video with LiveKit's video API. Application code does not handle Cloudflare, SDP, ICE, or SFU
 credentials.
 
 Install it next to the Relay SDK and the LiveKit Agents runtime:
@@ -86,6 +86,59 @@ await transport.writeAudio({
 });
 await transport.waitForPlayout();
 ```
+
+## Video
+
+Relay calls carry video whenever a camera is on. The video API copies
+LiveKit's `@livekit/rtc-node` names: `VideoSource`, `LocalVideoTrack`,
+`VideoFrame`, `VideoBufferType`, `VideoStream`. Video needs the default
+`"werift"` engine and the optional dependency `node-webcodecs` (prebuilt for
+macOS arm64 and Linux x64/arm64).
+
+Send a video feed:
+
+```ts
+import {
+  LocalVideoTrack,
+  VideoBufferType,
+  VideoFrame,
+  VideoSource,
+} from "@relaymessenger/livekit/transport";
+
+await transport.connect();
+
+const source = new VideoSource(640, 480);
+const track = LocalVideoTrack.createVideoTrack("camera", source);
+await transport.publishTrack(track, {
+  videoEncoding: { maxBitrate: 800_000, maxFramerate: 15 },
+});
+
+// RGBA, BGRA or I420 bytes, tightly packed.
+source.captureFrame(new VideoFrame(rgba, 640, 480, VideoBufferType.RGBA));
+
+// Camera off, then on again; the track stays negotiated.
+await transport.unpublishTrack(track);
+await transport.publishTrack(track);
+```
+
+Receive the other participant's video:
+
+```ts
+import { VideoBufferType, VideoStream } from "@relaymessenger/livekit/transport";
+
+transport.on("trackSubscribed", async (track) => {
+  const stream = new VideoStream(track, { format: VideoBufferType.RGBA, capacity: 2 });
+  for await (const { frame, timestampUs } of stream) {
+    // frame.data is width x height x 4 bytes of RGBA.
+  }
+});
+transport.on("remoteVideo", (on) => {
+  // The other participant's camera started or stopped sending.
+});
+```
+
+Frames are decoded only while a `VideoStream` is open. `transport.videoStats()`
+reports frames, packets, keyframes and decode errors in both directions.
 
 ## ICE servers, TURN, and diagnostics
 

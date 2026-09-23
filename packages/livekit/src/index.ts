@@ -12,6 +12,7 @@ export {
   RelayCallTransport,
   RelayCallTransportError,
   type RelayAudioFrame,
+  type RelayCallVideoStats,
   type RelayCallEngine,
   type RelayCallIceDiagnostics,
   type RelayCallInboundDiagnostics,
@@ -27,3 +28,19 @@ export {
   type RelayInboundAudioFormat,
 } from "./transport.js";
 export { createWeriftWebRTCFactory } from "./engine-werift.js";
+export {
+  LocalVideoTrack,
+  RemoteVideoTrack,
+  VideoBufferType,
+  VideoCodec,
+  VideoFrame,
+  VideoRotation,
+  VideoSource,
+  VideoStream,
+  type RelayVideoReceiverStats,
+  type RelayVideoSenderStats,
+  type TrackPublishOptions,
+  type VideoEncoding,
+  type VideoFrameEvent,
+  type VideoStreamOptions,
+} from "./video.js";
