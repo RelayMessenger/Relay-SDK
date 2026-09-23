@@ -22,7 +22,7 @@ export {
   type CallRoomEventMap,
   type CallRoomOptions,
   type CallRoomReconnectingEvent,
-} from "./call-room.js";
+} from "./calls/call-room.js";
 export {
   RelayAPIError,
   RelayWebhookConfiguredError,

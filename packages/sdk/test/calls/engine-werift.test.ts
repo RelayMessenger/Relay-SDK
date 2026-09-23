@@ -6,7 +6,7 @@ import {
   WERIFT_CHANNEL_COUNT,
   WERIFT_SAMPLE_RATE,
   createWeriftWebRTCFactory,
-} from "../src/engine-werift.js";
+} from "../../src/calls/engine-werift.js";
 
 /**
  * The werift audio source on a fake clock. Every RTP packet the source writes

@@ -7,7 +7,7 @@ import type {
   CallRoomStateFrame,
   CallRoomSubscriptionOfferFrame,
   Relay,
-} from "@relaymessenger/sdk";
+} from "../../src/index.js";
 import {
   RESTART_MAX_DELAY_MS,
   RelayCallTransport,
@@ -22,7 +22,7 @@ import {
   type RelayPeerConnectionConfig,
   type RelayPeerConnectionLike,
   type RelayWebRTCFactory,
-} from "../src/transport.js";
+} from "../../src/calls/transport.js";
 
 type RoomEvent = Extract<keyof CallRoomEventMap, string>;
 
@@ -210,6 +210,18 @@ const connectTransport = async (
   await connecting;
 };
 
+/** The person's roomState now lists `audio` in `receiving`: the transport stops holding application audio (PROTOCOL.md 6b). */
+const personReceivesAudio = (room: FakeRoom): void => {
+  room.emit("roomState", {
+    type: "roomState",
+    call: { id: "call", chat_id: "chat", status: "in-progress" },
+    participants: [
+      { contact_id: "user", kind: "user", attached: true, track: "audio", muted: false, connected: true, tracks: ["audio"], receiving: ["audio"] },
+      { contact_id: "agent", kind: "agent", attached: true, track: "audio", muted: false, connected: true },
+    ],
+  } as unknown as CallRoomStateFrame);
+};
+
 const makeTransport = (room: FakeRoom, webRTC: FakeWebRTC): RelayCallTransport =>
   new RelayCallTransport({
     relay: {} as Relay,
@@ -297,6 +309,7 @@ it("converts WebRTC sink/source PCM at the provider-neutral boundary", async () 
   nativeSamples[0] = 99;
   expect([...incoming[0]!]).toEqual([1, 2, 3, 4]);
 
+  personReceivesAudio(room);
   const outgoing = transport.writeAudio({
     samples: new Int16Array(960),
     sampleRate: 48_000,
@@ -528,6 +541,7 @@ it("counts packets both ways, room frames, and renders one clause per direction"
     opusPackets: 2050, rtpPackets: 2049, silencePackets: 300, firstRtpAt: connectedAt + 1_100,
     lastRtpAt: connectedAt + 41_000, recentRtpPackets: 249, queued: 1, pacerAlive: true,
   };
+  personReceivesAudio(room);
   const outgoing = transport.writeAudio({ samples: new Int16Array(1920), sampleRate: 48_000, channelCount: 1 });
   await vi.advanceTimersByTimeAsync(50);
   await outgoing;
@@ -547,12 +561,12 @@ it("counts packets both ways, room frames, and renders one clause per direction"
     frames: 4, opusPackets: 2050, rtpPackets: 2049, silencePackets: 300, firstPacketAtMs: 1_100,
     lastPacketAtMs: 41_000, recentRtpPackets: 249, queued: 1, pacerAlive: true,
   });
-  expect(diagnostics.room).toEqual({ roomStates: 2, offers: 1, endedReason: "completed", errors: ["media down"] });
+  expect(diagnostics.room).toEqual({ roomStates: 3, offers: 1, endedReason: "completed", errors: ["media down"] });
   expect(diagnostics.summary).toContain("in: 1234 rtp, 2 bad, 3 frames, first 0.9s last 41.2s, 250/5s");
   expect(diagnostics.summary).toContain(
     "out: 4 frames, 2050 opus, 2049 rtp, silence 300, first 1.1s last 41.0s, 249/5s, queue 1, pacer alive",
   );
-  expect(diagnostics.summary).toContain('room: 2 roomState, 1 offer, ended completed, error "media down"');
+  expect(diagnostics.summary).toContain('room: 3 roomState, 1 offer, ended completed, error "media down"');
   expect(errors).toHaveLength(1);
   transport.close();
 });
@@ -704,6 +718,7 @@ it("restarts onto a new session when the first never connects, and the same sour
   }]);
 
   // Audio written while the first session is dead goes into the one source.
+  personReceivesAudio(room);
   await transport.writeAudio({ samples: new Int16Array(480).fill(1), sampleRate: 48_000, channelCount: 1 });
   await vi.advanceTimersByTimeAsync(4_999);
   expect(webRTC.peers).toHaveLength(1);
@@ -738,7 +753,12 @@ it("restarts onto a new session when the first never connects, and the same sour
   expect(first.track).toBe(webRTC.source.track);
   expect(second.track).toBe(webRTC.source.track);
   expect(webRTC.source.track.stopped).toBe(false);
-  await transport.writeAudio({ samples: new Int16Array(480).fill(2), sampleRate: 48_000, channelCount: 1 });
+  // The restart reset `receiving`: audio is held until the person receives the new session.
+  const held = transport.writeAudio({ samples: new Int16Array(480).fill(2), sampleRate: 48_000, channelCount: 1 });
+  await flush();
+  expect(webRTC.source.data.map((frame) => frame.samples[0])).toEqual([1]);
+  personReceivesAudio(room);
+  await held;
   expect(webRTC.source.data.map((frame) => frame.samples[0])).toEqual([1, 2]);
 
   // The new peer's remote track feeds the same `audio` event.
@@ -1310,5 +1330,81 @@ it("rejects waitForSubscription when the Call ends first", async () => {
   const waiting = transport.waitForSubscription();
   room.emit("ended", { type: "ended", reason: "completed" });
   await expect(waiting).rejects.toThrow(/ended before the person received audio/u);
+  transport.close();
+});
+
+it("holds audio written before the person receives it, then queues all of it in write order; a restart holds again (PROTOCOL.md 6b)", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  webRTC.nextPeer.neverConnects = true;
+  const transport = makeTransport(room, webRTC);
+  const connecting = transport.connect();
+  await flush();
+  answerLatest(room);
+  await flush();
+  const slice = (value: number) => ({ samples: new Int16Array(480).fill(value), sampleRate: 48_000, channelCount: 1 });
+
+  // The greeting starts before the person's pull of the agent's audio lands.
+  const settled: number[] = [];
+  const writes = [1, 2, 3].map((value) => transport.writeAudio(slice(value)).then(() => settled.push(value)));
+  await flush();
+  expect(webRTC.source.data).toHaveLength(0);
+  expect(settled).toEqual([]);
+  expect(transport.queuedAudioMs()).toBe(30);
+  let playedOut = false;
+  const playout = transport.waitForPlayout().then(() => { playedOut = true; });
+
+  // A roomState that lists only video, or that came before the answer, releases nothing.
+  room.emit("roomState", roomStateFrame("in-progress", { tracks: ["audio"], receiving: ["video"] }));
+  await flush();
+  expect(webRTC.source.data).toHaveLength(0);
+  expect(playedOut).toBe(false);
+
+  personReceivesAudio(room);
+  await Promise.all(writes);
+  expect(webRTC.source.data.map((frame) => frame.samples[0])).toEqual([1, 2, 3]);
+  expect(settled).toEqual([1, 2, 3]);
+  // Written after the person receives the audio: queued at once, behind the held frames.
+  await transport.writeAudio(slice(4));
+  expect(webRTC.source.data.map((frame) => frame.samples[0])).toEqual([1, 2, 3, 4]);
+  await playout;
+  expect(playedOut).toBe(true);
+
+  // The first session never connects: the restart resets `receiving`, and audio is held again.
+  await vi.advanceTimersByTimeAsync(5_000);
+  const afterRestart = transport.writeAudio(slice(5));
+  await flush();
+  expect(webRTC.source.data).toHaveLength(4);
+  await vi.advanceTimersByTimeAsync(250);
+  await flush();
+  answerLatest(room, "relay-answer-2");
+  await flush();
+  expect(webRTC.source.data).toHaveLength(4);
+  personReceivesAudio(room);
+  await afterRestart;
+  expect(webRTC.source.data.map((frame) => frame.samples[0])).toEqual([1, 2, 3, 4, 5]);
+  transport.close();
+  await connecting.catch(() => undefined);
+});
+
+it("drops held audio on clearAudio(), the Call ending, or close(); every held write resolves", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  await connectTransport(transport, room);
+  const slice = { samples: new Int16Array(480), sampleRate: 48_000, channelCount: 1 };
+
+  const cleared = transport.writeAudio(slice);
+  transport.clearAudio();
+  await cleared;
+  expect(transport.queuedAudioMs()).toBe(0);
+
+  const ended = transport.writeAudio(slice);
+  room.emit("ended", { type: "ended", reason: "completed" });
+  await ended;
+
+  personReceivesAudio(room);
+  expect(webRTC.source.data).toHaveLength(0);
   transport.close();
 });

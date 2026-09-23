@@ -20320,7 +20320,7 @@ var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 var wrapper_default = import_websocket.default;
 
-// node_modules/@relaymessenger/sdk/dist/call-room.js
+// node_modules/@relaymessenger/sdk/dist/calls/call-room.js
 var DEFAULT_HEARTBEAT_INTERVAL_MS = 5e3;
 var MIN_RECONNECTION_DELAY_MS = 3e3;
 var RECONNECTION_DELAY_GROW_FACTOR = 1.3;
@@ -23858,7 +23858,7 @@ var RelayStateStore = class {
 };
 
 // server.ts
-var VERSION = true ? "0.3.9-staging.23" : createRequire(import.meta.url)("./package.json").version;
+var VERSION = true ? "0.3.9-staging.24" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);

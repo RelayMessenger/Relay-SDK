@@ -1,7 +1,7 @@
 {
   "name": "@relaymessenger/sdk",
-  "version": "0.3.6-staging.23",
-  "description": "TypeScript SDK for the Relay v1 messaging API and signed webhooks.",
+  "version": "0.3.6-staging.24",
+  "description": "TypeScript SDK for the Relay v1 messaging API, signed webhooks, and Relay Calls.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,6 +10,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./calls": {
+      "types": "./dist/calls/index.d.ts",
+      "import": "./dist/calls/index.js",
+      "default": "./dist/calls/index.js"
     },
     "./package.json": "./package.json"
   },
@@ -34,6 +39,35 @@
   "dependencies": {
     "standardwebhooks": "^1.1.1",
     "ws": "^8.21.3"
+  },
+  "peerDependencies": {
+    "@evan/opus": "1.0.3",
+    "@roamhq/wrtc": "^0.10.0",
+    "node-webcodecs": "1.3.0",
+    "rtp-packet": "0.4.2",
+    "werift": "0.24.4"
+  },
+  "peerDependenciesMeta": {
+    "@evan/opus": {
+      "optional": true
+    },
+    "@roamhq/wrtc": {
+      "optional": true
+    },
+    "node-webcodecs": {
+      "optional": true
+    },
+    "rtp-packet": {
+      "optional": true
+    },
+    "werift": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@evan/opus": "1.0.3",
+    "rtp-packet": "0.4.2",
+    "werift": "0.24.4"
   },
   "publishConfig": {
     "access": "public",

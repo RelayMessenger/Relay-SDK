@@ -325,6 +325,49 @@ try {
       assert.equal(RELAY_WEBHOOK_EVENT_TYPES.includes("chat.activity.updated"), false);
     `,
   ], { cwd: consumer, stdio: "inherit" });
+
+  // `@relaymessenger/sdk/calls`: the WebRTC packages are optional peer
+  // dependencies (ws's bufferutil/utf-8-validate pattern), so the install
+  // above brought none of them and the root entry loaded without them. The
+  // subpath loads once the consumer installs them.
+  const callsPeers = Object.keys(packageManifest.peerDependenciesMeta ?? {});
+  for (const peer of ["werift", "@evan/opus", "rtp-packet"]) {
+    assert.equal(callsPeers.includes(peer), true, `${peer} is not an optional peer`);
+    assert.throws(
+      () => readFileSync(resolve(consumer, "node_modules", ...peer.split("/"), "package.json")),
+      `${peer} was installed without being asked for`,
+    );
+  }
+  runNpm([
+    "install",
+    "--ignore-scripts",
+    "--no-audit",
+    "--no-fund",
+    ...["werift", "@evan/opus", "rtp-packet"].map(
+      (peer) => `${peer}@${packageManifest.peerDependencies[peer]}`,
+    ),
+  ], { cwd: consumer, stdio: "ignore" });
+  execFileSync(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    `
+      import assert from "node:assert/strict";
+      import {
+        RelayCallTransport,
+        RelayCallTransportError,
+        VideoFrame,
+        VideoSource,
+        VideoStream,
+        createWeriftWebRTCFactory,
+      } from "@relaymessenger/sdk/calls";
+      for (const value of [RelayCallTransport, RelayCallTransportError, VideoFrame, VideoSource, VideoStream]) {
+        assert.equal(typeof value, "function");
+      }
+      const factory = createWeriftWebRTCFactory();
+      assert.equal(typeof factory.createPeerConnection, "function");
+      assert.equal(typeof factory.createVideoSender, "function");
+    `,
+  ], { cwd: consumer, stdio: "inherit" });
   console.log(JSON.stringify({
     ok: true,
     tarball: tarballs[0],

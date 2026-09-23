@@ -2,11 +2,11 @@
 
 Python twin of the npm package ``@relaymessenger/livekit`` plus the call-room
 client of ``@relaymessenger/sdk``, over Relay's public API only. The call
-core (room, media peer, audio, video) is ``relaymessenger-calls``.
+core (room, media peer, audio, video) is ``relaymessenger.calls``.
 """
 
-from relaymessenger_calls._engine import RelayIceServer
-from relaymessenger_calls.room import (
+from relaymessenger.calls._engine import RelayIceServer
+from relaymessenger.calls.room import (
     CallRoom,
     CallRoomCloseEvent,
     CallRoomError,

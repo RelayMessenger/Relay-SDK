@@ -6,18 +6,18 @@ import asyncio
 from typing import Any, Callable, Optional
 
 import pytest
-from livekit import rtc
 
-from relaymessenger_livekit import transport as transport_module
-from relaymessenger_livekit._engine import PeerConfig
-from relaymessenger_livekit.transport import RelayCallTransport, RelayCallTransportError, restart_delay_ms
-from relaymessenger_livekit.video import LocalVideoTrack, VideoSource
+from relaymessenger.calls import EventEmitter
+from relaymessenger.calls import transport as transport_module
+from relaymessenger.calls._engine import PeerConfig
+from relaymessenger.calls.transport import RelayCallTransport, RelayCallTransportError, restart_delay_ms
+from relaymessenger.calls.video import LocalVideoTrack, VideoSource
 
 PERSON = {"contact_id": "u", "kind": "user", "attached": True, "track": "audio", "muted": False, "connected": True}
 AGENT = {**PERSON, "contact_id": "a", "kind": "agent"}
 
 
-class FakeRoom(rtc.EventEmitter[str]):
+class FakeRoom(EventEmitter[str]):
     def __init__(self) -> None:
         super().__init__()
         self.sent: list[dict[str, Any]] = []
@@ -81,7 +81,7 @@ class FakeTransceiver:
         self.codecs = codecs
 
 
-class FakePeer(rtc.EventEmitter[str]):
+class FakePeer(EventEmitter[str]):
     instances: list["FakePeer"] = []
 
     def __init__(self, config: PeerConfig) -> None:
@@ -325,7 +325,7 @@ async def test_an_audio_video_answer_gives_the_real_peer_its_candidates() -> Non
     # aiortc hands the shared transport the LAST bundled section's candidates
     # (aiortc issue 1437); Cloudflare puts them only in the first, so without
     # addIceCandidate the peer never sends a connectivity check.
-    from relaymessenger_calls._engine import create_peer_connection
+    from relaymessenger.calls._engine import create_peer_connection
 
     room = FakeRoom()
     room.ice_servers = []
@@ -359,7 +359,7 @@ async def test_write_audio_slices_into_10_ms_and_validates() -> None:
 
     transport, room = make()
     await (await connected(transport, room))
-    from relaymessenger_livekit.transport import RelayAudioFrame
+    from relaymessenger.calls.transport import RelayAudioFrame
 
     await transport.write_audio(RelayAudioFrame(np.zeros(24_000 * 25 // 1000, dtype=np.int16), 24_000, 1))
     assert transport.diagnostics().outbound.frames == 3  # 25 ms -> three 10 ms slices, the last padded
@@ -394,11 +394,10 @@ def test_only_public_aiortc_options_no_relay_policy_and_no_candidate_pair() -> N
     import dataclasses
     import inspect
 
-    from relaymessenger_livekit import RelayCallDiagnostics, RelayLiveKitCall
+    from relaymessenger.calls import RelayCallDiagnostics
 
     # aiortc has no public iceTransportPolicy and no public selected candidate pair.
     assert "ice_transport_policy" not in inspect.signature(RelayCallTransport).parameters
-    assert "ice_transport_policy" not in inspect.signature(RelayLiveKitCall.connect).parameters
     assert "selected_pair" not in {f.name for f in dataclasses.fields(RelayCallDiagnostics)}
 
 
@@ -520,7 +519,6 @@ async def test_subscribed_needs_receiving_audio_after_this_peers_answer_and_a_re
     transport, room = make(session_connect_timeout_ms=30)
     task = asyncio.ensure_future(transport.connect())
     await settle()
-    waited = asyncio.ensure_future(transport.wait_for_subscription())
     # Before the publish answer, a receiving audio entry does not count.
     room.emit("room_state", receiving_state(["audio"]))
     assert transport.subscribed is False
@@ -529,7 +527,7 @@ async def test_subscribed_needs_receiving_audio_after_this_peers_answer_and_a_re
     assert transport.subscribed is False
     room.emit("room_state", receiving_state(["audio"]))
     await settle()
-    assert transport.subscribed is True and waited.done()
+    assert transport.subscribed is True
     room.emit("room_state", receiving_state([]))
     assert transport.subscribed is False
     room.emit("room_state", receiving_state(["audio"]))
@@ -547,13 +545,65 @@ async def test_subscribed_needs_receiving_audio_after_this_peers_answer_and_a_re
     await transport.aclose()
 
 
-async def test_wait_for_subscription_raises_when_the_call_ends_first() -> None:
+def tagged(value: int) -> Any:
+    """20 ms of 48 kHz mono PCM, one Opus packet, every sample ``value``."""
+    import numpy as np
+
+    from relaymessenger.calls import RelayAudioFrame
+
+    return RelayAudioFrame(np.full(960, value, dtype=np.int16), 48_000, 1)
+
+
+async def pull(peer: FakePeer, n: int) -> list[bytes]:
+    """What the peer's audio sender would put on the wire next: ``n`` paced packets."""
+    track = peer.transceivers[0].sender.track
+    return [bytes(await track.recv()) for _ in range(n)]
+
+
+async def test_audio_is_held_until_the_person_receives_it_then_plays_from_the_start() -> None:
     transport, room = make()
-    task = await connected(transport, room)
-    await task
-    waiting = asyncio.ensure_future(transport.wait_for_subscription())
+    await (await connected(transport, room))
+    source = transport._source
+    assert source is not None
+    silence = source._silence
+    for value in (1000, 2000, 3000):
+        await transport.write_audio(tagged(value))
+    queued = list(source._packets)
+    assert len(queued) == 3
+    # Not receiving yet: silence goes out and nothing queued is dropped.
+    assert await pull(FakePeer.instances[0], 4) == [silence] * 4
+    assert transport.queued_audio_ms() == 60
+    assert transport.diagnostics().outbound.held is True
+    assert transport.diagnostics().outbound.rtp_packets == 0
+    room.emit("room_state", receiving_state(["audio"]))
+    # Receiving: the queue plays from its first packet, in order, then silence again.
+    assert await pull(FakePeer.instances[0], 4) == [*queued, silence]
+    out = transport.diagnostics().outbound
+    assert out.held is False and out.rtp_packets == 3 and out.first_audio_at_ms is not None
+    await transport.aclose()
+
+
+async def test_clearing_held_audio_drops_it_and_a_restart_holds_audio_again() -> None:
+    transport, room = make()
+    await (await connected(transport, room))
+    source = transport._source
+    assert source is not None
+    silence = source._silence
+    await transport.write_audio(tagged(1000))
+    transport.clear_audio()  # the speech was interrupted before the person could hear it
+    room.emit("room_state", receiving_state(["audio"]))
+    assert await pull(FakePeer.instances[0], 2) == [silence] * 2
+    # The session fails: the person's pull of it is gone, so audio is held until the new one is pulled.
+    FakePeer.instances[0].set_state("failed")
+    await until(lambda: len(FakePeer.instances) == 2)
+    await transport.write_audio(tagged(2000))
+    await transport.write_audio(tagged(3000))
+    queued = list(source._packets)
+    assert await pull(FakePeer.instances[1], 3) == [silence] * 3
     await settle()
-    room.emit("ended", {"type": "ended", "reason": "completed"})
-    with pytest.raises(RelayCallTransportError, match="ended before the person received audio"):
-        await waiting
+    room.emit("answer", answer("v=0 second\r\n"))
+    await settle()
+    assert await pull(FakePeer.instances[1], 2) == [silence] * 2
+    room.emit("room_state", receiving_state(["audio"]))
+    assert await pull(FakePeer.instances[1], 3) == [*queued, silence]
     await transport.aclose()

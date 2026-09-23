@@ -11,7 +11,7 @@ import type {
   RelayPeerConnectionConfig,
   RelayPeerConnectionLike,
   RelayWebRTCFactory,
-} from "../src/transport.js";
+} from "@relaymessenger/sdk/calls";
 
 /**
  * Transport stand-in with an engine-shaped queue: `writeAudio` accepts at once,
@@ -23,19 +23,21 @@ class FakeTransport {
   clears = 0;
   queuedMs = 0;
   readonly waiters = new Set<() => void>();
-  /** The person is receiving the agent's audio; `hold()` makes a test start before it is. */
-  subscribed = true;
-  readonly subscriptionWaiters = new Set<() => void>();
+  /**
+   * Models the real transport's hold (PROTOCOL.md 6b): while `holding`, a write
+   * waits and resolves when `subscribe()` queues it, or when `clearAudio()` drops it.
+   */
+  holding = false;
+  readonly held: Array<{ frame: RelayAudioFrame; resolve: () => void }> = [];
 
-  hold(): void { this.subscribed = false; }
-  /** The person's roomState `receiving` now contains `audio`. */
+  hold(): void { this.holding = true; }
+  /** The person's roomState `receiving` now contains `audio`: held writes are queued in order. */
   subscribe(): void {
-    this.subscribed = true;
-    for (const resolve of [...this.subscriptionWaiters]) { this.subscriptionWaiters.delete(resolve); resolve(); }
-  }
-  waitForSubscription(): Promise<void> {
-    if (this.subscribed) return Promise.resolve();
-    return new Promise((resolve) => this.subscriptionWaiters.add(resolve));
+    this.holding = false;
+    for (const entry of this.held.splice(0)) {
+      this.#queue(entry.frame);
+      entry.resolve();
+    }
   }
 
   on(event: string, listener: (frame: RelayAudioFrame) => void): this {
@@ -50,9 +52,14 @@ class FakeTransport {
     for (const listener of this.listeners) listener(frame);
   }
   writeAudio(frame: RelayAudioFrame): Promise<void> {
-    this.writes.push({ ...frame, samples: frame.samples.slice() });
-    this.queuedMs += (frame.samples.length / frame.channelCount / frame.sampleRate) * 1_000;
+    const copy = { ...frame, samples: frame.samples.slice() };
+    if (this.holding) return new Promise((resolve) => this.held.push({ frame: copy, resolve }));
+    this.#queue(copy);
     return Promise.resolve();
+  }
+  #queue(frame: RelayAudioFrame): void {
+    this.writes.push(frame);
+    this.queuedMs += (frame.samples.length / frame.channelCount / frame.sampleRate) * 1_000;
   }
   queuedAudioMs(): number { return this.queuedMs; }
   waitForPlayout(): Promise<void> {
@@ -61,6 +68,7 @@ class FakeTransport {
   }
   clearAudio(): void {
     this.clears += 1;
+    for (const entry of this.held.splice(0)) entry.resolve();
     this.queuedMs = 0;
     this.#release();
   }
@@ -418,7 +426,7 @@ it("delivers every inbound frame in order when the transport emits faster than t
   await input.close();
 });
 
-it("holds speech until the person receives the agent's audio, then plays all of it from the start (LiveKit capture_frame waits for subscription)", async () => {
+it("waits while the transport holds speech, then reports playback started once it is queued (LiveKit capture_frame waits for subscription)", async () => {
   const transport = new FakeTransport();
   transport.hold();
   const output = new RelayAudioOutput(transport as unknown as RelayCallTransport);
@@ -438,7 +446,7 @@ it("holds speech until the person receives the agent's audio, then plays all of 
   output.close();
 });
 
-it("drops a frame held for subscription when the speech is interrupted meanwhile", async () => {
+it("counts nothing for a frame the transport dropped while holding it, when the speech is interrupted", async () => {
   const transport = new FakeTransport();
   transport.hold();
   const output = new RelayAudioOutput(transport as unknown as RelayCallTransport);

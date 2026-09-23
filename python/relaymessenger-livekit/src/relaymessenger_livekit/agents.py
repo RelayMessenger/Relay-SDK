@@ -16,7 +16,7 @@ from typing import Any, Optional, Union
 from livekit import rtc
 from livekit.agents.utils import aio
 from livekit.agents.voice.io import AudioInput, AudioOutput, AudioOutputCapabilities, VideoInput
-from relaymessenger_calls.room import DEFAULT_BASE_URL, CallRoom
+from relaymessenger.calls.room import DEFAULT_BASE_URL, CallRoom
 
 from .transport import (
     RESTART_CONNECT_TIMEOUT_MS,
@@ -143,11 +143,13 @@ class RelayAudioOutput(AudioOutput):
     """LiveKit Agents output that publishes TTS PCM to the Relay participant.
 
     Semantics of `_ParticipantAudioOutput` (room_io/_output.py):
-    `capture_frame` waits until the person is receiving the agent's audio, then
-    hands the frame to the transport and returns without
+    `capture_frame` hands the frame to the transport and returns without
     waiting for playout; `flush()` starts a playout task that reports
     `on_playback_finished` only once the transport has drained; `clear_buffer()`
     ends that task as ``interrupted=True`` with the position actually played.
+    The transport holds the audio until the person is receiving it (the wait
+    `_ParticipantAudioOutput` does on ``_subscribed_fut``), so a greeting
+    starts from its first word.
     """
 
     def __init__(self, transport: RelayCallTransport, sample_rate: int = DEFAULT_OUTPUT_SAMPLE_RATE) -> None:
@@ -166,25 +168,11 @@ class RelayAudioOutput(AudioOutput):
         #: (`_ParticipantAudioOutput._interrupted_event`).
         self._interrupted_event = asyncio.Event()
         self._interrupted_ms = 0.0
-        #: Bumped by `clear_buffer()`; a frame held for subscription across it is dropped.
-        self._interruption_generation = 0
         self._closed = False
 
     async def capture_frame(self, frame: rtc.AudioFrame) -> None:
-        """Play ``frame`` once the person is receiving the agent's audio.
-
-        Copy of `_ParticipantAudioOutput.capture_frame` (room_io/_output.py),
-        which awaits ``_subscribed_fut`` (set by
-        ``publication.wait_for_subscription()``) before its first frame. The
-        transport sends silence meanwhile; nothing captured is skipped.
-        """
         if self._closed:
             raise RuntimeError("Relay LiveKit audio output is closed.")
-        generation = self._interruption_generation
-        if not self._transport.subscribed:
-            await self._transport.wait_for_subscription()
-            if generation != self._interruption_generation:
-                return
         await super().capture_frame(frame)
         if self._flush_task is not None and not self._flush_task.done():
             logger.error("capture_frame called while flush is in progress")
@@ -212,7 +200,6 @@ class RelayAudioOutput(AudioOutput):
         self._flush_task = asyncio.get_running_loop().create_task(self._wait_for_playout())
 
     def clear_buffer(self) -> None:
-        self._interruption_generation += 1
         queued_ms = self._transport.queued_audio_ms()
         self._transport.clear_audio()
         if self._interrupted_event.is_set():

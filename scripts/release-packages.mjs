@@ -46,6 +46,10 @@ export const releasePackages = {
           default: true,
         },
       ],
+      // `/calls` needs the optional peer dependencies (werift, @evan/opus,
+      // rtp-packet), which a bare install of the SDK does not bring; the
+      // `livekit` smoke below imports it next to `@relaymessenger/livekit`,
+      // whose dependencies install them.
     },
   },
   livekit: {
@@ -58,17 +62,23 @@ export const releasePackages = {
         {
           specifier: "@relaymessenger/livekit",
           named: [
+            "LIVEKIT_ROOM_INPUT_AUDIO",
             "RelayAudioInput",
             "RelayAudioOutput",
-            "RelayCallTransport",
-            "RelayCallTransportError",
             "RelayLiveKitCall",
             "createRelayLiveKitAudio",
           ],
         },
         {
-          specifier: "@relaymessenger/livekit/transport",
-          named: ["RelayCallTransport", "RelayCallTransportError"],
+          specifier: "@relaymessenger/sdk/calls",
+          named: [
+            "RelayCallTransport",
+            "RelayCallTransportError",
+            "VideoFrame",
+            "VideoSource",
+            "VideoStream",
+            "createWeriftWebRTCFactory",
+          ],
         },
       ],
     },

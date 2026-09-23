@@ -1,15 +1,15 @@
 import { expect, it } from "vitest";
-import type { CallRoom, CallRoomEventMap, CallRoomIceServer, CallRoomStateFrame, Relay } from "@relaymessenger/sdk";
+import type { CallRoom, CallRoomEventMap, CallRoomIceServer, CallRoomStateFrame, Relay } from "../../src/index.js";
 import {
   RelayCallTransport,
   type RelayMediaStreamTrackLike,
   type RelayPeerConnectionLike,
-} from "../src/transport.js";
+} from "../../src/calls/transport.js";
 import {
   WERIFT_CHANNEL_COUNT,
   WERIFT_SAMPLE_RATE,
   createWeriftWebRTCFactory,
-} from "../src/engine-werift.js";
+} from "../../src/calls/engine-werift.js";
 
 /**
  * Real loopback: two werift peer connections on this machine, offer/answer
@@ -46,6 +46,16 @@ const waitForConnected = (peer: RelayPeerConnectionLike): Promise<void> =>
       }
     };
   });
+
+/** The person's roomState lists `audio` in `receiving`: the transport stops holding application audio (PROTOCOL.md 6b). */
+const personReceivingAudio = {
+  type: "roomState",
+  call: { id: "call", chat_id: "chat", status: "in-progress" },
+  participants: [
+    { contact_id: "user", kind: "user", attached: true, track: "audio", muted: false, connected: true, tracks: ["audio"], receiving: ["audio"] },
+    { contact_id: "agent", kind: "agent", attached: true, track: "audio", muted: false, connected: true },
+  ],
+} as unknown as CallRoomStateFrame;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -368,6 +378,7 @@ it("counts RTP both ways in diagnostics() over a werift loopback through the tra
 
   // Push the whole second at once (LiveKit pushes faster than real time); the
   // engine's 20 ms pump paces the wire and waitForPlayout() reports the drain.
+  room.emit("roomState", personReceivingAudio);
   const pushStarted = performance.now();
   for (let slice = 0; slice < SLICES; slice += 1) {
     await transport.writeAudio({
@@ -410,8 +421,8 @@ it("counts RTP both ways in diagnostics() over a werift loopback through the tra
   expect(diagnostics.inbound.frames).toBe(diagnostics.inbound.rtpPackets);
   expect(inbound.length).toBeGreaterThan(40);
   expect(decoded.length).toBeGreaterThan(40);
-  expect(diagnostics.room).toEqual({ roomStates: 0, offers: 1, endedReason: undefined, errors: [] });
-  expect(diagnostics.summary).toMatch(/in: \d+ rtp, 0 bad, \d+ frames, first \d+\.\ds last \d+\.\ds, \d+\/5s; out: 100 frames, 50 opus, 50 rtp, silence \d+, first \d+\.\ds last \d+\.\ds, \d+\/5s, queue 0, pacer alive; room: 0 roomState, 1 offer/);
+  expect(diagnostics.room).toEqual({ roomStates: 1, offers: 1, endedReason: undefined, errors: [] });
+  expect(diagnostics.summary).toMatch(/in: \d+ rtp, 0 bad, \d+ frames, first \d+\.\ds last \d+\.\ds, \d+\/5s; out: 100 frames, 50 opus, 50 rtp, silence \d+, first \d+\.\ds last \d+\.\ds, \d+\/5s, queue 0, pacer alive; room: 1 roomState, 1 offer/);
 }, 30_000);
 
 /** A werift peer playing the SFU: answers the transport's publish offer. */
@@ -467,6 +478,7 @@ it("restarts onto a new werift session when the first never connects; the tone r
     channelCount: WERIFT_CHANNEL_COUNT,
   });
   sink.ondata = (data) => decoded.push(data.samples);
+  room.emit("roomState", personReceivingAudio);
   for (let slice = 0; slice < SLICES; slice += 1) {
     await transport.writeAudio({
       samples: sineSlice(slice, TONE_AMPLITUDE),

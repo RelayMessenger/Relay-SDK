@@ -5,8 +5,8 @@ import {
   VideoFrameAssembler,
   createVideoPacketizer,
   splitAnnexB,
-} from "../src/video-rtp.js";
-import { VideoBufferType, VideoFrame } from "../src/video-frame.js";
+} from "../../src/calls/video-rtp.js";
+import { VideoBufferType, VideoFrame } from "../../src/calls/video-frame.js";
 
 /** Parse an RTP buffer from the packetizer into the fields the assembler reads (RFC 3550 section 5.1). */
 const parse = (buffer: Buffer): VideoRtpPacket & { payloadType: number } => ({

@@ -13,8 +13,8 @@ import type {
   CallRoomStateFrame,
   CallRoomSubscriptionOfferFrame,
   CallTerminalStatus,
-} from "./types.js";
-import type { WebSocketConstructor, WebSocketLike } from "./websocket.js";
+} from "../types.js";
+import type { WebSocketConstructor, WebSocketLike } from "../websocket.js";
 
 /** Orange Meets heartbeat cadence (`app/hooks/useRoom.ts`, 5_000 ms). */
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000;

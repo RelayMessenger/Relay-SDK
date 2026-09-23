@@ -1,6 +1,6 @@
 """Relay's call transport, with the other participant's camera as LiveKit frames.
 
-The transport itself lives in `relaymessenger_calls.transport`, shared with
+The transport itself lives in `relaymessenger.calls.transport`, shared with
 every framework adapter. This module keeps the import path and the names, and
 makes `RelayCallTransport.remote_video_track` a LiveKit-shaped
 `RemoteVideoTrack` whose `VideoStream` yields `rtc.VideoFrameEvent`.
@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import Optional, cast
 
-from relaymessenger_calls import transport as _calls
-from relaymessenger_calls.transport import (
+from relaymessenger.calls import transport as _calls
+from relaymessenger.calls.transport import (
     ACTIVE_CALL_STATUSES,
     AUDIO_SLICE_MS,
     DEFAULT_ICE_GATHERING_TIMEOUT_MS,

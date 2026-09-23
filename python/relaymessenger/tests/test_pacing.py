@@ -9,9 +9,9 @@ import av
 import numpy as np
 import pytest
 
-from relaymessenger_livekit import _audio
-from relaymessenger_livekit._audio import RelayAudioSource
-from relaymessenger_livekit._audio_format import MAX_CATCH_UP_MS, PACKET_MS, RtpAudioPacer
+from relaymessenger.calls import _audio
+from relaymessenger.calls._audio import RelayAudioSource
+from relaymessenger.calls._audio_format import MAX_CATCH_UP_MS, PACKET_MS, RtpAudioPacer
 
 
 class FakeClock:

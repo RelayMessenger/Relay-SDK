@@ -34,15 +34,15 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npm audit signatures
 
-  # relaymessenger-calls, the framework-neutral Python call core under the
-  # LiveKit and Pipecat packages: types and unit tests on Linux from the locked
-  # environment, then a wheel and sdist build. Nothing is published.
-  python-calls:
+  # relaymessenger, the Python SDK (its calls extra is the call core under the
+  # LiveKit and Pipecat packages): types and unit tests on Linux from the
+  # locked environment, then a wheel and sdist build. Nothing is published.
+  python-sdk:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: python/relaymessenger-calls
+        working-directory: python/relaymessenger
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

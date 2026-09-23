@@ -1,17 +1,20 @@
-# `relaymessenger-calls`
+# `relaymessenger`
 
-Join a Relay Call from Python as the agent, and send and receive audio and
-video. This is the framework-neutral core under `relaymessenger-livekit` and
-`relaymessenger-pipecat`; use one of those to connect a voice framework.
+The Relay SDK for Python, the twin of the npm package `@relaymessenger/sdk`.
+`relaymessenger.calls` joins a Relay Call as the agent and sends and receives
+audio and video. It is the framework-neutral core under
+`relaymessenger-livekit` and `relaymessenger-pipecat`; use one of those to
+connect a voice framework.
 
 ```sh
-pip install relaymessenger-calls
+pip install 'relaymessenger[calls]'
 ```
 
-Python 3.10 or newer. It uses only Relay's public API: the Call room
-WebSocket (`GET /v1/calls/{callId}/room`) with the agent's token. The package
-owns the WebRTC peer (aiortc), so your code never handles SDP, ICE, or SFU
-credentials.
+The `calls` extra installs the media dependencies (aiortc, av, numpy), the
+way `livekit-agents[images]` does. Python 3.10 or newer. It uses only Relay's
+public API: the Call room WebSocket (`GET /v1/calls/{callId}/room`) with the
+agent's token. The package owns the WebRTC peer (aiortc), so your code never
+handles SDP, ICE, or SFU credentials.
 
 ## Answer a Call
 
@@ -21,7 +24,7 @@ Joining the Call's room answers it:
 ```python
 import os
 
-from relaymessenger_calls import RelayCallTransport
+from relaymessenger.calls import RelayCallTransport
 
 
 async def answer(call_id: str) -> RelayCallTransport:
@@ -37,12 +40,14 @@ function that returns one per attempt, to use your own TURN credentials.
 ## Exchange audio
 
 The person's audio arrives as `audio` events of PCM16. Send yours with
-`write_audio`; a 20 ms pacer sets the pace on the wire:
+`write_audio`; a 20 ms pacer sets the pace on the wire. Until the person is
+receiving your audio, what you write is held and silence goes out; it then
+plays from the start, so a greeting written early is heard whole:
 
 ```python
 import numpy as np
 
-from relaymessenger_calls import RelayAudioFrame
+from relaymessenger.calls import RelayAudioFrame
 
 
 @call.on("audio")
@@ -65,7 +70,7 @@ camera from `track_subscribed`. Publish before `connect()` to send the camera
 with the audio from the first offer; publishing later adds it to the session:
 
 ```python
-from relaymessenger_calls import LocalVideoTrack, RelayVideoFrame, VideoSource, VideoStream
+from relaymessenger.calls import LocalVideoTrack, RelayVideoFrame, VideoSource, VideoStream
 
 source = VideoSource(640, 480)
 await call.publish_track(LocalVideoTrack.create_video_track("camera", source))
