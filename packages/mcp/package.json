@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/mcp",
-  "version": "0.1.7-staging.25",
+  "version": "0.1.7-staging.26",
   "description": "Local MCP v2 stdio server for current Relay messaging tools.",
   "type": "module",
   "bin": {
@@ -45,7 +45,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
-    "@relaymessenger/sdk": "0.3.6-staging.25",
+    "@relaymessenger/sdk": "0.3.6-staging.26",
     "minisearch": "7.2.0",
     "quickjs-emscripten": "0.32.0",
     "typescript": "5.9.3",
