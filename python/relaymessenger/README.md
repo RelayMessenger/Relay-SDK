@@ -88,4 +88,8 @@ def _camera(track) -> None:
 or `rgb24` bytes. `VideoSource.capture_frame` also takes an `av.VideoFrame`.
 Until the first `capture_frame`, a published camera sends one black frame a
 second, as Cloudflare's PartyTracks does: the SFU forwards only a track that
-has sent packets.
+has sent packets. When the person starts receiving the camera, and on every
+keyframe request from the SFU, the next frame is a keyframe; if no frame went
+out in the last 1/30 s, the latest frame is sent again at once, so a camera
+that sends a frame a second shows its picture without waiting for its next
+frame.

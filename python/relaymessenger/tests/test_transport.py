@@ -11,6 +11,7 @@ from relaymessenger.calls import EventEmitter
 from relaymessenger.calls import transport as transport_module
 from relaymessenger.calls._engine import PeerConfig
 from relaymessenger.calls.transport import RelayCallTransport, RelayCallTransportError, restart_delay_ms
+from relaymessenger.calls import video as video_module
 from relaymessenger.calls.video import LocalVideoTrack, VideoSource
 
 PERSON = {"contact_id": "u", "kind": "user", "attached": True, "track": "audio", "muted": False, "connected": True}
@@ -67,6 +68,10 @@ class Desc:
 class FakeSender:
     def __init__(self, track: Any) -> None:
         self.track = track
+        self.keyframes_forced = 0
+
+    def _send_keyframe(self) -> None:  # aiortc's RTCRtpSender: the next encoded frame is a keyframe
+        self.keyframes_forced += 1
 
     def replaceTrack(self, track: Any) -> None:
         self.track = track
@@ -541,6 +546,34 @@ async def test_subscribed_needs_receiving_audio_after_this_peers_answer_and_a_re
     assert transport.subscribed is False
     room.emit("room_state", receiving_state(["audio"]))
     assert transport.subscribed is True
+    task.cancel()
+    await transport.aclose()
+
+
+async def test_the_camera_sends_a_keyframe_when_the_person_starts_receiving_it() -> None:
+    transport, room = make(session_connect_timeout_ms=30)
+    await transport.publish_track(LocalVideoTrack.create_video_track("camera", VideoSource(64, 48)))
+    task = asyncio.ensure_future(transport.connect())
+    await settle()
+    video_sender = lambda: FakePeer.instances[-1].transceivers[1].sender  # noqa: E731
+    room.emit("room_state", receiving_state(["audio", "video"]))  # before the publish answer: not this session
+    room.emit("answer", answer())
+    await settle()
+    assert video_sender().keyframes_forced == 0
+    # The SFU's PLI and FIR reach the camera too (`serve_keyframe_requests`).
+    assert isinstance(video_sender()._send_keyframe, video_module._KeyframeRequests)
+    room.emit("room_state", receiving_state(["audio"]))
+    assert video_sender().keyframes_forced == 0
+    room.emit("room_state", receiving_state(["audio", "video"]))
+    room.emit("room_state", receiving_state(["audio", "video"]))
+    assert video_sender().keyframes_forced == 1  # once, when the person starts receiving it
+    # The session never connects (30 ms): the new session's pull asks again.
+    await until(lambda: len(FakePeer.instances) == 2)
+    await settle()
+    room.emit("answer", answer("v=0 second\r\n"))
+    await settle()
+    room.emit("room_state", receiving_state(["audio", "video"]))
+    assert video_sender().keyframes_forced == 1
     task.cancel()
     await transport.aclose()
 
