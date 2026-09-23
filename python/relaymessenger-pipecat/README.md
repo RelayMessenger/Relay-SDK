@@ -61,7 +61,8 @@ Set `video_in_enabled=True` to receive the caller's camera as
 `UserImageRawFrame`s in RGB. Set `video_out_enabled=True` to send
 `OutputImageRawFrame`s in `RGB`, `RGBA`, `BGRA` or `ARGB`, sized by
 `video_out_width` and `video_out_height`. The camera track is published with
-the audio when the bot joins.
+the audio when the bot joins, and sends one black frame a second until the
+bot's first image.
 
 [`examples/echo_bot.py`](examples/echo_bot.py) is a complete bot. It waits for
 the next Call on the Agent WebSocket, echoes the caller's voice back, and sends

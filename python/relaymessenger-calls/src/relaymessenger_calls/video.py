@@ -37,6 +37,16 @@ KEYFRAME_WAIT_MS = 200
 FRAME_WAIT_MS = 3_000
 INACTIVE_MS = 5_000
 
+#: Until its first captured frame, a published camera sends one black frame a
+#: second. Cloudflare's SFU forwards only a track that has sent packets: a pull
+#: of a silent track answers ``errorCode: "empty_track_error"`` ("No track data
+#: from remote peer") after about 8 s, and the Relay room ends the Call on it
+#: (staging, 2026-09-23). PartyTracks, Cloudflare's own client, sends a 1 fps
+#: black screen whenever a camera has no content
+#: (partytracks/src/client/makeBroadcastTrack.ts ``fallbackTrack$``,
+#: blackCanvasTrack$.ts).
+IDLE_FRAME_INTERVAL_S = 1.0
+
 RelayVideoFormat = Literal["i420", "rgba", "bgra", "argb", "abgr", "rgb24"]
 
 #: Bytes per pixel of each packed format, keyed by the PyAV pixel format of the same name.
@@ -143,7 +153,7 @@ class TrackPublishOptions:
 class RelayVideoSenderStats:
     #: Frames handed to `VideoSource.capture_frame` while published.
     frames_captured: int
-    #: Frames aiortc's sender pulled for encoding.
+    #: Captured frames aiortc's sender pulled for encoding (the idle black frames are not counted).
     frames_sent: int
     #: Negotiated codec, for example ``"video/H264"``; ``None`` before the answer.
     codec: Optional[str]
@@ -200,6 +210,20 @@ class VideoSource:
         self._closed = True
         self._changed.set()
 
+    def _idle_frame(self) -> av.VideoFrame:
+        """One black frame at the source's size, sent while nothing has been captured."""
+        return av.VideoFrame.from_ndarray(np.zeros((self.height, self.width, 3), dtype=np.uint8), format="rgb24")
+
+    async def _wait_first(self, timeout_s: float) -> None:
+        """Return when the first frame is captured or the source closes, or after ``timeout_s``."""
+        if self._latest is not None or self._closed:
+            return
+        self._changed.clear()
+        try:
+            await asyncio.wait_for(self._changed.wait(), timeout_s)
+        except asyncio.TimeoutError:
+            pass
+
     async def _next(self, after: int) -> tuple[int, Any, int]:
         while True:
             if self._closed:
@@ -233,11 +257,24 @@ class _SenderTrack(MediaStreamTrack):
         super().__init__()
         self._sender = sender
         self._serial = 0
+        #: When the next idle black frame is due (`IDLE_FRAME_INTERVAL_S`); the first is sent at once.
+        self._idle_due = 0.0
 
     async def recv(self) -> av.VideoFrame:
         if self.readyState != "live":
             raise MediaStreamError
-        serial, frame, stamp = await self._sender.source._next(self._serial)
+        source = self._sender.source
+        while source._latest is None and not source._closed:
+            wait = self._idle_due - time.monotonic()
+            if wait <= 0:
+                self._idle_due = time.monotonic() + IDLE_FRAME_INTERVAL_S
+                idle = source._idle_frame()
+                # capture_frame's default clock, so the first captured frame follows on.
+                idle.pts = int(time.monotonic() * 1_000_000) * 90_000 // 1_000_000
+                idle.time_base = VIDEO_TIME_BASE
+                return idle
+            await source._wait_first(wait)
+        serial, frame, stamp = await source._next(self._serial)
         self._serial = serial
         out = self._sender.source._to_av(frame)
         out.pts = stamp * 90_000 // 1_000_000
