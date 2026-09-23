@@ -135,11 +135,19 @@ frames captured, sent, decoded and dropped.
 
 ## ICE servers, TURN, restarts and diagnostics
 
-By default the peer uses Cloudflare's STUN server
-(`stun:stun.cloudflare.com:3478`), as Cloudflare's own Realtime echo example
-does, and Cloudflare's SFU supplies its own candidates in the answer. The
-offer leaves as soon as the local description is set. Inside a container or
-behind a firewall that blocks outbound UDP, pass TURN servers:
+By default the peer uses the servers the Call room sends after it joins:
+Cloudflare's STUN server and TURN credentials that Relay mints for the call.
+An agent behind a NAT that blocks direct paths connects through TURN with no
+setup. Each restart uses the room's latest servers. A room that sends none
+falls back to Cloudflare's STUN server (`stun:stun.cloudflare.com:3478`), as
+Cloudflare's own Realtime echo example does.
+
+aiortc uses only the first STUN URL and the first TURN URL, so the room's list
+is ordered to put `turn:...:3478?transport=udp` first. A network that blocks
+all outbound UDP therefore needs your own `turn:...?transport=tcp` server
+first in `ice_servers`. aiortc also gathers
+every candidate before the offer can leave, and a TURN server adds up to 5
+seconds to that wait. On an open network, pass STUN only to skip it:
 
 ```python
 from relaymessenger_livekit import RelayIceServer
@@ -147,21 +155,16 @@ from relaymessenger_livekit import RelayIceServer
 call = await RelayLiveKitCall.connect(
     api_key=token,
     call_id=call_id,
-    ice_servers=[
-        RelayIceServer(urls="stun:stun.cloudflare.com:3478"),
-        RelayIceServer(
-            urls="turn:turn.cloudflare.com:3478?transport=udp",
-            username=os.environ["TURN_USERNAME"],
-            credential=os.environ["TURN_CREDENTIAL"],
-        ),
-    ],
+    ice_servers=[RelayIceServer(urls="stun:stun.cloudflare.com:3478")],
 )
 ```
 
-aiortc uses the first STUN and the first TURN URL, and has no option to force
-every path through TURN. `ice_servers` may also be a
-function of the restart count (sync or async); it is called before every peer
-connection, so it can mint fresh TURN credentials for each restart.
+Your `ice_servers` replaces the room's; pass your own TURN server the same way,
+with `username` and `credential`. aiortc has no option to force every path
+through TURN. `ice_servers` may also be a function of the restart count (sync
+or async); it is called before every peer connection, so it can mint fresh TURN
+credentials for each restart. The room's servers are on `room.ice_servers` and
+its `ice_servers` event.
 
 `connect()` has no overall deadline: when an SFU session is not `connected`
 within `session_connect_timeout_ms` (5 seconds by default) of its answer,

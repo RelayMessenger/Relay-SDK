@@ -29,6 +29,7 @@ from ._engine import (
     create_peer_connection,
     media_codec,
     normalize_ice_servers,
+    order_for_aiortc,
     parse_candidate,
     prefer_h264,
 )
@@ -308,9 +309,12 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
         self.call_id = call_id
         self.room = room
         self._inbound = inbound_audio
-        self._ice_servers: Union[list[RelayIceServer], RelayIceServersProvider] = (
-            ice_servers if callable(ice_servers) else normalize_ice_servers(ice_servers or DEFAULT_ICE_SERVERS)
+        # ``None``: the application passed none, so the room's servers are used.
+        self._ice_servers: Union[list[RelayIceServer], RelayIceServersProvider, None] = (
+            ice_servers if ice_servers is None or callable(ice_servers) else normalize_ice_servers(ice_servers)
         )
+        # Set by the room's first ``iceServers`` or ``roomState``, or by the room or transport ending.
+        self._room_ice_settled = asyncio.Event()
         self._session_connect_timeout_ms = session_connect_timeout_ms
         self._ice_gathering_timeout_ms = _ice_gathering_timeout_ms
         self._restart_disconnected_ms = _restart_disconnected_ms
@@ -433,6 +437,7 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
         self._audio_generation += 1
         self._shutdown_media()
         self._release_playout_waiters()
+        self._room_ice_settled.set()
         self.room.close()
 
     async def aclose(self) -> None:
@@ -720,7 +725,9 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
         restarts = self._restarts
         self._peer_generation += 1
         generation = self._peer_generation
-        if callable(self._ice_servers):
+        if self._ice_servers is None:
+            servers = await self._room_ice_servers()
+        elif callable(self._ice_servers):
             result = self._ice_servers(restarts)
             servers = normalize_ice_servers(await result if inspect.isawaitable(result) else result)
         else:
@@ -736,6 +743,28 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
         self._add_video_transceiver(peer)
         self._observe(peer)
         await self._publish_local_audio(peer, restart=restarts > 0)
+
+    async def _room_ice_servers(self) -> list[RelayIceServer]:
+        """The room's latest servers, ordered for aiortc (PROTOCOL.md section 6).
+
+        Relay sends ``iceServers`` after it accepts ``join`` and before the first
+        ``roomState``, so a ``roomState`` with none before it means a room that
+        sends none: Cloudflare's STUN server is used. Otherwise waits for
+        whichever comes first, or for the room or transport to end.
+        """
+
+        def settled() -> Optional[list[RelayIceServer]]:
+            if self.room.ice_servers is not None:
+                return order_for_aiortc(normalize_ice_servers(self.room.ice_servers))
+            if self.room.state is not None or self._closed or self._ended:
+                return normalize_ice_servers(DEFAULT_ICE_SERVERS)
+            return None
+
+        now = settled()
+        if now is not None:
+            return now
+        await self._room_ice_settled.wait()
+        return settled() or normalize_ice_servers(DEFAULT_ICE_SERVERS)
 
     def _observe(self, peer: Any) -> None:
         def on_connection_state() -> None:
@@ -801,6 +830,10 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
         def on_open() -> None:
             self._room_opens += 1
 
+        @room.on("ice_servers")
+        def on_ice_servers(_frame: dict[str, Any]) -> None:
+            self._room_ice_settled.set()
+
         @room.on("answer")
         def on_answer(frame: dict[str, Any]) -> None:
             self._queue_negotiation(lambda: self._server_answer(frame))
@@ -812,6 +845,7 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
 
         @room.on("room_state")
         def on_room_state(frame: dict[str, Any]) -> None:
+            self._room_ice_settled.set()
             self._room_states += 1
             self._call_status = frame["call"]["status"]
             # A Call has exactly one agent; the transport is that agent, so the
@@ -828,6 +862,7 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
 
         @room.on("error")
         def on_error(error: Union[dict[str, Any], BaseException]) -> None:
+            self._room_ice_settled.set()
             if isinstance(error, BaseException):
                 self._reject_ready(error)
                 self.emit("error", error)
@@ -840,6 +875,7 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
         @room.on("ended")
         def on_ended(frame: dict[str, Any]) -> None:
             self._ended = True
+            self._room_ice_settled.set()
             self._ended_reason = frame["reason"]
             self._reject_ready(RelayCallTransportError(f"Relay Call ended before media connected ({frame['reason']})."))
             self._reject_peer_audio(
@@ -851,6 +887,7 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
 
         @room.on("close")
         def on_close(event: CallRoomCloseEvent) -> None:
+            self._room_ice_settled.set()
             if not self._reported_connected:
                 self._reject_ready(RelayCallTransportError(f"Relay Call room closed before media connected ({event.code})."))
             self.emit("close", event)

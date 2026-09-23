@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import type {
   CallRoom,
   CallRoomEventMap,
+  CallRoomIceServer,
   CallRoomServerAnswerFrame,
   CallRoomStateFrame,
   CallRoomSubscriptionOfferFrame,
@@ -27,6 +28,9 @@ type RoomEvent = Extract<keyof CallRoomEventMap, string>;
 
 class FakeRoom {
   readonly listeners = new Map<string, Set<(...args: any[]) => void>>();
+  /** What Relay's room sends after `join` when it cannot mint TURN (PROTOCOL.md section 6). */
+  iceServers: CallRoomIceServer[] | null = [{ urls: ["stun:stun.cloudflare.com:3478"] }];
+  state: CallRoomStateFrame | null = null;
   readonly sent: unknown[] = [];
   connects = 0;
   reconnects = 0;
@@ -39,6 +43,10 @@ class FakeRoom {
   userUpdate(update: { muted: boolean }): void { this.send({ type: "userUpdate", muted: update.muted }); }
   end(): void { this.send({ type: "end" }); }
   close(): void { this.closes += 1; }
+  off<K extends RoomEvent>(event: K, listener: (...args: CallRoomEventMap[K]) => void): this {
+    this.listeners.get(event)?.delete(listener as (...args: any[]) => void);
+    return this;
+  }
   on<K extends RoomEvent>(event: K, listener: (...args: CallRoomEventMap[K]) => void): this {
     const listeners = this.listeners.get(event) ?? new Set();
     listeners.add(listener as (...args: any[]) => void);
@@ -210,6 +218,29 @@ const makeTransport = (room: FakeRoom, webRTC: FakeWebRTC): RelayCallTransport =
     webRTC,
   });
 
+/** Cloudflare's `generate-ice-servers` response shape (realtime/turn/generate-credentials.mdx). */
+const ROOM_TURN = (username: string): CallRoomIceServer[] => [
+  { urls: ["stun:stun.cloudflare.com:3478", "stun:stun.cloudflare.com:53"] },
+  {
+    urls: [
+      "turn:turn.cloudflare.com:3478?transport=udp",
+      "turn:turn.cloudflare.com:53?transport=udp",
+      "turn:turn.cloudflare.com:3478?transport=tcp",
+      "turn:turn.cloudflare.com:80?transport=tcp",
+      "turns:turn.cloudflare.com:5349?transport=tcp",
+      "turns:turn.cloudflare.com:443?transport=tcp",
+    ],
+    username,
+    credential: `${username}-credential`,
+  },
+];
+
+/** What the SDK's CallRoom does with an `iceServers` frame: store it, then emit. */
+const sendRoomIceServers = (room: FakeRoom, iceServers: CallRoomIceServer[]): void => {
+  room.iceServers = iceServers;
+  room.emit("iceServers", { type: "iceServers", ice_servers: iceServers });
+};
+
 beforeEach(() => vi.useRealTimers());
 
 it("publishes exactly one Relay audio track and handles server renegotiation", async () => {
@@ -368,14 +399,16 @@ it("hands ICE servers and the transport policy to the WebRTC factory", async () 
   const webRTC = new FakeWebRTC();
   const defaults = makeTransport(room, webRTC);
   await connectTransport(defaults, room);
-  // Cloudflare Realtime's echo example: `iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }]`.
+  // No application servers: the room's `iceServers` frame.
   expect(webRTC.peerConfigs).toEqual([{
-    iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }],
+    iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }],
     iceTransportPolicy: "all",
   }]);
   defaults.close();
 
+  // An application value wins over the room's servers.
   const turnRoom = new FakeRoom();
+  turnRoom.iceServers = [ROOM_TURN("room-user")[1]!];
   const turnWebRTC = new FakeWebRTC();
   const transport = new RelayCallTransport({
     relay: {} as Relay,
@@ -1136,5 +1169,79 @@ it("names the local candidate type of the pair media flows on, from the W3C stat
   await flush();
   expect(transport.diagnostics().selectedPair).toBe("relay udp");
   expect(transport.diagnostics().summary).toContain("local: host 0, srflx 0, relay 0, pair relay udp;");
+  transport.close();
+});
+
+it("builds the first peer with the room's iceServers when the application passes none", async () => {
+  const room = new FakeRoom();
+  room.iceServers = null;
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  const connecting = transport.connect();
+  await flush();
+  // Joined, but neither `iceServers` nor `roomState` has arrived: no peer yet.
+  expect(webRTC.peers).toHaveLength(0);
+  sendRoomIceServers(room, ROOM_TURN("u0"));
+  await flush();
+  expect(webRTC.peerConfigs).toEqual([{ iceServers: ROOM_TURN("u0"), iceTransportPolicy: "all" }]);
+  // The offer does not wait for TURN gathering (PROTOCOL.md section 6).
+  expect(offersSent(room)).toHaveLength(1);
+  answerLatest(room);
+  await connecting;
+  transport.close();
+});
+
+it("uses Cloudflare's STUN server when the room's first roomState comes with no iceServers", async () => {
+  const room = new FakeRoom();
+  room.iceServers = null;
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  const connecting = transport.connect();
+  await flush();
+  expect(webRTC.peers).toHaveLength(0);
+  room.state = roomStateFrame("ringing");
+  room.emit("roomState", room.state);
+  await flush();
+  // Cloudflare Realtime's echo example: `iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }]`.
+  expect(webRTC.peerConfigs).toEqual([{
+    iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }],
+    iceTransportPolicy: "all",
+  }]);
+  answerLatest(room);
+  await connecting;
+  transport.close();
+});
+
+it("rejects connect() and builds no peer when closed while waiting for the room's iceServers", async () => {
+  const room = new FakeRoom();
+  room.iceServers = null;
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  const connecting = transport.connect();
+  await flush();
+  transport.close();
+  await expect(connecting).rejects.toThrow(/closed before media connected/u);
+  expect(webRTC.peers).toHaveLength(0);
+});
+
+it("restarts with the room's latest iceServers, sent again on the room's rejoin", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  room.iceServers = ROOM_TURN("u0");
+  const webRTC = new FakeWebRTC();
+  webRTC.nextPeer.neverConnects = true;
+  const transport = makeTransport(room, webRTC);
+  const connecting = transport.connect();
+  await flush();
+  answerLatest(room);
+  await flush();
+  // The room socket reopened and Relay sent fresh credentials after the new join.
+  sendRoomIceServers(room, ROOM_TURN("u1"));
+  await vi.advanceTimersByTimeAsync(5_000 + 250);
+  await flush();
+  expect(webRTC.peers).toHaveLength(2);
+  expect(webRTC.peerConfigs.map((config) => config.iceServers[1]?.username)).toEqual(["u0", "u1"]);
+  answerLatest(room, "relay-answer-2");
+  await connecting;
   transport.close();
 });

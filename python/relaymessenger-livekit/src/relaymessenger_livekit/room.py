@@ -35,7 +35,9 @@ ROOM_ERROR_CODES = frozenset({"invalid_frame", "not_allowed", "media_unavailable
 PARTICIPANT_KEYS = frozenset({"contact_id", "kind", "attached", "track", "muted", "connected"})
 
 CallRoomConnectionState = Literal["idle", "connecting", "open", "reconnecting", "closed"]
-CallRoomEvent = Literal["open", "reconnecting", "room_state", "offer", "answer", "ended", "error", "close"]
+CallRoomEvent = Literal[
+    "open", "reconnecting", "ice_servers", "room_state", "offer", "answer", "ended", "error", "close"
+]
 
 
 class CallRoomError(Exception):
@@ -147,6 +149,20 @@ def _valid_participant(value: Any) -> bool:
     )
 
 
+def _valid_ice_server(value: Any) -> bool:
+    """Standard ``RTCIceServer``: ``urls`` (non-empty list of strings), optional ``username``/``credential``."""
+    if not isinstance(value, dict) or not set(value.keys()) <= {"urls", "username", "credential"}:
+        return False
+    urls = value.get("urls")
+    return (
+        isinstance(urls, list)
+        and len(urls) > 0
+        and all(isinstance(url, str) and url for url in urls)
+        and ("username" not in value or isinstance(value["username"], str))
+        and ("credential" not in value or isinstance(value["credential"], str))
+    )
+
+
 def parse_call_room_server_frame(value: Any) -> Optional[dict[str, Any]]:
     """Validate one server frame before exposing it to application code.
 
@@ -159,6 +175,14 @@ def parse_call_room_server_frame(value: Any) -> Optional[dict[str, Any]]:
     if kind == "heartbeat":
         if _has_exact_keys(value, {"type"}):
             return None
+    elif kind == "iceServers":
+        servers = value.get("ice_servers")
+        if (
+            _has_exact_keys(value, {"type", "ice_servers"})
+            and isinstance(servers, list)
+            and all(_valid_ice_server(s) for s in servers)
+        ):
+            return value
     elif kind == "roomState":
         participants = value.get("participants")
         if (
@@ -219,7 +243,8 @@ class CallRoom(rtc.EventEmitter[CallRoomEvent]):
     re-offered by a socket-only reconnect.
 
     Events: ``open``, ``reconnecting`` (`CallRoomReconnectingEvent`),
-    ``room_state``, ``offer``, ``answer``, ``ended``, ``error`` (a frame dict or
+    ``ice_servers`` (the room's ``iceServers`` frame, sent after every accepted
+    ``join`` and before its ``roomState``), ``room_state``, ``offer``, ``answer``, ``ended``, ``error`` (a frame dict or
     an exception) and ``close`` (`CallRoomCloseEvent`, the socket closed and the
     room will not reopen it by itself).
     """
@@ -243,6 +268,10 @@ class CallRoom(rtc.EventEmitter[CallRoomEvent]):
         self.url = call_room_url(base_url, call_id)
         #: The last validated ``roomState`` frame.
         self.state: Optional[dict[str, Any]] = None
+        #: The STUN/TURN servers of the room's latest ``iceServers`` frame, or
+        #: ``None`` before the first. Relay sends fresh ones on every join,
+        #: reconnects included, so read this again before each new peer.
+        self.ice_servers: Optional[list[dict[str, Any]]] = None
         self._api_key = api_key
         self._connector: RoomConnector = connector or _websockets_connect
         self._heartbeat_interval_s = heartbeat_interval_ms / 1000
@@ -602,7 +631,10 @@ class CallRoom(rtc.EventEmitter[CallRoomEvent]):
         if frame is None:
             return
         kind = frame["type"]
-        if kind == "roomState":
+        if kind == "iceServers":
+            self.ice_servers = frame["ice_servers"]
+            self.emit("ice_servers", frame)
+        elif kind == "roomState":
             self.state = frame
             self.emit("room_state", frame)
         elif kind == "offer":

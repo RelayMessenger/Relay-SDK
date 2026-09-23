@@ -213,3 +213,57 @@ it("rejects server frames whose stable shapes drift", () => {
   expect(() => parseCallRoomServerFrame({ type: "error", code: "cloudflare_error", message: "provider detail" }))
     .toThrow(/invalid frame/u);
 });
+
+/** Cloudflare's `generate-ice-servers` response shape (realtime/turn/generate-credentials.mdx). */
+const iceServersFrame = (username: string) => ({
+  type: "iceServers" as const,
+  ice_servers: [
+    { urls: ["stun:stun.cloudflare.com:3478"] },
+    {
+      urls: ["turn:turn.cloudflare.com:3478?transport=udp", "turns:turn.cloudflare.com:443?transport=tcp"],
+      username,
+      credential: `${username}-credential`,
+    },
+  ],
+});
+
+it("exposes the room's iceServers frame, the latest after every join (PROTOCOL.md section 6)", async () => {
+  const client = new Relay({ apiKey: "agent-token", baseURL: "https://api.staging.relayapp.im" });
+  const room = client.calls.room(call.id, { WebSocket: FakeWebSocket, heartbeatIntervalMs: 60_000 });
+  const received: unknown[] = [];
+  room.on("iceServers", (frame) => received.push(frame));
+  expect(room.iceServers).toBeNull();
+
+  const first = await connect(room);
+  first.message(iceServersFrame("u0"));
+  first.message(roomState);
+  await Promise.resolve();
+  expect(received).toEqual([iceServersFrame("u0")]);
+  expect(room.iceServers).toEqual(iceServersFrame("u0").ice_servers);
+
+  // A fresh join on a new socket brings fresh credentials.
+  const reconnecting = room.reconnect();
+  const second = FakeWebSocket.latest;
+  second.emit("open", {});
+  await reconnecting;
+  expect(second.sent.map(JSON.parse)[0]).toEqual({ type: "join" });
+  second.message(iceServersFrame("u1"));
+  await Promise.resolve();
+  expect(received).toEqual([iceServersFrame("u0"), iceServersFrame("u1")]);
+  expect(room.iceServers).toEqual(iceServersFrame("u1").ice_servers);
+  room.close();
+});
+
+it("accepts the STUN-only fallback iceServers frame and rejects drifted ones", () => {
+  const fallback = { type: "iceServers", ice_servers: [{ urls: ["stun:stun.cloudflare.com:3478"] }] };
+  expect(parseCallRoomServerFrame(fallback)).toEqual(fallback);
+  expect(parseCallRoomServerFrame(iceServersFrame("u"))).toEqual(iceServersFrame("u"));
+  const drifted = (iceServers: unknown, extra: Record<string, unknown> = {}) =>
+    () => parseCallRoomServerFrame({ type: "iceServers", ice_servers: iceServers, ...extra });
+  expect(drifted([{ urls: ["stun:stun.cloudflare.com:3478"] }], { ttl: 86400 })).toThrow(/invalid frame/u);
+  expect(drifted({ urls: ["stun:stun.cloudflare.com:3478"] })).toThrow(/invalid frame/u);
+  expect(drifted([{ urls: [] }])).toThrow(/invalid frame/u);
+  expect(drifted([{ urls: [""] }])).toThrow(/invalid frame/u);
+  expect(drifted([{ urls: ["turn:x"], username: 1 }])).toThrow(/invalid frame/u);
+  expect(drifted([{ urls: ["turn:x"], credentialType: "password" }])).toThrow(/invalid frame/u);
+});

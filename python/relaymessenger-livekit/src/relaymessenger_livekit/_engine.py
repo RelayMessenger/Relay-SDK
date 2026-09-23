@@ -15,6 +15,7 @@ from typing import Any, Optional, Union
 
 from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCRtpSender
 from aiortc.rtcconfiguration import RTCBundlePolicy
+from aiortc.rtcicetransport import parse_stun_turn_uri
 from aiortc.rtcrtpparameters import RTCRtpCodecCapability
 
 #: H.264 constrained baseline, the only H.264 profile Cloudflare's SFU accepts
@@ -55,6 +56,51 @@ def normalize_ice_servers(servers: Any) -> list[RelayIceServer]:
         else:
             raise TypeError("ice_servers entries must be RelayIceServer or dicts with 'urls'.")
     return out
+
+
+def _turn_rank(url: str) -> int:
+    """0 for ``turn:`` over UDP on 3478, then other UDP, then TCP, then ``turns:``; STUN and unparsable URLs 0."""
+    try:
+        parsed = parse_stun_turn_uri(url)
+    except ValueError:
+        return 0
+    if parsed["scheme"] == "turns":
+        return 3
+    if parsed["scheme"] != "turn":
+        return 0
+    if parsed["transport"] != "udp":
+        return 2
+    return 0 if parsed["port"] == 3478 else 1
+
+
+def order_for_aiortc(servers: list[RelayIceServer]) -> list[RelayIceServer]:
+    """Put ``turn:<host>:3478?transport=udp`` where aiortc looks first.
+
+    aiortc keeps only the first STUN URL and the first usable TURN URL, in list
+    order (aiortc/rtcicetransport.py `connection_kwargs`), and gathers every
+    candidate before the offer can leave, up to aioice's 5 s (aioice/ice.py
+    `gather_candidates`, ``timeout=5``). UDP on Cloudflare's primary port is
+    the cheapest TURN allocation, so it goes first. Each server's URLs are
+    sorted stably by that rank, and the servers too, with STUN-only servers
+    kept first in their given order, so the first STUN URL does not change.
+    """
+
+    def urls(server: RelayIceServer) -> list[str]:
+        return server.urls if isinstance(server.urls, list) else [server.urls]
+
+    def server_rank(server: RelayIceServer) -> int:
+        ranks = [_turn_rank(url) for url in urls(server) if url.lower().startswith("turn")]
+        return min(ranks) if ranks else -1
+
+    ordered = [
+        RelayIceServer(
+            urls=sorted(urls(server), key=_turn_rank) if isinstance(server.urls, list) else server.urls,
+            username=server.username,
+            credential=server.credential,
+        )
+        for server in servers
+    ]
+    return sorted(ordered, key=server_rank)
 
 
 def create_peer_connection(config: PeerConfig) -> RTCPeerConnection:

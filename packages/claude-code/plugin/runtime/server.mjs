@@ -20356,6 +20356,7 @@ var validCall = (value) => {
 var PARTICIPANT_KEYS = ["contact_id", "kind", "attached", "track", "muted", "connected"];
 var validTracks = (value) => Array.isArray(value) && value.length <= 2 && value.every((name) => name === "audio" || name === "video") && new Set(value).size === value.length;
 var validParticipant = (value) => isRecord(value) && (hasExactKeys(value, PARTICIPANT_KEYS) || hasExactKeys(value, [...PARTICIPANT_KEYS, "video", "tracks"])) && (value.video === void 0 || typeof value.video === "boolean") && (value.tracks === void 0 || validTracks(value.tracks)) && typeof value.contact_id === "string" && (value.kind === "user" || value.kind === "agent") && typeof value.attached === "boolean" && (value.track === "audio" || value.track === null) && typeof value.muted === "boolean" && typeof value.connected === "boolean";
+var validIceServer = (value) => isRecord(value) && Object.keys(value).every((key) => key === "urls" || key === "username" || key === "credential") && Array.isArray(value.urls) && value.urls.length > 0 && value.urls.every((url) => typeof url === "string" && url.length > 0) && (value.username === void 0 || typeof value.username === "string") && (value.credential === void 0 || typeof value.credential === "string");
 var parseCallRoomServerFrame = (value) => {
   if (!isRecord(value) || typeof value.type !== "string") {
     throw new Error("Relay Call room received an invalid frame.");
@@ -20365,6 +20366,10 @@ var parseCallRoomServerFrame = (value) => {
       if (!hasExactKeys(value, ["type"]))
         break;
       return null;
+    case "iceServers":
+      if (!hasExactKeys(value, ["type", "ice_servers"]) || !Array.isArray(value.ice_servers) || !value.ice_servers.every(validIceServer))
+        break;
+      return value;
     case "roomState": {
       if (!hasExactKeys(value, ["type", "call", "participants"]) || !validCall(value.call) || !Array.isArray(value.participants) || value.participants.length !== 2 || !value.participants.every(validParticipant))
         break;
@@ -20413,6 +20418,12 @@ var CallRoom = class {
   callID;
   url;
   state = null;
+  /**
+   * The STUN/TURN servers from the room's latest `iceServers` frame, or `null`
+   * before the first one. Relay sends fresh ones on every join, reconnects
+   * included, so read this again before building each new peer connection.
+   */
+  iceServers = null;
   #apiKey;
   #WebSocket;
   #heartbeatIntervalMs;
@@ -20767,6 +20778,10 @@ var CallRoom = class {
     if (!frame)
       return;
     switch (frame.type) {
+      case "iceServers":
+        this.iceServers = frame.ice_servers;
+        this.#emit("iceServers", frame);
+        return;
       case "roomState":
         this.state = frame;
         this.#emit("roomState", frame);

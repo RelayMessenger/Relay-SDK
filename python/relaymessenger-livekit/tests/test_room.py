@@ -47,6 +47,13 @@ def test_room_state_accepts_the_three_track_shapes() -> None:
         {"type": "ended", "reason": "disconnected"},
         {"type": "error", "code": "boom", "message": "x"},
         {"type": "heartbeat", "extra": True},
+        {"type": "iceServers", "ice_servers": {"urls": ["stun:stun.cloudflare.com:3478"]}},
+        {"type": "iceServers", "ice_servers": [{"urls": []}]},
+        {"type": "iceServers", "ice_servers": [{"urls": [""]}]},
+        {"type": "iceServers", "ice_servers": [{"urls": "turn:x"}]},
+        {"type": "iceServers", "ice_servers": [{"urls": ["turn:x"], "username": 1}]},
+        {"type": "iceServers", "ice_servers": [{"urls": ["turn:x"], "credentialType": "password"}]},
+        {"type": "iceServers", "ice_servers": [], "ttl": 86400},
         {"type": "unknown"},
         [],
     ],
@@ -54,6 +61,27 @@ def test_room_state_accepts_the_three_track_shapes() -> None:
 def test_invalid_frames_raise(frame: Any) -> None:
     with pytest.raises(CallRoomError):
         parse_call_room_server_frame(frame)
+
+
+def ice_servers_frame(username: str) -> dict[str, Any]:
+    """Cloudflare's ``generate-ice-servers`` response shape (realtime/turn/generate-credentials.mdx)."""
+    return {
+        "type": "iceServers",
+        "ice_servers": [
+            {"urls": ["stun:stun.cloudflare.com:3478"]},
+            {
+                "urls": ["turn:turn.cloudflare.com:3478?transport=udp", "turns:turn.cloudflare.com:443?transport=tcp"],
+                "username": username,
+                "credential": f"{username}-credential",
+            },
+        ],
+    }
+
+
+def test_ice_servers_frame_and_its_stun_only_fallback_parse() -> None:
+    fallback = {"type": "iceServers", "ice_servers": [{"urls": ["stun:stun.cloudflare.com:3478"]}]}
+    assert parse_call_room_server_frame(fallback) == fallback
+    assert parse_call_room_server_frame(ice_servers_frame("u")) == ice_servers_frame("u")
 
 
 def test_heartbeat_echo_is_not_a_frame() -> None:
@@ -279,3 +307,25 @@ async def test_manual_reconnect_opens_a_new_socket_and_replaces_the_old() -> Non
     assert len(h.sockets) == 2
     assert h.sockets[0].closed_with == (1000, "Replaced")
     assert h.room.connection_state == "open"
+
+
+async def test_ice_servers_frame_is_exposed_and_replaced_after_every_join() -> None:
+    h = Harness()
+    seen: list[dict[str, Any]] = []
+    h.room.on("ice_servers", seen.append)
+    assert h.room.ice_servers is None
+    await h.room.connect()
+    await settle()
+    h.sockets[0].push(ice_servers_frame("u0"))
+    h.sockets[0].push(room_state())
+    await settle()
+    assert seen == [ice_servers_frame("u0")]
+    assert h.room.ice_servers == ice_servers_frame("u0")["ice_servers"]
+    # A fresh join on a new socket brings fresh credentials.
+    await h.room.reconnect()
+    await settle()
+    assert h.sockets[1].sent[0] == {"type": "join"}
+    h.sockets[1].push(ice_servers_frame("u1"))
+    await settle()
+    assert seen == [ice_servers_frame("u0"), ice_servers_frame("u1")]
+    assert h.room.ice_servers == ice_servers_frame("u1")["ice_servers"]

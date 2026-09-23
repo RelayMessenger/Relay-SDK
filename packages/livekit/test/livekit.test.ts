@@ -1,7 +1,7 @@
 import { beforeAll, expect, it, vi } from "vitest";
 import { AgentSession, initializeLogger } from "@livekit/agents";
 import { AudioFrame } from "@livekit/rtc-node";
-import type { CallRoom, CallRoomEventMap, Relay } from "@relaymessenger/sdk";
+import type { CallRoom, CallRoomEventMap, CallRoomIceServer, CallRoomStateFrame, Relay } from "@relaymessenger/sdk";
 import { RelayAudioInput, RelayAudioOutput, RelayLiveKitCall, createRelayLiveKitAudio } from "../src/livekit.js";
 import type {
   RelayAudioFrame,
@@ -222,6 +222,9 @@ it("installs the reusable Relay audio pair on an existing AgentSession", async (
 /** Minimal room + WebRTC fakes: the answer arrives at once and the peer connects. */
 class ConnectingRoom {
   readonly listeners = new Map<string, Set<(...args: any[]) => void>>();
+  /** What Relay's room sends after `join` when it cannot mint TURN (PROTOCOL.md section 6). */
+  iceServers: CallRoomIceServer[] | null = [{ urls: ["stun:stun.cloudflare.com:3478"] }];
+  state: CallRoomStateFrame | null = null;
   async connect(): Promise<void> {}
   async reconnect(): Promise<void> {}
   send(frame: { type: string }): void {
@@ -236,6 +239,10 @@ class ConnectingRoom {
   userUpdate(): void {}
   end(): void {}
   close(): void {}
+  off<K extends Extract<keyof CallRoomEventMap, string>>(event: K, listener: (...args: any[]) => void): this {
+    this.listeners.get(event)?.delete(listener as (...args: any[]) => void);
+    return this;
+  }
   on<K extends Extract<keyof CallRoomEventMap, string>>(event: K, listener: (...args: any[]) => void): this {
     const listeners = this.listeners.get(event) ?? new Set();
     listeners.add(listener);
