@@ -1,0 +1,51 @@
+[project]
+name = "relaymessenger-livekit"
+version = "0.1.0.dev1"
+description = "Relay WebRTC audio and video transport and LiveKit Agents integration for Python."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Companion Inc." }]
+keywords = ["relay", "livekit", "webrtc", "voice", "video", "agents"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+dependencies = [
+  "aiortc>=1.15,<2",
+  "av>=14",
+  "livekit>=1.1,<2",
+  "livekit-agents>=1.8,<2",
+  "numpy>=1.26",
+  "websockets>=14",
+]
+
+[project.urls]
+Homepage = "https://github.com/RelayMessenger/Relay-SDK/tree/main/python/relaymessenger-livekit#readme"
+Repository = "https://github.com/RelayMessenger/Relay-SDK"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "mypy>=1.13"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/relaymessenger_livekit"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+files = ["src/relaymessenger_livekit"]
