@@ -13,7 +13,7 @@ import {
   type RelayInboundAudioFormat,
   type RelayIceTransportPolicy,
   type RelayWebRTCFactory,
-} from "./transport.js";
+} from "@relaymessenger/sdk/calls";
 
 /**
  * The format LiveKit's own room input hands an AgentSession:
@@ -101,7 +101,7 @@ export class RelayAudioOutput extends AudioOutput {
   #flushDone = true;
   /** Resolved by `clearBuffer()` with the milliseconds still queued at that moment. */
   #interruptedFuture = new Future<number>();
-  /** Bumped by `clearBuffer()`; a frame held for subscription across it is dropped (agents-js `interruptionGeneration`). */
+  /** Bumped by `clearBuffer()`; a frame the transport dropped across it is not counted (agents-js `interruptionGeneration`). */
   #interruptionGeneration = 0;
   #closed = false;
 
@@ -111,36 +111,31 @@ export class RelayAudioOutput extends AudioOutput {
   }
 
   /**
-   * Waits until the person is receiving the agent's audio before playing the
-   * frame, as LiveKit's room audio output waits for the track's subscription
-   * (agents-js `voice/room_io/_output.ts` `captureFrame` awaits `startedFuture`,
-   * resolved by `publication.waitForSubscription()`; Python
-   * `room_io/_output.py` `capture_frame` awaits `_subscribed_fut`). The
-   * transport sends silence meanwhile; nothing captured is skipped.
+   * Hands the frame to the transport, which holds it until the person receives
+   * the agent's audio (PROTOCOL.md section 6b) and resolves once it is queued,
+   * so this waits as LiveKit's room audio output waits for the track's
+   * subscription. A frame dropped by `clearBuffer()` meanwhile is not counted.
    */
   override async captureFrame(frame: AudioFrame): Promise<void> {
     if (this.#closed) throw new Error("Relay LiveKit audio output is closed.");
-    const interruptionGeneration = this.#interruptionGeneration;
-    if (!this.#transport.subscribed) {
-      await this.#transport.waitForSubscription();
-      if (interruptionGeneration !== this.#interruptionGeneration) return;
-    }
     if (this.#flushTask && !this.#flushDone) {
       this.logger.error("captureFrame called while flush is in progress");
       await this.#flushTask;
     }
-    await super.captureFrame(frame);
-    if (!this.#firstFrameEmitted) {
-      this.#firstFrameEmitted = true;
-      this.onPlaybackStarted(Date.now());
-    }
-    this.#pushedDuration += frame.samplesPerChannel / frame.sampleRate;
+    const interruptionGeneration = this.#interruptionGeneration;
     // Resolves once the slices are queued; the engine's pump paces the wire.
     await this.#transport.writeAudio({
       samples: frame.data,
       sampleRate: frame.sampleRate,
       channelCount: frame.channels,
     });
+    if (interruptionGeneration !== this.#interruptionGeneration) return;
+    await super.captureFrame(frame);
+    if (!this.#firstFrameEmitted) {
+      this.#firstFrameEmitted = true;
+      this.onPlaybackStarted(Date.now());
+    }
+    this.#pushedDuration += frame.samplesPerChannel / frame.sampleRate;
   }
 
   /** Mark the segment complete; `onPlaybackFinished` fires once the transport has drained. */

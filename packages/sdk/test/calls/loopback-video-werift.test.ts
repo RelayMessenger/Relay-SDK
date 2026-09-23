@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
-import type { RelayMediaStreamTrackLike, RelayPeerConnectionLike } from "../src/transport.js";
-import { createWeriftWebRTCFactory } from "../src/engine-werift.js";
+import type { RelayMediaStreamTrackLike, RelayPeerConnectionLike } from "../../src/calls/transport.js";
+import { createWeriftWebRTCFactory } from "../../src/calls/engine-werift.js";
 import {
   RemoteVideoTrack,
   VideoBufferType,
@@ -8,7 +8,7 @@ import {
   VideoFrame,
   VideoStream,
   type VideoFrameEvent,
-} from "../src/video.js";
+} from "../../src/calls/video.js";
 
 /**
  * Real loopback: two werift peer connections on this machine, offer/answer

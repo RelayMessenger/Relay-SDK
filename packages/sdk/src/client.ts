@@ -1,6 +1,6 @@
 import { RelayAPIError, isAbortError } from "./errors.js";
 import { ChatsPage, MessagesPage } from "./pagination.js";
-import { CallRoom, type CallRoomOptions } from "./call-room.js";
+import { CallRoom, type CallRoomOptions } from "./calls/call-room.js";
 import type {
   AcceptedResponse,
   Attachment,

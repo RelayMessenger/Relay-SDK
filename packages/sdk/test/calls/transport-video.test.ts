@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import type { CallRoom, CallRoomEventMap, CallRoomIceServer, CallRoomStateFrame, Relay } from "@relaymessenger/sdk";
+import type { CallRoom, CallRoomEventMap, CallRoomIceServer, CallRoomStateFrame, Relay } from "../../src/index.js";
 import {
   RelayCallTransport,
   type RelayAudioSinkLike,
@@ -7,7 +7,7 @@ import {
   type RelayMediaStreamTrackLike,
   type RelayPeerConnectionLike,
   type RelayWebRTCFactory,
-} from "../src/transport.js";
+} from "../../src/calls/transport.js";
 import {
   LocalVideoTrack,
   type RelayVideoReceiverLike,
@@ -19,7 +19,7 @@ import {
   VideoFrame,
   VideoSource,
   VideoStream,
-} from "../src/video.js";
+} from "../../src/calls/video.js";
 
 /**
  * The transport's video signaling against a fake room and fake engine:

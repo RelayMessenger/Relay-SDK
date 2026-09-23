@@ -2,7 +2,7 @@
 import type { MethodDoc } from "./search-docs.js";
 export const DOCS_SOURCE = {
   "contract": "3fb4873a3c09b7dade09012ecfc57acfef8cfb983b6b35fff9d320cf62bb3b00",
-  "client": "4b6f0a1213afc0753b7cc01e086f5bc66e71eccc5ba3b6632324c6b9bb48255e",
+  "client": "07669fc04130796f3d5494917ea9f4899ec6a5ce95850d81f600c9911ff7450e",
   "types": "7dbf490b96c2f7a80f23b32e7dafb0085b3fc1c542bdd6f53f0726cfaa86e83e"
 };
 export const METHOD_DOCS: readonly MethodDoc[] = [

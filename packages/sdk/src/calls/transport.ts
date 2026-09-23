@@ -9,7 +9,7 @@ import type {
   CallRoomStateFrame,
   CallRoomSubscriptionOfferFrame,
   Relay,
-} from "@relaymessenger/sdk";
+} from "../index.js";
 import {
   type LocalVideoTrack,
   type RelayVideoReceiverStats,
@@ -667,6 +667,10 @@ export class RelayCallTransport {
   /** The person's latest roomState `receiving` contains `audio` (PROTOCOL.md section 6b). */
   #personReceivingAudio = false;
   readonly #subscriptionWaiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>();
+  /** Application audio written before the person receives this transport's audio, in write order (PROTOCOL.md section 6b). */
+  readonly #heldAudio: { frame: RelayAudioFrame; ms: number; resolve: () => void }[] = [];
+  #heldAudioMs = 0;
+  readonly #heldAudioWaiters: (() => void)[] = [];
   #peerAudioArrived = false;
   #peerAudioReady = false;
   readonly #peerAudioWaiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>();
@@ -924,6 +928,18 @@ export class RelayCallTransport {
    * paces the wire, so adapters may push faster than real time (LiveKit's
    * `AudioSource.captureFrame` shape). Resolves once the slices are queued;
    * `waitForPlayout()` tells when they have left.
+   *
+   * Until the person receives this transport's audio (`subscribed`, PROTOCOL.md
+   * section 6b) frames are held, in order, and the engine keeps sending
+   * silence; they are queued from the first once `subscribed` turns true, so
+   * the start of a greeting is heard. A restart holds again until the new
+   * session is received. LiveKit's room audio output waits the same way
+   * (agents-js `voice/room_io/_output.ts` `captureFrame` awaits
+   * `startedFuture`, resolved by `publication.waitForSubscription()`; Python
+   * `room_io/_output.py` `capture_frame` awaits `_subscribed_fut`). A held
+   * frame resolves when it is queued, or when it is dropped: by `clearAudio()`,
+   * the Call ending, or `close()`. It never rejects, so an unawaited write
+   * cannot become an unhandled rejection.
    */
   writeAudio(frame: RelayAudioFrame): Promise<void> {
     if (this.#closed) return Promise.reject(new Error("Relay Call transport is closed."));
@@ -942,13 +958,20 @@ export class RelayCallTransport {
       sampleRate: frame.sampleRate,
       channelCount: frame.channelCount,
     };
-    this.#writeAudio(captured, this.#audioGeneration);
-    return Promise.resolve();
+    if (this.subscribed && this.#heldAudio.length === 0) {
+      this.#writeAudio(captured, this.#audioGeneration);
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      const ms = (captured.samples.length / captured.channelCount / captured.sampleRate) * 1000;
+      this.#heldAudio.push({ frame: captured, ms, resolve });
+      this.#heldAudioMs += ms;
+    });
   }
 
-  /** Milliseconds of audio accepted by `writeAudio` but not yet written to RTP. */
+  /** Milliseconds of audio accepted by `writeAudio` but not yet written to RTP, held audio included. */
   queuedAudioMs(): number {
-    return this.#audioSource?.queuedMs?.() ?? 0;
+    return (this.#audioSource?.queuedMs?.() ?? 0) + this.#heldAudioMs;
   }
 
   /**
@@ -965,14 +988,18 @@ export class RelayCallTransport {
         resolve();
       };
       this.#playoutWaiters.add(release);
-      const drained = source.waitForDrain?.() ?? Promise.resolve();
-      drained.then(release, release);
+      // Held audio is queued first (or dropped, which releases this waiter), then drains.
+      const queued = this.#heldAudio.length === 0 ? Promise.resolve() : this.#waitForHeldAudio();
+      queued
+        .then(() => source.waitForDrain?.())
+        .then(release, release);
     });
   }
 
-  /** Drop outgoing PCM that has not reached RTP and release `waitForPlayout()` callers. */
+  /** Drop outgoing PCM that has not reached RTP, held audio included, and release `waitForPlayout()` callers. */
   clearAudio(): void {
     this.#audioGeneration += 1;
+    this.#dropHeldAudio();
     this.#audioSource?.clear?.();
     this.#releasePlayoutWaiters();
   }
@@ -1033,11 +1060,39 @@ export class RelayCallTransport {
 
   #checkSubscription(): void {
     if (!this.subscribed) return;
+    this.#releaseHeldAudio();
     for (const waiter of [...this.#subscriptionWaiters]) waiter.resolve();
   }
 
   #rejectSubscription(error: Error): void {
+    this.#dropHeldAudio();
     for (const waiter of [...this.#subscriptionWaiters]) waiter.reject(error);
+  }
+
+  /** The person receives this transport's audio: queue every held frame, in write order. */
+  #releaseHeldAudio(): void {
+    const held = this.#heldAudio.splice(0);
+    this.#heldAudioMs = 0;
+    for (const entry of held) {
+      this.#writeAudio(entry.frame, this.#audioGeneration);
+      entry.resolve();
+    }
+    const waiters = this.#heldAudioWaiters.splice(0);
+    for (const waiter of waiters) waiter();
+  }
+
+  /** Drop every held frame (`clearAudio()`, the Call ending, `close()`); each write resolves. */
+  #dropHeldAudio(): void {
+    const held = this.#heldAudio.splice(0);
+    this.#heldAudioMs = 0;
+    for (const entry of held) entry.resolve();
+    const waiters = this.#heldAudioWaiters.splice(0);
+    for (const waiter of waiters) waiter();
+  }
+
+  /** Resolves once no audio is held, whether it was queued or dropped. */
+  #waitForHeldAudio(): Promise<void> {
+    return new Promise<void>((resolve) => { this.#heldAudioWaiters.push(resolve); });
   }
 
   #checkPeerAudio(): void {
