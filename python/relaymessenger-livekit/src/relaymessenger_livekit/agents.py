@@ -17,7 +17,6 @@ from livekit import rtc
 from livekit.agents.utils import aio
 from livekit.agents.voice.io import AudioInput, AudioOutput, AudioOutputCapabilities, VideoInput
 
-from ._engine import IceTransportPolicy
 from .room import DEFAULT_BASE_URL, CallRoom
 from .transport import (
     RESTART_CONNECT_TIMEOUT_MS,
@@ -269,7 +268,6 @@ class RelayLiveKitCall:
         base_url: str = DEFAULT_BASE_URL,
         room: Optional[CallRoom] = None,
         ice_servers: Union[list[Any], RelayIceServersProvider, None] = None,
-        ice_transport_policy: IceTransportPolicy = "all",
         session_connect_timeout_ms: float = RESTART_CONNECT_TIMEOUT_MS,
         output_sample_rate: int = DEFAULT_OUTPUT_SAMPLE_RATE,
         on_warning: Any = None,
@@ -286,7 +284,6 @@ class RelayLiveKitCall:
             base_url=base_url,
             room=room,
             ice_servers=ice_servers,
-            ice_transport_policy=ice_transport_policy,
             session_connect_timeout_ms=session_connect_timeout_ms,
             inbound_audio=LIVEKIT_ROOM_INPUT_AUDIO,
             on_warning=on_warning,

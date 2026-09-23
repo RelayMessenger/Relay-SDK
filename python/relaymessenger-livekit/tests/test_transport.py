@@ -312,3 +312,15 @@ async def test_ice_servers_provider_is_called_before_every_peer() -> None:
     assert FakePeer.instances[1].config.ice_servers[0].username == "u1"
     task.cancel()
     await transport.aclose()
+
+
+def test_only_public_aiortc_options_no_relay_policy_and_no_candidate_pair() -> None:
+    import dataclasses
+    import inspect
+
+    from relaymessenger_livekit import RelayCallDiagnostics, RelayLiveKitCall
+
+    # aiortc has no public iceTransportPolicy and no public selected candidate pair.
+    assert "ice_transport_policy" not in inspect.signature(RelayCallTransport).parameters
+    assert "ice_transport_policy" not in inspect.signature(RelayLiveKitCall.connect).parameters
+    assert "selected_pair" not in {f.name for f in dataclasses.fields(RelayCallDiagnostics)}

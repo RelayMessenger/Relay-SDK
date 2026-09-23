@@ -11,13 +11,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional, Union
+from typing import Any, Optional, Union
 
 from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCRtpSender
 from aiortc.rtcconfiguration import RTCBundlePolicy
 from aiortc.rtcrtpparameters import RTCRtpCodecCapability
-
-IceTransportPolicy = Literal["all", "relay"]
 
 #: H.264 constrained baseline, the only H.264 profile Cloudflare's SFU accepts
 #: (engine-werift.ts `videoCodecs`), with packetization-mode 1.
@@ -36,7 +34,6 @@ class RelayIceServer:
 @dataclass
 class PeerConfig:
     ice_servers: list[RelayIceServer] = field(default_factory=list)
-    ice_transport_policy: IceTransportPolicy = "all"
 
 
 def normalize_ice_servers(servers: Any) -> list[RelayIceServer]:
@@ -73,26 +70,6 @@ def create_peer_connection(config: PeerConfig) -> RTCPeerConnection:
     return RTCPeerConnection(RTCConfiguration(iceServers=servers, bundlePolicy=RTCBundlePolicy.MAX_BUNDLE))
 
 
-def apply_ice_transport_policy(transceiver: Any, policy: IceTransportPolicy) -> None:
-    """Force TURN for ``"relay"``.
-
-    aioice's `Connection` takes ``transport_policy`` (aioice/ice.py
-    `TransportPolicy.RELAY`: host and server-reflexive candidates are not
-    gathered), but aiortc does not forward an ``iceTransportPolicy``
-    (aiortc/rtcconfiguration.py has no such field), so the policy is set on the
-    connection aiortc created for this transceiver before it gathers.
-    """
-    if policy != "relay":
-        return
-    from aioice import TransportPolicy
-
-    gatherer = transceiver.sender.transport.transport.iceGatherer
-    connection = gatherer._connection
-    if connection.turn_server is None:
-        raise ValueError('ice_transport_policy "relay" needs a TURN server in ice_servers.')
-    connection._transport_policy = TransportPolicy.RELAY
-
-
 def prefer_h264(transceiver: Any) -> None:
     """Offer H.264 constrained baseline ``42e01f`` (and RTX) only on the published video."""
     capabilities = RTCRtpSender.getCapabilities("video").codecs
@@ -103,24 +80,6 @@ def prefer_h264(transceiver: Any) -> None:
     ]
     preferred += [c for c in capabilities if c.mimeType.lower() == "video/rtx"]
     transceiver.setCodecPreferences(preferred)
-
-
-def selected_pair(peer: Any) -> Optional[str]:
-    """``"<type> <protocol>"`` of the local candidate media flows on, for diagnostics.
-
-    aiortc's `getStats()` has no ``candidate-pair`` entry, so this reads
-    aioice's nominated pair (aioice/ice.py `Connection._nominated`, set in
-    `check_complete`). Diagnostics only; ``None`` when it cannot be read.
-    """
-    try:
-        for transceiver in peer.getTransceivers():
-            connection = transceiver.sender.transport.transport.iceGatherer._connection
-            for pair in connection._nominated.values():
-                local = pair.local_candidate
-                return f"{local.type} {local.transport.lower()}"
-    except Exception:  # noqa: BLE001 - diagnostics never fail the call
-        return None
-    return None
 
 
 _CANDIDATE = re.compile(r"candidate:\S+\s+\d+\s+(\S+)\s+\d+\s+\S+\s+(\d+)\s+typ\s+(\S+)", re.IGNORECASE)

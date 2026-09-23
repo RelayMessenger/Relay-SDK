@@ -139,8 +139,7 @@ By default the peer uses Cloudflare's STUN server
 (`stun:stun.cloudflare.com:3478`), as Cloudflare's own Realtime echo example
 does, and Cloudflare's SFU supplies its own candidates in the answer. The
 offer leaves as soon as the local description is set. Inside a container or
-behind a firewall that blocks outbound UDP, pass TURN servers and, if every
-path must go through TURN, `ice_transport_policy="relay"`:
+behind a firewall that blocks outbound UDP, pass TURN servers:
 
 ```python
 from relaymessenger_livekit import RelayIceServer
@@ -159,7 +158,8 @@ call = await RelayLiveKitCall.connect(
 )
 ```
 
-aiortc uses the first STUN and the first TURN URL. `ice_servers` may also be a
+aiortc uses the first STUN and the first TURN URL, and has no option to force
+every path through TURN. `ice_servers` may also be a
 function of the restart count (sync or async); it is called before every peer
 connection, so it can mint fresh TURN credentials for each restart.
 
@@ -175,12 +175,12 @@ for (3 s, then x1.3, at most 10 s) without touching media, and sends a
 heartbeat every 5 s.
 
 `call.diagnostics()` returns the facts for logs, with a one-line `summary`,
-for example `local: host 2, srflx 1, relay 0, pair host udp; remote: udp 1473;
+for example `local: host 2, srflx 1, relay 0; remote: udp 1473;
 states: …, connected 1.4s; in: 1234 rtp, 1234 frames, first 0.9s last 41.2s,
 250/5s, 50.0/s; out: 2600 frames, 1300 opus, 1300 rtp, silence 700, first 1.1s
 last 41.0s, 250/5s, 50.0/s, queue 0, pacer alive; room: 3 roomState, 1 offer,
-1 open`: packets both ways and per second, silence packets, restarts, and the
-candidate pair media flows on.
+1 open`: packets both ways and per second, silence packets and restarts. It has
+no winning candidate pair: aiortc's public API does not expose it.
 
 Like a live microphone, the published track sends one Opus packet every 20 ms
 from the moment media connects until the transport closes, paced by the

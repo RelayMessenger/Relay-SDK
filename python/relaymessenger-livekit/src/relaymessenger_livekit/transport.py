@@ -24,16 +24,13 @@ from livekit import rtc
 from ._audio import RelayAudioSink, RelayAudioSource, monotonic_ms
 from ._audio_format import INBOUND_SAMPLE_RATES, Int16Array
 from ._engine import (
-    IceTransportPolicy,
     PeerConfig,
     RelayIceServer,
-    apply_ice_transport_policy,
     create_peer_connection,
     media_codec,
     normalize_ice_servers,
     parse_candidate,
     prefer_h264,
-    selected_pair,
 )
 from .room import DEFAULT_BASE_URL, CallRoom, CallRoomCloseEvent, CallRoomError
 from .video import (
@@ -184,13 +181,15 @@ class RelayCallTransition:
 
 @dataclass
 class RelayCallDiagnostics:
-    """ICE facts, packet counts, room frames and restarts for one call, with a one-line summary."""
+    """ICE facts, packet counts, room frames and restarts for one call, with a one-line summary.
+
+    There is no winning candidate pair: aiortc's public API does not expose it
+    (its `getStats()` has no ``candidate-pair`` entry).
+    """
 
     local: dict[str, int]
     remote: list[tuple[str, int]]
     transitions: list[RelayCallTransition]
-    #: ``"<type> <protocol>"`` of the local candidate media flows on, once connected.
-    selected_pair: Optional[str]
     connected: bool
     inbound: RelayCallInboundDiagnostics
     outbound: RelayCallOutboundDiagnostics
@@ -226,8 +225,6 @@ def summarize(d: RelayCallDiagnostics) -> str:
     local_part = f"local: host {local['host']}, srflx {local['srflx']}, relay {local['relay']}"
     if local["other"]:
         local_part += f", other {local['other']}"
-    if d.selected_pair:
-        local_part += f", pair {d.selected_pair}"
     remote_part = "remote: " + (", ".join(f"{t} {p}" for t, p in d.remote) if d.remote else "none")
     states: list[str] = []
     last_gathering = "new"
@@ -288,7 +285,6 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
         base_url: str = DEFAULT_BASE_URL,
         room: Optional[CallRoom] = None,
         ice_servers: Union[list[Any], RelayIceServersProvider, None] = None,
-        ice_transport_policy: IceTransportPolicy = "all",
         session_connect_timeout_ms: float = RESTART_CONNECT_TIMEOUT_MS,
         inbound_audio: RelayInboundAudioFormat = RelayInboundAudioFormat(),
         on_warning: Optional[Callable[[str], None]] = None,
@@ -307,14 +303,11 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
             raise ValueError("inbound_audio.sample_rate must be 8000, 12000, 16000, 24000 or 48000.")
         if inbound_audio.channel_count not in (1, 2):
             raise ValueError("inbound_audio.channel_count must be 1 or 2.")
-        if ice_transport_policy not in ("all", "relay"):
-            raise ValueError('ice_transport_policy must be "all" or "relay".')
         if not session_connect_timeout_ms > 0:
             raise ValueError("session_connect_timeout_ms must be greater than zero.")
         self.call_id = call_id
         self.room = room
         self._inbound = inbound_audio
-        self._policy: IceTransportPolicy = ice_transport_policy
         self._ice_servers: Union[list[RelayIceServer], RelayIceServersProvider] = (
             ice_servers if callable(ice_servers) else normalize_ice_servers(ice_servers or DEFAULT_ICE_SERVERS)
         )
@@ -338,7 +331,6 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
         self._stall_warned = False
         self._ice_local = {"host": 0, "srflx": 0, "relay": 0, "other": 0}
         self._ice_remote: list[tuple[str, int]] = []
-        self._selected_pair: Optional[str] = None
         self._transitions: list[RelayCallTransition] = []
         self._source: Optional[RelayAudioSource] = None
         self._peer: Any = None
@@ -592,7 +584,6 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
             return
         transceiver = peer.addTransceiver("video", direction="sendonly")
         prefer_h264(transceiver)
-        apply_ice_transport_policy(transceiver, self._policy)
         if video.enabled:
             transceiver.sender.replaceTrack(video.create_track())
         self._video_transceiver = transceiver
@@ -605,7 +596,6 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
             local=dict(self._ice_local),
             remote=list(self._ice_remote),
             transitions=list(self._transitions),
-            selected_pair=self._selected_pair,
             connected=self._peer_connected,
             inbound=self._inbound_diagnostics(),
             outbound=self._outbound_diagnostics(),
@@ -737,12 +727,11 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
             servers = normalize_ice_servers(self._ice_servers)
         if self._closed or self._ended or generation != self._peer_generation:
             return
-        peer = self._peer_factory(PeerConfig(ice_servers=servers, ice_transport_policy=self._policy))
+        peer = self._peer_factory(PeerConfig(ice_servers=servers))
         self._peer = peer
         self._peer_connected = False
         self._initial_answer_sdp = None
         self._publish_transceiver = peer.addTransceiver(source.create_track(), direction="sendonly")
-        apply_ice_transport_policy(self._publish_transceiver, self._policy)
         self._video_transceiver = None
         self._add_video_transceiver(peer)
         self._observe(peer)
@@ -933,7 +922,6 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
                 return
             self._peer_connected = True
             self._failed_attempts = 0
-            self._selected_pair = selected_pair(peer) or self._selected_pair
             if self._source is not None:
                 self._source.start()
             try:
