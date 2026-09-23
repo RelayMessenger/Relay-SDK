@@ -81,3 +81,6 @@ def _camera(track) -> None:
 
 `RelayVideoFrame` holds tightly packed `i420`, `rgba`, `bgra`, `argb`, `abgr`
 or `rgb24` bytes. `VideoSource.capture_frame` also takes an `av.VideoFrame`.
+Until the first `capture_frame`, a published camera sends one black frame a
+second, as Cloudflare's PartyTracks does: the SFU forwards only a track that
+has sent packets.

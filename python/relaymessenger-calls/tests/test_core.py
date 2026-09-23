@@ -23,6 +23,7 @@ from relaymessenger_calls import (
     VideoStream,
 )
 from relaymessenger_calls._engine import PeerConfig, RelayIceServer, create_peer_connection, media_ssrc, turn_only
+from relaymessenger_calls import video
 from relaymessenger_calls.video import TrackPublishOptions, _VideoSender, request_keyframes
 
 
@@ -108,6 +109,30 @@ async def test_a_published_source_encodes_relay_frames_and_pyav_frames() -> None
     second = await asyncio.wait_for(track.recv(), 1)
     assert second.pts == 180_000
     assert sender.stats().frames_captured == 2 and sender.stats().frames_sent == 2
+
+
+async def test_a_published_camera_sends_black_frames_until_its_first_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Cloudflare's SFU refuses to forward a track that has sent no packets (empty_track_error).
+    monkeypatch.setattr(video, "IDLE_FRAME_INTERVAL_S", 0.05)
+    source = VideoSource(64, 48)
+    sender = _VideoSender(LocalVideoTrack.create_video_track("camera", source), TrackPublishOptions())
+    track = sender.create_track()
+    started = time.monotonic()
+    idle = [await asyncio.wait_for(track.recv(), 1) for _ in range(3)]
+    assert time.monotonic() - started >= 0.09  # one a period, the first at once
+    for frame in idle:
+        assert (frame.width, frame.height) == (64, 48)
+        assert int(frame.to_ndarray(format="rgb24").max()) == 0
+    assert idle[0].pts < idle[1].pts < idle[2].pts
+    pending = asyncio.ensure_future(track.recv())
+    await asyncio.sleep(0.01)
+    source.capture_frame(RelayVideoFrame(64, 48, "rgb24", gradient(64, 48).tobytes()))
+    content = await asyncio.wait_for(pending, 0.04)  # sooner than the next idle frame
+    assert int(content.to_ndarray(format="rgb24").max()) > 0 and content.pts > idle[2].pts
+    # Once the camera has a picture, no black frame follows: the track waits for the next capture.
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(track.recv(), 0.2)
+    assert sender.stats().frames_captured == 1 and sender.stats().frames_sent == 1
 
 
 class FakeVideoTrack:
