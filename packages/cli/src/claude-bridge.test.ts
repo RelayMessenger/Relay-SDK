@@ -1,5 +1,5 @@
 import type Relay from "@relaymessenger/sdk";
-import { INVOICE_BLOCK_INSTRUCTION, SELECTION_BLOCK_INSTRUCTION, type RelayWebhookEvent } from "@relaymessenger/sdk";
+import { PAYMENT_BLOCK_INSTRUCTION, RelayAPIError, SELECTION_BLOCK_INSTRUCTION, type RelayWebhookEvent } from "@relaymessenger/sdk";
 import type { query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
@@ -24,6 +24,8 @@ function fakeRelay(events: readonly RelayWebhookEvent[]) {
   const typing: string[] = [];
   const sent: Array<{ chatId: string; text: string; key: string | undefined; parts?: unknown[]; replyTo?: unknown }> = [];
   let sendFails = false;
+  const created: Array<{ body: unknown; key: string | undefined }> = [];
+  let createRefusal: Error | undefined;
   const client = {
     chats: {
       startTyping: async (chatID: string) => { typing.push(`start ${chatID}`); },
@@ -36,6 +38,13 @@ function fakeRelay(events: readonly RelayWebhookEvent[]) {
         },
       },
     },
+    paymentRequests: {
+      create: async (body: unknown, options?: { idempotencyKey?: string }) => {
+        if (createRefusal) throw createRefusal;
+        created.push({ body, key: options?.idempotencyKey });
+        return { checkout_url: "https://pay.relayapp.im/pr_token_123" };
+      },
+    },
     websocket: {
       // Relay's own connection hands one event over at a time and waits for
       // each to be taken before the next (packages/sdk/src/websocket.ts).
@@ -43,8 +52,8 @@ function fakeRelay(events: readonly RelayWebhookEvent[]) {
         for (const [index, event] of events.entries()) await options.onEvent(event, { sequence: String(index + 1) });
       },
     },
-  } as unknown as Pick<Relay, "chats" | "websocket">;
-  return { client, typing, sent, failSends: () => { sendFails = true; } };
+  } as unknown as Pick<Relay, "chats" | "paymentRequests" | "websocket">;
+  return { client, typing, sent, created, refuseCreate: (error: Error) => { createRefusal = error; }, failSends: () => { sendFails = true; } };
 }
 
 /** Every way one message can end on the terminal. */
@@ -130,14 +139,25 @@ describe("Claude Agent SDK bridge", () => {
     ]);
   });
 
-  it("leaves an invoice block with a checkout link that is not Stripe's in the text and says why", async () => {
-    const answer = 'That is $24.\n```invoice\n{"title": "House blend, 250 g", "amount": 2400, "currency": "usd", "goods": "physical", "url": "https://pay.example.com/x"}\n```';
+  it("leaves a payment block with a field the model cannot set in the text and says why", async () => {
+    const answer = 'That is $24.\n```payment\n{"description": "House blend", "category": "physical_goods", "amount": 2400, "currency": "usd", "customer_id": "cus_1"}\n```';
     const ask = fakeQuery(async function* () { yield success(answer); });
     const state = setup(ask, [received("event-1", "chat-1", "hi")]);
     await runClaudeBridge(state.input);
     await untilEnded(state.said, 1);
     expect(state.relay.sent.map((item) => item.parts)).toEqual([[{ type: "text", value: answer }]]);
-    expect(state.said[1]).toMatch(/^The component block in the answer to @alice was left as text: invoice url must be an https Stripe checkout link/u);
+    expect(state.said[1]).toMatch(/^The component block in the answer to @alice was left as text: payment has unknown field customer_id/u);
+  });
+
+  it("sends the words and says why when Relay refuses the payment request", async () => {
+    const answer = 'That is $24.\n```payment\n{"description": "House blend", "category": "physical_goods", "amount": 2400, "currency": "usd"}\n```';
+    const ask = fakeQuery(async function* () { yield success(answer); });
+    const state = setup(ask, [received("event-1", "chat-1", "hi")]);
+    state.relay.refuseCreate(new RelayAPIError("Connect Stripe in the Relay Console first.", { status: 403, code: 2003 }));
+    await runClaudeBridge(state.input);
+    await untilEnded(state.said, 1);
+    expect(state.relay.sent.map((item) => item.parts)).toEqual([[{ type: "text", value: "That is $24." }]]);
+    expect(state.said).toContain("The payment in the answer to @alice was not sent: Connect Stripe in the Relay Console first.");
   });
 
   it("tells the agent how to send buttons and when", () => {
@@ -147,11 +167,11 @@ describe("Claude Agent SDK bridge", () => {
     expect(prompt).toContain("If the person asks for buttons, send them.");
   });
 
-  it("tells the agent how to send an invoice and when", () => {
+  it("tells the agent how to send a payment and when", () => {
     const prompt = codexPrompt("alice", "hello");
-    expect(prompt).toContain("fenced code block tagged `invoice`");
-    expect(prompt).toContain("Send an invoice only when the person asked to buy something or has already agreed to a price");
-    expect(prompt).toContain("The invoice card is a message of its own");
+    expect(prompt).toContain("fenced code block tagged `payment`");
+    expect(prompt).toContain("category digital_goods: digital content and tips.");
+    expect(prompt).toContain("drawn as a card in its own message after your words");
   });
 
   it("a photo with no text starts a turn", async () => {
@@ -344,26 +364,28 @@ it("passes selected values to Claude and authors a native selection through the 
   ]);
 });
 
-it("teaches Claude the invoice block and sends an invoice answer as the words, then the invoice alone, once on replay", async () => {
+it("teaches Claude the payment block and sends a payment answer as the words, then the payment alone, once on replay", async () => {
   const event = received("pay", "chat-1", "I'll take the house blend");
   if (event.event_type !== "message.received") throw new Error("fixture");
   event.data.reply_to = { message_id: "source", part_index: 0 };
   let prompt = "";
   const ask = fakeQuery(async function* (input) {
     prompt = String(input.prompt);
-    yield success('That is $24.\n```invoice\n{"title": "House blend, 250 g", "amount": 2400, "currency": "usd", "goods": "physical", "url": "https://buy.stripe.com/test_123"}\n```');
+    yield success('That is $24.\n```payment\n{"description": "House blend, 250 g", "category": "physical_goods", "amount": 2400, "currency": "usd"}\n```');
   });
   const state = setup(ask, [event, event]);
   await runClaudeBridge(state.input);
   await untilEnded(state.said, 1);
-  expect(prompt).toContain(INVOICE_BLOCK_INSTRUCTION);
-  expect(prompt.indexOf(INVOICE_BLOCK_INSTRUCTION)).toBeGreaterThan(prompt.indexOf(SELECTION_BLOCK_INSTRUCTION));
+  expect(prompt).toContain(PAYMENT_BLOCK_INSTRUCTION);
+  expect(prompt.indexOf(PAYMENT_BLOCK_INSTRUCTION)).toBeGreaterThan(prompt.indexOf(SELECTION_BLOCK_INSTRUCTION));
   expect(state.relay.sent.map((item) => [item.key, item.parts])).toEqual([
     ["codex-bridge-pay", [{ type: "text", value: "That is $24." }]],
     ["codex-bridge-pay-1", [{
-      type: "invoice", title: "House blend, 250 g", amount: 2400, currency: "usd", goods: "physical", url: "https://buy.stripe.com/test_123",
+      type: "payment", checkout_url: "https://pay.relayapp.im/pr_token_123",
     }]],
   ]);
+  // The bridge created the request once, on the card's own key, from the block's fields.
+  expect(state.relay.created).toEqual([{ body: { description: "House blend, 250 g", category: "physical_goods", amount: 2400, currency: "usd" }, key: "codex-bridge-pay-1" }]);
   // The reply_to that came in is context for Claude, not a quote on the answer.
   expect(state.relay.sent.map((item) => item.replyTo)).toEqual([undefined, undefined]);
 });

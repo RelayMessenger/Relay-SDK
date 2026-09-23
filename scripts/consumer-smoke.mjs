@@ -153,8 +153,8 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 43);
-      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
+      assert.equal(RELAY_V1_OPERATIONS.length, 46);
+      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 22);
       const allowedOperations = new Set([
         "POST /v1/chats",
         "GET /v1/chats",
@@ -177,7 +177,10 @@ try {
         "POST /v1/chats/{chatId}/voicememo",
         "GET /v1/messages/{messageId}",
         "POST /v1/messages/{messageId}/reactions",
-        "PUT /v1/messages/{messageId}/invoice",
+        "POST /v1/payment_requests",
+        "GET /v1/payment_requests",
+        "GET /v1/payment_requests/{paymentRequestId}",
+        "POST /v1/payment_requests/{paymentRequestId}/cancel",
         "POST /v1/attachments",
         "GET /v1/attachments/{attachmentId}",
         "DELETE /v1/attachments/{attachmentId}",
@@ -258,6 +261,12 @@ try {
         "retrieve",
       ]);
       assert.deepEqual(methods(client.chats.messages), ["list", "send"]);
+      assert.deepEqual(methods(client.paymentRequests), [
+        "cancel",
+        "create",
+        "list",
+        "retrieve",
+      ]);
       assert.deepEqual(
         methods(client.chats.participants),
         ["add", "remove"],

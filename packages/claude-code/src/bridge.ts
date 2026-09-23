@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { SELECTION_CONTEXT_MAX_LENGTH, componentParts, indexedIdempotencyKey, partsWithButtons, partsWithSelection, selectionReply, type SelectionPart, type ButtonsPart, type InvoicePart } from "@relaymessenger/sdk";
+import { SELECTION_CONTEXT_MAX_LENGTH, componentParts, indexedIdempotencyKey, partsWithButtons, partsWithSelection, selectionReply, type SelectionPart, type ButtonsPart, type PaymentPart } from "@relaymessenger/sdk";
 import type {
   Chat,
   Message,
@@ -271,8 +271,8 @@ export function buildReply(
 /**
  * The Messages one reply becomes: the words (with any buttons) first, then
  * the link as its own Message, which the server requires and the app draws
- * as a card, then any invoice, which must also be the only part of its
- * Message. A reply that is only a link or only an invoice is one Message.
+ * as a card, then any payment, which must also be the only part of its
+ * Message. A reply that is only a link or only a payment is one Message.
  * Each Message past the first carries its index in the key.
  */
 export function buildReplyMessages(
@@ -282,11 +282,11 @@ export function buildReplyMessages(
   buttons?: ButtonsPart,
   link?: string,
   selection?: SelectionPart,
-  invoice?: InvoicePart,
+  payment?: PaymentPart,
 ): MessageSendParams[] {
   if (selection && (buttons || link)) throw new Error("selection cannot be combined with buttons or link");
-  if (invoice && (buttons || selection)) throw new Error("an invoice cannot be combined with buttons or selection");
-  if (!link && !invoice) return [buildReply(text, idempotencyKey, replyTo, buttons, selection)];
+  if (payment && (buttons || selection)) throw new Error("a payment cannot be combined with buttons or selection");
+  if (!link && !payment) return [buildReply(text, idempotencyKey, replyTo, buttons, selection)];
   const messages: MessageSendParams[] = [];
   if (text || buttons) messages.push(buildReply(text, idempotencyKey, replyTo, buttons));
   const solo = (part: MessagePart): void => {
@@ -299,7 +299,7 @@ export function buildReplyMessages(
     });
   };
   if (link) solo({ type: "link", value: link });
-  if (invoice) solo(invoice);
+  if (payment) solo(payment);
   return messages;
 }
 

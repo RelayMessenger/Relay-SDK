@@ -7,6 +7,7 @@ export {
   ContactCard,
   Contacts,
   Messages,
+  PaymentRequests,
   Relay,
   WebSocket,
   WebhookEvents,
@@ -80,19 +81,18 @@ export {
   type AnswerSegment,
 } from "./links.js";
 export {
-  INVOICE_BLOCK_INSTRUCTION,
-  INVOICE_CHECKOUT_HOSTS,
-  INVOICE_FENCE,
-  INVOICE_GUIDANCE,
-  INVOICE_MAX_AMOUNT,
-  INVOICE_RECURRING_MAX_COUNT,
-  INVOICE_TITLE_MAX_LENGTH,
-  INVOICE_URL_MAX_LENGTH,
-  invoicePart,
-  parseInvoiceBlock,
-  splitInvoice,
-  type SplitInvoice,
-} from "./invoice.js";
+  PAYMENT_BLOCK_INSTRUCTION,
+  PAYMENT_CATEGORIES,
+  PAYMENT_DESCRIPTION_MAX_LENGTH,
+  PAYMENT_FENCE,
+  PAYMENT_GUIDANCE,
+  PAYMENT_IMAGE_URL_MAX_LENGTH,
+  createPaymentPart,
+  parsePaymentBlock,
+  paymentRequestFields,
+  splitPayment,
+  type SplitPayment,
+} from "./payment.js";
 
 export { Relay as default } from "./client.js";
 export {

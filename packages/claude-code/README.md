@@ -26,16 +26,18 @@ checks any number of options and submits them once; checking sends nothing, and
 a person answers a given selection once. iOS may draw a checkmark in place of
 each bullet and repeat the prompt's title, as presentation only.
 
-## Invoice
+## Payment
 
-A verified agent can ask the person to pay: the `reply` tool accepts an
-`invoice` object (`title`, `amount` in minor units, `currency`, `goods` of
-`physical` or `digital`, a Stripe-hosted checkout `url`, and optional
-`recurring`), never together with `buttons` or `selection`. The invoice is
-always a Message of its own, sent after the text and any link on the next
-indexed idempotency key. When your Stripe webhook learns the payment went
-through, mark it with `relay.messages.invoice.update(messageId, { status })`;
-the channel exposes no status tool.
+The `reply` tool's `payment` argument asks the person to pay: `description`,
+`category` (`physical_goods`, `digital_goods` or `donation`), and `amount` in
+minor units with a `currency`, or `mode: "subscription"` with a `price_id` and
+optional `quantity`, plus an optional `image_url`. The channel creates the
+payment request with its own Relay token before anything is sent, on the key
+the card will carry, then sends the card as its own Message after the text and
+any link; never together with `buttons` or `selection`. A refusal (Stripe not
+connected, Stripe's own 400) comes back as the tool result with nothing sent.
+A paid request adds a `payment_receipt` message from the payer, which arrives
+like any message.
 
 ## Requirements
 
@@ -185,7 +187,7 @@ Sends plain text through `chats.messages.send` with:
 - `chat_id` copied from an allowlisted channel event;
 - `text` of at most 10,000 UTF-16 code units;
 - a caller-selected stable `send_id`;
-- optional `buttons`, `link`, `selection`, or `invoice`; and
+- optional `buttons`, `link`, `selection`, or `payment`; and
 - optional `reply_to_message_id`.
 
 The mapping from `send_id` to request hash and Relay idempotency key is persisted

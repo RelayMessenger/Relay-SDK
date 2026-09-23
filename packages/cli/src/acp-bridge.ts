@@ -220,7 +220,7 @@ export const runTurn = async (
 };
 
 export interface AcpBridgeInput {
-  client: Pick<Relay, "chats" | "websocket">;
+  client: Pick<Relay, "chats" | "paymentRequests" | "websocket">;
   media?: Omit<InboundMediaOptions, "chatId">;
   /** The agent's ACP command, and the folder to run it in. */
   acp: AcpCommand;

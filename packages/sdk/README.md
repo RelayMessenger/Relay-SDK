@@ -58,41 +58,48 @@ The CLI, Pi, OpenClaw, the Claude Code channel, MCP, and the Chat SDK adapter
 include selection guidance and structured inbound discovery.
 `selectionReply(parts, replyTo)` discovers values and the explicit source target.
 
-## Invoice
+## Payment
 
-Only a verified agent can send an `invoice` part, and it must be the only part
-of its Message. The `url` is your own Stripe-hosted checkout page on one of
-`INVOICE_CHECKOUT_HOSTS` (`checkout`, `buy`, `book`, `donate` or
-`invoice.stripe.com`); Relay never touches the money.
+Ask a person to pay in two steps. Create a payment request on your
+organization's connected Stripe account, then send its `checkout_url` as a
+`payment` part, the only part of its Message. The card reads its amount and
+title from the request. The money settles to your Stripe account.
 
 ```ts
-import { invoicePart } from "@relaymessenger/sdk";
-
-const invoice = invoicePart({
-  title: "House blend, 250 g",
-  amount: 2400, // minor units
-  currency: "usd",
-  goods: "physical", // "digital" for anything delivered in chat or used in an app
-  url: "https://buy.stripe.com/test_123",
-});
-if (typeof invoice === "string") throw new Error(invoice);
+const request = await relay.paymentRequests.create(
+  {
+    amount: 2400, // minor units
+    currency: "usd",
+    description: "House blend, 250 g",
+    category: "physical_goods", // or "digital_goods", "donation"
+  },
+  { idempotencyKey: `order-${orderId}` },
+);
 await relay.chats.messages.send(chatId, {
-  message: { parts: [invoice], idempotency_key: crypto.randomUUID() },
+  message: {
+    parts: [{ type: "payment", checkout_url: request.checkout_url }],
+    idempotency_key: crypto.randomUUID(),
+  },
 });
 ```
 
-`invoicePart` applies the server's checks (title, amount, currency, goods,
-Stripe checkout url, optional `recurring` of up to 3 years) and returns a
-normalized part or an error string. When your Stripe webhook learns the
-outcome, move the card with
-`relay.messages.invoice.update(messageId, { status: "succeeded" })`; only the
-sending agent may.
+For a subscription, pass `mode: "subscription"` and a recurring `price_id`
+instead of `amount` and `currency`. `relay.paymentRequests.list`, `retrieve`
+and `cancel` read and cancel requests. The status moves only on Stripe's word
+or your cancel, and arrives as `payment.succeeded`, `payment.canceled` or
+`payment.expired`; a paid request also adds a `payment_receipt` message from
+the payer, which arrives as `message.received`.
 
-`answerMessages` accepts one `invoice` fenced JSON block and sends it as its
-own Message after the words. A second invoice, or an invoice beside buttons or
-a selection, stays text with an error. `INVOICE_GUIDANCE` is the
-when-to-invoice text the CLI, Pi, OpenClaw, MCP and the Claude Code channel
-carry; the text bridges also carry `INVOICE_BLOCK_INSTRUCTION`.
+A model inside a bridge never holds the Relay token, so it gives the request's
+fields and the bridge creates it. `answerMessages` lifts one `payment` fenced
+JSON block (`description`, `category`, `amount` and `currency`, or
+`mode: "subscription"` with `price_id`) out of the words and returns it as
+`payment`, checked by `paymentRequestFields`; `createPaymentPart` creates the
+request on the card Message's own idempotency key and returns the `payment`
+part to send last. A second payment, or a payment beside buttons or a
+selection, stays text with an error. `PAYMENT_GUIDANCE` is the text the CLI,
+Pi, OpenClaw, MCP and the Claude Code channel carry; the text bridges also
+carry `PAYMENT_BLOCK_INSTRUCTION`.
 
 ## Chat permissions
 

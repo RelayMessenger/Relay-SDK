@@ -13,6 +13,8 @@ import Relay, {
   type Call,
   type CallMarker,
   type CallWebhookEvent,
+  type PaymentRequest,
+  type PaymentStatus,
   type ChatHandle,
   type ChatSendVoicememoResponse,
   type ChatSetActivityParams,
@@ -202,7 +204,25 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "call.created",
   "call.updated",
   "call.ended",
+  "payment.succeeded",
+  "payment.canceled",
+  "payment.expired",
 ];
+
+// Compile-only payment request exercise: create, then send its checkout_url.
+async function requestPayment(chatId: string): Promise<void> {
+  const request = await relay.paymentRequests.create(
+    { amount: 2400, currency: "usd", description: "House blend, 250 g", category: "physical_goods" },
+    { idempotencyKey: "order-42" },
+  );
+  request.checkout_url satisfies string;
+  await relay.chats.messages.send(chatId, {
+    message: { parts: [{ type: "payment", checkout_url: request.checkout_url }] },
+  });
+  (await relay.paymentRequests.list({ status: "requested" })).payment_requests satisfies PaymentRequest[];
+  (await relay.paymentRequests.cancel(request.id)).status satisfies PaymentStatus;
+}
+void requestPayment;
 
 // Compile-only call event and REST exercise.
 async function receiveCall(event: CallWebhookEvent): Promise<void> {

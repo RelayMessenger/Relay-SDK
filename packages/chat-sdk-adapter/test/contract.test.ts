@@ -10,7 +10,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "3fb4873a3c09b7dade09012ecfc57acfef8cfb983b6b35fff9d320cf62bb3b00";
+  "7b41c21bebd99d28d103da1c3fe380642542e5b6243bb4319e501d7609d8ab0f";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -121,39 +121,37 @@ describe("locked Relay Server contract", () => {
     }
   });
 
-  it("carries the invoice part, its read-back status and the status route", async () => {
+  it("carries the payment part, its read-back fields, the receipt and the payment request routes", async () => {
     const document = parse(await readFile(new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8")) as OpenApiDocument;
     const schemas = document.components.schemas;
-    expect(schemas.InvoicePart).toHaveProperty("additionalProperties", false);
-    expect(schemas.InvoicePart).toHaveProperty("required", ["type", "title", "amount", "currency", "goods", "url"]);
-    expect(schemas.InvoicePart).toHaveProperty("properties.title.maxLength", 32);
-    expect(schemas.InvoicePart).toHaveProperty("properties.amount.maximum", 99999999);
-    expect(schemas.InvoicePart).toHaveProperty("properties.goods.enum", ["physical", "digital"]);
-    expect(schemas.InvoicePart).toHaveProperty("properties.url.maxLength", 2048);
-    expect(schemas.InvoicePart).toHaveProperty("properties.recurring.$ref", "#/components/schemas/InvoiceRecurring");
-    expect(schemas.InvoiceRecurring).toHaveProperty("properties.interval.enum", ["day", "week", "month", "year"]);
-    expect(schemas.InvoiceStatus).toHaveProperty("enum", ["requested", "succeeded", "canceled", "expired", "refunded"]);
-    expect(schemas.InvoicePartResponse).toHaveProperty("required", [
-      "type", "title", "amount", "currency", "goods", "url", "status", "reactions",
+    expect(schemas.PaymentPart).toHaveProperty("additionalProperties", false);
+    expect(schemas.PaymentPart).toHaveProperty("required", ["type", "checkout_url"]);
+    expect(schemas.PaymentPart).toHaveProperty("properties.checkout_url.maxLength", 2048);
+    expect(schemas.PaymentPartResponse).toHaveProperty("required", [
+      "type", "payment_request_id", "checkout_url", "amount", "currency", "description", "category", "mode", "status", "reactions",
     ]);
-    expect(schemas.MessagePart).toHaveProperty("discriminator.mapping.invoice", "#/components/schemas/InvoicePart");
+    expect(schemas.PaymentReceiptPartResponse).toHaveProperty("required", [
+      "type", "payment_request_id", "description", "amount", "currency", "mode", "reactions",
+    ]);
+    expect(schemas.PaymentCategory).toHaveProperty("enum", ["physical_goods", "digital_goods", "donation"]);
+    expect(schemas.PaymentStatus).toHaveProperty("enum", ["requested", "succeeded", "canceled", "expired"]);
+    expect(schemas.PaymentRecurring).toHaveProperty("required", ["interval", "interval_count"]);
+    expect(schemas.MessagePart).toHaveProperty("discriminator.mapping.payment", "#/components/schemas/PaymentPart");
     for (const name of ["Message", "MessageEvent", "SentMessage"]) {
       expect(schemas[name]).toHaveProperty("properties.parts.items.oneOf", expect.arrayContaining([
-        { $ref: "#/components/schemas/InvoicePartResponse" },
+        { $ref: "#/components/schemas/PaymentPartResponse" },
+        { $ref: "#/components/schemas/PaymentReceiptPartResponse" },
       ]));
     }
-    const route = document.paths["/v1/messages/{messageId}/invoice"]?.put as Record<string, unknown> | undefined;
-    expect(route).toHaveProperty("operationId", "updateInvoiceStatus");
-    expect(route).toHaveProperty(
-      ["requestBody", "content", "application/json", "schema", "$ref"],
-      "#/components/schemas/UpdateInvoiceStatusRequest",
-    );
-    expect(route).toHaveProperty(
-      ["responses", "200", "content", "application/json", "schema", "properties", "message", "$ref"],
-      "#/components/schemas/Message",
-    );
-    expect(schemas.UpdateInvoiceStatusRequest).toHaveProperty("required", ["status"]);
-    expect(schemas.UpdateInvoiceStatusRequest).toHaveProperty("properties.status.$ref", "#/components/schemas/InvoiceStatus");
+    expect(schemas.CreatePaymentRequestRequest).toHaveProperty("required", ["description", "category"]);
+    expect(schemas.PaymentRequest).toHaveProperty("required", [
+      "id", "object", "status", "mode", "amount", "currency", "description", "category", "checkout_url",
+      "expires_at", "metadata", "stripe", "created_at", "updated_at",
+    ]);
+    expect(document.paths["/v1/payment_requests"]).toHaveProperty("post.operationId", "createPaymentRequest");
+    expect(document.paths["/v1/payment_requests"]).toHaveProperty("get.operationId", "listPaymentRequests");
+    expect(document.paths["/v1/payment_requests/{paymentRequestId}"]).toHaveProperty("get.operationId", "getPaymentRequest");
+    expect(document.paths["/v1/payment_requests/{paymentRequestId}/cancel"]).toHaveProperty("post.operationId", "cancelPaymentRequest");
   });
 
   it("caps both recipient arrays at six without changing generic admission APIs", async () => {

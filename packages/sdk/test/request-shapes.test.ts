@@ -179,9 +179,15 @@ describe("Relay v1 request shapes", () => {
       type: "love",
       part_index: 0,
     });
-    await client.messages.invoice.update("message-id", {
-      status: "succeeded",
-    });
+    await client.paymentRequests.create({
+      amount: 2_400,
+      currency: "usd",
+      description: "House blend, 250 g",
+      category: "physical_goods",
+    }, { idempotencyKey: "payment-request-key" });
+    await client.paymentRequests.list({ status: "requested", limit: 10 });
+    await client.paymentRequests.retrieve("payment-request-id");
+    await client.paymentRequests.cancel("payment-request-id");
     await client.attachments.create({
       filename: "photo.png",
       content_type: "image/png",
@@ -229,7 +235,8 @@ describe("Relay v1 request shapes", () => {
           .replace("{messageId}", "message-id")
           .replace("{attachmentId}", "attachment-id")
           .replace("{subscriptionId}", "subscription-id")
-          .replace("{callId}", "call-id"),
+          .replace("{callId}", "call-id")
+          .replace("{paymentRequestId}", "payment-request-id"),
       ]),
     );
     expect(calls.every((call) =>
@@ -245,6 +252,20 @@ describe("Relay v1 request shapes", () => {
         idempotency_key: "chat-create-key",
       },
     });
+
+    const createPayment = calls.find((call) =>
+      call.method === "POST" && call.url.pathname === "/v1/payment_requests")!;
+    expect(createPayment.headers.get("idempotency-key")).toBe("payment-request-key");
+    expect(JSON.parse(String(createPayment.body))).toEqual({
+      amount: 2_400,
+      currency: "usd",
+      description: "House blend, 250 g",
+      category: "physical_goods",
+    });
+    const listPayments = calls.find((call) =>
+      call.method === "GET" && call.url.pathname === "/v1/payment_requests")!;
+    expect(listPayments.url.searchParams.get("status")).toBe("requested");
+    expect(listPayments.url.searchParams.get("limit")).toBe("10");
 
     const sharedContactCard = calls.find((call) =>
       call.url.pathname.endsWith("/share_contact_card"))!;
@@ -345,6 +366,7 @@ describe("Relay v1 request shapes", () => {
       "contactCard",
       "contacts",
       "messages",
+      "paymentRequests",
       "webhookEvents",
       "webhookSubscriptions",
       "webhooks",
@@ -373,6 +395,12 @@ describe("Relay v1 request shapes", () => {
       "retrieve",
     ]);
     expect(methods(client.chats.messages)).toEqual(["list", "send"]);
+    expect(methods(client.paymentRequests)).toEqual([
+      "cancel",
+      "create",
+      "list",
+      "retrieve",
+    ]);
     expect(methods(client.chats.participants)).toEqual(["add", "remove"]);
     expect(methods(client.calls)).toEqual([
       "create",

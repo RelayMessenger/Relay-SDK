@@ -404,20 +404,20 @@ it("builds selection replies without changing button semantics", () => {
   expect(() => buildReply(" ", "stable", undefined, undefined, selection)).toThrow("nonblank");
 });
 
-it("sends an invoice alone after the words and any link, on indexed keys", () => {
-  const invoice = { type: "invoice" as const, title: "House blend", amount: 2400, currency: "usd", goods: "physical" as const, url: "https://buy.stripe.com/test_123" };
+it("sends a payment alone after the words and any link, on indexed keys", () => {
+  const payment = { type: "payment" as const, checkout_url: "https://pay.relayapp.im/pr_token_123" };
   const anchor = "00000000-0000-7000-8000-000000000001";
-  expect(buildReplyMessages("Here you go:", "stable", anchor, undefined, "https://example.com/a", undefined, invoice)).toEqual([
+  expect(buildReplyMessages("Here you go:", "stable", anchor, undefined, "https://example.com/a", undefined, payment)).toEqual([
     { message: { parts: [{ type: "text", value: "Here you go:" }], idempotency_key: "stable", reply_to: { message_id: anchor } } },
     { message: { parts: [{ type: "link", value: "https://example.com/a" }], idempotency_key: "stable-1" } },
-    { message: { parts: [invoice], idempotency_key: "stable-2" } },
+    { message: { parts: [payment], idempotency_key: "stable-2" } },
   ]);
-  expect(buildReplyMessages("", "stable", anchor, undefined, undefined, undefined, invoice)).toEqual([
-    { message: { parts: [invoice], idempotency_key: "stable", reply_to: { message_id: anchor } } },
+  expect(buildReplyMessages("", "stable", anchor, undefined, undefined, undefined, payment)).toEqual([
+    { message: { parts: [payment], idempotency_key: "stable", reply_to: { message_id: anchor } } },
   ]);
-  expect(() => buildReplyMessages("Pay?", "stable", undefined, { type: "buttons", items: [{ label: "Yes" }] }, undefined, undefined, invoice)).toThrow("cannot be combined");
+  expect(() => buildReplyMessages("Pay?", "stable", undefined, { type: "buttons", items: [{ label: "Yes" }] }, undefined, undefined, payment)).toThrow("cannot be combined");
   const selection = { type: "selection" as const, options: [{ value: "a", label: "A" }] };
-  expect(() => buildReplyMessages("Pay?", "stable", undefined, undefined, undefined, selection, invoice)).toThrow("cannot be combined");
+  expect(() => buildReplyMessages("Pay?", "stable", undefined, undefined, undefined, selection, payment)).toThrow("cannot be combined");
 });
 
 it("keeps readable channel content and forwards selection metadata in notification tags", () => {

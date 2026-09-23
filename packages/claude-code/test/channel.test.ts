@@ -10,6 +10,7 @@ import type {
   Relay,
   RelayWebhookEvent,
 } from "@relaymessenger/sdk";
+import { RelayAPIError } from "@relaymessenger/sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import { RelayChannel } from "../src/channel.ts";
 import type { RelayChannelConfig } from "../src/config.ts";
@@ -112,6 +113,8 @@ interface FakeRelay {
   readonly sends: Array<{ chatId: string; body: MessageSendParams }>;
   readonly retrieved: string[];
   readonly agentMessages: Map<string, Message>;
+  readonly paymentRequests: Array<{ body: unknown; key: string | undefined }>;
+  readonly refusal: { error?: Error };
 }
 
 function fakeRelay(): FakeRelay {
@@ -119,7 +122,16 @@ function fakeRelay(): FakeRelay {
   const sends: Array<{ chatId: string; body: MessageSendParams }> = [];
   const retrieved: string[] = [];
   const agentMessages = new Map<string, Message>();
+  const paymentRequests: Array<{ body: unknown; key: string | undefined }> = [];
+  const refusal: { error?: Error } = {};
   const relay = {
+    paymentRequests: {
+      create: async (body: unknown, options?: { idempotencyKey?: string }) => {
+        if (refusal.error) throw refusal.error;
+        paymentRequests.push({ body, key: options?.idempotencyKey });
+        return { checkout_url: "https://pay.relayapp.im/pr_token_123" };
+      },
+    },
     chats: {
       markAsRead: async (chatId: string) => {
         reads.push(chatId);
@@ -150,7 +162,7 @@ function fakeRelay(): FakeRelay {
       },
     },
   } as unknown as Relay;
-  return { relay, reads, sends, retrieved, agentMessages };
+  return { relay, reads, sends, retrieved, agentMessages, paymentRequests, refusal };
 }
 
 function fixture() {
@@ -627,52 +639,72 @@ it("validates selection tool arguments and sends the native part on the existing
   } finally { state.close(); }
 });
 
-it("validates invoice tool arguments and sends the invoice as its own Message after the words", async () => {
+it("validates payment tool arguments, creates the request first and sends its card as its own Message after the words", async () => {
   const { state, fake, channel } = fixture();
   try {
     const origin = event({ sequence: 1, text: "I'll take the house blend" });
     accept(state, origin, 1);
     await channel.flush();
     await channel.beginProcessing({ delivery_id: origin.event_id });
-    const invoice = { title: " House blend ", amount: 2400, currency: "USD", goods: "physical", url: "https://buy.stripe.com/test_123" };
-    const args = { chat_id: CHAT_A, text: "Here is your invoice.", send_id: "invoice-1", invoice };
+    const payment = { description: " House blend, 250 g ", category: "physical_goods", amount: 2400, currency: "USD" };
+    const args = { chat_id: CHAT_A, text: "Here is your order.", send_id: "payment-1", payment };
     for (const bad of [
       [],
-      { ...invoice, url: "https://example.com/pay" },
-      { ...invoice, url: "https://buy.stripe.com@evil.example/pay" },
-      { ...invoice, amount: 0 },
-      { ...invoice, goods: "service" },
-      { ...invoice, title: "x".repeat(33) },
-      { ...invoice, extra: true },
+      {},
+      { ...payment, category: "service" },
+      { ...payment, description: "x".repeat(33) },
+      { ...payment, amount: 0 },
+      { ...payment, checkout_url: "https://pay.relayapp.im/pr_token_123" },
+      { ...payment, mode: "subscription" },
     ]) {
-      expect((await channel.reply({ ...args, invoice: bad })).isError).toBe(true);
+      expect((await channel.reply({ ...args, payment: bad })).isError).toBe(true);
     }
     expect((await channel.reply({ ...args, buttons: [{ label: "Pay" }] })).isError).toBe(true);
     expect((await channel.reply({ ...args, selection: [{ value: "a", label: "A" }] })).isError).toBe(true);
     expect(fake.sends).toHaveLength(0);
+    expect(fake.paymentRequests).toHaveLength(0);
     expect((await channel.reply(args)).isError).not.toBe(true);
-    const part = { type: "invoice", title: "House blend", amount: 2400, currency: "usd", goods: "physical", url: "https://buy.stripe.com/test_123" };
     expect(fake.sends.map((send) => send.body.message.parts)).toEqual([
-      [{ type: "text", value: "Here is your invoice." }], [part],
+      [{ type: "text", value: "Here is your order." }], [{ type: "payment", checkout_url: "https://pay.relayapp.im/pr_token_123" }],
     ]);
     const key = fake.sends[0]!.body.message.idempotency_key!;
     expect(fake.sends[1]!.body.message.idempotency_key).toBe(`${key}-1`);
+    expect(fake.paymentRequests).toEqual([{
+      body: { description: "House blend, 250 g", category: "physical_goods", amount: 2400, currency: "usd" },
+      key: `${key}-1`,
+    }]);
     expect((await channel.reply(args)).isError).not.toBe(true);
     expect(fake.sends).toHaveLength(2);
+    expect(fake.paymentRequests).toHaveLength(1);
   } finally { state.close(); }
 });
 
-it("sends an invoice-only reply as one Message", async () => {
+it("returns a refused payment request to the model and sends nothing", async () => {
   const { state, fake, channel } = fixture();
   try {
-    const origin = event({ sequence: 1, text: "invoice me" });
+    const origin = event({ sequence: 1, text: "how do I pay?" });
     accept(state, origin, 1);
     await channel.flush();
     await channel.beginProcessing({ delivery_id: origin.event_id });
-    const invoice = { title: "Plan", amount: 900, currency: "eur", goods: "digital", url: "https://checkout.stripe.com/c/pay/cs_test_1", recurring: { interval: "month" } };
-    expect((await channel.reply({ chat_id: CHAT_A, send_id: "invoice-only", invoice })).isError).not.toBe(true);
-    expect(fake.sends.map((send) => send.body.message.parts)).toEqual([
-      [{ type: "invoice", ...invoice, recurring: { interval: "month", interval_count: 1 } }],
-    ]);
+    fake.refusal.error = new RelayAPIError("Connect Stripe in the Relay Console first.", { status: 403, code: 2003 });
+    const payment = { description: "Tip", category: "digital_goods", amount: 500, currency: "usd" };
+    const refused = await channel.reply({ chat_id: CHAT_A, text: "Thanks!", send_id: "payment-refused", payment });
+    expect(refused.isError).toBe(true);
+    expect(JSON.stringify(refused.content)).toContain("Connect Stripe in the Relay Console first.");
+    expect(fake.sends).toHaveLength(0);
+  } finally { state.close(); }
+});
+
+it("sends a payment-only reply as one Message", async () => {
+  const { state, fake, channel } = fixture();
+  try {
+    const origin = event({ sequence: 1, text: "how do I pay?" });
+    accept(state, origin, 1);
+    await channel.flush();
+    await channel.beginProcessing({ delivery_id: origin.event_id });
+    const payment = { description: "Monthly plan", category: "digital_goods", mode: "subscription", price_id: "price_123" };
+    expect((await channel.reply({ chat_id: CHAT_A, send_id: "payment-only", payment })).isError).not.toBe(true);
+    expect(fake.sends.map((send) => send.body.message.parts)).toEqual([[{ type: "payment", checkout_url: "https://pay.relayapp.im/pr_token_123" }]]);
+    expect(fake.paymentRequests.map((request) => request.key)).toEqual([fake.sends[0]!.body.message.idempotency_key]);
   } finally { state.close(); }
 });

@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "3b7425e5bafcf25cdc8ceff009715e4f06877d18", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "51bc3ecd9b203a3fc75fe0ab7a105b6751080678", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -77,7 +77,10 @@ const allowedOperationSignatures = [
   "POST /v1/chats/{chatId}/voicememo",
   "GET /v1/messages/{messageId}",
   "POST /v1/messages/{messageId}/reactions",
-  "PUT /v1/messages/{messageId}/invoice",
+  "POST /v1/payment_requests",
+  "GET /v1/payment_requests",
+  "GET /v1/payment_requests/{paymentRequestId}",
+  "POST /v1/payment_requests/{paymentRequestId}/cancel",
   "POST /v1/attachments",
   "GET /v1/attachments/{attachmentId}",
   "DELETE /v1/attachments/{attachmentId}",
@@ -108,14 +111,14 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 43);
-assert.equal(manifest.path_count, 27);
-assert.equal(manifest.source_path_count, 32);
-assert.equal(manifest.source_schema_count, 161);
-assert.equal(manifest.callback_count, 19);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 27);
-assert.equal(operationJSON.length, 43);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 19);
+assert.equal(manifest.operation_count, 46);
+assert.equal(manifest.path_count, 29);
+assert.equal(manifest.source_path_count, 34);
+assert.equal(manifest.source_schema_count, 171);
+assert.equal(manifest.callback_count, 22);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 29);
+assert.equal(operationJSON.length, 46);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 22);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
@@ -219,6 +222,7 @@ assert.deepEqual(Object.keys(client).sort(), [
   "contactCard",
   "contacts",
   "messages",
+  "paymentRequests",
   "webhookEvents",
   "webhookSubscriptions",
   "webhooks",
@@ -251,6 +255,7 @@ assert.deepEqual(publicMethods(client.messages), [
   "retrieve",
 ]);
 assert.deepEqual(publicMethods(client.chats.messages), ["list", "send"]);
+assert.deepEqual(publicMethods(client.paymentRequests), ["cancel", "create", "list", "retrieve"]);
 assert.deepEqual(publicMethods(client.chats.participants), ["add", "remove"]);
 assert.deepEqual(publicMethods(client.attachments), [
   "create",
@@ -548,6 +553,9 @@ const validateOpenAPI = () => {
     ["call.created", "CallCreatedWebhook"],
     ["call.updated", "CallUpdatedWebhook"],
     ["call.ended", "CallEndedWebhook"],
+    ["payment.succeeded", "PaymentSucceededWebhook"],
+    ["payment.canceled", "PaymentCanceledWebhook"],
+    ["payment.expired", "PaymentExpiredWebhook"],
   ]) {
     assert.equal(
       document["x-relay-webhooks"][`${event}.v2026-08-30`].post

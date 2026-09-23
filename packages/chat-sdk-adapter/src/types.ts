@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 3b7425e5bafcf25cdc8ceff009715e4f06877d18
- * OpenAPI 3fb4873a3c09b7dade09012ecfc57acfef8cfb983b6b35fff9d320cf62bb3b00
+ * Relay Server 51bc3ecd9b203a3fc75fe0ab7a105b6751080678
+ * OpenAPI 7b41c21bebd99d28d103da1c3fe380642542e5b6243bb4319e501d7609d8ab0f
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -29,6 +29,9 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "call.created",
   "call.updated",
   "call.ended",
+  "payment.succeeded",
+  "payment.canceled",
+  "payment.expired",
 ] as const;
 
 export type RelayWebhookEventType =
@@ -142,46 +145,102 @@ export interface RelaySelectionResponsePart {
   selected_values: string[];
 }
 
-/** Stripe's own recurring shape: interval plus how many of it. */
-export interface RelayInvoiceRecurring {
+/** What is being paid for; App Store rules decide where each is payable. */
+export type RelayPaymentCategory = "physical_goods" | "digital_goods" | "donation";
+
+/** Leaves `requested` exactly once, only on Stripe's word or the agent's cancel. */
+export type RelayPaymentStatus = "requested" | "succeeded" | "canceled" | "expired";
+
+export type RelayPaymentMode = "payment" | "subscription";
+
+/** A subscription's renewal cadence, read from its Stripe Price. */
+export interface RelayPaymentRecurring {
   interval: "day" | "week" | "month" | "year";
-  /** Defaults to 1. Total span is capped at 3 years (1095 days / 156 weeks / 36 months / 3 years). */
-  interval_count?: number;
+  interval_count: number;
 }
 
-export type RelayInvoiceStatus =
-  | "requested"
-  | "succeeded"
-  | "canceled"
-  | "expired"
-  | "refunded";
-
 /**
- * Verified agents only: asks the person to pay through the developer's own
- * Stripe-hosted checkout page. Must be the only part of its Message.
+ * A payment card: the `checkout_url` a payment request returned, unchanged.
+ * The card's amount and title are read from the request. Must be the only
+ * part of its Message.
  */
-export interface RelayInvoicePart {
-  type: "invoice";
-  /** Trimmed, 1–32 characters. */
-  title: string;
-  /** Minor units, 1..99,999,999. */
-  amount: number;
-  /** 3-letter ISO code, sent in either case, returned lowercase. */
-  currency: string;
-  /** physical = goods or services used outside the app; digital = anything delivered in chat or used in an app. */
-  goods: "physical" | "digital";
-  /** https on checkout, buy, book, donate or invoice.stripe.com, with no port, username or password; at most 2048 characters. */
-  url: string;
-  /** Omit for a one-time charge. */
-  recurring?: RelayInvoiceRecurring;
+export interface RelayPaymentPart {
+  type: "payment";
+  checkout_url: string;
 }
 
 /** Metadata exposed intact through message.raw.message.parts; contributes no readable text. */
-export interface RelayInvoicePartResponse extends RelayInvoicePart {
-  recurring?: Required<RelayInvoiceRecurring>;
-  /** "requested" until the sending agent's own status update changes it. */
-  status: RelayInvoiceStatus;
+export interface RelayPaymentPartResponse {
+  type: "payment";
+  payment_request_id: string;
+  checkout_url: string;
+  amount: number;
+  currency: string;
+  description: string;
+  category: RelayPaymentCategory;
+  mode: RelayPaymentMode;
+  recurring?: RelayPaymentRecurring;
+  image_url?: string;
+  status: RelayPaymentStatus;
   reactions: RelayReaction[] | null;
+}
+
+/** The payer's receipt, written only by Relay as a reply to the `payment` card; contributes no readable text. */
+export interface RelayPaymentReceiptPartResponse {
+  type: "payment_receipt";
+  payment_request_id: string;
+  description: string;
+  amount: number;
+  currency: string;
+  mode: RelayPaymentMode;
+  recurring?: RelayPaymentRecurring;
+  reactions: RelayReaction[] | null;
+}
+
+/** `POST /v1/payment_requests`. */
+export interface RelayCreatePaymentRequest {
+  amount?: number;
+  currency?: string;
+  /** The card's title line; trimmed, 1 to 32 characters. */
+  description: string;
+  category: RelayPaymentCategory;
+  metadata?: Record<string, string>;
+  mode?: RelayPaymentMode;
+  price_id?: string;
+  quantity?: number;
+  customer_id?: string;
+  discount?: { coupon?: string; promotion_code?: string; label?: string };
+  image_url?: string;
+}
+
+export interface RelayPaymentRequest {
+  id: string;
+  object: "payment_request";
+  status: RelayPaymentStatus;
+  mode: RelayPaymentMode;
+  amount: number;
+  currency: string;
+  description: string;
+  category: RelayPaymentCategory;
+  /** Send it back unchanged in a `payment` part. */
+  checkout_url: string;
+  expires_at: string;
+  metadata: Record<string, string>;
+  image_url?: string;
+  price_id?: string;
+  quantity?: number;
+  interval?: RelayPaymentRecurring["interval"];
+  interval_count?: number;
+  discount?: { coupon?: string; promotion_code?: string; label?: string };
+  stripe: { payment_intent_id: string; customer_id?: string; subscription_id?: string };
+  paid_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RelayPaymentRequestList {
+  payment_requests: RelayPaymentRequest[];
+  next_cursor: string | null;
 }
 
 export type RelayOutgoingPart =
@@ -190,7 +249,7 @@ export type RelayOutgoingPart =
   | RelayLinkPart
   | RelayButtonsPart
   | RelaySelectionPart
-  | RelayInvoicePart;
+  | RelayPaymentPart;
 
 export interface RelayTextPartResponse extends RelayTextPart {
   mentions?: Array<{
@@ -237,7 +296,8 @@ export type RelayMessagePartResponse =
   | RelayButtonsPartResponse
   | RelaySelectionPartResponse
   | RelaySelectionResponsePart
-  | RelayInvoicePartResponse;
+  | RelayPaymentPartResponse
+  | RelayPaymentReceiptPartResponse;
 
 export interface RelayReplyTo {
   message_id: string;
@@ -280,7 +340,8 @@ export interface RelayWebhookMessageEvent {
     | RelayButtonsPartResponse
     | RelaySelectionPartResponse
     | RelaySelectionResponsePart
-    | RelayInvoicePartResponse
+    | RelayPaymentPartResponse
+    | RelayPaymentReceiptPartResponse
   >;
   read_at?: string | null;
   reply_to?: RelayReplyTo | null;
@@ -302,16 +363,12 @@ export interface RelaySentMessage {
     | RelayButtonsPartResponse
     | RelaySelectionPartResponse
     | RelaySelectionResponsePart
-    | RelayInvoicePartResponse
+    | RelayPaymentPartResponse
+    | RelayPaymentReceiptPartResponse
   >;
   reply_to?: RelayReplyTo | null;
   sent_at: string | null;
   silent?: boolean;
-}
-
-/** `PUT /v1/messages/{messageId}/invoice`: the updated Message projection. */
-export interface RelayUpdateInvoiceStatusResponse {
-  message: RelayMessage;
 }
 
 export interface RelaySendMessageResponse {

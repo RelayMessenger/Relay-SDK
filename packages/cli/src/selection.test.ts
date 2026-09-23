@@ -12,7 +12,7 @@ describe("CLI selection authoring and discovery", () => {
     expect(prompt).toContain("literal '• '");
     expect(prompt).not.toContain("Clear and toggles");
     const warnings: string[] = [];
-    expect(answerMessages('Topics?\n```selection\n[{"value":"research","label":"Research"}]\n```', "alice", text => warnings.push(text))).toEqual([
+    expect(answerMessages('Topics?\n```selection\n[{"value":"research","label":"Research"}]\n```', "alice", text => warnings.push(text)).messages).toEqual([
       [{ type: "text", value: "Topics?" }, { type: "selection", options: [{ value: "research", label: "Research" }] }],
     ]);
     expect(warnings).toEqual([]);
