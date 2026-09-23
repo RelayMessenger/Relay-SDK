@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import Relay, { answerMessages } from "../src/index.js";
-import { invoicePart, parseInvoiceBlock, splitInvoice } from "../src/invoice.js";
+import { INVOICE_CHECKOUT_HOSTS, invoicePart, parseInvoiceBlock, splitInvoice } from "../src/invoice.js";
 import type { MessageInvoiceUpdateParams } from "../src/types.js";
 
 const invoice = {
@@ -42,10 +42,10 @@ describe("invoicePart", () => {
     [{ ...invoice, currency: "usdd" }, "invoice currency must be a 3-letter code"],
     [{ ...invoice, goods: "service" }, 'invoice goods must be "physical" or "digital"'],
     [{ ...invoice, url: "x".repeat(2_049) }, "invoice url is not a string of at most 2048 characters"],
-    [{ ...invoice, url: "http://buy.stripe.com/test_123" }, "invoice url must be an https link with a host and no username or password"],
-    [{ ...invoice, url: "not a url" }, "invoice url must be an https link with a host and no username or password"],
-    [{ ...invoice, url: "https://buy.stripe.com@evil.com/x" }, "invoice url must be an https link with a host and no username or password"],
-    [{ ...invoice, url: "https://user:pass@buy.stripe.com/x" }, "invoice url must be an https link with a host and no username or password"],
+    [{ ...invoice, url: "http://buy.stripe.com/test_123" }, "invoice url must be an https Stripe checkout link on checkout.stripe.com, buy.stripe.com, book.stripe.com, donate.stripe.com, invoice.stripe.com"],
+    [{ ...invoice, url: "not a url" }, "invoice url must be an https Stripe checkout link on checkout.stripe.com, buy.stripe.com, book.stripe.com, donate.stripe.com, invoice.stripe.com"],
+    [{ ...invoice, url: "https://buy.stripe.com@evil.com/x" }, "invoice url must be an https Stripe checkout link on checkout.stripe.com, buy.stripe.com, book.stripe.com, donate.stripe.com, invoice.stripe.com"],
+    [{ ...invoice, url: "https://user:pass@buy.stripe.com/x" }, "invoice url must be an https Stripe checkout link on checkout.stripe.com, buy.stripe.com, book.stripe.com, donate.stripe.com, invoice.stripe.com"],
     [{ ...invoice, recurring: "month" }, "invoice recurring must be an object"],
     [{ ...invoice, recurring: { interval: "month", id: "x" } }, "invoice recurring has unknown field id"],
     [{ ...invoice, recurring: { interval: "century" } }, "invoice recurring interval must be day, week, month or year"],
@@ -73,6 +73,24 @@ describe("invoicePart", () => {
       .toMatchObject({ title: "😀".repeat(17) });
     expect(invoicePart({ ...invoice, title: "😀".repeat(33) }))
       .toBe("invoice needs a trimmed title of 1 to 32 characters");
+  });
+
+  it("takes only a Stripe-hosted checkout url, the server's own host list", () => {
+    for (const host of INVOICE_CHECKOUT_HOSTS) {
+      expect(invoicePart({ ...invoice, url: `https://${host}/test_123` })).toMatchObject({ url: `https://${host}/test_123` });
+    }
+    for (const url of [
+      "https://example.com/pay",
+      "https://stripe.com/checkout",
+      "https://pay.stripe.com/receipts/x",
+      "https://billing.stripe.com/p/session/x",
+      "https://buy.stripe.com.evil.com/x",
+      "https://buy.stripe.com:8443/x",
+    ]) {
+      expect(invoicePart({ ...invoice, url })).toBe(
+        "invoice url must be an https Stripe checkout link on checkout.stripe.com, buy.stripe.com, book.stripe.com, donate.stripe.com, invoice.stripe.com",
+      );
+    }
   });
 
   it("normalizes the checkout url the same way the server stores it", () => {

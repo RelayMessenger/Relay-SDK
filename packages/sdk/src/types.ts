@@ -345,8 +345,8 @@ export type InvoiceGoods = "physical" | "digital";
 export type InvoiceStatus = "requested" | "succeeded" | "canceled" | "expired" | "refunded";
 
 /**
- * Agent-only: asks the person to pay via the developer's own checkout link
- * (Stripe Payment Link, Stripe Checkout, Shopify, anything https). Relay
+ * Verified agents only: asks the person to pay via the developer's own Stripe
+ * checkout link (Payment Link, Checkout Session, or hosted invoice). Relay
  * never touches money, has no Stripe account, and takes no fee. An invoice
  * must be the only part of its message (Linq: "a card is the whole message").
  */
@@ -359,7 +359,7 @@ export interface InvoicePart {
   /** 3-letter ISO code, sent in either case, always returned lowercase. */
   currency: string;
   goods: InvoiceGoods;
-  /** The developer's own checkout link. https only, at most 2048 characters. */
+  /** The developer's own Stripe checkout link on checkout, buy, book, donate or invoice.stripe.com; at most 2048 characters. */
   url: string;
   /** Omit for a one-time charge. */
   recurring?: InvoiceRecurring;

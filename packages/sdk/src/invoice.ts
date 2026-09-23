@@ -19,7 +19,8 @@ export const INVOICE_FENCE = "invoice";
  */
 export const INVOICE_GUIDANCE = [
   "Send an invoice only when the person asked to buy something or has already agreed to a price; never invoice out of the blue.",
-  "url must be a real checkout link you were given — your own Stripe Payment Link, Stripe Checkout, Shopify page, or anything https. Never invent one, and never paste a checkout link in text or a button; send an invoice instead.",
+  "url must be a real Stripe checkout link you were given — a Stripe Payment Link (buy.stripe.com), a Stripe Checkout Session (checkout.stripe.com) or a Stripe hosted invoice (invoice.stripe.com). Never invent one, and never paste a checkout link in text or a button; send an invoice instead.",
+  "Only a verified agent can send an invoice; if yours is refused as unverified, say so in words instead.",
   "Set goods honestly: physical for goods or services used outside the app, digital for anything delivered in chat or used inside an app.",
   "The invoice card is a message of its own: no buttons or selection beside it, and any words you write arrive in a message before it.",
   "Use recurring for a subscription: interval day, week, month or year, for up to 3 years total.",
@@ -33,9 +34,24 @@ export const INVOICE_GUIDANCE = [
 export const INVOICE_BLOCK_INSTRUCTION =
   "To ask the person to pay, end your answer with a fenced code block tagged `" + INVOICE_FENCE + "` "
   + "holding one JSON object: {\"title\": \"...\", \"amount\": 2400, \"currency\": \"usd\", "
-  + "\"goods\": \"physical\" or \"digital\", \"url\": \"https://...\"}, with an optional "
+  + "\"goods\": \"physical\" or \"digital\", \"url\": \"https://buy.stripe.com/...\"}, with an optional "
   + "\"recurring\": {\"interval\": \"month\", \"interval_count\": 1} for a subscription. "
   + "The block is removed from your words and drawn as its own invoice card, sent after them.";
+
+/**
+ * The Stripe-hosted pages where a person pays, and the only hosts an invoice
+ * url may use (the server's own list): a Checkout Session, a Payment Link
+ * (pay/subscribe, book, donate), or a hosted invoice. Test-mode links share
+ * these hosts.
+ */
+export const INVOICE_CHECKOUT_HOSTS = [
+  "checkout.stripe.com",
+  "buy.stripe.com",
+  "book.stripe.com",
+  "donate.stripe.com",
+  "invoice.stripe.com",
+] as const;
+const checkoutHosts: ReadonlySet<string> = new Set(INVOICE_CHECKOUT_HOSTS);
 
 /** The server's limits (Telegram title, Stripe amount/url/recurring span). */
 export const INVOICE_TITLE_MAX_LENGTH = 32;
@@ -66,15 +82,16 @@ const record = (value: unknown): value is Record<string, unknown> =>
 const invoiceTitleLength = (value: string): number => [...value].length;
 
 /**
- * A checkout link the card may open: https with a host, and no username or
- * password (`https://buy.stripe.com@evil.com` is evil.com). Matches the
- * server's own check and its normalization, so a link the SDK accepts is
- * never rejected by the API and always reads back the same way.
+ * A checkout link the card may open: https on a Stripe checkout host, with no
+ * username, password or port (`https://buy.stripe.com@evil.com` is evil.com).
+ * Matches the server's own check and its normalization, so a link the SDK
+ * accepts is never rejected by the API and always reads back the same way.
  */
 const checkoutUrl = (value: string): URL | undefined => {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && url.hostname !== "" && url.username === "" && url.password === ""
+    return url.protocol === "https:" && checkoutHosts.has(url.hostname) && url.port === ""
+      && url.username === "" && url.password === ""
       ? url
       : undefined;
   } catch {
@@ -119,7 +136,7 @@ export const invoicePart = (parsed: unknown): InvoicePart | string => {
   }
   const normalizedUrl = checkoutUrl(url);
   if (!normalizedUrl) {
-    return "invoice url must be an https link with a host and no username or password";
+    return `invoice url must be an https Stripe checkout link on ${INVOICE_CHECKOUT_HOSTS.join(", ")}`;
   }
   let normalizedRecurring: InvoiceRecurring | undefined;
   if (recurring !== undefined) {
