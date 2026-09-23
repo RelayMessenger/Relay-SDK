@@ -2,8 +2,12 @@ name: Staging package
 
 # One package's staging publish, called once per changed package by
 # publish-package-staging.yml after it has committed the automatic version
-# bump. `sha` is that bump commit, which is staging's tip by the time this runs;
-# `github.sha` stays the push that started the run, an ancestor of `sha`.
+# bump. `sha` is that bump commit and `base` the staging tip it was made on
+# (`sha` itself when nothing was bumped). The packages another package pins
+# publish before the land job pushes `sha` to staging, so they read it from
+# the run's bundle while staging is still `base`; every later package runs
+# after the land, when `sha` is staging's tip. `github.sha` stays the push
+# that started the run, an ancestor of `sha`.
 #
 # Every job runs on Blacksmith (owner ruling, 2026-09-07), so the publish
 # carries no npm attestation and authenticates with the npm-staging
@@ -22,6 +26,10 @@ on:
         description: Exact 40-character staging commit to publish
         required: true
         type: string
+      base:
+        description: Staging tip the bump commit was made on; equals sha when nothing was bumped
+        required: true
+        type: string
     secrets:
       NPM_PUBLISH_TOKEN:
         required: true
@@ -32,6 +40,7 @@ permissions:
 env:
   RELEASE_PACKAGE: ${{ inputs.package }}
   RELEASE_SHA: ${{ inputs.sha }}
+  RELEASE_BASE: ${{ inputs.base }}
 
 jobs:
   package:
@@ -54,9 +63,20 @@ jobs:
           test "${#EXPECTED_SHA}" -eq 40
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ env.RELEASE_SHA }}
+          ref: ${{ env.RELEASE_BASE }}
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        if: inputs.sha != inputs.base
+        with:
+          name: staging-bump-commit-${{ github.sha }}
+          path: ${{ runner.temp }}/staging-bump-commit
+      - name: Check out the bump commit
+        if: inputs.sha != inputs.base
+        run: |
+          git fetch --no-tags "$RUNNER_TEMP/staging-bump-commit/staging-bump.bundle" HEAD
+          test "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA"
+          git checkout --detach "$RELEASE_SHA"
       - name: Verify canonical staging SHA
         env:
           EXPECTED_SHA: ${{ env.RELEASE_SHA }}
@@ -64,7 +84,15 @@ jobs:
         run: |
           git fetch origin staging
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$EXPECTED_SHA" = "$(git rev-parse origin/staging)"
+          STAGING="$(git rev-parse origin/staging)"
+          if [ "$EXPECTED_SHA" = "$RELEASE_BASE" ]; then
+            test "$STAGING" = "$EXPECTED_SHA"
+          else
+            # The bump commit sits directly on base, and staging is base
+            # (not landed yet) or the bump commit itself (landed).
+            test "$(git rev-parse "${EXPECTED_SHA}^")" = "$RELEASE_BASE"
+            test "$STAGING" = "$RELEASE_BASE" || test "$STAGING" = "$EXPECTED_SHA"
+          fi
           git merge-base --is-ancestor "$EVENT_SHA" HEAD
           test -z "$(git status --porcelain)"
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -141,8 +169,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ env.RELEASE_SHA }}
+          ref: ${{ env.RELEASE_BASE }}
           persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        if: inputs.sha != inputs.base
+        with:
+          name: staging-bump-commit-${{ github.sha }}
+          path: ${{ runner.temp }}/staging-bump-commit
+      - name: Check out the bump commit
+        if: inputs.sha != inputs.base
+        run: |
+          git fetch --no-tags "$RUNNER_TEMP/staging-bump-commit/staging-bump.bundle" HEAD
+          test "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA"
+          git checkout --detach "$RELEASE_SHA"
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: .nvmrc

@@ -29,7 +29,7 @@ for (const { name, script } of scripts) {
   });
 }
 test("the malformed bump guard is caught before any publish or Git mutation", () => {
-  const step = scripts.find(({ name }) => name.endsWith(":Commit the bump to staging"));
+  const step = scripts.find(({ name }) => name.endsWith(":Commit the bump"));
   assert.ok(step);
   const broken = step.script.replace(/\nthen\n/u, " \\\nthen\n");
   assert.notEqual(broken, step.script);

@@ -130,8 +130,10 @@ Nothing is published by hand. Two npm channels, kept apart:
   `X.Y.(Z+1)-staging.0` once `X.Y.Z` is on npm (a prerelease ranks below its
   base, so the base must move for main to publish again). Dependents are
   pinned to the versions decided in the same run. The workflow commits that
-  bump to `staging` as `github-actions[bot]` and publishes each changed
-  package from that commit, in the order below.
+  bump as `github-actions[bot]` and publishes each changed package from that
+  commit, in the order below; the commit reaches `staging` only after every
+  package another package pins is on npm, so `staging` never names a
+  dependency version npm lacks.
 - Production publishes plain `X.Y.Z` versions under the `latest` dist-tag.
   The one deliberate act is merging `staging` into `main`; the push to `main`
   runs [`release.yml`](.github/workflows/release.yml), which:
