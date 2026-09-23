@@ -1,5 +1,5 @@
 import type Relay from "@relaymessenger/sdk";
-import type { RelayWebhookEvent } from "@relaymessenger/sdk";
+import { INVOICE_BLOCK_INSTRUCTION, SELECTION_BLOCK_INSTRUCTION, type RelayWebhookEvent } from "@relaymessenger/sdk";
 import type { query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
@@ -22,16 +22,16 @@ const received = (eventId: string, chatId: string, text: string, sender = "alice
 /** Relay, reduced to what the bridge touches, with every call written down. */
 function fakeRelay(events: readonly RelayWebhookEvent[]) {
   const typing: string[] = [];
-  const sent: Array<{ chatId: string; text: string; key: string | undefined; parts?: unknown[] }> = [];
+  const sent: Array<{ chatId: string; text: string; key: string | undefined; parts?: unknown[]; replyTo?: unknown }> = [];
   let sendFails = false;
   const client = {
     chats: {
       startTyping: async (chatID: string) => { typing.push(`start ${chatID}`); },
       stopTyping: async (chatID: string) => { typing.push(`stop ${chatID}`); },
       messages: {
-        send: async (chatID: string, body: { message: { parts: Array<{ value?: string }>; idempotency_key?: string } }) => {
+        send: async (chatID: string, body: { message: { parts: Array<{ value?: string }>; idempotency_key?: string; reply_to?: unknown } }) => {
           if (sendFails) throw new Error("Relay refused this send.");
-          sent.push({ chatId: chatID, text: body.message.parts[0]?.value ?? "", key: body.message.idempotency_key, parts: body.message.parts });
+          sent.push({ chatId: chatID, text: body.message.parts[0]?.value ?? "", key: body.message.idempotency_key, parts: body.message.parts, replyTo: body.message.reply_to });
           return {} as never;
         },
       },
@@ -128,6 +128,16 @@ describe("Claude Agent SDK bridge", () => {
       "The component block in the answer to @alice was left as text: the buttons block is not valid JSON.",
       "Sent the answer to @alice.",
     ]);
+  });
+
+  it("leaves an invoice block with a checkout link that is not Stripe's in the text and says why", async () => {
+    const answer = 'That is $24.\n```invoice\n{"title": "House blend, 250 g", "amount": 2400, "currency": "usd", "goods": "physical", "url": "https://pay.example.com/x"}\n```';
+    const ask = fakeQuery(async function* () { yield success(answer); });
+    const state = setup(ask, [received("event-1", "chat-1", "hi")]);
+    await runClaudeBridge(state.input);
+    await untilEnded(state.said, 1);
+    expect(state.relay.sent.map((item) => item.parts)).toEqual([[{ type: "text", value: answer }]]);
+    expect(state.said[1]).toMatch(/^The component block in the answer to @alice was left as text: invoice url must be an https Stripe checkout link/u);
   });
 
   it("tells the agent how to send buttons and when", () => {
@@ -332,4 +342,28 @@ it("passes selected values to Claude and authors a native selection through the 
   expect(state.relay.sent[0]?.parts).toEqual([
     { type: "text", value: "Next?" }, { type: "selection", options: [{ value: "next", label: "Next" }] },
   ]);
+});
+
+it("teaches Claude the invoice block and sends an invoice answer as the words, then the invoice alone, once on replay", async () => {
+  const event = received("pay", "chat-1", "I'll take the house blend");
+  if (event.event_type !== "message.received") throw new Error("fixture");
+  event.data.reply_to = { message_id: "source", part_index: 0 };
+  let prompt = "";
+  const ask = fakeQuery(async function* (input) {
+    prompt = String(input.prompt);
+    yield success('That is $24.\n```invoice\n{"title": "House blend, 250 g", "amount": 2400, "currency": "usd", "goods": "physical", "url": "https://buy.stripe.com/test_123"}\n```');
+  });
+  const state = setup(ask, [event, event]);
+  await runClaudeBridge(state.input);
+  await untilEnded(state.said, 1);
+  expect(prompt).toContain(INVOICE_BLOCK_INSTRUCTION);
+  expect(prompt.indexOf(INVOICE_BLOCK_INSTRUCTION)).toBeGreaterThan(prompt.indexOf(SELECTION_BLOCK_INSTRUCTION));
+  expect(state.relay.sent.map((item) => [item.key, item.parts])).toEqual([
+    ["codex-bridge-pay", [{ type: "text", value: "That is $24." }]],
+    ["codex-bridge-pay-1", [{
+      type: "invoice", title: "House blend, 250 g", amount: 2400, currency: "usd", goods: "physical", url: "https://buy.stripe.com/test_123",
+    }]],
+  ]);
+  // The reply_to that came in is context for Claude, not a quote on the answer.
+  expect(state.relay.sent.map((item) => item.replyTo)).toEqual([undefined, undefined]);
 });

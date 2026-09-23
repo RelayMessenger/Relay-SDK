@@ -1,6 +1,6 @@
 import type { InboundMediaOptions } from "./inbound-media.js";
 import type Relay from "@relaymessenger/sdk";
-import type { RelayWebhookEvent } from "@relaymessenger/sdk";
+import { INVOICE_BLOCK_INSTRUCTION, SELECTION_BLOCK_INSTRUCTION, type RelayWebhookEvent } from "@relaymessenger/sdk";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -76,16 +76,16 @@ const received = (eventId: string, chatId: string, text: string, sender = "alice
 /** Relay, reduced to what the bridge touches, with every call written down. */
 function fakeRelay(events: readonly RelayWebhookEvent[]) {
   const typing: string[] = [];
-  const sent: Array<{ chatId: string; text: string; key: string | undefined; parts?: unknown[] }> = [];
+  const sent: Array<{ chatId: string; text: string; key: string | undefined; parts?: unknown[]; replyTo?: unknown }> = [];
   let sendFails = false;
   const client = {
     chats: {
       startTyping: async (chatID: string) => { typing.push(`start ${chatID}`); },
       stopTyping: async (chatID: string) => { typing.push(`stop ${chatID}`); },
       messages: {
-        send: async (chatID: string, body: { message: { parts: Array<{ value?: string }>; idempotency_key?: string } }) => {
+        send: async (chatID: string, body: { message: { parts: Array<{ value?: string }>; idempotency_key?: string; reply_to?: unknown } }) => {
           if (sendFails) throw new Error("Relay refused this send.");
-          sent.push({ chatId: chatID, text: body.message.parts[0]?.value ?? "", key: body.message.idempotency_key, parts: body.message.parts });
+          sent.push({ chatId: chatID, text: body.message.parts[0]?.value ?? "", key: body.message.idempotency_key, parts: body.message.parts, replyTo: body.message.reply_to });
           return {} as never;
         },
       },
@@ -401,4 +401,27 @@ it("passes selection metadata into app-server and sends one native selection on 
   expect(result.relay.sent[0]?.parts).toEqual([
     { type: "text", value: "Next?" }, { type: "selection", options: [{ value: "next", label: "Next" }] },
   ]);
+});
+
+it("teaches the invoice block and sends an invoice answer as the words, then the invoice alone, once on replay", async () => {
+  const event = received("pay", "chat-1", "I'll take the house blend");
+  if (event.event_type !== "message.received") throw new Error("fixture");
+  event.data.reply_to = { message_id: "source", part_index: 0 };
+  const codex = await fakeAppServer({ answers: [[{
+    text: 'That is $24.\n```invoice\n{"title": "House blend, 250 g", "amount": 2400, "currency": "usd", "goods": "physical", "url": "https://buy.stripe.com/test_123"}\n```',
+    phase: "final_answer",
+  }]] });
+  const result = await runBridge({ ...codex, events: [event, event], endings: 1 });
+  const start = (await codex.log()).find(line => line.in === "turn/start");
+  const prompt = String((start?.params?.input as Array<{ text?: string }>)[0]?.text);
+  expect(prompt).toContain(INVOICE_BLOCK_INSTRUCTION);
+  expect(prompt.indexOf(INVOICE_BLOCK_INSTRUCTION)).toBeGreaterThan(prompt.indexOf(SELECTION_BLOCK_INSTRUCTION));
+  expect(result.relay.sent.map((message) => [message.key, message.parts])).toEqual([
+    ["codex-bridge-pay", [{ type: "text", value: "That is $24." }]],
+    ["codex-bridge-pay-1", [{
+      type: "invoice", title: "House blend, 250 g", amount: 2400, currency: "usd", goods: "physical", url: "https://buy.stripe.com/test_123",
+    }]],
+  ]);
+  // The reply_to that came in is context for Codex, not a quote on the answer.
+  expect(result.relay.sent.map((message) => message.replyTo)).toEqual([undefined, undefined]);
 });
