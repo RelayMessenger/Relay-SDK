@@ -1161,7 +1161,8 @@ class RelayCallTransport(rtc.EventEmitter[TransportEvent]):
 
     def _reject_ready(self, error: BaseException) -> None:
         if self._ready is None:
-            self._ready = asyncio.get_running_loop().create_future()
+            # Nothing has called connect(); a later connect() sees `_closed` or `_ended` itself.
+            return
         if not self._ready.done():
             self._ready.set_exception(error)
             # Nobody may be awaiting; retrieving it keeps asyncio from logging it.
