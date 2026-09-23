@@ -37,7 +37,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@relaymessenger/sdk": "0.3.6-staging.24"
+    "@relaymessenger/sdk": "0.3.6-staging.25"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
