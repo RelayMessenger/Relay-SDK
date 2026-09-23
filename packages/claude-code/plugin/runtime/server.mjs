@@ -21959,7 +21959,7 @@ var invoicePart = (parsed) => {
     if (recurringExtra)
       return `invoice recurring has unknown field ${recurringExtra}`;
     const { interval, interval_count } = recurring;
-    if (typeof interval !== "string" || !(interval in INVOICE_RECURRING_MAX_COUNT)) {
+    if (typeof interval !== "string" || !Object.hasOwn(INVOICE_RECURRING_MAX_COUNT, interval)) {
       return "invoice recurring interval must be day, week, month or year";
     }
     const max = INVOICE_RECURRING_MAX_COUNT[interval];

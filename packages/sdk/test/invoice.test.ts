@@ -49,6 +49,7 @@ describe("invoicePart", () => {
     [{ ...invoice, recurring: "month" }, "invoice recurring must be an object"],
     [{ ...invoice, recurring: { interval: "month", id: "x" } }, "invoice recurring has unknown field id"],
     [{ ...invoice, recurring: { interval: "century" } }, "invoice recurring interval must be day, week, month or year"],
+    [{ ...invoice, recurring: { interval: "toString" } }, "invoice recurring interval must be day, week, month or year"],
     [{ ...invoice, recurring: { interval: "year", interval_count: 4 } }, "invoice recurring interval_count for year must be an integer of 1 to 3"],
     [{ ...invoice, recurring: { interval: "month", interval_count: 0 } }, "invoice recurring interval_count for month must be an integer of 1 to 36"],
     [null, "the invoice block must be a JSON object"],
