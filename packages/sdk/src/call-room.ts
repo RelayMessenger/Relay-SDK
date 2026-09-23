@@ -31,6 +31,15 @@ const CLIENT_PROTOCOL_ERROR = 4400;
 const TERMINAL_STATUSES = new Set<CallTerminalStatus>([
   "completed", "no-answer", "canceled", "busy", "failed",
 ]);
+/**
+ * Server frame types this client decodes. Any other type is a frame a newer
+ * Relay added: it is ignored and the socket stays open, as Orange Meets'
+ * room client does (`app/hooks/useRoom.ts` `onMessage`: its `default` case
+ * only breaks).
+ */
+const KNOWN_SERVER_FRAME_TYPES: ReadonlySet<string> = new Set([
+  "heartbeat", "iceServers", "roomState", "answer", "offer", "ended", "error",
+]);
 const ROOM_ERROR_CODES = new Set<CallRoomErrorCode>([
   "invalid_frame", "not_allowed", "media_unavailable",
 ]);
@@ -42,6 +51,11 @@ export interface CallRoomOptions {
   WebSocket?: WebSocketConstructor;
   /** Client heartbeat cadence. Relay's room heartbeat frame has no payload. */
   heartbeatIntervalMs?: number;
+  /**
+   * Called once per unknown server frame type, which the room ignores.
+   * Defaults to `console.warn`.
+   */
+  onWarning?: (message: string) => void;
 }
 
 export interface CallRoomCloseEvent {
@@ -147,15 +161,16 @@ const validIceServer = (value: unknown): value is CallRoomIceServer =>
   && (value.credential === undefined || typeof value.credential === "string");
 
 /**
- * Validate one server frame before exposing it to application code. Relay's
- * runtime may echo the exact heartbeat frame without waking the Call room; that
- * transport heartbeat is intentionally ignored and is not part of the public
- * server-frame union.
+ * Validate one server frame before exposing it to application code. Returns
+ * `null` for Relay's echoed heartbeat (not part of the public server-frame
+ * union) and for a frame type this client does not know (a newer Relay's
+ * frame, ignored). Throws for a known frame type whose shape is invalid.
  */
 export const parseCallRoomServerFrame = (value: unknown): CallRoomServerFrame | null => {
   if (!isRecord(value) || typeof value.type !== "string") {
     throw new Error("Relay Call room received an invalid frame.");
   }
+  if (!KNOWN_SERVER_FRAME_TYPES.has(value.type)) return null;
   switch (value.type) {
     case "heartbeat":
       if (!hasExactKeys(value, ["type"])) break;
@@ -238,6 +253,9 @@ export class CallRoom {
   readonly #apiKey: string;
   readonly #WebSocket: WebSocketConstructor;
   readonly #heartbeatIntervalMs: number;
+  readonly #onWarning: (message: string) => void;
+  /** Unknown server frame types already warned about, so each is logged once. */
+  readonly #unknownFrameTypes = new Set<string>();
   readonly #signal: AbortSignal | undefined;
   readonly #listeners = new Map<CallRoomEvent, Set<(...args: any[]) => void>>();
   /** The open socket, or the still-open socket a manual `reconnect()` is replacing. */
@@ -264,6 +282,7 @@ export class CallRoom {
     this.#apiKey = apiKey;
     this.#WebSocket = options.WebSocket ?? (NodeWebSocket as unknown as WebSocketConstructor);
     this.#heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+    this.#onWarning = options.onWarning ?? ((message) => console.warn(message));
     this.#signal = options.signal;
     if (!Number.isFinite(this.#heartbeatIntervalMs) || this.#heartbeatIntervalMs <= 0) {
       throw new Error("Call room heartbeatIntervalMs must be greater than zero.");
@@ -578,7 +597,17 @@ export class CallRoom {
   async #message(socket: WebSocketLike, data: unknown): Promise<void> {
     if (socket !== this.#socket) return;
     const source = await text(data);
-    const frame = parseCallRoomServerFrame(JSON.parse(source));
+    const value: unknown = JSON.parse(source);
+    if (isRecord(value) && typeof value.type === "string" && !KNOWN_SERVER_FRAME_TYPES.has(value.type)) {
+      if (!this.#unknownFrameTypes.has(value.type)) {
+        this.#unknownFrameTypes.add(value.type);
+        try {
+          this.#onWarning(`Relay Call room ignored a server frame of unknown type "${value.type}".`);
+        } catch { /* a warning sink never corrupts signaling */ }
+      }
+      return;
+    }
+    const frame = parseCallRoomServerFrame(value);
     if (!frame) return;
     switch (frame.type) {
       case "iceServers":

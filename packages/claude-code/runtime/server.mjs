@@ -20335,6 +20335,15 @@ var TERMINAL_STATUSES = /* @__PURE__ */ new Set([
   "busy",
   "failed"
 ]);
+var KNOWN_SERVER_FRAME_TYPES = /* @__PURE__ */ new Set([
+  "heartbeat",
+  "iceServers",
+  "roomState",
+  "answer",
+  "offer",
+  "ended",
+  "error"
+]);
 var ROOM_ERROR_CODES = /* @__PURE__ */ new Set([
   "invalid_frame",
   "not_allowed",
@@ -20361,6 +20370,8 @@ var parseCallRoomServerFrame = (value) => {
   if (!isRecord(value) || typeof value.type !== "string") {
     throw new Error("Relay Call room received an invalid frame.");
   }
+  if (!KNOWN_SERVER_FRAME_TYPES.has(value.type))
+    return null;
   switch (value.type) {
     case "heartbeat":
       if (!hasExactKeys(value, ["type"]))
@@ -20427,6 +20438,9 @@ var CallRoom = class {
   #apiKey;
   #WebSocket;
   #heartbeatIntervalMs;
+  #onWarning;
+  /** Unknown server frame types already warned about, so each is logged once. */
+  #unknownFrameTypes = /* @__PURE__ */ new Set();
   #signal;
   #listeners = /* @__PURE__ */ new Map();
   /** The open socket, or the still-open socket a manual `reconnect()` is replacing. */
@@ -20452,6 +20466,7 @@ var CallRoom = class {
     this.#apiKey = apiKey;
     this.#WebSocket = options.WebSocket ?? wrapper_default;
     this.#heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+    this.#onWarning = options.onWarning ?? ((message) => console.warn(message));
     this.#signal = options.signal;
     if (!Number.isFinite(this.#heartbeatIntervalMs) || this.#heartbeatIntervalMs <= 0) {
       throw new Error("Call room heartbeatIntervalMs must be greater than zero.");
@@ -20774,7 +20789,18 @@ var CallRoom = class {
     if (socket !== this.#socket)
       return;
     const source = await text(data);
-    const frame = parseCallRoomServerFrame(JSON.parse(source));
+    const value = JSON.parse(source);
+    if (isRecord(value) && typeof value.type === "string" && !KNOWN_SERVER_FRAME_TYPES.has(value.type)) {
+      if (!this.#unknownFrameTypes.has(value.type)) {
+        this.#unknownFrameTypes.add(value.type);
+        try {
+          this.#onWarning(`Relay Call room ignored a server frame of unknown type "${value.type}".`);
+        } catch {
+        }
+      }
+      return;
+    }
+    const frame = parseCallRoomServerFrame(value);
     if (!frame)
       return;
     switch (frame.type) {
