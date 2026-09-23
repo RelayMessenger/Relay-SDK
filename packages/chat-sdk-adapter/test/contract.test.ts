@@ -121,6 +121,41 @@ describe("locked Relay Server contract", () => {
     }
   });
 
+  it("carries the invoice part, its read-back status and the status route", async () => {
+    const document = parse(await readFile(new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8")) as OpenApiDocument;
+    const schemas = document.components.schemas;
+    expect(schemas.InvoicePart).toHaveProperty("additionalProperties", false);
+    expect(schemas.InvoicePart).toHaveProperty("required", ["type", "title", "amount", "currency", "goods", "url"]);
+    expect(schemas.InvoicePart).toHaveProperty("properties.title.maxLength", 32);
+    expect(schemas.InvoicePart).toHaveProperty("properties.amount.maximum", 99999999);
+    expect(schemas.InvoicePart).toHaveProperty("properties.goods.enum", ["physical", "digital"]);
+    expect(schemas.InvoicePart).toHaveProperty("properties.url.maxLength", 2048);
+    expect(schemas.InvoicePart).toHaveProperty("properties.recurring.$ref", "#/components/schemas/InvoiceRecurring");
+    expect(schemas.InvoiceRecurring).toHaveProperty("properties.interval.enum", ["day", "week", "month", "year"]);
+    expect(schemas.InvoiceStatus).toHaveProperty("enum", ["requested", "succeeded", "canceled", "expired", "refunded"]);
+    expect(schemas.InvoicePartResponse).toHaveProperty("required", [
+      "type", "title", "amount", "currency", "goods", "url", "status", "reactions",
+    ]);
+    expect(schemas.MessagePart).toHaveProperty("discriminator.mapping.invoice", "#/components/schemas/InvoicePart");
+    for (const name of ["Message", "MessageEvent", "SentMessage"]) {
+      expect(schemas[name]).toHaveProperty("properties.parts.items.oneOf", expect.arrayContaining([
+        { $ref: "#/components/schemas/InvoicePartResponse" },
+      ]));
+    }
+    const route = document.paths["/v1/messages/{messageId}/invoice"]?.put as Record<string, unknown> | undefined;
+    expect(route).toHaveProperty("operationId", "updateInvoiceStatus");
+    expect(route).toHaveProperty(
+      ["requestBody", "content", "application/json", "schema", "$ref"],
+      "#/components/schemas/UpdateInvoiceStatusRequest",
+    );
+    expect(route).toHaveProperty(
+      ["responses", "200", "content", "application/json", "schema", "properties", "message", "$ref"],
+      "#/components/schemas/Message",
+    );
+    expect(schemas.UpdateInvoiceStatusRequest).toHaveProperty("required", ["status"]);
+    expect(schemas.UpdateInvoiceStatusRequest).toHaveProperty("properties.status.$ref", "#/components/schemas/InvoiceStatus");
+  });
+
   it("caps both recipient arrays at six without changing generic admission APIs", async () => {
     const document = parse(await readFile(
       new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8",

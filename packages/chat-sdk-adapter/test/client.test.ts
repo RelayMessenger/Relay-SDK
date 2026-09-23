@@ -393,3 +393,47 @@ it("sends a typed native selection without losing the existing idempotency ident
   expect(new Headers(requests[0]?.headers).get("idempotency-key")).toBe("selection-operation");
   expect(JSON.parse(String(requests[0]?.body)).message.parts[1]).toEqual({ type: "selection", options: [{ value: "research", label: "Research" }] });
 });
+
+const INVOICE = {
+  type: "invoice" as const, title: "House blend, 250 g", amount: 2400, currency: "usd",
+  goods: "physical" as const, url: "https://buy.stripe.com/test_123",
+  recurring: { interval: "month" as const, interval_count: 1 },
+};
+
+it("sends a typed invoice as the only part, unchanged", async () => {
+  const requests: RequestInit[] = [];
+  const client = new RelayClient({ token: "test", fetch: async (_, init) => {
+    requests.push(init!);
+    return Response.json({ chat_id: IDS.chat, message: { id: IDS.message } }, { status: 202 });
+  } });
+  await client.sendMessage({ chatId: IDS.chat, idempotencyKey: "invoice-operation", parts: [INVOICE] });
+  expect(new Headers(requests[0]?.headers).get("idempotency-key")).toBe("invoice-operation");
+  expect(JSON.parse(String(requests[0]?.body)).message.parts).toEqual([INVOICE]);
+});
+
+it("moves an invoice's status on the locked PUT route and returns the updated Message", async () => {
+  const message = {
+    id: IDS.message, chat_id: IDS.chat, is_from_me: true, is_system_message: false,
+    delivery_status: "delivered", created_at: "2026-09-22T00:00:00Z", updated_at: "2026-09-22T00:01:00Z",
+    parts: [{ ...INVOICE, status: "succeeded", reactions: null }],
+  };
+  const { calls, fetchMock } = harness(() => jsonResponse({ message }));
+  const client = new RelayClient({ token: "test", fetch: fetchMock as typeof fetch });
+  await expect(client.updateInvoiceStatus(IDS.message, "succeeded")).resolves.toEqual({ message });
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toMatchObject({
+    method: "PUT", url: `https://api.relayapp.im/v1/messages/${IDS.message}/invoice`, body: { status: "succeeded" },
+  });
+  expect(calls[0]?.headers.get("content-type")).toBe("application/json");
+  expect(calls[0]?.headers.get("authorization")).toBe("Bearer test");
+});
+
+it("rejects a non-UUID invoice message before calling Relay, and maps a foreign sender's 403", async () => {
+  const { fetchMock } = harness(() => jsonResponse({ error: { code: "2003", message: "Not the sending agent." } }, 403));
+  const client = new RelayClient({ token: "test", fetch: fetchMock as typeof fetch });
+  await expect(client.updateInvoiceStatus("not-a-uuid", "canceled")).rejects.toBeInstanceOf(ValidationError);
+  expect(fetchMock).not.toHaveBeenCalled();
+  const error = await client.updateInvoiceStatus(IDS.message, "canceled").catch((thrown: unknown) => thrown);
+  expect(error).toBeInstanceOf(PermissionError);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});

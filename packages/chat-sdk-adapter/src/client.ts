@@ -18,10 +18,12 @@ import type {
   RelayAttachmentAllocation,
   RelayChat,
   RelayGetMessagesResult,
+  RelayInvoiceStatus,
   RelayMessage,
   RelayOutgoingPart,
   RelayReactionType,
   RelaySendMessageResponse,
+  RelayUpdateInvoiceStatusResponse,
 } from "./types.js";
 
 export const RELAY_DEFAULT_BASE_URL = "https://api.relayapp.im";
@@ -325,6 +327,26 @@ export class RelayClient {
         }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
+      },
+    );
+  }
+
+  /**
+   * Move an `invoice` part's status, for example to `succeeded` once the
+   * developer's own Stripe webhook reports the payment. Only the agent that
+   * sent the invoice may call this; setting the current status is a no-op.
+   */
+  async updateInvoiceStatus(
+    messageId: string,
+    status: RelayInvoiceStatus,
+  ): Promise<RelayUpdateInvoiceStatusResponse> {
+    assertRelayUuid(messageId, "messageId");
+    return this.request<RelayUpdateInvoiceStatusResponse>(
+      `/v1/messages/${encodeURIComponent(messageId)}/invoice`,
+      {
+        body: JSON.stringify({ status }),
+        headers: { "Content-Type": "application/json" },
+        method: "PUT",
       },
     );
   }

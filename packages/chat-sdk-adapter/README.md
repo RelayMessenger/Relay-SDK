@@ -32,6 +32,20 @@ checks any number of options and submits them once; checking sends nothing, and
 a person answers a given selection once. iOS may draw a checkmark in place of
 each bullet and repeat the prompt's title, as presentation only.
 
+## Invoice
+
+A verified agent asks someone to pay by sending an `invoice` part through
+`postMessageParts`, on the same idempotency lane as other posts. The invoice
+must be the only part of its Message, so send any words first with
+`postMessage`. Its `url` must be your own Stripe-hosted checkout page on
+`checkout`, `buy`, `book`, `donate` or `invoice.stripe.com`. A read-back
+invoice adds `status`, `reactions` and a filled-in `recurring.interval_count`
+in `message.raw.message.parts`, and contributes no text to `message.text`.
+Once your own system learns the payment went through, for example from your
+Stripe webhook, call `adapter.client.updateInvoiceStatus(messageId, "succeeded")`
+so the card updates for the person. Only the agent that sent the invoice may
+update its status.
+
 ## Install
 
 ```sh

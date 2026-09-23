@@ -142,12 +142,55 @@ export interface RelaySelectionResponsePart {
   selected_values: string[];
 }
 
+/** Stripe's own recurring shape: interval plus how many of it. */
+export interface RelayInvoiceRecurring {
+  interval: "day" | "week" | "month" | "year";
+  /** Defaults to 1. Total span is capped at 3 years (1095 days / 156 weeks / 36 months / 3 years). */
+  interval_count?: number;
+}
+
+export type RelayInvoiceStatus =
+  | "requested"
+  | "succeeded"
+  | "canceled"
+  | "expired"
+  | "refunded";
+
+/**
+ * Verified agents only: asks the person to pay through the developer's own
+ * Stripe-hosted checkout page. Must be the only part of its Message.
+ */
+export interface RelayInvoicePart {
+  type: "invoice";
+  /** Trimmed, 1–32 characters. */
+  title: string;
+  /** Minor units, 1..99,999,999. */
+  amount: number;
+  /** 3-letter ISO code, sent in either case, returned lowercase. */
+  currency: string;
+  /** physical = goods or services used outside the app; digital = anything delivered in chat or used in an app. */
+  goods: "physical" | "digital";
+  /** https on checkout, buy, book, donate or invoice.stripe.com, with no port, username or password; at most 2048 characters. */
+  url: string;
+  /** Omit for a one-time charge. */
+  recurring?: RelayInvoiceRecurring;
+}
+
+/** Metadata exposed intact through message.raw.message.parts; contributes no readable text. */
+export interface RelayInvoicePartResponse extends RelayInvoicePart {
+  recurring?: Required<RelayInvoiceRecurring>;
+  /** "requested" until the sending agent's own status update changes it. */
+  status: RelayInvoiceStatus;
+  reactions: RelayReaction[] | null;
+}
+
 export type RelayOutgoingPart =
   | RelayTextPart
   | RelayMediaPart
   | RelayLinkPart
   | RelayButtonsPart
-  | RelaySelectionPart;
+  | RelaySelectionPart
+  | RelayInvoicePart;
 
 export interface RelayTextPartResponse extends RelayTextPart {
   mentions?: Array<{
@@ -193,7 +236,8 @@ export type RelayMessagePartResponse =
   | RelaySystemPartResponse
   | RelayButtonsPartResponse
   | RelaySelectionPartResponse
-  | RelaySelectionResponsePart;
+  | RelaySelectionResponsePart
+  | RelayInvoicePartResponse;
 
 export interface RelayReplyTo {
   message_id: string;
@@ -236,6 +280,7 @@ export interface RelayWebhookMessageEvent {
     | RelayButtonsPartResponse
     | RelaySelectionPartResponse
     | RelaySelectionResponsePart
+    | RelayInvoicePartResponse
   >;
   read_at?: string | null;
   reply_to?: RelayReplyTo | null;
@@ -257,10 +302,16 @@ export interface RelaySentMessage {
     | RelayButtonsPartResponse
     | RelaySelectionPartResponse
     | RelaySelectionResponsePart
+    | RelayInvoicePartResponse
   >;
   reply_to?: RelayReplyTo | null;
   sent_at: string | null;
   silent?: boolean;
+}
+
+/** `PUT /v1/messages/{messageId}/invoice`: the updated Message projection. */
+export interface RelayUpdateInvoiceStatusResponse {
+  message: RelayMessage;
 }
 
 export interface RelaySendMessageResponse {
