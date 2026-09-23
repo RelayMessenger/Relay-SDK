@@ -2352,30 +2352,36 @@ wheels = [
 ]
 
 [[package]]
-name = "relaymessenger-calls"
+name = "relaymessenger"
 version = "0.1.0.dev1"
-source = { editable = "../relaymessenger-calls" }
+source = { editable = "../relaymessenger" }
 dependencies = [
+    { name = "websockets" },
+]
+
+[package.optional-dependencies]
+calls = [
     { name = "aiortc" },
     { name = "av" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "websockets" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "aiortc", specifier = ">=1.15,<2" },
-    { name = "av", specifier = ">=14" },
-    { name = "numpy", specifier = ">=1.26" },
+    { name = "aiortc", marker = "extra == 'calls'", specifier = ">=1.15,<2" },
+    { name = "av", marker = "extra == 'calls'", specifier = ">=14" },
+    { name = "numpy", marker = "extra == 'calls'", specifier = ">=1.26" },
     { name = "websockets", specifier = ">=14" },
 ]
+provides-extras = ["calls"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=1.13" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
+    { name = "relaymessenger", extras = ["calls"] },
 ]
 
 [[package]]
@@ -2386,7 +2392,7 @@ dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pipecat-ai" },
-    { name = "relaymessenger-calls" },
+    { name = "relaymessenger", extra = ["calls"] },
 ]
 
 [package.dev-dependencies]
@@ -2400,7 +2406,7 @@ dev = [
 requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "pipecat-ai", specifier = ">=1.11,<2" },
-    { name = "relaymessenger-calls", editable = "../relaymessenger-calls" },
+    { name = "relaymessenger", extras = ["calls"], editable = "../relaymessenger" },
 ]
 
 [package.metadata.requires-dev]

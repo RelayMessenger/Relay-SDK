@@ -6,7 +6,7 @@ a client shared by an input and an output processor, connected in ``setup``
 and reference-counted so the second ``disconnect`` closes it; the input pushes
 the caller's audio as ``UserAudioRawFrame`` and camera as ``UserImageRawFrame``;
 the output implements ``write_audio_frame`` and ``write_video_frame``. The
-media is `relaymessenger_calls.RelayCallTransport`: joining the Call's room as
+media is `relaymessenger.calls.RelayCallTransport`: joining the Call's room as
 the agent answers the Call.
 """
 
@@ -38,7 +38,7 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pydantic import BaseModel
-from relaymessenger_calls import (
+from relaymessenger.calls import (
     DEFAULT_BASE_URL,
     CallRoom,
     LocalVideoTrack,
@@ -51,9 +51,9 @@ from relaymessenger_calls import (
     VideoSource,
     VideoStream,
 )
-from relaymessenger_calls._audio_format import INBOUND_SAMPLE_RATES
-from relaymessenger_calls.transport import AUDIO_SLICE_MS, RESTART_CONNECT_TIMEOUT_MS
-from relaymessenger_calls.video import RelayVideoFormat
+from relaymessenger.calls._audio_format import INBOUND_SAMPLE_RATES
+from relaymessenger.calls.transport import AUDIO_SLICE_MS, RESTART_CONNECT_TIMEOUT_MS
+from relaymessenger.calls.video import RelayVideoFormat
 
 CAM_VIDEO_SOURCE = "camera"
 

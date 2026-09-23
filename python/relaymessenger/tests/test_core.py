@@ -12,7 +12,7 @@ import av
 import numpy as np
 import pytest
 
-from relaymessenger_calls import (
+from relaymessenger.calls import (
     EventEmitter,
     LocalVideoTrack,
     RelayCallTransport,
@@ -22,13 +22,34 @@ from relaymessenger_calls import (
     VideoSource,
     VideoStream,
 )
-from relaymessenger_calls._engine import PeerConfig, RelayIceServer, create_peer_connection, media_ssrc, turn_only
-from relaymessenger_calls import video
-from relaymessenger_calls.video import TrackPublishOptions, _VideoSender, request_keyframes
+from relaymessenger.calls._engine import PeerConfig, RelayIceServer, create_peer_connection, media_ssrc, turn_only
+from relaymessenger.calls import video
+from relaymessenger.calls.video import TrackPublishOptions, _VideoSender, request_keyframes
 
 
 def test_the_core_imports_no_livekit() -> None:
     assert not [name for name in sys.modules if name == "livekit" or name.startswith("livekit.")]
+
+
+def test_relaymessenger_imports_without_the_calls_extra_and_calls_names_the_extra() -> None:
+    import subprocess
+
+    # A Python where aiortc, av and numpy are not installed.
+    script = """
+import importlib.abc, sys
+class Missing(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in ("aiortc", "av", "numpy"):
+            raise ModuleNotFoundError(f"No module named {name!r}")
+sys.meta_path.insert(0, Missing())
+import relaymessenger
+try:
+    import relaymessenger.calls
+except ImportError as e:
+    print(e)
+"""
+    out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True).stdout
+    assert "pip install 'relaymessenger[calls]'" in out
 
 
 def test_emitter_trims_arguments_decorates_runs_once_and_removes() -> None:

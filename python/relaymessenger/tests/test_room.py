@@ -8,8 +8,8 @@ from typing import Any, Callable, Optional, Union
 
 import pytest
 
-from relaymessenger_livekit import room as room_module
-from relaymessenger_livekit.room import (
+from relaymessenger.calls import room as room_module
+from relaymessenger.calls.room import (
     CallRoom,
     CallRoomError,
     CallRoomReconnectingEvent,

@@ -18,7 +18,7 @@ classifiers = [
 dependencies = [
   "numpy>=1.26",
   "pipecat-ai>=1.11,<2",
-  "relaymessenger-calls>=0.1.0.dev1",
+  "relaymessenger[calls]>=0.1.0.dev1",
 ]
 
 [project.urls]
@@ -28,9 +28,9 @@ Repository = "https://github.com/RelayMessenger/Relay-SDK"
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "mypy>=1.13"]
 
-# The call core is the sibling package in this repository.
+# The Relay SDK is the sibling package in this repository.
 [tool.uv.sources]
-relaymessenger-calls = { path = "../relaymessenger-calls", editable = true }
+relaymessenger = { path = "../relaymessenger", editable = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]

@@ -65,6 +65,10 @@ class AudioSourceStats:
     pacer_alive: bool
     #: Times the pacer fell more than 200 ms behind and restarted its clock (packets skipped, not burst).
     pacer_late_restarts: int = 0
+    #: The first packet carrying application audio, monotonic ms.
+    first_audio_at: Optional[float] = None
+    #: Application audio is queued and held: the other participant is not receiving it yet.
+    held: bool = False
 
 
 @dataclass
@@ -117,10 +121,17 @@ class RelayAudioSource:
     from remote peer", staging 2026-09-22, engine-werift.ts). aiortc starts
     pulling only once DTLS is connected (`RTCPeerConnection.__connect`), so
     silence flows from connect. Silence never counts toward `queued_ms()`.
+
+    ``playing`` says whether application audio may leave now. While it is
+    false the pull keeps sending silence and nothing queued is dropped; once
+    it is true the queue plays from its first packet (PROTOCOL.md section 6b:
+    hold the agent's audio until the other participant receives it, as
+    LiveKit's room output waits for the subscription and never skips).
     """
 
-    def __init__(self, clock: Callable[[], float] = monotonic_ms) -> None:
+    def __init__(self, clock: Callable[[], float] = monotonic_ms, *, playing: Callable[[], bool] = lambda: True) -> None:
         self._clock = clock
+        self._playing = playing
         self._encoder = _OpusEncoder()
         #: 20 ms of digital silence, encoded once by the same encoder and reused.
         self._silence = self._encoder.encode(np.zeros(PACKET_SAMPLES, dtype=np.int16))
@@ -130,6 +141,7 @@ class RelayAudioSource:
         self._opus_packets = 0
         self._application_rtp_packets = 0
         self._silence_packets = 0
+        self._first_audio_at: Optional[float] = None
         self._pts = 0
         self._pacer = RtpAudioPacer()
         self._due = 0
@@ -151,6 +163,8 @@ class RelayAudioSource:
             queued=len(self._packets),
             pacer_alive=self._last_pull_at is not None and now - self._last_pull_at < 1_000,
             pacer_late_restarts=self._pacer.late_restarts,
+            first_audio_at=self._first_audio_at,
+            held=not self._drained() and not self._playing(),
         )
 
     def create_track(self) -> "_RelayAudioTrack":
@@ -235,13 +249,15 @@ class RelayAudioSource:
             await _sleep(max(0.0, (self._pacer.next_due_at() - now) / 1000))
 
     def _take(self, now: float) -> "av.Packet[Any]":
-        application = self._packets.popleft() if self._packets else None
+        application = self._packets.popleft() if self._packets and self._playing() else None
         packet = av.Packet(application if application is not None else self._silence)
         packet.pts = self._pts
         packet.time_base = OPUS_TIME_BASE
         self._pts += PACKET_FRAMES
         if application is not None:
             self._application_rtp_packets += 1
+            if self._first_audio_at is None:
+                self._first_audio_at = now
         else:
             self._silence_packets += 1
         self._rtp.mark(now)
