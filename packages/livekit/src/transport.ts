@@ -123,6 +123,8 @@ export interface RelayPeerConnectionLike {
   setRemoteDescription(description: RTCSessionDescriptionInit): Promise<void>;
   addEventListener(type: "icegatheringstatechange", listener: () => void): void;
   removeEventListener(type: "icegatheringstatechange", listener: () => void): void;
+  /** W3C `getStats()`; the report is Map-like (werift `buildStatsReport`, libwebrtc `RTCStatsReport`). */
+  getStats?(): Promise<{ forEach(callback: (stat: Record<string, unknown>) => void): void }>;
   close(): void;
 }
 
@@ -296,6 +298,12 @@ export interface RelayCallIceDiagnostics {
   remote: Array<{ transport: string; port: number }>;
   /** ICE gathering, ICE connection and peer connection state changes since `connect()`. */
   transitions: Array<{ kind: "gathering" | "ice" | "connection"; state: string; atMs: number }>;
+  /**
+   * The local side of the candidate pair media flows on, as `"<type> <protocol>"`
+   * (for example `"relay udp"`), read from the W3C stats once the peer connects;
+   * undefined until then or when the engine has no `getStats()`.
+   */
+  selectedPair: string | undefined;
   connected: boolean;
   inbound: RelayCallInboundDiagnostics;
   outbound: RelayCallOutboundDiagnostics;
@@ -419,7 +427,8 @@ const seconds = (milliseconds: number): string => `${(milliseconds / 1000).toFix
 const summarizeIce = (diagnostics: Omit<RelayCallIceDiagnostics, "summary">): string => {
   const { local, remote, transitions, connected } = diagnostics;
   const localPart = `local: host ${local.host}, srflx ${local.srflx}, relay ${local.relay}`
-    + (local.other ? `, other ${local.other}` : "");
+    + (local.other ? `, other ${local.other}` : "")
+    + (diagnostics.selectedPair ? `, pair ${diagnostics.selectedPair}` : "");
   const remotePart = remote.length
     ? `remote: ${remote.map((candidate) => `${candidate.transport} ${candidate.port}`).join(", ")}`
     : "remote: none";
@@ -583,6 +592,7 @@ export class RelayCallTransport {
   #stallWarned = false;
   #iceLocal = { host: 0, srflx: 0, relay: 0, other: 0 };
   #iceRemote: Array<{ transport: string; port: number }> = [];
+  #selectedPair: string | undefined;
   #iceTransitions: RelayCallIceDiagnostics["transitions"] = [];
   readonly #listeners = new Map<TransportEvent, Set<(...args: any[]) => void>>();
   #factory: RelayWebRTCFactory | undefined;
@@ -756,6 +766,7 @@ export class RelayCallTransport {
       local: { ...this.#iceLocal },
       remote: this.#iceRemote.map((candidate) => ({ ...candidate })),
       transitions: this.#iceTransitions.map((transition) => ({ ...transition })),
+      selectedPair: this.#selectedPair,
       connected: this.#peerConnected,
       inbound: this.#inboundDiagnostics(),
       outbound: this.#outboundDiagnostics(),
@@ -1126,6 +1137,7 @@ export class RelayCallTransport {
       if (this.#peerConnected) return;
       this.#peerConnected = true;
       this.#failedAttempts = 0;
+      void this.#readSelectedPair(peer);
       // The SFU will not pull a track that has carried no RTP, so the source
       // sends silence from here on until it is closed.
       this.#audioSource?.start?.();
@@ -1373,6 +1385,33 @@ export class RelayCallTransport {
     peer.oniceconnectionstatechange = () => {
       if (peer.iceConnectionState !== undefined) this.#recordTransition("ice", peer.iceConnectionState);
     };
+  }
+
+  /**
+   * W3C stats path: `transport.selectedCandidatePairId` -> `candidate-pair`
+   * -> `local-candidate.candidateType` (werift transport/dtls.js and
+   * transport/ice.js `getStats`); a nominated, succeeded pair when the
+   * transport names none.
+   */
+  async #readSelectedPair(peer: RelayPeerConnectionLike): Promise<void> {
+    let report: Awaited<ReturnType<NonNullable<RelayPeerConnectionLike["getStats"]>>> | undefined;
+    try {
+      report = await peer.getStats?.();
+    } catch {
+      return;
+    }
+    if (!report || this.#peer !== peer) return;
+    const stats = new Map<string, Record<string, unknown>>();
+    report.forEach((stat) => stats.set(String(stat.id), stat));
+    const all = [...stats.values()];
+    const selectedId = all.find((stat) => stat.type === "transport" && stat.selectedCandidatePairId)
+      ?.selectedCandidatePairId;
+    const pair = selectedId !== undefined
+      ? stats.get(String(selectedId))
+      : all.find((stat) => stat.type === "candidate-pair" && stat.nominated === true && stat.state === "succeeded");
+    const local = pair ? stats.get(String(pair.localCandidateId)) : undefined;
+    if (typeof local?.candidateType !== "string") return;
+    this.#selectedPair = `${local.candidateType} ${typeof local.protocol === "string" ? local.protocol : "?"}`;
   }
 
   #recordTransition(kind: RelayCallIceDiagnostics["transitions"][number]["kind"], state: string): void {

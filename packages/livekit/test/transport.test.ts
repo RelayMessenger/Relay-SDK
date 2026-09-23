@@ -1119,3 +1119,22 @@ it("keeps the person's audio sink and its packet count when ontrack fires again 
   expect(transport.diagnostics().inbound.rtpPackets).toBe(350);
   transport.close();
 });
+
+it("names the local candidate type of the pair media flows on, from the W3C stats", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const stats = [
+    { id: "T01", type: "transport", selectedCandidatePairId: "CP2" },
+    { id: "CP1", type: "candidate-pair", localCandidateId: "L1", nominated: false, state: "failed" },
+    { id: "CP2", type: "candidate-pair", localCandidateId: "L2", nominated: true, state: "succeeded" },
+    { id: "L1", type: "local-candidate", candidateType: "host", protocol: "udp" },
+    { id: "L2", type: "local-candidate", candidateType: "relay", protocol: "udp" },
+  ];
+  Object.assign(webRTC.nextPeer, { getStats: async () => new Map(stats.map((stat) => [stat.id, stat])) });
+  const transport = makeTransport(room, webRTC);
+  await connectTransport(transport, room);
+  await flush();
+  expect(transport.diagnostics().selectedPair).toBe("relay udp");
+  expect(transport.diagnostics().summary).toContain("local: host 0, srflx 0, relay 0, pair relay udp;");
+  transport.close();
+});
