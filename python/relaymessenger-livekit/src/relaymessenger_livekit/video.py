@@ -6,7 +6,7 @@ Twin of `packages/livekit/src/video.ts`. Frames are LiveKit's own
 for LiveKit can be sent unchanged. The names copy `livekit.rtc`:
 `VideoSource.capture_frame(frame, timestamp_us=, rotation=)`,
 `LocalVideoTrack.create_video_track(name, source)`, `VideoStream(track)`
-yielding `VideoFrameEvent`. The media itself lives in `relaymessenger_calls`;
+yielding `VideoFrameEvent`. The media itself lives in `relaymessenger.calls`;
 this module converts at its two edges.
 """
 
@@ -17,8 +17,8 @@ from typing import Any, cast
 import av
 import numpy as np
 from livekit import rtc
-from relaymessenger_calls import video as _calls
-from relaymessenger_calls.video import (
+from relaymessenger.calls import video as _calls
+from relaymessenger.calls.video import (
     VIDEO_TIME_BASE,
     LocalVideoTrack,
     RelayVideoReceiverStats,

@@ -9,7 +9,7 @@ pip install relaymessenger-pipecat
 ```
 
 Python 3.11 or newer, with `pipecat-ai` 1.11 or newer. The media core is
-`relaymessenger-calls`; it uses only Relay's public API with the agent's
+`relaymessenger.calls` from the Relay SDK (`relaymessenger[calls]`); it uses only Relay's public API with the agent's
 token, so your code never handles SDP, ICE, or SFU credentials.
 
 ## Answer a Call
@@ -52,7 +52,8 @@ async def answer(call_id: str) -> None:
 
 Joining answers a ringing Call, so start the pipeline within the Call's
 ten-second ring. `on_first_participant_joined` fires once the caller's audio
-reaches the agent, so a greeting is heard. `transport.end()` ends the Call for
+reaches the agent, and the bot's audio is held until the caller is receiving
+it, so a greeting is heard from its first word. `transport.end()` ends the Call for
 both sides.
 
 ## Send and receive video

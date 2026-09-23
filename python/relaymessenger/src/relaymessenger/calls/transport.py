@@ -161,6 +161,10 @@ class RelayCallOutboundDiagnostics:
     pacer_late_restarts: int = 0
     #: Packets of either kind per second from the first to the last packet.
     packets_per_second: Optional[float] = None
+    #: ms since ``connect()`` for the first packet carrying the caller's audio.
+    first_audio_at_ms: Optional[float] = None
+    #: The caller's audio is queued and held until the other participant receives it (PROTOCOL.md section 6b).
+    held: bool = False
 
 
 @dataclass
@@ -253,6 +257,7 @@ def summarize(d: RelayCallDiagnostics) -> str:
         f"{o.packets_per_second if o.packets_per_second is not None else '-'}/s, queue {o.queued}, "
         f"pacer {'alive' if o.pacer_alive else 'idle'}"
         + (f", pacer late {o.pacer_late_restarts}" if o.pacer_late_restarts else "")
+        + (", held" if o.held else "")
     )
     room_parts = [f"{r.room_states} roomState", f"{r.offers} offer", f"{r.opens} open"]
     if r.ended_reason is not None:
@@ -360,7 +365,6 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         self._person_connected = False
         # The person's latest roomState ``receiving`` contains ``audio`` (PROTOCOL.md section 6b).
         self._person_receiving_audio = False
-        self._subscription_waiters: set[asyncio.Future[None]] = set()
         self._peer_audio_arrived = False
         self._peer_audio_ready = False
         self._peer_audio_waiters: set[asyncio.Future[None]] = set()
@@ -413,7 +417,8 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
             await asyncio.shield(self._ready)
             return
         self._record("signaling", "room open")
-        self._source = RelayAudioSource()
+        # Application audio leaves only while the person receives it (PROTOCOL.md section 6b).
+        self._source = RelayAudioSource(playing=lambda: self.subscribed)
         if self._video is not None and self._video.enabled:
             # Published before connect(): the camera rides the first offer.
             self.room.user_update(muted=self._muted, video=True)
@@ -446,7 +451,6 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         self._reject_peer_audio(
             RelayCallTransportError("Relay Call transport closed before the person's audio arrived.")
         )
-        self._reject_subscription(RelayCallTransportError("Relay Call transport closed before the person received audio."))
         self._audio_generation += 1
         self._shutdown_media()
         self._release_playout_waiters()
@@ -466,7 +470,11 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
 
         The pacer sends them at 50 packets a second, so adapters may push faster
         than real time (LiveKit's ``AudioSource.capture_frame`` shape);
-        `wait_for_playout()` tells when they have left.
+        `wait_for_playout()` tells when they have left. Until the person is
+        receiving this participant's audio (`subscribed`), the queue is held and
+        silence goes out; it then plays from its start, nothing dropped
+        (PROTOCOL.md section 6b). A restart holds it again until the new session
+        is pulled.
         """
         if self._closed:
             raise RelayCallTransportError("Relay Call transport is closed.")
@@ -536,43 +544,15 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
 
     @property
     def subscribed(self) -> bool:
-        """True once the person is receiving this transport's audio (PROTOCOL.md section 6b).
+        """True while the person is receiving this transport's audio (PROTOCOL.md section 6b).
 
         A roomState that arrived after this peer's publish answer was applied
         lists ``audio`` in the person's ``receiving``. False again from a
-        restart until the new session is pulled.
+        restart until the new session is pulled. `write_audio` holds audio
+        while this is false (LiveKit's room output waits for
+        ``publication.wait_for_subscription()`` the same way).
         """
         return self._person_receiving_audio and self._initial_answer_sdp is not None and not self._restart_pending
-
-    async def wait_for_subscription(self) -> None:
-        """Return once `subscribed` is true (at once if it is).
-
-        Copy of LiveKit's ``publication.wait_for_subscription()``, which its room
-        audio output awaits before playing a frame. Raises when the Call ends or
-        the transport closes first.
-        """
-        if self.subscribed:
-            return
-        if self._closed or self._ended:
-            raise RelayCallTransportError("Relay Call ended before the person received audio.")
-        waiter: asyncio.Future[None] = asyncio.get_running_loop().create_future()
-        self._subscription_waiters.add(waiter)
-        try:
-            await asyncio.shield(waiter)
-        finally:
-            self._subscription_waiters.discard(waiter)
-
-    def _check_subscription(self) -> None:
-        if not self.subscribed:
-            return
-        for waiter in list(self._subscription_waiters):
-            if not waiter.done():
-                waiter.set_result(None)
-
-    def _reject_subscription(self, error: BaseException) -> None:
-        for waiter in list(self._subscription_waiters):
-            if not waiter.done():
-                waiter.set_exception(error)
 
     def set_muted(self, muted: bool) -> None:
         self._muted = muted
@@ -717,6 +697,8 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
             pacer_alive=s.pacer_alive,
             pacer_late_restarts=s.pacer_late_restarts,
             packets_per_second=_rate(s.rtp_packets + s.silence_packets, first_ms, last_ms),
+            first_audio_at_ms=self._since_connect(s.first_audio_at),
+            held=s.held,
         )
 
     async def _stall_guard(self) -> None:
@@ -922,7 +904,6 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
                 and not self._restart_pending
                 and bool(person and "audio" in (person.get("receiving") or []))
             )
-            self._check_subscription()
             self.emit("room_state", frame)
             if changed:
                 self.emit("remote_video", video)
@@ -948,9 +929,6 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
             self._reject_ready(RelayCallTransportError(f"Relay Call ended before media connected ({frame['reason']})."))
             self._reject_peer_audio(
                 RelayCallTransportError(f"Relay Call ended before the person's audio arrived ({frame['reason']}).")
-            )
-            self._reject_subscription(
-                RelayCallTransportError(f"Relay Call ended before the person received audio ({frame['reason']}).")
             )
             self.clear_audio()
             self._shutdown_media()

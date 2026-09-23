@@ -12,8 +12,10 @@ SFU credentials. It uses only Relay's public API: the Call room WebSocket
 pip install relaymessenger-livekit
 ```
 
-Python 3.10 or newer. `livekit-agents`, `livekit` and `relaymessenger-calls`,
-Relay's framework-neutral call core, are dependencies.
+Python 3.10 or newer. `livekit-agents`, `livekit` and `relaymessenger[calls]`,
+the Relay SDK with its call core, are dependencies. Like LiveKit's own room
+output, the agent's audio is held until the person is receiving it, so a
+greeting that starts early is heard from its first word.
 
 ## Answer a Relay Call
 
@@ -51,11 +53,9 @@ async def answer_call(call_id: str) -> RelayLiveKitCall:
 audio as 24 kHz mono PCM16 frames, the format of LiveKit's own room input.
 
 `RelayAudioOutput` has the semantics of LiveKit's own
-`_ParticipantAudioOutput`. Like LiveKit's, it holds the first frame until the
-person is receiving the agent's audio, so a greeting that starts early is not
-cut; the transport sends silence meanwhile and nothing is skipped. Then
-`capture_frame()` hands each frame to the transport and returns at once, so the AgentSession may push a whole reply faster than
-real time; the 20 ms pacer paces the wire. `flush()` closes the segment and
+`_ParticipantAudioOutput`. `capture_frame()` hands each frame to the
+transport and returns at once, so the AgentSession may push a whole reply
+faster than real time; the 20 ms pacer paces the wire. `flush()` closes the segment and
 reports `playback_finished` only after the transport has drained.
 `clear_buffer()` drops audio that has not reached the wire and reports the
 segment as interrupted at the position that actually played.

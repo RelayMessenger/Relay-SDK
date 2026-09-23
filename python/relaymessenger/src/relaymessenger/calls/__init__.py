@@ -2,8 +2,21 @@
 
 The framework-neutral core under ``relaymessenger-livekit`` and
 ``relaymessenger-pipecat``: the Call room client, the aiortc media peer, PCM16
-audio both ways and video, over Relay's public API only.
+audio both ways and video, over Relay's public API only. Needs the ``calls``
+extra: ``pip install 'relaymessenger[calls]'``.
 """
+
+# The media dependencies are the ``calls`` extra; the guard copies livekit-agents
+# ``llm/mcp.py``, which names its extra when the optional package is missing.
+try:
+    import aiortc  # noqa: F401
+    import av  # noqa: F401
+    import numpy  # noqa: F401
+except ImportError as e:
+    raise ImportError(
+        "relaymessenger.calls needs aiortc, av and numpy, which are not installed.\n"
+        "To fix this, install the optional dependency: pip install 'relaymessenger[calls]'"
+    ) from e
 
 from ._engine import RelayIceServer
 from ._events import EventEmitter

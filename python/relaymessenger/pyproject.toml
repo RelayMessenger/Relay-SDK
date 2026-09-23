@@ -1,7 +1,7 @@
 [project]
-name = "relaymessenger-calls"
+name = "relaymessenger"
 version = "0.1.0.dev1"
-description = "Join a Relay Call as a WebRTC participant from Python: the framework-neutral core of Relay's voice and video integrations."
+description = "The Relay SDK for Python: join a Relay Call as a WebRTC participant with the calls extra."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -17,25 +17,32 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "aiortc>=1.15,<2",
-  "av>=14",
-  "numpy>=1.26",
   "websockets>=14",
 ]
 
+# Optional features as install extras, as livekit-agents does
+# (`livekit-agents[codecs,images]`): `pip install 'relaymessenger[calls]'`.
+[project.optional-dependencies]
+calls = [
+  "aiortc>=1.15,<2",
+  "av>=14",
+  "numpy>=1.26",
+]
+
 [project.urls]
-Homepage = "https://github.com/RelayMessenger/Relay-SDK/tree/main/python/relaymessenger-calls#readme"
+Homepage = "https://github.com/RelayMessenger/Relay-SDK/tree/main/python/relaymessenger#readme"
 Repository = "https://github.com/RelayMessenger/Relay-SDK"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.24", "mypy>=1.13"]
+# The tests exercise the calls extra.
+dev = ["relaymessenger[calls]", "pytest>=8", "pytest-asyncio>=0.24", "mypy>=1.13"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/relaymessenger_calls"]
+packages = ["src/relaymessenger"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -46,4 +53,4 @@ testpaths = ["tests"]
 python_version = "3.12"
 strict = true
 ignore_missing_imports = true
-files = ["src/relaymessenger_calls"]
+files = ["src/relaymessenger"]

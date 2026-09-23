@@ -25,7 +25,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.workers.runner import WorkerRunner
 
 import relaymessenger_pipecat.transport as transport_module
-from relaymessenger_calls import EventEmitter, RelayAudioFrame, RelayVideoFrame, RemoteVideoTrack
+from relaymessenger.calls import EventEmitter, RelayAudioFrame, RelayVideoFrame, RemoteVideoTrack
 from relaymessenger_pipecat import RelayParams, RelayTransport
 
 
@@ -259,3 +259,156 @@ def test_constructor_needs_a_call_and_a_token() -> None:
         RelayTransport(api_key="agent-token", call_id=" ")
     with pytest.raises(ValueError):
         RelayTransport(call_id="call-1")
+
+
+# ---- the real call transport under the Pipecat output, over a fake room and peer ----
+
+
+class FakeRoom(EventEmitter[str]):
+    """`CallRoom`'s surface as `RelayCallTransport` uses it; frames sent are kept."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sent: list[dict[str, Any]] = []
+        self.ice_servers: Any = [{"urls": ["stun:stun.cloudflare.com:3478"]}]
+        self.state: Any = None
+
+    async def connect(self) -> None:
+        return None
+
+    def send(self, frame: dict[str, Any]) -> None:
+        self.sent.append(frame)
+
+    def connected(self) -> None:
+        self.send({"type": "connected"})
+
+    def user_update(self, *, muted: bool, video: Any = None) -> None:
+        self.send({"type": "userUpdate", "muted": muted})
+
+    def close(self, *_: Any) -> None:
+        return None
+
+
+class Desc:
+    def __init__(self, sdp: str, type: str) -> None:
+        self.sdp, self.type = sdp, type
+
+
+class FakeSender:
+    def __init__(self, track: Any) -> None:
+        self.track = track
+
+
+class FakeTransceiver:
+    def __init__(self, kind: str, mid: str, track: Any) -> None:
+        self.kind, self.mid, self.direction = kind, mid, "sendonly"
+        self.sender = FakeSender(track)
+
+    def setCodecPreferences(self, codecs: list[Any]) -> None:
+        self.codecs = codecs
+
+
+class FakePeer(EventEmitter[str]):
+    """aiortc's `RTCPeerConnection` as the transport drives it; the audio track is pulled by the test."""
+
+    instances: list["FakePeer"] = []
+
+    def __init__(self, config: Any) -> None:
+        super().__init__()
+        self.transceivers: list[FakeTransceiver] = []
+        self.connectionState = self.iceConnectionState = self.iceGatheringState = "new"
+        self.signalingState = "stable"
+        self.localDescription: Any = None
+        FakePeer.instances.append(self)
+
+    def addTransceiver(self, track_or_kind: Any, direction: str) -> FakeTransceiver:
+        kind = track_or_kind if isinstance(track_or_kind, str) else track_or_kind.kind
+        t = FakeTransceiver(kind, str(len(self.transceivers)), None if isinstance(track_or_kind, str) else track_or_kind)
+        self.transceivers.append(t)
+        return t
+
+    def getTransceivers(self) -> list[FakeTransceiver]:
+        return self.transceivers
+
+    async def createOffer(self) -> Desc:
+        return Desc("offer", "offer")
+
+    async def setLocalDescription(self, d: Desc) -> None:
+        self.localDescription = Desc(f"v=0\r\na=candidate:1 1 udp 1 10.0.0.1 5000 typ host\r\n{d.type}", d.type)
+
+    async def setRemoteDescription(self, d: Any) -> None:
+        self.signalingState = "stable"
+
+    async def close(self) -> None:
+        return None
+
+    def set_state(self, state: str) -> None:
+        self.connectionState = state
+        self.emit("connectionstatechange")
+
+
+def receiving(tracks: list[str]) -> dict[str, Any]:
+    person = {"contact_id": "person-1", "kind": "user", "connected": True, "video": False, "receiving": tracks}
+    return {"type": "roomState", "call": {"status": "in-progress"}, "participants": [person]}
+
+
+async def test_the_bots_audio_is_held_until_the_person_receives_it_then_plays_from_the_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from relaymessenger.calls import RelayCallTransport
+
+    FakePeer.instances = []
+    monkeypatch.setattr(
+        transport_module, "RelayCallTransport", lambda **kwargs: RelayCallTransport(**kwargs, _peer_factory=FakePeer)
+    )
+    room = FakeRoom()
+    transport = RelayTransport(
+        call_id="call-1",
+        room=room,  # type: ignore[arg-type]
+        params=RelayParams(audio_out_enabled=True, audio_out_end_silence_secs=0),
+    )
+    worker = PipelineWorker(
+        Pipeline([transport.input(), transport.output()]),
+        params=PipelineParams(audio_out_sample_rate=48_000),
+        cancel_on_idle_timeout=False,
+    )
+
+    async def answer_and_connect() -> None:
+        # What Relay and the SFU do after join: answer the publish offer, then ICE connects.
+        while not room.sent:
+            await asyncio.sleep(0.005)
+        room.emit("answer", {"type": "answer", "session_description": {"type": "answer", "sdp": "v=0\r\n"}})
+        while FakePeer.instances[0].signalingState != "stable" or not any(f["type"] == "offer" for f in room.sent):
+            await asyncio.sleep(0.005)
+        await asyncio.sleep(0.01)
+        FakePeer.instances[0].set_state("connected")
+
+    connecting = asyncio.ensure_future(answer_and_connect())
+    greeting = np.full(48_000 // 10, 1000, dtype=np.int16)  # 100 ms, five Opus packets
+
+    async def during() -> None:
+        call = transport._client.call
+        assert call is not None and call._source is not None
+        source = call._source
+        track = FakePeer.instances[0].transceivers[0].sender.track
+        await worker.queue_frame(OutputAudioRawFrame(audio=greeting.tobytes(), sample_rate=48_000, num_channels=1))
+        for _ in range(200):
+            if len(source._packets) >= 4:
+                break
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)  # the output has written every chunk it will write for now
+        queued = list(source._packets)
+        assert len(queued) >= 4
+        # The person has not pulled the bot's audio yet: silence goes out, the greeting waits.
+        assert [bytes(await track.recv()) for _ in range(5)] == [source._silence] * 5
+        assert list(source._packets) == queued
+        assert call.diagnostics().outbound.rtp_packets == 0
+        room.emit("room_state", receiving(["video"]))
+        assert [bytes(await track.recv()) for _ in range(2)] == [source._silence] * 2
+        room.emit("room_state", receiving(["audio"]))
+        # Receiving: the greeting plays from its first packet, every packet in order.
+        assert [bytes(await track.recv()) for _ in range(len(queued))] == queued
+        assert call.diagnostics().outbound.rtp_packets == len(queued)
+
+    await run(worker, during)
+    await connecting
