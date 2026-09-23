@@ -135,12 +135,14 @@ const validParticipant = (value: unknown): value is CallRoomParticipant =>
   && typeof value.muted === "boolean"
   && typeof value.connected === "boolean";
 
+/** Contract `CallRoomIceServersFrame`: 1-8 servers, each 1-16 `stun:`/`turn:`/`turns:` URLs. */
 const validIceServer = (value: unknown): value is CallRoomIceServer =>
   isRecord(value)
   && Object.keys(value).every((key) => key === "urls" || key === "username" || key === "credential")
   && Array.isArray(value.urls)
-  && value.urls.length > 0
-  && value.urls.every((url) => typeof url === "string" && url.length > 0)
+  && value.urls.length >= 1
+  && value.urls.length <= 16
+  && value.urls.every((url) => typeof url === "string" && /^(stun|turns?):/u.test(url))
   && (value.username === undefined || typeof value.username === "string")
   && (value.credential === undefined || typeof value.credential === "string");
 
@@ -161,6 +163,8 @@ export const parseCallRoomServerFrame = (value: unknown): CallRoomServerFrame | 
     case "iceServers":
       if (!hasExactKeys(value, ["type", "ice_servers"])
         || !Array.isArray(value.ice_servers)
+        || value.ice_servers.length < 1
+        || value.ice_servers.length > 8
         || !value.ice_servers.every(validIceServer)) break;
       return value as unknown as CallRoomIceServersFrame;
     case "roomState": {

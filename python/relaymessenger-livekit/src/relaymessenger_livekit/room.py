@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Literal, Optional, Protocol, Union
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -32,6 +33,7 @@ DEFAULT_BASE_URL = "https://api.relayapp.im"
 
 TERMINAL_STATUSES = frozenset({"completed", "no-answer", "canceled", "busy", "failed"})
 ROOM_ERROR_CODES = frozenset({"invalid_frame", "not_allowed", "media_unavailable"})
+_ICE_URL = re.compile(r"^(stun|turns?):")
 PARTICIPANT_KEYS = frozenset({"contact_id", "kind", "attached", "track", "muted", "connected"})
 
 CallRoomConnectionState = Literal["idle", "connecting", "open", "reconnecting", "closed"]
@@ -150,14 +152,14 @@ def _valid_participant(value: Any) -> bool:
 
 
 def _valid_ice_server(value: Any) -> bool:
-    """Standard ``RTCIceServer``: ``urls`` (non-empty list of strings), optional ``username``/``credential``."""
+    """Contract ``CallRoomIceServersFrame`` item: 1-16 ``stun:``/``turn:``/``turns:`` URLs, optional credentials."""
     if not isinstance(value, dict) or not set(value.keys()) <= {"urls", "username", "credential"}:
         return False
     urls = value.get("urls")
     return (
         isinstance(urls, list)
-        and len(urls) > 0
-        and all(isinstance(url, str) and url for url in urls)
+        and 1 <= len(urls) <= 16
+        and all(isinstance(url, str) and _ICE_URL.match(url) for url in urls)
         and ("username" not in value or isinstance(value["username"], str))
         and ("credential" not in value or isinstance(value["credential"], str))
     )
@@ -180,6 +182,7 @@ def parse_call_room_server_frame(value: Any) -> Optional[dict[str, Any]]:
         if (
             _has_exact_keys(value, {"type", "ice_servers"})
             and isinstance(servers, list)
+            and 1 <= len(servers) <= 8
             and all(_valid_ice_server(s) for s in servers)
         ):
             return value

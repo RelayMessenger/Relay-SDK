@@ -264,6 +264,10 @@ it("accepts the STUN-only fallback iceServers frame and rejects drifted ones", (
   expect(drifted({ urls: ["stun:stun.cloudflare.com:3478"] })).toThrow(/invalid frame/u);
   expect(drifted([{ urls: [] }])).toThrow(/invalid frame/u);
   expect(drifted([{ urls: [""] }])).toThrow(/invalid frame/u);
+  expect(drifted([])).toThrow(/invalid frame/u);
+  expect(drifted([{ urls: ["http://turn.example"] }])).toThrow(/invalid frame/u);
+  expect(drifted(Array.from({ length: 9 }, () => ({ urls: ["stun:x"] })))).toThrow(/invalid frame/u);
+  expect(drifted([{ urls: Array.from({ length: 17 }, () => "stun:x") }])).toThrow(/invalid frame/u);
   expect(drifted([{ urls: ["turn:x"], username: 1 }])).toThrow(/invalid frame/u);
   expect(drifted([{ urls: ["turn:x"], credentialType: "password" }])).toThrow(/invalid frame/u);
 });
