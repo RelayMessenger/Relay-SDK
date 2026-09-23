@@ -40,9 +40,14 @@ import {
   OpusRtpPayload,
   RTCPeerConnection,
   RTCRtpCodecParameters,
+  RTCRtpHeaderExtensionParameters,
   RtpHeader,
   RtpPacket,
+  useFIR,
+  useNACK,
+  usePLI,
 } from "werift";
+import { createWeriftVideoFactory } from "./engine-werift-video.js";
 import type {
   RelayAudioSinkLike,
   RelayAudioSinkStats,
@@ -437,14 +442,37 @@ class WeriftAudioSink implements RelayAudioSinkLike {
 }
 
 /**
- * Video codecs the peer can accept in a pull offer. Nothing decodes video: the
- * transport only answers the person's `video` m-line receive-only and ignores
- * the track (PROTOCOL.md section 5). werift matches a remote codec by MIME
- * type alone (`findCodecByMimeType` in `TransceiverManager.setRemoteRTP`) and
- * throws "negotiate codecs failed." for a media section with no local codec
- * of its kind, so an audio-only codec list cannot answer a video m-line.
+ * Video codecs. werift matches a remote codec by MIME type alone
+ * (`findCodecByMimeType` in `TransceiverManager.setRemoteRTP`) and throws
+ * "negotiate codecs failed." for a media section with no local codec of its
+ * kind, so every codec a phone may publish is listed. H.264 and VP8 are the
+ * ones this engine encodes and decodes (engine-werift-video.ts): H.264 as
+ * constrained baseline `42e01f`, the only H.264 profile Cloudflare's SFU
+ * accepts, with packetization-mode 1; both ask for NACK, PLI and FIR, without
+ * which the SFU sends no keyframe request. VP9 and AV1 are receive-only: a
+ * pull offer carrying them is answered, the track is not decoded.
  */
-const RECEIVE_VIDEO_MIME_TYPES = ["video/VP8", "video/VP9", "video/H264", "video/AV1"] as const;
+const videoCodecs = (): RTCRtpCodecParameters[] => {
+  const feedback = () => [useNACK(), usePLI(), useFIR()];
+  return [
+    new RTCRtpCodecParameters({
+      mimeType: "video/H264",
+      clockRate: 90_000,
+      rtcpFeedback: feedback(),
+      parameters: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+    }),
+    new RTCRtpCodecParameters({ mimeType: "video/VP8", clockRate: 90_000, rtcpFeedback: feedback() }),
+    new RTCRtpCodecParameters({ mimeType: "video/VP9", clockRate: 90_000, direction: "recvonly" }),
+    new RTCRtpCodecParameters({ mimeType: "video/AV1", clockRate: 90_000, direction: "recvonly" }),
+  ];
+};
+
+/**
+ * The 3GPP coordination-of-video-orientation extension: with it negotiated a
+ * phone sends its camera frames unrotated and says how to turn them, and the
+ * receiver reports that as `VideoFrameEvent.rotation`, as LiveKit does.
+ */
+const VIDEO_ORIENTATION_URI = "urn:3gpp:video-orientation";
 
 export const createWeriftPeerConnection = (
   config: RelayPeerConnectionConfig = { iceServers: [], iceTransportPolicy: "all" },
@@ -461,7 +489,10 @@ export const createWeriftPeerConnection = (
           channels: WERIFT_CHANNEL_COUNT,
         }),
       ],
-      video: RECEIVE_VIDEO_MIME_TYPES.map((mimeType) => new RTCRtpCodecParameters({ mimeType, clockRate: 90_000 })),
+      video: videoCodecs(),
+    },
+    headerExtensions: {
+      video: [new RTCRtpHeaderExtensionParameters({ id: 1, uri: VIDEO_ORIENTATION_URI })],
     },
   });
 
@@ -469,4 +500,5 @@ export const createWeriftWebRTCFactory = (): RelayWebRTCFactory => ({
   createPeerConnection: (config) => createWeriftPeerConnection(config) as unknown as RelayPeerConnectionLike,
   createAudioSource: () => new WeriftAudioSource(),
   createAudioSink: (track, format) => new WeriftAudioSink(track as unknown as MediaStreamTrack, format),
+  ...createWeriftVideoFactory(),
 });
