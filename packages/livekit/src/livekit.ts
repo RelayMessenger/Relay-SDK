@@ -197,7 +197,8 @@ export interface RelayLiveKitConnectOptions extends RelayLiveKitAudioOptions {
   /** @internal */
   webRTC?: RelayWebRTCFactory;
   /**
-   * STUN and TURN servers for the agent's WebRTC peer. Defaults to none. A
+   * STUN and TURN servers for the agent's WebRTC peer. Defaults to the servers
+   * the Call room sends (Cloudflare STUN plus TURN credentials Relay mints). A
    * function is called again before every restart, to mint fresh TURN credentials.
    */
   iceServers?: RelayIceServer[] | RelayIceServersProvider;

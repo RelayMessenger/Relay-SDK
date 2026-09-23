@@ -22,6 +22,14 @@ class FakeRoom(rtc.EventEmitter[str]):
         super().__init__()
         self.sent: list[dict[str, Any]] = []
         self.closed = False
+        # What Relay's room sends after ``join`` when it cannot mint TURN (PROTOCOL.md section 6).
+        self.ice_servers: Optional[list[dict[str, Any]]] = [{"urls": ["stun:stun.cloudflare.com:3478"]}]
+        self.state: Optional[dict[str, Any]] = None
+
+    def send_ice_servers(self, servers: list[dict[str, Any]]) -> None:
+        """What `CallRoom` does with an ``iceServers`` frame: store it, then emit."""
+        self.ice_servers = servers
+        self.emit("ice_servers", {"type": "iceServers", "ice_servers": servers})
 
     async def connect(self) -> None:
         return None
@@ -169,7 +177,8 @@ async def test_connect_publishes_audio_and_reports_connected() -> None:
     assert offer["tracks"] == [{"mid": "0", "name": "audio"}]
     assert "restart" not in offer
     assert {"type": "connected"} in room.sent
-    assert FakePeer.instances[0].config.ice_servers[0].urls == "stun:stun.cloudflare.com:3478"
+    # No application servers: the room's ``iceServers`` frame.
+    assert FakePeer.instances[0].config.ice_servers[0].urls == ["stun:stun.cloudflare.com:3478"]
     d = transport.diagnostics()
     assert d.local["host"] == 1 and d.remote == [("udp", 1473)]
     await transport.aclose()
@@ -324,3 +333,104 @@ def test_only_public_aiortc_options_no_relay_policy_and_no_candidate_pair() -> N
     assert "ice_transport_policy" not in inspect.signature(RelayCallTransport).parameters
     assert "ice_transport_policy" not in inspect.signature(RelayLiveKitCall.connect).parameters
     assert "selected_pair" not in {f.name for f in dataclasses.fields(RelayCallDiagnostics)}
+
+
+def room_turn(username: str) -> list[dict[str, Any]]:
+    """Cloudflare's live ``generate-ice-servers`` list, TCP deliberately first to prove the reorder."""
+    return [
+        {"urls": ["stun:stun.cloudflare.com:3478", "stun:stun.cloudflare.com:53"]},
+        {
+            "urls": [
+                "turns:turn.cloudflare.com:443?transport=tcp",
+                "turn:turn.cloudflare.com:80?transport=tcp",
+                "turn:turn.cloudflare.com:53?transport=udp",
+                "turn:turn.cloudflare.com:3478?transport=udp",
+            ],
+            "username": username,
+            "credential": f"{username}-credential",
+        },
+    ]
+
+
+def aiortc_pick(peer: FakePeer) -> dict[str, Any]:
+    """What aiortc keeps from the peer's servers (aiortc/rtcicetransport.py `connection_kwargs`)."""
+    from aiortc import RTCIceServer
+    from aiortc.rtcicetransport import connection_kwargs
+
+    servers = [RTCIceServer(urls=s.urls, username=s.username, credential=s.credential) for s in peer.config.ice_servers]
+    return connection_kwargs(servers)
+
+
+async def test_first_peer_waits_for_the_room_ice_servers_and_aiortc_picks_turn_udp_3478() -> None:
+    transport, room = make()
+    room.ice_servers = None
+    task = asyncio.ensure_future(transport.connect())
+    await settle()
+    assert FakePeer.instances == []  # joined, but neither iceServers nor roomState has arrived
+    room.send_ice_servers(room_turn("u0"))
+    await settle()
+    kwargs = aiortc_pick(FakePeer.instances[0])
+    assert kwargs["stun_server"] == ("stun.cloudflare.com", 3478)
+    assert kwargs["turn_server"] == ("turn.cloudflare.com", 3478)
+    assert kwargs["turn_transport"] == "udp"
+    assert kwargs["turn_username"] == "u0"
+    assert len(room.offers()) == 1
+    task.cancel()
+    await transport.aclose()
+
+
+async def test_a_room_state_with_no_ice_servers_before_it_means_cloudflare_stun() -> None:
+    transport, room = make()
+    room.ice_servers = None
+    task = asyncio.ensure_future(transport.connect())
+    await settle()
+    assert FakePeer.instances == []
+    room.state = {"type": "roomState", "call": {"id": "c", "chat_id": "c", "status": "ringing"}, "participants": [PERSON, AGENT]}
+    room.emit("room_state", room.state)
+    await settle()
+    assert [s.urls for s in FakePeer.instances[0].config.ice_servers] == ["stun:stun.cloudflare.com:3478"]
+    task.cancel()
+    await transport.aclose()
+
+    # A room that already sent its roomState and no iceServers: no wait at all.
+    again, joined = make()
+    joined.ice_servers = None
+    joined.state = {"type": "roomState", "call": {"id": "c", "chat_id": "c", "status": "in-progress"}, "participants": [PERSON, AGENT]}
+    task = asyncio.ensure_future(again.connect())
+    await settle()
+    assert [s.urls for s in FakePeer.instances[0].config.ice_servers] == ["stun:stun.cloudflare.com:3478"]
+    task.cancel()
+    await again.aclose()
+
+
+async def test_closing_while_waiting_for_the_room_ice_servers_builds_no_peer() -> None:
+    transport, room = make()
+    room.ice_servers = None
+    task = asyncio.ensure_future(transport.connect())
+    await settle()
+    transport.close()
+    with pytest.raises(RelayCallTransportError, match="closed before media connected"):
+        await task
+    assert FakePeer.instances == []
+
+
+async def test_restart_uses_the_room_latest_ice_servers_and_an_application_value_wins() -> None:
+    transport, room = make(session_connect_timeout_ms=30)
+    room.ice_servers = room_turn("u0")
+    task = asyncio.ensure_future(transport.connect())
+    await settle()
+    room.emit("answer", answer())
+    room.send_ice_servers(room_turn("u1"))  # the socket rejoined with fresh credentials
+    await asyncio.sleep(0.03 + 0.25 + 0.05)
+    await settle()
+    assert [aiortc_pick(p)["turn_username"] for p in FakePeer.instances[:2]] == ["u0", "u1"]
+    task.cancel()
+    await transport.aclose()
+
+    own, own_room = make(ice_servers=[{"urls": "stun:stun.l.google.com:19302"}])
+    own_room.ice_servers = room_turn("room")
+    task = asyncio.ensure_future(own.connect())
+    await settle()
+    assert [s.urls for s in FakePeer.instances[0].config.ice_servers] == ["stun:stun.l.google.com:19302"]
+    task.cancel()
+    await own.aclose()

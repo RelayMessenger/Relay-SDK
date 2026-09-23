@@ -242,10 +242,12 @@ export interface RelayCallTransportOptions {
   webRTC?: RelayWebRTCFactory;
   /**
    * STUN and TURN servers handed to the engine's `RTCPeerConnection`. Defaults
-   * to Cloudflare's STUN server, the configuration of Cloudflare's own Realtime
-   * echo example. Set TURN servers when the agent runs behind a NAT or firewall
-   * that blocks UDP. A function is called before every peer connection,
-   * restarts included, so it can mint fresh TURN credentials each time.
+   * to the servers the Call room sends (its `iceServers` frame: Cloudflare STUN
+   * plus TURN credentials Relay mints), read again before every restart; when
+   * the room sends none, Cloudflare's STUN server, the configuration of
+   * Cloudflare's own Realtime echo example. Set this only to replace Relay's
+   * servers. A function is called before every peer connection, restarts
+   * included, so it can mint fresh TURN credentials each time.
    */
   iceServers?: RelayIceServer[] | RelayIceServersProvider;
   /** `"relay"` forces every candidate through TURN. Defaults to `"all"`. */
@@ -610,7 +612,8 @@ export class RelayCallTransport {
   readonly #engine: RelayCallEngine;
   readonly #iceGatheringTimeoutMs: number;
   readonly #sessionConnectTimeoutMs: number;
-  readonly #iceServers: RelayIceServer[] | RelayIceServersProvider;
+  /** `undefined`: the application passed none, so the room's servers are used. */
+  readonly #iceServers: RelayIceServer[] | RelayIceServersProvider | undefined;
   readonly #iceTransportPolicy: RelayIceTransportPolicy;
   readonly #inboundAudio: RelayInboundAudioFormat;
   readonly #onWarning: (message: string) => void;
@@ -674,6 +677,8 @@ export class RelayCallTransport {
   #readyReject: ((error: Error) => void) | undefined;
   readonly #ready: Promise<void>;
   #handlersAttached = false;
+  /** Releases a peer build waiting on the room's first `iceServers` or `roomState`. */
+  #roomIceServersWaiter: (() => void) | undefined;
   #closed = false;
   #muted = false;
   /** The published camera: one per call, kept across restarts (PROTOCOL.md section 1). */
@@ -721,8 +726,10 @@ export class RelayCallTransport {
       throw new Error('iceTransportPolicy must be "all" or "relay".');
     }
     this.#iceTransportPolicy = policy;
-    const iceServers = options.iceServers ?? DEFAULT_ICE_SERVERS;
-    this.#iceServers = typeof iceServers === "function" ? iceServers : copyIceServers(iceServers);
+    const iceServers = options.iceServers;
+    this.#iceServers = iceServers === undefined || typeof iceServers === "function"
+      ? iceServers
+      : copyIceServers(iceServers);
     if (!Number.isFinite(this.#iceGatheringTimeoutMs) || this.#iceGatheringTimeoutMs <= 0) {
       throw new Error("iceGatheringTimeoutMs must be greater than zero.");
     }
@@ -1093,6 +1100,7 @@ export class RelayCallTransport {
     this.#audioGeneration += 1;
     this.#shutdownMedia();
     this.#releasePlayoutWaiters();
+    this.#roomIceServersWaiter?.();
     this.#room.close();
   }
 
@@ -1107,9 +1115,11 @@ export class RelayCallTransport {
     if (!factory || !track) throw new Error("Relay Call transport is not connected.");
     const restarts = this.#restarts;
     const generation = ++this.#peerGeneration;
-    const iceServers = typeof this.#iceServers === "function"
-      ? copyIceServers(await this.#iceServers({ restarts }))
-      : copyIceServers(this.#iceServers);
+    const iceServers = this.#iceServers === undefined
+      ? copyIceServers(await this.#roomIceServers())
+      : typeof this.#iceServers === "function"
+        ? copyIceServers(await this.#iceServers({ restarts }))
+        : copyIceServers(this.#iceServers);
     if (this.#closed || this.#ended || generation !== this.#peerGeneration) return;
     const peer = factory.createPeerConnection({ iceServers, iceTransportPolicy: this.#iceTransportPolicy });
     this.#peer = peer;
@@ -1155,6 +1165,34 @@ export class RelayCallTransport {
       ...(restart ? { restart: true } : {}),
     };
     this.#room.send(this.#publishFrame);
+  }
+
+  /**
+   * The room's latest servers (PROTOCOL.md section 6). Relay sends
+   * `iceServers` after it accepts `join` and before the first `roomState`, so
+   * a `roomState` with no `iceServers` before it means a room that sends none:
+   * Cloudflare's STUN server is used. Otherwise waits for whichever arrives
+   * first, or for the room to close, end or fail.
+   */
+  async #roomIceServers(): Promise<RelayIceServer[]> {
+    const settled = (): RelayIceServer[] | undefined => {
+      if (this.#room.iceServers) return this.#room.iceServers;
+      if (this.#room.state || this.#closed || this.#ended) return DEFAULT_ICE_SERVERS;
+      return undefined;
+    };
+    const now = settled();
+    if (now) return now;
+    await new Promise<void>((resolve) => {
+      const events = ["iceServers", "roomState", "ended", "error", "close"] as const;
+      const done = (): void => {
+        for (const event of events) this.#room.off(event, done);
+        this.#roomIceServersWaiter = undefined;
+        resolve();
+      };
+      for (const event of events) this.#room.on(event, done);
+      this.#roomIceServersWaiter = done;
+    });
+    return settled() ?? DEFAULT_ICE_SERVERS;
   }
 
   #attachRoomHandlers(): void {

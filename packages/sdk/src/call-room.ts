@@ -5,6 +5,8 @@ import type {
   CallRoomEndedFrame,
   CallRoomErrorCode,
   CallRoomErrorFrame,
+  CallRoomIceServer,
+  CallRoomIceServersFrame,
   CallRoomParticipant,
   CallRoomServerAnswerFrame,
   CallRoomServerFrame,
@@ -68,6 +70,8 @@ export type CallRoomConnectionState = "idle" | "connecting" | "open" | "reconnec
 export type CallRoomEventMap = {
   open: [];
   reconnecting: [CallRoomReconnectingEvent];
+  /** The room's STUN/TURN servers, sent after every accepted `join`, before its `roomState`. */
+  iceServers: [CallRoomIceServersFrame];
   roomState: [CallRoomStateFrame];
   offer: [CallRoomSubscriptionOfferFrame];
   answer: [CallRoomServerAnswerFrame];
@@ -131,6 +135,17 @@ const validParticipant = (value: unknown): value is CallRoomParticipant =>
   && typeof value.muted === "boolean"
   && typeof value.connected === "boolean";
 
+/** Contract `CallRoomIceServersFrame`: 1-8 servers, each 1-16 `stun:`/`turn:`/`turns:` URLs. */
+const validIceServer = (value: unknown): value is CallRoomIceServer =>
+  isRecord(value)
+  && Object.keys(value).every((key) => key === "urls" || key === "username" || key === "credential")
+  && Array.isArray(value.urls)
+  && value.urls.length >= 1
+  && value.urls.length <= 16
+  && value.urls.every((url) => typeof url === "string" && /^(stun|turns?):/u.test(url))
+  && (value.username === undefined || typeof value.username === "string")
+  && (value.credential === undefined || typeof value.credential === "string");
+
 /**
  * Validate one server frame before exposing it to application code. Relay's
  * runtime may echo the exact heartbeat frame without waking the Call room; that
@@ -145,6 +160,13 @@ export const parseCallRoomServerFrame = (value: unknown): CallRoomServerFrame | 
     case "heartbeat":
       if (!hasExactKeys(value, ["type"])) break;
       return null;
+    case "iceServers":
+      if (!hasExactKeys(value, ["type", "ice_servers"])
+        || !Array.isArray(value.ice_servers)
+        || value.ice_servers.length < 1
+        || value.ice_servers.length > 8
+        || !value.ice_servers.every(validIceServer)) break;
+      return value as unknown as CallRoomIceServersFrame;
     case "roomState": {
       if (!hasExactKeys(value, ["type", "call", "participants"])
         || !validCall(value.call)
@@ -206,6 +228,12 @@ export class CallRoom {
   readonly callID: string;
   readonly url: string;
   state: CallRoomStateFrame | null = null;
+  /**
+   * The STUN/TURN servers from the room's latest `iceServers` frame, or `null`
+   * before the first one. Relay sends fresh ones on every join, reconnects
+   * included, so read this again before building each new peer connection.
+   */
+  iceServers: CallRoomIceServer[] | null = null;
 
   readonly #apiKey: string;
   readonly #WebSocket: WebSocketConstructor;
@@ -553,6 +581,10 @@ export class CallRoom {
     const frame = parseCallRoomServerFrame(JSON.parse(source));
     if (!frame) return;
     switch (frame.type) {
+      case "iceServers":
+        this.iceServers = frame.ice_servers;
+        this.#emit("iceServers", frame);
+        return;
       case "roomState":
         this.state = frame;
         this.#emit("roomState", frame);

@@ -142,15 +142,22 @@ reports frames, packets, keyframes and decode errors in both directions.
 
 ## ICE servers, TURN, and diagnostics
 
-By default the peer uses Cloudflare's STUN server
+By default the peer uses the servers the Call room sends after it joins:
+Cloudflare's STUN server and TURN credentials that Relay mints for the call.
+An agent in a container or behind a firewall that blocks outbound UDP connects
+through TURN with no setup. Each restart uses the room's latest servers. A room
+that sends none falls back to Cloudflare's STUN server
 (`stun:stun.cloudflare.com:3478`), as Cloudflare's own Realtime echo example
-does, and Cloudflare's SFU supplies its own candidates in the answer. The offer
-leaves as soon as the first local candidate exists, without waiting for ICE
-gathering to finish: the SFU is ICE-lite and learns the agent's address from
-its connectivity checks. Inside a container or behind a firewall that
-blocks outbound UDP, pass TURN servers in the standard `RTCIceServer` shape and,
-if every path must go through TURN, `iceTransportPolicy: "relay"`. Both options
-are accepted by `RelayLiveKitCall.connect()` and `RelayCallTransport`.
+does.
+
+The offer leaves as soon as the first local candidate exists, without waiting
+for ICE gathering to finish: the SFU is ICE-lite and learns the agent's address
+from its connectivity checks, TURN relay checks included.
+
+To use your own servers instead, pass `iceServers` in the standard
+`RTCIceServer` shape and, if every path must go through TURN,
+`iceTransportPolicy: "relay"`. Your value replaces the room's. Both options are
+accepted by `RelayLiveKitCall.connect()` and `RelayCallTransport`:
 
 ```ts
 const call = await RelayLiveKitCall.connect({
@@ -159,9 +166,9 @@ const call = await RelayLiveKitCall.connect({
   iceServers: [
     {
       urls: [
-        "turn:turn.cloudflare.com:3478?transport=udp",
-        "turn:turn.cloudflare.com:3478?transport=tcp",
-        "turns:turn.cloudflare.com:5349?transport=tcp",
+        "turn:turn.example.com:3478?transport=udp",
+        "turn:turn.example.com:3478?transport=tcp",
+        "turns:turn.example.com:5349?transport=tcp",
       ],
       username: process.env.TURN_USERNAME!,
       credential: process.env.TURN_CREDENTIAL!,
@@ -172,7 +179,8 @@ const call = await RelayLiveKitCall.connect({
 ```
 
 `iceServers` may also be a function; it is called before every peer
-connection, so it can mint fresh TURN credentials for each restart.
+connection, so it can mint fresh TURN credentials for each restart. The room's
+servers are on `room.iceServers` and its `iceServers` event.
 
 `connect()` resolves when media first reaches `connected`. It has no overall
 deadline: when an SFU session is not `connected` within

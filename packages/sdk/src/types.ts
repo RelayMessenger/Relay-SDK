@@ -158,7 +158,25 @@ export interface CallRoomErrorFrame {
   message: string;
 }
 
+/** Standard `RTCIceServer`: STUN or TURN URLs, with credentials on TURN servers. */
+export interface CallRoomIceServer {
+  urls: string[];
+  username?: string;
+  credential?: string;
+}
+
+/**
+ * STUN and TURN servers for this participant's peer connection, sent after
+ * every accepted `join` and before the first `roomState` (Orange Meets shape:
+ * Cloudflare TURN credentials minted by the server).
+ */
+export interface CallRoomIceServersFrame {
+  type: "iceServers";
+  ice_servers: CallRoomIceServer[];
+}
+
 export type CallRoomServerFrame =
+  | CallRoomIceServersFrame
   | CallRoomStateFrame
   | CallRoomServerAnswerFrame
   | CallRoomSubscriptionOfferFrame

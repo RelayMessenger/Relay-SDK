@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import type { CallRoom, CallRoomEventMap, CallRoomStateFrame, Relay } from "@relaymessenger/sdk";
+import type { CallRoom, CallRoomEventMap, CallRoomIceServer, CallRoomStateFrame, Relay } from "@relaymessenger/sdk";
 import {
   RelayCallTransport,
   type RelayMediaStreamTrackLike,
@@ -261,6 +261,9 @@ type RoomEvent = Extract<keyof CallRoomEventMap, string>;
 /** Signaling stand-in: frames the transport sends land in `sent`; the test replies with `emit`. */
 class LoopbackRoom {
   readonly listeners = new Map<string, Set<(...args: any[]) => void>>();
+  /** What Relay's room sends after `join` when it cannot mint TURN (PROTOCOL.md section 6). */
+  iceServers: CallRoomIceServer[] | null = [{ urls: ["stun:stun.cloudflare.com:3478"] }];
+  state: CallRoomStateFrame | null = null;
   readonly sent: Array<Record<string, any>> = [];
   readonly waiters: Array<(frame: Record<string, any>) => void> = [];
   async connect(): Promise<void> {}
@@ -283,6 +286,10 @@ class LoopbackRoom {
   userUpdate(): void {}
   end(): void {}
   close(): void {}
+  off<K extends RoomEvent>(event: K, listener: (...args: CallRoomEventMap[K]) => void): this {
+    this.listeners.get(event)?.delete(listener as (...args: any[]) => void);
+    return this;
+  }
   on<K extends RoomEvent>(event: K, listener: (...args: CallRoomEventMap[K]) => void): this {
     const listeners = this.listeners.get(event) ?? new Set();
     listeners.add(listener as (...args: any[]) => void);

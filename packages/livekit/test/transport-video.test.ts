@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import type { CallRoom, CallRoomEventMap, Relay } from "@relaymessenger/sdk";
+import type { CallRoom, CallRoomEventMap, CallRoomIceServer, CallRoomStateFrame, Relay } from "@relaymessenger/sdk";
 import {
   RelayCallTransport,
   type RelayAudioSinkLike,
@@ -31,6 +31,9 @@ type RoomEvent = Extract<keyof CallRoomEventMap, string>;
 
 class FakeRoom {
   readonly listeners = new Map<string, Set<(...args: any[]) => void>>();
+  /** What Relay's room sends after `join` when it cannot mint TURN (PROTOCOL.md section 6). */
+  iceServers: CallRoomIceServer[] | null = [{ urls: ["stun:stun.cloudflare.com:3478"] }];
+  state: CallRoomStateFrame | null = null;
   readonly sent: any[] = [];
   async connect(): Promise<void> {}
   async reconnect(): Promise<void> {}
@@ -39,6 +42,10 @@ class FakeRoom {
   userUpdate(update: { muted: boolean; video?: boolean }): void { this.send({ type: "userUpdate", ...update }); }
   end(): void {}
   close(): void {}
+  off<K extends RoomEvent>(event: K, listener: (...args: CallRoomEventMap[K]) => void): this {
+    this.listeners.get(event)?.delete(listener as (...args: any[]) => void);
+    return this;
+  }
   on<K extends RoomEvent>(event: K, listener: (...args: CallRoomEventMap[K]) => void): this {
     const listeners = this.listeners.get(event) ?? new Set();
     listeners.add(listener as (...args: any[]) => void);
