@@ -1210,6 +1210,19 @@ it("uses Cloudflare's STUN server when the room's first roomState comes with no 
   answerLatest(room);
   await connecting;
   transport.close();
+
+  // A room that already sent its roomState and no iceServers: no wait at all.
+  const joined = new FakeRoom();
+  joined.iceServers = null;
+  joined.state = roomStateFrame("in-progress");
+  const joinedWebRTC = new FakeWebRTC();
+  const again = makeTransport(joined, joinedWebRTC);
+  const reconnecting = again.connect();
+  await flush();
+  expect(joinedWebRTC.peerConfigs.map((config) => config.iceServers)).toEqual([[{ urls: "stun:stun.cloudflare.com:3478" }]]);
+  answerLatest(joined);
+  await reconnecting;
+  again.close();
 });
 
 it("rejects connect() and builds no peer when closed while waiting for the room's iceServers", async () => {

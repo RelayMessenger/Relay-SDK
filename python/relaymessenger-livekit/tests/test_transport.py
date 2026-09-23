@@ -392,6 +392,16 @@ async def test_a_room_state_with_no_ice_servers_before_it_means_cloudflare_stun(
     task.cancel()
     await transport.aclose()
 
+    # A room that already sent its roomState and no iceServers: no wait at all.
+    again, joined = make()
+    joined.ice_servers = None
+    joined.state = {"type": "roomState", "call": {"id": "c", "chat_id": "c", "status": "in-progress"}, "participants": [PERSON, AGENT]}
+    task = asyncio.ensure_future(again.connect())
+    await settle()
+    assert [s.urls for s in FakePeer.instances[0].config.ice_servers] == ["stun:stun.cloudflare.com:3478"]
+    task.cancel()
+    await again.aclose()
+
 
 async def test_closing_while_waiting_for_the_room_ice_servers_builds_no_peer() -> None:
     transport, room = make()
