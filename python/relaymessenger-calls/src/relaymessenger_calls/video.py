@@ -24,7 +24,18 @@ import av
 import numpy as np
 from aiortc.mediastreams import MediaStreamError, MediaStreamTrack
 
+from ._engine import media_ssrc
+
 VIDEO_TIME_BASE = fractions.Fraction(1, 90_000)
+
+#: libwebrtc's receive-side waits for a decodable frame: 200 ms while a
+#: keyframe is needed, 3 s otherwise (video/video_receive_stream2.h
+#: ``kMaxWaitForKeyFrame``, ``kMaxWaitForFrame``), and the 5 s after the last
+#: packet during which a stream counts as active (video_receive_stream2.cc
+#: ``kInactiveDuration``).
+KEYFRAME_WAIT_MS = 200
+FRAME_WAIT_MS = 3_000
+INACTIVE_MS = 5_000
 
 RelayVideoFormat = Literal["i420", "rgba", "bgra", "argb", "abgr", "rgb24"]
 
@@ -325,12 +336,16 @@ class RemoteVideoTrack:
         self._receiver: Optional[asyncio.Task[None]] = None
         self._frames_decoded = 0
         self._frames_dropped = 0
+        self._keyframe_requests = 0
         self._ended = False
         self.codec: Optional[str] = None
 
     def stats(self) -> RelayVideoReceiverStats:
         return RelayVideoReceiverStats(
-            frames_decoded=self._frames_decoded, frames_dropped=self._frames_dropped, codec=self.codec
+            frames_decoded=self._frames_decoded,
+            frames_dropped=self._frames_dropped,
+            codec=self.codec,
+            keyframe_requests=self._keyframe_requests,
         )
 
     def _event(self, frame: av.VideoFrame, timestamp_us: int) -> Any:
@@ -367,3 +382,50 @@ class RemoteVideoTrack:
             event = self._event(frame, timestamp_us)
             for stream in list(self._streams):
                 stream._push(event)
+
+
+async def request_keyframes(peer: Any, transceiver: Any, remote: RemoteVideoTrack) -> None:
+    """Ask the sender for keyframes on the rule libwebrtc's receiver uses, for as long as the track is attached.
+
+    aiortc's receiver asks only when its jitter buffer overflows
+    (aiortc/rtcrtpreceiver.py ``_handle_rtp_packet``), so a track pulled after
+    the sender's first keyframe decodes nothing until the encoder's next
+    periodic one (libx264 by default every 250 frames). libwebrtc requests a
+    keyframe when no frame has decoded for 200 ms while a keyframe is needed
+    (from the start of the stream, and after any request) or for 3 s
+    otherwise, if a packet arrived in the last 5 s, and repeats the request at
+    most every 200 ms (video_receive_stream2.cc ``HandleFrameBufferTimeout``,
+    ``OnEncodedFrame``). The request is an RTCP PLI for the section's media
+    SSRC, sent with aiortc's own PLI writer (``RTCRtpReceiver._send_rtcp_pli``).
+    """
+    receiver = transceiver.receiver
+    loop = asyncio.get_running_loop()
+    keyframe_required = True
+    decoded = remote._frames_decoded
+    progress_at = loop.time()
+    packets, packets_at = 0, None
+    while True:
+        await asyncio.sleep(KEYFRAME_WAIT_MS / 1000)
+        now = loop.time()
+        if remote._frames_decoded != decoded:
+            decoded = remote._frames_decoded
+            progress_at = now
+            keyframe_required = False
+            continue
+        inbound = [s for s in (await receiver.getStats()).values() if getattr(s, "type", None) == "inbound-rtp"]
+        received = sum(s.packetsReceived for s in inbound)
+        if received > packets:
+            packets, packets_at = received, now
+        wait_ms = KEYFRAME_WAIT_MS if keyframe_required else FRAME_WAIT_MS
+        if (now - progress_at) * 1000 < wait_ms or packets_at is None or (now - packets_at) * 1000 >= INACTIVE_MS:
+            continue
+        description = peer.remoteDescription
+        ssrc = media_ssrc(description.sdp, transceiver.mid) if description is not None else None
+        if ssrc is None and inbound:
+            ssrc = inbound[0].ssrc
+        if ssrc is None:
+            continue
+        await receiver._send_rtcp_pli(ssrc)
+        remote._keyframe_requests += 1
+        keyframe_required = True
+        progress_at = now

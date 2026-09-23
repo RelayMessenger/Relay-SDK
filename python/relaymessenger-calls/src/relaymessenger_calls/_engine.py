@@ -17,6 +17,7 @@ from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCRtpSend
 from aiortc.rtcconfiguration import RTCBundlePolicy
 from aiortc.rtcicetransport import parse_stun_turn_uri
 from aiortc.rtcrtpparameters import RTCRtpCodecCapability
+from aiortc.sdp import candidate_from_sdp
 
 #: H.264 constrained baseline, the only H.264 profile Cloudflare's SFU accepts
 #: (engine-werift.ts `videoCodecs`), with packetization-mode 1.
@@ -76,13 +77,14 @@ def _turn_rank(url: str) -> int:
 def order_for_aiortc(servers: list[RelayIceServer]) -> list[RelayIceServer]:
     """Put ``turn:<host>:3478?transport=udp`` where aiortc looks first.
 
-    aiortc keeps only the first STUN URL and the first usable TURN URL, in list
-    order (aiortc/rtcicetransport.py `connection_kwargs`), and gathers every
-    candidate before the offer can leave, up to aioice's 5 s (aioice/ice.py
-    `gather_candidates`, ``timeout=5``). UDP on Cloudflare's primary port is
-    the cheapest TURN allocation, so it goes first. Each server's URLs are
-    sorted stably by that rank, and the servers too, with STUN-only servers
-    kept first in their given order, so the first STUN URL does not change.
+    aiortc keeps only the first usable TURN URL, in list order
+    (aiortc/rtcicetransport.py `connection_kwargs`), and allocates it before
+    the offer can leave, up to aioice's 5 s (aioice/ice.py
+    `get_component_candidates`, ``timeout=5``). UDP on Cloudflare's primary
+    port is the cheapest TURN allocation, so it goes first. Each server's URLs
+    are sorted stably by that rank, and the servers too, with STUN-only
+    servers kept first in their given order; `create_peer_connection` then
+    drops the STUN URLs (`turn_only`).
     """
 
     def urls(server: RelayIceServer) -> list[str]:
@@ -103,15 +105,39 @@ def order_for_aiortc(servers: list[RelayIceServer]) -> list[RelayIceServer]:
     return sorted(ordered, key=server_rank)
 
 
-def create_peer_connection(config: PeerConfig) -> RTCPeerConnection:
-    """An aiortc peer with max-bundle and the given ICE servers.
+def turn_only(servers: list[RelayIceServer]) -> list[RelayIceServer]:
+    """The ``turn:`` and ``turns:`` URLs of ``servers``; STUN URLs and servers left with none are dropped.
 
-    aiortc uses one STUN and one TURN URL per peer (aiortc/rtcicetransport.py
-    `connection_kwargs`: "only a single STUN server is supported", "only a
-    single TURN server is supported"); the first of each kind is used.
+    Cloudflare's SFU is ICE-lite (``a=ice-lite`` in its answer): it never
+    checks this peer's candidates and learns its address from the checks this
+    peer sends. aioice sends checks only from its host sockets and its TURN
+    allocations (aioice/ice.py ``connect`` pairs ``self._protocols`` with the
+    remote candidates); a server-reflexive candidate has no socket of its own
+    and never carries a check. Asking STUN therefore adds nothing, and costs
+    time: aiortc sends no offer until gathering ends, and aioice waits up to
+    5 s for a STUN answer on every IPv4 interface, including ones that cannot
+    reach the server (aioice/ice.py ``get_component_candidates``,
+    ``timeout=5``). Cloudflare's echo example sends its offer without waiting
+    for gathering at all (realtime-examples echo/index.html).
+    """
+    out: list[RelayIceServer] = []
+    for server in servers:
+        urls = server.urls if isinstance(server.urls, list) else [server.urls]
+        turn = [url for url in urls if url.lower().startswith(("turn:", "turns:"))]
+        if turn:
+            out.append(RelayIceServer(urls=turn, username=server.username, credential=server.credential))
+    return out
+
+
+def create_peer_connection(config: PeerConfig) -> RTCPeerConnection:
+    """An aiortc peer with max-bundle and the TURN servers among the given ICE servers (`turn_only`).
+
+    aiortc uses one TURN URL per peer (aiortc/rtcicetransport.py
+    `connection_kwargs`: "only a single TURN server is supported"); the first is used.
     """
     servers = [
-        RTCIceServer(urls=s.urls, username=s.username, credential=s.credential) for s in config.ice_servers
+        RTCIceServer(urls=s.urls, username=s.username, credential=s.credential)
+        for s in turn_only(config.ice_servers)
     ]
     return RTCPeerConnection(RTCConfiguration(iceServers=servers, bundlePolicy=RTCBundlePolicy.MAX_BUNDLE))
 
@@ -137,6 +163,64 @@ def parse_candidate(line: str) -> Optional[tuple[str, int, str]]:
     if not match:
         return None
     return match.group(1).lower(), int(match.group(2)), match.group(3).lower()
+
+
+def bundle_tag_candidates(sdp: str) -> tuple[Optional[str], list[str]]:
+    """The BUNDLE tag (first mid of ``a=group:BUNDLE``) and the candidate lines of its section."""
+    tag: Optional[str] = None
+    for line in sdp.splitlines():
+        if line.startswith("a=group:BUNDLE "):
+            mids = line.split(" ")[1:]
+            tag = mids[0] if mids else None
+            break
+    if tag is None:
+        return None, []
+    for section in sdp.split("\nm=")[1:]:
+        lines = [line.strip() for line in section.split("\n")]
+        if f"a=mid:{tag}" in lines:
+            return tag, [line[len("a=") :] for line in lines if line.startswith("a=candidate:")]
+    return tag, []
+
+
+async def add_bundle_candidates(peer: Any, sdp: str) -> None:
+    """Hand the answer's candidates to the peer's shared transport through ``addIceCandidate``.
+
+    In an answer, candidates belong only to the BUNDLE-tagged section and
+    apply to the whole group (RFC 9143 section 7.1.3), and Cloudflare's SFU
+    answers that way. aiortc 1.15 gives the shared transport the candidates
+    of the LAST bundled section instead (aiortc/rtcpeerconnection.py
+    ``setRemoteDescription``: ``iceCandidates[iceTransport] = media``; open
+    upstream as aiortc issue 1437), so an offer with audio and video gets no
+    remote candidate, sends no check and never connects. aioice pairs
+    candidates added while it is checking (aioice/ice.py
+    ``add_remote_candidate``). Candidates the transport already has, and any
+    after end-of-candidates, are ignored by aiortc (``addRemoteCandidate``).
+    """
+    tag, lines = bundle_tag_candidates(sdp)
+    if tag is None or not lines:
+        return
+    for line in lines:
+        candidate = candidate_from_sdp(line.split(":", 1)[1])
+        candidate.sdpMid = tag
+        await peer.addIceCandidate(candidate)
+    await peer.addIceCandidate(None)
+
+
+def media_ssrc(sdp: str, mid: Optional[str]) -> Optional[int]:
+    """The media SSRC of the section with ``a=mid:<mid>``: the first of an ``FID`` group, else the first ``a=ssrc``."""
+    if mid is None:
+        return None
+    for section in sdp.split("\nm=")[1:]:
+        lines = [line.strip() for line in section.split("\n")]
+        if f"a=mid:{mid}" not in lines:
+            continue
+        for line in lines:
+            if line.startswith("a=ssrc-group:FID "):
+                return int(line.split(" ")[1])
+        for line in lines:
+            if line.startswith("a=ssrc:"):
+                return int(line[len("a=ssrc:") :].split(" ")[0])
+    return None
 
 
 def media_codec(sdp: str, mid: Optional[str]) -> Optional[str]:

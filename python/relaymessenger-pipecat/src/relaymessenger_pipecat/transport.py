@@ -178,10 +178,12 @@ class RelayTransportClient:
             )
             self._call = call
             self._attach(call)
-            if self._params.video_out_enabled:
-                self._video_source = VideoSource(self._params.video_out_width, self._params.video_out_height)
-                self._video_track = LocalVideoTrack.create_video_track("pipecat-video", self._video_source)
             try:
+                if self._params.video_out_enabled:
+                    # Published before connect(): the camera rides the first offer with the audio.
+                    self._video_source = VideoSource(self._params.video_out_width, self._params.video_out_height)
+                    self._video_track = LocalVideoTrack.create_video_track("pipecat-video", self._video_source)
+                    await call.publish_track(self._video_track)
                 await call.connect()
             except BaseException:
                 await self._close_call()
@@ -279,15 +281,6 @@ class RelayTransportClient:
         self._spawn(self._participant_connected(self._participant_id))
 
     async def _participant_connected(self, participant_id: str) -> None:
-        # The camera is published only now. Until the agent has answered the room's
-        # offer for the person's audio, Cloudflare's SFU refuses a second local
-        # track on the agent's session (HTTP 406 on tracks/new, staging 2026-09-23).
-        call, track = self._call, self._video_track
-        if call is not None and track is not None:
-            try:
-                await call.publish_track(track)
-            except Exception as error:  # noqa: BLE001 - the call goes on without the camera
-                logger.error(f"{self._transport_name} could not publish video: {error}")
         await self._callbacks.on_participant_connected(participant_id)
 
     def _on_ended(self, frame: dict[str, Any]) -> None:

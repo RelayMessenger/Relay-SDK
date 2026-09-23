@@ -24,6 +24,7 @@ from ._audio_format import INBOUND_SAMPLE_RATES, Int16Array
 from ._engine import (
     PeerConfig,
     RelayIceServer,
+    add_bundle_candidates,
     create_peer_connection,
     media_codec,
     normalize_ice_servers,
@@ -40,6 +41,7 @@ from .video import (
     RemoteVideoTrack,
     TrackPublishOptions,
     _VideoSender,
+    request_keyframes,
 )
 
 logger = logging.getLogger("relaymessenger.calls")
@@ -174,7 +176,9 @@ class RelayCallRoomDiagnostics:
 
 @dataclass
 class RelayCallTransition:
-    kind: Literal["gathering", "ice", "connection"]
+    #: ``signaling`` states are ``room open``, ``offer``, ``restart offer``,
+    #: ``answer`` and ``pull <track>``; the others are the peer's own states.
+    kind: Literal["signaling", "gathering", "ice", "connection"]
     state: str
     at_ms: float
 
@@ -362,6 +366,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         self._playout_waiters: set[asyncio.Future[None]] = set()
         self._reported_connected = False
         self._ready: Optional[asyncio.Future[None]] = None
+        self._keyframe_task: Optional[asyncio.Task[None]] = None
         self._handlers_attached = False
         self._closed = False
         self._muted = False
@@ -398,12 +403,17 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         if self._ready is None:
             self._ready = loop.create_future()
         self._attach_room_handlers()
+        if self._source is None:
+            self._connect_started_at = monotonic_ms()
         await self.room.connect()
         if self._source is not None:
             await asyncio.shield(self._ready)
             return
+        self._record("signaling", "room open")
         self._source = RelayAudioSource()
-        self._connect_started_at = monotonic_ms()
+        if self._video is not None and self._video.enabled:
+            # Published before connect(): the camera rides the first offer.
+            self.room.user_update(muted=self._muted, video=True)
         try:
             await self._start_peer()
             await asyncio.shield(self._ready)
@@ -529,13 +539,19 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
     async def publish_track(self, track: LocalVideoTrack, options: Optional[TrackPublishOptions] = None) -> None:
         """Publish the camera (LiveKit ``LocalParticipant.publish_track``).
 
-        The first call adds a ``video`` track to the SFU session with an
-        add-track offer, then announces ``userUpdate { video: true }``; later
-        calls, after `unpublish_track`, only resume sending and announce it
-        again (PROTOCOL.md sections 1-2).
+        Called before `connect()`, the camera is published with the audio in
+        the first offer, one ``tracks/new`` for both, as Cloudflare's echo
+        example pushes its audio and video (realtime-examples echo/index.html).
+        Called after ``connected``, the first call adds a ``video`` track to the
+        SFU session with an add-track offer, then announces ``userUpdate {
+        video: true }``; later calls, after `unpublish_track`, only resume
+        sending and announce it again (PROTOCOL.md sections 1-2).
         """
         if self._closed or self._ended:
             raise RelayCallTransportError("Relay Call transport is closed.")
+        if self._source is None and self._video is None:
+            self._video = _VideoSender(track, options or TrackPublishOptions())
+            return
         if self._source is None or not self._reported_connected:
             raise RelayCallTransportError("Relay Call transport is not connected.")
         if self._video is not None:
@@ -818,6 +834,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
             frame["restart"] = True
         self._publish_frame = frame
         self.room.send(frame)
+        self._record("signaling", "restart offer" if restart else "offer")
 
     def _attach_room_handlers(self) -> None:
         if self._handlers_attached:
@@ -908,6 +925,8 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         await peer.setRemoteDescription(RTCSessionDescription(sdp=sdp, type="answer"))
         if self._peer is not peer:
             return
+        await add_bundle_candidates(peer, sdp)
+        self._record("signaling", "answer")
         if self._initial_answer_sdp is None:
             self._initial_answer_sdp = sdp
         self._last_answer_sdp = sdp
@@ -934,6 +953,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         if peer is None or peer.signalingState == "have-local-offer":
             return
         sdp = frame["session_description"]["sdp"]
+        self._record("signaling", f"pull {frame['track']}")
         await peer.setRemoteDescription(RTCSessionDescription(sdp=sdp, type="offer"))
         answer = await peer.createAnswer()
         await peer.setLocalDescription(answer)
@@ -1071,6 +1091,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         if self._remote_video_track is not None:
             self._remote_video_track._detach()
         self._remote_video_engine_track = None
+        self._stop_keyframe_requests()
         self._retire_sink()
         if peer is not None:
             self._spawn(self._close_peer(peer))
@@ -1129,8 +1150,21 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         remote = existing or self._new_remote_video_track()
         self._remote_video_track = remote
         remote._attach(track)
+        peer = self._peer
+        transceiver = next(
+            (t for t in peer.getTransceivers() if getattr(getattr(t, "receiver", None), "track", None) is track),
+            None,
+        )
+        self._stop_keyframe_requests()
+        if transceiver is not None:
+            self._keyframe_task = self._spawn(request_keyframes(peer, transceiver, remote))
         if existing is None:
             self.emit("track_subscribed", remote)
+
+    def _stop_keyframe_requests(self) -> None:
+        if self._keyframe_task is not None:
+            self._keyframe_task.cancel()
+            self._keyframe_task = None
 
     def _new_remote_video_track(self) -> RemoteVideoTrack:
         """The call's one remote video track; an adapter overrides this to yield its framework's frames."""
@@ -1155,14 +1189,13 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
             if not waiter.done():
                 waiter.set_result(None)
 
-    def _record(self, kind: Literal["gathering", "ice", "connection"], state: str) -> None:
+    def _record(self, kind: Literal["signaling", "gathering", "ice", "connection"], state: str) -> None:
         self._transitions.append(RelayCallTransition(kind=kind, state=state, at_ms=round(monotonic_ms() - self._connect_started_at, 1)))
 
     def _record_local_candidates(self, sdp: str) -> None:
         counts = {"host": 0, "srflx": 0, "relay": 0, "other": 0}
-        for line in sdp.splitlines():
-            if not line.startswith("a=candidate:"):
-                continue
+        # Every bundled section of an offer repeats the same candidates; each counts once.
+        for line in dict.fromkeys(line for line in sdp.splitlines() if line.startswith("a=candidate:")):
             parsed = parse_candidate(line)
             kind = parsed[2] if parsed else "other"
             counts[kind if kind in counts else "other"] += 1
@@ -1203,6 +1236,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
             self._wake_restart.set()
         if self._stall_task is not None:
             self._stall_task.cancel()
+        self._stop_keyframe_requests()
         if self._final_inbound is None and self._source is not None:
             self._final_inbound = self._inbound_diagnostics()
         if self._remote_sink is not None:

@@ -61,7 +61,8 @@ locally without ending it.
 ## Send and read video
 
 Publish a camera with LiveKit's names, and read the other participant's
-camera from `track_subscribed`:
+camera from `track_subscribed`. Publish before `connect()` to send the camera
+with the audio from the first offer; publishing later adds it to the session:
 
 ```python
 from relaymessenger_calls import LocalVideoTrack, RelayVideoFrame, VideoSource, VideoStream
