@@ -26,14 +26,6 @@ checks any number of options and submits them once; checking sends nothing, and
 a person answers a given selection once. iOS may draw a checkmark in place of
 each bullet and repeat the prompt's title, as presentation only.
 
-## Payment
-
-The agent ends the final answer with a `payment` JSON fence holding the
-payment request's fields (`description`, `category`, and `amount` with
-`currency`, or `mode: "subscription"` with `price_id`). The plugin creates the
-request with its own Relay token, on the card's own idempotency key; the words
-go first and the payment card follows as its own Message.
-
 ## Install
 
 ```bash

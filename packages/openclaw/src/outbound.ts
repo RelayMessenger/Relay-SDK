@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   answerMessages,
-  createPaymentPart,
   indexedIdempotencyKey,
   Relay,
   RelayAPIError,
@@ -44,7 +43,7 @@ export function deriveRelayIdempotencyKey(params: {
  * Message; the response is the first Message's, the one the reply anchors to.
  */
 export async function sendRelayText(params: {
-  relay: Pick<Relay, "chats" | "paymentRequests">;
+  relay: Pick<Relay, "chats">;
   chatId: string;
   text: string;
   replyToId?: string | null | undefined;
@@ -54,21 +53,9 @@ export async function sendRelayText(params: {
   onButtonsError?: (error: string) => void;
 }): Promise<MessageSendResponse> {
   await params.onPlatformSendDispatch?.();
-  const { messages, payment, error } = answerMessages(params.text);
+  const { messages, error } = answerMessages(params.text);
   if (error) params.onButtonsError?.(error);
-  if (messages.length === 0 && !payment) messages.push([{ type: "text", value: params.text }]);
-  if (payment) {
-    // Created with the card's own key, so a retry of this delivery returns
-    // the same request. A refusal after words went out is reported and the
-    // words stand; with nothing sent yet, it is the delivery's own error.
-    const key = indexedIdempotencyKey(params.idempotencyKey, messages.length);
-    try {
-      messages.push([await createPaymentPart(params.relay, payment, key, params.signal ? { signal: params.signal } : undefined)]);
-    } catch (refusal) {
-      if (!(refusal instanceof RelayAPIError) || refusal.retryable || messages.length === 0) throw refusal;
-      params.onButtonsError?.(`the payment was not sent: ${refusal.message}`);
-    }
-  }
+  if (messages.length === 0) messages.push([{ type: "text", value: params.text }]);
   let first: MessageSendResponse | undefined;
   for (const [index, parts] of messages.entries()) {
     const response = await params.relay.chats.messages.send(
