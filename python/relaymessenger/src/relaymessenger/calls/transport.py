@@ -41,7 +41,9 @@ from .video import (
     RemoteVideoTrack,
     TrackPublishOptions,
     _VideoSender,
+    request_keyframe,
     request_keyframes,
+    serve_keyframe_requests,
 )
 
 logger = logging.getLogger("relaymessenger.calls")
@@ -365,6 +367,8 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         self._person_connected = False
         # The person's latest roomState ``receiving`` contains ``audio`` (PROTOCOL.md section 6b).
         self._person_receiving_audio = False
+        # The same for ``video``: the person has started receiving this peer's camera.
+        self._person_receiving_video = False
         self._peer_audio_arrived = False
         self._peer_audio_ready = False
         self._peer_audio_waiters: set[asyncio.Future[None]] = set()
@@ -628,6 +632,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
             return
         transceiver = peer.addTransceiver("video", direction="sendonly")
         prefer_h264(transceiver)
+        serve_keyframe_requests(transceiver.sender)
         if video.enabled:
             transceiver.sender.replaceTrack(video.create_track())
         self._video_transceiver = transceiver
@@ -904,6 +909,17 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
                 and not self._restart_pending
                 and bool(person and "audio" in (person.get("receiving") or []))
             )
+            receiving_video = (
+                self._initial_answer_sdp is not None
+                and not self._restart_pending
+                and bool(person and "video" in (person.get("receiving") or []))
+            )
+            if receiving_video and not self._person_receiving_video and self._video_transceiver is not None:
+                # The person now receives this camera: start them on a keyframe instead of waiting for
+                # their PLI, as LiveKit's SFU asks a publisher for one when it adds a subscriber's down
+                # track (livekit pkg/sfu/downtrack.go keyFrameRequester); Cloudflare's SFU does not.
+                request_keyframe(self._video_transceiver.sender)
+            self._person_receiving_video = receiving_video
             self.emit("room_state", frame)
             if changed:
                 self.emit("remote_video", video)
@@ -1070,6 +1086,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         self._restart_pending = True
         # The person's pulls of the retired session are gone (PROTOCOL.md 6b).
         self._person_receiving_audio = False
+        self._person_receiving_video = False
         self._restarts += 1
         self._failed_attempts += 1
         restarts = self._restarts

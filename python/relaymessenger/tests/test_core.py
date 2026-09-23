@@ -156,6 +156,59 @@ async def test_a_published_camera_sends_black_frames_until_its_first_frame(monke
     assert sender.stats().frames_captured == 1 and sender.stats().frames_sent == 1
 
 
+async def test_a_keyframe_request_sends_the_latest_frame_again_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A camera at 1 fps (the idle black frames, or an app's placeholder picture) otherwise answers a
+    # PLI only with its next frame, up to 1 s later; libwebrtc repeats its last frame at once
+    # (frame_cadence_adapter.cc ZeroHertzAdapterMode::ProcessKeyFrameRequest).
+    monkeypatch.setattr(video, "IDLE_FRAME_INTERVAL_S", 10.0)
+    source = VideoSource(64, 48)
+    sender = _VideoSender(LocalVideoTrack.create_video_track("camera", source), TrackPublishOptions())
+    track = sender.create_track()
+    black = await asyncio.wait_for(track.recv(), 1)
+    await asyncio.sleep(0.05)
+    track.request_keyframe()
+    again = await asyncio.wait_for(track.recv(), 0.1)  # not the next idle frame, 10 s away
+    assert int(again.to_ndarray(format="rgb24").max()) == 0 and again.pts > black.pts
+    source.capture_frame(RelayVideoFrame(64, 48, "rgb24", gradient(64, 48).tobytes()))
+    picture = await asyncio.wait_for(track.recv(), 1)
+    await asyncio.sleep(0.05)
+    track.request_keyframe()
+    repeat = await asyncio.wait_for(track.recv(), 0.1)
+    assert np.array_equal(repeat.to_ndarray(format="rgb24"), picture.to_ndarray(format="rgb24"))
+    # Stamped on from the last frame by the time since (about 50 ms of 90 kHz), so the next capture follows on.
+    assert 3_000 < repeat.pts - picture.pts < 30_000
+    # A frame went out within one frame period: the next one is due anyway, nothing is repeated.
+    source.capture_frame(RelayVideoFrame(64, 48, "rgb24", gradient(64, 48).tobytes()))
+    await asyncio.wait_for(track.recv(), 1)
+    track.request_keyframe()
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(track.recv(), 0.2)
+    assert sender.stats().frames_sent == 2 and sender.stats().keyframe_requests == 3
+
+
+async def test_an_aiortc_senders_keyframe_requests_also_repeat_the_camera() -> None:
+    source = VideoSource(64, 48)
+    sender = _VideoSender(LocalVideoTrack.create_video_track("camera", source), TrackPublishOptions())
+
+    class AiortcSender:  # the two members aiortc's RTCRtpSender has: `track`, `_send_keyframe`
+        def __init__(self) -> None:
+            self.track = sender.create_track()
+            self.forced = 0
+
+        def _send_keyframe(self) -> None:
+            self.forced += 1
+
+    rtp = AiortcSender()
+    video.serve_keyframe_requests(rtp)
+    video.serve_keyframe_requests(rtp)  # once only
+    await asyncio.wait_for(rtp.track.recv(), 1)
+    await asyncio.sleep(0.05)
+    rtp._send_keyframe()  # what aiortc calls for a PLI or FIR
+    await asyncio.wait_for(rtp.track.recv(), 0.1)
+    video.request_keyframe(rtp)
+    assert rtp.forced == 2 and sender.stats().keyframe_requests == 2
+
+
 class FakeVideoTrack:
     def __init__(self, frames: int) -> None:
         self.left = frames

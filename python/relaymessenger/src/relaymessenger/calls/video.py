@@ -18,7 +18,7 @@ import fractions
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Literal, Optional
+from typing import Any, AsyncIterator, Callable, Literal, Optional
 
 import av
 import numpy as np
@@ -46,6 +46,18 @@ INACTIVE_MS = 5_000
 #: (partytracks/src/client/makeBroadcastTrack.ts ``fallbackTrack$``,
 #: blackCanvasTrack$.ts).
 IDLE_FRAME_INTERVAL_S = 1.0
+
+#: A keyframe request (PLI or FIR from the SFU, or the other participant
+#: starting to receive this camera) sends the latest frame again at once, as a
+#: keyframe, unless a frame went out within one frame period (30 fps, aiortc's
+#: ``MAX_FRAME_RATE`` in codecs/h264.py and codecs/vpx.py): the next frame is
+#: then about to follow. libwebrtc does the same for a source that repeats its
+#: last frame about once a second (video/frame_cadence_adapter.cc
+#: ``ZeroHertzAdapterMode::ProcessKeyFrameRequest``: "Cancel the current repeat
+#: and reschedule a short repeat now"). Without it a camera at 1 fps, the idle
+#: black frames or an application's placeholder picture, answers a request only
+#: with its next frame, up to 1 s later (staging, 2026-09-23).
+KEYFRAME_REPEAT_AFTER_S = 1 / 30
 
 RelayVideoFormat = Literal["i420", "rgba", "bgra", "argb", "abgr", "rgb24"]
 
@@ -214,25 +226,13 @@ class VideoSource:
         """One black frame at the source's size, sent while nothing has been captured."""
         return av.VideoFrame.from_ndarray(np.zeros((self.height, self.width, 3), dtype=np.uint8), format="rgb24")
 
-    async def _wait_first(self, timeout_s: float) -> None:
-        """Return when the first frame is captured or the source closes, or after ``timeout_s``."""
-        if self._latest is not None or self._closed:
-            return
-        self._changed.clear()
+    async def _wait(self, timeout_s: Optional[float]) -> None:
+        """Return on the next capture, close or wake-up, or after ``timeout_s``; callers check what changed."""
         try:
             await asyncio.wait_for(self._changed.wait(), timeout_s)
         except asyncio.TimeoutError:
             pass
-
-    async def _next(self, after: int) -> tuple[int, Any, int]:
-        while True:
-            if self._closed:
-                raise MediaStreamError
-            if self._serial > after and self._latest is not None:
-                frame, stamp = self._latest
-                return self._serial, frame, stamp
-            self._changed.clear()
-            await self._changed.wait()
+        self._changed.clear()
 
 
 class LocalVideoTrack:
@@ -259,28 +259,57 @@ class _SenderTrack(MediaStreamTrack):
         self._serial = 0
         #: When the next idle black frame is due (`IDLE_FRAME_INTERVAL_S`); the first is sent at once.
         self._idle_due = 0.0
+        #: A keyframe request asked for the latest frame again (`KEYFRAME_REPEAT_AFTER_S`).
+        self._repeat = False
+        #: pts of the last frame handed to the encoder, and when it was handed over.
+        self._last_pts: Optional[int] = None
+        self._last_sent_at = float("-inf")
+
+    def request_keyframe(self) -> None:
+        """Send the latest frame again now unless a frame went out within one frame period."""
+        self._sender.keyframe_requests += 1
+        if time.monotonic() - self._last_sent_at < KEYFRAME_REPEAT_AFTER_S:
+            return
+        self._repeat = True
+        self._sender.source._changed.set()
+
+    def _send(self, frame: av.VideoFrame, pts: int) -> av.VideoFrame:
+        frame.pts = pts
+        frame.time_base = VIDEO_TIME_BASE
+        self._last_pts = pts
+        self._last_sent_at = time.monotonic()
+        return frame
 
     async def recv(self) -> av.VideoFrame:
         if self.readyState != "live":
             raise MediaStreamError
         source = self._sender.source
-        while source._latest is None and not source._closed:
-            wait = self._idle_due - time.monotonic()
-            if wait <= 0:
-                self._idle_due = time.monotonic() + IDLE_FRAME_INTERVAL_S
-                idle = source._idle_frame()
-                # capture_frame's default clock, so the first captured frame follows on.
-                idle.pts = int(time.monotonic() * 1_000_000) * 90_000 // 1_000_000
-                idle.time_base = VIDEO_TIME_BASE
-                return idle
-            await source._wait_first(wait)
-        serial, frame, stamp = await source._next(self._serial)
-        self._serial = serial
-        out = self._sender.source._to_av(frame)
-        out.pts = stamp * 90_000 // 1_000_000
-        out.time_base = VIDEO_TIME_BASE
-        self._sender.frames_sent += 1
-        return out
+        while True:
+            if source._closed:
+                raise MediaStreamError
+            now = time.monotonic()
+            latest = source._latest
+            if latest is None:
+                if self._repeat or now >= self._idle_due:
+                    self._repeat = False
+                    self._idle_due = now + IDLE_FRAME_INTERVAL_S
+                    # capture_frame's default clock, so the first captured frame follows on.
+                    return self._send(source._idle_frame(), int(now * 1_000_000) * 90_000 // 1_000_000)
+                await source._wait(self._idle_due - now)
+                continue
+            if source._serial > self._serial:
+                self._serial = source._serial
+                self._repeat = False
+                self._sender.frames_sent += 1
+                frame, stamp = latest
+                return self._send(source._to_av(frame), stamp * 90_000 // 1_000_000)
+            if self._repeat and self._last_pts is not None:
+                # The same picture, stamped on from the last one by the time since (frame_cadence_adapter.cc
+                # ProcessRepeatedFrameOnDelayedCadence), so the next captured frame still follows on.
+                self._repeat = False
+                elapsed = int((now - self._last_sent_at) * 90_000)
+                return self._send(source._to_av(latest[0]), self._last_pts + max(1, elapsed))
+            await source._wait(None)
 
 
 class _VideoSender:
@@ -294,6 +323,7 @@ class _VideoSender:
         self.codec: Optional[str] = None
         self.enabled = True
         self._captured_at_publish = track.source._frames_captured
+        self.keyframe_requests = 0
 
     def create_track(self) -> _SenderTrack:
         return _SenderTrack(self)
@@ -303,7 +333,42 @@ class _VideoSender:
             frames_captured=self.source._frames_captured - self._captured_at_publish,
             frames_sent=self.frames_sent,
             codec=self.codec,
+            keyframe_requests=self.keyframe_requests,
         )
+
+
+class _KeyframeRequests:
+    """Stands in for an aiortc sender's ``_send_keyframe``: the encoder's next frame is a keyframe, as before,
+    and the published camera sends its latest frame again at once (`KEYFRAME_REPEAT_AFTER_S`).
+
+    aiortc calls ``_send_keyframe`` for every PLI and FIR (rtcrtpsender.py ``_handle_rtcp_packet``) and
+    only sets a flag the next encode reads (``_next_encoded_frame``).
+    """
+
+    def __init__(self, sender: Any, force_keyframe: Callable[[], None]) -> None:
+        self._sender = sender
+        self._force_keyframe = force_keyframe
+
+    def __call__(self) -> None:
+        self._force_keyframe()
+        track = getattr(self._sender, "track", None)
+        if isinstance(track, _SenderTrack):
+            track.request_keyframe()
+
+
+def serve_keyframe_requests(sender: Any) -> None:
+    """Route an aiortc video sender's keyframe requests through `_KeyframeRequests`, once."""
+    force_keyframe = getattr(sender, "_send_keyframe", None)
+    if force_keyframe is None or isinstance(force_keyframe, _KeyframeRequests):
+        return
+    sender._send_keyframe = _KeyframeRequests(sender, force_keyframe)
+
+
+def request_keyframe(sender: Any) -> None:
+    """Ask a video sender for a keyframe now, as a PLI from the SFU would."""
+    force_keyframe = getattr(sender, "_send_keyframe", None)
+    if force_keyframe is not None:
+        force_keyframe()
 
 
 class VideoStream:
