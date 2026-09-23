@@ -21,8 +21,9 @@
 //      must ship the same version), rebuild so generated files carry it, and
 //      pack again so the integrity a dependent locks is the one that publishes.
 //
-// The publish workflow commits the result back to staging and then publishes
-// each changed package from that commit, in the same order. The main release
+// The publish workflow commits the result and publishes each changed package
+// from that commit, in the same order; it pushes the commit to staging only
+// once every package another package pins is on npm. The main release
 // then derives the plain version and finds it unpublished, as it must:
 // semver 2.0.0 item 9 gives `X.Y.Z-staging.N` lower precedence than `X.Y.Z`, so
 // once `X.Y.Z` is on npm the base has to move.

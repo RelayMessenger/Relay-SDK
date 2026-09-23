@@ -5,6 +5,7 @@ import {
 } from "node:fs";
 import { basename, join } from "node:path";
 import { releasePackages } from "./release-packages.mjs";
+import { internalDependencies, readManifests } from "./release-derive.mjs";
 import { validateRunnerPolicy } from "./agent-cli-platforms-policy.mjs";
 import { verifyPolicyFixtures } from "./agent-cli-platforms-policy-fixtures.mjs";
 
@@ -79,8 +80,12 @@ for (const [path, workflow] of workflowFiles) {
 
 // The staging release: every push to staging versions what changed and
 // publishes it (owner ruling, 2026-09-07: releases are automatic, nothing
-// manual, ever). publish-package-staging.yml bumps and commits, then calls
-// staging-package.yml once per changed package in catalog order.
+// manual, ever). publish-package-staging.yml bumps and commits, calls
+// staging-package.yml once per changed package in catalog order, and pushes
+// the bump commit to staging (the land job) only once every package another
+// package pins is on npm: a staging tree that names an SDK npm lacks fails
+// OpenClaw's contract verification on the next push (commit 5510901,
+// 2026-09-23).
 const staging = readFileSync(
   ".github/workflows/publish-package-staging.yml",
   "utf8",
@@ -107,10 +112,26 @@ assert.match(
   /run: node --test scripts\/staging-bump\.test\.mjs\n\s*- id: plan\n\s*name: [^\n]*\n\s*run: node scripts\/staging-bump\.mjs --write$/mu,
   "the bump job proves the decision table before it writes",
 );
+const stagingJob = (key) => {
+  const start = staging.indexOf(`\n  ${key}:\n`);
+  assert.notEqual(start, -1, `the staging release has no ${key} job`);
+  const next = staging.slice(start + 1).search(/\n  [a-z-]+:\n/u);
+  return next === -1 ? staging.slice(start) : staging.slice(start, start + 1 + next);
+};
+assert.doesNotMatch(
+  stagingJob("bump"),
+  /git push/u,
+  "the bump job must not push: staging gets the commit only in the land job",
+);
 assert.match(
-  staging,
-  /git push "https:\/\/x-access-token:\$\{GITHUB_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git" HEAD:staging/u,
-  "the bump commits to staging with the job token, so its push starts no second run",
+  stagingJob("land"),
+  /git push "https:\/\/x-access-token:\$\{GITHUB_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git" "\$\{RELEASE_SHA\}:refs\/heads\/staging"/u,
+  "the land job pushes the bump commit to staging with the job token, so its push starts no second run",
+);
+assert.doesNotMatch(
+  stagingJob("land"),
+  /git push[^\n]*(?:--force|\+\$)/u,
+  "the land push is a plain push, refused once staging has moved",
 );
 assert.match(staging, /user\.name 'github-actions\[bot\]'/u);
 const stagingOrder = Object.keys(releasePackages);
@@ -120,8 +141,58 @@ assert.deepEqual(
   stagingOrder,
   "the staging release must call every catalog package once, in catalog order",
 );
+// The packages another package pins, in catalog order. Each must be on npm
+// before staging names it, so the land job waits for all of them, and every
+// package after the last of them publishes only from the landed commit.
+const stagingManifests = readManifests(".");
+const pinned = stagingOrder.filter((candidate) =>
+  stagingOrder.some((key) =>
+    internalDependencies(stagingManifests[key], stagingManifests)
+      .some((dependency) => dependency.key === candidate)));
+assert.ok(pinned.length > 0, "no catalog package pins another; the land job has nothing to wait for");
+const lastPinned = stagingOrder.indexOf(pinned.at(-1));
+const land = stagingJob("land");
+assert.match(
+  land,
+  new RegExp(`^    needs: \\[bump, ${pinned.join(", ")}\\]$`, "mu"),
+  `land must wait for every package another package pins: ${pinned.join(", ")}`,
+);
+for (const key of pinned) {
+  assert.ok(
+    land.includes(
+      `(needs.${key}.result == 'success' || (needs.${key}.result == 'skipped' && !contains(needs.bump.outputs.changed, ',${key},')))`,
+    ),
+    `land must require ${key} published whenever the bump changed it`,
+  );
+}
+assert.match(land, /^\s*contents: write$/mu, "the land job alone may write to staging");
+assert.doesNotMatch(
+  stagingJob("bump"),
+  /^\s*contents: write$/mu,
+  "the bump job no longer writes to the repository",
+);
 for (const [position, key] of stagingOrder.entries()) {
-  const job = staging.slice(staging.indexOf(`\n  ${key}:\n`));
+  const job = stagingJob(key);
+  const afterLand = position > lastPinned;
+  assert.equal(
+    /^    needs: \[[^\]]*\bland\]$/mu.test(job),
+    afterLand,
+    afterLand
+      ? `${key} pins a package land waits for, or follows one, so it must need land`
+      : `${key} publishes before land and must not need it`,
+  );
+  if (afterLand) {
+    assert.match(
+      job,
+      /needs\.land\.result == 'success'/u,
+      `${key} must publish only from the landed commit`,
+    );
+  }
+  assert.match(
+    job,
+    /^\s*base: \$\{\{ needs\.bump\.outputs\.base \}\}$/mu,
+    `${key} must name the staging tip the bump was made on`,
+  );
   assert.match(
     job,
     /^\s*uses: \.\/\.github\/workflows\/staging-package\.yml$/mu,
@@ -141,7 +212,7 @@ for (const [position, key] of stagingOrder.entries()) {
     const previous = stagingOrder[position - 1];
     assert.match(
       job,
-      new RegExp(`needs: \\[bump, (?:sdk, )?${previous}\\]|needs: \\[bump, ${previous}\\]`, "u"),
+      new RegExp(`needs: \\[bump, (?:sdk, )?${previous}(?:, land)?\\]`, "u"),
       `${key} must wait for ${previous}, the package before it in the catalog`,
     );
   }
@@ -177,6 +248,23 @@ assert.match(
   publish,
   /git merge-base --is-ancestor "\$EVENT_SHA" HEAD/u,
   "the published commit must descend from the pushed commit",
+);
+// Until the land job pushes it, the bump commit exists only in this run's
+// bundle: both jobs check out the staging tip it was made on and fetch it.
+assert.doesNotMatch(
+  publish,
+  /ref: \$\{\{ env\.RELEASE_SHA \}\}/u,
+  "the bump commit is not on the remote before it lands; check out RELEASE_BASE",
+);
+assert.equal(
+  [...publish.matchAll(/^\s*ref: \$\{\{ env\.RELEASE_BASE \}\}$/gmu)].length,
+  2,
+  "the package and publish jobs must each check out RELEASE_BASE",
+);
+assert.equal(
+  [...publish.matchAll(/test "\$\(git rev-parse FETCH_HEAD\)" = "\$RELEASE_SHA"/gu)].length,
+  2,
+  "the package and publish jobs must each prove the bundle carries RELEASE_SHA",
 );
 const releaseOrder = [
   "Build the canonical SDK workspace",
