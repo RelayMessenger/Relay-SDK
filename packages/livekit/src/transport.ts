@@ -680,6 +680,8 @@ export class RelayCallTransport {
   #video: { track: LocalVideoTrack; sender: RelayVideoSenderLike; detach: () => void } | undefined;
   #videoTransceiver: RelayRtpTransceiverLike | undefined;
   #remoteVideoTrack: RemoteVideoTrack | undefined;
+  /** The engine track the current video receiver reads. */
+  #remoteVideoEngineTrack: RelayMediaStreamTrackLike | undefined;
   /** An add-track offer is out; a pull offer that crosses it waits for its answer. */
   #addTrackPending = false;
   #deferredOffer: CallRoomSubscriptionOfferFrame | undefined;
@@ -1391,6 +1393,7 @@ export class RelayCallTransport {
     this.#addTrackPending = false;
     this.#deferredOffer = undefined;
     this.#remoteVideoTrack?._detach();
+    this.#remoteVideoEngineTrack = undefined;
     if (this.#remoteSink) {
       this.#retiredSinkStats = this.#sinkStats();
       this.#remoteSink.stop();
@@ -1449,10 +1452,17 @@ export class RelayCallTransport {
     };
   }
 
-  /** One `RemoteVideoTrack` per call; each new session's receiver is attached to it. */
+  /**
+   * One `RemoteVideoTrack` per call; each new session's receiver is attached
+   * to it. werift fires `ontrack` again for every sending m-line on each
+   * `setRemoteDescription` (transceiverManager.js `setRemoteRTP`), so the
+   * track already being decoded keeps its receiver.
+   */
   #subscribeRemoteVideo(track: RelayMediaStreamTrackLike, transceiver: unknown): void {
     const factory = this.#factory;
     if (!factory?.createVideoReceiver || this.#closed) return;
+    if (this.#remoteVideoEngineTrack === track) return;
+    this.#remoteVideoEngineTrack = track;
     const receiver = factory.createVideoReceiver(track, transceiver);
     const existing = this.#remoteVideoTrack;
     const remote = existing ?? new RemoteVideoTrack();

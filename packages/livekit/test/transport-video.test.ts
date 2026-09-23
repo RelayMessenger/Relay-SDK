@@ -242,8 +242,12 @@ it("a restart re-publishes video on the new session and keeps one remote video t
   await publishing;
 
   const first = webRTC.peer;
-  first.ontrack?.({ track: new FakeTrack("video"), transceiver: {} });
+  const personCamera = new FakeTrack("video");
+  first.ontrack?.({ track: personCamera, transceiver: {} });
   expect(subscribed).toHaveLength(1);
+  // werift re-announces the same track on the next renegotiation: the receiver stays.
+  first.ontrack?.({ track: personCamera, transceiver: {} });
+  expect(webRTC.receivers).toHaveLength(1);
   const stream = new VideoStream(subscribed[0]!);
   const reader = stream.getReader();
   const read = reader.read();
