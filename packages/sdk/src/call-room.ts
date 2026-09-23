@@ -14,7 +14,17 @@ import type {
 } from "./types.js";
 import type { WebSocketConstructor, WebSocketLike } from "./websocket.js";
 
-const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
+/** Orange Meets heartbeat cadence (`app/hooks/useRoom.ts`, 5_000 ms). */
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000;
+/**
+ * PartySocket reconnect defaults (`partysocket/src/ws.ts` DEFAULT), PROTOCOL.md
+ * section 5. No retry limit: the room stops only on a close that was asked for.
+ */
+const MIN_RECONNECTION_DELAY_MS = 3_000;
+const RECONNECTION_DELAY_GROW_FACTOR = 1.3;
+const MAX_RECONNECTION_DELAY_MS = 10_000;
+const CONNECTION_TIMEOUT_MS = 4_000;
+const MIN_UPTIME_MS = 5_000;
 const CLIENT_PROTOCOL_ERROR = 4400;
 const TERMINAL_STATUSES = new Set<CallTerminalStatus>([
   "completed", "no-answer", "canceled", "busy", "failed",
@@ -38,13 +48,32 @@ export interface CallRoomCloseEvent {
   wasClean: boolean;
 }
 
+/**
+ * The room socket dropped, or an attempt to open one failed, and the room
+ * opens a new one after `delayMs`. Media rides the SFU, not this socket, so the
+ * Call and its WebRTC session continue; nothing is re-offered.
+ */
+export interface CallRoomReconnectingEvent {
+  /** 1 for the first retry; the count resets once a socket stays open 5 s. */
+  attempt: number;
+  delayMs: number;
+  /** The close that caused the retry; absent when an attempt failed before opening. */
+  close?: CallRoomCloseEvent;
+  /** Why the failed attempt did not open (connect timeout, handshake error). */
+  error?: Error;
+}
+
+export type CallRoomConnectionState = "idle" | "connecting" | "open" | "reconnecting" | "closed";
+
 export type CallRoomEventMap = {
   open: [];
+  reconnecting: [CallRoomReconnectingEvent];
   roomState: [CallRoomStateFrame];
   offer: [CallRoomSubscriptionOfferFrame];
   answer: [CallRoomServerAnswerFrame];
   ended: [CallRoomEndedFrame];
   error: [CallRoomErrorFrame | Error];
+  /** The room socket closed and the room will not reopen it by itself. */
   close: [CallRoomCloseEvent];
 };
 
@@ -162,7 +191,17 @@ const reasonText = (value: unknown): string => {
   return "";
 };
 
-/** Authenticated JSON signaling socket for one Relay Call participant. */
+/**
+ * Authenticated JSON signaling socket for one Relay Call participant.
+ *
+ * The room reopens its socket after any close that neither this client nor the
+ * server asked for, with PartySocket's numbers (PROTOCOL.md section 5): first
+ * retry after 3000 ms, then x1.3, capped at 10000 ms, a 4000 ms connect
+ * timeout, the retry count reset once a socket stays open 5000 ms, and no
+ * retry limit. On every open it sends `join`, then `userUpdate` with the last
+ * muted/video state, then the frames queued while closed. Media is never
+ * re-offered by a socket-only reconnect.
+ */
 export class CallRoom {
   readonly callID: string;
   readonly url: string;
@@ -173,10 +212,24 @@ export class CallRoom {
   readonly #heartbeatIntervalMs: number;
   readonly #signal: AbortSignal | undefined;
   readonly #listeners = new Map<CallRoomEvent, Set<(...args: any[]) => void>>();
+  /** The open socket, or the still-open socket a manual `reconnect()` is replacing. */
   #socket: WebSocketLike | undefined;
+  /** The socket being opened, not yet accepted. */
+  #attempt: { socket: WebSocketLike; detach: () => void } | undefined;
   #heartbeat: ReturnType<typeof setInterval> | undefined;
+  #retryTimer: ReturnType<typeof setTimeout> | undefined;
+  #uptimeTimer: ReturnType<typeof setTimeout> | undefined;
+  /** PartySocket `_retryCount`: -1 before the first connect, 0 once a socket stayed up. */
+  #retryCount = -1;
   #closed = false;
-  #connectionState: "idle" | "connecting" | "open" | "closed" = "idle";
+  #ended = false;
+  #connectionState: CallRoomConnectionState = "idle";
+  #queue: string[] = [];
+  #muted: boolean | undefined;
+  #video: boolean | undefined;
+  #openWaiters: OpenWaiter[] = [];
+  /** The pending manual `reconnect()`, rejected alone when its attempt fails and the old socket is kept. */
+  #manual: OpenWaiter | undefined;
 
   constructor(callID: string, baseURL: string, apiKey: string, options: CallRoomOptions = {}) {
     this.callID = callID;
@@ -199,7 +252,8 @@ export class CallRoom {
     }
   }
 
-  get connectionState(): "idle" | "connecting" | "open" | "closed" {
+  /** `reconnecting` while the room waits to reopen a dropped socket. */
+  get connectionState(): CallRoomConnectionState {
     return this.#connectionState;
   }
 
@@ -218,31 +272,68 @@ export class CallRoom {
     return this;
   }
 
+  /** Resolves on the first open; a failed attempt is retried, not thrown. */
   async connect(): Promise<void> {
     if (this.#closed) throw new Error("Relay Call room is closed.");
     if (this.#connectionState === "open") return;
     if (this.#connectionState === "connecting") {
       throw new Error("Relay Call room is already connecting.");
     }
-    await this.#openSocket(undefined);
+    const opened = this.#waitForOpen();
+    if (this.#connectionState === "idle") {
+      this.#ended = false;
+      this.#retryCount = -1;
+      this.#connect();
+    }
+    return opened;
   }
 
   /**
-   * Replace the signaling socket while keeping application/WebRTC state alive.
+   * Open a new signaling socket now, keeping application/WebRTC state alive.
    * Relay accepts the new authenticated socket before the previous one closes,
-   * so an active Call is not interpreted as having lost its participant.
+   * so an active Call is not interpreted as having lost its participant. Same
+   * path as the automatic reconnect (PartySocket `reconnect()`: retry count
+   * reset, no delay); if the new socket fails while the old one is still open,
+   * the old one stays and this rejects.
    */
   async reconnect(): Promise<void> {
     if (this.#closed) throw new Error("Relay Call room is closed.");
-    const previous = this.#socket;
-    await this.#openSocket(previous);
+    let manual!: OpenWaiter;
+    const opened = new Promise<void>((resolve, reject) => { manual = { resolve, reject }; });
+    this.#openWaiters.push(manual);
+    this.#manual = manual;
+    this.#ended = false;
+    this.#retryCount = -1;
+    this.#clearRetryTimer();
+    this.#abandonAttempt();
+    this.#connect();
+    try {
+      await opened;
+    } finally {
+      if (this.#manual === manual) this.#manual = undefined;
+    }
   }
 
+  /**
+   * Send one frame. While the socket is reopening the frame is queued and sent
+   * after `join` on the next open (PartySocket's queue); heartbeats are dropped.
+   */
   send(frame: CallRoomClientFrame): void {
-    if (this.#connectionState !== "open" || !this.#socket) {
+    if (this.#closed || this.#connectionState === "idle" || this.#connectionState === "closed") {
       throw new Error("Relay Call room is not connected.");
     }
-    this.#socket.send(JSON.stringify(frame));
+    if (frame.type === "userUpdate") {
+      this.#muted = frame.muted;
+      if (frame.video !== undefined) this.#video = frame.video;
+    }
+    const data = JSON.stringify(frame);
+    if (this.#connectionState === "open" && this.#socket) {
+      this.#socket.send(data);
+      return;
+    }
+    // `userUpdate` is re-sent from the recorded state on open, not queued.
+    if (frame.type === "heartbeat" || frame.type === "userUpdate") return;
+    this.#queue.push(data);
   }
 
   connected(): void {
@@ -266,66 +357,154 @@ export class CallRoom {
     this.#closed = true;
     this.#connectionState = "closed";
     this.#stopHeartbeat();
-    this.#socket?.close(code, reason);
+    this.#clearRetryTimer();
+    this.#clearUptimeTimer();
+    this.#abandonAttempt();
+    this.#queue = [];
+    const socket = this.#socket;
     this.#socket = undefined;
+    socket?.close(code, reason);
+    this.#rejectOpenWaiters(new Error("Relay Call room is closed."));
   }
 
-  async #openSocket(previous: WebSocketLike | undefined): Promise<void> {
-    this.#connectionState = "connecting";
+  #waitForOpen(): Promise<void> {
+    return new Promise((resolve, reject) => this.#openWaiters.push({ resolve, reject }));
+  }
+
+  #rejectOpenWaiters(error: Error): void {
+    const waiters = this.#openWaiters;
+    this.#openWaiters = [];
+    for (const waiter of waiters) waiter.reject(error);
+  }
+
+  /** PartySocket `_getNextDelay`. */
+  #nextDelay(): number {
+    if (this.#retryCount <= 0) return 0;
+    return Math.min(
+      MIN_RECONNECTION_DELAY_MS * RECONNECTION_DELAY_GROW_FACTOR ** (this.#retryCount - 1),
+      MAX_RECONNECTION_DELAY_MS,
+    );
+  }
+
+  /** PartySocket `_connect`: count the attempt, wait the delay, open. */
+  #connect(cause: { close?: CallRoomCloseEvent; error?: Error } = {}): void {
+    if (this.#closed) return;
+    this.#retryCount += 1;
+    const delayMs = this.#nextDelay();
+    if (!this.#socket) this.#connectionState = this.#retryCount === 0 ? "connecting" : "reconnecting";
+    else this.#connectionState = "connecting";
+    if (delayMs === 0) {
+      this.#open();
+      return;
+    }
+    this.#emit("reconnecting", { attempt: this.#retryCount, delayMs, ...cause });
+    if (this.#closed) return;
+    this.#retryTimer = setTimeout(() => {
+      this.#retryTimer = undefined;
+      this.#open();
+    }, delayMs);
+  }
+
+  #open(): void {
+    if (this.#closed) return;
     const socket = new this.#WebSocket(this.url, {
       headers: { Authorization: `Bearer ${this.#apiKey}` },
     });
-    this.#socket = socket;
-
-    await new Promise<void>((resolve, reject) => {
-      let opened = false;
-      let settled = false;
-      const cleanupBeforeOpen = (): void => {
-        socket.removeEventListener("open", onOpen);
-        socket.removeEventListener("error", onErrorBeforeOpen);
-        socket.removeEventListener("close", onCloseBeforeOpen);
-      };
-      const failBeforeOpen = (error: Error): void => {
-        if (settled) return;
-        settled = true;
-        cleanupBeforeOpen();
-        if (this.#socket === socket) this.#socket = previous;
-        this.#connectionState = previous ? "open" : "idle";
-        reject(error);
-      };
-      const onErrorBeforeOpen = (): void => {
-        if (!opened) failBeforeOpen(new Error("Relay Call room WebSocket failed to connect."));
-      };
-      const onCloseBeforeOpen = (event: any): void => {
-        if (!opened) {
-          failBeforeOpen(new Error(
-            `Relay Call room closed before connecting (${Number(event?.code ?? 1006)}).`,
-          ));
-        }
-      };
-      const onOpen = (): void => {
-        opened = true;
-        if (settled) return;
-        settled = true;
-        cleanupBeforeOpen();
-        if (this.#closed) {
-          socket.close(1000, "Client closed");
-          reject(new Error("Relay Call room is closed."));
-          return;
-        }
-        this.#socket = socket;
+    let settled = false;
+    const timeout = setTimeout(() => fail(new Error("Relay Call room connect timed out.")), CONNECTION_TIMEOUT_MS);
+    const detach = (): void => {
+      settled = true;
+      clearTimeout(timeout);
+      socket.removeEventListener("open", onOpen);
+      socket.removeEventListener("error", onError);
+      socket.removeEventListener("close", onClose);
+    };
+    const fail = (error: Error): void => {
+      if (settled) return;
+      detach();
+      this.#attempt = undefined;
+      socket.addEventListener("error", ignore);
+      try { socket.close(1000, "timeout"); } catch { /* the socket may not be closable yet */ }
+      if (this.#closed) return;
+      const previous = this.#socket;
+      const manual = this.#manual;
+      if (previous && manual) {
+        // The socket a manual reconnect was replacing is still open: keep it.
         this.#connectionState = "open";
-        this.#attachOpenSocket(socket);
-        this.#startHeartbeat();
-        socket.send(JSON.stringify({ type: "join" } satisfies CallRoomClientFrame));
-        this.#emit("open");
-        if (previous && previous !== socket) previous.close(1000, "Replaced");
-        resolve();
-      };
-      socket.addEventListener("open", onOpen);
-      socket.addEventListener("error", onErrorBeforeOpen);
-      socket.addEventListener("close", onCloseBeforeOpen);
-    });
+        this.#flush(previous);
+        this.#manual = undefined;
+        this.#openWaiters = this.#openWaiters.filter((waiter) => waiter !== manual);
+        manual.reject(error);
+        return;
+      }
+      this.#connect({ error });
+    };
+    const onError = (): void => fail(new Error("Relay Call room WebSocket failed to connect."));
+    const onClose = (event: any): void => fail(new Error(
+      `Relay Call room closed before connecting (${Number(event?.code ?? 1006)}).`,
+    ));
+    const onOpen = (): void => {
+      if (settled) return;
+      detach();
+      this.#attempt = undefined;
+      if (this.#closed) {
+        socket.close(1000, "Client closed");
+        return;
+      }
+      const previous = this.#socket;
+      this.#socket = socket;
+      this.#connectionState = "open";
+      this.#attachOpenSocket(socket);
+      this.#clearUptimeTimer();
+      this.#uptimeTimer = setTimeout(() => {
+        this.#uptimeTimer = undefined;
+        this.#retryCount = 0;
+      }, MIN_UPTIME_MS);
+      this.#uptimeTimer.unref?.();
+      socket.send(JSON.stringify({ type: "join" } satisfies CallRoomClientFrame));
+      if (this.#muted !== undefined) {
+        socket.send(JSON.stringify({
+          type: "userUpdate",
+          muted: this.#muted,
+          ...(this.#video === undefined ? {} : { video: this.#video }),
+        } satisfies CallRoomClientFrame));
+      }
+      this.#flush(socket);
+      this.#startHeartbeat();
+      if (previous && previous !== socket) previous.close(1000, "Replaced");
+      const waiters = this.#openWaiters;
+      this.#openWaiters = [];
+      for (const waiter of waiters) waiter.resolve();
+      this.#emit("open");
+    };
+    socket.addEventListener("open", onOpen);
+    socket.addEventListener("error", onError);
+    socket.addEventListener("close", onClose);
+    this.#attempt = { socket, detach };
+  }
+
+  #flush(socket: WebSocketLike): void {
+    const queue = this.#queue;
+    this.#queue = [];
+    for (const data of queue) socket.send(data);
+  }
+
+  #abandonAttempt(): void {
+    const attempt = this.#attempt;
+    if (!attempt) return;
+    this.#attempt = undefined;
+    attempt.detach();
+    attempt.socket.addEventListener("error", ignore);
+    try { attempt.socket.close(1000, "Client closed"); } catch { /* not closable yet */ }
+  }
+
+  /** A close the client or the server asked for, or the Call is over: never reopen. */
+  #isFinal(event: CallRoomCloseEvent): boolean {
+    if (this.#closed || this.#ended) return true;
+    if (event.code === CLIENT_PROTOCOL_ERROR) return true;
+    if (event.code === 1000 && (event.reason === "Replaced" || event.reason === "Call ended")) return true;
+    const status = this.state?.call.status;
+    return status !== undefined && TERMINAL_STATUSES.has(status as CallTerminalStatus);
   }
 
   #attachOpenSocket(socket: WebSocketLike): void {
@@ -337,21 +516,34 @@ export class CallRoom {
         socket.close(CLIENT_PROTOCOL_ERROR, "invalid frame");
       });
     });
-    socket.addEventListener("error", () => {
-      if (socket === this.#socket) {
-        this.#emit("error", new Error("Relay Call room WebSocket connection error."));
-      }
-    });
+    // A socket error is always followed by its close; the close decides.
+    socket.addEventListener("error", ignore);
     socket.addEventListener("close", (event: any) => {
       if (socket !== this.#socket) return;
       this.#stopHeartbeat();
-      if (!this.#closed) this.#connectionState = "idle";
+      this.#clearUptimeTimer();
       this.#socket = undefined;
-      this.#emit("close", {
+      const close: CallRoomCloseEvent = {
         code: Number(event?.code ?? 1006),
         reason: reasonText(event?.reason),
         wasClean: Boolean(event?.wasClean),
-      });
+      };
+      // A manual reconnect's new socket is still opening: the server closes
+      // the socket it replaces ("Replaced"), and the new socket decides.
+      if (this.#attempt) {
+        this.#connectionState = "connecting";
+        return;
+      }
+      if (!this.#isFinal(close)) {
+        this.#connect({ close });
+        return;
+      }
+      this.#clearRetryTimer();
+      this.#abandonAttempt();
+      this.#queue = [];
+      if (!this.#closed) this.#connectionState = "idle";
+      this.#rejectOpenWaiters(new Error(`Relay Call room closed (${close.code}).`));
+      this.#emit("close", close);
     });
   }
 
@@ -372,6 +564,7 @@ export class CallRoom {
         this.#emit("answer", frame);
         return;
       case "ended":
+        this.#ended = true;
         this.#emit("ended", frame);
         return;
       case "error":
@@ -395,9 +588,29 @@ export class CallRoom {
     this.#heartbeat = undefined;
   }
 
+  #clearRetryTimer(): void {
+    if (!this.#retryTimer) return;
+    clearTimeout(this.#retryTimer);
+    this.#retryTimer = undefined;
+  }
+
+  #clearUptimeTimer(): void {
+    if (!this.#uptimeTimer) return;
+    clearTimeout(this.#uptimeTimer);
+    this.#uptimeTimer = undefined;
+  }
+
   #emit<K extends CallRoomEvent>(event: K, ...args: CallRoomEventMap[K]): void {
     for (const listener of this.#listeners.get(event) ?? []) {
       try { listener(...args); } catch { /* listener failures never corrupt signaling */ }
     }
   }
+}
+
+/** Absorbs late errors from sockets the room no longer listens to (PartySocket `absorbError`). */
+const ignore = (): void => {};
+
+interface OpenWaiter {
+  resolve: () => void;
+  reject: (error: Error) => void;
 }

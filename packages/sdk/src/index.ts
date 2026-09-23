@@ -17,8 +17,10 @@ export {
   CallRoom,
   parseCallRoomServerFrame,
   type CallRoomCloseEvent,
+  type CallRoomConnectionState,
   type CallRoomEventMap,
   type CallRoomOptions,
+  type CallRoomReconnectingEvent,
 } from "./call-room.js";
 export {
   RelayAPIError,
