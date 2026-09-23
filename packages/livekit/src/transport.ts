@@ -664,6 +664,9 @@ export class RelayCallTransport {
   #callStatus: CallStatus | undefined;
   #remoteVideo = false;
   #personConnected = false;
+  /** The person's latest roomState `receiving` contains `audio` (PROTOCOL.md section 6b). */
+  #personReceivingAudio = false;
+  readonly #subscriptionWaiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>();
   #peerAudioArrived = false;
   #peerAudioReady = false;
   readonly #peerAudioWaiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>();
@@ -999,6 +1002,44 @@ export class RelayCallTransport {
     });
   }
 
+  /**
+   * True once the person is receiving this transport's audio: a roomState
+   * that arrived after this peer's publish answer was applied lists `audio` in
+   * the person's `receiving` (PROTOCOL.md section 6b). False again from a
+   * restart until the new session is pulled.
+   */
+  get subscribed(): boolean {
+    return this.#personReceivingAudio && this.#initialAnswerSdp !== undefined && !this.#restartPending;
+  }
+
+  /**
+   * Resolves once `subscribed` is true (at once if it is). Copy of LiveKit's
+   * `publication.waitForSubscription()`, which its room audio output awaits
+   * before playing a frame. Rejects when the Call ends or the transport closes.
+   */
+  waitForSubscription(): Promise<void> {
+    if (this.subscribed) return Promise.resolve();
+    if (this.#closed || this.#ended) {
+      return Promise.reject(new RelayCallTransportError("Relay Call ended before the person received audio."));
+    }
+    return new Promise<void>((resolve, reject) => {
+      const waiter = {
+        resolve: () => { this.#subscriptionWaiters.delete(waiter); resolve(); },
+        reject: (error: Error) => { this.#subscriptionWaiters.delete(waiter); reject(error); },
+      };
+      this.#subscriptionWaiters.add(waiter);
+    });
+  }
+
+  #checkSubscription(): void {
+    if (!this.subscribed) return;
+    for (const waiter of [...this.#subscriptionWaiters]) waiter.resolve();
+  }
+
+  #rejectSubscription(error: Error): void {
+    for (const waiter of [...this.#subscriptionWaiters]) waiter.reject(error);
+  }
+
   #checkPeerAudio(): void {
     if (this.#peerAudioReady || !this.#peerAudioArrived || !this.#personConnected) return;
     this.#peerAudioReady = true;
@@ -1097,6 +1138,7 @@ export class RelayCallTransport {
     this.#closed = true;
     this.#rejectReady(new RelayCallTransportError("Relay Call transport closed before media connected."));
     this.#rejectPeerAudio(new RelayCallTransportError("Relay Call transport closed before the person's audio arrived."));
+    this.#rejectSubscription(new RelayCallTransportError("Relay Call transport closed before the person received audio."));
     this.#audioGeneration += 1;
     this.#shutdownMedia();
     this.#releasePlayoutWaiters();
@@ -1215,6 +1257,11 @@ export class RelayCallTransport {
       const videoChanged = video !== this.#remoteVideo;
       this.#remoteVideo = video;
       this.#personConnected = person?.connected === true;
+      // Counts only for this peer's session: a roomState from before its publish
+      // answer (first connect or a restart) describes pulls of no live session.
+      this.#personReceivingAudio = this.#initialAnswerSdp !== undefined && !this.#restartPending
+        && person?.receiving?.includes("audio") === true;
+      this.#checkSubscription();
       this.#emit("roomState", frame);
       if (videoChanged) this.#emit("remoteVideo", video);
       this.#checkPeerAudio();
@@ -1231,6 +1278,9 @@ export class RelayCallTransport {
       this.#rejectReady(new RelayCallTransportError(`Relay Call ended before media connected (${frame.reason}).`));
       this.#rejectPeerAudio(new RelayCallTransportError(
         `Relay Call ended before the person's audio arrived (${frame.reason}).`,
+      ));
+      this.#rejectSubscription(new RelayCallTransportError(
+        `Relay Call ended before the person received audio (${frame.reason}).`,
       ));
       this.clearAudio();
       this.#shutdownMedia();
@@ -1379,6 +1429,9 @@ export class RelayCallTransport {
     if (this.#restartPending || peer !== this.#peer || !this.#callActive()) return;
     const summary = this.diagnostics().summary;
     this.#restartPending = true;
+    // The person's pulls of the retired session are gone (PROTOCOL.md 6b):
+    // `receiving` counts again only from roomStates after the new answer.
+    this.#personReceivingAudio = false;
     this.#restarts += 1;
     this.#failedAttempts += 1;
     const restarts = this.#restarts;

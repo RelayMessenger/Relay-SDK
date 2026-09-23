@@ -501,3 +501,59 @@ async def test_restart_uses_the_room_latest_ice_servers_and_an_application_value
     assert [s.urls for s in FakePeer.instances[0].config.ice_servers] == ["stun:stun.l.google.com:19302"]
     task.cancel()
     await own.aclose()
+
+
+async def until(condition: Callable[[], bool], timeout_s: float = 5.0) -> None:
+    """Wait on real timers for ``condition``, so a loaded machine cannot race the assertion."""
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while not condition():
+        assert asyncio.get_running_loop().time() < deadline, "condition not met in time"
+        await asyncio.sleep(0.005)
+
+
+def receiving_state(receiving: list[str]) -> dict[str, Any]:
+    person = {**PERSON, "video": False, "tracks": ["audio"], "receiving": receiving}
+    return {"type": "roomState", "call": {"id": "c", "chat_id": "c", "status": "in-progress"}, "participants": [person, AGENT]}
+
+
+async def test_subscribed_needs_receiving_audio_after_this_peers_answer_and_a_restart_resets_it() -> None:
+    transport, room = make(session_connect_timeout_ms=30)
+    task = asyncio.ensure_future(transport.connect())
+    await settle()
+    waited = asyncio.ensure_future(transport.wait_for_subscription())
+    # Before the publish answer, a receiving audio entry does not count.
+    room.emit("room_state", receiving_state(["audio"]))
+    assert transport.subscribed is False
+    room.emit("answer", answer())
+    await settle()
+    assert transport.subscribed is False
+    room.emit("room_state", receiving_state(["audio"]))
+    await settle()
+    assert transport.subscribed is True and waited.done()
+    room.emit("room_state", receiving_state([]))
+    assert transport.subscribed is False
+    room.emit("room_state", receiving_state(["audio"]))
+    assert transport.subscribed is True
+    # The session never connects (30 ms): the restart resets it until the new session is pulled.
+    await until(lambda: len(FakePeer.instances) == 2)
+    assert transport.subscribed is False
+    await settle()
+    room.emit("answer", answer("v=0 second\r\n"))
+    await settle()
+    assert transport.subscribed is False
+    room.emit("room_state", receiving_state(["audio"]))
+    assert transport.subscribed is True
+    task.cancel()
+    await transport.aclose()
+
+
+async def test_wait_for_subscription_raises_when_the_call_ends_first() -> None:
+    transport, room = make()
+    task = await connected(transport, room)
+    await task
+    waiting = asyncio.ensure_future(transport.wait_for_subscription())
+    await settle()
+    room.emit("ended", {"type": "ended", "reason": "completed"})
+    with pytest.raises(RelayCallTransportError, match="ended before the person received audio"):
+        await waiting
+    await transport.aclose()

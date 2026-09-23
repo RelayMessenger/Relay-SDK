@@ -51,8 +51,10 @@ async def answer_call(call_id: str) -> RelayLiveKitCall:
 audio as 24 kHz mono PCM16 frames, the format of LiveKit's own room input.
 
 `RelayAudioOutput` has the semantics of LiveKit's own
-`_ParticipantAudioOutput`: `capture_frame()` hands the frame to the transport
-and returns at once, so the AgentSession may push a whole reply faster than
+`_ParticipantAudioOutput`. Like LiveKit's, it holds the first frame until the
+person is receiving the agent's audio, so a greeting that starts early is not
+cut; the transport sends silence meanwhile and nothing is skipped. Then
+`capture_frame()` hands each frame to the transport and returns at once, so the AgentSession may push a whole reply faster than
 real time; the 20 ms pacer paces the wire. `flush()` closes the segment and
 reports `playback_finished` only after the transport has drained.
 `clear_buffer()` drops audio that has not reached the wire and reports the

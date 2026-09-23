@@ -141,11 +141,17 @@ def _valid_tracks(value: Any) -> bool:
 def _valid_participant(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
-    if not (_has_exact_keys(value, PARTICIPANT_KEYS) or _has_exact_keys(value, PARTICIPANT_KEYS | {"video", "tracks"})):
+    if not (
+        _has_exact_keys(value, PARTICIPANT_KEYS)
+        or _has_exact_keys(value, PARTICIPANT_KEYS | {"video", "tracks"})
+        or _has_exact_keys(value, PARTICIPANT_KEYS | {"video", "tracks", "receiving"})
+    ):
         return False
     return (
         ("video" not in value or isinstance(value["video"], bool))
         and ("tracks" not in value or _valid_tracks(value["tracks"]))
+        # The other participant's tracks this one is receiving now (PROTOCOL.md section 6b).
+        and ("receiving" not in value or _valid_tracks(value["receiving"]))
         and isinstance(value.get("contact_id"), str)
         and value.get("kind") in ("user", "agent")
         and isinstance(value.get("attached"), bool)

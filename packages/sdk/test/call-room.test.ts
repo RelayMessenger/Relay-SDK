@@ -301,3 +301,18 @@ it("ignores unknown server frame types, warns once per type and keeps the socket
   expect(parseCallRoomServerFrame({ type: "futureFrame", anything: [1] })).toBeNull();
   room.close();
 });
+
+it("accepts the participant receiving field and rejects a drifted one (PROTOCOL.md section 6b)", () => {
+  const withReceiving = (receiving: unknown) => ({
+    ...roomState,
+    participants: roomState.participants.map((participant) => ({
+      ...participant, video: false, tracks: ["audio"], receiving,
+    })),
+  });
+  for (const receiving of [[], ["audio"], ["audio", "video"]]) {
+    expect(parseCallRoomServerFrame(withReceiving(receiving))).toEqual(withReceiving(receiving));
+  }
+  expect(() => parseCallRoomServerFrame(withReceiving(["audio", "audio"]))).toThrow(/invalid frame/u);
+  expect(() => parseCallRoomServerFrame(withReceiving(["screen"]))).toThrow(/invalid frame/u);
+  expect(() => parseCallRoomServerFrame(withReceiving("audio"))).toThrow(/invalid frame/u);
+});

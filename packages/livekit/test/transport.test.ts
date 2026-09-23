@@ -1258,3 +1258,57 @@ it("restarts with the room's latest iceServers, sent again on the room's rejoin"
   await connecting;
   transport.close();
 });
+
+it("is subscribed once the person's roomState receiving has audio and this peer's answer is applied; a restart resets it (PROTOCOL.md 6b)", async () => {
+  vi.useFakeTimers();
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  webRTC.nextPeer.neverConnects = true;
+  const transport = makeTransport(room, webRTC);
+  const connecting = transport.connect();
+  await flush();
+  let subscribedAt = 0;
+  void transport.waitForSubscription().then(() => { subscribedAt = Date.now(); });
+
+  // Before the publish answer, a receiving audio entry does not count.
+  room.emit("roomState", roomStateFrame("in-progress", { tracks: ["audio"], receiving: ["audio"] }));
+  await flush();
+  expect(transport.subscribed).toBe(false);
+  answerLatest(room);
+  await flush();
+  expect(transport.subscribed).toBe(false);
+  room.emit("roomState", roomStateFrame("in-progress", { tracks: ["audio"], receiving: ["audio"] }));
+  await flush();
+  expect(transport.subscribed).toBe(true);
+  expect(subscribedAt).toBeGreaterThan(0);
+
+  // Receiving only video, or nothing, is not subscribed.
+  room.emit("roomState", roomStateFrame("in-progress", { tracks: ["audio"], receiving: [] }));
+  expect(transport.subscribed).toBe(false);
+  room.emit("roomState", roomStateFrame("in-progress", { tracks: ["audio"], receiving: ["audio"] }));
+  expect(transport.subscribed).toBe(true);
+
+  // The first session never connects: a restart resets it until the person pulls the new one.
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(transport.subscribed).toBe(false);
+  await vi.advanceTimersByTimeAsync(250);
+  await flush();
+  answerLatest(room, "relay-answer-2");
+  await flush();
+  expect(transport.subscribed).toBe(false);
+  room.emit("roomState", roomStateFrame("in-progress", { tracks: ["audio"], receiving: ["audio"] }));
+  expect(transport.subscribed).toBe(true);
+  transport.close();
+  await connecting.catch(() => undefined);
+});
+
+it("rejects waitForSubscription when the Call ends first", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  await connectTransport(transport, room);
+  const waiting = transport.waitForSubscription();
+  room.emit("ended", { type: "ended", reason: "completed" });
+  await expect(waiting).rejects.toThrow(/ended before the person received audio/u);
+  transport.close();
+});

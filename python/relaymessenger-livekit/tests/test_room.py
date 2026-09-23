@@ -29,6 +29,17 @@ def room_state(**overrides: Any) -> dict[str, Any]:
 # ---- frames --------------------------------------------------------------------------------------------------------
 
 
+def test_room_state_accepts_receiving_and_rejects_a_drifted_one() -> None:
+    for receiving in ([], ["audio"], ["audio", "video"]):
+        person = {**PARTICIPANT, "video": False, "tracks": ["audio"], "receiving": receiving}
+        frame = {"type": "roomState", "call": CALL, "participants": [person, AGENT]}
+        assert parse_call_room_server_frame(frame) == frame
+    for receiving in (["audio", "audio"], ["screen"], "audio"):
+        person = {**PARTICIPANT, "video": False, "tracks": ["audio"], "receiving": receiving}
+        with pytest.raises(CallRoomError):
+            parse_call_room_server_frame({"type": "roomState", "call": CALL, "participants": [person, AGENT]})
+
+
 def test_room_state_accepts_the_three_track_shapes() -> None:
     for tracks in ([], ["audio"], ["audio", "video"]):
         person = {**PARTICIPANT, "video": False, "tracks": tracks}
