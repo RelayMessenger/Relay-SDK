@@ -2701,6 +2701,35 @@ wheels = [
 ]
 
 [[package]]
+name = "relaymessenger-calls"
+version = "0.1.0.dev1"
+source = { editable = "../relaymessenger-calls" }
+dependencies = [
+    { name = "aiortc" },
+    { name = "av" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "websockets", version = "16.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "websockets", version = "17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiortc", specifier = ">=1.15,<2" },
+    { name = "av", specifier = ">=14" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "websockets", specifier = ">=14" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.13" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-asyncio", specifier = ">=0.24" },
+]
+
+[[package]]
 name = "relaymessenger-livekit"
 version = "0.1.0.dev1"
 source = { editable = "." }
@@ -2712,6 +2741,7 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "relaymessenger-calls" },
     { name = "websockets", version = "16.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "websockets", version = "17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
@@ -2730,6 +2760,7 @@ requires-dist = [
     { name = "livekit", specifier = ">=1.1,<2" },
     { name = "livekit-agents", specifier = ">=1.8,<2" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "relaymessenger-calls", editable = "../relaymessenger-calls" },
     { name = "websockets", specifier = ">=14" },
 ]
 

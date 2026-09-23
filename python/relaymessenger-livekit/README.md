@@ -12,8 +12,8 @@ SFU credentials. It uses only Relay's public API: the Call room WebSocket
 pip install relaymessenger-livekit
 ```
 
-Python 3.10 or newer. `aiortc`, `livekit-agents` and `livekit` are
-dependencies.
+Python 3.10 or newer. `livekit-agents`, `livekit` and `relaymessenger-calls`,
+Relay's framework-neutral call core, are dependencies.
 
 ## Answer a Relay Call
 
