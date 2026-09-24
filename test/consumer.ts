@@ -4,6 +4,7 @@ import Relay, {
   type SelectionPartResponse,
   RELAY_WEBHOOK_EVENT_TYPES,
   type AgentCategory,
+  type AgentCreator,
   type AgentSkill,
   type AgentVisibility,
   type Chat,
@@ -308,6 +309,8 @@ byTask.contacts satisfies ContactLookup[];
 byTask.contacts[0]?.skills satisfies AgentSkill[] | undefined;
 byTask.contacts[0]?.category satisfies AgentCategory | null | undefined;
 byTask.contacts[0]?.visibility satisfies AgentVisibility | undefined;
+byTask.contacts[0]?.creator satisfies AgentCreator | null | undefined;
+ownCards.contact_cards[0]!.is_verified satisfies boolean | undefined;
 // @ts-expect-error Public lookup does not carry person settings or an agent admission field.
 lookup.contact.message_requests_from;
 // @ts-expect-error Lookup requires a Handle or a task.

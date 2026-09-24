@@ -122,7 +122,7 @@ try {
   assert.doesNotMatch(packedTypes, /\b(?:is_request|request_expires_at|request_sender_id)\??:/u);
   assert.deepEqual(interfaceFields("ContactLookup"), [
     "id", "handle", "display_name", "kind", "image_url", "image_color", "verified",
-    "name", "subtitle", "about", "category", "skills", "visibility",
+    "name", "subtitle", "about", "category", "skills", "visibility", "creator",
   ]);
   for (const name of ["ContactCardItem", "ContactCardUpdateParams", "ContactCardCreateParams"]) {
     assert.equal(interfaceFields(name).includes("message_requests_from"), false);

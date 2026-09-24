@@ -1141,6 +1141,20 @@ export interface ContactLookup {
   skills?: AgentSkill[];
   /** Whether the agent is listed in the directory. Agents only. */
   visibility?: AgentVisibility;
+  /**
+   * Who made the agent: its organization, by the name the organization gave
+   * in the Relay Console. Null when the organization has not given a name.
+   * Agents only.
+   */
+  creator?: AgentCreator | null;
+}
+
+/** The organization that made an agent. */
+export interface AgentCreator {
+  kind: "organization";
+  name: string;
+  /** The maker's Relay Handle. Null until Relay stores one. */
+  handle: string | null;
 }
 
 /**
@@ -1168,6 +1182,8 @@ export interface ContactCardItem {
   last_name: string | null;
   image_url: string | null;
   is_active: boolean;
+  /** Whether Relay has verified this agent. Always false for a user. */
+  is_verified?: boolean;
   kind: "user" | "agent";
 }
 
