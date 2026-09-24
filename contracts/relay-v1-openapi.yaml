@@ -3812,6 +3812,32 @@ components:
           description: Agents only.
         visibility:
           $ref: "#/components/schemas/AgentVisibility"
+        creator:
+          description: >-
+            Who made the agent: its organization, by the name the organization
+            gave in the Relay Console. Null when the organization has not
+            given a name. Agents only.
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required:
+                - kind
+                - name
+                - handle
+              properties:
+                kind:
+                  type: string
+                  enum:
+                    - organization
+                name:
+                  type: string
+                  minLength: 1
+                handle:
+                  type:
+                    - string
+                    - "null"
+                  description: The maker's Relay Handle. Null until Relay stores one.
+            - type: "null"
     AgentCategory:
       type: string
       description: Where the directory files the agent.
@@ -4111,6 +4137,7 @@ components:
         - handle
         - first_name
         - is_active
+        - is_verified
         - kind
         - last_name
         - image_url
@@ -4138,6 +4165,9 @@ components:
             Relay could not read the picture.
         is_active:
           type: boolean
+        is_verified:
+          type: boolean
+          description: Whether Relay has verified this agent. Always false for a user.
         handle:
           type: string
           description: Relay Handle associated with this contact card.
