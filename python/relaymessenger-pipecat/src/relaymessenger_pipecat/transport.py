@@ -75,6 +75,10 @@ class RelayParams(TransportParams):
     ``video_out_enabled`` is set, sized by ``video_out_width`` and
     ``video_out_height``, from frames in ``video_out_color_format``.
 
+    ``audio_out_auto_silence`` works as in ``SmallWebRTCTransport``: when
+    False, the wire waits for the bot's next audio instead of sending silence.
+    Until the person receives the bot's audio, silence goes out either way.
+
     Parameters:
         audio_out_queue_size_ms: Audio the transport accepts ahead of the wire, in
             milliseconds, before ``write_audio_frame`` waits (the LiveKit
@@ -174,6 +178,8 @@ class RelayTransportClient:
                 ice_servers=self._ice_servers,
                 session_connect_timeout_ms=self._session_connect_timeout_ms,
                 inbound_audio=RelayInboundAudioFormat(sample_rate=rate, channel_count=self._params.audio_in_channels),
+                # As SmallWebRTCTransport hands it to its RawAudioTrack: False waits for audio instead of silence.
+                audio_out_auto_silence=self._params.audio_out_auto_silence,
                 on_warning=self._on_warning,
             )
             self._call = call

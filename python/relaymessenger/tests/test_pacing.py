@@ -166,3 +166,68 @@ async def test_idle_packets_are_opus_silence_the_sfu_accepts(fake_time: FakeCloc
         frames = decoder.decode(av.Packet(bytes(packet)))
         assert sum(f.samples for f in frames) == 960
         assert all(not np.any(f.to_ndarray()) for f in frames)
+
+
+# ---- auto silence: Pipecat's ``audio_out_auto_silence`` (SmallWebRTC's ``RawAudioTrack``) ----
+
+
+async def spin(times: int = 60) -> None:
+    """Let a waiting pull poll ``times`` times; each poll moves the fake clock at least 5 ms."""
+    for _ in range(times):
+        await asyncio.sleep(0)
+
+
+async def test_without_auto_silence_an_empty_queue_waits_and_the_timestamp_carries_on(fake_time: FakeClock) -> None:
+    source = RelayAudioSource(clock=fake_time, auto_silence=False)
+    track = source.create_track()
+    source.on_data(np.full(960 * 2, 1000, dtype=np.int16), 48_000, 1)  # 40 ms: two packets
+    first, second = await track.recv(), await track.recv()
+    assert second.pts - first.pts == 960
+    # Nothing queued: the pull waits, and no silence packet goes out however long it waits.
+    waiting = asyncio.ensure_future(track.recv())
+    before = fake_time.now
+    await spin()
+    assert fake_time.now - before >= 300
+    assert not waiting.done()
+    assert source.stats().silence_packets == 0
+    source.on_data(np.full(960, 2000, dtype=np.int16), 48_000, 1)
+    expected = source._packets[0]
+    packet = await asyncio.wait_for(waiting, 1)
+    assert bytes(packet) == expected
+    # As SmallWebRTC's `frame.pts = self._timestamp`: one packet later, not the time waited.
+    assert packet.pts == second.pts + 960
+    stats = source.stats()
+    assert (stats.rtp_packets, stats.silence_packets) == (3, 0)
+
+
+async def test_with_auto_silence_an_empty_queue_sends_silence(fake_time: FakeClock) -> None:
+    source = RelayAudioSource(clock=fake_time)
+    track = source.create_track()
+    source.on_data(np.full(960, 1000, dtype=np.int16), 48_000, 1)
+    audio = await track.recv()
+    silence = await asyncio.wait_for(track.recv(), 1)
+    assert bytes(silence) == source._silence
+    assert silence.pts == audio.pts + 960
+    stats = source.stats()
+    assert (stats.rtp_packets, stats.silence_packets) == (1, 1)
+
+
+async def test_without_auto_silence_held_audio_still_sends_silence_until_it_may_play(fake_time: FakeClock) -> None:
+    # Cloudflare's SFU forwards only a track that carries RTP, so the hello gate keeps silence flowing either way.
+    playing = False
+    source = RelayAudioSource(clock=fake_time, playing=lambda: playing, auto_silence=False)
+    track = source.create_track()
+    assert [bytes(await asyncio.wait_for(track.recv(), 1)) for _ in range(2)] == [source._silence] * 2
+    source.on_data(np.full(960 * 2, 1000, dtype=np.int16), 48_000, 1)
+    queued = list(source._packets)
+    assert [bytes(await asyncio.wait_for(track.recv(), 1)) for _ in range(2)] == [source._silence] * 2
+    assert list(source._packets) == queued and source.stats().held
+    playing = True
+    # Receiving: the queue plays from its first packet, then the pull waits instead of sending silence.
+    assert [bytes(await asyncio.wait_for(track.recv(), 1)) for _ in range(2)] == queued
+    waiting = asyncio.ensure_future(track.recv())
+    await spin()
+    assert not waiting.done()
+    stats = source.stats()
+    assert (stats.rtp_packets, stats.silence_packets) == (2, 4)
+    waiting.cancel()

@@ -42,6 +42,10 @@ OPUS_BIT_RATE = 96_000
 #: The pacer's wait; tests replace it to drive a fake clock.
 _sleep = asyncio.sleep
 
+#: How often a pull without auto silence looks for queued audio: Pipecat's
+#: ``RawAudioTrack.recv`` polls its queue with ``asyncio.sleep(0.005)``.
+AUDIO_WAIT_POLL_S = 0.005
+
 
 def monotonic_ms() -> float:
     return time.monotonic() * 1000
@@ -127,11 +131,28 @@ class RelayAudioSource:
     it is true the queue plays from its first packet (PROTOCOL.md section 6b:
     hold the agent's audio until the other participant receives it, as
     LiveKit's room output waits for the subscription and never skips).
+
+    ``auto_silence`` False is Pipecat's ``audio_out_auto_silence=False``: once
+    audio may play, a pull with nothing queued waits until the next packet is
+    queued instead of sending silence, and the RTP timestamp carries on from
+    the last packet sent, not from the time waited (Pipecat's
+    ``RawAudioTrack.recv``, pipecat/transports/smallwebrtc/transport.py:
+    ``while not self._chunk_queue: await asyncio.sleep(0.005)``, then
+    ``frame.pts = self._timestamp``). While audio is held, silence still goes
+    out in either mode, so the SFU has RTP to forward and the other
+    participant can start receiving.
     """
 
-    def __init__(self, clock: Callable[[], float] = monotonic_ms, *, playing: Callable[[], bool] = lambda: True) -> None:
+    def __init__(
+        self,
+        clock: Callable[[], float] = monotonic_ms,
+        *,
+        playing: Callable[[], bool] = lambda: True,
+        auto_silence: bool = True,
+    ) -> None:
         self._clock = clock
         self._playing = playing
+        self._auto_silence = auto_silence
         self._encoder = _OpusEncoder()
         #: 20 ms of digital silence, encoded once by the same encoder and reused.
         self._silence = self._encoder.encode(np.zeros(PACKET_SAMPLES, dtype=np.int16))
@@ -236,10 +257,18 @@ class RelayAudioSource:
                 waiter.set_result(None)
 
     async def next_packet(self, track: "_RelayAudioTrack") -> "av.Packet[Any]":
-        """Wait until the next packet is due, then return queued audio, else silence."""
+        """Wait until the next packet is due, then return queued audio, else silence.
+
+        Without ``auto_silence``, a pull that may play but has nothing queued
+        first waits for audio, polling every 5 ms as Pipecat's
+        ``RawAudioTrack.recv`` does.
+        """
         while True:
             if self._stopped or track is not self._current_track:
                 raise MediaStreamError
+            if not self._auto_silence and not self._packets and self._playing():
+                await _sleep(AUDIO_WAIT_POLL_S)
+                continue
             now = self._clock()
             if self._due <= 0:
                 self._due = self._pacer.take(now)

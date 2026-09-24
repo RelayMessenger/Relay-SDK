@@ -298,6 +298,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         ice_servers: Union[list[Any], RelayIceServersProvider, None] = None,
         session_connect_timeout_ms: float = RESTART_CONNECT_TIMEOUT_MS,
         inbound_audio: RelayInboundAudioFormat = RelayInboundAudioFormat(),
+        audio_out_auto_silence: bool = True,
         on_warning: Optional[Callable[[str], None]] = None,
         _peer_factory: Optional[PeerFactory] = None,
         _ice_gathering_timeout_ms: float = DEFAULT_ICE_GATHERING_TIMEOUT_MS,
@@ -319,6 +320,9 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         self.call_id = call_id
         self.room = room
         self._inbound = inbound_audio
+        # Pipecat's ``TransportParams.audio_out_auto_silence``: False waits for the
+        # next audio instead of sending silence once audio may play (`RelayAudioSource`).
+        self._audio_out_auto_silence = audio_out_auto_silence
         # ``None``: the application passed none, so the room's servers are used.
         self._ice_servers: Union[list[RelayIceServer], RelayIceServersProvider, None] = (
             ice_servers if ice_servers is None or callable(ice_servers) else normalize_ice_servers(ice_servers)
@@ -422,7 +426,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
             return
         self._record("signaling", "room open")
         # Application audio leaves only while the person receives it (PROTOCOL.md section 6b).
-        self._source = RelayAudioSource(playing=lambda: self.subscribed)
+        self._source = RelayAudioSource(playing=lambda: self.subscribed, auto_silence=self._audio_out_auto_silence)
         if self._video is not None and self._video.enabled:
             # Published before connect(): the camera rides the first offer.
             self.room.user_update(muted=self._muted, video=True)
@@ -478,7 +482,8 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         receiving this participant's audio (`subscribed`), the queue is held and
         silence goes out; it then plays from its start, nothing dropped
         (PROTOCOL.md section 6b). A restart holds it again until the new session
-        is pulled.
+        is pulled. Once it plays, an empty queue sends silence, or, with
+        ``audio_out_auto_silence=False``, waits for the next audio.
         """
         if self._closed:
             raise RelayCallTransportError("Relay Call transport is closed.")

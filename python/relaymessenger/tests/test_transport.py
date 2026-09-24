@@ -640,3 +640,30 @@ async def test_clearing_held_audio_drops_it_and_a_restart_holds_audio_again() ->
     room.emit("room_state", receiving_state(["audio"]))
     assert await pull(FakePeer.instances[1], 3) == [*queued, silence]
     await transport.aclose()
+
+
+async def test_without_auto_silence_audio_is_held_behind_silence_then_the_pull_waits_for_audio() -> None:
+    transport, room = make(audio_out_auto_silence=False)
+    await (await connected(transport, room))
+    source = transport._source
+    assert source is not None
+    silence = source._silence
+    for value in (1000, 2000, 3000):
+        await transport.write_audio(tagged(value))
+    queued = list(source._packets)
+    # Not receiving yet: silence goes out, so the SFU has RTP to forward, and nothing queued is dropped.
+    assert await asyncio.wait_for(pull(FakePeer.instances[0], 4), 2) == [silence] * 4
+    assert transport.diagnostics().outbound.held is True
+    room.emit("room_state", receiving_state(["audio"]))
+    assert await asyncio.wait_for(pull(FakePeer.instances[0], 3), 2) == queued
+    # Receiving and nothing queued: the pull waits for the next audio instead of sending silence.
+    track = FakePeer.instances[0].transceivers[0].sender.track
+    waiting = asyncio.ensure_future(track.recv())
+    await asyncio.sleep(0.2)
+    assert not waiting.done()
+    await transport.write_audio(tagged(4000))
+    expected = source._packets[0]
+    assert bytes(await asyncio.wait_for(waiting, 2)) == expected
+    out = transport.diagnostics().outbound
+    assert (out.rtp_packets, out.silence_packets) == (4, 4)
+    await transport.aclose()

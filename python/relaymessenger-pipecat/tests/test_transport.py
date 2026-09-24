@@ -254,6 +254,16 @@ async def test_output_rejects_unknown_formats_and_short_images() -> None:
     assert frame is not None and frame.format == "bgra"
 
 
+@pytest.mark.parametrize("auto_silence", [True, False])
+async def test_the_call_gets_pipecats_audio_out_auto_silence(auto_silence: bool) -> None:
+    transport = RelayTransport(
+        api_key="agent-token", call_id="call-1", params=RelayParams(audio_out_auto_silence=auto_silence)
+    )
+    await transport._client.connect()
+    assert FakeCall.instances[0].kwargs["audio_out_auto_silence"] is auto_silence
+    await transport._client.disconnect()
+
+
 def test_constructor_needs_a_call_and_a_token() -> None:
     with pytest.raises(ValueError):
         RelayTransport(api_key="agent-token", call_id=" ")
@@ -352,8 +362,9 @@ def receiving(tracks: list[str]) -> dict[str, Any]:
     return {"type": "roomState", "call": {"status": "in-progress"}, "participants": [person]}
 
 
+@pytest.mark.parametrize("auto_silence", [True, False])
 async def test_the_bots_audio_is_held_until_the_person_receives_it_then_plays_from_the_start(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, auto_silence: bool
 ) -> None:
     from relaymessenger.calls import RelayCallTransport
 
@@ -365,7 +376,9 @@ async def test_the_bots_audio_is_held_until_the_person_receives_it_then_plays_fr
     transport = RelayTransport(
         call_id="call-1",
         room=room,  # type: ignore[arg-type]
-        params=RelayParams(audio_out_enabled=True, audio_out_end_silence_secs=0),
+        params=RelayParams(
+            audio_out_enabled=True, audio_out_end_silence_secs=0, audio_out_auto_silence=auto_silence
+        ),
     )
     worker = PipelineWorker(
         Pipeline([transport.input(), transport.output()]),
@@ -409,6 +422,17 @@ async def test_the_bots_audio_is_held_until_the_person_receives_it_then_plays_fr
         # Receiving: the greeting plays from its first packet, every packet in order.
         assert [bytes(await track.recv()) for _ in range(len(queued))] == queued
         assert call.diagnostics().outbound.rtp_packets == len(queued)
+        # Then, with the queue empty, silence (the default) or, as SmallWebRTC's
+        # RawAudioTrack without auto silence, a wait for the bot's next audio.
+        while source._packets:
+            await track.recv()
+        after = asyncio.ensure_future(track.recv())
+        await asyncio.sleep(0.2)
+        if auto_silence:
+            assert after.done() and bytes(after.result()) == source._silence
+        else:
+            assert not after.done()
+            after.cancel()
 
     await run(worker, during)
     await connecting
