@@ -17,11 +17,12 @@ import Relay, {
   type RelayWebhookEvent,
 } from "../src/index.js";
 
-// The card, update and tap below are the shapes Relay Server's own A2UI tests
-// send and receive (Relay-Server PR 372 at 738143df, server/test/a2ui.test.ts:
-// betCard, the "stream" update, action). test/fixtures/message.received.json
-// is that commit's server/test/fixtures/webhooks/2026-08-30/message.received.json,
-// byte for byte.
+// The card, update, tap and refusal below are the shapes Relay Server's own
+// A2UI tests send and receive (Relay-Server PR 372 at f1200152,
+// server/test/a2ui.test.ts: betCard, the "stream" update, action, "twice").
+// test/fixtures/message.received.json is
+// server/test/fixtures/webhooks/2026-08-30/message.received.json, byte for
+// byte (unchanged from 738143df to f1200152).
 const V = "v0.9.1";
 const chatID = "00000000-0000-7000-8000-000000000023";
 const betComponents: A2uiComponent[] = [
@@ -125,8 +126,12 @@ describe("sendA2uiSurface", () => {
 
   it("returns the A2UI messages Relay did not apply beside the Message", async () => {
     const a2ui_errors = [{
-      version: "v0.9.1" as const,
-      error: { code: "VALIDATION_FAILED" as const, surfaceId: "bet-lakers", path: "/parts/0/data/1/updateComponents/components/0", message: "A component needs an id." },
+      part_index: 0,
+      data_index: 1,
+      a2ui_message: {
+        version: "v0.9.1" as const,
+        error: { code: "VALIDATION_FAILED" as const, surfaceId: "bet-lakers", path: "/components/0", message: "A component needs an id." },
+      },
     }];
     const { relay } = client(() => Response.json({ a2ui_errors, chat_id: chatID, message: cardMessage }, { status: 201 }));
     const result = await sendA2uiSurface(relay, chatID, { surfaceId: "bet-lakers", catalogId: A2UI_BASIC_CATALOG_ID, components: betComponents });
@@ -134,12 +139,16 @@ describe("sendA2uiSurface", () => {
   });
 
   it("throws the refusal with every A2UI error in the body when nothing was applied", async () => {
-    // server/src/a2ui-send.ts at 738143df: a live surfaceId is a 409, error code 1005.
+    // server/src/a2ui-send.ts at f1200152: a live surfaceId is a 409, error code 1005.
     const duplicate = "A surface with this surfaceId already exists in this chat; delete it before creating it again.";
     const body = {
       success: false,
       error: { status: 409, code: 1005, message: duplicate },
-      a2ui_errors: [{ version: V, error: { code: "VALIDATION_FAILED", surfaceId: "twice", path: "/parts/0/data/0/createSurface/surfaceId", message: duplicate } }],
+      a2ui_errors: [{
+        part_index: 0,
+        data_index: 0,
+        a2ui_message: { version: V, error: { code: "VALIDATION_FAILED", surfaceId: "twice", path: "/surfaceId", message: duplicate } },
+      }],
     };
     const { relay, requests } = client(() => Response.json(body, { status: 409 }));
     const refusal = await sendA2uiSurface(relay, chatID, { surfaceId: "twice", catalogId: A2UI_BASIC_CATALOG_ID, components: betComponents })

@@ -626,9 +626,9 @@ export type A2uiVersion = "v0.9" | "v0.9.1";
 /**
  * One component of a surface: `id`, the catalog's `component` name, and that
  * component's own properties, for example
- * `{ id: "title", component: "Text", text: "Lakers win tonight?" }`. Relay
- * keeps components, properties and enum values it does not know and delivers
- * them as sent; the catalog named by `createSurface.catalogId` defines them.
+ * `{ id: "title", component: "Text", text: "Lakers win tonight?" }`. The
+ * catalog named by `createSurface.catalogId` defines them: Relay refuses a
+ * component, property or value that catalog does not define.
  */
 export interface A2uiComponent {
   id: string;
@@ -650,7 +650,7 @@ export interface A2uiCreateSurfaceMessage {
   };
 }
 
-/** A2UI `updateComponents`: adds or replaces components by `id`. One component, in some update, has the id `root`. */
+/** A2UI `updateComponents`: adds or replaces components by `id`. A surface's first update holds the component with the id `root`. */
 export interface A2uiUpdateComponentsMessage {
   version: A2uiVersion;
   updateComponents: {
@@ -730,14 +730,23 @@ export interface A2uiErrorMessage {
 }
 
 /**
- * One A2UI message of a send that Relay did not apply, in A2UI's validation
- * error format. `surfaceId` is empty when the message named none; `path`
- * points into the request, for example
- * `/parts/0/data/2/updateComponents/components/0`.
+ * A2UI's `error` message in its validation format, as Relay writes it for a
+ * message it did not apply. `surfaceId` is empty when the message named none;
+ * `path` points inside the failing message's body, as in A2UI's own example
+ * `/components/0/text`, and is empty when the whole message is at fault.
  */
 export interface A2uiValidationErrorMessage {
   version: "v0.9.1";
   error: A2uiValidationError;
+}
+
+/** One A2UI message of a send that Relay did not apply, where it sits in the request, and A2UI's `error` message for it. */
+export interface A2uiFailure {
+  /** The data part's index in `parts`; null when the fault is in `metadata.a2uiClientDataModel`. */
+  part_index: number | null;
+  /** The message's index in that part's `data`; null when the part itself, or the metadata, is at fault. */
+  data_index: number | null;
+  a2ui_message: A2uiValidationErrorMessage;
 }
 
 /** What a renderer sends back (A2UI `client_to_server.json`). */
@@ -747,13 +756,16 @@ export type A2uiClientToServerMessage = A2uiActionMessage | A2uiErrorMessage;
 export type A2uiMessage = A2uiServerToClientMessage | A2uiClientToServerMessage;
 
 /**
- * A2A's DataPart holding A2UI v0.9.1 messages, in order. A Message may carry
- * any number of data parts beside its other parts. Relay applies each A2UI
- * message on its own: the ones that fail come back in the response's
- * `a2ui_errors`, and a send that applies nothing is refused (404, 409 or 422)
- * with `a2ui_errors` in the error body. Only an agent sends `createSurface`,
- * `updateComponents`, `updateDataModel` and `deleteSurface`; a send that only
- * changes an earlier card adds no Message and returns that card.
+ * A data part holding A2UI v0.9.1 messages, in order: Relay's REST shape of
+ * A2A's DataPart. A Message may carry any number of data parts beside its
+ * other parts. Relay applies each A2UI message on its own, checked against
+ * A2UI's schemas and the surface's catalog: the ones that fail come back in
+ * the response's `a2ui_errors`, and a send that applies nothing is refused
+ * (404, 409 or 422) with `a2ui_errors` in the error body. Only an agent sends
+ * `createSurface`, `updateComponents`, `updateDataModel` and `deleteSurface`;
+ * a send that only changes an earlier card adds no Message and returns that
+ * card. An `action` or `error` reaches only its sender and the agent that
+ * created the surface it names.
  */
 export interface DataPart {
   type: "data";
@@ -762,9 +774,10 @@ export interface DataPart {
 }
 
 /**
- * A data part as every reader receives it: the `action` and `error` messages
- * it carried, as sent, then, for each surface it created, every A2UI message
- * accepted for that surface since, in order. Replay the list to draw the card.
+ * A data part as a reader receives it: the `action` and `error` messages it
+ * carried, as sent, when the reader sent them or created the surface they
+ * name; then, for each surface it created, every A2UI message accepted for
+ * that surface since, in order. Replay the list to draw the card.
  */
 export interface DataPartResponse extends DataPart {
   reactions: Reaction[] | null;
@@ -791,13 +804,14 @@ export interface A2uiClientCapabilities {
 
 /**
  * A2A Message metadata. A tap on a surface that set `sendDataModel` carries
- * `a2uiClientDataModel`, passed to the agent unchanged.
+ * `a2uiClientDataModel`. Each surface's data model reaches only the sender and
+ * the agent that created that surface, unchanged.
  */
 export interface MessageMetadata {
   a2uiClientDataModel?: A2uiClientDataModel;
 }
 
-/** The metadata on every `message.received`: the reader's A2UI catalogs, and the sender's data model when it sent one. */
+/** The metadata on every `message.received`: the reader's A2UI catalogs, and the sender's data model for the surfaces this agent created, when it sent one. */
 export interface MessageReceivedMetadata extends MessageMetadata {
   a2uiClientCapabilities: A2uiClientCapabilities;
 }
@@ -1036,10 +1050,10 @@ export interface ChatCreateParams {
 
 export interface ChatCreateResponse {
   /**
-   * The A2UI messages of the send that were not applied, in A2UI's error
-   * format. The rest of the list was applied.
+   * The A2UI messages of the send that were not applied, each with its place
+   * in the request and A2UI's `error` message for it. The rest was applied.
    */
-  a2ui_errors?: A2uiValidationErrorMessage[];
+  a2ui_errors?: A2uiFailure[];
   chat: Pick<
     Chat,
     "id" | "display_name" | "is_group" | "handles"
@@ -1090,10 +1104,10 @@ export interface MessageSendParams {
 
 export interface MessageSendResponse {
   /**
-   * The A2UI messages of the send that were not applied, in A2UI's error
-   * format. The rest of the list was applied.
+   * The A2UI messages of the send that were not applied, each with its place
+   * in the request and A2UI's `error` message for it. The rest was applied.
    */
-  a2ui_errors?: A2uiValidationErrorMessage[];
+  a2ui_errors?: A2uiFailure[];
   chat_id: UUID;
   message: SentMessage;
 }
@@ -1106,10 +1120,10 @@ export interface MessageCreateParams {
 
 export interface MessageCreateResponse {
   /**
-   * The A2UI messages of the send that were not applied, in A2UI's error
-   * format. The rest of the list was applied.
+   * The A2UI messages of the send that were not applied, each with its place
+   * in the request and A2UI's `error` message for it. The rest was applied.
    */
-  a2ui_errors?: A2uiValidationErrorMessage[];
+  a2ui_errors?: A2uiFailure[];
   from: string;
   chat_id: UUID;
   created_new_chat: boolean;
@@ -1556,7 +1570,8 @@ export interface MessageWebhookData {
   /**
    * A2A Message metadata. Every `message.received` carries it, with the
    * reader's `a2uiClientCapabilities` and, when the sender sent one, its
-   * `a2uiClientDataModel` (see `MessageReceivedMetadata`).
+   * `a2uiClientDataModel` for the surfaces this agent created (see
+   * `MessageReceivedMetadata`).
    */
   metadata?: Partial<MessageReceivedMetadata>;
 }

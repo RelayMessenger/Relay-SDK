@@ -31,7 +31,7 @@ export interface A2uiSurface {
   surfaceId: string;
   /** A catalog Relay draws: `A2UI_BASIC_CATALOG_ID` or `RELAY_A2UI_CATALOG_ID`. */
   catalogId: string;
-  /** Every component of the card; one has the id `root`. */
+  /** Every component of the card; one has the id `root`. The catalog defines each component and property. */
   components: A2uiComponent[];
   /** The whole data model, sent as an `updateDataModel` with no `path`. */
   dataModel?: Record<string, unknown>;
@@ -87,8 +87,8 @@ const send = (
 /**
  * Sends a new card into a chat: `createSurface`, `updateComponents` and, when
  * `dataModel` is given, `updateDataModel`, in one data part. Messages Relay
- * could not apply come back in `a2ui_errors`; a send it could not apply at all
- * throws a `RelayAPIError` whose `body.a2ui_errors` lists each.
+ * could not apply come back in `a2ui_errors` (`A2uiFailure`); a send it could
+ * not apply at all throws a `RelayAPIError` whose `body.a2ui_errors` lists each.
  */
 export const sendA2uiSurface = (
   client: Pick<Relay, "chats">,

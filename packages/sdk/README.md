@@ -184,7 +184,8 @@ if (tap?.action.name === "confirm_order" && event.event_type === "message.receiv
 `sendA2uiSurface` sends `createSurface`, `updateComponents` and, with
 `dataModel`, `updateDataModel` in one data part. `updateA2uiSurface` sends
 `updateComponents` and `updateDataModel` for a surface already in the chat;
-components replace their namesakes by `id`. `deleteA2uiSurface` sends
+components replace their namesakes by `id`. A surface's first
+`updateComponents` holds the component with the id `root`. `deleteA2uiSurface` sends
 `deleteSurface`; when every surface of a Message is deleted, the Message reads
 back with no parts and a non-null `unsent_at`. Each takes the rest of the
 Message as its fourth argument: `text` becomes a text part before the card,
@@ -192,9 +193,12 @@ and `reply_to`, `idempotency_key`, `silent` and `metadata` pass through.
 `a2uiPart` wraps any list of A2UI messages in a data part for
 `relay.chats.messages.send`.
 
-Relay applies each A2UI message on its own. The ones it could not apply come
-back in the response's `a2ui_errors`, in A2UI's `error` format with `path` a
-JSON Pointer into your request. A send that applies nothing throws a
+Relay applies each A2UI message on its own, checked against A2UI's schemas and
+the catalog the surface names; a component, property or value the catalog does
+not define is refused. The messages it could not apply come back in the
+response's `a2ui_errors`: each gives `part_index` and `data_index` in your
+request and `a2ui_message`, A2UI's own `error` message, whose `path` points
+inside the failing message's body. A send that applies nothing throws a
 `RelayAPIError` (404 unknown or deleted surface, 409 a `surfaceId` already live
 in the chat, 422 anything else) whose `body.a2ui_errors` lists each.
 
@@ -203,7 +207,8 @@ catalogs Relay's app draws, in order of preference, `RELAY_A2UI_CATALOG_ID`
 (every basic catalog component and function, plus `PaymentRequest`) and
 `A2UI_BASIC_CATALOG_ID`. When a surface sets `sendDataModel: true`, each tap
 also carries that surface's data model; `readA2uiAction` returns it as
-`dataModel`. Only an agent sends `createSurface`, `updateComponents`,
+`dataModel`. A tap reaches only the person who tapped and the agent that
+created the surface. Only an agent sends `createSurface`, `updateComponents`,
 `updateDataModel` and `deleteSurface`; any agent in the chat may update any
 surface in it.
 
