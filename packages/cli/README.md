@@ -381,3 +381,8 @@ printf '%s' "$STAGING_RELAY_AGENT_TOKEN" |
   relay auth login --profile staging --with-token
 relay profiles list
 ```
+
+Agent creation requires `--subtitle "Helps with your calendar"`, the line under
+its name (up to 60 characters). An interactive terminal asks when it is missing;
+`--json` and non-interactive commands fail instead. Use `--description` for the
+detailed text of what the agent can do (up to 2000 characters), required for public agents.

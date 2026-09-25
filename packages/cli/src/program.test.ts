@@ -118,7 +118,7 @@ describe("CLI command routing", () => {
 
   it("agents create --json refuses a missing session without a terminal", async () => {
     const fetch = vi.fn();
-    const code = await runCLI(["agents", "create", "--json"], {
+    const code = await runCLI(["agents", "create", "--subtitle", "Helps with tasks", "--json"], {
       fetch,
       isInteractive: false,
       stdout: (value) => stdout.push(value),

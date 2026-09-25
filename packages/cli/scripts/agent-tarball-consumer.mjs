@@ -27,7 +27,7 @@ const deps = {
     calls.push({ url: String(url), init });
     if (init.method === "POST") {
       assert.equal(new Headers(init.headers).get("authorization"), "Bearer rel_org_installedFixtureOnly");
-      assert.deepEqual(JSON.parse(init.body), {});
+      assert.deepEqual(JSON.parse(init.body), { subtitle: "Helps with tasks" });
       return Response.json({ agent: card, secret: token, share_url: `https://go.test/@${card.handle}` }, { status: 201 });
     }
     assert.equal(new Headers(init.headers).get("authorization"), init.method === "DELETE" ? "Bearer rel_org_installedFixtureOnly" : `Bearer ${token}`);
@@ -38,7 +38,7 @@ const deps = {
 const consoleAuth = await installedConsoleFixture(consumer, deps.configContext, card);
 deps.consoleLogin = consoleAuth.login;
 deps.fetch = consoleAuth.wrap(deps.fetch);
-assert.equal(await runCLI(["agents", "create", "--json"], deps), 0);
+assert.equal(await runCLI(["agents", "create", "--subtitle", "Helps with tasks", "--json"], deps), 0);
 assert.equal(JSON.parse(output[0]).handle, card.handle);
 assert.equal(JSON.parse(output[0]).token, "stored");
 assert.equal(JSON.parse(output[0]).image_url, card.image_url);
@@ -47,7 +47,7 @@ assert.equal(calls.some(({ init }) => init.method === "PATCH"), false);
 // The front door ships in the tarball and can say what it would do without
 // creating anything, running anything, or needing a terminal.
 const plan = [];
-assert.equal(await runCLI(["connect", "claude", "--dry-run"], {
+assert.equal(await runCLI(["connect", "claude", "--subtitle", "Helps with tasks", "--dry-run"], {
   ...deps, isInteractive: false, stdout: (text) => plan.push(text), stderr: (text) => plan.push(text),
 }), 0);
 assert.match(plan.join(""), /keep running here, and answer your Relay messages with Claude Code from this folder/);

@@ -38,7 +38,7 @@ export const USER_HANDLE: RelayChatHandle = {
   joined_at: "2026-08-30T12:00:00.000Z",
   kind: "user",
   status: "active",
-  about: null,
+  subtitle: null,
   verified: false,
   is_contact: true,
 };
@@ -52,7 +52,7 @@ export const AGENT_HANDLE: RelayChatHandle = {
   joined_at: "2026-08-30T12:00:00.000Z",
   kind: "agent",
   status: "active",
-  about: "Helpful",
+  subtitle: "Helpful",
   verified: true,
   is_contact: true,
 };

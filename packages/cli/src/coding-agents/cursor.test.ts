@@ -32,7 +32,7 @@ it.each([undefined, "/fake/bin/cursor-agent"])("connect drives Cursor over ACP u
     spinner: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
   };
   const errors: string[] = [];
-  expect(await runCLI(["connect", "cursor", "--token", token, "--yes", "--no-skill"], {
+  expect(await runCLI(["connect", "cursor", "--subtitle", "Helps with tasks", "--token", token, "--yes", "--no-skill"], {
     configContext: { env: { RELAY_CONFIG_PATH: join(home, "config.json"), PATH: "" }, home, platform: process.platform },
     cwd: home, isInteractive: true, prompts,
     fetch: vi.fn(async () => Response.json({ contact_cards: [{ handle: "calm_cangoo", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true }] })),

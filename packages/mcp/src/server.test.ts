@@ -169,7 +169,7 @@ describe("approved two-tool MCP", () => {
     expect(METHOD_DOCS.filter(row => row.method.startsWith("client.contacts.")).map(row => row.method))
       .toEqual(["client.contacts.lookup"]);
     expect(METHOD_DOCS.find(row => row.method === "client.contacts.lookup")?.description)
-      .toBe("Send a handle to look up one active contact: a person resolves agents; an agent resolves people and agents. Send a task instead to find the public agents whose name, subtitle, about or skills match it, verified agents first; no match is an empty list.");
+      .toBe("Send a handle to look up one active contact: a person resolves agents; an agent resolves people and agents. Send a task instead to find the public agents whose name, subtitle, description or skills match it, verified agents first; no match is an empty list.");
   });
   it("does not document the reverted agent admission field", () => {
     for (const method of ["client.contactCard.create", "client.contactCard.retrieve", "client.contactCard.update"]) {

@@ -10,7 +10,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "1a145cd9dbf977de1d4f40191ec861825a19f1c7ab637f60fd507eeea0007402";
+  "d724f38784e54027775e518fd70190147fc1af7baaec74943b58e60a98611640";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -37,7 +37,7 @@ describe("locked Relay Server contract", () => {
     const handle = {
       id: "agent", handle: "fixture", kind: "agent",
       joined_at: "2026-09-20T12:00:00Z", image_url: null, display_name: null,
-      about: null, verified: false, is_contact: true,
+      subtitle: null, verified: false, is_contact: true,
       activity_version: "9007199254740993",
       activity: {
         id: "task", text: "Generating image", emoji: "🖼️",
@@ -145,7 +145,7 @@ describe("locked Relay Server contract", () => {
     }
     expect(schemas.CreatePaymentRequestRequest).toHaveProperty("required", ["description", "category"]);
     expect(schemas.PaymentRequest).toHaveProperty("required", [
-      "id", "object", "status", "mode", "amount", "currency", "description", "category", "checkout_url",
+      "id", "object", "status", "mode", "amount", "application_fee_amount", "currency", "description", "category", "checkout_url",
       "expires_at", "metadata", "stripe", "created_at", "updated_at",
     ]);
     expect(document.paths["/v1/payment_requests"]).toHaveProperty("post.operationId", "createPaymentRequest");

@@ -342,10 +342,10 @@ chat.is_request;
 chat.request_expires_at;
 // @ts-expect-error Request sender identity belongs to the private client projection.
 chat.request_sender_id;
-chat.handles[0]!.about satisfies string | null;
+chat.handles[0]!.subtitle satisfies string | null;
 // @ts-expect-error The active public Contact shape uses image_url only.
 chat.handles[0]!.avatar_url;
-// @ts-expect-error The active public Contact shape uses about only.
+// @ts-expect-error The active public Contact shape uses subtitle only.
 chat.handles[0]!.tagline;
 chat.handles[0]!.verified satisfies boolean;
 const userHandle: ChatHandle = {
@@ -355,7 +355,7 @@ const userHandle: ChatHandle = {
   kind: "user",
   display_name: "Alice",
   image_url: null,
-  about: null,
+  subtitle: null,
   verified: false,
   is_contact: true,
 };
@@ -367,7 +367,7 @@ const agentHandle: ChatHandle = {
   kind: "agent",
   display_name: "Echo",
   image_url: "https://cdn.relayapp.im/echo.png",
-  about: "Weather when you need it",
+  subtitle: "Weather when you need it",
   verified: true,
   is_contact: true,
 };

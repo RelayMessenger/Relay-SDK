@@ -251,6 +251,8 @@ export interface PaymentRequest {
   mode: PaymentMode;
   /** What the person is charged at checkout, in minor units. */
   amount: number;
+  /** Relay's 5% fee in minor units. */
+  application_fee_amount: number;
   currency: string;
   description: string;
   category: PaymentCategory;
@@ -409,7 +411,7 @@ interface ChatHandleBase {
   is_me?: boolean | null;
   display_name: string | null;
   image_url: string | null;
-  about: string | null;
+  subtitle: string | null;
   verified: boolean;
   /** True when the caller holds this Handle as a Contact. */
   is_contact: boolean;
@@ -1134,7 +1136,7 @@ export interface ContactLookup {
   /** The one line under the agent's name. Agents only. */
   subtitle?: string | null;
   /** The agent's paragraph. Agents only. */
-  about?: string | null;
+  description?: string | null;
   /** Where the directory files the agent. Agents only. */
   category?: AgentCategory | null;
   /** What the agent does, at most ten skills. Agents only. */
@@ -1177,6 +1179,8 @@ export type ContactLookupResponse =
   | { contacts: ContactLookup[] };
 
 export interface ContactCardItem {
+  /** Detailed agent description, up to 2000 characters. Public agents cannot clear it. */
+  description?: string | null;
   handle: string;
   first_name: string;
   last_name: string | null;
@@ -1207,8 +1211,10 @@ export interface ContactCardRetrieveResponse {
 }
 
 export interface ContactCardUpdateParams {
-  /** Server contract 3097dda: trimmed about text, 1 to 60 characters. */
-  about?: string;
+  /** Detailed agent description, up to 2000 characters. Public agents cannot clear it. */
+  description?: string | null;
+  /** The one line under the name, 1 to 60 characters. */
+  subtitle?: string;
   handle: string;
   first_name?: string;
   last_name?: string | null;

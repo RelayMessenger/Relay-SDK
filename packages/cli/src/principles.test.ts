@@ -62,18 +62,18 @@ it("root and nested help end in the two documentation lines", async () => {
   }
 });
 it("no-input aliases non-interactive without adding a prompt", async () => {
-  const normal = await run(["connect", "claude", "--new", "--dry-run"]);
+  const normal = await run(["connect", "claude", "--subtitle", "Helps with tasks", "--new", "--dry-run"]);
   for (const flag of ["--non-interactive", "--no-input"]) {
-    const r = await run([flag, "connect", "claude", "--new", "--dry-run"]);
+    const r = await run([flag, "connect", "claude", "--subtitle", "Helps with tasks", "--new", "--dry-run"]);
     expect(r.code).toBe(0);
     expect(r.out).not.toContain("Continue?");
     expect(r.err).not.toContain("Continue?");
     expect(normal.out).not.toContain("Continue?");
   }
 });
-it("about validates before any creation request", async () => {
+it("subtitle validates before any creation request", async () => {
   for (const command of [["agents", "create"], ["connect", "codex", "--new"], ["contact-card", "set", "--handle", "test"]]) {
-    for (const about of ["   ", "a".repeat(61)]) expect((await run([...command, "--about", about, "--json"])).code).toBe(2);
+    for (const subtitle of ["   ", "a".repeat(61)]) expect((await run([...command, "--subtitle", subtitle, "--json"])).code).toBe(2);
   }
 });
 it("docs sections keep only the requested H2", () => {
@@ -89,11 +89,11 @@ it("installer output has neither terminal controls nor spinner frames", async ()
 });
 
 // Relay-Server 3097dda request fields: prove the body, not only option parsing.
-it("agent creation forwards trimmed about and omits it when absent", async () => {
+it("agent creation forwards trimmed subtitle and omits it when absent", async () => {
   const { createAgentWithPicture } = await import("./agent-create.js");
   const { agentDependencies } = await import("./agents.js");
-  for (const about of [undefined, "  Helps with your calendar  "]) {
-    const home = await privateHome("cli-principles-20260910-about-");
+  for (const subtitle of [undefined, "  Helps with your calendar  "]) {
+    const home = await privateHome("cli-principles-20260910-subtitle-");
     let body: Record<string, unknown> = {};
     const context = { home, env: { RELAY_CONFIG_PATH: join(home, "config.json") } };
     const console = consoleFixture(context, { handle: "calendar", first_name: "Calendar", image_url: null });
@@ -103,20 +103,21 @@ it("agent creation forwards trimmed about and omits it when absent", async () =>
       return Response.json({ agent: { handle: "calendar", first_name: "Calendar", image_url: null }, secret: "rly_test_about_0123456789", share_url: "https://relayapp.im/calendar" }, { status: 201 });
     }));
     const deps = agentDependencies(context, fetch);
-    await createAgentWithPicture({ apiURL: "https://api.staging.relayapp.im", ...(about === undefined ? {} : { about }) }, deps, fetch);
-    if (about === undefined) expect(body).not.toHaveProperty("about");
-    else expect(body.about).toBe("Helps with your calendar");
+    await createAgentWithPicture({ apiURL: "https://api.staging.relayapp.im", description: "  Detailed agent capabilities  ", ...(subtitle === undefined ? {} : { subtitle }) }, deps, fetch);
+    if (subtitle === undefined) expect(body).not.toHaveProperty("subtitle");
+    else expect(body.subtitle).toBe("Helps with your calendar");
+    expect(body.description).toBe("Detailed agent capabilities");
   }
 });
-it("contact-card set sends the trimmed about field", async () => {
+it("contact-card set sends the trimmed subtitle field", async () => {
   const home = await privateHome("cli-principles-20260910-card-");
   let body: Record<string, unknown> = {};
-  expect(await runCLI(["--agent", "no", "contact-card", "set", "--handle", "calendar", "--about", "  Helps you plan  "], {
+  expect(await runCLI(["--agent", "no", "contact-card", "set", "--handle", "calendar", "--subtitle", "  Helps you plan  "], {
     configContext: { home, env: { RELAY_CONFIG_PATH: join(home, "config.json"), RELAY_AGENT_TOKEN: "rly_test_about_0123456789", RELAY_API_URL: "https://api.staging.relayapp.im" } },
     isInteractive: false, stdout: () => undefined, stderr: () => undefined,
     fetch: async (_url, init) => { body = JSON.parse(String(init?.body)); return Response.json({}); },
   })).toBe(0);
-  expect(body).toEqual({ about: "Helps you plan" });
+  expect(body).toEqual({ subtitle: "Helps you plan" });
 });
 it("API failures retain numeric codes and select not-found exit", async () => {
   const { describeFailure } = await import("./errors.js");
@@ -127,4 +128,20 @@ it("quiet suppresses successful output but not usage errors", async () => {
   expect((await run(["--quiet", "config-path"])).out).toBe("");
   expect((await run(["--quiet", "auth", "logout"])).err).toBe("");
   expect((await run(["--quiet", "--nope"])).err).toContain("unknown option");
+});
+
+it.each([["agents", "create"], ["connect", "codex", "--new"]])("requires a subtitle before creating with %j", async (...command) => {
+  for (const flags of [[], ["--json"], ["--no-input"]]) {
+    const result = await run([...command, ...flags]);
+    expect(result.code).toBe(2);
+    expect(result.err).toContain("An agent needs a subtitle. Pass --subtitle.");
+  }
+});
+
+it("asks for a missing subtitle with the existing text prompt", async () => {
+  const { requireSubtitle } = await import("./agent-create.js");
+  const { vi } = await import("vitest");
+  const text = vi.fn(async () => "  Helps with tasks  ");
+  expect(await requireSubtitle(undefined, { prompts: { text } as unknown as import("./interactive.js").InteractivePrompts })).toBe("Helps with tasks");
+  expect(text).toHaveBeenCalledWith("Subtitle", "", expect.objectContaining({ validate: expect.any(Function) }));
 });

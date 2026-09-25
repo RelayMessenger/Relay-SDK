@@ -51,7 +51,7 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
       return exited;
     });
     let finished = false;
-    const pending = runCLI(["agents", "create"], f.deps).then((code) => { finished = true; return code; });
+    const pending = runCLI(["agents", "create", "--subtitle", "Helps with tasks"], f.deps).then((code) => { finished = true; return code; });
     // Synchronize with the actual session callback, not a separate one-second
     // polling deadline. The enclosing suite still bounds a missing callback.
     await Promise.race([
@@ -71,18 +71,18 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
     const qr = new RegExp(QR_DARK.replace("[", "\\["), "u");
     const live = await fixture();
     live.terminalSession.mockImplementation(async () => exited);
-    expect(await runCLI(["agents", "create"], live.deps)).toBe(0);
+    expect(await runCLI(["agents", "create", "--subtitle", "Helps with tasks"], live.deps)).toBe(0);
     expect(live.terminalSession).toHaveBeenCalledTimes(1);
     expect(live.output.join("")).not.toMatch(qr);
     const plain = await fixture();
-    expect(await runCLI(["--non-interactive", "agents", "create"], plain.deps)).toBe(0);
+    expect(await runCLI(["--non-interactive", "agents", "create", "--subtitle", "Helps with tasks"], plain.deps)).toBe(0);
     expect(plain.terminalSession).not.toHaveBeenCalled();
     expect(plain.output.join("")).toMatch(qr);
   });
   it.each([["--json"], ["--non-interactive"], []])("never opens a persistent session for scripted/JSON or nonTTY create %j", async (...flags) => {
     const f = await fixture();
     const args = flags as string[];
-    expect(await runCLI([...args, "agents", "create"], { ...f.deps, isInteractive: args.length > 0 })).toBe(0);
+    expect(await runCLI([...args, "agents", "create", "--subtitle", "Helps with tasks"], { ...f.deps, isInteractive: args.length > 0 })).toBe(0);
     expect(f.terminalSession).not.toHaveBeenCalled();
   });
   it("reopens a saved identity through interactive auth status without bootstrapping", async () => {
@@ -103,7 +103,7 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
   });
   it("retains created credentials if only terminal presentation fails", async () => {
     const f = await fixture(); f.terminalSession.mockRejectedValueOnce(new Error(token));
-    expect(await runCLI(["agents", "create"], f.deps)).toBe(0);
+    expect(await runCLI(["agents", "create", "--subtitle", "Helps with tasks"], f.deps)).toBe(0);
     expect((await readConfig(f.configContext)).profiles[card.handle]?.agent_token).toBe(token);
     expect(f.output.join("")).not.toContain(token); expect(f.output.join("")).toContain("The agent and its token are unchanged");
   });

@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "b1e534c03fb9d2826ac63ea0d6cc7a0b843276e9", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "efd780128d1f71d90c05947fcf919e3e0d03acbb", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -392,6 +392,11 @@ const validateOpenAPI = () => {
   ]) {
     assert.equal(document.components.schemas[name].properties.message_requests_from, undefined);
   }
+  for (const name of ["ContactCardItem", "SetContactCardResponse", "UpdateContactCardRequest"]) {
+    const description = document.components.schemas[name].properties.description;
+    assert.deepEqual(description.type, ["string", "null"]);
+    assert.equal(description.maxLength, 2000);
+  }
   assert.equal(document.paths["/v1/me"], undefined);
   assert.doesNotMatch(declaredTypes, /\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/u);
   const deletion = document.paths["/v1/agents/{handle}"].delete;
@@ -427,7 +432,7 @@ const validateOpenAPI = () => {
   assert.equal(lookup.post.operationId, "lookupContact");
   assert.equal(
     lookup.post.description,
-    "Send a handle to look up one active contact: a person resolves agents; an agent resolves people and agents. Send a task instead to find the public agents whose name, subtitle, about or skills match it, verified agents first; no match is an empty list.",
+    "Send a handle to look up one active contact: a person resolves agents; an agent resolves people and agents. Send a task instead to find the public agents whose name, subtitle, description or skills match it, verified agents first; no match is an empty list.",
   );
   // The lookup body is one of two closed shapes: the original handle lookup,
   // unchanged, or the task search the Server added with the agent directory.
@@ -470,13 +475,16 @@ const validateOpenAPI = () => {
   assert.deepEqual(contactLookup.required, [
     "id", "handle", "display_name", "kind", "image_url", "image_color", "verified",
   ]);
-  // `about` left the required set and joined the agent-only profile fields the
-  // directory carry added; every property is still one of the two lists.
+  // Agent-only directory profile fields are optional on a contact lookup.
   assert.deepEqual(Object.keys(contactLookup.properties), [
     ...contactLookup.required,
-    "name", "subtitle", "about", "category", "skills", "visibility", "creator",
+    "name", "subtitle", "description", "category", "skills", "visibility", "creator",
   ]);
   assert.equal(contactLookup.additionalProperties, false);
+  assert.equal(contactLookup.properties.description.maxLength, 2000);
+  assert.equal("about" in contactLookup.properties, false);
+  assert.ok(document.components.schemas.PaymentRequest.required.includes("application_fee_amount"));
+  assert.equal(document.components.schemas.PaymentRequest.properties.application_fee_amount.type, "integer");
   assert.deepEqual(contactLookup.properties.kind.enum, ["user", "agent"]);
   assert.equal(
     document.components.schemas.ChatHandle.properties.is_contact.description,

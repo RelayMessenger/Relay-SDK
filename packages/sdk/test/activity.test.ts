@@ -103,7 +103,7 @@ describe("Chat activity", () => {
   it("carries optional activity state on either kind of Chat handle without adding an agent event", () => {
     const handles: ChatHandle[] = (["agent", "user"] as const).map((kind) => ({
       id: state.agent_id, kind, handle: "fixture", joined_at: "2026-09-20T12:00:00Z",
-      display_name: null, image_url: null, about: null, verified: false, is_contact: true,
+      display_name: null, image_url: null, subtitle: null, verified: false, is_contact: true,
       activity_version: state.version, activity: kind === "agent" ? state.activity : null,
     }));
     expect(handles[0]!.activity).toEqual(state.activity);

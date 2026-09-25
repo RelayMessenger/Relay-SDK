@@ -1,3 +1,4 @@
+import { requireSubtitle } from "./agent-create.js";
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
@@ -53,7 +54,7 @@ export interface ConnectOptions {
   new?: boolean;
   handle?: string;
   name?: string;
-  about?: string;
+  subtitle?: string; description?: string;
   image?: string;
   /** A PNG or JPEG on this computer; `--image` also takes an https:// address. */
   avatar?: string;
@@ -367,7 +368,7 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
 export interface AgentIdentity {
   handle?: string;
   name?: string;
-  about?: string;
+  subtitle?: string; description?: string;
   /** A resolved path to a PNG or JPEG on this computer. */
   avatar?: string;
 }
@@ -375,12 +376,12 @@ export interface AgentIdentity {
 /** The plan's first line when an agent will be created: unchanged when nothing
  * was chosen; otherwise the handle, the name, and the rest as dim words. */
 export const createLine = (create: AgentIdentity | undefined, mark: (value: string) => string = (value) => value): string => {
-  const { handle, name, about, avatar } = create ?? {};
-  if (!name && !about && !avatar) return `create a new agent  (${handle ? `@${handle}` : "Relay picks the name"})`;
+  const { handle, name, subtitle, avatar } = create ?? {};
+  if (!name && !subtitle && !avatar) return `create a new agent  (${handle ? `@${handle}` : "Relay picks the name"})`;
   return [
     handle ? `create @${handle}` : "create a new agent",
     ...(name ? [`"${name}"`] : []),
-    ...(about ? [mark(`about: ${about}`)] : []),
+    ...(subtitle ? [mark(`subtitle: ${subtitle}`)] : []),
     ...(avatar ? [mark(`avatar: ${basename(avatar)}`)] : []),
   ].join("  ");
 };
@@ -922,12 +923,13 @@ interface PendingAgent {
   identity: AgentIdentity;
 }
 
-/** Identity flags are optional overrides. The default connect asks nothing about identity. */
+/** Carry the chosen subtitle and optional identity fields into creation. */
 const chooseIdentity = (options: ConnectOptions): AgentIdentity => {
   const identity: AgentIdentity = {
     ...(options.handle ? { handle: options.handle } : {}),
     ...(options.name ? { name: options.name } : {}),
-    ...(options.about ? { about: options.about } : {}),
+    ...(options.subtitle ? { subtitle: options.subtitle } : {}),
+    ...(options.description ? { description: options.description } : {}),
     ...(options.avatar ? { avatar: options.avatar } : {}),
   };
   return identity;
@@ -960,7 +962,8 @@ const resolveAgent = async (
       if (agent) return agent;
     }
   }
-  const identity = chooseIdentity(options);
+  const subtitle = await requireSubtitle(options.subtitle, { prompts: deps.prompts, nonInteractive: options.nonInteractive === true || options.json === true });
+  const identity = chooseIdentity({ ...options, subtitle });
   return { pending: true, apiURL, ...(identity.handle ? { handle: identity.handle } : {}), identity };
 };
 
@@ -984,7 +987,8 @@ const createNewAgent = async (
     ...(deps.profile ? { profile: deps.profile } : {}),
     ...(handle ? { handle } : {}),
     ...(identity.name ? { firstName: identity.name } : {}),
-    ...(identity.about === undefined ? {} : { about: identity.about }),
+    ...(identity.subtitle === undefined ? {} : { subtitle: identity.subtitle }),
+    ...(identity.description === undefined ? {} : { description: identity.description }),
     ...(image ? { image } : {}),
     cwd: deps.cwd,
     home: deps.home,

@@ -23,7 +23,7 @@ describe("Codex start", () => {
     const stderr: string[] = [];
     const configContext = { home, platform: process.platform, env: { PATH: "", RELAY_CONFIG_PATH: join(home, "config.json") } };
     const console = consoleFixture(configContext, { handle: "codex_test", first_name: "Codex", image_url: null });
-    const code = await runCLI(["connect", "codex", "--new", "--yes", "--no-skill", "--json"], {
+    const code = await runCLI(["connect", "codex", "--subtitle", "Helps with tasks", "--new", "--yes", "--no-skill", "--json"], {
       configContext, consoleLogin: console.login,
       cwd: home,
       isInteractive: false,

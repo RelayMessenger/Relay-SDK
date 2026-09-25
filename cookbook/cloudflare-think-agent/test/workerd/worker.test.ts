@@ -103,7 +103,7 @@ function handle(id: string, handleName: string) {
     id,
     joined_at: "2026-09-01T12:00:00.000Z",
     kind: "user",
-    about: null,
+    subtitle: null,
     verified: false,
     ...{ is_contact: true },
   };

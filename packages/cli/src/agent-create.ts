@@ -1,3 +1,5 @@
+import type { InteractivePrompts } from "./interactive.js";
+import { CliError } from "./error-codes.js";
 import { prepareAgentImage, type LocalAgentImage } from "./local-image.js";
 import { uploadAgentImage, type AgentImageUploadResult } from "./agent-image-upload.js";
 import { agentRecord, createAgent, type AgentDependencies, type CreateAgentInput } from "./agents.js";
@@ -48,7 +50,8 @@ export const createAgentWithPicture = async (
     ...(input.apiURL === undefined ? {} : { apiURL: input.apiURL }),
     ...(input.handle === undefined ? {} : { handle: input.handle }),
     ...(input.firstName === undefined ? {} : { firstName: input.firstName }),
-    ...(input.about === undefined ? {} : { about: input.about }),
+    ...(input.subtitle === undefined ? {} : { subtitle: input.subtitle }),
+    ...(input.description === undefined ? {} : { description: input.description }),
     ...(imageURL === undefined ? {} : { imageURL }),
     ...(input.imageRecipe === undefined || localImage ? {} : { imageRecipe: input.imageRecipe }),
     ...(input.makeDefault ? { makeDefault: true } : {}),
@@ -93,3 +96,13 @@ export const incompletePictureMessage = (
     ? `--attachment-id ${image.attachment_id}` : "--image <local-file>";
   return `Agent @${handle} was created and its profile and token are saved. The picture did not go through. Set it on this profile: npx relaymessenger --profile ${profile} contact-card update --handle ${handle} ${retry}${hasRecipe ? " --image-recipe <json-file>" : ""}. Do not create another agent.`;
 };
+
+export async function requireSubtitle(value: string | undefined, options: { prompts?: InteractivePrompts | undefined; nonInteractive?: boolean }): Promise<string> {
+  if (value === undefined) {
+    if (options.nonInteractive || !options.prompts) throw new CliError("An agent needs a subtitle. Pass --subtitle.", "usage");
+    value = await options.prompts.text("Subtitle", "", { validate: text => !text.trim() || [...text.trim()].length > 60 ? "Subtitle must be 1 to 60 characters." : undefined });
+  }
+  const text = value.trim();
+  if (!text || [...text].length > 60) throw new CliError("Subtitle must be 1 to 60 characters.", "usage");
+  return text;
+}

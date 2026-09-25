@@ -49,7 +49,7 @@ const skillLock = JSON.parse(
   ),
 );
 assert.equal(skillLock.api.openapi_sha256, expected);
-assert.equal(skillLock.api.commit, "b1e534c03fb9d2826ac63ea0d6cc7a0b843276e9");
+assert.equal(skillLock.api.commit, "efd780128d1f71d90c05947fcf919e3e0d03acbb");
 assert.equal(skillLock.sdk.commit, "79517a1c9fcb1c82b474cd72ba8bc10197ff363f");
 assert.equal(skillLock.sdk.version, "0.3.1-staging.1");
 // The lock is what a customer's installed skill reads, on every branch, so its
