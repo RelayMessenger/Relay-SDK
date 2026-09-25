@@ -1,3 +1,4 @@
+import { requireSubtitle } from "./agent-create.js";
 import { openSavedAgentSession, savedAgentShareURL, type AgentSessionInput, type AgentSessionDependencies } from "./agent-session.js";
 import { prepareAgentImage } from "./local-image.js";
 import { uploadAgentImage } from "./agent-image-upload.js";
@@ -128,9 +129,15 @@ const agentModeValue = (value: string): string => {
   return value;
 };
 
-const aboutText = (value: string): string => {
+const subtitleText = (value: string): string => {
   const text = value.trim();
-  if (!text || [...text].length > 60) throw new InvalidArgumentError("About must be 1 to 60 characters.");
+  if (!text || [...text].length > 60) throw new InvalidArgumentError("Subtitle must be 1 to 60 characters.");
+  return text;
+};
+
+const descriptionText = (value: string): string => {
+  const text = value.trim();
+  if (!text || [...text].length > 2000) throw new InvalidArgumentError("Description must be 1 to 2000 characters.");
   return text;
 };
 
@@ -301,7 +308,8 @@ export const createProgram = (
     .option("--new", "a new agent")
     .option("--handle <handle>", "the agent's handle")
     .option("--name <name>", "the display name")
-    .option("--about <text>", "the line above the first message", aboutText)
+    .option("--subtitle <text>", "the line under the agent's name, 60 characters", subtitleText)
+    .option("--description <text>", "what it can do, 2000 characters", descriptionText)
     .option("--image <path-or-url>", "a picture file or https:// address")
     .option("--avatar <file>", "a local PNG or JPEG picture")
     // gh's `auth login --with-token` (ledger row P25): the token comes down a
@@ -492,12 +500,13 @@ export const createProgram = (
     .addOption(new Option("--api-url <url>", "the Relay API address to use").argParser(validateApiURL).hideHelp())
     .option("--handle <handle>", "the agent's handle")
     .option("--name <name>", "the display name")
-    .option("--about <text>", "the line above the first message", aboutText)
+    .option("--subtitle <text>", "the line under the agent's name, 60 characters", subtitleText)
+    .option("--description <text>", "what it can do, 2000 characters", descriptionText)
     .option("--image <path-or-url>", "a picture file or https:// address")
     .option("--image-url <url>", "a picture at an https:// address")
     .option("--image-recipe <json-file>", "a Relay picture recipe accompanying the picture")
     .option("--json", "JSON output")
-    .action(async (options: { apiUrl?: string; json?: boolean; handle?: string; name?: string; about?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
+    .action(async (options: { apiUrl?: string; json?: boolean; handle?: string; name?: string; subtitle?: string; description?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
       if (options.handle !== undefined) validateHandle(options.handle);
       if (options.name !== undefined) validateFirstName(options.name);
       if (options.image !== undefined && options.imageUrl !== undefined) throw new Error("Choose --image or --image-url, not both.");
@@ -511,6 +520,10 @@ export const createProgram = (
           throw new Error("Profile already exists; choose a new profile name.");
         }
       }
+      options.subtitle = await requireSubtitle(options.subtitle, {
+        prompts: dependencies.prompts,
+        nonInteractive: globals(command).nonInteractive === true || options.json === true || globals(command).json === true || dependencies.isInteractive === false,
+      });
       const session = await (dependencies.consoleLogin?.() ?? consoleLoginOrReuse({
         context: configContext,
         apiURL: options.apiUrl ?? defaultCreationApiURL(),
@@ -525,7 +538,8 @@ export const createProgram = (
         apiURL: options.apiUrl ?? defaultCreationApiURL(),
         ...(options.handle === undefined ? {} : { handle: options.handle }),
         ...(options.name === undefined ? {} : { firstName: options.name }),
-        ...(options.about === undefined ? {} : { about: options.about }),
+        ...(options.subtitle === undefined ? {} : { subtitle: options.subtitle }),
+        ...(options.description === undefined ? {} : { description: options.description }),
         ...(options.image === undefined ? {} : { image: options.image }),
         ...(options.imageUrl === undefined ? {} : { imageURL: options.imageUrl }),
         ...(imageRecipe === undefined ? {} : { imageRecipe }),
@@ -570,17 +584,19 @@ export const createProgram = (
       if (firstFailure) throw firstFailure;
     });
   agents.command("update").argument("<handle>", "agent handle", handle)
-    .description("update an agent's name or about")
+    .description("update an agent's name or subtitle")
     .option("--name <name>", "the display name")
-    .option("--about <text>", "the line above the first message", aboutText)
+    .option("--subtitle <text>", "the line under the agent's name, 60 characters", subtitleText)
+    .option("--description <text>", "what it can do, 2000 characters", descriptionText)
     .option("--json", "JSON output")
-    .action(async (agentHandle: string, options: { name?: string; about?: string }, command: Command) => {
+    .action(async (agentHandle: string, options: { name?: string; subtitle?: string; description?: string }, command: Command) => {
       const body = {
         handle: agentHandle,
         ...(options.name === undefined ? {} : { first_name: validateFirstName(options.name) }),
-        ...(options.about === undefined ? {} : { about: options.about }),
+        ...(options.subtitle === undefined ? {} : { subtitle: options.subtitle }),
+        ...(options.description === undefined ? {} : { description: options.description }),
       };
-      if (Object.keys(body).length === 1) throw new Error("Choose --name or --about.");
+      if (Object.keys(body).length === 1) throw new Error("Choose --name, --subtitle or --description.");
       const auth = await selectAgentAuth(agentHandle, globals(command).profile, agentDeps);
       await agentDeps.client(auth.token, auth.apiURL).contactCard.update(body, { maxRetries: 0 });
       output(safeMetadata({ ok: true, handle: agentHandle, profile: auth.profile, token: "unchanged" }, [auth.token]));
@@ -1586,7 +1602,7 @@ export const createProgram = (
     .action(async (
       options: {
         handle?: string;
-        name?: string; about?: string;
+        name?: string; subtitle?: string; description?: string;
         firstName?: string;
         lastName?: string;
         imageUrl?: string;
@@ -1609,7 +1625,8 @@ export const createProgram = (
     .description("change this agent's name or picture")
     .option("--handle <handle>", "the agent's handle", handle)
     .option("--name <name>", "the display name")
-    .option("--about <text>", "the line above the first message", aboutText)
+    .option("--subtitle <text>", "the line under the agent's name, 60 characters", subtitleText)
+    .option("--description <text>", "what it can do, 2000 characters", descriptionText)
     .addOption(new Option("--first-name <name>", "the display name").hideHelp())
     .option("--last-name <name>", "an optional second name")
     .option("--clear-last-name", "no second name")
@@ -1621,7 +1638,7 @@ export const createProgram = (
     .action(async (
       options: {
         handle?: string;
-        name?: string; about?: string;
+        name?: string; subtitle?: string; description?: string;
         firstName?: string;
         lastName?: string;
         clearLastName?: boolean;
@@ -1647,7 +1664,8 @@ export const createProgram = (
       const client = selected.client;
       const body = {
         handle: await contactCardHandle(client, options.handle),
-        ...(options.about === undefined ? {} : { about: options.about }),
+        ...(options.subtitle === undefined ? {} : { subtitle: options.subtitle }),
+        ...(options.description === undefined ? {} : { description: options.description }),
         ...((options.name ?? options.firstName) ? { first_name: (options.name ?? options.firstName)! } : {}),
         ...(options.lastName
           ? { last_name: options.lastName }

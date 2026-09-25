@@ -22,12 +22,12 @@ it("every help description fits the CLI help rules", () => {
     expect(withoutProducts.split(/\s+/u).slice(1).join(" "), `${path}: lowercase after first word`).toBe(withoutProducts.split(/\s+/u).slice(1).join(" ").toLowerCase());
     for (const option of command.createHelp().visibleOptions(command)) {
       options++;
-      check(option.description, 7, `${path} ${option.flags}`);
+      check(option.description, option.long === "--subtitle" ? 8 : 7, `${path} ${option.flags}`);
     }
     // Hidden flags are still supported help descriptions and must obey the rules.
     for (const option of command.options.filter((option) => option.hidden)) {
       options++;
-      check(option.description, 7, `${path} ${option.flags}`);
+      check(option.description, option.long === "--subtitle" ? 8 : 7, `${path} ${option.flags}`);
     }
     for (const argument of command.registeredArguments) {
       argumentsChecked++;

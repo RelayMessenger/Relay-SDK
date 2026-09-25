@@ -75,7 +75,7 @@ describe("saved-agent local image promotion", { timeout: 120_000 }, () => {
   it("preflights, creates/persists once, uploads, verifies completion, and PATCHes existing card", async () => {
     const f = await fixture();
     f.deps.configContext.env.RELAY_AGENT_TOKEN = "unrelated-env-identity";
-    expect(await runCLI(["agents", "create", "--image", f.path, "--json"], f.deps)).toBe(0);
+    expect(await runCLI(["agents", "create", "--subtitle", "Helps with tasks", "--image", f.path, "--json"], f.deps)).toBe(0);
     expect(f.calls.map(({ method, path }) => `${method} ${path}`)).toEqual([
       "POST /api/orgs/org_fixture/agents", "GET /v1/contact_card", "POST /v1/attachments", "PUT /fixture/upload", `GET /v1/attachments/${attachmentID}`, "PATCH /v1/contact_card",
     ]);
@@ -85,7 +85,7 @@ describe("saved-agent local image promotion", { timeout: 120_000 }, () => {
   });
   it.each(["upload", "promotion", "pending"] as const)("retains identity/token and can retry existing image after %s failure without another bootstrap", async (failure) => {
     const f = await fixture(); f.setFailure(failure);
-    expect(await runCLI(["agents", "create", "--image", f.path, "--json"], f.deps)).toBe(1);
+    expect(await runCLI(["agents", "create", "--subtitle", "Helps with tasks", "--image", f.path, "--json"], f.deps)).toBe(1);
     const partial = JSON.parse(f.out[0]!);
     expect(partial.handle).toBe(handle); expect(partial.token).toBe("stored"); expect(partial.image.status).toBe("incomplete");
     expect((await readConfig(f.deps.configContext)).profiles[handle]?.agent_token).toBe(secret);
@@ -99,7 +99,7 @@ describe("saved-agent local image promotion", { timeout: 120_000 }, () => {
   it("uses a local rendered snapshot with advanced recipe metadata only on promotion", async () => {
     const f = await fixture(); const recipe = { recipe: { monogram: { initials: "LP" } }, background: { linearGradient: { colors: ["5B9BFA", "0B52C0"] } } };
     const recipePath = join(f.home, "recipe.json"); await writeFile(recipePath, JSON.stringify(recipe));
-    expect(await runCLI(["agents", "create", "--image", f.path, "--image-recipe", recipePath, "--json"], f.deps)).toBe(0);
+    expect(await runCLI(["agents", "create", "--subtitle", "Helps with tasks", "--image", f.path, "--image-recipe", recipePath, "--json"], f.deps)).toBe(0);
     expect(f.calls.find(({ method }) => method === "PATCH")?.body).toEqual({ attachment_id: attachmentID, image_recipe: recipe });
     expect((await readFile(f.path)).equals(png)).toBe(true);
   });

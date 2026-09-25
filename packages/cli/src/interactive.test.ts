@@ -16,7 +16,7 @@ async function fixture() {
   const stdout: string[] = []; const stderr: string[] = [];
   const prompts = {
     select: vi.fn(async () => "exit"), multiselect: vi.fn(async (_m: string, _o: unknown, initial: string[]) => initial), confirm: vi.fn(async () => false),
-    password: vi.fn(async () => token), text: vi.fn(async (_message: string, initial: string) => initial),
+    password: vi.fn(async () => token), text: vi.fn(async (message: string, initial: string) => message === "Subtitle" ? "Helps with tasks" : initial),
     info: vi.fn((message: string) => { stderr.push(message); }),
     intro: vi.fn(), outro: vi.fn(), step: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
     success: vi.fn((message: string) => { stdout.push(`${message}\n`); }),
@@ -87,7 +87,7 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
   // Owner ruling, 2026-09-09: the Relay skill is offered at the end of a
   // successful connect, and nowhere else. Setup must never open with it.
   it.each([
-    [["agents", "create"]],
+    [["agents", "create", "--subtitle", "Helps with tasks"]],
     [["agents"]],
     [["auth", "login"]],
     [["auth"]],
@@ -105,7 +105,7 @@ describe("interactive Commander adapter", { timeout: 120_000 }, () => {
 
   it("a full connect offers the skill exactly once, at the end", async () => {
     const f = await fixture();
-    const code = await runCLI(["connect", "claude", "--new", "--yes", "--allow", "advait", "--no-start"], {
+    const code = await runCLI(["connect", "claude", "--subtitle", "Helps with tasks", "--new", "--yes", "--allow", "advait", "--no-start"], {
       ...f.deps,
       connect: {
         sniff: async () => [{ id: "claude", label: "Claude Code", executable: "/fake/claude", found: true, supported: true }],
@@ -181,10 +181,10 @@ it("interactive creation collects optional fields; blanks keep server defaults",
   f.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   expect(await runCLI(["agents"], f.deps)).toBe(0);
   const post = f.fetch.mock.calls.find(([, init]) => init?.method === "POST")!;
-  expect(JSON.parse(String(post[1]?.body))).toEqual({ handle: "custom_agent", displayName: "Custom Agent" });
+  expect(JSON.parse(String(post[1]?.body))).toEqual({ handle: "custom_agent", displayName: "Custom Agent", subtitle: "Helps with tasks" });
   const blank = await fixture(); blank.prompts.select.mockResolvedValueOnce("create"); blank.prompts.confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
   expect(await runCLI(["agents"], blank.deps)).toBe(0);
-  expect(JSON.parse(String(blank.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body))).toEqual({});
+  expect(JSON.parse(String(blank.fetch.mock.calls.find(([, init]) => init?.method === "POST")![1]?.body))).toEqual({ subtitle: "Helps with tasks" });
   expect(blank.stdout.join("")).toContain(card.handle);
   const saved = await readConfig(blank.deps.configContext);
   expect(saved.profiles[card.handle]?.agent_token).toBe(token);
@@ -215,7 +215,7 @@ it("preserves explicit telemetry opt-outs while keeping credentials out of insta
 it("Create selection needs no extra confirmation and has exactly three concise optional prompts", async () => {
   const f = await fixture(); f.skillPresent.mockResolvedValue(true); f.prompts.select.mockResolvedValueOnce("create");
   expect(await runCLI(["agents"], f.deps)).toBe(0);
-  expect(f.prompts.text.mock.calls.map(([message]) => message)).toEqual(["Handle (optional)", "Name (optional)", "Image (optional)"]);
+  expect(f.prompts.text.mock.calls.map(([message]) => message)).toEqual(["Handle (optional)", "Name (optional)", "Image (optional)", "Subtitle"]);
   expect(f.prompts.confirm).not.toHaveBeenCalled();
   expect(f.prompts.info).toHaveBeenCalledTimes(1);
   expect(f.fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
@@ -225,9 +225,9 @@ it("Create selection needs no extra confirmation and has exactly three concise o
 it("no-name creation shows and saves the identity returned by Console", async () => {
   const f = await fixture();
   await consoleFixture(f.deps.configContext, card).login();
-  expect(await runCLI(["--json", "--no-input", "agents", "create"], f.deps)).toBe(0);
+  expect(await runCLI(["--json", "--no-input", "agents", "create", "--subtitle", "Helps with tasks"], f.deps)).toBe(0);
   const post = f.fetch.mock.calls.find(([, init]) => init?.method === "POST")!;
-  expect(JSON.parse(String(post[1]?.body))).toEqual({});
+  expect(JSON.parse(String(post[1]?.body))).toEqual({ subtitle: "Helps with tasks" });
   expect(JSON.parse(f.stdout.join(""))).toMatchObject({
     handle: card.handle, display_name: card.first_name, profile: card.handle,
   });

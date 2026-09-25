@@ -325,7 +325,7 @@ export const consoleLoginOrReuse = async (
 export interface ConsoleAgentCreateInput {
   handle?: string;
   displayName?: string;
-  about?: string;
+  subtitle?: string; description?: string;
   image?: string;
   imageRecipe?: import("@relaymessenger/sdk").AgentImageRecipe;
   cwd?: string;
@@ -391,7 +391,8 @@ export const createConsoleAgent = async (
         body: JSON.stringify({
           ...(handle === undefined ? {} : { handle }),
           ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
-          ...(input.about === undefined ? {} : { about: input.about }),
+          ...(input.subtitle === undefined ? {} : { subtitle: input.subtitle }),
+          ...(input.description === undefined ? {} : { description: input.description }),
         }),
       });
       break;
