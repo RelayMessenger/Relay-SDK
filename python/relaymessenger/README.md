@@ -76,9 +76,24 @@ the surface's data model when you created it with `send_data_model=True`.
 deleted is removed for everyone. `client_capabilities(event)` lists the
 catalogs the reader's app draws, in order of preference.
 
-Relay applies each A2UI message of a send in order. The ones it did not apply
-come back in the response's `a2ui_errors`; a send that applied nothing raises
-`RelayAPIError` with the same `a2ui_errors`. To send A2UI messages you built
+Relay applies each A2UI message of a send in order. Each one it did not apply
+comes back in the response's `a2ui_errors` as an `A2uiFailure`:
+`part_index` and `data_index` say where the message sits in your request, and
+`a2ui_message` is A2UI's own `error` message for it, its `path` a JSON Pointer
+into that message's body. A send that applied nothing raises `RelayAPIError`
+with the same `a2ui_errors`:
+
+```python
+from relaymessenger import RelayAPIError
+
+try:
+    await send_a2ui_surface(relay, chat_id, "bet-lakers", BET)
+except RelayAPIError as error:
+    for failure in error.a2ui_errors:
+        print(failure["data_index"], failure["a2ui_message"]["error"]["message"])
+```
+
+To send A2UI messages you built
 yourself, use `send_a2ui`, or put `a2ui_part(messages)` in
 `relay.chats.messages.send`. The builders (`surface_messages`,
 `create_surface`, `update_components`, `update_data_model`, `delete_surface`)

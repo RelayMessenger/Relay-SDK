@@ -17,7 +17,7 @@ import urllib.request
 from typing import Any, Dict, List, Mapping, Optional, Tuple, TypedDict, cast
 from urllib.parse import quote
 
-from .a2ui import A2uiErrorMessage
+from .a2ui import A2uiFailure
 
 DEFAULT_BASE_URL = "https://api.relayapp.im"
 
@@ -35,7 +35,7 @@ class SendMessageResponse(TypedDict, total=False):
     #: The sent message; for an A2UI update with no other part, the card's message.
     message: Dict[str, Any]
     #: The A2UI messages of the send that were not applied; the rest were.
-    a2ui_errors: List[A2uiErrorMessage]
+    a2ui_errors: List[A2uiFailure]
 
 
 class RelayAPIError(Exception):
@@ -61,7 +61,7 @@ class RelayAPIError(Exception):
         self.body = body
         raw = body.get("a2ui_errors") if isinstance(body, dict) else None
         #: When A2UI messages were refused and nothing in the send was applied, each one.
-        self.a2ui_errors: List[A2uiErrorMessage] = cast(List[A2uiErrorMessage], raw) if isinstance(raw, list) else []
+        self.a2ui_errors: List[A2uiFailure] = cast(List[A2uiFailure], raw) if isinstance(raw, list) else []
 
     @property
     def retryable(self) -> bool:

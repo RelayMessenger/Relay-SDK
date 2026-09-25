@@ -294,14 +294,19 @@ async def test_a_send_that_applied_nothing_raises_with_a2ui_errors(server: _Serv
         "error": {"status": 409, "code": 1005, "message": "Surface exists.", "doc_url": "https://docs.relayapp.im/x"},
         "success": False,
         "trace_id": "t1",
+        # Relay Server's A2uiFailure (contracts/developer/openapi.yaml at f1200152).
         "a2ui_errors": [
             {
-                "version": "v0.9.1",
-                "error": {
-                    "code": "VALIDATION_FAILED",
-                    "surfaceId": "twice",
-                    "path": "/parts/0/data/0/createSurface/surfaceId",
-                    "message": "Surface exists.",
+                "part_index": 0,
+                "data_index": 0,
+                "a2ui_message": {
+                    "version": "v0.9.1",
+                    "error": {
+                        "code": "VALIDATION_FAILED",
+                        "surfaceId": "twice",
+                        "path": "/surfaceId",
+                        "message": "Surface exists.",
+                    },
                 },
             }
         ],
@@ -314,15 +319,27 @@ async def test_a_send_that_applied_nothing_raises_with_a2ui_errors(server: _Serv
     assert error.a2ui_errors == refused["a2ui_errors"]
     assert len(server.seen) == 1, "a refused send is not retried"
     # Relay's A2UI errors are A2UI error messages.
-    assert not list(CLIENT_VALIDATOR.iter_errors(error.a2ui_errors[0]))
+    failure = error.a2ui_errors[0]
+    assert (failure["part_index"], failure["data_index"]) == (0, 0)
+    assert failure["a2ui_message"]["error"]["path"] == "/surfaceId"
+    assert not list(CLIENT_VALIDATOR.iter_errors(failure["a2ui_message"]))
 
 
 async def test_a_partial_send_returns_a2ui_errors(server: _Server) -> None:
-    applied = {"chat_id": "chat", "message": {"id": "m1"}, "a2ui_errors": [{"version": "v0.9.1", "error": {
-        "code": "VALIDATION_FAILED", "surfaceId": "s", "path": "/parts/0/data/1", "message": "No."}}]}
+    applied = {"chat_id": "chat", "message": {"id": "m1"}, "a2ui_errors": [
+        {"part_index": 0, "data_index": 1, "a2ui_message": {"version": "v0.9.1", "error": {
+            "code": "VALIDATION_FAILED", "surfaceId": "t", "path": "", "message": "No such surface."}}},
+        # A fault in metadata.a2uiClientDataModel has no place in parts.
+        {"part_index": None, "data_index": None, "a2ui_message": {"version": "v0.9.1", "error": {
+            "code": "VALIDATION_FAILED", "surfaceId": "t", "path": "/surfaces", "message": "Not an object."}}},
+    ]}
     server.replies.append((202, applied))
     response = await send_a2ui(Relay("tok", base_url=server.base_url), "chat", [delete_surface("s"), delete_surface("t")])
-    assert response["a2ui_errors"][0]["error"]["path"] == "/parts/0/data/1"
+    errors = response["a2ui_errors"]
+    assert [(e["part_index"], e["data_index"]) for e in errors] == [(0, 1), (None, None)]
+    assert errors[0]["a2ui_message"]["error"]["surfaceId"] == "t"
+    for e in errors:
+        assert not list(CLIENT_VALIDATOR.iter_errors(e["a2ui_message"]))
 
 
 async def test_only_a_keyed_send_is_retried(server: _Server) -> None:

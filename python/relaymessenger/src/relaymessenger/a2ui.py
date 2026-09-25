@@ -11,8 +11,10 @@ renderer is sent unchanged. Components belong to the catalog named by
 so they are plain dicts here.
 
 Relay applies every A2UI message of a send in order. The ones it did not apply
-come back in the response's ``a2ui_errors``; a send that applied nothing raises
-:class:`~relaymessenger.client.RelayAPIError` with ``a2ui_errors`` set.
+come back in the response's ``a2ui_errors`` as :class:`A2uiFailure` (where the
+message sits in the request, and A2UI's own ``error`` message for it); a send
+that applied nothing raises :class:`~relaymessenger.client.RelayAPIError` with
+``a2ui_errors`` set.
 """
 
 from __future__ import annotations
@@ -137,6 +139,20 @@ class A2uiError(_A2uiErrorRequired, total=False):
 class A2uiErrorMessage(TypedDict):
     version: A2uiVersion
     error: A2uiError
+
+
+class A2uiFailure(TypedDict):
+    """One A2UI message Relay did not apply (``A2uiFailure`` in the contract)."""
+
+    #: The data part's index in ``parts``; ``None`` for a fault in
+    #: ``metadata.a2uiClientDataModel``.
+    part_index: Optional[int]
+    #: The message's index in that part's ``data``; ``None`` when the part
+    #: itself, or the metadata, is at fault.
+    data_index: Optional[int]
+    #: A2UI's ``VALIDATION_FAILED`` error, ``path`` a JSON Pointer into the
+    #: failing message's body (for example ``/components/0/text``).
+    a2ui_message: A2uiErrorMessage
 
 
 A2uiClientMessage = Union[A2uiActionMessage, A2uiErrorMessage]
@@ -487,6 +503,7 @@ __all__ = [
     "A2uiDeleteSurfaceMessage",
     "A2uiError",
     "A2uiErrorMessage",
+    "A2uiFailure",
     "A2uiMessage",
     "A2uiServerMessage",
     "A2uiTap",
