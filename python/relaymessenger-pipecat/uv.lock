@@ -2353,7 +2353,7 @@ wheels = [
 
 [[package]]
 name = "relaymessenger"
-version = "0.1.0.dev1"
+version = "0.1.0.dev2"
 source = { editable = "../relaymessenger" }
 dependencies = [
     { name = "websockets" },
@@ -2378,6 +2378,7 @@ provides-extras = ["calls"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "jsonschema", specifier = ">=4.23" },
     { name = "mypy", specifier = ">=1.13" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
