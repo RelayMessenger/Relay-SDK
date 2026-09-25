@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server b1e534c03fb9d2826ac63ea0d6cc7a0b843276e9
- * OpenAPI 1a145cd9dbf977de1d4f40191ec861825a19f1c7ab637f60fd507eeea0007402
+ * Relay Server 30f867bd05e500431dcfe0d12547dc8d1f7d96d2
+ * OpenAPI 700a1b460ac4f7eef8a6b5e389626d6ded63c7adfcf82e530a93687df269dddf
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -68,7 +68,7 @@ export interface RelayChatHandle {
   kind: "user" | "agent";
   left_at?: string | null;
   status?: "active" | "left" | "removed" | null;
-  about: string | null;
+  subtitle: string | null;
   verified: boolean;
   /** True when the caller holds this Handle as a Contact. */
   is_contact: boolean;
@@ -237,6 +237,8 @@ export interface RelayPaymentRequest {
   status: RelayPaymentStatus;
   mode: RelayPaymentMode;
   amount: number;
+  /** Relay's 5% fee in minor units. */
+  application_fee_amount: number;
   currency: string;
   description: string;
   category: RelayPaymentCategory;

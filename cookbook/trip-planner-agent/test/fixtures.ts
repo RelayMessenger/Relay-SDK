@@ -12,7 +12,7 @@ export const AGENT_HANDLE = {
   joined_at: "2026-09-03T12:00:00Z",
   display_name: "Trip planner",
   image_url: null,
-  about: null,
+  subtitle: null,
   verified: false,
   ...{ is_contact: true },
   is_me: true,
@@ -25,7 +25,7 @@ export const ALICE = {
   joined_at: "2026-09-03T12:00:00Z",
   display_name: "Alice",
   image_url: null,
-  about: null,
+  subtitle: null,
   verified: false,
   ...{ is_contact: true },
 };

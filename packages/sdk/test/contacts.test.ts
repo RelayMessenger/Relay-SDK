@@ -10,7 +10,7 @@ describe("public Contact lookup", () => {
       kind,
       image_url: null,
       image_color: null,
-      about: null,
+      subtitle: null,
       verified: false,
     };
     const calls: Array<{ url: string; init?: RequestInit }> = [];

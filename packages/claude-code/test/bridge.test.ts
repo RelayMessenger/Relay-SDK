@@ -22,7 +22,7 @@ const sender: ChatHandle = {
   joined_at: "2026-09-01T00:00:00.000Z",
   display_name: "Owner",
   image_url: null,
-  about: null,
+  subtitle: null,
   verified: false,
   is_contact: true,
 };
@@ -35,7 +35,7 @@ const agent: ChatHandle = {
   is_me: true,
   display_name: "Relay Agent",
   image_url: null,
-  about: null,
+  subtitle: null,
   verified: false,
   is_contact: true,
 };

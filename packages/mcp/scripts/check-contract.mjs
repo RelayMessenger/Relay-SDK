@@ -41,7 +41,7 @@ assert.equal(
   "Anonymous Agent registration is retired",
 );
 assert.match(sdkTypes, /\bimage_url: string \| null;/u);
-assert.match(sdkTypes, /\babout: string \| null;/u);
+assert.match(sdkTypes, /\bsubtitle: string \| null;/u);
 assert.doesNotMatch(sdkTypes, /\bavatar_url\b/u);
 assert.doesNotMatch(sdkTypes, /\btagline\b/u);
 assert.deepEqual(manifest.repository, {

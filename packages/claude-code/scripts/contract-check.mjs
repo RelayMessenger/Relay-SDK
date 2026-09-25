@@ -122,16 +122,16 @@ if (packageJSON.dependencies?.[lock.relaySdk.package] !== lock.relaySdk.version)
 }
 if (
   !/\bimage_url: string \| null;/u.test(sdkTypes)
-  || !/\babout: string \| null;/u.test(sdkTypes)
+  || !/\bsubtitle: string \| null;/u.test(sdkTypes)
   || /\bavatar_url\b/u.test(sdkTypes)
   || /\btagline\b/u.test(sdkTypes)
 ) {
-  throw new Error("Relay SDK Contact declarations must expose image_url and about only");
+  throw new Error("Relay SDK Contact declarations must expose image_url and subtitle only");
 }
-if (lock.relayServer.commit !== "b1e534c03fb9d2826ac63ea0d6cc7a0b843276e9") {
+if (lock.relayServer.commit !== "30f867bd05e500431dcfe0d12547dc8d1f7d96d2") {
   throw new Error("Relay Server commit lock drifted");
 }
-if (lock.relayServer.sha256 !== "1a145cd9dbf977de1d4f40191ec861825a19f1c7ab637f60fd507eeea0007402") {
+if (lock.relayServer.sha256 !== "700a1b460ac4f7eef8a6b5e389626d6ded63c7adfcf82e530a93687df269dddf") {
   throw new Error("Relay OpenAPI hash lock drifted");
 }
 if (
