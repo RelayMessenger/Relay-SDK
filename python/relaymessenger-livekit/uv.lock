@@ -2702,7 +2702,7 @@ wheels = [
 
 [[package]]
 name = "relaymessenger"
-version = "0.1.0.dev2"
+version = "0.1.0.dev1"
 source = { editable = "../relaymessenger" }
 dependencies = [
     { name = "websockets", version = "16.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
