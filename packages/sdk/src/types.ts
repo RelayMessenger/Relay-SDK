@@ -1179,6 +1179,8 @@ export type ContactLookupResponse =
   | { contacts: ContactLookup[] };
 
 export interface ContactCardItem {
+  /** Detailed agent description, up to 2000 characters. Public agents cannot clear it. */
+  description?: string | null;
   handle: string;
   first_name: string;
   last_name: string | null;
@@ -1209,6 +1211,8 @@ export interface ContactCardRetrieveResponse {
 }
 
 export interface ContactCardUpdateParams {
+  /** Detailed agent description, up to 2000 characters. Public agents cannot clear it. */
+  description?: string | null;
   /** The one line under the name, 1 to 60 characters. */
   subtitle?: string;
   handle: string;

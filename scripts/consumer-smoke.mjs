@@ -127,6 +127,9 @@ try {
   for (const name of ["ContactCardItem", "ContactCardUpdateParams", "ContactCardCreateParams"]) {
     assert.equal(interfaceFields(name).includes("message_requests_from"), false);
   }
+  for (const name of ["ContactCardItem", "ContactCardUpdateParams"]) {
+    assert.ok(interfaceFields(name).includes("description"));
+  }
   assert.doesNotMatch(packedTypes, /\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/u);
   assert.doesNotMatch(packedTypes, /AgentCreate(?:ProfileParams|Params|Response)/);
   assert.doesNotMatch(packedTypes, /\bContactRequestCreate(?:Params|Response)\b/u);

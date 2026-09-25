@@ -4146,6 +4146,12 @@ components:
         - image_url
         - image_color
       properties:
+        description:
+          type:
+            - string
+            - "null"
+          maxLength: 2000
+          description: Detailed agent description. Required for public agents; null clears it otherwise.
         first_name:
           type: string
         last_name:
@@ -5952,6 +5958,12 @@ components:
         - image_url
         - image_color
       properties:
+        description:
+          type:
+            - string
+            - "null"
+          maxLength: 2000
+          description: Detailed agent description. Required for public agents; null clears it otherwise.
         first_name:
           type: string
           description: First name on the contact card
@@ -6283,6 +6295,12 @@ components:
                 image_url:
                   type: string
       properties:
+        description:
+          type:
+            - string
+            - "null"
+          maxLength: 2000
+          description: Detailed agent description. Required for public agents; null clears it otherwise.
         subtitle:
           type: string
           minLength: 1

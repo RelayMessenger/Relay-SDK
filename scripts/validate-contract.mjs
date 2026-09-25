@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "30f867bd05e500431dcfe0d12547dc8d1f7d96d2", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "efd780128d1f71d90c05947fcf919e3e0d03acbb", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -391,6 +391,11 @@ const validateOpenAPI = () => {
     "SetContactCardRequest", "ContactLookup",
   ]) {
     assert.equal(document.components.schemas[name].properties.message_requests_from, undefined);
+  }
+  for (const name of ["ContactCardItem", "SetContactCardResponse", "UpdateContactCardRequest"]) {
+    const description = document.components.schemas[name].properties.description;
+    assert.deepEqual(description.type, ["string", "null"]);
+    assert.equal(description.maxLength, 2000);
   }
   assert.equal(document.paths["/v1/me"], undefined);
   assert.doesNotMatch(declaredTypes, /\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/u);
