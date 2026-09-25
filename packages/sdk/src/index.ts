@@ -113,3 +113,18 @@ export {
   type SelectionReply,
   type SplitSelection,
 } from "./selection.js";
+export {
+  A2UI_BASIC_CATALOG_ID,
+  A2UI_MEDIA_TYPE,
+  A2UI_VERSION,
+  RELAY_A2UI_CATALOG_ID,
+  a2uiPart,
+  deleteA2uiSurface,
+  readA2uiAction,
+  sendA2uiSurface,
+  updateA2uiSurface,
+  type A2uiSendOptions,
+  type A2uiSurface,
+  type A2uiSurfaceUpdate,
+  type A2uiTap,
+} from "./a2ui.js";

@@ -614,6 +614,194 @@ export interface LocationPartResponse {
   reactions: Reaction[] | null;
 }
 
+/**
+ * A2UI v0.9.1 (https://a2ui.org), the messages a card is made of. The shapes
+ * are A2UI's own JSON schemas (`specification/v0_9_1/json/*.json` in
+ * google/A2UI): `server_to_client.json` for what an agent sends to draw a
+ * card, `client_to_server.json` for a tap (`action`) and an `error`. The
+ * version enum is A2UI's (`v0.9` or `v0.9.1`); Relay's contract names v0.9.1.
+ */
+export type A2uiVersion = "v0.9" | "v0.9.1";
+
+/**
+ * One component of a surface: `id`, the catalog's `component` name, and that
+ * component's own properties, for example
+ * `{ id: "title", component: "Text", text: "Lakers win tonight?" }`. Relay
+ * keeps components, properties and enum values it does not know and delivers
+ * them as sent; the catalog named by `createSurface.catalogId` defines them.
+ */
+export interface A2uiComponent {
+  id: string;
+  component: string;
+  [property: string]: unknown;
+}
+
+/** A2UI `createSurface`: starts a surface drawn by the Message that carries it. */
+export interface A2uiCreateSurfaceMessage {
+  version: A2uiVersion;
+  createSurface: {
+    surfaceId: string;
+    /** A catalog Relay draws; see `A2uiClientCapabilities`. */
+    catalogId: string;
+    /** Theme values the catalog defines, for example `{ primaryColor: "#FF0000" }`. */
+    theme?: Record<string, unknown>;
+    /** When true, every tap on the surface carries the surface's data model in `metadata.a2uiClientDataModel`. */
+    sendDataModel?: boolean;
+  };
+}
+
+/** A2UI `updateComponents`: adds or replaces components by `id`. One component, in some update, has the id `root`. */
+export interface A2uiUpdateComponentsMessage {
+  version: A2uiVersion;
+  updateComponents: {
+    surfaceId: string;
+    components: A2uiComponent[];
+  };
+}
+
+/**
+ * A2UI `updateDataModel`: replaces (or creates) the value at `path`, a JSON
+ * Pointer; no `path`, or `/`, is the whole data model. No `value` removes the
+ * key at `path`.
+ */
+export interface A2uiUpdateDataModelMessage {
+  version: A2uiVersion;
+  updateDataModel: {
+    surfaceId: string;
+    path?: string;
+    value?: unknown;
+  };
+}
+
+/** A2UI `deleteSurface`: removes the surface for everyone. */
+export interface A2uiDeleteSurfaceMessage {
+  version: A2uiVersion;
+  deleteSurface: {
+    surfaceId: string;
+  };
+}
+
+/** What an agent sends to draw, change or remove a card (A2UI `server_to_client.json`). */
+export type A2uiServerToClientMessage =
+  | A2uiCreateSurfaceMessage
+  | A2uiUpdateComponentsMessage
+  | A2uiUpdateDataModelMessage
+  | A2uiDeleteSurfaceMessage;
+
+/** The body of an A2UI `action` message: a tap on a Button. */
+export interface A2uiAction {
+  /** The Button's `action.event.name`. */
+  name: string;
+  surfaceId: string;
+  /** The `id` of the Button that was tapped. */
+  sourceComponentId: string;
+  /** ISO 8601 time of the tap. */
+  timestamp: string;
+  /** The Button's `action.event.context`, with every data binding resolved. */
+  context: Record<string, unknown>;
+}
+
+/** A2UI `action`: a person (or an agent) tapped a Button on a surface. */
+export interface A2uiActionMessage {
+  version: A2uiVersion;
+  action: A2uiAction;
+}
+
+/** A2UI's validation error: `path` is a JSON Pointer to the field that failed. */
+export interface A2uiValidationError {
+  code: "VALIDATION_FAILED";
+  surfaceId: string;
+  path: string;
+  message: string;
+}
+
+/** A2UI's generic error: any other `code`. */
+export interface A2uiGenericError {
+  code: string;
+  surfaceId: string;
+  message: string;
+  [property: string]: unknown;
+}
+
+/** A2UI `error`: a renderer (or an agent) reports that it could not use a message. */
+export interface A2uiErrorMessage {
+  version: A2uiVersion;
+  error: A2uiValidationError | A2uiGenericError;
+}
+
+/**
+ * One A2UI message of a send that Relay did not apply, in A2UI's validation
+ * error format. `surfaceId` is empty when the message named none; `path`
+ * points into the request, for example
+ * `/parts/0/data/2/updateComponents/components/0`.
+ */
+export interface A2uiValidationErrorMessage {
+  version: "v0.9.1";
+  error: A2uiValidationError;
+}
+
+/** What a renderer sends back (A2UI `client_to_server.json`). */
+export type A2uiClientToServerMessage = A2uiActionMessage | A2uiErrorMessage;
+
+/** Any A2UI v0.9.1 message a data part may carry. */
+export type A2uiMessage = A2uiServerToClientMessage | A2uiClientToServerMessage;
+
+/**
+ * A2A's DataPart holding A2UI v0.9.1 messages, in order. A Message may carry
+ * any number of data parts beside its other parts. Relay applies each A2UI
+ * message on its own: the ones that fail come back in the response's
+ * `a2ui_errors`, and a send that applies nothing is refused (404, 409 or 422)
+ * with `a2ui_errors` in the error body. Only an agent sends `createSurface`,
+ * `updateComponents`, `updateDataModel` and `deleteSurface`; a send that only
+ * changes an earlier card adds no Message and returns that card.
+ */
+export interface DataPart {
+  type: "data";
+  media_type: "application/a2ui+json";
+  data: A2uiMessage[];
+}
+
+/**
+ * A data part as every reader receives it: the `action` and `error` messages
+ * it carried, as sent, then, for each surface it created, every A2UI message
+ * accepted for that surface since, in order. Replay the list to draw the card.
+ */
+export interface DataPartResponse extends DataPart {
+  reactions: Reaction[] | null;
+}
+
+/** A2UI's `a2uiClientDataModel` (`client_data_model.json`): each surface's data model, by surface id. */
+export interface A2uiClientDataModel {
+  version: A2uiVersion;
+  surfaces: Record<string, Record<string, unknown>>;
+}
+
+/**
+ * A2UI's `a2uiClientCapabilities` (`client_capabilities.json`, keyed by the
+ * protocol family `v0.9`): the catalogs Relay's app draws, in order of
+ * preference. Relay's catalog (`RELAY_A2UI_CATALOG_ID`) is every basic catalog
+ * component and function plus `PaymentRequest`.
+ */
+export interface A2uiClientCapabilities {
+  "v0.9": {
+    supportedCatalogIds: string[];
+    inlineCatalogs?: Array<Record<string, unknown>>;
+  };
+}
+
+/**
+ * A2A Message metadata. A tap on a surface that set `sendDataModel` carries
+ * `a2uiClientDataModel`, passed to the agent unchanged.
+ */
+export interface MessageMetadata {
+  a2uiClientDataModel?: A2uiClientDataModel;
+}
+
+/** The metadata on every `message.received`: the reader's A2UI catalogs, and the sender's data model when it sent one. */
+export interface MessageReceivedMetadata extends MessageMetadata {
+  a2uiClientCapabilities: A2uiClientCapabilities;
+}
+
 export type MessagePart =
   | TextPart
   | MediaPart
@@ -621,7 +809,8 @@ export type MessagePart =
   | ButtonsPart
   | SelectionPart
   | SelectionResponsePart
-  | PaymentPart;
+  | PaymentPart
+  | DataPart;
 
 export interface TextPartResponse extends TextPart {
   mentions?: Array<{
@@ -715,6 +904,7 @@ export type MessagePartResponse =
   | SelectionResponsePartResponse
   | PaymentPartResponse
   | PaymentReceiptPartResponse
+  | DataPartResponse
   | LocationRequestPartResponse
   | LocationPartResponse
   | SystemPartResponse;
@@ -730,6 +920,11 @@ export interface ReplyTo {
 export interface MessageContent {
   parts: MessagePart[];
   reply_to?: ReplyTo;
+  /**
+   * A2A Message metadata. A tap (an A2UI `action`) on a surface that set
+   * `sendDataModel` must carry `a2uiClientDataModel`.
+   */
+  metadata?: MessageMetadata;
   idempotency_key?: string;
   /**
    * Send the Message with no banner and no sound on the recipient's device.
@@ -758,9 +953,11 @@ export interface SentMessage {
     | SelectionResponsePartResponse
     | PaymentPartResponse
     | PaymentReceiptPartResponse
+    | DataPartResponse
     | LocationRequestPartResponse
     | LocationPartResponse
   >;
+  metadata?: MessageMetadata;
   created_at: string;
   sent_at: string | null;
   delivered_at?: string | null;
@@ -782,6 +979,7 @@ export interface Message {
   from_handle?: ChatHandle | null;
   parts?: MessagePartResponse[] | null;
   reply_to?: ReplyTo | null;
+  metadata?: MessageMetadata;
   is_system_message: boolean;
   system_event?: SystemEvent | null;
   is_from_me: boolean;
@@ -837,6 +1035,11 @@ export interface ChatCreateParams {
 }
 
 export interface ChatCreateResponse {
+  /**
+   * The A2UI messages of the send that were not applied, in A2UI's error
+   * format. The rest of the list was applied.
+   */
+  a2ui_errors?: A2uiValidationErrorMessage[];
   chat: Pick<
     Chat,
     "id" | "display_name" | "is_group" | "handles"
@@ -886,6 +1089,11 @@ export interface MessageSendParams {
 }
 
 export interface MessageSendResponse {
+  /**
+   * The A2UI messages of the send that were not applied, in A2UI's error
+   * format. The rest of the list was applied.
+   */
+  a2ui_errors?: A2uiValidationErrorMessage[];
   chat_id: UUID;
   message: SentMessage;
 }
@@ -897,6 +1105,11 @@ export interface MessageCreateParams {
 }
 
 export interface MessageCreateResponse {
+  /**
+   * The A2UI messages of the send that were not applied, in A2UI's error
+   * format. The rest of the list was applied.
+   */
+  a2ui_errors?: A2uiValidationErrorMessage[];
   from: string;
   chat_id: UUID;
   created_new_chat: boolean;
@@ -1340,6 +1553,12 @@ export interface MessageWebhookData {
    */
   silent?: boolean;
   reply_to?: ReplyTo | null;
+  /**
+   * A2A Message metadata. Every `message.received` carries it, with the
+   * reader's `a2uiClientCapabilities` and, when the sender sent one, its
+   * `a2uiClientDataModel` (see `MessageReceivedMetadata`).
+   */
+  metadata?: Partial<MessageReceivedMetadata>;
 }
 
 /**
