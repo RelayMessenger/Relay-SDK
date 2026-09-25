@@ -29,9 +29,9 @@ A2UI_MEDIA_TYPE: Final = "application/a2ui+json"
 #: The A2UI version every message this module builds carries.
 A2UI_VERSION: Final = "v0.9.1"
 #: Relay's catalog: every basic catalog component and function, plus ``PaymentRequest``.
-RELAY_CATALOG_ID: Final = "https://relayapp.im/a2ui/catalog/v1"
+RELAY_A2UI_CATALOG_ID: Final = "https://relayapp.im/a2ui/catalog/v1"
 #: A2UI v0.9.1's basic catalog.
-BASIC_CATALOG_ID: Final = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
+A2UI_BASIC_CATALOG_ID: Final = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
 
 A2uiVersion = Literal["v0.9", "v0.9.1"]
 #: A component of the surface's catalog, for example
@@ -177,7 +177,7 @@ _OMIT: Any = object()
 def create_surface(
     surface_id: str,
     *,
-    catalog_id: str = RELAY_CATALOG_ID,
+    catalog_id: str = RELAY_A2UI_CATALOG_ID,
     theme: Optional[Mapping[str, Any]] = None,
     send_data_model: Optional[bool] = None,
 ) -> A2uiCreateSurfaceMessage:
@@ -219,12 +219,12 @@ def delete_surface(surface_id: str) -> A2uiDeleteSurfaceMessage:
     return {"version": A2UI_VERSION, "deleteSurface": {"surfaceId": surface_id}}
 
 
-def card(
+def surface_messages(
     surface_id: str,
     components: Sequence[A2uiComponent],
     *,
     data_model: Any = _OMIT,
-    catalog_id: str = RELAY_CATALOG_ID,
+    catalog_id: str = RELAY_A2UI_CATALOG_ID,
     theme: Optional[Mapping[str, Any]] = None,
     send_data_model: Optional[bool] = None,
 ) -> List[A2uiServerMessage]:
@@ -257,8 +257,10 @@ async def send_a2ui(
     text: Optional[str] = None,
     reply_to: Optional[ReplyTo] = None,
     idempotency_key: Optional[str] = None,
+    silent: Optional[bool] = None,
 ) -> SendMessageResponse:
-    """Send A2UI messages to a chat, after an optional ``text`` part."""
+    """Send A2UI messages to a chat, after an optional ``text`` part. With no
+    ``text``, the chat list and notification show the card's first ``Text``."""
     parts: List[Dict[str, Any]] = []
     if text is not None:
         parts.append({"type": "text", "value": text})
@@ -268,25 +270,28 @@ async def send_a2ui(
         message["reply_to"] = dict(reply_to)
     if idempotency_key is not None:
         message["idempotency_key"] = idempotency_key
+    if silent is not None:
+        message["silent"] = silent
     return await relay.chats.messages.send(chat_id, {"message": message})
 
 
-async def send_card(
+async def send_a2ui_surface(
     relay: Relay,
     chat_id: str,
     surface_id: str,
     components: Sequence[A2uiComponent],
     *,
     data_model: Any = _OMIT,
-    catalog_id: str = RELAY_CATALOG_ID,
+    catalog_id: str = RELAY_A2UI_CATALOG_ID,
     theme: Optional[Mapping[str, Any]] = None,
     send_data_model: Optional[bool] = None,
     text: Optional[str] = None,
     reply_to: Optional[ReplyTo] = None,
     idempotency_key: Optional[str] = None,
+    silent: Optional[bool] = None,
 ) -> SendMessageResponse:
-    """Send a new card (:func:`card`). The response's ``message`` is the card's message."""
-    messages = card(
+    """Send a new card (:func:`surface_messages`). The response's ``message`` is the card's message."""
+    messages = surface_messages(
         surface_id,
         components,
         data_model=data_model,
@@ -294,10 +299,12 @@ async def send_card(
         theme=theme,
         send_data_model=send_data_model,
     )
-    return await send_a2ui(relay, chat_id, messages, text=text, reply_to=reply_to, idempotency_key=idempotency_key)
+    return await send_a2ui(
+        relay, chat_id, messages, text=text, reply_to=reply_to, idempotency_key=idempotency_key, silent=silent
+    )
 
 
-async def update_card(
+async def update_a2ui_surface(
     relay: Relay,
     chat_id: str,
     surface_id: str,
@@ -320,11 +327,11 @@ async def update_card(
     if data_model is not _OMIT or path is not None:
         messages.append(update_data_model(surface_id, data_model, path=path))
     if not messages:
-        raise ValueError("update_card needs components, data_model or path.")
+        raise ValueError("update_a2ui_surface needs components, data_model or path.")
     return await send_a2ui(relay, chat_id, messages, text=text, idempotency_key=idempotency_key)
 
 
-async def delete_card(
+async def delete_a2ui_surface(
     relay: Relay, chat_id: str, surface_id: str, *, idempotency_key: Optional[str] = None
 ) -> SendMessageResponse:
     """``deleteSurface``. A message whose every surface is deleted reads back
@@ -405,7 +412,7 @@ def a2ui_messages(payload: Union[Mapping[str, Any], str, bytes]) -> List[A2uiMes
     ]
 
 
-def read_a2ui_taps(payload: Union[Mapping[str, Any], str, bytes]) -> List[A2uiTap]:
+def read_a2ui_actions(payload: Union[Mapping[str, Any], str, bytes]) -> List[A2uiTap]:
     """The taps in a ``message.received`` event; empty for any other event."""
     event = _event(payload)
     if event.get("event_type") != "message.received":
@@ -444,9 +451,9 @@ def read_a2ui_taps(payload: Union[Mapping[str, Any], str, bytes]) -> List[A2uiTa
     return taps
 
 
-def read_a2ui_tap(payload: Union[Mapping[str, Any], str, bytes]) -> Optional[A2uiTap]:
+def read_a2ui_action(payload: Union[Mapping[str, Any], str, bytes]) -> Optional[A2uiTap]:
     """The first tap in a ``message.received`` event, or ``None``."""
-    taps = read_a2ui_taps(payload)
+    taps = read_a2ui_actions(payload)
     return taps[0] if taps else None
 
 
@@ -464,8 +471,8 @@ def client_capabilities(payload: Union[Mapping[str, Any], str, bytes]) -> List[s
 __all__ = [
     "A2UI_MEDIA_TYPE",
     "A2UI_VERSION",
-    "BASIC_CATALOG_ID",
-    "RELAY_CATALOG_ID",
+    "A2UI_BASIC_CATALOG_ID",
+    "RELAY_A2UI_CATALOG_ID",
     "A2uiAction",
     "A2uiActionMessage",
     "A2uiCatalogs",
@@ -490,17 +497,17 @@ __all__ = [
     "A2uiVersion",
     "a2ui_messages",
     "a2ui_part",
-    "card",
+    "surface_messages",
     "client_capabilities",
     "create_surface",
-    "delete_card",
+    "delete_a2ui_surface",
     "delete_surface",
     "is_a2ui_part",
-    "read_a2ui_tap",
-    "read_a2ui_taps",
+    "read_a2ui_action",
+    "read_a2ui_actions",
     "send_a2ui",
-    "send_card",
-    "update_card",
+    "send_a2ui_surface",
+    "update_a2ui_surface",
     "update_components",
     "update_data_model",
 ]

@@ -18,15 +18,16 @@ Python 3.10 or newer. It uses only Relay's public API with the agent's token.
 
 A card is an A2UI v0.9.1 surface in a message part,
 `{"type": "data", "media_type": "application/a2ui+json", "data": [...]}`.
-`send_card` creates the surface, sends its components and, when you give one,
-its data model. Components come from Relay's catalog (`RELAY_CATALOG_ID`, the
-A2UI basic catalog plus `PaymentRequest`); one must have the id `root`:
+`send_a2ui_surface` creates the surface, sends its components and, when you
+give one, its data model. Components come from Relay's catalog
+(`RELAY_A2UI_CATALOG_ID`, the A2UI basic catalog plus `PaymentRequest`) unless
+you pass `catalog_id`; one must have the id `root`:
 
 ```python
 import os
 
 from relaymessenger import Relay
-from relaymessenger.a2ui import read_a2ui_tap, send_card, update_card
+from relaymessenger.a2ui import read_a2ui_action, send_a2ui_surface, update_a2ui_surface
 
 relay = Relay(os.environ["RELAY_AGENT_TOKEN"])
 
@@ -45,21 +46,21 @@ BET = [
     },
 ]
 
-await send_card(relay, chat_id, "bet-lakers", BET, data_model={"status": "Open"})
+await send_a2ui_surface(relay, chat_id, "bet-lakers", BET, data_model={"status": "Open"})
 ```
 
 A tap on the button reaches your agent as `message.received`, through its
 webhook or the Agent WebSocket, with the A2UI `action` in a data part.
-`read_a2ui_tap` takes the event, or its raw JSON body, and returns the tap or
-`None`. Answer by changing the same surface: `update_card` changes the card in
-place for everyone in the chat and adds no message:
+`read_a2ui_action` takes the event, or its raw JSON body, and returns the tap
+or `None`. Answer by changing the same surface: `update_a2ui_surface` changes
+the card in place for everyone in the chat and adds no message:
 
 ```python
 async def on_event(event: dict) -> None:
-    tap = read_a2ui_tap(event)
+    tap = read_a2ui_action(event)
     if tap is None or tap.name != "place_bet":
         return
-    await update_card(
+    await update_a2ui_surface(
         relay,
         tap.chat_id,
         tap.surface_id,
@@ -71,19 +72,18 @@ async def on_event(event: dict) -> None:
 
 `tap.context` is the button's `action.event.context`, and `tap.data_model` is
 the surface's data model when you created it with `send_data_model=True`.
-`delete_card` removes the surface; a message whose every surface is deleted is
-removed for everyone. `client_capabilities(event)` lists the catalogs the
-reader's app draws.
+`delete_a2ui_surface` removes the surface; a message whose every surface is
+deleted is removed for everyone. `client_capabilities(event)` lists the
+catalogs the reader's app draws, in order of preference.
 
 Relay applies each A2UI message of a send in order. The ones it did not apply
-come back in the response's `a2ui_errors`, each an A2UI `error` message with a
-JSON Pointer `path`; a send that applied nothing raises `RelayAPIError` with
-the same `a2ui_errors`. To send A2UI messages you built yourself, use
-`send_a2ui`, or put `a2ui_part(messages)` in `relay.chats.messages.send`. The
-builders (`card`, `create_surface`, `update_components`, `update_data_model`,
-`delete_surface`) and the types (`A2uiDataPart`, `A2uiServerMessage`,
-`A2uiActionMessage`, `A2uiErrorMessage`, ...) follow A2UI v0.9.1's schemas field
-for field.
+come back in the response's `a2ui_errors`; a send that applied nothing raises
+`RelayAPIError` with the same `a2ui_errors`. To send A2UI messages you built
+yourself, use `send_a2ui`, or put `a2ui_part(messages)` in
+`relay.chats.messages.send`. The builders (`surface_messages`,
+`create_surface`, `update_components`, `update_data_model`, `delete_surface`)
+and the types (`A2uiDataPart`, `A2uiServerMessage`, `A2uiActionMessage`,
+`A2uiErrorMessage`, ...) follow A2UI v0.9.1's schemas field for field.
 
 ## Answer a Call
 

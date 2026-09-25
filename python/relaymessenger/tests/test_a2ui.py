@@ -22,20 +22,20 @@ from referencing import Registry, Resource
 from relaymessenger import Relay, RelayAPIError, a2ui
 from relaymessenger.a2ui import (
     A2UI_MEDIA_TYPE,
-    BASIC_CATALOG_ID,
-    RELAY_CATALOG_ID,
+    A2UI_BASIC_CATALOG_ID,
+    RELAY_A2UI_CATALOG_ID,
     a2ui_messages,
     a2ui_part,
-    card,
+    surface_messages,
     client_capabilities,
     create_surface,
-    delete_card,
+    delete_a2ui_surface,
     delete_surface,
-    read_a2ui_tap,
-    read_a2ui_taps,
+    read_a2ui_action,
+    read_a2ui_actions,
     send_a2ui,
-    send_card,
-    update_card,
+    send_a2ui_surface,
+    update_a2ui_surface,
     update_components,
     update_data_model,
 )
@@ -96,10 +96,10 @@ def test_the_schemas_reject_what_they_should() -> None:
 
 
 def test_card_is_relay_servers_bet_card_and_valid_a2ui() -> None:
-    messages = card("bet-lakers", BET_COMPONENTS, data_model={"status": "Open"}, catalog_id=BASIC_CATALOG_ID)
+    messages = surface_messages("bet-lakers", BET_COMPONENTS, data_model={"status": "Open"}, catalog_id=A2UI_BASIC_CATALOG_ID)
     # server/test/a2ui.test.ts betCard("bet-lakers"): create, components, model.
     assert messages == [
-        {"version": "v0.9.1", "createSurface": {"surfaceId": "bet-lakers", "catalogId": BASIC_CATALOG_ID}},
+        {"version": "v0.9.1", "createSurface": {"surfaceId": "bet-lakers", "catalogId": A2UI_BASIC_CATALOG_ID}},
         {"version": "v0.9.1", "updateComponents": {"surfaceId": "bet-lakers", "components": BET_COMPONENTS}},
         {"version": "v0.9.1", "updateDataModel": {"surfaceId": "bet-lakers", "value": {"status": "Open"}}},
     ]
@@ -118,7 +118,7 @@ def test_builders_cover_every_server_to_client_message() -> None:
         "version": "v0.9.1",
         "createSurface": {
             "surfaceId": "s",
-            "catalogId": RELAY_CATALOG_ID,
+            "catalogId": RELAY_A2UI_CATALOG_ID,
             "theme": {"primaryColor": "#FF0000"},
             "sendDataModel": True,
         },
@@ -148,7 +148,7 @@ def test_the_fixture_tap_is_valid_a2ui_and_reads_back() -> None:
     action = event["data"]["parts"][1]["data"][0]
     assert not list(CLIENT_VALIDATOR.iter_errors(action))
 
-    taps = read_a2ui_taps(event)
+    taps = read_a2ui_actions(event)
     assert len(taps) == 1
     tap = taps[0]
     assert (tap.name, tap.surface_id, tap.source_component_id) == ("place_bet", "bet-lakers", "bet")
@@ -160,8 +160,8 @@ def test_the_fixture_tap_is_valid_a2ui_and_reads_back() -> None:
     assert tap.sender_handle == "advait"
     assert tap.data_model is None
     # The raw webhook body and its text read the same.
-    assert read_a2ui_tap(raw) == tap
-    assert read_a2ui_tap(raw.decode()) == tap
+    assert read_a2ui_action(raw) == tap
+    assert read_a2ui_action(raw.decode()) == tap
     assert a2ui_messages(event) == [action]
 
 
@@ -171,23 +171,23 @@ def test_a_tap_carries_the_surfaces_data_model() -> None:
         "version": "v0.9.1",
         "surfaces": {"bet-lakers": {"stake": 75}},
     }
-    tap = read_a2ui_tap(event)
+    tap = read_a2ui_action(event)
     assert tap is not None and tap.data_model == {"stake": 75}
 
 
 def test_only_message_received_carries_taps() -> None:
     event = json.loads(RECEIVED.read_text())
-    assert read_a2ui_taps({**event, "event_type": "message.sent"}) == []
-    assert read_a2ui_taps({**event, "event_type": "reaction.added"}) == []
+    assert read_a2ui_actions({**event, "event_type": "message.sent"}) == []
+    assert read_a2ui_actions({**event, "event_type": "reaction.added"}) == []
     event["data"]["parts"] = [event["data"]["parts"][0]]
-    assert read_a2ui_tap(event) is None
+    assert read_a2ui_action(event) is None
     # A data part of another media type is not A2UI.
     event["data"]["parts"] = [{"type": "data", "media_type": "application/json", "data": [{"action": {}}]}]
     assert a2ui_messages(event) == []
 
 
 def test_client_capabilities_lists_the_apps_catalogs() -> None:
-    assert client_capabilities(json.loads(RECEIVED.read_text())) == [RELAY_CATALOG_ID, BASIC_CATALOG_ID]
+    assert client_capabilities(json.loads(RECEIVED.read_text())) == [RELAY_A2UI_CATALOG_ID, A2UI_BASIC_CATALOG_ID]
     assert client_capabilities({"event_type": "message.received", "data": {"parts": []}}) == []
 
 
@@ -244,10 +244,17 @@ def server() -> Iterator[_Server]:
     s.stop()
 
 
-async def test_send_card_posts_the_data_part(server: _Server) -> None:
+async def test_send_a2ui_surface_posts_the_data_part(server: _Server) -> None:
     relay = Relay("tok", base_url=server.base_url + "/")
-    response = await send_card(
-        relay, "chat/1", "bet-lakers", BET_COMPONENTS, data_model={"status": "Open"}, text="Your bet"
+    response = await send_a2ui_surface(
+        relay,
+        "chat/1",
+        "bet-lakers",
+        BET_COMPONENTS,
+        data_model={"status": "Open"},
+        text="Your bet",
+        reply_to={"message_id": "m0", "part_index": 0},
+        silent=True,
     )
     method, path, headers, body = server.seen[0]
     assert (method, path) == ("POST", "/v1/chats/chat%2F1/messages")
@@ -256,17 +263,19 @@ async def test_send_card_posts_the_data_part(server: _Server) -> None:
     assert "idempotency-key" not in headers
     parts = body["message"]["parts"]
     assert parts[0] == {"type": "text", "value": "Your bet"}
-    assert parts[1] == a2ui_part(card("bet-lakers", BET_COMPONENTS, data_model={"status": "Open"}))
+    assert parts[1] == a2ui_part(surface_messages("bet-lakers", BET_COMPONENTS, data_model={"status": "Open"}))
     assert parts[1]["media_type"] == A2UI_MEDIA_TYPE
+    assert body["message"]["reply_to"] == {"message_id": "m0", "part_index": 0}
+    assert body["message"]["silent"] is True
     assert response["message"]["id"] == "m1"
 
 
 async def test_update_and_delete_change_the_same_surface(server: _Server) -> None:
     relay = Relay("tok", base_url=server.base_url)
     done = [{"id": "body", "component": "Column", "children": ["title", "status"]}]
-    await update_card(relay, "chat", "bet-lakers", components=done, data_model="Done", path="/status")
-    await update_card(relay, "chat", "bet-lakers", path="/stake")
-    await delete_card(relay, "chat", "bet-lakers", idempotency_key="del-1")
+    await update_a2ui_surface(relay, "chat", "bet-lakers", components=done, data_model="Done", path="/status")
+    await update_a2ui_surface(relay, "chat", "bet-lakers", path="/stake")
+    await delete_a2ui_surface(relay, "chat", "bet-lakers", idempotency_key="del-1")
     update, remove, delete = (seen[3]["message"] for seen in server.seen)
     assert update == {
         "parts": [
@@ -277,7 +286,7 @@ async def test_update_and_delete_change_the_same_surface(server: _Server) -> Non
     assert delete == {"parts": [a2ui_part([delete_surface("bet-lakers")])], "idempotency_key": "del-1"}
     assert server.seen[2][2]["idempotency-key"] == "del-1"
     with pytest.raises(ValueError):
-        await update_card(relay, "chat", "bet-lakers")
+        await update_a2ui_surface(relay, "chat", "bet-lakers")
 
 
 async def test_a_send_that_applied_nothing_raises_with_a2ui_errors(server: _Server) -> None:
@@ -299,7 +308,7 @@ async def test_a_send_that_applied_nothing_raises_with_a2ui_errors(server: _Serv
     }
     server.replies.append((409, refused))
     with pytest.raises(RelayAPIError) as caught:
-        await send_card(Relay("tok", base_url=server.base_url), "chat", "twice", BET_COMPONENTS)
+        await send_a2ui_surface(Relay("tok", base_url=server.base_url), "chat", "twice", BET_COMPONENTS)
     error = caught.value
     assert (error.status, error.code, error.trace_id, str(error)) == (409, 1005, "t1", "Surface exists.")
     assert error.a2ui_errors == refused["a2ui_errors"]
@@ -351,12 +360,12 @@ def test_the_readme_card_is_valid_a2ui() -> None:
     found = re.search(r"^BET = (\[.*?^\])$", readme, re.S | re.M)
     assert found, "README defines BET"
     components = ast.literal_eval(found.group(1))
-    assert_valid_server_messages(list(card("bet-lakers", components, data_model={"status": "Open"})))
+    assert_valid_server_messages(list(surface_messages("bet-lakers", components, data_model={"status": "Open"})))
     done = [{"id": "body", "component": "Column", "children": ["title", "status"]}]
     assert_valid_server_messages([update_components("bet-lakers", done), update_data_model("bet-lakers", "Done", path="/status")])
     # The README's button is the one the fixture tap names.
     button = next(c for c in components if c["component"] == "Button")
-    tap = read_a2ui_tap(RECEIVED.read_bytes())
+    tap = read_a2ui_action(RECEIVED.read_bytes())
     assert tap is not None
     assert (button["id"], button["action"]["event"]["name"], button["action"]["event"]["context"]) == (
         tap.source_component_id,
