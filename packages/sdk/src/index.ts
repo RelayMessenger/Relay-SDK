@@ -25,6 +25,7 @@ export {
 } from "./calls/call-room.js";
 export {
   RelayAPIError,
+  RelayUnknownEventTypeError,
   RelayWebhookConfiguredError,
   type RelayAPIErrorOptions,
   type RelayWebhookConfiguredErrorOptions,

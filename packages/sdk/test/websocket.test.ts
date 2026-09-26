@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import Relay, {
+  RelayUnknownEventTypeError,
   RelayWebhookConfiguredError,
   runWebSocket,
   type ContactAddedWebhookEvent,
@@ -405,6 +406,68 @@ it.each([
   await expect(running).rejects.toThrow("invalid event frame");
   expect(callbacks).toBe(0);
   expect(socket.sent).toEqual([]);
+});
+
+it("skips and ACKs an event type this release does not know, reports it once, and delivers the next event", async () => {
+  const received: string[] = [];
+  const errors: unknown[] = [];
+  const { controller, running } = run(client(), {
+    onEvent: async (_event, context) => {
+      received.push(context.sequence);
+    },
+    onError: (error) => {
+      errors.push(error);
+    },
+  });
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  const socket = FakeWebSocket.latest;
+  emitFrame(socket, ready());
+  const future = { ...envelope(), event_type: "future.event", data: { anything: true } };
+  emitFrame(socket, { type: "event", sequence: "1", event: future });
+  emitFrame(socket, { type: "event", sequence: "2", event: future });
+  emitFrame(socket, eventFrame("3"));
+  await waitFor(() => socket.sent.length === 3);
+
+  expect(received).toEqual(["3"]);
+  expect(socket.sent.map(JSON.parse)).toEqual([
+    { type: "ack", through_sequence: "1" },
+    { type: "ack", through_sequence: "2" },
+    { type: "ack", through_sequence: "3" },
+  ]);
+  expect(socket.closeCalls).toEqual([]);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(RelayUnknownEventTypeError);
+  expect(errors[0]).toMatchObject({ eventType: "future.event", sequence: "1" });
+
+  controller.abort();
+  await running;
+});
+
+it.each([
+  ["a missing event_type", { event_type: undefined }],
+  ["a numeric event_type", { event_type: 7 }],
+  ["an empty event_type", { event_type: "" }],
+  ["an unknown event_type with no event_id", { event_type: "future.event", event_id: "nope" }],
+])("still stops on an event frame with %s", async (_name, override) => {
+  let callbacks = 0;
+  const { running } = run(client(), {
+    onEvent: async () => {
+      callbacks += 1;
+    },
+  });
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  const socket = FakeWebSocket.latest;
+  emitFrame(socket, ready());
+  emitFrame(socket, {
+    type: "event",
+    sequence: "1",
+    event: { ...envelope(), ...override },
+  });
+
+  await expect(running).rejects.toThrow("invalid event frame");
+  expect(callbacks).toBe(0);
+  expect(socket.sent).toEqual([]);
+  expect(socket.closeCalls.at(-1)?.code).toBe(4002);
 });
 
 it("delivers typed contact.added and contact.removed events before cumulative ACKs", async () => {

@@ -1,5 +1,8 @@
 import NodeWebSocket from "ws";
-import { RelayWebhookConfiguredError } from "./errors.js";
+import {
+  RelayUnknownEventTypeError,
+  RelayWebhookConfiguredError,
+} from "./errors.js";
 import type {
   RelayWebhookEvent,
   WebSocketDisconnectFrame,
@@ -81,6 +84,12 @@ export interface WebSocketRunOptions {
    * Resolve only after that snapshot is durably committed.
    */
   onFullSync(context: WebSocketFullSyncContext): Promise<void>;
+  /**
+   * Connection failures before each reconnect, and a
+   * `RelayUnknownEventTypeError` the first time an event type this release
+   * does not know arrives. Such events are skipped and acknowledged; upgrade
+   * the SDK to receive them.
+   */
   onError?(error: unknown): void;
 }
 
@@ -208,7 +217,18 @@ const parseReady = (value: unknown): WebSocketReadyFrame & { observational?: tru
   return value as unknown as WebSocketReadyFrame & { observational?: true };
 };
 
-const parseEvent = (value: unknown): WebSocketEventFrame => {
+/**
+ * A well-formed event frame. `known` is false when its `event_type` is one
+ * this SDK release does not carry yet: Relay adds event types, and a new type
+ * reaches a running agent before the agent upgrades, so such an event is
+ * skipped and acknowledged, never fatal. Every other malformation still is.
+ */
+interface ParsedEventFrame {
+  frame: WebSocketEventFrame;
+  known: boolean;
+}
+
+const parseEvent = (value: unknown): ParsedEventFrame => {
   if (
     !isRecord(value)
     || !hasExactKeys(value, ["type", "sequence", "event"])
@@ -217,7 +237,8 @@ const parseEvent = (value: unknown): WebSocketEventFrame => {
     || !isRecord(value.event)
     || value.event.api_version !== "v1"
     || value.event.webhook_version !== "2026-08-30"
-    || !WEBHOOK_EVENT_TYPES.has(String(value.event.event_type))
+    || typeof value.event.event_type !== "string"
+    || value.event.event_type.length === 0
     || !validUUID(value.event.event_id)
     || typeof value.event.created_at !== "string"
     || typeof value.event.trace_id !== "string"
@@ -228,7 +249,10 @@ const parseEvent = (value: unknown): WebSocketEventFrame => {
       "Relay WebSocket received an invalid event frame.",
     );
   }
-  return value as unknown as WebSocketEventFrame;
+  return {
+    frame: value as unknown as WebSocketEventFrame,
+    known: WEBHOOK_EVENT_TYPES.has(value.event.event_type as string),
+  };
 };
 
 const parseFullSync = (value: unknown): WebSocketFullSyncFrame => {
@@ -424,6 +448,7 @@ const runConnection = (
   options: WebSocketRunOptions,
   Constructor: WebSocketConstructor,
   onReady: (frame: WebSocketReadyFrame & { observational?: true }) => void,
+  onUnknownEvent: (eventType: string, sequence: string) => void,
 ): Promise<void> =>
   new Promise((resolve, reject) => {
     const socket = new Constructor(url, {
@@ -655,7 +680,7 @@ const runConnection = (
             "Relay WebSocket received an event while FULL sync was pending.",
           );
         }
-        const event = parseEvent(frame);
+        const { frame: event, known } = parseEvent(frame);
         const sequence = BigInt(event.sequence);
         if (options.observe === true && sequence <= acceptedThrough) {
           throw new WebSocketProtocolError("Observer event sequences must increase on each connection.");
@@ -670,10 +695,15 @@ const runConnection = (
             expectedSequence: (acceptedThrough + 1n).toString(), receivedSequence: event.sequence,
           });
         }
-        try {
-          await options.onEvent(event.event, { sequence: event.sequence });
-        } catch (cause) {
-          throw new DurableApplicationError("event", cause);
+        if (known) {
+          try {
+            await options.onEvent(event.event, { sequence: event.sequence });
+          } catch (cause) {
+            throw new DurableApplicationError("event", cause);
+          }
+        } else {
+          // Skipped, then acknowledged below exactly like a handled event.
+          onUnknownEvent(event.event.event_type, event.sequence);
         }
         if (options.observe === true) {
           // Local observation progress is NOT the server's cumulative checkpoint.
@@ -808,6 +838,14 @@ export const runWebSocket = async (
   const url = deriveWebSocketURL(baseURL, options.observe === true);
   const random = options.random ?? Math.random;
   let attempt = 0;
+  // Each event type this release does not know is reported once per run,
+  // however many events of it arrive, so onError is not flooded.
+  const reportedUnknown = new Set<string>();
+  const onUnknownEvent = (eventType: string, sequence: string): void => {
+    if (reportedUnknown.has(eventType)) return;
+    reportedUnknown.add(eventType);
+    options.onError?.(new RelayUnknownEventTypeError(eventType, sequence));
+  };
 
   while (!options.signal?.aborted) {
     options.onConnectionState?.("connecting");
@@ -822,6 +860,7 @@ export const runWebSocket = async (
           options.onConnectionState?.("ready");
           options.onReady?.(frame);
         },
+        onUnknownEvent,
       );
     } catch (error) {
       if (options.signal?.aborted) return;
