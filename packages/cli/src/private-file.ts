@@ -50,12 +50,15 @@ export const preparePrivateDestination = async (
 ): Promise<PrivateDestination> => {
   const directory = dirname(path);
   const windows = platform === "win32";
+  // Mode bits and owner ids mean something only on a POSIX host; a Windows host
+  // reports 0o666 and 0o777 for everything, even when a test names another platform.
+  const posixBits = !windows && process.platform !== "win32";
   await mkdir(directory, { recursive: true, mode: PRIVATE_DIR_MODE });
   const directoryInfo = await lstat(directory);
   if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()) throw new Error(`The ${what} folder is a link or a file, not a folder. Move it aside and sign in again.`);
   if ((directoryInfo.mode & 0o222) === 0) throw new Error(`You do not have permission to write in the ${what} folder.`);
   await access(directory, constants.W_OK);
-  if (!windows && (!ownedHere(directoryInfo.uid) || (directoryInfo.mode & 0o022) !== 0)) {
+  if (posixBits && (!ownedHere(directoryInfo.uid) || (directoryInfo.mode & 0o022) !== 0)) {
     throw new Error(`Other accounts on this computer can write in the ${what} folder. Limit it to your account; Relay changed nothing.`);
   }
   if (!windows) await chmod(directory, PRIVATE_DIR_MODE);
@@ -66,8 +69,8 @@ export const preparePrivateDestination = async (
   try {
     const existing = await lstat(path);
     if (!existing.isFile() || existing.isSymbolicLink() || existing.nlink !== 1) throw new Error(`The ${what} file must be a regular file, not a link, and it must not be hard-linked from anywhere else.`);
-    if (!windows && !ownedHere(existing.uid)) throw new Error(`Another account on this computer owns the ${what} file. Relay changed nothing.`);
-    if (!windows && (existing.mode & 0o022) !== 0) throw new Error(`Other accounts on this computer can write the ${what} file. Make it writable by you alone; Relay changed nothing.`);
+    if (posixBits && !ownedHere(existing.uid)) throw new Error(`Another account on this computer owns the ${what} file. Relay changed nothing.`);
+    if (posixBits && (existing.mode & 0o022) !== 0) throw new Error(`Other accounts on this computer can write the ${what} file. Make it writable by you alone; Relay changed nothing.`);
     if ((existing.mode & 0o444) === 0) throw new Error(`You do not have permission to read the ${what} file.`);
     if ((existing.mode & 0o222) === 0) throw new Error(`You do not have permission to write the ${what} file.`);
     // Opening with r+ proves the operating system allows reading and writing,
@@ -84,7 +87,7 @@ export const preparePrivateDestination = async (
         if (!privateWindowsAcl(acl)) throw new Error(`Relay could not limit the ${what} file to your Windows account, so it did not save the token. (Descriptor: ${acl.sddl})`);
       }
       existingACL = acl.sddl;
-    } else if ((existing.mode & 0o077) !== 0) await chmod(path, PRIVATE_FILE_MODE);
+    } else if (posixBits && (existing.mode & 0o077) !== 0) await chmod(path, PRIVATE_FILE_MODE);
   } catch (error) {
     if (!isMissing(error)) throw error;
   }
