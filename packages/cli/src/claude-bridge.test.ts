@@ -205,8 +205,13 @@ describe("Claude Agent SDK bridge", () => {
       cwd: "/project", resume: undefined, pathToClaudeCodeExecutable: "/bin/claude",
       permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true,
       mcpServers: { relay: { type: "http", url: "https://mcp.relayapp.im", headers: { Authorization: "Bearer rel_token_test" } } },
+      // On Windows every executable that is not an `.exe` starts through the
+      // shell (spawn-command.ts, `platformCommand`), so the bridge hands the SDK
+      // its own spawn there; everywhere else the SDK spawns Claude Code itself.
+      ...(process.platform === "win32" ? { spawnClaudeCodeProcess: expect.any(Function) } : {}),
       abortController: expect.any(AbortController),
     } });
+    if (process.platform !== "win32") expect(calls[0]?.options).not.toHaveProperty("spawnClaudeCodeProcess");
     expect(state.threads.get("chat-1")).toBe("session-1");
     expect(state.relay.sent).toEqual([{ chatId: "chat-1", text: "Answer", key: "codex-bridge-event-1", parts: [{ type: "text", value: "Answer" }] }]);
     expect(state.relay.typing).toEqual(["start chat-1", "stop chat-1"]);
