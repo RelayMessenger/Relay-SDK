@@ -44,6 +44,7 @@ from .video import (
     request_keyframe,
     request_keyframes,
     serve_keyframe_requests,
+    use_relay_encoder,
 )
 
 logger = logging.getLogger("relaymessenger.calls")
@@ -632,6 +633,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
             return
         transceiver = peer.addTransceiver("video", direction="sendonly")
         prefer_h264(transceiver)
+        use_relay_encoder(transceiver.sender, video.options.video_encoding)
         serve_keyframe_requests(transceiver.sender)
         if video.enabled:
             transceiver.sender.replaceTrack(video.create_track())

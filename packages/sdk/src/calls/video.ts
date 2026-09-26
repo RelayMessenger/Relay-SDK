@@ -38,19 +38,26 @@ export enum VideoCodec {
   H264 = 1,
 }
 
-/** LiveKit's `VideoEncoding`. */
+/**
+ * LiveKit's `VideoEncoding`. A field left out takes LiveKit's camera preset
+ * for the frame size being sent (video-presets.ts), for example 3 Mbps at
+ * 30 fps for 1920x1080, 1.7 Mbps at 30 fps for 1280x720 and 450 kbps at
+ * 20 fps for 640x360.
+ */
 export interface VideoEncoding {
-  /** Bits per second. Defaults to 800 kbps, the rate measured through Cloudflare's SFU on 2026-09-22. */
+  /** Encoder target, bits per second. */
   maxBitrate?: number | bigint;
-  /** Encoder rate-control hint. Defaults to 30. */
+  /** Encoder rate-control hint, frames per second. */
   maxFramerate?: number;
 }
 
 /** The subset of LiveKit's `TrackPublishOptions` a Relay call honours. */
 export interface TrackPublishOptions {
   /**
-   * Preferred codec. Defaults to H.264 (constrained baseline `42e01f`, the one
-   * profile Cloudflare's SFU accepts); VP8 is offered second either way.
+   * Preferred codec. Defaults to H.264 (constrained baseline, offered as
+   * `profile-level-id=42e01f` with `level-asymmetry-allowed=1` as libwebrtc
+   * and LiveKit offer it, sent at the level each frame size needs, 4.0 at
+   * 1920x1080 and 30 fps); VP8 is offered second either way.
    */
   videoCodec?: VideoCodec;
   videoEncoding?: VideoEncoding;

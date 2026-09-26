@@ -448,7 +448,12 @@ class WeriftAudioSink implements RelayAudioSinkLike {
  * kind, so every codec a phone may publish is listed. H.264 and VP8 are the
  * ones this engine encodes and decodes (engine-werift-video.ts): H.264 as
  * constrained baseline `42e01f`, the only H.264 profile Cloudflare's SFU
- * accepts, with packetization-mode 1; both ask for NACK, PLI and FIR, without
+ * accepts, with packetization-mode 1. The level in the offer is 3.1 with
+ * `level-asymmetry-allowed=1`, as libwebrtc offers its software H.264
+ * (modules/video_coding/codecs/h264/h264.cc `SupportedH264Codecs`) and
+ * LiveKit its hardware H.264 (rust-sdks webrtc-sys nvidia and vaapi encoder
+ * factories), while both send 1080p at the level the encoder picks. Both
+ * codecs ask for NACK, PLI and FIR, without
  * which the SFU sends no keyframe request. VP9 and AV1 are receive-only: a
  * pull offer carrying them is answered, the track is not decoded.
  */

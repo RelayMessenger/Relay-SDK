@@ -284,9 +284,9 @@ with the audio from the first offer; publishing later adds it to the session:
 ```python
 from relaymessenger.calls import LocalVideoTrack, RelayVideoFrame, VideoSource, VideoStream
 
-source = VideoSource(640, 480)
+source = VideoSource(1280, 720)
 await call.publish_track(LocalVideoTrack.create_video_track("camera", source))
-source.capture_frame(RelayVideoFrame(640, 480, "rgb24", rgb_bytes))
+source.capture_frame(RelayVideoFrame(1280, 720, "rgb24", rgb_bytes))  # 30 frames a second
 
 
 @call.on("track_subscribed")
@@ -295,6 +295,12 @@ def _camera(track) -> None:
         async for event in VideoStream(track, capacity=2):
             rgb = event.frame.convert("rgb24")
 ```
+
+Send frames up to 1920x1080 at 30 fps. Without a `VideoEncoding`, each frame
+size gets [LiveKit's camera preset](https://github.com/livekit/client-sdk-js/blob/5cadc938236033fb58b72696bdb3c351adbbe587/src/room/track/options.ts#L507-L532): 3 Mbps at 30 fps for 1920x1080,
+1.7 Mbps at 30 fps for 1280x720 and 450 kbps at 20 fps for 640x360. Pass
+`TrackPublishOptions(video_encoding=VideoEncoding(max_bitrate, max_framerate))`
+to set your own; aiortc keeps the bitrate between 500 kbps and 3 Mbps.
 
 `RelayVideoFrame` holds tightly packed `i420`, `rgba`, `bgra`, `argb`, `abgr`
 or `rgb24` bytes. `VideoSource.capture_frame` also takes an `av.VideoFrame`.
