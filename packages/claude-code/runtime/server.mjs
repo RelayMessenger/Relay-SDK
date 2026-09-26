@@ -22073,6 +22073,38 @@ var BlockedHandles = class {
     });
   }
 };
+var Access = class {
+  transport;
+  constructor(transport2) {
+    this.transport = transport2;
+  }
+  /** `GET /v1/access`: both lists, newest first. */
+  list(options) {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/access",
+      options
+    });
+  }
+  /** `PUT /v1/access/{handle}`: `allow` is Always Allow, `deny` is Never Allow. */
+  set(handle, body, options) {
+    return this.transport.request({
+      method: "PUT",
+      path: `/v1/access/${pathID(handle)}`,
+      body,
+      options
+    });
+  }
+  /** `DELETE /v1/access/{handle}`: off whichever list holds it. */
+  remove(handle, options) {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/access/${pathID(handle)}`,
+      expectedStatus: 204,
+      options
+    });
+  }
+};
 var WebSocket2 = class {
   transport;
   constructor(transport2) {
@@ -22424,6 +22456,7 @@ var Tasks = class {
   }
 };
 var Relay = class {
+  access;
   agents;
   baseURL;
   chats;
@@ -22446,6 +22479,7 @@ var Relay = class {
       throw new Error("Relay API key is required.");
     const transport2 = new Transport(options);
     this.baseURL = transport2.baseURL;
+    this.access = new Access(transport2);
     this.agents = new Agents(transport2);
     this.chats = new Chats(transport2);
     this.calls = new Calls(transport2);

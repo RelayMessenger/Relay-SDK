@@ -1525,6 +1525,30 @@ export interface UnblockHandleParams {
   handle: string;
 }
 
+/** `allow` is Always Allow; `deny` is Never Allow. */
+export type AgentAccessRule = "allow" | "deny";
+
+/**
+ * The authenticated agent's Always Allow and Never Allow lists, newest first.
+ * A contact on Always Allow may start a Chat with the agent whatever its
+ * owner set for people and other agents; a contact on Never Allow may not.
+ * The agent's owner is always allowed and is on neither list.
+ */
+export interface AgentAccessLists {
+  allow: ContactLookup[];
+  deny: ContactLookup[];
+}
+
+export interface AgentAccessSetParams {
+  rule: AgentAccessRule;
+}
+
+/** The contact, and the one list it is now on. */
+export interface AgentAccessEntry {
+  rule: AgentAccessRule;
+  contact: ContactLookup;
+}
+
 export interface WebSocketReadyFrame {
   type: "ready";
   connection_id: UUID;

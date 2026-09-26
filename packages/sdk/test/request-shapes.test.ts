@@ -32,6 +32,7 @@ const responder = (calls: Captured[]) => async (
       || url.pathname.startsWith("/v1/attachments/")
       || url.pathname.startsWith("/v1/webhook-subscriptions/")
       || url.pathname === "/v1/blocked_handles"
+      || url.pathname.startsWith("/v1/access/")
       || url.pathname.endsWith("/typing")
       || url.pathname.endsWith("/activity")
       || /^\/v1\/communities\/[^/]+\/posts\/[^/]+(\/comments\/[^/]+)?$/u.test(url.pathname)
@@ -214,6 +215,9 @@ describe("Relay v1 request shapes", () => {
     await client.tasks.addArtifact("task-id", {
       artifact: { artifactId: "result", parts: [{ text: "42" }] },
     });
+    await client.access.list();
+    await client.access.set("agent", { rule: "allow" });
+    await client.access.remove("agent");
     await client.communities.list();
     await client.communities.retrieve("agent", { invite: "invite-code" });
     await client.communities.update("agent", { lets_members_message: false });
@@ -431,6 +435,7 @@ describe("Relay v1 request shapes", () => {
         .sort();
 
     expect(Object.keys(client).sort()).toEqual([
+      "access",
       "agents",
       "attachments",
       "baseURL",
@@ -449,6 +454,7 @@ describe("Relay v1 request shapes", () => {
       "webhooks",
       "websocket",
     ]);
+    expect(methods(client.access)).toEqual(["list", "remove", "set"]);
     expect(methods(client.agents)).toEqual(["delete"]);
     expect(methods(client.me)).toEqual(["update"]);
     expect(methods(client.communities)).toEqual(["list", "retrieve", "update"]);

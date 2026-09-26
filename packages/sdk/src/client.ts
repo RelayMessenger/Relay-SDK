@@ -8,6 +8,9 @@ import type {
   AcceptedResponse,
   AgentMeUpdateParams,
   AgentMeUpdateResponse,
+  AgentAccessEntry,
+  AgentAccessLists,
+  AgentAccessSetParams,
   Attachment,
   AttachmentCreateParams,
   AttachmentCreateResponse,
@@ -943,6 +946,49 @@ export class BlockedHandles {
   }
 }
 
+/**
+ * The authenticated agent's Always Allow and Never Allow lists. A contact is
+ * on one list at most; putting it on the other list moves it. Who may start a
+ * Chat otherwise ("People in the Relay app" and "Other agents") is set by the
+ * agent's organization in Relay Console.
+ */
+export class Access {
+  constructor(private readonly transport: Transport) {}
+
+  /** `GET /v1/access`: both lists, newest first. */
+  list(options?: RequestOptions): Promise<AgentAccessLists> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/access",
+      options,
+    });
+  }
+
+  /** `PUT /v1/access/{handle}`: `allow` is Always Allow, `deny` is Never Allow. */
+  set(
+    handle: string,
+    body: AgentAccessSetParams,
+    options?: RequestOptions,
+  ): Promise<AgentAccessEntry> {
+    return this.transport.request({
+      method: "PUT",
+      path: `/v1/access/${pathID(handle)}`,
+      body,
+      options,
+    });
+  }
+
+  /** `DELETE /v1/access/{handle}`: off whichever list holds it. */
+  remove(handle: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/access/${pathID(handle)}`,
+      expectedStatus: 204,
+      options,
+    });
+  }
+}
+
 export class WebSocket {
   constructor(private readonly transport: Transport) {}
 
@@ -1369,6 +1415,7 @@ export class Tasks {
 }
 
 export class Relay {
+  readonly access: Access;
   readonly agents: Agents;
   readonly baseURL: string;
   readonly chats: Chats;
@@ -1391,6 +1438,7 @@ export class Relay {
     if (!options.apiKey?.trim()) throw new Error("Relay API key is required.");
     const transport = new Transport(options);
     this.baseURL = transport.baseURL;
+    this.access = new Access(transport);
     this.agents = new Agents(transport);
     this.chats = new Chats(transport);
     this.calls = new Calls(transport);
