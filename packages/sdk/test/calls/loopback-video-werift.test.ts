@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import type { RelayMediaStreamTrackLike, RelayPeerConnectionLike } from "../../src/calls/transport.js";
 import { createWeriftWebRTCFactory } from "../../src/calls/engine-werift.js";
+import { loadWebCodecs } from "../../src/calls/engine-werift-video.js";
 import {
   RemoteVideoTrack,
   VideoBufferType,
@@ -16,6 +17,11 @@ import {
  * build) and sends RTP; B depacketizes, decodes and reads the frames through
  * `VideoStream` in RGBA. No Relay room, no SFU.
  */
+
+// node-webcodecs 1.3.0 ships a build for these platforms only
+// (loadWebCodecs in src/calls/engine-werift-video.ts names the same set);
+// elsewhere, Windows included, npm drops the optional package on install.
+const VIDEO_BUILD = new Set(["darwin-arm64", "linux-x64", "linux-arm64"]).has(`${process.platform}-${process.arch}`);
 
 const WIDTH = 320;
 const HEIGHT = 240;
@@ -112,7 +118,7 @@ const loopback = async (videoCodec: VideoCodec) => {
 };
 
 for (const [label, codec, mime] of [["H.264", VideoCodec.H264, "video/H264"], ["VP8", VideoCodec.VP8, "video/VP8"]] as const) {
-  it(`carries a colour that changes each second from A to B over werift + ${label}`, async () => {
+  it.runIf(VIDEO_BUILD)(`carries a colour that changes each second from A to B over werift + ${label}`, async () => {
     const { seen, senderStats, receiverStats } = await loopback(codec);
     if (process.env.VIDEO_LOOPBACK_LOG) {
       console.log(label, JSON.stringify({ decoded: seen.length, sender: senderStats, receiver: receiverStats }));
@@ -130,3 +136,7 @@ for (const [label, codec, mime] of [["H.264", VideoCodec.H264, "video/H264"], ["
     expect(seen.length).toBeGreaterThanOrEqual(FPS * PALETTE.length * 0.6);
   }, 30_000);
 }
+
+it.skipIf(VIDEO_BUILD)("names the missing optional dependency where node-webcodecs has no build", async () => {
+  await expect(loadWebCodecs()).rejects.toThrow(/Relay video needs the optional dependency node-webcodecs/u);
+});

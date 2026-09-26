@@ -178,5 +178,8 @@ try {
   }
   writeFileSync(join(receipts, 'receipt.json'), JSON.stringify(report, null, 2));
   rmSync(scratch, { recursive: true, force: true });
+  // The job log carries the reason, not only the uploaded receipt (agent-cli-platforms-runtime.mjs does the same).
+  for (const { package: pkg, failure } of report.validationFailures ?? []) console.error(`validation failure (${pkg}): ${failure}`);
+  if (report.failure) console.error(report.failure);
   console.log(JSON.stringify({ result: report.result, platform: report.platform, sha: report.sha, receipts }));
 }
