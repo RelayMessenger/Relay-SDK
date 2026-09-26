@@ -1,35 +1,39 @@
 import Relay, { RelayPage } from "@relaymessenger/sdk";
-import { getQuickJS, type QuickJSDeferredPromise, type QuickJSHandle } from "quickjs-emscripten";
-import ts from "typescript";
+import {
+  RELEASE_SYNC, getQuickJS, newQuickJSWASMModule, newVariant,
+  type QuickJSDeferredPromise, type QuickJSHandle, type QuickJSWASMModule,
+} from "quickjs-emscripten";
+import { compile } from "#transpile";
 import { METHOD_DOCS } from "./generated-docs.js";
-import { redact, safeErrorMessage } from "./redact.js";
+import { redact, safeErrorMessage, withholdSecretFields } from "./redact.js";
 
 export interface ExecutionLimits { timeoutMs: number; memoryBytes: number; outputBytes: number }
 const defaults: ExecutionLimits = { timeoutMs: 30_000, memoryBytes: 64 * 1024 * 1024, outputBytes: 1024 * 1024 };
+/**
+ * Where QuickJS's WebAssembly comes from. Node reads the file itself. Workers
+ * cannot compile WebAssembly from bytes at run time, so a Workers host imports
+ * `@jitl/quickjs-wasmfile-release-sync/wasm` (a WebAssembly.Module) and passes
+ * it here; it is loaded with quickjs-emscripten's newVariant over the same
+ * RELEASE_SYNC variant getQuickJS() uses.
+ */
+export interface ExecutionRuntime { quickjsWasmModule?: WebAssembly.Module }
+const loadedModules = new WeakMap<WebAssembly.Module, Promise<QuickJSWASMModule>>();
+const loadQuickJS = (runtime: ExecutionRuntime): Promise<QuickJSWASMModule> => {
+  const wasmModule = runtime.quickjsWasmModule;
+  if (!wasmModule) return getQuickJS();
+  let loaded = loadedModules.get(wasmModule);
+  if (!loaded) {
+    loaded = newQuickJSWASMModule(newVariant(RELEASE_SYNC, { wasmModule }));
+    loadedModules.set(wasmModule, loaded);
+  }
+  return loaded;
+};
 const methods = new Map(METHOD_DOCS.filter(row => row.executable).map(row => [row.method.slice("client.".length), row]));
 
-function compile(code: string): string {
-  const file = ts.createSourceFile("relay-execute.ts", code, ts.ScriptTarget.Latest, true);
-  let invalidModule = false;
-  const visit = (node: ts.Node): void => {
-    if (ts.isImportDeclaration(node) || ts.isImportEqualsDeclaration(node) || ts.isExportDeclaration(node)
-      || ts.isExportAssignment(node) || node.kind === ts.SyntaxKind.ImportKeyword
-      || (ts.canHaveModifiers(node) && ts.getModifiers(node)?.some(x => x.kind === ts.SyntaxKind.ExportKeyword))) invalidModule = true;
-    ts.forEachChild(node, visit);
-  };
-  visit(file);
-  if (invalidModule) throw new Error("Imports and exports are not available. Define async function run(client) using the supplied client.");
-  const compiled = ts.transpileModule(code, { fileName: "relay-execute.ts", reportDiagnostics: true,
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, strict: true } });
-  const errors = (compiled.diagnostics ?? []).filter(x => x.category === ts.DiagnosticCategory.Error);
-  if (errors.length) throw new Error(errors.map(x => ts.flattenDiagnosticMessageText(x.messageText, "\n")).join("\n"));
-  return compiled.outputText;
-}
-
-export async function executeCode(code: string, client: Relay, secrets: readonly string[], overrides: Partial<ExecutionLimits> = {}): Promise<{ result: unknown; logs: Array<{ level: string; text: string }> }> {
+export async function executeCode(code: string, client: Relay, secrets: readonly string[], overrides: Partial<ExecutionLimits> = {}, runtimeOptions: ExecutionRuntime = {}): Promise<{ result: unknown; logs: Array<{ level: string; text: string }> }> {
   const limits = { ...defaults, ...overrides };
   const javascript = compile(code);
-  const QuickJS = await getQuickJS();
+  const QuickJS = await loadQuickJS(runtimeOptions);
   const runtime = QuickJS.newRuntime();
   runtime.setMemoryLimit(limits.memoryBytes);
   runtime.setMaxStackSize(512 * 1024);
@@ -55,7 +59,9 @@ export async function executeCode(code: string, client: Relay, secrets: readonly
   const encode = (value: unknown): string => {
     const page = value instanceof RelayPage ? pages.size + 1 : undefined;
     if (page !== undefined) pages.set(page, value as RelayPage<unknown>);
-    return limited(redact(JSON.stringify({ value: value ?? null, ...(page === undefined ? {} : { page }) }), secrets));
+    // Secret fields are withheld on the host, before a value enters the
+    // sandbox, so neither submitted code nor its result or logs can see them.
+    return limited(redact(JSON.stringify({ value: value ?? null, ...(page === undefined ? {} : { page }) }, withholdSecretFields), secrets));
   };
   async function call(method: string, args: unknown[]): Promise<unknown> {
     if (abort.signal.aborted) throw new Error("Execution ended.");

@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import Relay, {
   type A2aTask,
@@ -138,5 +140,31 @@ describe("jobs between agents", () => {
     if (event.event_type === "task.created") {
       expect(event.data.task.status.state).toBe("TASK_STATE_COMPLETED");
     }
+  });
+
+  it("loads the A2A client only when a job call is made", () => {
+    // A child Node process records every @a2a-js/* module it resolves while
+    // it loads the built SDK, makes a client, and then calls tasks.get.
+    const entry = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+    const script = `
+      import { registerHooks } from "node:module";
+      const seen = [];
+      registerHooks({ resolve(specifier, context, next) {
+        if (specifier.startsWith("@a2a-js/")) seen.push(specifier);
+        return next(specifier, context);
+      } });
+      const { default: Relay } = await import(${JSON.stringify(entry)});
+      const card = ${JSON.stringify(card)};
+      const task = ${JSON.stringify(task)};
+      const relay = new Relay({ apiKey: "t", baseURL: "https://api.staging.relayapp.im",
+        fetch: async (input, init) => init?.method === "POST"
+          ? Response.json({ jsonrpc: "2.0", id: JSON.parse(init.body).id, result: task })
+          : Response.json(card) });
+      const before = [...seen];
+      await relay.tasks.get({ to: "worker", id: task.id });
+      console.log(JSON.stringify({ before, after: [...new Set(seen)].sort() }));
+    `;
+    const out = execFileSync(process.execPath, ["--input-type=module", "--eval", script], { encoding: "utf8" });
+    expect(JSON.parse(out)).toEqual({ before: [], after: ["@a2a-js/sdk", "@a2a-js/sdk/client"] });
   });
 });

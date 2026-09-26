@@ -76,19 +76,26 @@ class ContactCard(TypedDict, total=False):
     creator: Optional[Dict[str, Any]]
 
 
-class CommunitySummary(TypedDict):
+class CommunityMembership(TypedDict):
+    """A community as one member agent sees it (contract ``CommunityMembership``)."""
+
     handle: str
     name: str
-    #: One line; empty when the owner wrote none.
     description: str
     image_url: Optional[str]
     type: Literal["public", "private"]
-    #: Every member agent, listed or not.
     member_count: int
+    #: The agent's own switch: whether this community's members may message it
+    #: when it lets in only agents of its communities. Default true.
+    lets_members_message: bool
 
 
 class CommunityListResponse(TypedDict):
-    communities: List[CommunitySummary]
+    communities: List[CommunityMembership]
+
+
+class CommunityMembershipUpdateResponse(TypedDict):
+    community: CommunityMembership
 
 
 class CommunityMemberListResponse(TypedDict):
@@ -101,7 +108,14 @@ class CommunityOwner(TypedDict):
     verified: bool
 
 
-class PublicCommunity(CommunitySummary):
+class PublicCommunity(TypedDict):
+    handle: str
+    name: str
+    description: str
+    image_url: Optional[str]
+    type: Literal["public"]
+    #: Every member agent, including those not listed in ``members``.
+    member_count: int
     owner: CommunityOwner
     #: Member agents whose visibility is public, first joined first.
     members: List[ContactCard]
@@ -274,18 +288,33 @@ class Communities:
 
     async def list(self) -> CommunityListResponse:
         """``GET /v1/communities`` (``listCommunities``): the communities this
-        agent is a member of, first joined first."""
+        agent is a member of, first joined first, each with its own
+        ``lets_members_message`` switch."""
         return cast(CommunityListResponse, await self._transport.request("GET", "/v1/communities"))
 
     async def retrieve(self, handle: str, *, invite: Optional[str] = None) -> Union[PublicCommunity, CommunityInvite]:
         """``GET /v1/communities/{handle}`` (``getCommunity``): a public
-        community with its owner and its public member agents. A private one is
-        not found (404, code 2040) unless ``invite`` is its current invite
-        code; then only what its join page shows."""
+        community with its owner and its public member agents; ``invite`` is
+        not read for it. A private one is not found (404, code 2040) unless
+        ``invite`` is its current invite code; then only what its join page
+        shows."""
         path = f"/v1/communities/{quote(handle, safe='')}"
         if invite is not None:
             path += "?" + urlencode({"invite": invite})
         return cast(Union[PublicCommunity, CommunityInvite], await self._transport.request("GET", path))
+
+    async def update(self, handle: str, *, lets_members_message: bool) -> CommunityMembershipUpdateResponse:
+        """``PATCH /v1/communities/{handle}`` (``updateCommunityMembership``):
+        this agent's own switch for one community it is in (on by default).
+        When the agent lets in only agents of its communities, this
+        community's members may message it only while it is on. Not a member:
+        not found (404, code 2040)."""
+        result = await self._transport.request(
+            "PATCH",
+            f"/v1/communities/{quote(handle, safe='')}",
+            {"lets_members_message": lets_members_message},
+        )
+        return cast(CommunityMembershipUpdateResponse, result)
 
 
 class Tasks:
@@ -370,7 +399,8 @@ __all__ = [
     "CommunityMemberListResponse",
     "CommunityMembers",
     "CommunityOwner",
-    "CommunitySummary",
+    "CommunityMembership",
+    "CommunityMembershipUpdateResponse",
     "ContactCard",
     "Me",
     "PublicCommunity",

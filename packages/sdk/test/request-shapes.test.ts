@@ -212,6 +212,7 @@ describe("Relay v1 request shapes", () => {
     });
     await client.communities.list();
     await client.communities.retrieve("agent", { invite: "invite-code" });
+    await client.communities.update("agent", { lets_members_message: false });
     await client.communities.members.list("agent");
     await client.webhookEvents.list();
     await client.webhookSubscriptions.create({
@@ -321,6 +322,7 @@ describe("Relay v1 request shapes", () => {
       return call.body === undefined ? undefined : JSON.parse(String(call.body));
     };
     expect(body("PATCH", "/v1/me")).toEqual({ accepts_tasks: true });
+    expect(body("PATCH", "/v1/communities/agent")).toEqual({ lets_members_message: false });
     expect(body("POST", "/v1/tasks/task-id/status")).toEqual({
       state: "TASK_STATE_COMPLETED",
       message: { messageId: "status-1", role: "ROLE_AGENT", parts: [{ text: "Done" }] },
@@ -415,7 +417,7 @@ describe("Relay v1 request shapes", () => {
     ]);
     expect(methods(client.agents)).toEqual(["delete"]);
     expect(methods(client.me)).toEqual(["update"]);
-    expect(methods(client.communities)).toEqual(["list", "retrieve"]);
+    expect(methods(client.communities)).toEqual(["list", "retrieve", "update"]);
     expect(methods(client.communities.members)).toEqual(["list"]);
     expect(methods(client.tasks)).toEqual([
       "addArtifact",

@@ -47,7 +47,7 @@ for (const forbiddenRelaySurface of [
 
 assert.deepEqual(
   Object.keys(manifest.dependencies).sort(),
-  ["@modelcontextprotocol/server", "@relaymessenger/sdk", "minisearch", "quickjs-emscripten", "typescript", "zod"],
+  ["@modelcontextprotocol/server", "@relaymessenger/sdk", "acorn", "minisearch", "quickjs-emscripten", "sucrase", "typescript", "zod"],
 );
 assert.match(source, /@modelcontextprotocol\/server\/stdio/);
 assert.match(source, /@relaymessenger\/sdk/);

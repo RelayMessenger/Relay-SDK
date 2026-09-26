@@ -71,6 +71,7 @@ import {
 import {
   assertExhaustiveEvent,
   parseReactionEvent,
+  isKnownWebhookEventType,
   parseWebhookEnvelope,
   parseWebhookMessageEvent,
   readWebhookBody,
@@ -363,6 +364,19 @@ export class RelayAdapter
    * through the console before that, so a warning is never lost to whichever
    * side of `initialize` it happens on.
    */
+  private readonly unknownEventTypes = new Set<string>();
+
+  private reportUnknownEventType(envelope: RelayWebhookEnvelope): void {
+    const eventType: string = envelope.event_type;
+    if (this.unknownEventTypes.has(eventType)) return;
+    this.unknownEventTypes.add(eventType);
+    this.warn("relay_unknown_event_type", {
+      eventType,
+      eventId: envelope.event_id,
+      message: "This adapter release does not know this event type; it was skipped and acknowledged.",
+    });
+  }
+
   private warn(event: string, fields: Record<string, unknown>): void {
     const logger = this.chat?.getLogger("relay");
     if (logger) logger.warn(event, fields);
@@ -1114,6 +1128,16 @@ export class RelayAdapter
     let envelope: RelayWebhookEnvelope;
     try {
       envelope = parseWebhookEnvelope(decoded);
+      if (!isKnownWebhookEventType(envelope.event_type)) {
+        // Skipped and acknowledged, so Relay does not redeliver it; reported
+        // once per event type for this adapter.
+        this.reportUnknownEventType(envelope);
+        return json(200, {
+          acknowledged: true,
+          event_id: envelope.event_id,
+          event_type: envelope.event_type,
+        });
+      }
       await this.turns.run(envelope.event_id, () =>
         this.dispatch(envelope, options),
       );

@@ -46,6 +46,10 @@ assert.ok(
   runtime.includes(Buffer.from(JSON.stringify(packageJSON.version))),
   "generated runtime does not embed the package version",
 );
+assert.ok(
+  !runtime.includes(Buffer.from("@a2a-js/sdk/dist/")),
+  "generated runtime bundles the A2A client; keep @a2a-js/sdk external (scripts/build.mjs)",
+);
 assert.doesNotMatch(
   runtime.toString("utf8"),
   /(?:\.\.\/)+(?:node_modules|sdk)\//u,

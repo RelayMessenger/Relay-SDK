@@ -47,6 +47,19 @@ function requestIn(node) {
   }
   return ts.forEachChild(node, requestIn);
 }
+// Jobs between agents are A2A 1.0 JSON-RPC calls at the other agent's own
+// address (tasks.send/get/cancel call the official A2A client), not Relay REST
+// operations, so they are found by the A2A client method each one calls.
+const A2A_METHODS = { sendMessage: "SendMessage", getTask: "GetTask", cancelTask: "CancelTask" };
+const A2A_PATH = "{a2aBaseURL}/{to}";
+function a2aIn(node) {
+  if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+    && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "client"
+    && Object.hasOwn(A2A_METHODS, node.expression.name.text)) return A2A_METHODS[node.expression.name.text];
+  return ts.forEachChild(node, a2aIn);
+}
+const jsDoc = member => ts.getJSDocCommentsAndTags(member)
+  .map(doc => ts.getTextOfJSDocComment(doc.comment) ?? "").join("\n").replace(/\s+/g, " ").trim();
 function definitions(text, depth = 0, seen = new Set()) {
   if (depth > 4) return [];
   const found = [];
@@ -63,15 +76,25 @@ function walk(className, prefix) {
       || member.modifiers?.some(m => m.kind === ts.SyntaxKind.PrivateKeyword || m.kind === ts.SyntaxKind.ProtectedKeyword)) continue;
     if (ts.isPropertyDeclaration(member) && member.type && classes.has(member.type.getText(clientFile))) walk(member.type.getText(clientFile), `${prefix}.${member.name.getText(clientFile)}`);
     if (!ts.isMethodDeclaration(member) || !member.body) continue;
-    const request = requestIn(member.body); if (!request?.operation) continue;
+    const request = requestIn(member.body);
+    const a2aMethod = request?.operation ? undefined : a2aIn(member.body);
+    if (!request?.operation && !a2aMethod) continue;
     const isStatic = member.modifiers?.some(m => m.kind === ts.SyntaxKind.StaticKeyword);
     const method = `${isStatic ? className : prefix}.${member.name.getText(clientFile)}`;
     const parameters = member.parameters.map(p => p.getText(clientFile));
     const signature = `${method}(${parameters.join(", ")}): ${member.type?.getText(clientFile) ?? "unknown"}`;
-    entries.push({ method, signature, parameters, httpMethod: request.method, path: request.path,
-      operationId: request.operation.operationId, summary: request.operation.summary ?? request.operation.operationId,
-      description: request.operation.description ?? "", definitions: definitions(signature),
-      requestBody: request.operation.requestBody ?? null, executable: !isStatic,
+    const described = a2aMethod
+      ? { httpMethod: "POST", path: A2A_PATH, operationId: a2aMethod,
+        summary: `A2A ${a2aMethod} at another agent's address`,
+        description: `${jsDoc(member)} A2A 1.0 JSON-RPC ${a2aMethod} at the agent's own address, with this agent's Relay token as bearer.`,
+        requestBody: null }
+      : { httpMethod: request.method, path: request.path, operationId: request.operation.operationId,
+        summary: request.operation.summary ?? request.operation.operationId,
+        description: request.operation.description ?? "", requestBody: request.operation.requestBody ?? null };
+    entries.push({ method, signature, parameters, httpMethod: described.httpMethod, path: described.path,
+      operationId: described.operationId, summary: described.summary,
+      description: described.description, definitions: definitions(signature),
+      requestBody: described.requestBody, executable: !isStatic,
       optionsIndex: member.parameters.findIndex(p =>
         ["RequestOptions", "CallCreateOptions", "PaymentRequestCreateOptions"].includes(p.type?.getText(clientFile) ?? "")),
     });
@@ -79,7 +102,10 @@ function walk(className, prefix) {
 }
 walk("Relay", "client");
 entries.sort((a,b) => a.method.localeCompare(b.method, "en"));
-assert.equal(new Set(entries.map(x => `${x.httpMethod} ${x.path}`)).size, operationCount, "Every locked HTTP operation must have SDK documentation");
+assert.equal(new Set(entries.filter(x => x.path !== A2A_PATH).map(x => `${x.httpMethod} ${x.path}`)).size, operationCount, "Every locked HTTP operation must have SDK documentation");
+assert.deepEqual(entries.filter(x => x.path === A2A_PATH).map(x => `${x.method} ${x.operationId}`).sort(),
+  ["client.tasks.cancel CancelTask", "client.tasks.get GetTask", "client.tasks.send SendMessage"],
+  "Every A2A job call the SDK makes must have documentation");
 assert.ok(entries.filter(x => x.executable).every(x => x.optionsIndex >= 0));
 const sha = s => createHash("sha256").update(s).digest("hex");
 const source = { contract: sha(contractText), client: sha(clientText), types: sha(typesText) };

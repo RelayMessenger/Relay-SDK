@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { AuthContext } from "./auth.js";
 import { collectLocalTokens, resolveAgentAuth } from "./auth.js";
 import { searchDocs } from "./search-docs.js";
-import { executeCode, type ExecutionLimits } from "./execute.js";
+import { executeCode, type ExecutionLimits, type ExecutionRuntime } from "./execute.js";
 import { redact, safeErrorMessage } from "./redact.js";
 import pkg from "../package.json" with { type: "json" };
 
@@ -15,7 +15,37 @@ export interface RelayMcpServerOptions {
   resolveClient?: () => Promise<ResolvedRelayClient>;
   collectSecrets?: () => Promise<string[]>;
   executionLimits?: Partial<ExecutionLimits>;
+  /**
+   * On Cloudflare Workers, pass `quickjsWasmModule` (import
+   * `@jitl/quickjs-wasmfile-release-sync/wasm`); Node needs nothing.
+   */
+  executionRuntime?: ExecutionRuntime;
 }
+export type { ExecutionRuntime };
+
+/** The structuredContent search_docs returns (search-docs.ts searchDocs). */
+export const searchDocsOutputSchema = z.object({
+  query: z.string(),
+  language: z.enum(["typescript", "javascript", "http"]),
+  contractSha256: z.string(),
+  note: z.string(),
+  results: z.array(z.object({
+    method: z.string(),
+    signature: z.string(),
+    endpoint: z.string(),
+    summary: z.string(),
+    description: z.string(),
+    parameters: z.array(z.string()),
+    types: z.array(z.string()),
+    executable: z.boolean(),
+    requestBody: z.unknown().optional(),
+  })),
+});
+/** The structuredContent execute returns (execute.ts executeCode). */
+export const executeOutputSchema = z.object({
+  result: z.unknown().describe("The JSON value run(client) returned; null when it returned nothing."),
+  logs: z.array(z.object({ level: z.string(), text: z.string() })),
+});
 
 export const createRelayMcpServer = (options: RelayMcpServerOptions = {}): McpServer => {
   const context = options.authContext ?? {};
@@ -38,6 +68,7 @@ export const createRelayMcpServer = (options: RelayMcpServerOptions = {}): McpSe
       language: z.enum(["typescript", "javascript", "http"]).default("typescript"),
       detail: z.enum(["default", "verbose"]).default("default"),
     }).strict(),
+    outputSchema: searchDocsOutputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async (input): Promise<CallToolResult> => {
     const result = searchDocs(input);
@@ -62,6 +93,7 @@ export const createRelayMcpServer = (options: RelayMcpServerOptions = {}): McpSe
       + ' { type: "payment", checkout_url } with its checkout_url as the only part of its message; '
       + "search_docs(\"payment\") shows the shapes. Read or cancel one with client.paymentRequests.retrieve(id) and client.paymentRequests.cancel(id).",
     inputSchema: z.object({ code: z.string().min(1).max(100_000), intent: z.string().max(2_000).optional() }).strict(),
+    outputSchema: executeOutputSchema,
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, async ({ code }): Promise<CallToolResult> => {
     let secrets: string[] = [];
@@ -69,7 +101,7 @@ export const createRelayMcpServer = (options: RelayMcpServerOptions = {}): McpSe
       try { secrets = await collectSecrets(); } catch { /* The resolver reports invalid configuration. */ }
       const resolved = await resolveClient();
       secrets.push(...(resolved.secrets ?? []));
-      const result = await executeCode(code, resolved.client, secrets, options.executionLimits);
+      const result = await executeCode(code, resolved.client, secrets, options.executionLimits, options.executionRuntime);
       const text = redact(JSON.stringify(result), secrets);
       return { content: [{ type: "text", text }], structuredContent: JSON.parse(text) as Record<string, unknown> };
     } catch (error) {

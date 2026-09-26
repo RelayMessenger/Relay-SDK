@@ -159,7 +159,7 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 55);
+      assert.equal(RELAY_V1_OPERATIONS.length, 56);
       assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
       const allowedOperations = new Set([
         "POST /v1/chats",
@@ -201,6 +201,7 @@ try {
         "POST /v1/tasks/{taskId}/artifacts",
         "GET /v1/communities",
         "GET /v1/communities/{handle}",
+        "PATCH /v1/communities/{handle}",
         "GET /v1/communities/{handle}/members",
         "GET /v1/webhook-events",
         "POST /v1/webhook-subscriptions",
@@ -254,7 +255,7 @@ try {
       assert.equal("createAgent" in Relay, false);
       assert.deepEqual(methods(client.agents), ["delete"]);
       assert.deepEqual(methods(client.me), ["update"]);
-      assert.deepEqual(methods(client.communities), ["list", "retrieve"]);
+      assert.deepEqual(methods(client.communities), ["list", "retrieve", "update"]);
       assert.deepEqual(methods(client.communities.members), ["list"]);
       assert.deepEqual(methods(client.tasks), [
         "addArtifact", "cancel", "get", "list", "send", "updateStatus",

@@ -603,6 +603,50 @@ describe("Relay webhook handling", () => {
     ).toBe(401);
   });
 
+  it("skips and acknowledges an event type it does not know, reporting it once", async () => {
+    const { adapter, calls } = adapterHarness();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const future = envelope(
+        "chat.created",
+        { anything: true },
+        { event_type: "future.event" as RelayWebhookEventType },
+      );
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const response = await adapter.handleWebhook(await signedRequest(future));
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+          acknowledged: true,
+          event_id: IDS.event,
+          event_type: "future.event",
+        });
+      }
+      expect(calls).toEqual([]);
+      const reports = warn.mock.calls.filter(([line]) =>
+        String(line).includes("relay_unknown_event_type"));
+      expect(reports).toHaveLength(1);
+      expect(String(reports[0]![0])).toContain("future.event");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.each([
+    ["an empty event_type", { event_type: "" as RelayWebhookEventType }],
+    ["a numeric event_type", { event_type: 7 as unknown as RelayWebhookEventType }],
+    ["an unknown event_type without an event_id", {
+      event_type: "future.event" as RelayWebhookEventType,
+      event_id: "nope",
+    }],
+  ])("still refuses a webhook with %s", async (_name, override) => {
+    const { adapter, calls } = adapterHarness();
+    const response = await adapter.handleWebhook(
+      await signedRequest(envelope("chat.created", {}, override)),
+    );
+    expect(response.status).toBe(422);
+    expect(calls).toEqual([]);
+  });
+
   it("reuses event_id plus ordinal across duplicate delivery recovery", async () => {
     const sends: Array<{
       body: string;

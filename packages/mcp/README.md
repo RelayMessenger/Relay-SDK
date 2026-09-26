@@ -99,6 +99,23 @@ Always await SDK calls and reuse a stable idempotency key for the same logical
 message send. `execute` is not read-only: submitted SDK calls can change the
 configured account.
 
+## Cloudflare Workers
+
+`createRelayMcpServer` also runs on Cloudflare Workers (`nodejs_compat`).
+Workers cannot compile WebAssembly at run time, so hand QuickJS its module:
+
+```ts
+import quickjsWasmModule from "@jitl/quickjs-wasmfile-release-sync/wasm";
+import { createRelayMcpServer } from "@relaymessenger/mcp";
+
+const server = createRelayMcpServer({ resolveClient, executionRuntime: { quickjsWasmModule } });
+```
+
+On Workers, `execute` strips TypeScript with Sucrase and checks for module
+syntax with acorn (the `workerd` condition of the package's `#transpile`
+import). On Node it uses TypeScript, as before. `npm run test:workerd` boots the
+server on workerd and runs one `execute` call.
+
 ## Development
 
 From the monorepo root, in Daytona for Linux:

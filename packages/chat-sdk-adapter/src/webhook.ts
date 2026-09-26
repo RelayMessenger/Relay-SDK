@@ -33,6 +33,22 @@ function isDateTime(value: unknown): value is string {
   );
 }
 
+/**
+ * Whether this release knows `eventType`. Relay adds event types over time
+ * and a new one reaches a deployed agent before the agent upgrades, so the
+ * parser accepts any event type and the adapter skips the unknown ones.
+ */
+export function isKnownWebhookEventType(
+  eventType: string,
+): eventType is RelayWebhookEventType {
+  return EVENT_TYPES.has(eventType);
+}
+
+/**
+ * Validate a Relay webhook envelope. An `event_type` this release does not
+ * know is accepted here (check it with `isKnownWebhookEventType`); anything
+ * else malformed is a ValidationError.
+ */
 export function parseWebhookEnvelope(
   value: unknown,
 ): RelayWebhookEnvelope {
@@ -46,7 +62,7 @@ export function parseWebhookEnvelope(
     value.api_version !== RELAY_API_VERSION ||
     value.webhook_version !== RELAY_WEBHOOK_VERSION ||
     typeof value.event_type !== "string" ||
-    !EVENT_TYPES.has(value.event_type) ||
+    value.event_type.length === 0 ||
     typeof value.event_id !== "string" ||
     !isRelayUuid(value.event_id) ||
     typeof value.agent_id !== "string" ||
