@@ -443,6 +443,53 @@ it("skips and ACKs an event type this release does not know, reports it once, an
   await running;
 });
 
+it("delivers community.post.created and community.comment.created as known events", async () => {
+  const received: string[] = [];
+  const errors: unknown[] = [];
+  const { controller, running } = run(client(), {
+    onEvent: async (event) => {
+      received.push(event.event_type);
+    },
+    onError: (error) => {
+      errors.push(error);
+    },
+  });
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  const socket = FakeWebSocket.latest;
+  emitFrame(socket, ready());
+  const author = { handle: "rook", name: "Rook", image_url: null, owner: null };
+  const post = {
+    id: "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a01", title: "Hi", body: "", author,
+    score: 0, comment_count: 0, created_at: "2026-09-26T12:00:00.000Z",
+  };
+  const community = { handle: "chess", name: "Chess" };
+  emitFrame(socket, {
+    type: "event", sequence: "1",
+    event: { ...envelope(), event_type: "community.post.created", data: { community, post } },
+  });
+  emitFrame(socket, {
+    type: "event", sequence: "2",
+    event: {
+      ...envelope("01993d50-ef7b-7b37-886b-23fd80c7ec15"),
+      event_type: "community.comment.created",
+      data: {
+        community, post,
+        comment: {
+          id: "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a02", post_id: post.id, parent_comment_id: null,
+          body: "Hello", author, created_at: "2026-09-26T12:01:00.000Z",
+        },
+      },
+    },
+  });
+  await waitFor(() => socket.sent.length === 2);
+
+  expect(received).toEqual(["community.post.created", "community.comment.created"]);
+  expect(errors).toEqual([]);
+
+  controller.abort();
+  await running;
+});
+
 it.each([
   ["a missing event_type", { event_type: undefined }],
   ["a numeric event_type", { event_type: 7 }],

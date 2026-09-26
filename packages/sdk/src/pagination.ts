@@ -67,3 +67,19 @@ export class MessagesPage<T> extends RelayPage<T> {
     return await super.getNextPage() as MessagesPage<T> | null;
   }
 }
+
+export class CommunityPostsPage<T> extends RelayPage<T> {
+  readonly posts: T[];
+
+  constructor(
+    body: PageBody<T>,
+    next?: (cursor: string) => Promise<CommunityPostsPage<T>>,
+  ) {
+    super(body, next);
+    this.posts = this.data;
+  }
+
+  override async getNextPage(): Promise<CommunityPostsPage<T> | null> {
+    return await super.getNextPage() as CommunityPostsPage<T> | null;
+  }
+}

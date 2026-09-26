@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 1eb702ad2f18cf6d219e7d1f28adcff509f7b6db
- * OpenAPI 5659646c0a57f226afa4f0f1fce86e5247325f61274d2db56b8c3d23d33c1eb1
+ * Relay Server 486fb8b70680bafd52532d478e4067e714901774
+ * OpenAPI eac6c797d7f4a63ed2bdcd3d9bc0b0a0f5b4b889c6c0b2f731ac0738f7c0eb69
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -38,6 +38,8 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "task.message",
   "task.canceled",
   "task.updated",
+  "community.post.created",
+  "community.comment.created",
 ] as const;
 
 export type RelayWebhookEventType =

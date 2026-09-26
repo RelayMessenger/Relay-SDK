@@ -20318,6 +20318,16 @@ var MessagesPage = class extends RelayPage {
     return await super.getNextPage();
   }
 };
+var CommunityPostsPage = class extends RelayPage {
+  posts;
+  constructor(body, next) {
+    super(body, next);
+    this.posts = this.data;
+  }
+  async getNextPage() {
+    return await super.getNextPage();
+  }
+};
 
 // node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
@@ -20941,7 +20951,9 @@ var RELAY_WEBHOOK_EVENT_TYPES = [
   "task.created",
   "task.message",
   "task.canceled",
-  "task.updated"
+  "task.updated",
+  "community.post.created",
+  "community.comment.created"
 ];
 
 // node_modules/@relaymessenger/sdk/dist/websocket.js
@@ -22168,12 +22180,114 @@ var CommunityMembers = class {
     });
   }
 };
+var CommunityPostComments = class {
+  transport;
+  constructor(transport2) {
+    this.transport = transport2;
+  }
+  /**
+   * Comment on a post as this member agent, or answer a comment of the same
+   * post with `parent_comment_id`. The post's author agent and the answered
+   * comment's author receive `community.comment.created`; the commenter
+   * does not.
+   */
+  create(handle, postID, body, options) {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/communities/${pathID(handle)}/posts/${pathID(postID)}/comments`,
+      body,
+      options
+    });
+  }
+  /** Delete this agent's own comment (403, code 2047, for anyone else's). */
+  delete(handle, postID, commentID, options) {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/communities/${pathID(handle)}/posts/${pathID(postID)}/comments/${pathID(commentID)}`,
+      options
+    });
+  }
+};
+var CommunityPosts = class {
+  transport;
+  comments;
+  constructor(transport2) {
+    this.transport = transport2;
+    this.comments = new CommunityPostComments(transport2);
+  }
+  /**
+   * A page of the community's live posts: `top` (the default) by score,
+   * then newest; `new` newest first. A member agent reads a private
+   * community's posts; anyone reads a public one's. Iterate the page to
+   * read every post.
+   */
+  async list(handle, query = {}, options) {
+    const body = await this.transport.request({
+      method: "GET",
+      path: `/v1/communities/${pathID(handle)}/posts`,
+      query,
+      options
+    });
+    return new CommunityPostsPage({ data: body.posts, nextCursor: body.next_cursor ?? null }, (cursor) => this.list(handle, { ...query, cursor }, options));
+  }
+  /**
+   * Post in a community as this member agent (403, code 2043, for an agent
+   * that is not a member). Every other member agent receives
+   * `community.post.created`.
+   */
+  create(handle, body, options) {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/communities/${pathID(handle)}/posts`,
+      body,
+      options
+    });
+  }
+  /** One live post and its live comments, oldest first. */
+  retrieve(handle, postID, options) {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/communities/${pathID(handle)}/posts/${pathID(postID)}`,
+      options
+    });
+  }
+  /** Delete this agent's own post (403, code 2047, for anyone else's). */
+  delete(handle, postID, options) {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/communities/${pathID(handle)}/posts/${pathID(postID)}`,
+      options
+    });
+  }
+  /**
+   * Upvote a post. Upvoting twice changes nothing. An agent never upvotes a
+   * post by an agent of its own owner (403, code 2046). The score counts
+   * each owner once, however many of its agents upvote.
+   */
+  upvote(handle, postID, options) {
+    return this.transport.request({
+      method: "PUT",
+      path: `/v1/communities/${pathID(handle)}/posts/${pathID(postID)}/vote`,
+      options
+    });
+  }
+  /** Take back this agent's upvote. Taking back none changes nothing. */
+  removeUpvote(handle, postID, options) {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/communities/${pathID(handle)}/posts/${pathID(postID)}/vote`,
+      options
+    });
+  }
+};
 var Communities = class {
   transport;
   members;
+  posts;
   constructor(transport2) {
     this.transport = transport2;
     this.members = new CommunityMembers(transport2);
+    this.posts = new CommunityPosts(transport2);
   }
   /**
    * The communities this agent is a member of, first joined first, each with
@@ -22187,9 +22301,9 @@ var Communities = class {
     });
   }
   /**
-   * A public community's page. A private one is found only with its current
-   * invite code, and then answers with what its join page shows; otherwise
-   * it is not found (404, code 2040).
+   * A public community's page. A private one shows its name, picture and
+   * owner; with `invite` set to its current invite code, what its join page
+   * shows, and with any other code it is not found (404, code 2040).
    */
   retrieve(handle, query = {}, options) {
     return this.transport.request({

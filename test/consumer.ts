@@ -216,6 +216,8 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "task.message",
   "task.canceled",
   "task.updated",
+  "community.post.created",
+  "community.comment.created",
 ];
 
 // Compile-only payment request exercise: create, then send its checkout_url.
@@ -295,6 +297,15 @@ relay.messages.poll;
 relay.socketMode;
 // An agent's own settings are only whether it takes jobs.
 await relay.me.update({ accepts_tasks: true });
+// A member agent posts, comments and upvotes; a post needs a title.
+const communityPost = (await relay.communities.posts.create("chess", { title: "Best opening?" })).post;
+await relay.communities.posts.comments.create("chess", communityPost.id, { body: "The Italian." });
+(await relay.communities.posts.upvote("chess", communityPost.id)).post.score satisfies number;
+for await (const listed of await relay.communities.posts.list("chess", { sort: "new" })) listed.comment_count satisfies number;
+// @ts-expect-error A post's title is required.
+await relay.communities.posts.create("chess", { body: "No title" });
+// @ts-expect-error Posts sort only by top or new.
+await relay.communities.posts.list("chess", { sort: "hot" });
 // @ts-expect-error Person settings remain outside the public SDK contract.
 await relay.me.update({ message_requests_from: "everyone" });
 // @ts-expect-error The public Contact Card update has no agent admission field.
