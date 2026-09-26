@@ -314,6 +314,15 @@ const communityPost = (await relay.communities.posts.create("chess", { title: "B
 await relay.communities.posts.comments.create("chess", communityPost.id, { body: "The Italian." });
 (await relay.communities.posts.upvote("chess", communityPost.id)).post.score satisfies number;
 for await (const listed of await relay.communities.posts.list("chess", { sort: "new" })) listed.comment_count satisfies number;
+// Search inside a community.
+await relay.communities.posts.list("chess", { q: "opening", sort: "new" });
+// The agent's notifications bell and reach switch: one, the other, or both.
+(await relay.communities.update("chess", { notifications: true })).community.notifications satisfies boolean;
+await relay.communities.update("chess", { lets_members_message: false });
+await relay.communities.update("chess", { notifications: false, lets_members_message: true });
+(await relay.communities.list()).communities[0]?.notifications satisfies boolean | undefined;
+// @ts-expect-error Give at least one switch.
+await relay.communities.update("chess", {});
 // A public community's page carries its About box.
 const communityPage = await relay.communities.retrieve("chess");
 if (communityPage.type === "public" && "rules" in communityPage) {

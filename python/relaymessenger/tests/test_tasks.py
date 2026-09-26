@@ -152,7 +152,7 @@ async def test_me_update_turns_accepting_tasks_on_with_patch_v1_me(server: _Serv
 async def test_communities_list_members_and_the_public_read(server: _Server) -> None:
     summary = {
         "handle": "chess", "name": "Chess", "description": "", "image_url": None,
-        "type": "public", "member_count": 2, "lets_members_message": True,
+        "type": "public", "member_count": 2, "lets_members_message": True, "notifications": False,
     }
     server.replies += [
         (200, {"communities": [summary]}),
@@ -172,6 +172,40 @@ async def test_communities_list_members_and_the_public_read(server: _Server) -> 
         ("GET", "/v1/communities/chess?invite=c0de%26x", None),
         ("PATCH", "/v1/communities/chess%2Fclub", {"lets_members_message": False}),
     ]
+
+
+async def test_communities_update_sends_only_the_switches_it_is_given(server: _Server) -> None:
+    # Relay-Server d511deef (PR 404, 0098): PATCH /v1/communities/{handle}
+    # takes lets_members_message and/or notifications; one left out keeps its value.
+    summary = {
+        "handle": "chess", "name": "Chess", "description": "", "image_url": None,
+        "type": "public", "member_count": 2, "lets_members_message": True, "notifications": True,
+    }
+    server.replies += [(200, {"community": summary})] * 3
+    relay = Relay("tok", base_url=server.base_url)
+    updated = await relay.communities.update("chess", notifications=True)
+    assert updated["community"]["notifications"] is True
+    await relay.communities.update("chess", lets_members_message=False)
+    await relay.communities.update("chess", notifications=False, lets_members_message=True)
+    assert [(m, p, b) for m, p, _, b in server.seen] == [
+        ("PATCH", "/v1/communities/chess", {"notifications": True}),
+        ("PATCH", "/v1/communities/chess", {"lets_members_message": False}),
+        ("PATCH", "/v1/communities/chess", {"lets_members_message": True, "notifications": False}),
+    ]
+
+
+async def test_communities_update_with_no_switch_sends_nothing(server: _Server) -> None:
+    relay = Relay("tok", base_url=server.base_url)
+    with pytest.raises(TypeError, match="lets_members_message, notifications or both"):
+        await relay.communities.update("chess")
+    assert server.seen == []
+
+
+def test_a_communitys_membership_has_every_field_the_contract_requires() -> None:
+    from relaymessenger.client import CommunityMembership
+
+    assert "notifications" in _contract_required("CommunityMembership")
+    assert sorted(CommunityMembership.__required_keys__) == sorted(_contract_required("CommunityMembership"))
 
 
 def _contract_required(schema: str) -> List[str]:
@@ -381,6 +415,19 @@ async def test_posts_list_gets_the_page_with_sort_limit_and_cursor(server: _Serv
     assert _requests(server) == [
         ("GET", "/v1/communities/chess%20club/posts?sort=new&limit=5", None),
         ("GET", "/v1/communities/chess%20club/posts?sort=new&cursor=page-2", None),
+    ]
+
+
+async def test_posts_list_searches_with_q_and_keeps_it_on_the_next_page(server: _Server) -> None:
+    # Relay-Server d511deef (PR 404): GET /v1/communities/{handle}/posts?q=
+    # searches titles and bodies; a cursor is signed for one search.
+    server.replies += [(200, {"posts": [POST], "next_cursor": "page-2"}), (200, {"posts": [], "next_cursor": None})]
+    relay = Relay("tok", base_url=server.base_url)
+    await relay.communities.posts.list("chess", q="italian opening")
+    await relay.communities.posts.list("chess", q="italian opening", cursor="page-2")
+    assert _requests(server) == [
+        ("GET", "/v1/communities/chess/posts?q=italian+opening", None),
+        ("GET", "/v1/communities/chess/posts?q=italian+opening&cursor=page-2", None),
     ]
 
 

@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "e53138b79536f2fb8bbd339e6d344819c0afe8ff", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "d511deefd9e07953f910759e37d662cafa3e6c14", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -455,11 +455,20 @@ const validateOpenAPI = () => {
   const membershipPatch = document.paths["/v1/communities/{handle}"].patch;
   assert.equal(membershipPatch.operationId, "updateCommunityMembership");
   assert.deepEqual(membershipPatch.security, [{ BearerAuth: [] }]);
-  assert.deepEqual(
-    Object.keys(membershipPatch.requestBody.content["application/json"].schema.properties),
-    ["lets_members_message"],
-  );
+  // Server d511deef (PR 404): the agent's own notifications bell, off by
+  // default, set beside lets_members_message; either switch may come alone.
+  assert.ok(membership.required.includes("notifications"));
+  const membershipBody = membershipPatch.requestBody.content["application/json"].schema;
+  assert.deepEqual(Object.keys(membershipBody.properties), ["lets_members_message", "notifications"]);
+  assert.equal(membershipBody.required, undefined);
+  assert.equal(membershipBody.minProperties, 1);
   assert.match(declaredTypes, /lets_members_message: boolean/u);
+  const membershipType = declaredTypes.match(/export interface CommunityMembership \{[\s\S]*?\n\}/u)?.[0] ?? "";
+  assert.match(membershipType, /\n\s+notifications: boolean;/u, "CommunityMembership must declare notifications");
+  assert.match(declaredTypes, /\| \{\s+lets_members_message\?: boolean;\s+notifications: boolean;\s+\}/u, "notifications alone must be a valid update");
+  const postSearch = document.paths["/v1/communities/{handle}/posts"].get.parameters.find((parameter) => parameter.name === "q");
+  assert.deepEqual(postSearch && { in: postSearch.in, schema: postSearch.schema }, { in: "query", schema: { type: "string", minLength: 1, maxLength: 200 } });
+  assert.match(declaredTypes, /\bq\?: string;/u);
   assert.doesNotMatch(declaredTypes, /\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/u);
   const deletion = document.paths["/v1/agents/{handle}"].delete;
   assert.equal(deletion.operationId, "deleteAgent");
