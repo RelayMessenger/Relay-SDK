@@ -6,6 +6,8 @@ export {
   Calls,
   Communities,
   CommunityMembers,
+  CommunityPostComments,
+  CommunityPosts,
   ContactCard,
   Contacts,
   Me,
@@ -41,6 +43,7 @@ export {
 } from "./operations.js";
 export {
   ChatsPage,
+  CommunityPostsPage,
   MessagesPage,
   RelayPage,
   type PageBody,

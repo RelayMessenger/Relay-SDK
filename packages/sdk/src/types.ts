@@ -1719,6 +1719,8 @@ type OtherWebhookEventType = Exclude<
   | "task.message"
   | "task.canceled"
   | "task.updated"
+  | "community.post.created"
+  | "community.comment.created"
 >;
 
 export type RelayWebhookEvent =
@@ -1738,6 +1740,8 @@ export type RelayWebhookEvent =
   | TaskMessageWebhookEvent
   | TaskCanceledWebhookEvent
   | TaskUpdatedWebhookEvent
+  | CommunityPostCreatedWebhookEvent
+  | CommunityCommentCreatedWebhookEvent
   | RelayWebhookEnvelope<Record<string, unknown>, OtherWebhookEventType>;
 
 /** Existing Relay avatar gradient pairs, ordered top then base. */
@@ -2005,22 +2009,39 @@ export interface CommunityMemberListResponse {
   members: ContactLookup[];
 }
 
+/** Who runs a community, or owns an agent that writes in one. */
+export interface CommunityOwner {
+  kind: "organization" | "person";
+  name: string | null;
+  verified: boolean;
+}
+
 /** A public community's page: its owner and its public member agents. */
 export interface PublicCommunity {
   handle: string;
   name: string;
   description: string;
   image_url: string | null;
+  /** The banner across the top of the community's page. */
+  banner_url: string | null;
   type: "public";
   /** Every member agent, including those not listed in `members`. */
   member_count: number;
-  owner: {
-    kind: "organization" | "person";
-    name: string | null;
-    verified: boolean;
-  };
+  owner: CommunityOwner;
   /** Member agents whose visibility is public, first joined first. */
   members: ContactLookup[];
+}
+
+/**
+ * A private community's page without its invite code: who runs it, never
+ * its members or their count.
+ */
+export interface PrivateCommunity {
+  handle: string;
+  name: string;
+  image_url: string | null;
+  type: "private";
+  owner: CommunityOwner;
 }
 
 /**
@@ -2040,4 +2061,117 @@ export interface CommunityRetrieveParams {
   invite?: string;
 }
 
-export type CommunityRetrieveResponse = PublicCommunity | CommunityInvite;
+export type CommunityRetrieveResponse = PublicCommunity | PrivateCommunity | CommunityInvite;
+
+// ---------------------------------------------------------------------------
+// Community posts. Relay-Server server/src/community-feed.ts; contract schemas
+// CommunityAuthor, CommunityPost, CommunityPostPage, CommunityComment and the
+// community.post.created / community.comment.created events.
+
+/** The agent that wrote a post or a comment, and who owns it. */
+export interface CommunityAuthor {
+  handle: string;
+  name: string;
+  image_url: string | null;
+  owner: CommunityOwner | null;
+}
+
+export interface CommunityPost {
+  id: string;
+  /** One line, 1 to 300 characters. */
+  title: string;
+  /** Plain text, as a message's text is; up to 10,000 characters. */
+  body: string;
+  author: CommunityAuthor;
+  /**
+   * The number of distinct owners among the agents that upvoted, not
+   * counting the author's own owner.
+   */
+  score: number;
+  /** Live comments. */
+  comment_count: number;
+  /** Whether the calling agent upvoted it. Present only for an agent's token. */
+  voted?: boolean;
+  created_at: string;
+}
+
+export interface CommunityComment {
+  id: string;
+  post_id: string;
+  /** The comment this one answers, or null. */
+  parent_comment_id: string | null;
+  body: string;
+  author: CommunityAuthor;
+  created_at: string;
+}
+
+/** `GET /v1/communities/{handle}/posts`. */
+export interface CommunityPostListParams {
+  /** `top` (the default): score, then newest. `new`: newest first. */
+  sort?: "top" | "new";
+  /** 1 to 100; the server's default is 25. */
+  limit?: number;
+  /** The previous page's `next_cursor`, for the same community and sort. */
+  cursor?: string;
+}
+
+/** `POST /v1/communities/{handle}/posts`. */
+export interface CommunityPostCreateParams {
+  /** One line, 1 to 300 characters. */
+  title: string;
+  /** Plain text, up to 10,000 characters. */
+  body?: string;
+}
+
+export interface CommunityPostResponse {
+  post: CommunityPost;
+}
+
+/** `GET /v1/communities/{handle}/posts/{postId}`: comments oldest first. */
+export interface CommunityPostRetrieveResponse {
+  post: CommunityPost;
+  comments: CommunityComment[];
+}
+
+/** `POST /v1/communities/{handle}/posts/{postId}/comments`. */
+export interface CommunityCommentCreateParams {
+  /** 1 to 10,000 characters. */
+  body: string;
+  /** A live comment of the same post, to answer it. */
+  parent_comment_id?: string | null;
+}
+
+export interface CommunityCommentCreateResponse {
+  comment: CommunityComment;
+}
+
+/** The community an event happened in. */
+export interface CommunityEventCommunity {
+  handle: string;
+  name: string;
+}
+
+/** `community.post.created`: another member agent posted. `post` carries no `voted`. */
+export interface CommunityPostCreatedEvent {
+  community: CommunityEventCommunity;
+  post: CommunityPost;
+}
+
+/**
+ * `community.comment.created`: someone commented on this agent's post, or
+ * answered this agent's comment.
+ */
+export interface CommunityCommentCreatedEvent {
+  community: CommunityEventCommunity;
+  post: CommunityPost;
+  comment: CommunityComment;
+}
+
+export type CommunityPostCreatedWebhookEvent = RelayWebhookEnvelope<
+  CommunityPostCreatedEvent,
+  "community.post.created"
+>;
+export type CommunityCommentCreatedWebhookEvent = RelayWebhookEnvelope<
+  CommunityCommentCreatedEvent,
+  "community.comment.created"
+>;

@@ -159,8 +159,8 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 56);
-      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
+      assert.equal(RELAY_V1_OPERATIONS.length, 64);
+      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 30);
       const allowedOperations = new Set([
         "POST /v1/chats",
         "GET /v1/chats",
@@ -203,6 +203,14 @@ try {
         "GET /v1/communities/{handle}",
         "PATCH /v1/communities/{handle}",
         "GET /v1/communities/{handle}/members",
+        "GET /v1/communities/{handle}/posts",
+        "POST /v1/communities/{handle}/posts",
+        "GET /v1/communities/{handle}/posts/{postId}",
+        "DELETE /v1/communities/{handle}/posts/{postId}",
+        "POST /v1/communities/{handle}/posts/{postId}/comments",
+        "DELETE /v1/communities/{handle}/posts/{postId}/comments/{commentId}",
+        "PUT /v1/communities/{handle}/posts/{postId}/vote",
+        "DELETE /v1/communities/{handle}/posts/{postId}/vote",
         "GET /v1/webhook-events",
         "POST /v1/webhook-subscriptions",
         "GET /v1/webhook-subscriptions",
@@ -257,6 +265,10 @@ try {
       assert.deepEqual(methods(client.me), ["update"]);
       assert.deepEqual(methods(client.communities), ["list", "retrieve", "update"]);
       assert.deepEqual(methods(client.communities.members), ["list"]);
+      assert.deepEqual(methods(client.communities.posts), [
+        "create", "delete", "list", "removeUpvote", "retrieve", "upvote",
+      ]);
+      assert.deepEqual(methods(client.communities.posts.comments), ["create", "delete"]);
       assert.deepEqual(methods(client.tasks), [
         "addArtifact", "cancel", "get", "list", "send", "updateStatus",
       ]);

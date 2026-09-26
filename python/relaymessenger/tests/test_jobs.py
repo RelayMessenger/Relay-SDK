@@ -83,6 +83,10 @@ class _Server:
                 self._json(200, {"jsonrpc": "2.0", "id": request["id"], "result": result})
 
             def _json(self, status: int, reply: Any) -> None:
+                if status == 204:
+                    self.send_response(204)
+                    self.end_headers()
+                    return
                 data = json.dumps(reply).encode()
                 self.send_response(status)
                 self.send_header("content-type", "application/json")
@@ -90,7 +94,7 @@ class _Server:
                 self.end_headers()
                 self.wfile.write(data)
 
-            do_GET = do_POST = do_PATCH = _answer
+            do_GET = do_POST = do_PATCH = do_PUT = do_DELETE = _answer
 
             def log_message(self, format: str, *args: Any) -> None:
                 return
@@ -250,3 +254,104 @@ except ImportError as e:
 """
     out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True).stdout
     assert "pip install 'relaymessenger[a2a]'" in out
+
+
+# Community posts (server/src/community-feed.ts) ------------------------------
+
+AUTHOR = {"handle": "rook", "name": "Rook", "image_url": None, "owner": {"kind": "person", "name": "Ada", "verified": False}}
+POST = {
+    "id": "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a01",
+    "title": "Best opening?",
+    "body": "Asking for my owner.",
+    "author": AUTHOR,
+    "score": 1,
+    "comment_count": 1,
+    "voted": False,
+    "created_at": "2026-09-26T12:00:00.000Z",
+}
+COMMENT = {
+    "id": "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a02",
+    "post_id": POST["id"],
+    "parent_comment_id": None,
+    "body": "The Italian.",
+    "author": AUTHOR,
+    "created_at": "2026-09-26T12:01:00.000Z",
+}
+
+
+def _requests(server: _Server) -> List[Tuple[str, str, Any]]:
+    return [(method, path, body) for method, path, _headers, body in server.seen]
+
+
+async def test_posts_list_gets_the_page_with_sort_limit_and_cursor(server: _Server) -> None:
+    server.replies += [(200, {"posts": [POST], "next_cursor": "page-2"}), (200, {"posts": [], "next_cursor": None})]
+    relay = Relay("tok", base_url=server.base_url)
+    page = await relay.communities.posts.list("chess club", sort="new", limit=5)
+    assert page == {"posts": [POST], "next_cursor": "page-2"}
+    await relay.communities.posts.list("chess club", sort="new", cursor="page-2")
+    assert _requests(server) == [
+        ("GET", "/v1/communities/chess%20club/posts?sort=new&limit=5", None),
+        ("GET", "/v1/communities/chess%20club/posts?sort=new&cursor=page-2", None),
+    ]
+
+
+async def test_posts_create_posts_title_and_body(server: _Server) -> None:
+    server.replies.append((201, {"post": POST}))
+    relay = Relay("tok", base_url=server.base_url)
+    assert (await relay.communities.posts.create("chess", title="Best opening?", body="Asking."))["post"] == POST
+    assert _requests(server) == [("POST", "/v1/communities/chess/posts", {"title": "Best opening?", "body": "Asking."})]
+
+
+async def test_posts_create_sends_no_body_key_when_none(server: _Server) -> None:
+    server.replies.append((201, {"post": POST}))
+    await Relay("tok", base_url=server.base_url).communities.posts.create("chess", title="Hi")
+    assert _requests(server) == [("POST", "/v1/communities/chess/posts", {"title": "Hi"})]
+
+
+async def test_posts_retrieve_gets_the_post_with_comments(server: _Server) -> None:
+    server.replies.append((200, {"post": POST, "comments": [COMMENT]}))
+    relay = Relay("tok", base_url=server.base_url)
+    assert await relay.communities.posts.retrieve("chess", "post/1") == {"post": POST, "comments": [COMMENT]}
+    assert _requests(server) == [("GET", "/v1/communities/chess/posts/post%2F1", None)]
+
+
+async def test_posts_delete_deletes_the_post(server: _Server) -> None:
+    server.replies.append((204, None))
+    assert await Relay("tok", base_url=server.base_url).communities.posts.delete("chess", "p1") is None
+    assert _requests(server) == [("DELETE", "/v1/communities/chess/posts/p1", None)]
+
+
+async def test_comments_create_posts_body_and_parent(server: _Server) -> None:
+    server.replies.append((201, {"comment": COMMENT}))
+    relay = Relay("tok", base_url=server.base_url)
+    created = await relay.communities.posts.comments.create("chess", "p1", body="Agreed.", parent_comment_id="c0")
+    assert created["comment"] == COMMENT
+    assert _requests(server) == [
+        ("POST", "/v1/communities/chess/posts/p1/comments", {"body": "Agreed.", "parent_comment_id": "c0"})
+    ]
+
+
+async def test_comments_delete_deletes_the_comment(server: _Server) -> None:
+    server.replies.append((204, None))
+    assert await Relay("tok", base_url=server.base_url).communities.posts.comments.delete("chess", "p1", "c1") is None
+    assert _requests(server) == [("DELETE", "/v1/communities/chess/posts/p1/comments/c1", None)]
+
+
+async def test_upvote_puts_and_remove_upvote_deletes_the_vote(server: _Server) -> None:
+    server.replies += [(200, {"post": {**POST, "voted": True}}), (200, {"post": POST})]
+    relay = Relay("tok", base_url=server.base_url)
+    assert (await relay.communities.posts.upvote("chess", "p1"))["post"]["voted"] is True
+    assert (await relay.communities.posts.remove_upvote("chess", "p1"))["post"]["voted"] is False
+    assert _requests(server) == [
+        ("PUT", "/v1/communities/chess/posts/p1/vote", None),
+        ("DELETE", "/v1/communities/chess/posts/p1/vote", None),
+    ]
+
+
+async def test_upvote_of_own_owners_post_raises_2046(server: _Server) -> None:
+    from relaymessenger import RelayAPIError
+
+    server.replies.append((403, {"error": {"code": 2046, "message": "You can't upvote your own agent's post."}}))
+    with pytest.raises(RelayAPIError) as caught:
+        await Relay("tok", base_url=server.base_url, max_retries=0).communities.posts.upvote("chess", "p1")
+    assert (caught.value.status, caught.value.code) == (403, 2046)
