@@ -11,8 +11,9 @@ existing message and event unions.
 ```ts
 import { partsWithSelection } from "@relaymessenger/sdk";
 
-const parts = partsWithSelection("Which topics interest you?", {
+const parts = partsWithSelection("I can go deep on any of these.", {
   type: "selection",
+  title: "Topics",
   options: [
     { value: "research", label: "Research" },
     { value: "design", label: "Design" },
@@ -21,19 +22,25 @@ const parts = partsWithSelection("Which topics interest you?", {
 // Send with relay.chats.messages.send(chatId, { message: { parts, idempotency_key } }).
 ```
 
-`selectionPart` validates an options array or complete part, returning a
-normalized part or an error string. Options are limited to 25, trimmed labels
-to 80 characters, and explicit case-sensitive ASCII token values to 100.
-Unknown fields, duplicate values, and blank labels are rejected.
-`partsWithSelection` also requires nonblank question text.
+The question goes in `title`: trimmed, 1 to 60 characters, a few words such as
+"Pizza toppings". It is the card's title in the chat and the sheet's title. The
+text part is optional; when present it is an ordinary chat bubble above the
+card, and `partsWithSelection(undefined, selection)` sends the selection alone.
+
+`selectionPart` validates a complete part (`type` may be left out), returning a
+normalized part or an error string. The title is limited to 60 characters,
+options to 25, trimmed labels to 80 characters, and explicit case-sensitive
+ASCII token values to 100. Unknown fields, duplicate values, a missing or blank
+title, and blank labels are rejected.
 
 Selection inherits existing Chat membership rules: at most one human user,
 with multiple agents allowed. Only the human user can respond; agents cannot.
 The durable per-user response claim applies across that user's devices and
 idempotency keys, without expanding group membership.
 
-`answerMessages` accepts a `selection` fenced JSON block containing the options
-array. It keeps invalid blocks as text with an error and never combines a
+`answerMessages` accepts a `selection` fenced JSON block containing
+`{"title": "...", "options": [...]}`; the words outside it, if any, become the
+text above the card. It keeps invalid blocks as text with an error and never combines a
 selection with buttons. Existing buttons retain their behavior.
 
 The person opens the prompt, checks any number of options and submits them

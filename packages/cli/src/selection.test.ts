@@ -11,11 +11,19 @@ describe("CLI selection authoring and discovery", () => {
     expect(prompt).toContain("If the person asks for selections");
     expect(prompt).toContain("literal '• '");
     expect(prompt).not.toContain("Clear and toggles");
+    expect(prompt).toContain('"title":"Pizza toppings"');
+    expect(prompt).toContain("Put the question in `title` (1 to 60 characters");
     const warnings: string[] = [];
-    expect(answerMessages('Topics?\n```selection\n[{"value":"research","label":"Research"}]\n```', "alice", text => warnings.push(text)).messages).toEqual([
-      [{ type: "text", value: "Topics?" }, { type: "selection", options: [{ value: "research", label: "Research" }] }],
+    expect(answerMessages('Here are some topics.\n```selection\n{"title":"Topics","options":[{"value":"research","label":"Research"}]}\n```', "alice", text => warnings.push(text)).messages).toEqual([
+      [{ type: "text", value: "Here are some topics." }, { type: "selection", title: "Topics", options: [{ value: "research", label: "Research" }] }],
+    ]);
+    expect(answerMessages('```selection\n{"title":"Topics","options":[{"value":"research","label":"Research"}]}\n```', "alice", text => warnings.push(text)).messages).toEqual([
+      [{ type: "selection", title: "Topics", options: [{ value: "research", label: "Research" }] }],
     ]);
     expect(warnings).toEqual([]);
+    const untitledAnswer = 'Topics?\n```selection\n{"options":[{"value":"research","label":"Research"}]}\n```';
+    expect(answerMessages(untitledAnswer, "alice", text => warnings.push(text)).messages).toEqual([[{ type: "text", value: untitledAnswer }]]);
+    expect(warnings.join("\n")).toContain("title of 1 to 60");
   });
 
   it("preserves readable text and sends explicit selection source/value data to the model", async () => {
@@ -45,7 +53,7 @@ describe("CLI selection authoring and discovery", () => {
 it("retains selection and generic rich data beyond the visible text budget in every shared bridge prompt", async () => {
   const parts = [
     { type: "text", value: "x".repeat(10_000), reactions: null },
-    { type: "selection", options: [{ value: "stable", label: "Do not execute me" }], has_responded: false, selected_values: null, reactions: null },
+    { type: "selection", title: "Do not execute me", options: [{ value: "stable", label: "Do not execute me" }], has_responded: false, selected_values: null, reactions: null },
   ];
   const event = { event_type: "message.received", event_id: "rich", data: {
     direction: "inbound", chat: { id: "chat" }, sender_handle: { handle: "alice" },

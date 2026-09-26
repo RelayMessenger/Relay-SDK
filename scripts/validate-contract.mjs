@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "45369bf6b8a0539524d819f9cd6f47c2a0e05cd0", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "31eba3faab3981a955966f36757525e7eb96c758", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -368,8 +368,14 @@ const validateOpenAPI = () => {
   assert.doesNotMatch(selection.description, /Coming soon/u);
   assert.doesNotMatch(selection.description, /Clear/u);
   assert.equal(selection.additionalProperties, false);
-  assert.deepEqual(selection.required, ["type", "options"]);
+  assert.deepEqual(selection.required, ["type", "title", "options"]);
   assert.deepEqual(selection.properties.type.enum, ["selection"]);
+  assert.equal(selection.properties.title.type, "string");
+  assert.equal(selection.properties.title.minLength, 1);
+  assert.equal(selection.properties.title.maxLength, 60);
+  assert.doesNotMatch(selection.description, /nonblank\s+text/u);
+  assert.ok(schemas.SelectionPartResponse.required.includes("title"));
+  assert.equal(schemas.SelectionPartResponse.properties.title.type, "string");
   assert.equal(selection.properties.options.minItems, 1);
   assert.equal(selection.properties.options.maxItems, 25);
   assert.equal(selection.properties.options.items.$ref, "#/components/schemas/SelectionOption");
@@ -409,6 +415,7 @@ const validateOpenAPI = () => {
     }
   }
   assert.match(declaredTypes, /type: "selection"/u);
+  assert.match(declaredTypes, /interface SelectionPart \{\s+type: "selection";\s+\/\*\*[^\n]*\*\/\s+title: string;/u);
   assert.match(declaredTypes, /type: "selection_response"/u);
   assert.match(declaredTypes, /selected_values: string\[\]/u);
 

@@ -202,9 +202,9 @@ it("sends a real selection part from a selection fence with the existing idempot
     requests.push(JSON.parse(String(init?.body)));
     return Response.json({ message: { id: "sent" } }, { status: 202 });
   } });
-  await sendRelayText({ relay, chatId: "chat", text: 'Topics?\n```selection\n[{"value":"research","label":"Research"}]\n```', idempotencyKey: "selection-operation" });
+  await sendRelayText({ relay, chatId: "chat", text: 'Topics?\n```selection\n{"title":"Topics","options":[{"value":"research","label":"Research"}]}\n```', idempotencyKey: "selection-operation" });
   expect(requests).toEqual([{ message: { parts: [
-    { type: "text", value: "Topics?" }, { type: "selection", options: [{ value: "research", label: "Research" }] },
+    { type: "text", value: "Topics?" }, { type: "selection", title: "Topics", options: [{ value: "research", label: "Research" }] },
   ], idempotency_key: "selection-operation" } }]);
 });
 

@@ -2,13 +2,16 @@ import type { MessagePartResponse, ReplyTo, SelectionOption, SelectionPart, Text
 
 /** Selection authoring uses explicit stable values, never label-derived IDs. */
 export const SELECTION_MAX_OPTIONS = 25;
+export const SELECTION_TITLE_MAX_LENGTH = 60;
 export const SELECTION_LABEL_MAX_LENGTH = 80;
 export const SELECTION_VALUE_MAX_LENGTH = 100;
 export const SELECTION_FENCE = "selection";
 export const SELECTION_GUIDANCE =
   "Use selection when the person can choose several known options, then Send once. "
   + "If the person asks for selections or multiple choices to submit together, send a selection, not buttons. "
-  + "Include a nonblank text question and 1 to 25 options with explicit stable value and readable label. "
+  + "Put the question in `title` (1 to 60 characters, a few words, e.g. \"Pizza toppings\"). "
+  + "Anything else you want to say goes in the text part, which shows as a normal message above the card. "
+  + "Give 1 to 25 options with explicit stable value and readable label. "
   + "Labels are trimmed, 1 to 80 characters; values are unique case-sensitive ASCII tokens of 1 to 100 characters matching ^[A-Za-z0-9][A-Za-z0-9._:-]*$. "
   + "Do not mix selection with buttons. The person opens the prompt, checks any number of options and submits them once; checking sends nothing and only the submit does. A person answers a given selection once, and reopening it afterwards shows what they chose without letting them change it. "
   + "Selection inherits existing Chat membership rules: at most one human user, with multiple agents allowed. "
@@ -18,7 +21,8 @@ export const SELECTION_GUIDANCE =
   + "Use those values and reply_to to dispatch your own application handler, not label parsing.";
 export const SELECTION_BLOCK_INSTRUCTION =
   "To offer multiple selections, end your answer with a fenced code block tagged `selection` "
-  + 'containing [{"value":"stable_token","label":"Readable label"}]. Include the question outside the block.';
+  + 'containing {"title":"Pizza toppings","options":[{"value":"stable_token","label":"Readable label"}]}. '
+  + "Anything you write outside the block is sent as a normal message above the card.";
 
 /** Structured response discovery, never reconstructed by splitting visible labels. */
 export interface SelectionReply {
@@ -78,14 +82,18 @@ export const selectionReplyContext = (
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
-/** Validate an options array or complete request part. Output fields are not accepted. */
+/**
+ * Validate a complete request part, `{ type?, title, options }`; `type` may be
+ * left out, and must be "selection" when present. Output fields are not accepted.
+ */
 export const selectionPart = (parsed: unknown): SelectionPart | string => {
-  let options: unknown = parsed;
-  if (record(parsed)) {
-    const extra = Object.keys(parsed).find((key) => key !== "type" && key !== "options");
-    if (extra) return `selection has unknown field ${extra}`;
-    if (parsed.type !== "selection") return "selection part needs type selection";
-    options = parsed.options;
+  if (!record(parsed)) return "selection needs an object with title and options";
+  const extra = Object.keys(parsed).find((key) => !["type", "title", "options"].includes(key));
+  if (extra) return `selection has unknown field ${extra}`;
+  if (parsed.type !== undefined && parsed.type !== "selection") return "selection part needs type selection";
+  const { title, options } = parsed;
+  if (typeof title !== "string" || !title.trim() || title.trim().length > SELECTION_TITLE_MAX_LENGTH) {
+    return `selection needs a trimmed title of 1 to ${SELECTION_TITLE_MAX_LENGTH} characters`;
   }
   if (!Array.isArray(options) || options.length < 1 || options.length > SELECTION_MAX_OPTIONS) {
     return `selection needs 1 to ${SELECTION_MAX_OPTIONS} options`;
@@ -109,7 +117,7 @@ export const selectionPart = (parsed: unknown): SelectionPart | string => {
     values.add(value);
     result.push({ value, label: label.trim() });
   }
-  return { type: "selection", options: result };
+  return { type: "selection", title: title.trim(), options: result };
 };
 
 export const parseSelectionBlock = (body: string): SelectionPart | string => {
@@ -141,18 +149,21 @@ export const splitSelection = (answer: string): SplitSelection => {
   if (typeof selection === "string") return { text: answer, error: selection };
   const before = answer.slice(0, match.index).trimEnd();
   const after = answer.slice(match.index + match[0].length).trimStart();
+  // Words around the block are optional: the title is the question.
   const text = [before, after].filter(Boolean).join("\n\n");
-  if (!text.trim()) return { text: answer, error: "selection needs a nonblank text prompt" };
   return { text, selection };
 };
 
-/** Construct a complete prompt, without truncating labels, values, or the question. */
+/**
+ * Construct a complete prompt, without truncating labels, values, or the
+ * title. The text is optional: when it has words it is an ordinary chat
+ * bubble above the card; blank text sends the selection alone.
+ */
 export const partsWithSelection = (
-  text: string,
+  text: string | undefined,
   selection: SelectionPart,
-): [TextPart, SelectionPart] => {
-  if (!text.trim()) throw new Error("selection needs a nonblank text prompt");
+): [TextPart, SelectionPart] | [SelectionPart] => {
   const validated = selectionPart(selection);
   if (typeof validated === "string") throw new Error(validated);
-  return [{ type: "text", value: text }, validated];
+  return text?.trim() ? [{ type: "text", value: text }, validated] : [validated];
 };

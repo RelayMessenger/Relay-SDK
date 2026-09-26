@@ -93,7 +93,7 @@ describe("splitPayment", () => {
     expect(splitPayment(twice)).toEqual({ text: twice, error });
     const withButtons = block(fields) + '\n```buttons\n[{"label": "Yes"}]\n```';
     expect(splitPayment(withButtons)).toEqual({ text: withButtons, error });
-    const withSelection = block(fields) + '\n```selection\n[{"value": "a", "label": "A"}]\n```';
+    const withSelection = block(fields) + '\n```selection\n{"title": "Pick", "options": [{"value": "a", "label": "A"}]}\n```';
     expect(splitPayment(withSelection)).toEqual({ text: withSelection, error });
   });
 });

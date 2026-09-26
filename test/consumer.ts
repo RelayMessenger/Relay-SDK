@@ -48,10 +48,13 @@ const relay = new Relay({
 });
 
 // Source-consumer example, not a claim about a published version.
-const topics = selectionPart([
-  { value: "research", label: "Research" },
-  { value: "design", label: "Design" },
-]);
+const topics = selectionPart({
+  title: "Topics",
+  options: [
+    { value: "research", label: "Research" },
+    { value: "design", label: "Design" },
+  ],
+});
 if (typeof topics === "string") throw new Error(topics);
 const selectionMessage: MessageContent = {
   parts: partsWithSelection("Which topics?", topics),

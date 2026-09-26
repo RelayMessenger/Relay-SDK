@@ -382,10 +382,15 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     const listed = await mcp.take(message => message.id === 101, "selection reply schema");
     const tools = (listed.result as { tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }> }).tools;
     expect(tools.find(tool => tool.name === "reply")?.inputSchema.properties.selection).toMatchObject({
-      type: "array", minItems: 1, maxItems: 25,
-      items: { additionalProperties: false, required: ["value", "label"], properties: {
-        value: { maxLength: 100, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$" }, label: { maxLength: 80 },
-      } },
+      type: "object", additionalProperties: false, required: ["title", "options"], properties: {
+        title: { type: "string", minLength: 1, maxLength: 60 },
+        options: {
+          type: "array", minItems: 1, maxItems: 25,
+          items: { additionalProperties: false, required: ["value", "label"], properties: {
+            value: { maxLength: 100, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$" }, label: { maxLength: 80 },
+          } },
+        },
+      },
     });
     await acked;
     const notification = await mcp.take(
@@ -539,7 +544,7 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     );
     expect((began.result as { isError?: boolean }).isError).not.toBe(true);
     expect(relay.readCalls).toEqual([`/v1/chats/${CHAT_ID}/read`]);
-    const selection = [{ value: "next", label: "Next" }];
+    const selection = { title: "Next step", options: [{ value: "next", label: "Next" }] };
     for (const id of [10, 11]) {
       mcp.send({ jsonrpc: "2.0", id, method: "tools/call", params: {
         name: "reply", arguments: { chat_id: CHAT_ID, text: "Next?", selection, send_id: "selection-reply" },
@@ -549,7 +554,7 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     }
     expect(relay.sends).toHaveLength(1);
     expect(relay.sends[0]?.body).toEqual({ message: {
-      parts: [{ type: "text", value: "Next?" }, { type: "selection", options: selection }],
+      parts: [{ type: "text", value: "Next?" }, { type: "selection", ...selection }],
       idempotency_key: relay.sends[0]?.key,
     } });
     mcp.send({
