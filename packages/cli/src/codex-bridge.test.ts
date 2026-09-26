@@ -35,6 +35,10 @@ const RELAY_THREAD_CONFIG = {
       },
     },
   },
+  // The token reaches the relay entry, never a shell command the model runs,
+  // and no shell snapshot puts it back or saves it.
+  shell_environment_policy: { filters: { RELAY_AGENT_TOKEN: "exclude" } },
+  features: { shell_snapshot: false },
 };
 
 const folders: string[] = [];

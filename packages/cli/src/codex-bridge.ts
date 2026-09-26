@@ -86,9 +86,34 @@ export const CODEX_APPROVAL_POLICY = "never";
  * learn.chatgpt.com/docs/extend/mcp?surface=cli; saved at
  * _sources/mcp-hosted-docs-20260926/codex-extend-mcp-cli.txt:1010-1011,
  * 1318-1319). No other server, and no approval policy, changes.
+ *
+ * The agent's token is kept out of every shell command the model runs.
+ * app-server gets `RELAY_AGENT_TOKEN` in its own environment so the relay
+ * entry can read it (`bearer_token_env_var`), and by default Codex hands that
+ * environment to model-run commands too; its shell snapshots saved the token
+ * (the Mac run of 2026-09-26). Codex's `shell_environment_policy.filters`
+ * is "Canonical case-insensitive environment-variable pattern filters"
+ * (map<string, include | exclude>; learn.chatgpt.com/docs/config-file/
+ * config-reference, saved at
+ * _sources/mcp-hosted-docs-20260926/codex-config-reference.txt:4301-4312),
+ * so the token's one name is excluded there. The MCP client is not a shell
+ * command and still reads it. Every other variable is left as it was.
+ *
+ * The filter alone does not hold: Codex's shell snapshot, "Snapshot shell
+ * environment to speed up repeated commands (stable; on by default)"
+ * (`features.shell_snapshot`, same page, codex-config-reference.txt:1276),
+ * records the environment app-server started with and restores it into
+ * every command. Measured on this Mac with codex-cli 0.155.1 and a stand-in
+ * value: filter only, `echo ${#RELAY_AGENT_TOKEN}` printed 15; filter with
+ * snapshots off, 0; and the bridge's snapshot file held the real token. So
+ * bridge threads run without shell snapshots, which also keeps the token out
+ * of `CODEX_HOME/shell_snapshots`. The commands' environment is otherwise
+ * the same; only the speed-up is gone.
  */
 export const codexThreadConfig = (mcpURL: string): {
   mcp_servers: Record<string, ReturnType<typeof codexMcpServer> & { tools: Record<string, { approval_mode: "approve" }> }>;
+  shell_environment_policy: { filters: Record<string, "exclude"> };
+  features: { shell_snapshot: false };
 } => ({
   mcp_servers: {
     [MCP_SERVER_NAME]: {
@@ -96,6 +121,8 @@ export const codexThreadConfig = (mcpURL: string): {
       tools: Object.fromEntries(RELAY_WRITE_TOOLS.map((tool) => [tool, { approval_mode: "approve" as const }])),
     },
   },
+  shell_environment_policy: { filters: { [AGENT_TOKEN_ENV]: "exclude" } },
+  features: { shell_snapshot: false },
 });
 
 /** The one sub-command, over stdin and stdout, which is where it listens by default. */
