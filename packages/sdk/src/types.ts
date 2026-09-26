@@ -615,6 +615,26 @@ export interface LocationPartResponse {
 }
 
 /**
+ * A place sent once: a person's current location, a dropped pin, or a place an
+ * agent names (Relay-Server contract `PlacePart`; WhatsApp Cloud API's location
+ * fields). `name` and `address` are 1 to 256 characters after trimming.
+ */
+export interface PlacePart {
+  type: "place";
+  /** Latitude in degrees (WGS 84), -90 to 90. */
+  latitude: number;
+  /** Longitude in degrees (WGS 84), -180 to 180. */
+  longitude: number;
+  name?: string;
+  address?: string;
+}
+
+/** A place as its sender sent it; `name` and `address` are absent when left out. */
+export interface PlacePartResponse extends PlacePart {
+  reactions: Reaction[] | null;
+}
+
+/**
  * A2UI v0.9.1 (https://a2ui.org), the messages a card is made of. The shapes
  * are A2UI's own JSON schemas (`specification/v0_9_1/json/*.json` in
  * google/A2UI): `server_to_client.json` for what an agent sends to draw a
@@ -824,7 +844,8 @@ export type MessagePart =
   | SelectionPart
   | SelectionResponsePart
   | PaymentPart
-  | DataPart;
+  | DataPart
+  | PlacePart;
 
 export interface TextPartResponse extends TextPart {
   mentions?: Array<{
@@ -921,6 +942,7 @@ export type MessagePartResponse =
   | DataPartResponse
   | LocationRequestPartResponse
   | LocationPartResponse
+  | PlacePartResponse
   | SystemPartResponse;
 
 /** Ordinary replies target text, media, or link, never system. A buttons part
@@ -970,6 +992,7 @@ export interface SentMessage {
     | DataPartResponse
     | LocationRequestPartResponse
     | LocationPartResponse
+    | PlacePartResponse
   >;
   metadata?: MessageMetadata;
   created_at: string;

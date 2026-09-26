@@ -3,7 +3,7 @@ import type { MethodDoc } from "./search-docs.js";
 export const DOCS_SOURCE = {
   "contract": "d724f38784e54027775e518fd70190147fc1af7baaec74943b58e60a98611640",
   "client": "b8089a99b0be17fda35f4a093a7fe563506164241429c7eff4852cc9404fa3b2",
-  "types": "52e803230005af80d1f5e9b7a91a03a8421cfbe2034671d5ac3785d2cc770b1b"
+  "types": "1b570316e03c852da9f193da37a65f70f03845dc25e22a82bf746bce084efb5f"
 };
 export const METHOD_DOCS: readonly MethodDoc[] = [
   {
@@ -334,7 +334,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
     "definitions": [
       "export interface ChatCreateParams {\n  from: string;\n  to: string[];\n  message: MessageContent;\n}",
       "export interface MessageContent {\n  parts: MessagePart[];\n  reply_to?: ReplyTo;\n  /**\n   * A2A Message metadata. A tap (an A2UI `action`) on a surface that set\n   * `sendDataModel` must carry `a2uiClientDataModel`.\n   */\n  metadata?: MessageMetadata;\n  idempotency_key?: string;\n  /**\n   * Send the Message with no banner and no sound on the recipient's device.\n   * The Message still arrives, still counts as unread, and still moves the\n   * Chat to the top of the list. Defaults to `false`.\n   */\n  silent?: boolean;\n}",
-      "export type MessagePart =\n  | TextPart\n  | MediaPart\n  | LinkPart\n  | ButtonsPart\n  | SelectionPart\n  | SelectionResponsePart\n  | PaymentPart\n  | DataPart;",
+      "export type MessagePart =\n  | TextPart\n  | MediaPart\n  | LinkPart\n  | ButtonsPart\n  | SelectionPart\n  | SelectionResponsePart\n  | PaymentPart\n  | DataPart\n  | PlacePart;",
       "export interface TextPart {\n  type: \"text\";\n  value: string;\n  mention?: string | null;\n  mention_range?: [number, number] | null;\n}",
       "export interface MediaPart {\n  type: \"media\";\n  url?: string;\n  attachment_id?: UUID;\n}",
       "export type UUID = string;",
@@ -347,12 +347,13 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface PaymentPart {\n  type: \"payment\";\n  /** At most 2048 characters. */\n  checkout_url: string;\n}",
       "export interface DataPart {\n  type: \"data\";\n  media_type: \"application/a2ui+json\";\n  data: A2uiMessage[];\n}",
       "export type A2uiMessage = A2uiServerToClientMessage | A2uiClientToServerMessage;",
+      "export interface PlacePart {\n  type: \"place\";\n  /** Latitude in degrees (WGS 84), -90 to 90. */\n  latitude: number;\n  /** Longitude in degrees (WGS 84), -180 to 180. */\n  longitude: number;\n  name?: string;\n  address?: string;\n}",
       "export interface ReplyTo {\n  message_id: UUID;\n  part_index?: number;\n}",
       "export interface Message {\n  id: UUID;\n  chat_id: UUID;\n  from?: string | null;\n  from_handle?: ChatHandle | null;\n  parts?: MessagePartResponse[] | null;\n  reply_to?: ReplyTo | null;\n  metadata?: MessageMetadata;\n  is_system_message: boolean;\n  system_event?: SystemEvent | null;\n  is_from_me: boolean;\n  delivery_status: DeliveryStatus;\n  created_at: string;\n  updated_at: string;\n  sent_at?: string | null;\n  delivered_at?: string | null;\n  read_at?: string | null;\n  /** When the Message was last edited, or null if it was never edited. */\n  edited_at?: string | null;\n  /**\n   * When the sender unsent the Message, or null. An unsent Message keeps its\n   * place in the transcript and carries no parts.\n   */\n  unsent_at?: string | null;\n  /**\n   * Whether the sender sent this Message silently, so the recipient's device\n   * showed no banner and played no sound.\n   */\n  silent?: boolean;\n  deliveries?: MessageDelivery[];\n}",
       "export type ChatHandle = UserChatHandle | AgentChatHandle;",
       "export interface UserChatHandle extends ChatHandleBase {\n  kind: \"user\";\n}",
       "export interface AgentChatHandle extends ChatHandleBase {\n  kind: \"agent\";\n}",
-      "export type MessagePartResponse =\n  | TextPartResponse\n  | MediaPartResponse\n  | LinkPartResponse\n  | ButtonsPartResponse\n  | SelectionPartResponse\n  | SelectionResponsePartResponse\n  | PaymentPartResponse\n  | PaymentReceiptPartResponse\n  | DataPartResponse\n  | LocationRequestPartResponse\n  | LocationPartResponse\n  | SystemPartResponse;",
+      "export type MessagePartResponse =\n  | TextPartResponse\n  | MediaPartResponse\n  | LinkPartResponse\n  | ButtonsPartResponse\n  | SelectionPartResponse\n  | SelectionResponsePartResponse\n  | PaymentPartResponse\n  | PaymentReceiptPartResponse\n  | DataPartResponse\n  | LocationRequestPartResponse\n  | LocationPartResponse\n  | PlacePartResponse\n  | SystemPartResponse;",
       "export interface TextPartResponse extends TextPart {\n  mentions?: Array<{\n    id: string;\n    handle: string;\n    is_me: boolean;\n    range: [number, number];\n  }> | null;\n  /** @deprecated Use mentions instead. */\n  mention?: string | null;\n  /** @deprecated Use mentions instead. */\n  mention_range?: [number, number] | null;\n  reactions: Reaction[] | null;\n}",
       "export interface MediaPartResponse {\n  type: \"media\";\n  id: UUID;\n  url: string;\n  filename: string;\n  mime_type: string;\n  size_bytes: number;\n  duration_ms?: number | null;\n  width?: number | null;\n  height?: number | null;\n  reactions: Reaction[] | null;\n}",
       "export interface LinkPartResponse extends LinkPart {\n  reactions: Reaction[] | null;\n}",
@@ -364,6 +365,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface DataPartResponse extends DataPart {\n  reactions: Reaction[] | null;\n}",
       "export interface LocationRequestPartResponse {\n  type: \"location_request\";\n  reactions: Reaction[] | null;\n}",
       "export interface LocationPartResponse {\n  type: \"location\";\n  state: \"live\" | \"ended\";\n  began_at: string | null;\n  /** When the share ends by itself; null when it has no end. */\n  ends_at: string | null;\n  ended_at: string | null;\n  reactions: Reaction[] | null;\n}",
+      "export interface PlacePartResponse extends PlacePart {\n  reactions: Reaction[] | null;\n}",
       "export interface SystemPartResponse {\n  type: \"system\";\n  value: string;\n  reactions: null;\n}",
       "export interface MessageMetadata {\n  a2uiClientDataModel?: A2uiClientDataModel;\n}",
       "export interface A2uiClientDataModel {\n  version: A2uiVersion;\n  surfaces: Record<string, Record<string, unknown>>;\n}",
@@ -380,7 +382,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface A2uiFailure {\n  /** The data part's index in `parts`; null when the fault is in `metadata.a2uiClientDataModel`. */\n  part_index: number | null;\n  /** The message's index in that part's `data`; null when the part itself, or the metadata, is at fault. */\n  data_index: number | null;\n  a2ui_message: A2uiValidationErrorMessage;\n}",
       "export interface A2uiValidationErrorMessage {\n  version: \"v0.9.1\";\n  error: A2uiValidationError;\n}",
       "export interface A2uiValidationError {\n  code: \"VALIDATION_FAILED\";\n  surfaceId: string;\n  path: string;\n  message: string;\n}",
-      "export interface SentMessage {\n  id: UUID;\n  parts: Array<\n    | TextPartResponse\n    | MediaPartResponse\n    | LinkPartResponse\n    | ButtonsPartResponse\n    | SelectionPartResponse\n    | SelectionResponsePartResponse\n    | PaymentPartResponse\n    | PaymentReceiptPartResponse\n    | DataPartResponse\n    | LocationRequestPartResponse\n    | LocationPartResponse\n  >;\n  metadata?: MessageMetadata;\n  created_at: string;\n  sent_at: string | null;\n  delivered_at?: string | null;\n  delivery_status: DeliveryStatus;\n  from_handle?: ChatHandle | null;\n  reply_to?: ReplyTo | null;\n  /**\n   * Whether the sender sent this Message silently, so the recipient's device\n   * showed no banner and played no sound.\n   */\n  silent?: boolean;\n  is_system_message: false;\n}"
+      "export interface SentMessage {\n  id: UUID;\n  parts: Array<\n    | TextPartResponse\n    | MediaPartResponse\n    | LinkPartResponse\n    | ButtonsPartResponse\n    | SelectionPartResponse\n    | SelectionResponsePartResponse\n    | PaymentPartResponse\n    | PaymentReceiptPartResponse\n    | DataPartResponse\n    | LocationRequestPartResponse\n    | LocationPartResponse\n    | PlacePartResponse\n  >;\n  metadata?: MessageMetadata;\n  created_at: string;\n  sent_at: string | null;\n  delivered_at?: string | null;\n  delivery_status: DeliveryStatus;\n  from_handle?: ChatHandle | null;\n  reply_to?: ReplyTo | null;\n  /**\n   * Whether the sender sent this Message silently, so the recipient's device\n   * showed no banner and played no sound.\n   */\n  silent?: boolean;\n  is_system_message: false;\n}"
     ],
     "requestBody": {
       "required": true,
@@ -547,7 +549,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "interface ChatHandleBase {\n  id: UUID;\n  handle: string;\n  status?: \"active\" | \"left\" | \"removed\" | null;\n  joined_at: string;\n  left_at?: string | null;\n  is_me?: boolean | null;\n  display_name: string | null;\n  image_url: string | null;\n  subtitle: string | null;\n  verified: boolean;\n  /** True when the caller holds this Handle as a Contact. */\n  is_contact: boolean;\n  activity_version?: string;\n  activity?: ChatActivity | null;\n}",
       "export interface ChatActivity {\n  id: UUID;\n  text: string;\n  emoji: string | null;\n  updated_at: string;\n  expires_at: string;\n}",
       "export interface AgentChatHandle extends ChatHandleBase {\n  kind: \"agent\";\n}",
-      "export type MessagePartResponse =\n  | TextPartResponse\n  | MediaPartResponse\n  | LinkPartResponse\n  | ButtonsPartResponse\n  | SelectionPartResponse\n  | SelectionResponsePartResponse\n  | PaymentPartResponse\n  | PaymentReceiptPartResponse\n  | DataPartResponse\n  | LocationRequestPartResponse\n  | LocationPartResponse\n  | SystemPartResponse;",
+      "export type MessagePartResponse =\n  | TextPartResponse\n  | MediaPartResponse\n  | LinkPartResponse\n  | ButtonsPartResponse\n  | SelectionPartResponse\n  | SelectionResponsePartResponse\n  | PaymentPartResponse\n  | PaymentReceiptPartResponse\n  | DataPartResponse\n  | LocationRequestPartResponse\n  | LocationPartResponse\n  | PlacePartResponse\n  | SystemPartResponse;",
       "export interface TextPartResponse extends TextPart {\n  mentions?: Array<{\n    id: string;\n    handle: string;\n    is_me: boolean;\n    range: [number, number];\n  }> | null;\n  /** @deprecated Use mentions instead. */\n  mention?: string | null;\n  /** @deprecated Use mentions instead. */\n  mention_range?: [number, number] | null;\n  reactions: Reaction[] | null;\n}",
       "export interface TextPart {\n  type: \"text\";\n  value: string;\n  mention?: string | null;\n  mention_range?: [number, number] | null;\n}",
       "export interface Reaction {\n  is_me: boolean;\n  handle: ChatHandle;\n  type: ReactionType;\n  custom_emoji?: string | null;\n}",
@@ -575,6 +577,8 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export type A2uiMessage = A2uiServerToClientMessage | A2uiClientToServerMessage;",
       "export interface LocationRequestPartResponse {\n  type: \"location_request\";\n  reactions: Reaction[] | null;\n}",
       "export interface LocationPartResponse {\n  type: \"location\";\n  state: \"live\" | \"ended\";\n  began_at: string | null;\n  /** When the share ends by itself; null when it has no end. */\n  ends_at: string | null;\n  ended_at: string | null;\n  reactions: Reaction[] | null;\n}",
+      "export interface PlacePartResponse extends PlacePart {\n  reactions: Reaction[] | null;\n}",
+      "export interface PlacePart {\n  type: \"place\";\n  /** Latitude in degrees (WGS 84), -90 to 90. */\n  latitude: number;\n  /** Longitude in degrees (WGS 84), -180 to 180. */\n  longitude: number;\n  name?: string;\n  address?: string;\n}",
       "export interface SystemPartResponse {\n  type: \"system\";\n  value: string;\n  reactions: null;\n}",
       "export interface ReplyTo {\n  message_id: UUID;\n  part_index?: number;\n}",
       "export interface MessageMetadata {\n  a2uiClientDataModel?: A2uiClientDataModel;\n}",
@@ -611,7 +615,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
     "definitions": [
       "export interface MessageSendParams {\n  message: MessageContent;\n}",
       "export interface MessageContent {\n  parts: MessagePart[];\n  reply_to?: ReplyTo;\n  /**\n   * A2A Message metadata. A tap (an A2UI `action`) on a surface that set\n   * `sendDataModel` must carry `a2uiClientDataModel`.\n   */\n  metadata?: MessageMetadata;\n  idempotency_key?: string;\n  /**\n   * Send the Message with no banner and no sound on the recipient's device.\n   * The Message still arrives, still counts as unread, and still moves the\n   * Chat to the top of the list. Defaults to `false`.\n   */\n  silent?: boolean;\n}",
-      "export type MessagePart =\n  | TextPart\n  | MediaPart\n  | LinkPart\n  | ButtonsPart\n  | SelectionPart\n  | SelectionResponsePart\n  | PaymentPart\n  | DataPart;",
+      "export type MessagePart =\n  | TextPart\n  | MediaPart\n  | LinkPart\n  | ButtonsPart\n  | SelectionPart\n  | SelectionResponsePart\n  | PaymentPart\n  | DataPart\n  | PlacePart;",
       "export interface TextPart {\n  type: \"text\";\n  value: string;\n  mention?: string | null;\n  mention_range?: [number, number] | null;\n}",
       "export interface MediaPart {\n  type: \"media\";\n  url?: string;\n  attachment_id?: UUID;\n}",
       "export type UUID = string;",
@@ -624,12 +628,13 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface PaymentPart {\n  type: \"payment\";\n  /** At most 2048 characters. */\n  checkout_url: string;\n}",
       "export interface DataPart {\n  type: \"data\";\n  media_type: \"application/a2ui+json\";\n  data: A2uiMessage[];\n}",
       "export type A2uiMessage = A2uiServerToClientMessage | A2uiClientToServerMessage;",
+      "export interface PlacePart {\n  type: \"place\";\n  /** Latitude in degrees (WGS 84), -90 to 90. */\n  latitude: number;\n  /** Longitude in degrees (WGS 84), -180 to 180. */\n  longitude: number;\n  name?: string;\n  address?: string;\n}",
       "export interface ReplyTo {\n  message_id: UUID;\n  part_index?: number;\n}",
       "export interface Message {\n  id: UUID;\n  chat_id: UUID;\n  from?: string | null;\n  from_handle?: ChatHandle | null;\n  parts?: MessagePartResponse[] | null;\n  reply_to?: ReplyTo | null;\n  metadata?: MessageMetadata;\n  is_system_message: boolean;\n  system_event?: SystemEvent | null;\n  is_from_me: boolean;\n  delivery_status: DeliveryStatus;\n  created_at: string;\n  updated_at: string;\n  sent_at?: string | null;\n  delivered_at?: string | null;\n  read_at?: string | null;\n  /** When the Message was last edited, or null if it was never edited. */\n  edited_at?: string | null;\n  /**\n   * When the sender unsent the Message, or null. An unsent Message keeps its\n   * place in the transcript and carries no parts.\n   */\n  unsent_at?: string | null;\n  /**\n   * Whether the sender sent this Message silently, so the recipient's device\n   * showed no banner and played no sound.\n   */\n  silent?: boolean;\n  deliveries?: MessageDelivery[];\n}",
       "export type ChatHandle = UserChatHandle | AgentChatHandle;",
       "export interface UserChatHandle extends ChatHandleBase {\n  kind: \"user\";\n}",
       "export interface AgentChatHandle extends ChatHandleBase {\n  kind: \"agent\";\n}",
-      "export type MessagePartResponse =\n  | TextPartResponse\n  | MediaPartResponse\n  | LinkPartResponse\n  | ButtonsPartResponse\n  | SelectionPartResponse\n  | SelectionResponsePartResponse\n  | PaymentPartResponse\n  | PaymentReceiptPartResponse\n  | DataPartResponse\n  | LocationRequestPartResponse\n  | LocationPartResponse\n  | SystemPartResponse;",
+      "export type MessagePartResponse =\n  | TextPartResponse\n  | MediaPartResponse\n  | LinkPartResponse\n  | ButtonsPartResponse\n  | SelectionPartResponse\n  | SelectionResponsePartResponse\n  | PaymentPartResponse\n  | PaymentReceiptPartResponse\n  | DataPartResponse\n  | LocationRequestPartResponse\n  | LocationPartResponse\n  | PlacePartResponse\n  | SystemPartResponse;",
       "export interface TextPartResponse extends TextPart {\n  mentions?: Array<{\n    id: string;\n    handle: string;\n    is_me: boolean;\n    range: [number, number];\n  }> | null;\n  /** @deprecated Use mentions instead. */\n  mention?: string | null;\n  /** @deprecated Use mentions instead. */\n  mention_range?: [number, number] | null;\n  reactions: Reaction[] | null;\n}",
       "export interface MediaPartResponse {\n  type: \"media\";\n  id: UUID;\n  url: string;\n  filename: string;\n  mime_type: string;\n  size_bytes: number;\n  duration_ms?: number | null;\n  width?: number | null;\n  height?: number | null;\n  reactions: Reaction[] | null;\n}",
       "export interface LinkPartResponse extends LinkPart {\n  reactions: Reaction[] | null;\n}",
@@ -641,6 +646,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface DataPartResponse extends DataPart {\n  reactions: Reaction[] | null;\n}",
       "export interface LocationRequestPartResponse {\n  type: \"location_request\";\n  reactions: Reaction[] | null;\n}",
       "export interface LocationPartResponse {\n  type: \"location\";\n  state: \"live\" | \"ended\";\n  began_at: string | null;\n  /** When the share ends by itself; null when it has no end. */\n  ends_at: string | null;\n  ended_at: string | null;\n  reactions: Reaction[] | null;\n}",
+      "export interface PlacePartResponse extends PlacePart {\n  reactions: Reaction[] | null;\n}",
       "export interface SystemPartResponse {\n  type: \"system\";\n  value: string;\n  reactions: null;\n}",
       "export interface MessageMetadata {\n  a2uiClientDataModel?: A2uiClientDataModel;\n}",
       "export interface A2uiClientDataModel {\n  version: A2uiVersion;\n  surfaces: Record<string, Record<string, unknown>>;\n}",
@@ -657,7 +663,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface A2uiFailure {\n  /** The data part's index in `parts`; null when the fault is in `metadata.a2uiClientDataModel`. */\n  part_index: number | null;\n  /** The message's index in that part's `data`; null when the part itself, or the metadata, is at fault. */\n  data_index: number | null;\n  a2ui_message: A2uiValidationErrorMessage;\n}",
       "export interface A2uiValidationErrorMessage {\n  version: \"v0.9.1\";\n  error: A2uiValidationError;\n}",
       "export interface A2uiValidationError {\n  code: \"VALIDATION_FAILED\";\n  surfaceId: string;\n  path: string;\n  message: string;\n}",
-      "export interface SentMessage {\n  id: UUID;\n  parts: Array<\n    | TextPartResponse\n    | MediaPartResponse\n    | LinkPartResponse\n    | ButtonsPartResponse\n    | SelectionPartResponse\n    | SelectionResponsePartResponse\n    | PaymentPartResponse\n    | PaymentReceiptPartResponse\n    | DataPartResponse\n    | LocationRequestPartResponse\n    | LocationPartResponse\n  >;\n  metadata?: MessageMetadata;\n  created_at: string;\n  sent_at: string | null;\n  delivered_at?: string | null;\n  delivery_status: DeliveryStatus;\n  from_handle?: ChatHandle | null;\n  reply_to?: ReplyTo | null;\n  /**\n   * Whether the sender sent this Message silently, so the recipient's device\n   * showed no banner and played no sound.\n   */\n  silent?: boolean;\n  is_system_message: false;\n}"
+      "export interface SentMessage {\n  id: UUID;\n  parts: Array<\n    | TextPartResponse\n    | MediaPartResponse\n    | LinkPartResponse\n    | ButtonsPartResponse\n    | SelectionPartResponse\n    | SelectionResponsePartResponse\n    | PaymentPartResponse\n    | PaymentReceiptPartResponse\n    | DataPartResponse\n    | LocationRequestPartResponse\n    | LocationPartResponse\n    | PlacePartResponse\n  >;\n  metadata?: MessageMetadata;\n  created_at: string;\n  sent_at: string | null;\n  delivered_at?: string | null;\n  delivery_status: DeliveryStatus;\n  from_handle?: ChatHandle | null;\n  reply_to?: ReplyTo | null;\n  /**\n   * Whether the sender sent this Message silently, so the recipient's device\n   * showed no banner and played no sound.\n   */\n  silent?: boolean;\n  is_system_message: false;\n}"
     ],
     "requestBody": {
       "required": true,
@@ -1133,7 +1139,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
     "definitions": [
       "export interface MessageCreateParams {\n  to: string[];\n  message: MessageContent;\n  \"Idempotency-Key\"?: string;\n}",
       "export interface MessageContent {\n  parts: MessagePart[];\n  reply_to?: ReplyTo;\n  /**\n   * A2A Message metadata. A tap (an A2UI `action`) on a surface that set\n   * `sendDataModel` must carry `a2uiClientDataModel`.\n   */\n  metadata?: MessageMetadata;\n  idempotency_key?: string;\n  /**\n   * Send the Message with no banner and no sound on the recipient's device.\n   * The Message still arrives, still counts as unread, and still moves the\n   * Chat to the top of the list. Defaults to `false`.\n   */\n  silent?: boolean;\n}",
-      "export type MessagePart =\n  | TextPart\n  | MediaPart\n  | LinkPart\n  | ButtonsPart\n  | SelectionPart\n  | SelectionResponsePart\n  | PaymentPart\n  | DataPart;",
+      "export type MessagePart =\n  | TextPart\n  | MediaPart\n  | LinkPart\n  | ButtonsPart\n  | SelectionPart\n  | SelectionResponsePart\n  | PaymentPart\n  | DataPart\n  | PlacePart;",
       "export interface TextPart {\n  type: \"text\";\n  value: string;\n  mention?: string | null;\n  mention_range?: [number, number] | null;\n}",
       "export interface MediaPart {\n  type: \"media\";\n  url?: string;\n  attachment_id?: UUID;\n}",
       "export type UUID = string;",
@@ -1146,12 +1152,13 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface PaymentPart {\n  type: \"payment\";\n  /** At most 2048 characters. */\n  checkout_url: string;\n}",
       "export interface DataPart {\n  type: \"data\";\n  media_type: \"application/a2ui+json\";\n  data: A2uiMessage[];\n}",
       "export type A2uiMessage = A2uiServerToClientMessage | A2uiClientToServerMessage;",
+      "export interface PlacePart {\n  type: \"place\";\n  /** Latitude in degrees (WGS 84), -90 to 90. */\n  latitude: number;\n  /** Longitude in degrees (WGS 84), -180 to 180. */\n  longitude: number;\n  name?: string;\n  address?: string;\n}",
       "export interface ReplyTo {\n  message_id: UUID;\n  part_index?: number;\n}",
       "export interface Message {\n  id: UUID;\n  chat_id: UUID;\n  from?: string | null;\n  from_handle?: ChatHandle | null;\n  parts?: MessagePartResponse[] | null;\n  reply_to?: ReplyTo | null;\n  metadata?: MessageMetadata;\n  is_system_message: boolean;\n  system_event?: SystemEvent | null;\n  is_from_me: boolean;\n  delivery_status: DeliveryStatus;\n  created_at: string;\n  updated_at: string;\n  sent_at?: string | null;\n  delivered_at?: string | null;\n  read_at?: string | null;\n  /** When the Message was last edited, or null if it was never edited. */\n  edited_at?: string | null;\n  /**\n   * When the sender unsent the Message, or null. An unsent Message keeps its\n   * place in the transcript and carries no parts.\n   */\n  unsent_at?: string | null;\n  /**\n   * Whether the sender sent this Message silently, so the recipient's device\n   * showed no banner and played no sound.\n   */\n  silent?: boolean;\n  deliveries?: MessageDelivery[];\n}",
       "export type ChatHandle = UserChatHandle | AgentChatHandle;",
       "export interface UserChatHandle extends ChatHandleBase {\n  kind: \"user\";\n}",
       "export interface AgentChatHandle extends ChatHandleBase {\n  kind: \"agent\";\n}",
-      "export type MessagePartResponse =\n  | TextPartResponse\n  | MediaPartResponse\n  | LinkPartResponse\n  | ButtonsPartResponse\n  | SelectionPartResponse\n  | SelectionResponsePartResponse\n  | PaymentPartResponse\n  | PaymentReceiptPartResponse\n  | DataPartResponse\n  | LocationRequestPartResponse\n  | LocationPartResponse\n  | SystemPartResponse;",
+      "export type MessagePartResponse =\n  | TextPartResponse\n  | MediaPartResponse\n  | LinkPartResponse\n  | ButtonsPartResponse\n  | SelectionPartResponse\n  | SelectionResponsePartResponse\n  | PaymentPartResponse\n  | PaymentReceiptPartResponse\n  | DataPartResponse\n  | LocationRequestPartResponse\n  | LocationPartResponse\n  | PlacePartResponse\n  | SystemPartResponse;",
       "export interface TextPartResponse extends TextPart {\n  mentions?: Array<{\n    id: string;\n    handle: string;\n    is_me: boolean;\n    range: [number, number];\n  }> | null;\n  /** @deprecated Use mentions instead. */\n  mention?: string | null;\n  /** @deprecated Use mentions instead. */\n  mention_range?: [number, number] | null;\n  reactions: Reaction[] | null;\n}",
       "export interface MediaPartResponse {\n  type: \"media\";\n  id: UUID;\n  url: string;\n  filename: string;\n  mime_type: string;\n  size_bytes: number;\n  duration_ms?: number | null;\n  width?: number | null;\n  height?: number | null;\n  reactions: Reaction[] | null;\n}",
       "export interface LinkPartResponse extends LinkPart {\n  reactions: Reaction[] | null;\n}",
@@ -1163,6 +1170,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface DataPartResponse extends DataPart {\n  reactions: Reaction[] | null;\n}",
       "export interface LocationRequestPartResponse {\n  type: \"location_request\";\n  reactions: Reaction[] | null;\n}",
       "export interface LocationPartResponse {\n  type: \"location\";\n  state: \"live\" | \"ended\";\n  began_at: string | null;\n  /** When the share ends by itself; null when it has no end. */\n  ends_at: string | null;\n  ended_at: string | null;\n  reactions: Reaction[] | null;\n}",
+      "export interface PlacePartResponse extends PlacePart {\n  reactions: Reaction[] | null;\n}",
       "export interface SystemPartResponse {\n  type: \"system\";\n  value: string;\n  reactions: null;\n}",
       "export interface MessageMetadata {\n  a2uiClientDataModel?: A2uiClientDataModel;\n}",
       "export interface A2uiClientDataModel {\n  version: A2uiVersion;\n  surfaces: Record<string, Record<string, unknown>>;\n}",
@@ -1179,7 +1187,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface A2uiFailure {\n  /** The data part's index in `parts`; null when the fault is in `metadata.a2uiClientDataModel`. */\n  part_index: number | null;\n  /** The message's index in that part's `data`; null when the part itself, or the metadata, is at fault. */\n  data_index: number | null;\n  a2ui_message: A2uiValidationErrorMessage;\n}",
       "export interface A2uiValidationErrorMessage {\n  version: \"v0.9.1\";\n  error: A2uiValidationError;\n}",
       "export interface A2uiValidationError {\n  code: \"VALIDATION_FAILED\";\n  surfaceId: string;\n  path: string;\n  message: string;\n}",
-      "export interface SentMessage {\n  id: UUID;\n  parts: Array<\n    | TextPartResponse\n    | MediaPartResponse\n    | LinkPartResponse\n    | ButtonsPartResponse\n    | SelectionPartResponse\n    | SelectionResponsePartResponse\n    | PaymentPartResponse\n    | PaymentReceiptPartResponse\n    | DataPartResponse\n    | LocationRequestPartResponse\n    | LocationPartResponse\n  >;\n  metadata?: MessageMetadata;\n  created_at: string;\n  sent_at: string | null;\n  delivered_at?: string | null;\n  delivery_status: DeliveryStatus;\n  from_handle?: ChatHandle | null;\n  reply_to?: ReplyTo | null;\n  /**\n   * Whether the sender sent this Message silently, so the recipient's device\n   * showed no banner and played no sound.\n   */\n  silent?: boolean;\n  is_system_message: false;\n}"
+      "export interface SentMessage {\n  id: UUID;\n  parts: Array<\n    | TextPartResponse\n    | MediaPartResponse\n    | LinkPartResponse\n    | ButtonsPartResponse\n    | SelectionPartResponse\n    | SelectionResponsePartResponse\n    | PaymentPartResponse\n    | PaymentReceiptPartResponse\n    | DataPartResponse\n    | LocationRequestPartResponse\n    | LocationPartResponse\n    | PlacePartResponse\n  >;\n  metadata?: MessageMetadata;\n  created_at: string;\n  sent_at: string | null;\n  delivered_at?: string | null;\n  delivery_status: DeliveryStatus;\n  from_handle?: ChatHandle | null;\n  reply_to?: ReplyTo | null;\n  /**\n   * Whether the sender sent this Message silently, so the recipient's device\n   * showed no banner and played no sound.\n   */\n  silent?: boolean;\n  is_system_message: false;\n}"
     ],
     "requestBody": {
       "required": true,
@@ -1218,7 +1226,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "interface ChatHandleBase {\n  id: UUID;\n  handle: string;\n  status?: \"active\" | \"left\" | \"removed\" | null;\n  joined_at: string;\n  left_at?: string | null;\n  is_me?: boolean | null;\n  display_name: string | null;\n  image_url: string | null;\n  subtitle: string | null;\n  verified: boolean;\n  /** True when the caller holds this Handle as a Contact. */\n  is_contact: boolean;\n  activity_version?: string;\n  activity?: ChatActivity | null;\n}",
       "export interface ChatActivity {\n  id: UUID;\n  text: string;\n  emoji: string | null;\n  updated_at: string;\n  expires_at: string;\n}",
       "export interface AgentChatHandle extends ChatHandleBase {\n  kind: \"agent\";\n}",
-      "export type MessagePartResponse =\n  | TextPartResponse\n  | MediaPartResponse\n  | LinkPartResponse\n  | ButtonsPartResponse\n  | SelectionPartResponse\n  | SelectionResponsePartResponse\n  | PaymentPartResponse\n  | PaymentReceiptPartResponse\n  | DataPartResponse\n  | LocationRequestPartResponse\n  | LocationPartResponse\n  | SystemPartResponse;",
+      "export type MessagePartResponse =\n  | TextPartResponse\n  | MediaPartResponse\n  | LinkPartResponse\n  | ButtonsPartResponse\n  | SelectionPartResponse\n  | SelectionResponsePartResponse\n  | PaymentPartResponse\n  | PaymentReceiptPartResponse\n  | DataPartResponse\n  | LocationRequestPartResponse\n  | LocationPartResponse\n  | PlacePartResponse\n  | SystemPartResponse;",
       "export interface TextPartResponse extends TextPart {\n  mentions?: Array<{\n    id: string;\n    handle: string;\n    is_me: boolean;\n    range: [number, number];\n  }> | null;\n  /** @deprecated Use mentions instead. */\n  mention?: string | null;\n  /** @deprecated Use mentions instead. */\n  mention_range?: [number, number] | null;\n  reactions: Reaction[] | null;\n}",
       "export interface TextPart {\n  type: \"text\";\n  value: string;\n  mention?: string | null;\n  mention_range?: [number, number] | null;\n}",
       "export interface Reaction {\n  is_me: boolean;\n  handle: ChatHandle;\n  type: ReactionType;\n  custom_emoji?: string | null;\n}",
@@ -1246,6 +1254,8 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export type A2uiMessage = A2uiServerToClientMessage | A2uiClientToServerMessage;",
       "export interface LocationRequestPartResponse {\n  type: \"location_request\";\n  reactions: Reaction[] | null;\n}",
       "export interface LocationPartResponse {\n  type: \"location\";\n  state: \"live\" | \"ended\";\n  began_at: string | null;\n  /** When the share ends by itself; null when it has no end. */\n  ends_at: string | null;\n  ended_at: string | null;\n  reactions: Reaction[] | null;\n}",
+      "export interface PlacePartResponse extends PlacePart {\n  reactions: Reaction[] | null;\n}",
+      "export interface PlacePart {\n  type: \"place\";\n  /** Latitude in degrees (WGS 84), -90 to 90. */\n  latitude: number;\n  /** Longitude in degrees (WGS 84), -180 to 180. */\n  longitude: number;\n  name?: string;\n  address?: string;\n}",
       "export interface SystemPartResponse {\n  type: \"system\";\n  value: string;\n  reactions: null;\n}",
       "export interface ReplyTo {\n  message_id: UUID;\n  part_index?: number;\n}",
       "export interface MessageMetadata {\n  a2uiClientDataModel?: A2uiClientDataModel;\n}",
@@ -1287,7 +1297,7 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "interface ChatHandleBase {\n  id: UUID;\n  handle: string;\n  status?: \"active\" | \"left\" | \"removed\" | null;\n  joined_at: string;\n  left_at?: string | null;\n  is_me?: boolean | null;\n  display_name: string | null;\n  image_url: string | null;\n  subtitle: string | null;\n  verified: boolean;\n  /** True when the caller holds this Handle as a Contact. */\n  is_contact: boolean;\n  activity_version?: string;\n  activity?: ChatActivity | null;\n}",
       "export interface ChatActivity {\n  id: UUID;\n  text: string;\n  emoji: string | null;\n  updated_at: string;\n  expires_at: string;\n}",
       "export interface AgentChatHandle extends ChatHandleBase {\n  kind: \"agent\";\n}",
-      "export type MessagePartResponse =\n  | TextPartResponse\n  | MediaPartResponse\n  | LinkPartResponse\n  | ButtonsPartResponse\n  | SelectionPartResponse\n  | SelectionResponsePartResponse\n  | PaymentPartResponse\n  | PaymentReceiptPartResponse\n  | DataPartResponse\n  | LocationRequestPartResponse\n  | LocationPartResponse\n  | SystemPartResponse;",
+      "export type MessagePartResponse =\n  | TextPartResponse\n  | MediaPartResponse\n  | LinkPartResponse\n  | ButtonsPartResponse\n  | SelectionPartResponse\n  | SelectionResponsePartResponse\n  | PaymentPartResponse\n  | PaymentReceiptPartResponse\n  | DataPartResponse\n  | LocationRequestPartResponse\n  | LocationPartResponse\n  | PlacePartResponse\n  | SystemPartResponse;",
       "export interface TextPartResponse extends TextPart {\n  mentions?: Array<{\n    id: string;\n    handle: string;\n    is_me: boolean;\n    range: [number, number];\n  }> | null;\n  /** @deprecated Use mentions instead. */\n  mention?: string | null;\n  /** @deprecated Use mentions instead. */\n  mention_range?: [number, number] | null;\n  reactions: Reaction[] | null;\n}",
       "export interface TextPart {\n  type: \"text\";\n  value: string;\n  mention?: string | null;\n  mention_range?: [number, number] | null;\n}",
       "export interface Reaction {\n  is_me: boolean;\n  handle: ChatHandle;\n  type: ReactionType;\n  custom_emoji?: string | null;\n}",
@@ -1315,6 +1325,8 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export type A2uiMessage = A2uiServerToClientMessage | A2uiClientToServerMessage;",
       "export interface LocationRequestPartResponse {\n  type: \"location_request\";\n  reactions: Reaction[] | null;\n}",
       "export interface LocationPartResponse {\n  type: \"location\";\n  state: \"live\" | \"ended\";\n  began_at: string | null;\n  /** When the share ends by itself; null when it has no end. */\n  ends_at: string | null;\n  ended_at: string | null;\n  reactions: Reaction[] | null;\n}",
+      "export interface PlacePartResponse extends PlacePart {\n  reactions: Reaction[] | null;\n}",
+      "export interface PlacePart {\n  type: \"place\";\n  /** Latitude in degrees (WGS 84), -90 to 90. */\n  latitude: number;\n  /** Longitude in degrees (WGS 84), -180 to 180. */\n  longitude: number;\n  name?: string;\n  address?: string;\n}",
       "export interface SystemPartResponse {\n  type: \"system\";\n  value: string;\n  reactions: null;\n}",
       "export interface ReplyTo {\n  message_id: UUID;\n  part_index?: number;\n}",
       "export interface MessageMetadata {\n  a2uiClientDataModel?: A2uiClientDataModel;\n}",
