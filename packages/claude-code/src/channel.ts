@@ -325,7 +325,16 @@ export class RelayChannel {
     if (replyTo !== undefined && replyTo !== origin.messageId) {
       return failure("reply_to_message_id is not the Message that originated the active Relay turn");
     }
-    let bodies = plannedBodies;
+    // A reply to another agent names its Message even when the model leaves
+    // it out, as a bot's reply names the message it answers (Telegram
+    // reply_to_message_id): Relay's A2A door gives a calling agent only the
+    // reply that names its message once two of its messages are open. A
+    // person's Message is named only when the model asks. The payload hash
+    // stays on the model's own arguments, so a retry matches.
+    const linked = replyTo ?? (origin.linksReply ? origin.messageId : undefined);
+    let bodies = plannedBodies.length === 0
+      ? plannedBodies
+      : buildReplyMessages(redactedText, idempotencyKey, linked, buttons, link, selection);
     if (payment) {
       // Created before anything is sent, on the key its card will carry, so
       // a refusal reaches the model with nothing half-sent, and a retry of
@@ -333,7 +342,7 @@ export class RelayChannel {
       const cardKey = indexedIdempotencyKey(idempotencyKey, (redactedText ? 1 : 0) + (link ? 1 : 0));
       try {
         const card = await createPaymentPart(this.relay, payment, cardKey);
-        bodies = buildReplyMessages(redactedText, idempotencyKey, replyTo, buttons, link, selection, card);
+        bodies = buildReplyMessages(redactedText, idempotencyKey, linked, buttons, link, selection, card);
       } catch (error) {
         if (error instanceof RelayAPIError && !error.retryable) {
           return failure(`payment request refused: ${this.#redactor.text(error)}. Nothing was sent; fix the payment or reply without it, with a new send_id.`);

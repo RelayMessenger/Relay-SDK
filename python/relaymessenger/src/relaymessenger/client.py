@@ -412,7 +412,11 @@ class Me:
         with its token. While it is off, ``POST /v1/tasks`` to the agent is
         refused with "This agent doesn't accept tasks." (409, code 2033), and
         a message to its A2A address arrives as an ordinary message in the
-        chat with the sender, answered with the agent's next message there."""
+        chat with the sender. The answer is the agent's message there whose
+        ``reply_to`` names it; a message that names nothing answers it only
+        when it is the agent's next message and the sender sent nothing else
+        since the agent last spoke. So reply with ``reply_to``: two
+        overlapping messages from the same sender get no unnamed answer."""
         result = await self._transport.request("PATCH", "/v1/me", {"accepts_tasks": accepts_tasks})
         return cast(UpdateMeResponse, result)
 

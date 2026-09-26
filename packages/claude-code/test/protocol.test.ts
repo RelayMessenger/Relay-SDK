@@ -38,6 +38,7 @@ function inboundEvent(
   text = "ship the fix",
   eventId = EVENT_ID,
   messageId = MESSAGE_ID,
+  sender: { kind: "user" | "agent"; parts?: unknown[] } = { kind: "user" },
 ) {
   return {
     api_version: "v1",
@@ -55,7 +56,7 @@ function inboundEvent(
       sender_handle: {
         id: USER_ID,
         handle: "@owner",
-        kind: "user",
+        kind: sender.kind,
         joined_at: "2026-09-01T00:00:00.000Z",
         display_name: "Owner",
         image_url: null,
@@ -63,7 +64,7 @@ function inboundEvent(
         verified: false,
         is_contact: true,
       },
-      parts: [{ type: "text", value: text, reactions: null }],
+      parts: sender.parts ?? [{ type: "text", value: text, reactions: null }],
       sent_at: "2026-09-01T00:00:01.000Z",
       delivered_at: null,
       read_at: null,
@@ -433,6 +434,7 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     await mcp.take((message) => message.id === 3, "reply response");
     expect(relay.sends).toHaveLength(1);
     expect(relay.sends[0]?.key).toMatch(/^claude-reply-[a-f0-9]{64}$/u);
+    // A person's Message: the model named none, so the reply names none.
     expect(relay.sends[0]?.body).toEqual({
       message: {
         parts: [{ type: "text", value: "done" }],
@@ -446,6 +448,59 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
 
     await mcp.stop();
     expect(mcp.stderr()).not.toContain(TOKEN);
+  });
+
+  it.each([
+    ["server.ts", "text", { message_id: MESSAGE_ID }],
+    ["runtime/server.mjs", "text", { message_id: MESSAGE_ID }],
+    ["plugin/runtime/server.mjs", "text", { message_id: MESSAGE_ID }],
+    ["server.ts", "buttons", undefined],
+    ["server.ts", "selection", undefined],
+  ] as const)("%s: a reply to another agent's %s Message names it only when an agent may reply to it", async (entry, opening, replyTo) => {
+    // Relay's A2A door gives a calling agent only the reply that names its
+    // message; an agent may not reply to buttons or a selection.
+    const channelDir = mkdtempSync(join(tmpdir(), "relay-agent-reply-"));
+    cleanups.push(() => rmSync(channelDir, { recursive: true, force: true }));
+    const parts = opening === "text"
+      ? undefined
+      : [
+        opening === "buttons"
+          ? { type: "buttons", items: [{ label: "Yes" }], reactions: null }
+          : { type: "selection", title: "Pick", options: [{ value: "a", label: "A" }], reactions: null },
+        { type: "text", value: "Pick one", reactions: null },
+      ];
+    const relay = await startRelayMock({
+      channelDir,
+      onSocket(socket) {
+        socket.send(JSON.stringify({
+          type: "ready", connection_id: CONNECTION_ID, acked_through: "0", full_sync_required: false,
+          full_sync_through: null, heartbeat_interval_ms: 30_000, max_in_flight: 16,
+        }));
+        socket.send(JSON.stringify({
+          type: "event", sequence: "1",
+          event: inboundEvent("What is 17 plus 25?", EVENT_ID, MESSAGE_ID, { kind: "agent", ...(parts ? { parts } : {}) }),
+        }));
+      },
+    });
+    cleanups.push(() => relay.close());
+    const mcp = startMCP(channelDir, relay.baseURL, entry);
+    cleanups.push(() => mcp.stop());
+    await initialize(mcp);
+    await mcp.take((message) => message.method === "notifications/claude/channel", "agent Message notification");
+    mcp.send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "begin_processing", arguments: { delivery_id: EVENT_ID } } });
+    await mcp.take((message) => message.id === 2, "begin_processing response");
+    mcp.send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: {
+      name: "reply", arguments: { chat_id: CHAT_ID, text: "42", send_id: "agent-reply" },
+    } });
+    const sent = await mcp.take((message) => message.id === 3, "reply response");
+    expect((sent.result as { isError?: boolean }).isError).not.toBe(true);
+    expect(relay.sends).toHaveLength(1);
+    expect(relay.sends[0]?.body).toEqual({ message: {
+      parts: [{ type: "text", value: "42" }],
+      idempotency_key: relay.sends[0]?.key,
+      ...(replyTo ? { reply_to: replyTo } : {}),
+    } });
+    await mcp.stop();
   });
 
   it.each(["server.ts", "runtime/server.mjs", "plugin/runtime/server.mjs"])(

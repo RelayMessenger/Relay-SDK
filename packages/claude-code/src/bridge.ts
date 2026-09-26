@@ -33,6 +33,12 @@ function selectionMeta(parts: readonly MessagePartResponse[], replyTo: Message["
   };
 }
 
+/** See `DeliveryCandidate.linksReply`. */
+function linksReply(senderKind: string, parts: readonly MessagePartResponse[]): boolean {
+  const opening = parts[0]?.type;
+  return senderKind === "agent" && opening !== "buttons" && opening !== "selection";
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -186,6 +192,7 @@ export function classifyRelayEvent(params: {
       source_sequence: params.sequence,
       sent_at: typeof data.sent_at === "string" ? data.sent_at : event.created_at,
     },
+    ...(linksReply(senderKind, parts) ? { linksReply: true } : {}),
     createdAt: event.created_at,
   };
   return {
@@ -244,6 +251,7 @@ export function deliveryFromSnapshotMessage(params: {
       sent_at: message.sent_at ?? message.created_at,
       full_sync: "true",
     },
+    ...(linksReply(sender.kind, parts) ? { linksReply: true } : {}),
     createdAt: message.created_at,
   };
 }

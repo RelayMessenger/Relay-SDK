@@ -76,6 +76,32 @@ describe("durable Relay cursor and event acceptance", () => {
   });
 });
 
+describe("schema 5: whether a reply names the delivered Message", () => {
+  it("adds the column to a schema 4 store, keeps old deliveries unnamed, and carries it to the turn origin", () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "relay-state-v4-"));
+    roots.push(stateDir);
+    const first = new RelayStateStore({ stateDir, sessionKey: "session-a" });
+    first.close();
+    const path = join(stateDir, readdirSync(stateDir).find((name) => name.endsWith(".sqlite"))!);
+    const raw = new DatabaseSync(path);
+    raw.exec("ALTER TABLE deliveries DROP COLUMN links_reply");
+    raw.exec("INSERT INTO deliveries(delivery_id, event_id, message_id, chat_id, sender_id, sender_handle, content, meta_json, created_at, status) VALUES ('old', NULL, 'old-message', 'chat', 'sender', '@old', 'hi', '{}', '2026-09-01T00:00:00.000Z', 'pending')");
+    raw.exec("UPDATE metadata SET value = '4' WHERE key = 'schema_version'");
+    raw.close();
+    const state = new RelayStateStore({ stateDir, sessionKey: "session-a" });
+    expect(state.delivery("old")?.linksReply).toBeUndefined();
+    state.recordDelivery({ ...delivery(), eventId: null, linksReply: true });
+    expect(state.delivery(EVENT_ID)?.linksReply).toBe(true);
+    state.beginDelivery(EVENT_ID, 10);
+    state.markDeliveryProcessing(EVENT_ID, 11, 100);
+    expect(state.activeTurnOrigin(12)).toMatchObject({ messageId: MESSAGE_ID, linksReply: true });
+    state.close();
+    const check = new DatabaseSync(path, { readOnly: true });
+    expect(check.prepare("SELECT value FROM metadata WHERE key = 'schema_version'").get()).toEqual({ value: "5" });
+    check.close();
+  });
+});
+
 describe("durable Claude delivery start", () => {
   it("keeps notification pending until explicit Read-start completion", () => {
     const state = open();

@@ -22,8 +22,8 @@ import type {
   TurnOutcome,
 } from "./types.ts";
 
-const SCHEMA_VERSION = 4;
-const MIGRATABLE_SCHEMA_VERSIONS = new Set(["1", "2", "3", String(SCHEMA_VERSION)]);
+const SCHEMA_VERSION = 5;
+const MIGRATABLE_SCHEMA_VERSIONS = new Set(["1", "2", "3", "4", String(SCHEMA_VERSION)]);
 const MAX_PENDING_DELIVERIES = 10_000;
 const MAX_UNREAD_FULL_SYNC_DELIVERIES = 100_000;
 export const ACTIVE_TURN_TTL_MS = 10 * 60_000;
@@ -187,6 +187,7 @@ interface DeliveryRow {
   sender_handle: string;
   content: string;
   meta_json: string;
+  links_reply: number;
   created_at: string;
   status: StoredDelivery["status"];
   last_notified_at: number | null;
@@ -211,6 +212,7 @@ function deliveryFromRow(row: DeliveryRow): StoredDelivery {
     senderHandle: row.sender_handle,
     content: row.content,
     meta: JSON.parse(row.meta_json) as Record<string, string>,
+    ...(row.links_reply === 1 ? { linksReply: true } : {}),
     createdAt: row.created_at,
     status: row.status,
     lastNotifiedAt: row.last_notified_at,
@@ -258,6 +260,7 @@ export class RelayStateStore {
         sender_handle TEXT NOT NULL,
         content TEXT NOT NULL,
         meta_json TEXT NOT NULL,
+        links_reply INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         status TEXT NOT NULL CHECK(status IN ('pending','starting','processing')),
         last_notified_at INTEGER,
@@ -290,6 +293,12 @@ export class RelayStateStore {
     `);
     if (existingSchema !== null && existingSchema < SCHEMA_VERSION) {
       transaction(this.#db, () => {
+        // Schema 5: whether a reply names the delivered Message by default. A
+        // delivery stored before it names nothing, as it would have then.
+        const columns = this.#db.prepare("PRAGMA table_info(deliveries)").all() as Array<{ name: string }>;
+        if (!columns.some((column) => column.name === "links_reply")) {
+          this.#db.exec("ALTER TABLE deliveries ADD COLUMN links_reply INTEGER NOT NULL DEFAULT 0");
+        }
         this.#db.exec("DROP TABLE IF EXISTS permissions");
         this.#db.prepare("DELETE FROM metadata WHERE key LIKE 'active_origin:%'").run();
         this.#db.prepare(
@@ -430,8 +439,8 @@ export class RelayStateStore {
         this.#db.prepare(`
           INSERT INTO deliveries(
             delivery_id, event_id, message_id, chat_id, sender_id, sender_handle,
-            content, meta_json, created_at, status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            content, meta_json, links_reply, created_at, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         `).run(
           delivery.deliveryId,
           delivery.eventId,
@@ -441,6 +450,7 @@ export class RelayStateStore {
           delivery.senderHandle,
           delivery.content,
           JSON.stringify(delivery.meta),
+          delivery.linksReply === true ? 1 : 0,
           delivery.createdAt,
         );
       }
@@ -594,6 +604,7 @@ export class RelayStateStore {
       chatId: row.chat_id,
       senderId: row.sender_id,
       senderHandle: row.sender_handle,
+      linksReply: row.links_reply === 1,
     };
   }
 
@@ -882,8 +893,8 @@ export class RelayStateStore {
         this.#db.prepare(`
           INSERT INTO deliveries(
             delivery_id, event_id, message_id, chat_id, sender_id, sender_handle,
-            content, meta_json, created_at, status
-          ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            content, meta_json, links_reply, created_at, status
+          ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         `).run(
           delivery.deliveryId,
           delivery.messageId,
@@ -892,6 +903,7 @@ export class RelayStateStore {
           delivery.senderHandle,
           delivery.content,
           JSON.stringify(delivery.meta),
+          delivery.linksReply === true ? 1 : 0,
           delivery.createdAt,
         );
         this.#db.prepare(`

@@ -11,6 +11,7 @@ import {
   type CodexCommand,
 } from "./codex-bridge.js";
 import { openCodexThreads, type CodexThreadStore } from "./codex-threads.js";
+import { replacesLiveTurn } from "./bridge-turn.js";
 import { platformCommand } from "./spawn-command.js";
 
 /**
@@ -95,12 +96,12 @@ const fakeAppServer = async (settings: {
 const traffic = (log: FakeLine[]): string[] =>
   log.map((line) => line.in ?? `out ${line.out ?? ""}`);
 
-const received = (eventId: string, chatId: string, text: string, sender = "alice"): RelayWebhookEvent => ({
+const received = (eventId: string, chatId: string, text: string, sender = "alice", kind: "user" | "agent" = "user"): RelayWebhookEvent => ({
   api_version: "v1", webhook_version: "2026-08-30", event_type: "message.received",
   event_id: eventId, created_at: "2026-09-11T00:00:00.000Z", trace_id: "trace", agent_id: "agent",
   data: {
-    chat: { id: chatId }, id: "message", direction: "inbound",
-    sender_handle: { id: "sender", handle: sender, kind: "user" },
+    chat: { id: chatId }, id: `message-${eventId}`, direction: "inbound",
+    sender_handle: { id: "sender", handle: sender, kind },
     parts: [{ type: "text", value: text, reactions: null }],
   },
 } as unknown as RelayWebhookEvent);
@@ -322,8 +323,30 @@ describe("the codex the bridge starts", () => {
 describe("which messages the bridge answers", () => {
   it("answers an inbound message that has text", () => {
     expect(bridgeTurn(received("event-1", "chat-1", "Hey, what's up"))).toEqual({
-      eventId: "event-1", chatId: "chat-1", sender: "alice", text: "Hey, what's up", media: [],
+      eventId: "event-1", chatId: "chat-1", sender: "alice", text: "Hey, what's up", media: [], fromAgent: false,
     });
+  });
+
+  it("names the message it answers only when another agent sent it", () => {
+    expect(bridgeTurn(received("event-1", "chat-1", "What is 17 plus 25?", "caller", "agent"))).toEqual({
+      eventId: "event-1", chatId: "chat-1", sender: "caller", text: "What is 17 plus 25?", media: [], fromAgent: true,
+      replyTo: { message_id: "message-event-1" },
+    });
+  });
+
+  it.each([["buttons"], ["selection"]])("answers another agent's message that opens with %s without replying to it, since an agent may not", (type) => {
+    const event = received("event-1", "chat-1", "Pick one", "caller", "agent");
+    if (event.event_type !== "message.received") throw new Error("fixture");
+    event.data.parts = [
+      type === "buttons"
+        ? { type: "buttons", items: [{ label: "Yes" }] }
+        : { type: "selection", title: "Pick", options: [{ value: "a", label: "A" }] },
+      { type: "text", value: "Pick one", reactions: null },
+    ] as never;
+    const turn = bridgeTurn(event);
+    expect(turn?.text).toBe("Pick one");
+    expect(turn?.fromAgent).toBe(true);
+    expect(turn?.replyTo).toBeUndefined();
   });
 
   it.each([
@@ -345,6 +368,8 @@ describe("what the bridge sends back", () => {
       key: "codex-bridge-event-1",
       parts: [{ type: "text", value: "Not much. Your README says this is a test project." }],
     }]);
+    // A person's message: the answer names none, so the chat looks as it always has.
+    expect(relay.sent[0]).not.toHaveProperty("replyTo.message_id");
     expect(relay.typing).toEqual(["start chat-1", "stop chat-1"]);
     expect(said).toEqual(["@alice  Hey, what's up", "Sent the answer to @alice."]);
   });
@@ -438,6 +463,13 @@ describe("one thread for each chat", () => {
 });
 
 describe("when turns run", () => {
+  it("drops an answer only for a person's newer message over a person's older one", () => {
+    expect(replacesLiveTurn({ fromAgent: false }, { fromAgent: false })).toBe(true);
+    expect(replacesLiveTurn({ fromAgent: true }, { fromAgent: false })).toBe(false);
+    expect(replacesLiveTurn({ fromAgent: false }, { fromAgent: true })).toBe(false);
+    expect(replacesLiveTurn({ fromAgent: true }, { fromAgent: true })).toBe(false);
+  });
+
   it("never runs two turns in one chat at once: the newer message replaces the older", async () => {
     const codex = await fakeAppServer({ turnMs: 300 });
     const { said, relay } = await runBridge({
@@ -452,6 +484,24 @@ describe("when turns run", () => {
     expect(said).toContain("A newer message came in, so the answer to @alice was dropped.");
     // Nothing is sent for the turn that was stopped.
     expect(relay.sent.map((message) => message.key)).toEqual(["codex-bridge-event-2"]);
+  });
+
+  it("answers an agent's overlapping messages in one chat in turn, each linked to its own", async () => {
+    // A2A 1.0 3.1.1: each Message answers its own request, so a calling
+    // agent's older message is never dropped for its newer one.
+    const codex = await fakeAppServer({ turnMs: 300 });
+    const { said, relay } = await runBridge({
+      ...codex,
+      events: [received("event-1", "chat-1", "first", "caller", "agent"), received("event-2", "chat-1", "second", "caller", "agent")],
+      endings: 2,
+    });
+    expect(traffic(await codex.log()).filter((line) => line.includes("turn/")))
+      .toEqual(["turn/start", "out turn/completed", "turn/start", "out turn/completed"]);
+    expect(said.join("\n")).not.toContain("was dropped");
+    expect(relay.sent.map((message) => [message.key, message.replyTo])).toEqual([
+      ["codex-bridge-event-1", { message_id: "message-event-1" }],
+      ["codex-bridge-event-2", { message_id: "message-event-2" }],
+    ]);
   });
 
   it("runs turns in two chats at the same time", async () => {
@@ -491,7 +541,7 @@ it("passes selection metadata into app-server and sends one native selection on 
 });
 
 it("teaches the payment block and sends a payment answer as the words, then the payment alone, once on replay", async () => {
-  const event = received("pay", "chat-1", "I'll take the house blend");
+  const event = received("pay", "chat-1", "I'll take the house blend", "shop_agent", "agent");
   if (event.event_type !== "message.received") throw new Error("fixture");
   event.data.reply_to = { message_id: "source", part_index: 0 };
   const codex = await fakeAppServer({ answers: [[{
@@ -511,6 +561,7 @@ it("teaches the payment block and sends a payment answer as the words, then the 
   ]);
   // The bridge created the request once, on the card's own key, from the block's fields.
   expect(result.relay.created).toEqual([{ body: { description: "House blend, 250 g", category: "physical_goods", amount: 2400, currency: "usd" }, key: "codex-bridge-pay-1" }]);
-  // The reply_to that came in is context for Codex, not a quote on the answer.
-  expect(result.relay.sent.map((message) => message.replyTo)).toEqual([undefined, undefined]);
+  // An answer to an agent replies to the message that came in, never to the
+  // reply_to that came with it (context for Codex), and only its first message does.
+  expect(result.relay.sent.map((message) => message.replyTo)).toEqual([{ message_id: "message-pay" }, undefined]);
 });

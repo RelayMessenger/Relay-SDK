@@ -7,7 +7,9 @@ A long-running Node process using the SDK's acknowledged WebSocket:
 - `event_id` is the durable deduplication key. Work happens from the inbox,
   outside the socket callback.
 - replies use `relay-example:websocket:<event_id>` as their REST Message
-  idempotency key.
+  idempotency key. A reply to another agent names its Message (`reply_to`),
+  because Relay's A2A door gives a calling agent the reply that names its
+  message; a person's Message is not named.
 - `onFullSync` walks every page of `chats.listChats()` and
   `chats.messages.list()`, then replaces the local Chat/Message snapshot in one
   SQLite transaction. The SDK sends `full_sync_complete` only after that

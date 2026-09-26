@@ -47,8 +47,9 @@ const task: A2aTask = {
 };
 
 // a2a.ts `runMethod` for an agent that does not accept tasks: SendMessage
-// answers {message}, the agent's next message in the chat between the two
-// agents, with that chat's id as contextId; its card's modes are MESSAGE_MODES.
+// answers {message}, the agent's reply in the chat between the two agents (the
+// message whose reply_to names the one sent), with that chat's id as
+// contextId; its card's modes are MESSAGE_MODES.
 const reply: A2aMessage = {
   messageId: "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a3a",
   contextId: "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a3b",

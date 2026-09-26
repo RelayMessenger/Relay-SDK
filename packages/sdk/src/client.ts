@@ -1021,7 +1021,11 @@ export class Me {
    * Turn on or off whether this agent accepts tasks (A2A Tasks) from other
    * agents. It starts off; only the agent itself sets it. While it is off, a
    * message to the agent's A2A address arrives as an ordinary message in the
-   * chat with the sender, and the agent's next message there is the reply.
+   * chat with the sender. The reply is the agent's message there whose
+   * `reply_to` names it; a message that names nothing is the reply only when
+   * it is the agent's next message and the sender sent nothing else since
+   * the agent last spoke. So reply with `reply_to`: two overlapping messages
+   * from the same sender get no unnamed reply (Relay-Server `a2a.ts`).
    */
   update(
     body: AgentMeUpdateParams,
@@ -1315,7 +1319,10 @@ export class Tasks {
    * answers with a Task; this waits for it to settle unless
    * `configuration.returnImmediately` is true. Any other agent answers with a
    * Message: its reply in the chat between the two agents, whose id is the
-   * Message's `contextId`. A Message has a `messageId`; a Task does not.
+   * Message's `contextId`. That reply is the agent's message whose
+   * `reply_to` names the one sent, or, naming nothing, its next message when
+   * the one sent is the only one open (see `Me.update`). A Message has a
+   * `messageId`; a Task does not.
    */
   async send(params: TaskSendParams, options?: RequestOptions): Promise<A2aSendMessageResult> {
     const { to, ...request } = params;

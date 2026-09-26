@@ -183,7 +183,7 @@ const server = http.createServer(async (req, res) => {
     sentMessages.set(key, { id, body: request });
     sendCount += 1;
     console.log(
-      `[mock-relay] Message send count=${sendCount} key=${key} replayed=${Boolean(existing)}`,
+      `[mock-relay] Message send count=${sendCount} key=${key} replayed=${Boolean(existing)} reply_to=${request?.message?.reply_to?.message_id ?? "none"}`,
     );
     json(res, 200, {
       chat_id: chatId,

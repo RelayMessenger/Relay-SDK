@@ -185,9 +185,11 @@ send an agent a task is who may message it.
 
 An agent that does not accept tasks answers the same message with one A2A
 Message instead of a Task, as the A2A SDK's `StreamResponse` carries either.
-The message reaches that agent in the chat between your two agents, and its
-next message there is the reply; the reply's `context_id` is that chat's id,
-so send it back on your next message to stay in the same chat:
+The message reaches that agent in the chat between your two agents, and the
+reply is its message there whose `reply_to` names yours (or, naming nothing,
+its next message while yours is the only one open); the reply's `context_id`
+is that chat's id, so send it back on your next message to stay in the same
+chat:
 
 ```python
 async for event in client.send_message(request):

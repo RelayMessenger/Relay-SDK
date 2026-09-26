@@ -15,6 +15,7 @@ import { Readable, Writable } from "node:stream";
 import { isAbsolute } from "node:path";
 import type { AcpSessionStore } from "./acp-threads.js";
 import { bridgeTurn, codexPrompt, sendAnswer, type BridgeTurn } from "./codex-bridge.js";
+import { replacesLiveTurn } from "./bridge-turn.js";
 import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
@@ -347,15 +348,19 @@ interface ChatLane {
   /** Turns in one chat run one after another, in the order the messages arrived. */
   chain: Promise<void>;
   live?: LiveTurn | undefined;
+  /** Whether the live turn answers another agent (`replacesLiveTurn`). */
+  liveFromAgent?: boolean | undefined;
 }
 
 /**
  * Answers every message that arrives until the signal stops it.
  *
  * Turns run one at a time inside a chat and at the same time across chats,
- * which is what one agent with one session per chat allows. A message for a
- * chat whose turn is still running cancels that turn (`session/cancel`) and
- * takes its place; the cancelled turn sends nothing.
+ * which is what one agent with one session per chat allows. A person's
+ * message for a chat whose turn for a person is still running cancels that
+ * turn (`session/cancel`) and takes its place; the cancelled turn sends
+ * nothing. An agent's message waits for the running turn instead
+ * (`replacesLiveTurn`).
  */
 export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
   const answered = new Set<string>();
@@ -465,10 +470,10 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
       const media = await inboundMediaPrompt(turn, input.media);
       outcome = await runTurn(agent, {
         sessionId, prompt: acpPrompt(turn.sender, media.text),
-        onStarted: (live) => { mine = live; lane.live = live; started(); },
+        onStarted: (live) => { mine = live; lane.live = live; lane.liveFromAgent = turn.fromAgent; started(); },
       });
     } catch (error) { failure = error; }
-    if (lane.live === mine) lane.live = undefined;
+    if (lane.live === mine) { lane.live = undefined; lane.liveFromAgent = undefined; }
     if (mine?.dropped === true || outcome?.stopReason === "cancelled") {
       await stopTyping();
       input.say(`A newer message came in, so the answer to @${turn.sender} was dropped.`);
@@ -506,7 +511,8 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
       const lane = lanes.get(turn.chatId) ?? { chain: Promise.resolve() };
       lanes.set(turn.chatId, lane);
       const live = lane.live;
-      if (live !== undefined) {
+      const replacing = live !== undefined && replacesLiveTurn(turn, { fromAgent: lane.liveFromAgent === true });
+      if (live !== undefined && replacing) {
         live.dropped = true;
         try { await (await acpAgent()).client.cancel({ sessionId: live.sessionId }); }
         catch { /* The turn ended by itself, which is the same outcome. */ }
@@ -516,6 +522,9 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
       // Nothing may be thrown here: a failure would close the connection, and
       // the agent failing to answer one message is not a reason to stop.
       lane.chain = lane.chain.then(() => answerOne(turn, lane, ready)).catch(() => undefined).finally(() => { ready(); });
+      // A message that waits behind the live turn is taken now, so the turn
+      // it waits for does not hold this connection for every other chat.
+      if (live !== undefined && !replacing) ready();
       // Relay is told the message is handled once the agent is working on it.
       // The rest of the turn does not hold this connection, because every other
       // chat's messages, and the next message in this one, arrive down it.

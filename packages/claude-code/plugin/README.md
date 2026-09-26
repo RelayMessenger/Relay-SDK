@@ -195,7 +195,12 @@ The mapping from `send_id` to request hash and Relay idempotency key is persiste
 before the REST request. An unknown-outcome retry must reuse the same arguments
 and `send_id`; changed content is refused. A deliberate second Message uses a
 new `send_id`. The tool refuses a Chat other than the authenticated origin of
-the active turn, and any `reply_to_message_id` must be that turn's Message. A
+the active turn, and any `reply_to_message_id` must be that turn's Message.
+When that Message came from another agent, the reply names it even if the
+model passes nothing, so a caller waiting on Relay's A2A door gets the answer
+to its own message; a Message that opens with buttons or a selection is not
+named, since an agent may not reply to those parts. A person's Message is named
+only when the model passes it. A
 confirmed send completes and clears the turn automatically. A byte-identical
 retry of an already-confirmed `send_id` remains an idempotent success without
 reopening its turn.

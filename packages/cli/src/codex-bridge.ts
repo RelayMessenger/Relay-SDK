@@ -15,7 +15,7 @@ import {
   type PaymentRequestCreateParams,
   type Relay,
 } from "@relaymessenger/sdk";
-import { bridgeTurn, type BridgeTurn } from "./bridge-turn.js";
+import { bridgeTurn, replacesLiveTurn, type BridgeTurn } from "./bridge-turn.js";
 export { bridgeTurn, type BridgeTurn } from "./bridge-turn.js";
 import type { CodexThreadStore } from "./codex-threads.js";
 import { isAbsolute } from "node:path";
@@ -184,22 +184,25 @@ export const answerMessages = (
 /**
  * Sends an answer, one message at a time in order. The message that arrived
  * is the key, so a retry after a dropped connection cannot answer the same
- * person twice; each message past the first carries its index. A payment
- * request is created with the card's own key after the words go out; when
- * Relay refuses it (Stripe not connected, Stripe's own 400) the terminal says
- * why and no card is sent.
+ * person twice; each message past the first carries its index. The first
+ * message replies to the one that arrived (`turn.replyTo`), so a caller
+ * waiting on that message gets this answer even while another of its
+ * messages is open. A payment request is created with the card's own key
+ * after the words go out; when Relay refuses it (Stripe not connected,
+ * Stripe's own 400) the terminal says why and no card is sent.
  */
 export const sendAnswer = async (
   client: Pick<Relay, "chats" | "paymentRequests">,
-  turn: Pick<BridgeTurn, "chatId" | "eventId" | "sender">,
+  turn: Pick<BridgeTurn, "chatId" | "eventId" | "sender" | "replyTo">,
   answer: string,
   say: (line: string) => void,
   key: string = replyKey(turn.eventId),
 ): Promise<void> => {
   const { messages, payment } = answerMessages(answer, turn.sender, say);
+  const replyTo = (index: number) => (index === 0 && turn.replyTo ? { reply_to: turn.replyTo } : {});
   for (const [index, parts] of messages.entries()) {
     await client.chats.messages.send(turn.chatId, {
-      message: { parts, idempotency_key: indexedIdempotencyKey(key, index) },
+      message: { parts, idempotency_key: indexedIdempotencyKey(key, index), ...replyTo(index) },
     });
   }
   if (!payment) return;
@@ -213,7 +216,7 @@ export const sendAnswer = async (
     return;
   }
   await client.chats.messages.send(turn.chatId, {
-    message: { parts: [card], idempotency_key: cardKey },
+    message: { parts: [card], idempotency_key: cardKey, ...replyTo(messages.length) },
   });
 };
 
@@ -528,15 +531,18 @@ interface ChatLane {
   /** Turns in one chat run one after another, in the order the messages arrived. */
   chain: Promise<void>;
   live?: LiveTurn | undefined;
+  /** Whether the live turn answers another agent (`replacesLiveTurn`). */
+  liveFromAgent?: boolean | undefined;
 }
 
 /**
  * Answers every message that arrives until the signal stops it.
  *
  * Turns run one at a time inside a chat and at the same time across chats,
- * which is what one app-server with one thread per chat allows. A message for a
- * chat whose turn is still running stops that turn (`turn/interrupt`) and takes
- * its place; the stopped turn sends nothing.
+ * which is what one app-server with one thread per chat allows. A person's
+ * message for a chat whose turn for a person is still running stops that turn
+ * (`turn/interrupt`) and takes its place; the stopped turn sends nothing. An
+ * agent's message waits for the running turn instead (`replacesLiveTurn`).
  */
 export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => {
   const answered = new Set<string>();
@@ -629,10 +635,10 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
       const media = await inboundMediaPrompt(turn, input.media);
       outcome = await runTurn(server, {
         threadId, prompt: codexPrompt(turn.sender, media.text), images: media.images,
-        onStarted: (live) => { mine = live; lane.live = live; started(); },
+        onStarted: (live) => { mine = live; lane.live = live; lane.liveFromAgent = turn.fromAgent; started(); },
       });
     } catch (error) { failure = error; }
-    if (lane.live === mine) lane.live = undefined;
+    if (lane.live === mine) { lane.live = undefined; lane.liveFromAgent = undefined; }
     if (mine?.dropped === true || outcome?.status === "interrupted") {
       await stopTyping();
       input.say(`A newer message came in, so the answer to @${turn.sender} was dropped.`);
@@ -676,7 +682,8 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
       const lane = lanes.get(turn.chatId) ?? { chain: Promise.resolve() };
       lanes.set(turn.chatId, lane);
       const live = lane.live;
-      if (live !== undefined) {
+      const replacing = live !== undefined && replacesLiveTurn(turn, { fromAgent: lane.liveFromAgent === true });
+      if (live !== undefined && replacing) {
         live.dropped = true;
         try { await (await appServer()).request("turn/interrupt", { threadId: live.threadId, turnId: live.turnId }); }
         catch { /* The turn ended by itself, which is the same outcome. */ }
@@ -686,6 +693,9 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
       // Nothing may be thrown here: a failure would close the connection, and
       // Codex failing to answer one message is not a reason to stop.
       lane.chain = lane.chain.then(() => answerOne(turn, lane, ready)).catch(() => undefined).finally(() => { ready(); });
+      // A message that waits behind the live turn is taken now, so the turn
+      // it waits for does not hold this connection for every other chat.
+      if (live !== undefined && !replacing) ready();
       // Relay is told the message is handled once Codex is working on it. The
       // rest of the turn does not hold this connection, because every other
       // chat's messages, and the next message in this one, arrive down it.
