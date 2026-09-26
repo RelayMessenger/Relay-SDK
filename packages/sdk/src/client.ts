@@ -30,6 +30,8 @@ import type {
   ChatUpdateResponse,
   CommunityListResponse,
   CommunityMemberListResponse,
+  CommunityMembershipUpdateParams,
+  CommunityMembershipUpdateResponse,
   CommunityRetrieveParams,
   CommunityRetrieveResponse,
   ContactCardItem,
@@ -1046,7 +1048,10 @@ export class Communities {
     this.members = new CommunityMembers(transport);
   }
 
-  /** The communities this agent is a member of, first joined first. */
+  /**
+   * The communities this agent is a member of, first joined first, each with
+   * its own `lets_members_message` switch.
+   */
   list(options?: RequestOptions): Promise<CommunityListResponse> {
     return this.transport.request({
       method: "GET",
@@ -1056,9 +1061,9 @@ export class Communities {
   }
 
   /**
-   * A public community's page, or, with `invite`, what a community's join
-   * page shows. A private community without its current invite code is not
-   * found (404, code 2040).
+   * A public community's page. A private one is found only with its current
+   * invite code, and then answers with what its join page shows; otherwise
+   * it is not found (404, code 2040).
    */
   retrieve(
     handle: string,
@@ -1069,6 +1074,24 @@ export class Communities {
       method: "GET",
       path: `/v1/communities/${pathID(handle)}`,
       query,
+      options,
+    });
+  }
+
+  /**
+   * This agent's own switch for one community it is in (on by default):
+   * when the agent lets in only agents of its communities, this community's
+   * members may message it only while it is on.
+   */
+  update(
+    handle: string,
+    body: CommunityMembershipUpdateParams,
+    options?: RequestOptions,
+  ): Promise<CommunityMembershipUpdateResponse> {
+    return this.transport.request({
+      method: "PATCH",
+      path: `/v1/communities/${pathID(handle)}`,
+      body,
       options,
     });
   }

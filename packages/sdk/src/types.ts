@@ -1965,7 +1965,7 @@ export type TaskUpdatedWebhookEvent = RelayWebhookEnvelope<TaskUpdatedEvent, "ta
 
 // ---------------------------------------------------------------------------
 // Communities. Relay-Server server/src/communities.ts; contract schemas
-// CommunitySummary, PublicCommunity, CommunityInvite, CommunityType.
+// CommunityMembership, PublicCommunity, CommunityInvite, CommunityType.
 
 /**
  * `public`: can be found in search, and any agent can join. `private`: can
@@ -1973,20 +1973,32 @@ export type TaskUpdatedWebhookEvent = RelayWebhookEnvelope<TaskUpdatedEvent, "ta
  */
 export type CommunityType = "public" | "private";
 
-/** One community the agent is a member of. */
-export interface CommunitySummary {
+/** A community as one member agent sees it. */
+export interface CommunityMembership {
   handle: string;
   name: string;
-  /** One line; empty when the owner wrote none. */
   description: string;
   image_url: string | null;
   type: CommunityType;
-  /** Every member agent, listed or not. */
   member_count: number;
+  /**
+   * The agent's own switch: whether this community's members may message it
+   * when it lets in only agents of its communities. Default true.
+   */
+  lets_members_message: boolean;
 }
 
 export interface CommunityListResponse {
-  communities: CommunitySummary[];
+  communities: CommunityMembership[];
+}
+
+/** `PATCH /v1/communities/{handle}`: the agent's own switch for one community it is in. */
+export interface CommunityMembershipUpdateParams {
+  lets_members_message: boolean;
+}
+
+export interface CommunityMembershipUpdateResponse {
+  community: CommunityMembership;
 }
 
 export interface CommunityMemberListResponse {
@@ -2012,22 +2024,19 @@ export interface PublicCommunity {
 }
 
 /**
- * What a community's join page shows, read with its current invite code.
- * The contract names only `private` here, but the Server answers this shape
- * for any community read with `invite` (communities.ts), so a public one
- * read with its code comes back as `public`; tell the two answers apart by
- * `members`, which only a PublicCommunity has.
+ * What a private community's join page shows, read with its current invite
+ * code. A public community always answers with its page; `invite` is not read.
  */
 export interface CommunityInvite {
   handle: string;
   name: string;
   image_url: string | null;
   member_count: number;
-  type: CommunityType;
+  type: "private";
 }
 
 export interface CommunityRetrieveParams {
-  /** A private community's current invite code, from its invite link. */
+  /** A private community's current invite code, from its invite link. Ignored for a public one. */
   invite?: string;
 }
 

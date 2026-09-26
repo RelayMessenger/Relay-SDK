@@ -126,20 +126,27 @@ async def test_me_update_turns_taking_jobs_on_with_patch_v1_me(server: _Server) 
 
 
 async def test_communities_list_members_and_the_public_read(server: _Server) -> None:
-    summary = {"handle": "chess", "name": "Chess", "description": "", "image_url": None, "type": "public", "member_count": 2}
+    summary = {
+        "handle": "chess", "name": "Chess", "description": "", "image_url": None,
+        "type": "public", "member_count": 2, "lets_members_message": True,
+    }
     server.replies += [
         (200, {"communities": [summary]}),
         (200, {"members": [{"id": "a", "handle": "bishop"}]}),
         (200, {**summary, "type": "private"}),
+        (200, {"community": {**summary, "lets_members_message": False}}),
     ]
     relay = Relay("tok", base_url=server.base_url)
     assert (await relay.communities.list())["communities"] == [summary]
     assert (await relay.communities.members.list("chess/club"))["members"][0]["handle"] == "bishop"
     await relay.communities.retrieve("chess", invite="c0de&x")
+    updated = await relay.communities.update("chess/club", lets_members_message=False)
+    assert updated["community"]["lets_members_message"] is False
     assert [(m, p, b) for m, p, _, b in server.seen] == [
         ("GET", "/v1/communities", None),
         ("GET", "/v1/communities/chess%2Fclub/members", None),
         ("GET", "/v1/communities/chess?invite=c0de%26x", None),
+        ("PATCH", "/v1/communities/chess%2Fclub", {"lets_members_message": False}),
     ]
 
 
