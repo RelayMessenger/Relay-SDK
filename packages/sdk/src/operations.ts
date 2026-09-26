@@ -11,6 +11,11 @@ export const RELAY_V1_OPERATIONS = [
     "operationId": "deleteAgent"
   },
   {
+    "method": "GET",
+    "path": "/v1/me",
+    "operationId": "getMe"
+  },
+  {
     "method": "PATCH",
     "path": "/v1/me",
     "operationId": "updateAgentMe"

@@ -8,11 +8,12 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
-  acpCommand, acpEnvironment, acpFailure, acpPrompt, authMethodFromEnv, autoPermission, relayMcpServer, replyKey, runAcpBridge,
+  acpChoices, acpCommand, acpEnvironment, acpFailure, acpPermissionResponse, acpPrompt, authMethodFromEnv, isRelayToolCall, relayMcpServer, replyKey, runAcpBridge,
   type AcpCommand,
 } from "./acp-bridge.js";
 import { openAcpSessions, type AcpSessionStore } from "./acp-threads.js";
 import { platformCommand } from "./spawn-command.js";
+import type { ApprovalRequest, OwnerApprovals } from "./approvals.js";
 
 const folders: string[] = [];
 afterAll(async () => {
@@ -43,6 +44,7 @@ interface FakeLine {
   argv?: string[];
   /** RELAY_AGENT_TOKEN as the agent's own environment held it; null when absent. */
   tokenEnv?: string | null;
+  permissionResponse?: unknown;
 }
 
 /** Relay's hosted MCP server as connect hands it over: the staging server and the agent's token. */
@@ -64,6 +66,7 @@ const fakeAcpAgent = async (settings: {
   newSessionError?: { code: number; message: string; data?: unknown };
   replayAfterLoad?: string;
   resumable?: string[];
+  permission?: { toolCall: Record<string, unknown>; options: { optionId: string; name: string; kind: string }[] };
 } = {}): Promise<{ acp: AcpCommand; cwd: string; log(): Promise<FakeLine[]> }> => {
   const folder = await scratch("fake-acp");
   const record = join(folder, "messages.jsonl");
@@ -131,6 +134,12 @@ function fakeRelay(events: readonly RelayWebhookEvent[]) {
   return { client, typing, sent, created, refuseCreate: (error: Error) => { createRefusal = error; }, failSends: () => { sendFails = true; } };
 }
 
+/** Owners nobody asks: every prompt goes unanswered, and no event is a tap. */
+const NO_APPROVALS: Pick<OwnerApprovals, "ask" | "take"> = {
+  ask: async () => ({ reason: "no_owner" }),
+  take: async () => false,
+};
+
 /** Every way one message can end on the terminal. */
 const ENDED = /Sent the answer|gave no answer|could not answer|did not reach Relay|was dropped/u;
 
@@ -162,6 +171,7 @@ const runBridge = async (input: {
   media?: Omit<InboundMediaOptions, "chatId">;
   relay?: ReturnType<typeof fakeRelay>;
   env?: NodeJS.ProcessEnv;
+  approvals?: Pick<OwnerApprovals, "ask" | "take">;
 }): Promise<{ said: string[]; relay: ReturnType<typeof fakeRelay> }> => {
   const relay = input.relay ?? fakeRelay(input.events);
   const said: string[] = [];
@@ -173,6 +183,7 @@ const runBridge = async (input: {
       mcp: RELAY_MCP,
       env: input.env ?? {},
       label: "Cursor",
+      approvals: input.approvals ?? NO_APPROVALS,
       sessions: input.sessions ?? memorySessions(),
       signal: control.signal, say: (line) => said.push(line),
     });
@@ -332,17 +343,58 @@ describe("what the bridge sends back", () => {
     expect((await acp.log()).filter((line) => line.in === "session/prompt")).toHaveLength(1);
   });
 
-  it("declines a tool permission automatically when nobody is at the keyboard", () => {
+  it("relays a tool permission to the owners with the agent's own options, and hands back the option picked", async () => {
+    const options = [
+      { optionId: "proceed_once", name: "Allow once", kind: "allow_once" as const },
+      { optionId: "proceed_always", name: "Allow for this session", kind: "allow_always" as const },
+      { optionId: "proceed_always_and_save", name: "Allow this command for all future sessions", kind: "allow_always" as const },
+      { optionId: "cancel", name: "Reject", kind: "reject_once" as const },
+    ];
+    const asked: ApprovalRequest[] = [];
+    for (const [picked, optionId] of [["allow_once", "proceed_once"], ["allow_session", "proceed_always"], ["deny", "cancel"]] as const) {
+      const acp = await fakeAcpAgent({ permission: { toolCall: { toolCallId: "run_shell_command-1-1", title: "uname -a", kind: "execute" }, options } });
+      await runBridge({ ...acp, events: [received("event-1", "chat-1", "run uname")], approvals: {
+        ask: async (request) => { asked.push(request); const choice = request.choices.find((option) => option.decision === picked); return choice ? { reason: "answered", choice, by: "owner" } : { reason: "timeout" }; },
+        take: async () => false,
+      } });
+      expect((await acp.log()).find((line) => "permissionResponse" in line)?.permissionResponse)
+        .toEqual({ outcome: { outcome: "selected", optionId } });
+    }
+    expect(asked[0]).toMatchObject({ harness: "Cursor", title: "Cursor asks to run a command.", summary: "uname -a" });
+    expect(asked[0]?.choices).toEqual([
+      { id: "proceed_once", label: "Allow once", decision: "allow_once" },
+      { id: "proceed_always", label: "Allow for this session", decision: "allow_session" },
+      { id: "cancel", label: "Reject", decision: "deny" },
+    ]);
+  });
+
+  it("rejects with the agent's own reject option when nobody answers, and runs Relay's own tools without asking", async () => {
     const options = [
       { optionId: "yes", name: "Allow", kind: "allow_once" as const },
       { optionId: "no", name: "Reject", kind: "reject_once" as const },
     ];
-    expect(autoPermission({ sessionId: "s", toolCall: {} as never, options })).toEqual({
-      outcome: { outcome: "selected", optionId: "yes" },
-    });
-    expect(autoPermission({ sessionId: "s", toolCall: {} as never, options: [] })).toEqual({
-      outcome: { outcome: "cancelled" },
-    });
+    const timedOut = await fakeAcpAgent({ permission: { toolCall: { toolCallId: "run_shell_command-1-1", title: "rm -rf build", kind: "execute" }, options } });
+    await runBridge({ ...timedOut, events: [received("event-1", "chat-1", "clean")], approvals: { ask: async () => ({ reason: "timeout" }), take: async () => false } });
+    expect((await timedOut.log()).find((line) => "permissionResponse" in line)?.permissionResponse)
+      .toEqual({ outcome: { outcome: "selected", optionId: "no" } });
+
+    let asks = 0;
+    const own = await fakeAcpAgent({ permission: { toolCall: { toolCallId: "mcp_relay_send_message-1-1", title: "send_message", kind: "other" }, options } });
+    await runBridge({ ...own, events: [received("event-1", "chat-1", "tell bob")], approvals: { ask: async () => { asks += 1; return { reason: "timeout" }; }, take: async () => false } });
+    expect(asks).toBe(0);
+    expect((await own.log()).find((line) => "permissionResponse" in line)?.permissionResponse)
+      .toEqual({ outcome: { outcome: "selected", optionId: "yes" } });
+  });
+
+  it("maps ACP options and answers the way the protocol asks", () => {
+    expect(isRelayToolCall({ toolCall: { toolCallId: "mcp_relay_send_message-9-1" } })).toBe(true);
+    expect(isRelayToolCall({ toolCall: { toolCallId: "mcp_relayx_send_message-9-1" } })).toBe(false);
+    expect(isRelayToolCall({ toolCall: { toolCallId: "run_shell_command-9-1" } })).toBe(false);
+    expect(acpChoices([{ optionId: "r", name: "Never", kind: "reject_always" }])).toEqual([{ id: "r", label: "Never", decision: "deny" }]);
+    const options = [{ optionId: "no", name: "Reject", kind: "reject_once" as const }];
+    expect(acpPermissionResponse({ options }, { reason: "aborted" })).toEqual({ outcome: { outcome: "cancelled" } });
+    expect(acpPermissionResponse({ options: [] }, { reason: "timeout" })).toEqual({ outcome: { outcome: "cancelled" } });
+    expect(acpPermissionResponse({ options }, { reason: "no_owner" })).toEqual({ outcome: { outcome: "selected", optionId: "no" } });
   });
 
   it("strips only Relay's secrets from the agent's environment, and keeps each client's own sign-in", () => {

@@ -2,12 +2,13 @@ import { inboundMediaPrompt, type InboundMediaOptions } from "./inbound-media.js
 import { isAbsolute } from "node:path";
 import { findExecutable } from "./runtime-sniff.js";
 import type Relay from "@relaymessenger/sdk";
-import { query, type SpawnOptions, type SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
+import { query, type CanUseTool, type PermissionResult, type PermissionUpdate, type SpawnOptions, type SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import { platformCommand, spawnCommand } from "./spawn-command.js";
 import { bridgeTurn, codexPrompt, sendAnswer, type BridgeTurn } from "./codex-bridge.js";
 import { replacesLiveTurn } from "./bridge-turn.js";
 import type { ClaudeThreadStore } from "./claude-threads.js";
 import { MCP_SERVER_NAME, claudeMcpServer, type HostedMcp } from "./hosted-mcp.js";
+import { denialMessage, inputDetail, inputSummary, type ApprovalChoice, type OwnerApprovals } from "./approvals.js";
 
 export interface ClaudeBridgeInput {
   client: Pick<Relay, "chats" | "paymentRequests" | "websocket">;
@@ -19,6 +20,8 @@ export interface ClaudeBridgeInput {
   threads: ClaudeThreadStore;
   /** Relay's hosted MCP server and this agent's token (hosted-mcp.ts). */
   mcp: HostedMcp;
+  /** Asks the agent's owners, in Relay, whatever Claude Code would ask at its terminal. */
+  approvals: Pick<OwnerApprovals, "ask" | "take">;
   signal: AbortSignal;
   say(line: string): void;
   query?: typeof query;
@@ -33,6 +36,80 @@ export const claudeCommand = async (
   if (isAbsolute(found)) return { executable: found };
   const onPath = await findExecutable(found, env, platform);
   return { executable: onPath ?? (platform === "win32" ? `${found}.cmd` : found) };
+};
+
+/**
+ * The tools that run without asking, as Inkbox's Claude Code plugin runs them:
+ * its read-only set (`DEFAULT_AUTO_ALLOWED_TOOLS`,
+ * _sources/approvals-inkbox-20260926/inkbox-claude-code-plugin-config.py.txt:40-49)
+ * plus every tool of its own MCP server (sessions.py.txt:1171-1173). Relay's
+ * are `mcp__relay__*`, the rule that "matches all tools from the server"
+ * (Claude Code permissions, _sources/mcp-tool-design-20260926/
+ * claude-code-permissions-docs.md:482-483). Everything else goes through the
+ * person's own settings (`settingSources`) and, where those ask, to the
+ * agent's owners (`claudePermission`).
+ */
+export const CLAUDE_ALLOWED_TOOLS: readonly string[] = [
+  "Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite", "Task", "NotebookRead",
+  `mcp__${MCP_SERVER_NAME}__*`,
+];
+
+/**
+ * The person's own Claude Code settings, user and project, as Inkbox loads
+ * them (`setting_sources=["user","project"]`, sessions.py.txt:1170): the
+ * allow and deny rules they wrote decide first, and only a call those rules
+ * leave to a prompt reaches `canUseTool` (Agent SDK, "Handle approvals and
+ * user input": "The callback never fires for auto-approved tools",
+ * claude-code-agent-sdk-user-input.md:52).
+ */
+export const CLAUDE_SETTING_SOURCES = ["user", "project"] as const;
+
+/** The three answers, in the Agent SDK's terms: allow, allow with a session rule, deny. */
+export const CLAUDE_CHOICES: readonly ApprovalChoice[] = [
+  { id: "allow_once", label: "Allow once", decision: "allow_once" },
+  { id: "allow_session", label: "Allow for this session", decision: "allow_session" },
+  { id: "deny", label: "Deny", decision: "deny" },
+];
+
+/**
+ * The rules that stop Claude Code asking again this session. The SDK hands
+ * `suggestions` for exactly this ("if presenting the user an option 'always
+ * allow' or similar, then this full set of suggestions should be returned as
+ * the `updatedPermissions`", sdk.d.ts `CanUseTool`); each is kept to the
+ * session (`PermissionUpdateDestination` "session") so no settings file of
+ * the person's changes. With no suggestion, the tool itself is allowed for
+ * the session.
+ */
+export const sessionRules = (toolName: string, suggestions: readonly PermissionUpdate[] | undefined): PermissionUpdate[] =>
+  suggestions?.length
+    ? suggestions.map((update) => ({ ...update, destination: "session" }))
+    : [{ type: "addRules", rules: [{ toolName }], behavior: "allow", destination: "session" }];
+
+/**
+ * Claude Code's `canUseTool`, answered by the agent's owners in Relay.
+ * `AskUserQuestion` is a question, not a permission, and nobody sits at this
+ * terminal to pick an option, so Claude is told to ask it in its answer,
+ * which the person reads in the chat.
+ */
+export const claudePermission = (
+  approvals: Pick<OwnerApprovals, "ask">,
+): CanUseTool => async (toolName, input, options): Promise<PermissionResult> => {
+  if (toolName === "AskUserQuestion") {
+    return { behavior: "deny", message: "Nobody can pick an option here. Ask the question in your answer; the person reads it in Relay." };
+  }
+  const outcome = await approvals.ask({
+    harness: "Claude Code",
+    tool: toolName,
+    summary: inputSummary(input),
+    detail: inputDetail(input),
+    choices: CLAUDE_CHOICES,
+    signal: options.signal,
+  });
+  switch (outcome.choice?.decision) {
+    case "allow_once": return { behavior: "allow", updatedInput: input };
+    case "allow_session": return { behavior: "allow", updatedInput: input, updatedPermissions: sessionRules(toolName, options.suggestions) };
+    default: return { behavior: "deny", message: denialMessage(outcome) };
+  }
 };
 
 /** The last bytes Claude Code wrote to stderr, kept to name a failed start. */
@@ -104,6 +181,7 @@ export const runClaudeBridge = async (input: ClaudeBridgeInput): Promise<void> =
   const lanes = new Map<string, ChatLane>();
   const ask = input.query ?? query;
   const spawner = claudeSpawn(input.claude.executable, input.platform);
+  const permission = claudePermission(input.approvals);
 
   const answerOne = async (turn: BridgeTurn, lane: ChatLane, started: () => void): Promise<void> => {
     const mine: LiveTurn = { control: new AbortController(), dropped: false, fromAgent: turn.fromAgent };
@@ -127,9 +205,11 @@ export const runClaudeBridge = async (input: ClaudeBridgeInput): Promise<void> =
             cwd: input.cwd,
             ...(resume !== undefined ? { resume } : {}),
             pathToClaudeCodeExecutable: input.claude.executable,
-            // Like CODEX_APPROVAL_POLICY = "never", no person is at the keyboard.
-            permissionMode: "bypassPermissions",
-            allowDangerouslySkipPermissions: true,
+            // Claude Code's own ask mode with the person's own settings; what
+            // it would ask at its terminal goes to the agent's owners.
+            settingSources: [...CLAUDE_SETTING_SOURCES],
+            allowedTools: [...CLAUDE_ALLOWED_TOOLS],
+            canUseTool: permission,
             mcpServers: { [MCP_SERVER_NAME]: claudeMcpServer(input.mcp) },
             ...(spawner.spawn ? { spawnClaudeCodeProcess: spawner.spawn } : {}),
             abortController: mine.control,
@@ -182,6 +262,8 @@ export const runClaudeBridge = async (input: ClaudeBridgeInput): Promise<void> =
   await input.client.websocket.run({
     signal: input.signal,
     onEvent: async (event) => {
+      // A tap on an approval card answers a prompt; it is not a message to answer.
+      if (await input.approvals.take(event)) return;
       const turn = bridgeTurn(event);
       if (!turn || answered.has(turn.eventId) || input.signal.aborted) return;
       answered.add(turn.eventId);

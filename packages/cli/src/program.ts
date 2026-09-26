@@ -13,6 +13,7 @@ import { openCodexThreads } from "./codex-threads.js";
 import { acpCommand, runAcpBridge } from "./acp-bridge.js";
 import { openAcpSessions } from "./acp-threads.js";
 import { runPiChannel } from "@relaymessenger/pi";
+import { OwnerApprovals, piApprovals } from "./approvals.js";
 import { sdkTerminalObserver, terminalEventLine } from "./terminal-watch.js";
 import { dim, link } from "./ui-colour.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
@@ -364,6 +365,9 @@ export const createProgram = (
           process.once("SIGINT", stop);
           process.once("SIGTERM", stop);
           const relayClient = () => new Relay({ apiKey: input.token, baseURL: input.apiURL, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) });
+          // What the coding agent would ask at its own terminal goes to the
+          // agent's owners in Relay, as a card; only an owner's tap answers.
+          const approvals = new OwnerApprovals({ client: relayClient(), say: input.say });
           try {
             if (input.kind === "pi") {
               await runPiChannel({
@@ -371,6 +375,7 @@ export const createProgram = (
                 baseURL: input.apiURL,
                 piCommand: input.command,
                 relay: relayClient(),
+                approvals: piApprovals(approvals),
               }, control.signal);
             } else if (input.kind === "claude") {
               await runClaudeBridge({
@@ -380,6 +385,7 @@ export const createProgram = (
                 cwd: input.cwd,
                 threads: await openClaudeThreads({ apiURL: input.apiURL, handle: input.handle }, configContext),
                 mcp: { url: input.mcpURL, token: input.token },
+                approvals,
                 signal: control.signal,
                 say: input.say,
               });
@@ -392,6 +398,7 @@ export const createProgram = (
                 // Relay's own tools travel through the agent's session.
                 mcp: { url: input.mcpURL, token: input.token },
                 label: input.label,
+                approvals,
                 // The chat's ACP session outlives this run, so a restart picks
                 // every chat up where it stopped (acp-threads.ts).
                 sessions: await openAcpSessions({ apiURL: input.apiURL, handle: input.handle }, configContext),
@@ -411,6 +418,7 @@ export const createProgram = (
                 // its token from RELAY_AGENT_TOKEN (codex-bridge.ts).
                 agentToken: input.token,
                 mcpURL: input.mcpURL,
+                approvals,
                 signal: control.signal,
                 say: input.say,
               });

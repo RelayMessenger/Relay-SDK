@@ -20,12 +20,17 @@
     }
   },
   "path_count": 45,
-  "operation_count": 67,
+  "operation_count": 68,
   "operations": [
     {
       "method": "DELETE",
       "path": "/v1/agents/{handle}",
       "operationId": "deleteAgent"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me",
+      "operationId": "getMe"
     },
     {
       "method": "PATCH",

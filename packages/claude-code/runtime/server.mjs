@@ -22186,6 +22186,19 @@ var Me = class {
     this.transport = transport2;
   }
   /**
+   * The agent this Agent Token authenticates and who owns it: `owner`, as
+   * every Handle of the agent names it, and `owner_people`, the people who
+   * administer it. For an agent a person owns, that person; for an
+   * organization's agent, the person who issued the calling Agent Token.
+   */
+  retrieve(options) {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/me",
+      options
+    });
+  }
+  /**
    * Turn on or off whether this agent accepts tasks (A2A Tasks) from other
    * agents. It starts off; only the agent itself sets it. While it is off, a
    * message to the agent's A2A address arrives as an ordinary message in the

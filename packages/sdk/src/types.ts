@@ -1875,6 +1875,33 @@ export interface A2aTask {
   };
 }
 
+/** A person who administers an agent (`OwnerPerson`, contracts/relay-v1-openapi.yaml). */
+export interface OwnerPerson {
+  /** The person's Contact identifier. */
+  id: UUID;
+  /** The person's Relay Handle. */
+  handle: string;
+  /** The person's display name. */
+  display_name: string;
+}
+
+/** `GET /v1/me`: the agent the Agent Token authenticates, and who owns it (`AgentMe`). */
+export interface AgentMe {
+  id: UUID;
+  handle: string;
+  kind: "agent";
+  display_name: string;
+  /** Who owns this agent, as every Handle of it names it. Null for an agent no organization or person owns. */
+  owner: HandleOwner | null;
+  /**
+   * The people who administer this agent: the owning person, or for an
+   * organization's agent the person who issued the calling Agent Token.
+   * Empty when none can be resolved, for example when that person has no
+   * Relay app account yet.
+   */
+  owner_people: OwnerPerson[];
+}
+
 /** `PATCH /v1/me`: whether the authenticated agent accepts tasks from other agents. */
 export interface AgentMeUpdateParams {
   accepts_tasks: boolean;

@@ -5,6 +5,7 @@ import {
   PROTOCOL_VERSION,
   ndJsonStream,
   type Client,
+  type PermissionOption,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionNotification,
@@ -20,6 +21,7 @@ import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
 import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, mcpRemoteServer, type HostedMcp } from "./hosted-mcp.js";
+import { inputDetail, inputSummary, type ApprovalChoice, type ApprovalOutcome, type OwnerApprovals } from "./approvals.js";
 
 /**
  * What `relay connect cursor|gemini-cli|cline|opencode` leaves running so the
@@ -113,12 +115,57 @@ export const relayMcpServer = (
 };
 
 /**
- * Nobody is at the keyboard, so a tool the agent asks to run is allowed the
- * same way Codex's `approvalPolicy: "never"` allows it: the agent proceeds. The
- * first `allow` option is chosen; when none is offered the request is cancelled
- * (`RequestPermissionOutcome`, schema/types.gen).
+ * Whether a permission request is for one of Relay's own tools, which run
+ * without a card, as Inkbox's own tools do (inkbox-claude-code-plugin-
+ * sessions.py.txt:1171-1173). ACP's `ToolCall` names no MCP server
+ * (acp-protocol-tool-calls.md), so this reads the one agent whose naming is
+ * known: Gemini CLI names an MCP tool `mcp_{server}_{tool}`
+ * (packages/core/src/tools/mcp-tool.ts `generateValidName`) and starts each
+ * call id with the tool's name (packages/cli/src/acp/acpSession.ts
+ * `generateCallId`; _sources/oss-20260912/gemini-cli). Any other request gets
+ * a card, the side that asks rather than allows.
  */
-export const autoPermission = (params: RequestPermissionRequest): RequestPermissionResponse => {
+export const isRelayToolCall = (params: Pick<RequestPermissionRequest, "toolCall">): boolean =>
+  params.toolCall.toolCallId.startsWith(`mcp_${MCP_SERVER_NAME}_`);
+
+/**
+ * The agent's own options mapped to the card's three: its first
+ * `allow_once`, its first `allow_always` as "for this session" (Gemini CLI
+ * names it "Allow for this session", acpUtils.ts `toPermissionOptions`), and
+ * its first `reject_once`, else `reject_always`. Each keeps the agent's own
+ * name and id (`PermissionOption`, acp-protocol-tool-calls.md).
+ */
+export const acpChoices = (options: readonly PermissionOption[]): ApprovalChoice[] => {
+  const first = (...kinds: PermissionOption["kind"][]): PermissionOption | undefined =>
+    kinds.map((kind) => options.find((option) => option.kind === kind)).find(Boolean);
+  const picks: [PermissionOption | undefined, ApprovalChoice["decision"]][] = [
+    [first("allow_once"), "allow_once"],
+    [first("allow_always"), "allow_session"],
+    [first("reject_once", "reject_always"), "deny"],
+  ];
+  return picks.flatMap(([option, decision]) => option ? [{ id: option.optionId, label: option.name, decision }] : []);
+};
+
+/**
+ * The answer the agent gets. A cancelled turn is answered `cancelled`, which
+ * ACP requires ("If the current prompt turn gets cancelled, the Client MUST
+ * respond with the "cancelled" outcome", acp-protocol-tool-calls.md:193). A
+ * prompt nobody allowed selects the agent's own reject option; ACP's answer
+ * carries no message.
+ */
+export const acpPermissionResponse = (
+  params: Pick<RequestPermissionRequest, "options">,
+  outcome: ApprovalOutcome,
+): RequestPermissionResponse => {
+  if (outcome.choice) return { outcome: { outcome: "selected", optionId: outcome.choice.id } };
+  if (outcome.reason === "aborted") return { outcome: { outcome: "cancelled" } };
+  const reject = params.options.find((option) => option.kind === "reject_once")
+    ?? params.options.find((option) => option.kind === "reject_always");
+  return reject ? { outcome: { outcome: "selected", optionId: reject.optionId } } : { outcome: { outcome: "cancelled" } };
+};
+
+/** Relay's own tool runs at once: the agent's first allow option. */
+const allowOwnTool = (params: RequestPermissionRequest): RequestPermissionResponse => {
   const allow = params.options.find((option) => option.kind === "allow_once")
     ?? params.options.find((option) => option.kind === "allow_always");
   return allow
@@ -149,6 +196,42 @@ export const acpEnvironment = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
   const copy = { ...env };
   for (const name of RELAY_SECRET_ENV) delete copy[name];
   return copy;
+};
+
+/** ACP's `ToolKind` as the card's first line (acp-protocol-tool-calls.md, "Tool Kinds"). */
+const KIND_ACTION: Readonly<Record<string, string>> = {
+  read: "read a file",
+  edit: "edit a file",
+  delete: "delete a file",
+  move: "move a file",
+  search: "search",
+  execute: "run a command",
+  fetch: "fetch a web page",
+};
+
+/**
+ * One permission request, answered by the agent's owners in Relay; Relay's
+ * own tools run without asking.
+ */
+export const acpPermission = (
+  label: string,
+  approvals: Pick<OwnerApprovals, "ask">,
+) => async (params: RequestPermissionRequest, signal?: AbortSignal): Promise<RequestPermissionResponse> => {
+  if (isRelayToolCall(params)) return allowOwnTool(params);
+  const call = params.toolCall;
+  const raw = call.rawInput !== null && typeof call.rawInput === "object" ? call.rawInput as Record<string, unknown> : undefined;
+  const title = call.title?.trim();
+  const paths = (call.locations ?? []).map((location) => location.path);
+  const outcome = await approvals.ask({
+    harness: label,
+    tool: title || call.kind || "a tool",
+    title: `${label} asks to ${KIND_ACTION[call.kind ?? ""] ?? "use a tool"}.`,
+    summary: title || (raw ? inputSummary(raw) : "") || paths.join(", ") || call.toolCallId,
+    detail: inputDetail({ ...(title ? { title } : {}), ...(call.kind ? { kind: call.kind } : {}), ...(raw ? { input: raw } : {}), ...(paths.length ? { paths } : {}) }),
+    choices: acpChoices(params.options),
+    ...(signal ? { signal } : {}),
+  });
+  return acpPermissionResponse(params, outcome);
 };
 
 /**
@@ -243,6 +326,8 @@ export const startAcpAgent = (
   acp: AcpCommand,
   cwd: string,
   signal: AbortSignal,
+  /** Answers `session/request_permission`; `acpPermission` in the bridge. */
+  permission: (params: RequestPermissionRequest) => Promise<RequestPermissionResponse>,
 ): AcpAgent => {
   // Started the way every other command this CLI runs is started, so the `.cmd`
   // shim npm installs on Windows runs too (spawn-command.ts). Nothing a person
@@ -286,7 +371,7 @@ export const startAcpAgent = (
       }
     },
     requestPermission: async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> =>
-      autoPermission(params),
+      await permission(params),
   };
   const client = new ClientSideConnection(() => handlers, stream);
 
@@ -359,6 +444,8 @@ export interface AcpBridgeInput {
   mcp: HostedMcp;
   /** The label shown to the person, e.g. "Cursor". */
   label: string;
+  /** Asks the agent's owners, in Relay, whatever the agent would ask its editor. */
+  approvals: Pick<OwnerApprovals, "ask" | "take">;
   /** Which ACP session belongs to which chat, across restarts. */
   sessions: AcpSessionStore;
   signal: AbortSignal;
@@ -398,12 +485,25 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
   let sessionGone = false;
   /** The ACP session each chat is holding open in the agent running now. */
   let opened = new Map<string, string>();
+  /** The permission prompts each session is waiting on. */
+  const waiting = new Map<string, Set<AbortController>>();
 
   const acpAgent = (): Promise<AcpAgent> => {
     if (session && !sessionGone) return session;
     opened = new Map();
     session = (async () => {
-      const started = startAcpAgent(input.acp, input.cwd, input.signal);
+      const ask = acpPermission(input.label, input.approvals);
+      const started = startAcpAgent(input.acp, input.cwd, input.signal, async (params) => {
+        // A prompt for a session whose turn is cancelled stops waiting.
+        const stop = new AbortController();
+        const open = waiting.get(params.sessionId) ?? new Set<AbortController>();
+        open.add(stop);
+        waiting.set(params.sessionId, open);
+        const onAbort = (): void => stop.abort();
+        input.signal.addEventListener("abort", onAbort, { once: true });
+        try { return await ask(params, stop.signal); }
+        finally { open.delete(stop); input.signal.removeEventListener("abort", onAbort); }
+      });
       // A stop the person asked for, with Control-C, is not news.
       void started.stopped.then((line) => {
         sessionGone = true;
@@ -533,6 +633,8 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
   await input.client.websocket.run({
     signal: input.signal,
     onEvent: async (event) => {
+      // A tap on an approval card answers a prompt; it is not a message to answer.
+      if (await input.approvals.take(event)) return;
       const turn = bridgeTurn(event);
       if (!turn || answered.has(turn.eventId)) return;
       answered.add(turn.eventId);
@@ -543,6 +645,7 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
       const replacing = live !== undefined && replacesLiveTurn(turn, { fromAgent: lane.liveFromAgent === true });
       if (live !== undefined && replacing) {
         live.dropped = true;
+        for (const stop of waiting.get(live.sessionId) ?? []) stop.abort();
         try { await (await acpAgent()).client.cancel({ sessionId: live.sessionId }); }
         catch { /* The turn ended by itself, which is the same outcome. */ }
       }

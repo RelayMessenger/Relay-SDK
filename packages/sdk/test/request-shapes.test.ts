@@ -258,9 +258,10 @@ describe("Relay v1 request shapes", () => {
     await client.calls.retrieve("call-id");
     await client.calls.end("call-id");
     await client.agents.delete("agent");
+    await client.me.retrieve();
     await client.me.update({ accepts_tasks: true });
 
-    expect([...calls.slice(-2), ...calls.slice(0, -2)].map((call) => [call.method, call.url.pathname])).toEqual(
+    expect([...calls.slice(-3), ...calls.slice(0, -3)].map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
         operation.method,
         operation.path
@@ -456,7 +457,7 @@ describe("Relay v1 request shapes", () => {
     ]);
     expect(methods(client.access)).toEqual(["list", "remove", "set"]);
     expect(methods(client.agents)).toEqual(["delete"]);
-    expect(methods(client.me)).toEqual(["update"]);
+    expect(methods(client.me)).toEqual(["retrieve", "update"]);
     expect(methods(client.communities)).toEqual(["list", "retrieve", "update"]);
     expect(methods(client.communities.members)).toEqual(["list"]);
     expect(methods(client.communities.posts)).toEqual([
