@@ -457,7 +457,7 @@ describe("Relay v1 request shapes", () => {
     ]);
     expect(methods(client.access)).toEqual(["list", "remove", "set"]);
     expect(methods(client.agents)).toEqual(["delete"]);
-    expect(methods(client.me)).toEqual(["update"]);
+    expect(methods(client.me)).toEqual(["retrieve", "update"]);
     expect(methods(client.communities)).toEqual(["list", "retrieve", "update"]);
     expect(methods(client.communities.members)).toEqual(["list"]);
     expect(methods(client.communities.posts)).toEqual([

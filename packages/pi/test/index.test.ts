@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type Relay from "@relaymessenger/sdk";
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
-import { answerMessages, PiChannel, piPrompt, type PiProcess } from "../src/index.js";
+import { answerMessages, PiChannel, piPrompt, type PiApprovals, type PiDialog, type PiProcess } from "../src/index.js";
 import native from "../src/native.js";
 
 const makeEvent = (id: string, chat: string, kind: "user" | "agent" = "agent"): RelayWebhookEvent => ({
@@ -183,4 +183,51 @@ it("refuses FULL sync rather than acknowledging discarded selection context", as
   } } } as unknown as Relay;
   await expect(new PiChannel({ agentToken: "test", relay }).run()).rejects.toThrow("cannot acknowledge FULL sync");
   expect(completed).toBe(false);
+});
+
+describe("the person's own extension dialogs", () => {
+  const withDialog = (request: Record<string, unknown>): string[] => [
+    JSON.stringify({ id: "1", type: "response", success: true }),
+    JSON.stringify({ type: "extension_ui_request", id: "ui-1", ...request }),
+    JSON.stringify({ type: "agent_settled" }),
+    JSON.stringify({ id: "2", type: "response", success: true, data: { text: "done" } }),
+  ];
+  const answers = async (process: PiProcess): Promise<Record<string, unknown>[]> => {
+    await vi.waitFor(() => {
+      expect(vi.mocked(process.stdin.write).mock.calls.some(([line]) => String(line).includes("extension_ui_response"))).toBe(true);
+    });
+    return vi.mocked(process.stdin.write).mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>)
+      .filter((line) => line.type === "extension_ui_response");
+  };
+
+  it("hands a select to the owners and gives Pi the option they picked", async () => {
+    const asked: PiDialog[] = [];
+    const approvals: PiApprovals = { dialog: async (dialog) => { asked.push(dialog); return "Allow"; }, take: async () => false };
+    const process = fakePi(withDialog({ method: "select", title: "Allow dangerous command?", options: ["Allow", "Block"], timeout: 10000 }));
+    const { relay } = relayFor([makeEvent("dialog", "chat")]);
+    await new PiChannel({ agentToken: "secret", relay, approvals, spawnPi: () => process }).run();
+    expect(await answers(process)).toEqual([{ type: "extension_ui_response", id: "ui-1", value: "Allow" }]);
+    expect(asked[0]).toMatchObject({ method: "select", title: "Allow dangerous command?", options: ["Allow", "Block"], timeoutMs: 10000 });
+  });
+
+  it("answers a confirm with confirmed, and dismisses one nobody answered", async () => {
+    const yes = fakePi(withDialog({ method: "confirm", title: "Clear session?", message: "All messages will be lost." }));
+    await new PiChannel({ agentToken: "secret", relay: relayFor([makeEvent("yes", "chat")]).relay, approvals: { dialog: async () => "Yes", take: async () => false }, spawnPi: () => yes }).run();
+    expect(await answers(yes)).toEqual([{ type: "extension_ui_response", id: "ui-1", confirmed: true }]);
+    const no = fakePi(withDialog({ method: "confirm", title: "Clear session?" }));
+    await new PiChannel({ agentToken: "secret", relay: relayFor([makeEvent("no", "chat")]).relay, approvals: { dialog: async () => "No", take: async () => false }, spawnPi: () => no }).run();
+    expect(await answers(no)).toEqual([{ type: "extension_ui_response", id: "ui-1", confirmed: false }]);
+    const unanswered = fakePi(withDialog({ method: "confirm", title: "Clear session?" }));
+    await new PiChannel({ agentToken: "secret", relay: relayFor([makeEvent("none", "chat")]).relay, approvals: { dialog: async () => undefined, take: async () => false }, spawnPi: () => unanswered }).run();
+    expect(await answers(unanswered)).toEqual([{ type: "extension_ui_response", id: "ui-1", cancelled: true }]);
+  });
+
+  it("dismisses a dialog at once when nobody is set to answer, and a tap on a card starts no turn", async () => {
+    const process = fakePi(withDialog({ method: "input", title: "Enter a value" }));
+    await new PiChannel({ agentToken: "secret", relay: relayFor([makeEvent("input", "chat")]).relay, spawnPi: () => process }).run();
+    expect(await answers(process)).toEqual([{ type: "extension_ui_response", id: "ui-1", cancelled: true }]);
+    const spawned: string[] = [];
+    await new PiChannel({ agentToken: "secret", relay: relayFor([makeEvent("tap", "chat")]).relay, approvals: { dialog: async () => undefined, take: async () => true }, spawnPi: (_c, _a, chat) => { spawned.push(chat); return fakePi(records("x")); } }).run();
+    expect(spawned).toEqual([]);
+  });
 });

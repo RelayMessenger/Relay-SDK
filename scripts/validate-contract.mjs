@@ -261,7 +261,7 @@ assert.deepEqual(Object.keys(client).sort(), [
 assert.equal("createAgent" in Relay, false);
 assert.deepEqual(publicMethods(client.access), ["list", "remove", "set"]);
 assert.deepEqual(publicMethods(client.agents), ["delete"]);
-assert.deepEqual(publicMethods(client.me), ["update"]);
+assert.deepEqual(publicMethods(client.me), ["retrieve", "update"]);
 assert.deepEqual(publicMethods(client.communities), ["list", "retrieve", "update"]);
 assert.deepEqual(publicMethods(client.communities.members), ["list"]);
 assert.deepEqual(publicMethods(client.tasks), [
