@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { AuthContext } from "./auth.js";
 import { collectLocalTokens, resolveAgentAuth } from "./auth.js";
 import { searchDocs } from "./search-docs.js";
-import { executeCode, type ExecutionLimits, type ExecutionRuntime } from "./execute.js";
+import { executeCode, type CodeExecutor, type ExecutionLimits, type ExecutionRuntime } from "./execute.js";
 import { redact, safeErrorMessage } from "./redact.js";
 import pkg from "../package.json" with { type: "json" };
 
@@ -16,12 +16,15 @@ export interface RelayMcpServerOptions {
   collectSecrets?: () => Promise<string[]>;
   executionLimits?: Partial<ExecutionLimits>;
   /**
-   * On Cloudflare Workers, pass `quickjsWasmModule` (import
-   * `@jitl/quickjs-wasmfile-release-sync/wasm`); Node needs nothing.
+   * On Cloudflare Workers, pass `executor` (Cloudflare Code Mode's
+   * `DynamicWorkerExecutor` over a Worker Loader binding) to run execute in a
+   * Dynamic Worker, or `quickjsWasmModule` (import
+   * `@jitl/quickjs-wasmfile-release-sync/wasm`) to run it in QuickJS. Node
+   * needs nothing.
    */
   executionRuntime?: ExecutionRuntime;
 }
-export type { ExecutionRuntime };
+export type { CodeExecutor, ExecutionRuntime };
 
 /** The structuredContent search_docs returns (search-docs.ts searchDocs). */
 export const searchDocsOutputSchema = z.object({
