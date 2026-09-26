@@ -142,8 +142,9 @@ describe("the plan screen", () => {
     expect(answer.dry_run).toBe(true);
     expect(answer.agents).toHaveLength(1);
     expect(answer.agents[0].agent).toBe(id === "claude" ? "claude-code" : id);
-    const kind = codingAgent(id === "claude" ? "claude-code" : id).connect.kind;
-    if (kind === "claude-bridge" || kind === "acp-bridge" || kind === "pi-channel" || kind === "openclaw-plugin") {
+    const method = codingAgent(id === "claude" ? "claude-code" : id).connect;
+    const kind = method.kind;
+    if (kind === "claude-bridge" || (method.kind === "acp-bridge" && !method.mcpSettings) || kind === "pi-channel" || kind === "openclaw-plugin") {
       // The ACP bridge writes no file: the Relay MCP server travels through the
       // agent's session instead (acp-bridge.ts). OpenClaw's own `channels add`
       // keeps the token, so Relay writes no OpenClaw file either.
@@ -339,13 +340,42 @@ describe("the MCP agents", () => {
     const cursorAnswer = JSON.parse(f.stdout.join(""));
     expect(cursorAnswer.agents[0]).toMatchObject({ agent: "cursor", files: [], bridge_command: "cursor-agent", bridge_args: ["acp"] });
 
-    // Gemini CLI, OpenCode and Cline are the same: no file, and their own ACP words.
-    for (const [id, command, args] of [["gemini", "gemini", ["--experimental-acp", "--skip-trust"]], ["opencode", "opencode", ["acp"]], ["cline", "cline", ["--acp"]]] as const) {
+    // Gemini CLI and OpenCode are the same: no file, and their own ACP words.
+    for (const [id, command, args] of [["gemini", "gemini", ["--experimental-acp", "--skip-trust"]], ["opencode", "opencode", ["acp"]]] as const) {
       const g = await fixture({}, runtimes());
       expect(await runCLI(["connect", id, "--token", token, "--yes", "--no-skill", "--json"], g.deps)).toBe(0);
       expect(g.runCommand).not.toHaveBeenCalled();
       expect(JSON.parse(g.stdout.join("")).agents[0]).toMatchObject({ files: [], bridge_command: command, bridge_args: args });
     }
+  });
+
+  it("cline gets mcpServers.relay in the settings file Cline reads, owner-only, every other entry kept, and is told it needs its own sign-in", async () => {
+    // Cline stores the MCP servers an ACP session hands it and never reads
+    // them (cline 3.0.65, apps/cli/src/acp/acpAgent.ts, `newSession`); its
+    // sessions load cline_mcp_settings.json instead (runtime-builder.ts).
+    const f = await fixture({}, runtimes());
+    const file = join(f.home, ".cline", "data", "settings", "cline_mcp_settings.json");
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, JSON.stringify({ mcpServers: { other: { command: "x" } }, theme: "dark" }), { mode: 0o600 });
+    expect(await runCLI(["connect", "cline", "--token", token, "--yes", "--no-skill", "--no-start"], f.deps)).toBe(0);
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      mcpServers: {
+        other: { command: "x" },
+        relay: { type: "streamableHttp", url: "https://mcp.staging.relayapp.im", headers: { Authorization: `Bearer ${token}` } },
+      },
+      theme: "dark",
+    });
+    await expectOwnerOnly(file, dirname(file));
+    expect(f.runCommand).not.toHaveBeenCalled();
+    const said = f.stdout.join("");
+    expect(said).toContain("Cline needs its own sign-in to answer: run cline auth once, or set CLINE_API_KEY.");
+    expect(said).not.toContain(token);
+
+    const g = await fixture({}, runtimes());
+    expect(await runCLI(["connect", "cline", "--token", token, "--yes", "--no-skill", "--json"], g.deps)).toBe(0);
+    expect(JSON.parse(g.stdout.join("")).agents[0]).toMatchObject({
+      files: [join(g.home, ".cline", "data", "settings", "cline_mcp_settings.json")], bridge_command: "cline", bridge_args: ["--acp"],
+    });
   });
 
   it("vscode writes servers.relay as the hosted server with the Agent Token, owner-only, and keeps every other entry", async () => {

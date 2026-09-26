@@ -4,10 +4,23 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import type { InteractivePrompts } from "../interactive.js";
 import { runCLI } from "../program.js";
-import agent from "./cline.js";
+import agent, { clineMcpSettings } from "./cline.js";
 
-it("connects over the ACP bridge with Cline's confirmed --acp command", () => {
-  expect(agent.connect).toEqual({ kind: "acp-bridge" });
+it("finds cline_mcp_settings.json where Cline resolves it", () => {
+  // cline 3.0.65, sdk/packages/shared/src/storage/paths.ts, `resolveMcpSettingsPath`.
+  const at = (env: NodeJS.ProcessEnv, platform: NodeJS.Platform = "linux", home = "/home/dev") =>
+    clineMcpSettings({ env, home, platform, cwd: platform === "win32" ? "C:\\work" : "/work" });
+  expect(at({})).toBe("/home/dev/.cline/data/settings/cline_mcp_settings.json");
+  expect(at({ CLINE_DIR: "/c" })).toBe("/c/data/settings/cline_mcp_settings.json");
+  expect(at({ CLINE_DIR: "/c", CLINE_DATA_DIR: "/d" })).toBe("/d/settings/cline_mcp_settings.json");
+  expect(at({ CLINE_DATA_DIR: " ", CLINE_DIR: " " })).toBe("/home/dev/.cline/data/settings/cline_mcp_settings.json");
+  expect(at({ CLINE_MCP_SETTINGS_PATH: "/m/mcp.json", CLINE_DATA_DIR: "/d" })).toBe("/m/mcp.json");
+  expect(at({ CLINE_MCP_SETTINGS_PATH: "cfg/mcp.json" })).toBe("/work/cfg/mcp.json");
+  expect(at({}, "win32", "C:\\Users\\dev")).toBe("C:\\Users\\dev\\.cline\\data\\settings\\cline_mcp_settings.json");
+});
+
+it("connects over the ACP bridge with Cline's confirmed --acp command, plus Cline's own MCP settings file", () => {
+  expect(agent.connect).toEqual({ kind: "acp-bridge", mcpSettings: clineMcpSettings });
   // `cline --acp` is Cline's own documented ACP launch (docs.cline.bot/usage/acp).
   expect(agent.start).toEqual({
     kind: "acp-bridge",

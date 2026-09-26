@@ -121,6 +121,24 @@ export const writePrivateDestination = async (
   } finally { await removeTemp(temporary.path); }
 };
 
+/**
+ * Writes a token-holding file some other program reads (an agent's MCP config),
+ * with the same checks and the same writer as Relay's own config: a new file is
+ * made owner-only before the token lands in it (POSIX 0o600, or a private
+ * Windows ACL that does not inherit the folder's), and an existing file that
+ * other accounts can already read, or a folder they can write, is refused with
+ * nothing changed. A POSIX mode alone is not enough: Windows ignores it, so a
+ * file in a folder that lets Users read would be readable (2026-09-26).
+ */
+export const writePrivateFile = async (
+  path: string,
+  what: string,
+  contents: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<void> => {
+  await writePrivateDestination(await preparePrivateDestination(path, what, platform), ".relay-connect", contents);
+};
+
 export interface PrivateFileReport {
   exists: boolean;
   /** Owner-only by the platform's own means; the folder counts too. */
