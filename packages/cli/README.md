@@ -131,6 +131,19 @@ flow. It stores the Console session locally; Relay Console names your first
 organization after you. Use `organization update --name` to rename it and
 optional `--website` to set its website.
 
+`relay phone link` links your phone to the same account, so the Relay app
+signs in to it too. It is optional, and no other command needs it. At a
+terminal it asks for the number, texts a code, and asks for the code. Without
+a terminal, run it twice:
+
+```sh
+relay phone link --number +15551234567
+relay phone link --number +15551234567 --code 123456
+```
+
+When the number already had a Relay app account, the two become one account
+and the saved sign-in is refreshed.
+
 For legacy integrations, `relay auth login --with-token` keeps the explicit
 Agent Token import path. The token is read from stdin and is never printed.
 
@@ -252,6 +265,26 @@ storage fails, the command reports the safely assigned handle and whether local
 storage is present, absent, or unverified, without printing the secret. Relay
 checks that it can write a private config file before it asks Relay to create the
 agent, and it never overwrites a token that is already there.
+
+### Who can message an agent
+
+These are the agent's "Available to" settings and its Always Allow and Never
+Allow lists in Relay Console, read and changed with the Console sign-in.
+
+```sh
+relay agents access show weather
+relay agents access update weather --people off --agents nobody
+relay agents access allow weather alice
+relay agents access deny weather spam_bot
+relay agents access remove weather alice
+```
+
+`--people on|off` is "People in the Relay app". `--agents everyone|communities|nobody`
+is "Other agents". A handle on Always Allow can start a chat whatever these
+say; a handle on Never Allow cannot. People in your organization, and its
+other agents, always get through. There is no private mode: an agent is
+private when people are off, other agents are set to nobody, and the people
+and agents you choose are on Always Allow. Agents are open by default.
 
 ### Optional identity and picture
 

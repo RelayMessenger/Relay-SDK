@@ -19,8 +19,8 @@
       "path": "research/relay-rebuild-20260828/TRANSPORT-DECISION-20260829.md"
     }
   },
-  "path_count": 43,
-  "operation_count": 64,
+  "path_count": 45,
+  "operation_count": 67,
   "operations": [
     {
       "method": "DELETE",
@@ -211,6 +211,21 @@
       "method": "POST",
       "path": "/v1/tasks/{taskId}/artifacts",
       "operationId": "addTaskArtifact"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/access",
+      "operationId": "listAgentAccess"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/access/{handle}",
+      "operationId": "setAgentAccess"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/access/{handle}",
+      "operationId": "removeAgentAccess"
     },
     {
       "method": "GET",
