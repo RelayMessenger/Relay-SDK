@@ -10,7 +10,7 @@ import { codexCommand, runCodexBridge } from "./codex-bridge.js";
 import { claudeCommand, runClaudeBridge } from "./claude-bridge.js";
 import { openClaudeThreads } from "./claude-threads.js";
 import { openCodexThreads } from "./codex-threads.js";
-import { acpCommand, relayMcpServer, runAcpBridge } from "./acp-bridge.js";
+import { acpCommand, runAcpBridge } from "./acp-bridge.js";
 import { openAcpSessions } from "./acp-threads.js";
 import { runPiChannel } from "@relaymessenger/pi";
 import { sdkTerminalObserver, terminalEventLine } from "./terminal-watch.js";
@@ -375,7 +375,7 @@ export const createProgram = (
                 claude: await claudeCommand(input.command, env),
                 cwd: input.cwd,
                 threads: await openClaudeThreads({ apiURL: input.apiURL, handle: input.handle }, configContext),
-                mcpServer: input.mcpServer,
+                mcp: { url: input.mcpURL, token: input.token },
                 signal: control.signal,
                 say: input.say,
               });
@@ -386,7 +386,7 @@ export const createProgram = (
                 acp: await acpCommand(input.command, input.acpArgs ?? [], env),
                 cwd: input.cwd,
                 // Relay's own tools travel through the agent's session.
-                mcpServers: [relayMcpServer(input.mcpServer)],
+                mcp: { url: input.mcpURL, token: input.token },
                 label: input.label,
                 // The chat's ACP session outlives this run, so a restart picks
                 // every chat up where it stopped (acp-threads.ts).
@@ -403,6 +403,10 @@ export const createProgram = (
                 // The chat's Codex thread outlives this run, so a restart picks
                 // every chat up where it stopped (codex-threads.ts).
                 threads: await openCodexThreads({ apiURL: input.apiURL, handle: input.handle }, configContext),
+                // Every thread gets Relay's hosted MCP server, which reads
+                // its token from RELAY_AGENT_TOKEN (codex-bridge.ts).
+                agentToken: input.token,
+                mcpURL: input.mcpURL,
                 signal: control.signal,
                 say: input.say,
               });

@@ -9,6 +9,7 @@ import {
   type RequestPermissionResponse,
   type SessionNotification,
   type McpServer,
+  type AuthMethod,
 } from "@agentclientprotocol/sdk";
 import { Readable, Writable } from "node:stream";
 import { isAbsolute } from "node:path";
@@ -17,6 +18,7 @@ import { bridgeTurn, codexPrompt, sendAnswer, type BridgeTurn } from "./codex-br
 import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
+import { MCP_SERVER_NAME, mcpRemoteServer, type HostedMcp } from "./hosted-mcp.js";
 
 /**
  * What `relay connect cursor|gemini-cli|cline|opencode` leaves running so the
@@ -30,9 +32,9 @@ import { spawnCommand } from "./spawn-command.js";
  * (`cursor-agent acp`, `gemini --experimental-acp`, `opencode acp`), gives every
  * chat its own ACP session, and sends the final answer back to the same chat.
  *
- * Relay's own tools travel through the session, natively: the Relay MCP server
- * connect would otherwise write into the agent's `mcp.json` is handed to
- * `session/new` instead, so the agent keeps Relay's send, read and react tools
+ * Relay's own tools travel through the session, natively: Relay's hosted MCP
+ * server, with this agent's token, is handed to `session/new` instead of being
+ * written into the agent's `mcp.json`, so the agent keeps Relay's send, read and react tools
  * while this process drives its turns. This mirrors `codex-bridge.ts`, which
  * does the same over Codex's `app-server`; the two never share a session file.
  */
@@ -78,15 +80,36 @@ export const acpCommand = async (
   return { command: onPath ?? (platform === "win32" ? `${found}.cmd` : found), args };
 };
 
-/** The Relay MCP server as ACP takes it (`McpServerStdio`, schema/types.gen). */
+/**
+ * Relay's hosted MCP server as ACP takes it. HTTP is optional in ACP: a client
+ * sends an `McpServerHttp` (`type: "http"`, `name`, `url`, `headers` as
+ * `{ name, value }` pairs) only to an agent whose `initialize` answer carries
+ * `mcpCapabilities.http`, and every agent must take stdio (ACP "Session Setup",
+ * MCP Servers; _sources/mcp-hosted-docs-20260926/acp-session-setup.md:374-470;
+ * `McpServerHttp`, `McpCapabilities` in @agentclientprotocol/sdk 1.4.0
+ * schema/types.gen). An agent without it gets the stdio `mcp-remote` entry
+ * Relay-Docs gives clients without remote support (hosted-mcp.ts).
+ */
 export const relayMcpServer = (
-  spec: { command: string; args: readonly string[]; env: Record<string, string> },
-): McpServer => ({
-  name: "relay",
-  command: spec.command,
-  args: [...spec.args],
-  env: Object.entries(spec.env).map(([name, value]) => ({ name, value })),
-});
+  mcp: HostedMcp,
+  capabilities: { http?: boolean } | null | undefined,
+): McpServer => {
+  if (capabilities?.http === true) {
+    return {
+      type: "http",
+      name: MCP_SERVER_NAME,
+      url: mcp.url,
+      headers: [{ name: "Authorization", value: `Bearer ${mcp.token}` }],
+    };
+  }
+  const remote = mcpRemoteServer(mcp);
+  return {
+    name: MCP_SERVER_NAME,
+    command: remote.command,
+    args: remote.args,
+    env: Object.entries(remote.env).map(([name, value]) => ({ name, value })),
+  };
+};
 
 /**
  * Nobody is at the keyboard, so a tool the agent asks to run is allowed the
@@ -103,9 +126,62 @@ export const autoPermission = (params: RequestPermissionRequest): RequestPermiss
     : { outcome: { outcome: "cancelled" } };
 };
 
+/**
+ * How long a loaded session must stay silent before the bridge prompts it.
+ * ACP says an agent replays the whole conversation and only then answers
+ * `session/load` (Session Setup, "Loading Sessions";
+ * _sources/mcp-hosted-docs-20260926/acp-session-setup.md:137,181). Gemini CLI
+ * answers first and replays after (`session.streamHistory` is not awaited,
+ * acpSessionManager.ts `loadSession`; acpSession.ts:241), so without a wait the
+ * old answers stream into the new turn's answer (the Daytona run of
+ * 2026-09-26 sent "Probe a8749ac6Probe a8749ac6"). An agent that follows the
+ * spec sends nothing after its answer and costs one window.
+ */
+export const REPLAY_QUIET_MS = 300;
+export const REPLAY_MAX_MS = 10_000;
+
+/** ACP's `auth_required` error code (`RequestError.authRequired`, jsonrpc.js). */
+export const AUTH_REQUIRED = -32000;
+
+/**
+ * Sign-in methods whose credential is an environment variable the agent reads
+ * itself, by method id. ACP leaves the choice of method to the client
+ * (Authentication, "Protocol-driven authentication";
+ * _sources/mcp-hosted-docs-20260926/acp-v1-authentication.md:138-170), and no
+ * person is at this client to choose, so the bridge picks only a method whose
+ * credential is already present, the rule acpx follows (`selectAuthMethod`,
+ * _sources/network-20260926/mcp-xos/acpx-src-src_acp_client.ts.txt:2054-2103).
+ * `gemini-api-key` is Gemini CLI's `AuthType.USE_GEMINI`, read from
+ * `GEMINI_API_KEY` (Gemini CLI docs/reference/configuration.md; Zed hands the
+ * same variable to Gemini, zed-agent_servers-custom.rs.txt:250-253).
+ */
+export const ENV_AUTH_METHODS: Readonly<Record<string, readonly string[]>> = {
+  "gemini-api-key": ["GEMINI_API_KEY"],
+};
+
+/** The advertised method whose credential this environment holds, when there is one. */
+export const authMethodFromEnv = (
+  methods: readonly AuthMethod[] | undefined,
+  env: NodeJS.ProcessEnv,
+): string | undefined => methods?.find((method) =>
+  !("type" in method && method.type === "terminal")
+  && (ENV_AUTH_METHODS[method.id] ?? []).some((name) => Boolean(env[name]?.trim())))?.id;
+
+/** An ACP error, an Error, or anything thrown, as one line. */
+export const acpFailure = (error: unknown): string => {
+  if (error instanceof Error && !("code" in error)) return error.message.trim().replace(/\s+/gu, " ");
+  const record = (error ?? {}) as { message?: unknown; data?: { details?: unknown } };
+  const message = typeof record.message === "string" ? record.message : String(error);
+  const details = typeof record.data?.details === "string" ? record.data.details : "";
+  return `${message}${details && !message.includes(details) ? ` (${details})` : ""}`.trim().replace(/\s+/gu, " ");
+};
+
+const isAuthRequired = (error: unknown): boolean =>
+  error !== null && typeof error === "object" && (error as { code?: unknown }).code === AUTH_REQUIRED;
+
 /** One running ACP agent, and the calls this bridge makes to it. */
 export interface AcpAgent {
-  client: Pick<ClientSideConnection, "initialize" | "newSession" | "loadSession" | "prompt" | "cancel">;
+  client: Pick<ClientSideConnection, "initialize" | "authenticate" | "newSession" | "loadSession" | "prompt" | "cancel">;
   /**
    * Collect the answer streamed for one session's running turn. Every
    * `agent_message_chunk` of text is handed to the sink until the returned
@@ -113,8 +189,19 @@ export interface AcpAgent {
    * is registered per session at a time.
    */
   collect(sessionId: string, sink: (text: string) => void): () => void;
+  /**
+   * Resolves once the agent has sent nothing for this session for `windowMs`,
+   * or after `maxMs` at most. See `REPLAY_QUIET_MS`.
+   */
+  quiet(sessionId: string, windowMs?: number, maxMs?: number): Promise<void>;
   /** True once the agent advertised `session/load`; set after `initialize`. */
   canLoad: boolean;
+  /** What the agent said it can reach an MCP server over; set after `initialize`. */
+  mcp?: { http?: boolean } | null;
+  /** The sign-in methods the agent advertised in `initialize`. */
+  authMethods?: readonly AuthMethod[];
+  /** Set once `authenticate` has been sent, so it is sent at most once per process. */
+  authenticated?: boolean;
   /** Resolves, with the line to show the person, when the process is gone. */
   stopped: Promise<string>;
   /** True once the process is gone, so the next message starts a new one. */
@@ -134,6 +221,7 @@ export const startAcpAgent = (
     cwd, stdio: ["pipe", "pipe", "pipe"], signal,
   });
   const sinks = new Map<string, (text: string) => void>();
+  const heard = new Map<string, number>();
   let dead = false;
   let announce!: (line: string) => void;
   const stopped = new Promise<string>((resolve) => { announce = resolve; });
@@ -159,6 +247,7 @@ export const startAcpAgent = (
 
   const handlers: Client = {
     sessionUpdate: async (params: SessionNotification): Promise<void> => {
+      heard.set(params.sessionId, Date.now());
       const sink = sinks.get(params.sessionId);
       if (!sink) return;
       const update = params.update;
@@ -176,6 +265,16 @@ export const startAcpAgent = (
     collect: (sessionId, sink) => {
       sinks.set(sessionId, sink);
       return () => { if (sinks.get(sessionId) === sink) sinks.delete(sessionId); };
+    },
+    quiet: async (sessionId, windowMs = REPLAY_QUIET_MS, maxMs = REPLAY_MAX_MS) => {
+      // The window starts now: a replay that has not begun yet still counts.
+      const from = Date.now();
+      const until = from + maxMs;
+      for (;;) {
+        const since = Date.now() - Math.max(heard.get(sessionId) ?? 0, from);
+        if (since >= windowMs || Date.now() >= until || dead) return;
+        await new Promise((resolve) => setTimeout(resolve, Math.min(windowMs - since, until - Date.now())));
+      }
     },
     canLoad: false,
     stopped,
@@ -225,8 +324,9 @@ export interface AcpBridgeInput {
   /** The agent's ACP command, and the folder to run it in. */
   acp: AcpCommand;
   cwd: string;
-  /** The Relay MCP server handed to every session, so Relay's tools travel with it. */
-  mcpServers: readonly McpServer[];
+  /** Relay's hosted MCP server and this agent's token, handed to every
+   * session so Relay's tools travel with it. */
+  mcp: HostedMcp;
   /** The label shown to the person, e.g. "Cursor". */
   label: string;
   /** Which ACP session belongs to which chat, across restarts. */
@@ -234,6 +334,8 @@ export interface AcpBridgeInput {
   signal: AbortSignal;
   /** One line to the terminal the person is watching. */
   say(line: string): void;
+  /** Where a sign-in method's credential is looked for; this process's own by default. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /** One line of what arrived, short enough to read at a glance. */
@@ -283,6 +385,8 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
         clientInfo: { name: CLIENT_NAME, title: "Relay", version: packageVersion() },
       });
       started.canLoad = info.agentCapabilities?.loadSession === true;
+      started.mcp = info.agentCapabilities?.mcpCapabilities ?? null;
+      started.authMethods = info.authMethods ?? [];
       return started;
     })().catch((error: unknown) => {
       sessionGone = true;
@@ -298,8 +402,29 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
    * (`agentCapabilities.loadSession`); a load the agent refuses starts a new
    * session, the same fallback the Codex bridge makes for a lost thread.
    */
+  /**
+   * Runs one session call, and when the agent answers `auth_required`, signs in
+   * the way ACP's initialize → authenticate flow gives it: `authenticate` with
+   * an advertised method, once per agent process, then the call again. Gemini
+   * CLI answers `session/load` this way whenever its settings name no sign-in
+   * method, even though `session/new` works (acpSessionManager.ts,
+   * `prepareSessionConfig`; the Daytona run of 2026-09-26).
+   */
+  const signedIn = async <T>(agent: AcpAgent, call: () => Promise<T>): Promise<T> => {
+    try {
+      return await call();
+    } catch (error) {
+      if (!isAuthRequired(error) || agent.authenticated) throw error;
+      const methodId = authMethodFromEnv(agent.authMethods, input.env ?? process.env);
+      if (methodId === undefined) throw error;
+      agent.authenticated = true;
+      await agent.client.authenticate({ methodId });
+      return await call();
+    }
+  };
+
   const openSession = async (agent: AcpAgent, chatId: string): Promise<string> => {
-    const settings = { cwd: input.cwd, mcpServers: [...input.mcpServers] };
+    const settings = { cwd: input.cwd, mcpServers: [relayMcpServer(input.mcp, agent.mcp)] };
     // This agent already has the session open; it is taken back by id once per
     // run of the process, not once per message.
     const open = opened.get(chatId);
@@ -307,13 +432,14 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
     const saved = input.sessions.get(chatId);
     if (saved !== undefined && agent.canLoad) {
       try {
-        await agent.client.loadSession({ ...settings, sessionId: saved });
+        await signedIn(agent, () => agent.client.loadSession({ ...settings, sessionId: saved }));
+        await agent.quiet(saved);
         opened.set(chatId, saved);
         return saved;
       } catch { /* Named below, once, for the one case a person can act on. */ }
       input.say(`${input.label} no longer has this chat's session. It starts a new one.`);
     }
-    const created = await agent.client.newSession(settings);
+    const created = await signedIn(agent, () => agent.client.newSession(settings));
     const id = created.sessionId;
     if (!id) throw new Error("The agent opened a session with no id.");
     opened.set(chatId, id);
@@ -332,6 +458,7 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
     };
     let mine: LiveTurn | undefined;
     let outcome: TurnOutcome | undefined;
+    let failure: unknown;
     try {
       const agent = await acpAgent();
       const sessionId = await openSession(agent, turn.chatId);
@@ -340,11 +467,17 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
         sessionId, prompt: acpPrompt(turn.sender, media.text),
         onStarted: (live) => { mine = live; lane.live = live; started(); },
       });
-    } catch { /* Named below, with everything else the agent can fail at. */ }
+    } catch (error) { failure = error; }
     if (lane.live === mine) lane.live = undefined;
     if (mine?.dropped === true || outcome?.stopReason === "cancelled") {
       await stopTyping();
       input.say(`A newer message came in, so the answer to @${turn.sender} was dropped.`);
+      return;
+    }
+    // What the agent refused is named, so the person sees why.
+    if (failure !== undefined && !input.signal.aborted) {
+      await stopTyping();
+      input.say(`${input.label} could not answer @${turn.sender}: ${acpFailure(failure)}. Nothing was sent.`);
       return;
     }
     const answer = (outcome?.answer ?? "").trim();

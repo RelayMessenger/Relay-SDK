@@ -16,6 +16,10 @@
  *   answers     what to answer, in order; each entry is a list of agent
  *               messages `{text, phase}`, or an empty list for no answer
  *   turnMs      how long a turn takes before it completes
+ *   turnError   when set, every turn ends `failed` with this error message,
+ *               the way the real one ends a turn its model refused (401)
+ *   threadError the error `thread/start` answers with, when set, the way the
+ *               real one refuses a config it cannot load
  *   resumable   the thread ids `thread/resume` accepts; anything else is an
  *               error, as the real one answers for a thread it has lost
  */
@@ -60,7 +64,7 @@ const completeTurn = (turnId, status) => {
   if (!turn) return;
   turns.delete(turnId);
   clearTimeout(turn.timer);
-  if (status === "completed") {
+  if (status === "completed" && !settings.turnError) {
     for (const message of turn.answers) {
       notify("item/agentMessage/delta", {
         threadId: turn.threadId, turnId, itemId: `${turnId}-item`, delta: message.text,
@@ -78,11 +82,20 @@ const completeTurn = (turnId, status) => {
       });
     }
   }
-  notify("turn/completed", { threadId: turn.threadId, turn: { id: turnId, status } });
+  const failed = status === "completed" && settings.turnError;
+  notify("turn/completed", {
+    threadId: turn.threadId,
+    turn: { id: turnId, status: failed ? "failed" : status, ...(failed ? { error: { message: settings.turnError } } : {}) },
+  });
 };
 
 const handle = (message) => {
-  record({ in: message.method, params: message.params, argv: process.argv.slice(2) });
+  record({
+    in: message.method, params: message.params, argv: process.argv.slice(2),
+    // The variable the folder's .codex/config.toml reads the hosted MCP
+    // server's token from (hosted-mcp.ts), as this process received it.
+    ...(message.method === "initialize" ? { tokenEnv: process.env.RELAY_AGENT_TOKEN ?? null } : {}),
+  });
   const answer = (result) => { write({ id: message.id, result }); };
   if (message.method === "initialize") {
     answer({ userAgent: "fake/0.154.0", codexHome: "/fake", platformFamily: "unix", platformOs: "macos" });
@@ -90,6 +103,10 @@ const handle = (message) => {
   }
   if (message.method === "initialized") return;
   if (message.method === "thread/start") {
+    if (settings.threadError) {
+      write({ id: message.id, error: { code: -32600, message: settings.threadError } });
+      return;
+    }
     threads += 1;
     const id = `thread-${threads}`;
     keepRollout(id);

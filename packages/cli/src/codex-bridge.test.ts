@@ -13,6 +13,15 @@ import {
 import { openCodexThreads, type CodexThreadStore } from "./codex-threads.js";
 import { platformCommand } from "./spawn-command.js";
 
+/**
+ * Relay's hosted MCP server as every thread carries it, so Codex has Relay's
+ * tools in a folder it does not trust yet: the keys `codex mcp add relay --url
+ * … --bearer-token-env-var RELAY_AGENT_TOKEN` writes, as a thread override.
+ */
+const RELAY_THREAD_CONFIG = {
+  mcp_servers: { relay: { url: "https://mcp.staging.relayapp.im", bearer_token_env_var: "RELAY_AGENT_TOKEN" } },
+};
+
 const folders: string[] = [];
 afterAll(async () => { for (const folder of folders.splice(0)) await rm(folder, { recursive: true, force: true }); });
 
@@ -31,6 +40,7 @@ interface FakeLine {
   out?: string;
   params?: Record<string, unknown>;
   argv?: string[];
+  tokenEnv?: string | null;
 }
 
 /**
@@ -41,6 +51,8 @@ interface FakeLine {
  */
 const fakeAppServer = async (settings: {
   answers?: FakeAnswer[][];
+  threadError?: string;
+  turnError?: string;
   turnMs?: number;
   resumable?: string[];
 } = {}): Promise<{ codex: CodexCommand; cwd: string; log(): Promise<FakeLine[]> }> => {
@@ -111,7 +123,7 @@ function fakeRelay(events: readonly RelayWebhookEvent[]) {
 }
 
 /** Every way one message can end on the terminal. */
-const ENDED = /Sent the answer|gave no answer|did not reach Relay|was dropped/u;
+const ENDED = /Sent the answer|gave no answer|could not answer|did not reach Relay|was dropped/u;
 
 /**
  * The bridge hands a message to Codex and lets the turn finish behind it, so a
@@ -144,6 +156,7 @@ const runBridge = async (input: {
   endings?: number;
   media?: Omit<InboundMediaOptions, "chatId">;
   relay?: ReturnType<typeof fakeRelay>;
+  agentToken?: string;
 }): Promise<{ said: string[]; relay: ReturnType<typeof fakeRelay> }> => {
   const relay = input.relay ?? fakeRelay(input.events);
   const said: string[] = [];
@@ -151,6 +164,8 @@ const runBridge = async (input: {
   try {
     await runCodexBridge({
       ...(input.media ? { media: input.media } : {}),
+      agentToken: input.agentToken ?? "rel_token_test",
+      mcpURL: "https://mcp.staging.relayapp.im",
       client: relay.client, codex: input.codex, cwd: input.cwd,
       threads: input.threads ?? memoryThreads(),
       signal: control.signal, say: (line) => said.push(line),
@@ -185,11 +200,32 @@ describe("the app-server the bridge starts", () => {
     expect(log[0]!.params).toEqual({ clientInfo: { name: "relaymessenger", title: "Relay", version: expect.any(String) } });
   });
 
+  it("names a thread Codex refuses instead of saying it gave no answer", async () => {
+    const refusal = "failed to load configuration: url is not supported for stdio\nin `mcp_servers.relay`\n";
+    const codex = await fakeAppServer({ threadError: refusal });
+    const { said, relay } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "Hey")] });
+    expect(relay.sent).toEqual([]);
+    expect(said).toContain("Codex could not answer @alice: failed to load configuration: url is not supported for stdio in `mcp_servers.relay`. Nothing was sent.");
+  });
+
+  it("names a turn Codex ended as failed instead of saying it gave no answer", async () => {
+    const codex = await fakeAppServer({ turnError: "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header" });
+    const { said, relay } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "Hey")] });
+    expect(relay.sent).toEqual([]);
+    expect(said).toContain("Codex could not answer @alice: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header. Nothing was sent.");
+  });
+
+  it("hands app-server the Agent Token in RELAY_AGENT_TOKEN, where the folder's config reads it", async () => {
+    const codex = await fakeAppServer();
+    await runBridge({ ...codex, agentToken: "rel_token_calm", events: [received("event-1", "chat-1", "Hey, what's up")] });
+    expect((await codex.log()).find((line) => line.in === "initialize")?.tokenEnv).toBe("rel_token_calm");
+  });
+
   it("opens a thread that may write in the folder and asks nobody anything", async () => {
     const codex = await fakeAppServer();
     await runBridge({ ...codex, events: [received("event-1", "chat-1", "Hey, what's up")] });
     const start = (await codex.log()).find((line) => line.in === "thread/start");
-    expect(start?.params).toEqual({ cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "never" });
+    expect(start?.params).toEqual({ cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "never", config: RELAY_THREAD_CONFIG });
   });
 
   it("sends the message as the turn's text input, and never on a command line", async () => {
@@ -340,7 +376,7 @@ describe("one thread for each chat", () => {
       .toEqual(["thread/start", "thread/resume"]);
     const resume = (await codex.log()).find((line) => line.in === "thread/resume");
     expect(resume?.params).toEqual({
-      threadId: "thread-1", cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "never",
+      threadId: "thread-1", cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "never", config: RELAY_THREAD_CONFIG,
     });
   });
 

@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
-  acpCommand, acpPrompt, autoPermission, relayMcpServer, replyKey, runAcpBridge,
+  acpCommand, acpFailure, acpPrompt, authMethodFromEnv, autoPermission, relayMcpServer, replyKey, runAcpBridge,
   type AcpCommand,
 } from "./acp-bridge.js";
 import { openAcpSessions, type AcpSessionStore } from "./acp-threads.js";
@@ -43,8 +43,8 @@ interface FakeLine {
   argv?: string[];
 }
 
-/** The Relay MCP server connect would build, reduced to what the bridge passes on. */
-const RELAY_MCP = { command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", "calm"], env: {} as Record<string, string> };
+/** Relay's hosted MCP server as connect hands it over: the staging server and the agent's token. */
+const RELAY_MCP = { url: "https://mcp.staging.relayapp.im", token: "rel_token_calm" };
 
 /**
  * An agent whose ACP command is the script beside this test. It is started
@@ -56,6 +56,11 @@ const fakeAcpAgent = async (settings: {
   answers?: string[];
   turnMs?: number;
   loadSession?: boolean;
+  mcpHttp?: boolean;
+  authMethods?: { id: string; name: string }[];
+  loadNeedsAuth?: boolean;
+  newSessionError?: { code: number; message: string; data?: unknown };
+  replayAfterLoad?: string;
   resumable?: string[];
 } = {}): Promise<{ acp: AcpCommand; cwd: string; log(): Promise<FakeLine[]> }> => {
   const folder = await scratch("fake-acp");
@@ -125,7 +130,7 @@ function fakeRelay(events: readonly RelayWebhookEvent[]) {
 }
 
 /** Every way one message can end on the terminal. */
-const ENDED = /Sent the answer|gave no answer|did not reach Relay|was dropped/u;
+const ENDED = /Sent the answer|gave no answer|could not answer|did not reach Relay|was dropped/u;
 
 const untilEnded = async (said: readonly string[], count: number): Promise<void> => {
   const deadline = Date.now() + 20_000;
@@ -154,7 +159,7 @@ const runBridge = async (input: {
   endings?: number;
   media?: Omit<InboundMediaOptions, "chatId">;
   relay?: ReturnType<typeof fakeRelay>;
-  mcpServers?: ReturnType<typeof relayMcpServer>[];
+  env?: NodeJS.ProcessEnv;
 }): Promise<{ said: string[]; relay: ReturnType<typeof fakeRelay> }> => {
   const relay = input.relay ?? fakeRelay(input.events);
   const said: string[] = [];
@@ -163,7 +168,8 @@ const runBridge = async (input: {
     await runAcpBridge({
       ...(input.media ? { media: input.media } : {}),
       client: relay.client, acp: input.acp, cwd: input.cwd,
-      mcpServers: input.mcpServers ?? [relayMcpServer(RELAY_MCP)],
+      mcp: RELAY_MCP,
+      env: input.env ?? {},
       label: "Cursor",
       sessions: input.sessions ?? memorySessions(),
       signal: control.signal, say: (line) => said.push(line),
@@ -201,7 +207,7 @@ describe("the ACP agent the bridge starts", () => {
     });
   });
 
-  it("opens a session in the folder and hands it the Relay MCP server", async () => {
+  it("hands an agent without mcpCapabilities.http the hosted server through mcp-remote over stdio", async () => {
     const acp = await fakeAcpAgent();
     await runBridge({ ...acp, events: [received("event-1", "chat-1", "Hey, what's up")] });
     const start = (await acp.log()).find((line) => line.in === "session/new");
@@ -209,9 +215,30 @@ describe("the ACP agent the bridge starts", () => {
       cwd: acp.cwd,
       mcpServers: [{
         name: "relay", command: "npx",
-        args: ["-y", "@relaymessenger/mcp@staging", "--profile", "calm"], env: [],
+        args: ["-y", "mcp-remote", "https://mcp.staging.relayapp.im", "--header", "Authorization:${AUTH_HEADER}"],
+        env: [{ name: "AUTH_HEADER", value: "Bearer rel_token_calm" }],
       }],
     });
+  });
+
+  it("hands an agent with mcpCapabilities.http the hosted server over HTTP with the Agent Token", async () => {
+    const acp = await fakeAcpAgent({ mcpHttp: true });
+    await runBridge({ ...acp, events: [received("event-1", "chat-1", "Hey, what's up")] });
+    const start = (await acp.log()).find((line) => line.in === "session/new");
+    expect(start?.params).toEqual({
+      cwd: acp.cwd,
+      mcpServers: [{
+        type: "http", name: "relay", url: "https://mcp.staging.relayapp.im",
+        headers: [{ name: "Authorization", value: "Bearer rel_token_calm" }],
+      }],
+    });
+  });
+
+  it("picks the transport from the agent's own answer, nothing else", () => {
+    for (const capabilities of [undefined, null, {}, { http: false }]) {
+      expect(relayMcpServer(RELAY_MCP, capabilities)).not.toHaveProperty("type");
+    }
+    expect(relayMcpServer(RELAY_MCP, { http: true })).toHaveProperty("type", "http");
   });
 
   it("sends the message as the prompt's text, and never on a command line", async () => {
@@ -361,6 +388,61 @@ describe("one session for each chat", () => {
     expect(said).toContain("Cursor no longer has this chat's session. It starts a new one.");
     const kept = await openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent" }, context);
     expect(kept.get("chat-1")).toBe("session-1");
+  });
+
+  it("signs in with the method whose key is set when session/load needs it, then takes the session back", async () => {
+    const methods = [{ id: "oauth-personal", name: "Log in with Google" }, { id: "gemini-api-key", name: "Use Gemini API key" }];
+    const acp = await fakeAcpAgent({ authMethods: methods, loadNeedsAuth: true });
+    const home = await scratch("sessions-auth");
+    const context = { env: { RELAY_CONFIG_DIR: home } };
+    const sessions = async () => openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent" }, context);
+    await runBridge({ ...acp, env: { GEMINI_API_KEY: "set" }, events: [received("event-1", "chat-1", "first")], sessions: await sessions() });
+    const second = await runBridge({ ...acp, env: { GEMINI_API_KEY: "set" }, events: [received("event-2", "chat-1", "second")], sessions: await sessions() });
+    expect(traffic(await acp.log()).filter((line) => ["authenticate", "session/new", "session/load"].includes(line)))
+      .toEqual(["session/new", "session/load", "authenticate", "session/load"]);
+    expect((await acp.log()).find((line) => line.in === "authenticate")?.params).toEqual({ methodId: "gemini-api-key" });
+    expect(second.said).not.toContain("Cursor no longer has this chat's session. It starts a new one.");
+  });
+
+  it("names what the agent refused instead of saying it gave no answer", async () => {
+    const acp = await fakeAcpAgent({ newSessionError: { code: -32000, message: "Authentication required", data: { details: "Gemini API key is missing" } } });
+    const { said, relay } = await runBridge({ ...acp, events: [received("event-1", "chat-1", "first")] });
+    expect(relay.sent).toEqual([]);
+    expect(said).toContain("Cursor could not answer @alice: Authentication required (Gemini API key is missing). Nothing was sent.");
+  });
+
+  it("falls back to a new session when no sign-in credential is set, and names ACP errors in one line", async () => {
+    const methods = [{ id: "oauth-personal", name: "Log in with Google" }];
+    const acp = await fakeAcpAgent({ authMethods: methods, loadNeedsAuth: true });
+    const home = await scratch("sessions-noauth");
+    const store = await openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent" }, { env: { RELAY_CONFIG_DIR: home } });
+    await store.set("chat-1", "session-saved");
+    // No credential for any advertised method: the load fails, and the new
+    // session the bridge falls back to is what answers.
+    const { said } = await runBridge({ ...acp, events: [received("event-1", "chat-1", "first")], sessions: store });
+    expect(traffic(await acp.log())).not.toContain("authenticate");
+    expect(said).toContain("Cursor no longer has this chat's session. It starts a new one.");
+    expect(acpFailure({ code: -32000, message: "Authentication required", data: { details: "Gemini API key is missing" } }))
+      .toBe("Authentication required (Gemini API key is missing)");
+    expect(acpFailure(new Error("spawn EINVAL"))).toBe("spawn EINVAL");
+  });
+
+  it("waits out a replay the agent streams after answering session/load, so old answers stay out of the new one", async () => {
+    const home = await scratch("sessions-replay");
+    const store = await openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent" }, { env: { RELAY_CONFIG_DIR: home } });
+    await store.set("chat-1", "session-saved");
+    const agent = await fakeAcpAgent({ answers: ["new answer"], replayAfterLoad: "old answer", resumable: ["session-saved"], turnMs: 200 });
+    const { relay } = await runBridge({ ...agent, events: [received("event-1", "chat-1", "first")], sessions: store });
+    expect(traffic(await agent.log()).filter((line) => line.startsWith("session/") && line !== "session/prompt")).toEqual(["session/load"]);
+    expect(relay.sent.map((sent) => sent.text)).toEqual(["new answer"]);
+  });
+
+  it("never picks a sign-in method whose credential is not there", async () => {
+    const methods = [{ id: "oauth-personal", name: "Log in with Google" }, { id: "gemini-api-key", name: "Use Gemini API key" }];
+    expect(authMethodFromEnv(methods, {})).toBeUndefined();
+    expect(authMethodFromEnv(methods, { GEMINI_API_KEY: "  " })).toBeUndefined();
+    expect(authMethodFromEnv(methods, { GEMINI_API_KEY: "set" })).toBe("gemini-api-key");
+    expect(authMethodFromEnv([{ id: "gemini-api-key", name: "x", type: "terminal", args: [] } as never], { GEMINI_API_KEY: "set" })).toBeUndefined();
   });
 
   it("starts a new session when the agent cannot load one at all", async () => {

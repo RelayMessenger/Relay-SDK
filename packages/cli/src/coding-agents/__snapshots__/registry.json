@@ -135,7 +135,8 @@
       "kind": "acp-bridge",
       "command": "gemini",
       "args": [
-        "--experimental-acp"
+        "--experimental-acp",
+        "--skip-trust"
       ],
       "prompt": "Answer Relay messages with Gemini CLI from this folder?"
     },

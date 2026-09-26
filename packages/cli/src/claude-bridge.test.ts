@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeCommand, runClaudeBridge } from "./claude-bridge.js";
+import { claudeCommand, claudeSpawn, runClaudeBridge, spawnClaude } from "./claude-bridge.js";
 import { codexPrompt } from "./codex-bridge.js";
 import type { ClaudeThreadStore } from "./claude-threads.js";
 
@@ -57,7 +57,7 @@ function fakeRelay(events: readonly RelayWebhookEvent[]) {
 }
 
 /** Every way one message can end on the terminal. */
-const ENDED = /Sent the answer|gave no answer|did not reach Relay|was dropped/u;
+const ENDED = /Sent the answer|gave no answer|could not answer|did not reach Relay|was dropped/u;
 
 /**
  * The bridge hands a message to Codex and lets the turn finish behind it, so a
@@ -82,7 +82,7 @@ const memoryThreads = (): ClaudeThreadStore => {
 };
 
 
-const mcpServer = { command: "npx", args: ["-y", "@relaymessenger/mcp", "--profile", "test"], env: { RELAY_CONFIG_PATH: "profile.json" } };
+const mcp = { url: "https://mcp.relayapp.im", token: "rel_token_test" };
 const init = (id: string): SDKMessage => ({ type: "system", subtype: "init", session_id: id } as SDKMessage);
 const success = (text = "Answer"): SDKMessage => ({ type: "result", subtype: "success", is_error: false, result: text, session_id: "session-1" } as SDKMessage);
 const fakeQuery = (generate: (input: Parameters<typeof query>[0]) => AsyncGenerator<SDKMessage>): typeof query =>
@@ -94,7 +94,7 @@ const setup = (ask: typeof query, events: RelayWebhookEvent[]) => {
   const control = new AbortController();
   const said: string[] = [];
   const input = { client: relay.client, threads, query: ask, signal: control.signal, say: (line: string) => said.push(line),
-    claude: { executable: "/bin/claude" }, cwd: "/project", mcpServer };
+    claude: { executable: "/bin/claude" }, cwd: "/project", mcp };
   return { relay, threads, control, said, input };
 };
 
@@ -204,7 +204,8 @@ describe("Claude Agent SDK bridge", () => {
     expect(calls[0]).toEqual({ prompt: codexPrompt("alice", "hello"), options: {
       cwd: "/project", resume: undefined, pathToClaudeCodeExecutable: "/bin/claude",
       permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true,
-      mcpServers: { relay: mcpServer }, abortController: expect.any(AbortController),
+      mcpServers: { relay: { type: "http", url: "https://mcp.relayapp.im", headers: { Authorization: "Bearer rel_token_test" } } },
+      abortController: expect.any(AbortController),
     } });
     expect(state.threads.get("chat-1")).toBe("session-1");
     expect(state.relay.sent).toEqual([{ chatId: "chat-1", text: "Answer", key: "codex-bridge-event-1", parts: [{ type: "text", value: "Answer" }] }]);
@@ -265,15 +266,26 @@ describe("Claude Agent SDK bridge", () => {
   });
 
   it.each([
-    { type: "result", subtype: "error_during_execution", errors: ["failed"] },
-    { type: "result", subtype: "success", is_error: true, result: "API error" },
-  ])("reports a failed SDK turn without replying: $subtype", async (error) => {
+    [{ type: "result", subtype: "error_during_execution", errors: ["failed"] }, "error_during_execution"],
+    [{ type: "result", subtype: "success", is_error: true, result: "Not logged in · Please run /login" }, "Not logged in · Please run /login"],
+  ])("names a failed SDK turn and sends nothing: %j", async (error, why) => {
     const state = setup(fakeQuery(async function* () { yield init("session-1"); yield error as SDKMessage; }),
       [received("event-1", "chat-1", "hello")]);
     await runClaudeBridge(state.input);
     await untilEnded(state.said, 1);
     expect(state.relay.sent).toEqual([]);
-    expect(state.said.at(-1)).toBe("Claude Code gave no answer to @alice, so nothing was sent.");
+    expect(state.said.at(-1)).toBe(`Claude Code could not answer @alice: ${why}. Nothing was sent.`);
+    state.control.abort();
+  });
+
+  it("names a Claude Code that never starts, instead of saying it gave no answer", async () => {
+    // What the Agent SDK throws when Node refuses to spawn the npm shim.
+    const state = setup(fakeQuery(async function* () { yield* []; throw new Error("spawn EINVAL"); }),
+      [received("event-1", "chat-1", "hello")]);
+    await runClaudeBridge(state.input);
+    await untilEnded(state.said, 1);
+    expect(state.relay.sent).toEqual([]);
+    expect(state.said.at(-1)).toBe("Claude Code could not answer @alice: spawn EINVAL. Nothing was sent.");
     state.control.abort();
   });
 
@@ -305,6 +317,41 @@ describe("the Claude executable the bridge starts", () => {
   it("keeps the absolute executable connect found", async () => {
     const executable = join(tmpdir(), "bin", "claude");
     expect(await claudeCommand(executable, { PATH: "" }, "darwin")).toEqual({ executable });
+  });
+
+  it("starts a Windows shim through the shell, and leaves every other executable to the SDK", () => {
+    expect(claudeSpawn("C:\\npm\\claude.cmd", "win32").spawn).toBeTypeOf("function");
+    expect(claudeSpawn("claude.cmd", "win32").spawn).toBeTypeOf("function");
+    expect(claudeSpawn("C:\\Users\\a\\.local\\bin\\claude.exe", "win32").spawn).toBeUndefined();
+    expect(claudeSpawn("/usr/local/bin/claude", "linux").spawn).toBeUndefined();
+    expect(claudeSpawn("/opt/homebrew/bin/claude", "darwin").spawn).toBeUndefined();
+  });
+
+  it("hands the Agent SDK its own spawn for a Windows shim", async () => {
+    const calls: Parameters<typeof query>[0][] = [];
+    const state = setup(fakeQuery(async function* (input) { calls.push(input); yield init("session-1"); yield success(); }),
+      [received("event-1", "chat-1", "hello")]);
+    await runClaudeBridge({ ...state.input, claude: { executable: "C:\\npm\\claude.cmd" }, platform: "win32" });
+    await untilEnded(state.said, 1);
+    expect(calls[0]?.options?.spawnClaudeCodeProcess).toBeTypeOf("function");
+    state.control.abort();
+  });
+
+  it("the spawn it hands over passes a JSON argument through whole and reads stderr", async () => {
+    // Runs on this computer's own platform. The argument has the shape of the
+    // `--mcp-config` the SDK passes, quotes and all.
+    const config = JSON.stringify({ mcpServers: { relay: { type: "http", url: "https://mcp.staging.relayapp.im", headers: { Authorization: "Bearer rel_x" } } } });
+    let stderr = "";
+    const child = spawnClaude(process.platform, (chunk) => { stderr += chunk; })({
+      command: process.execPath,
+      args: ["-e", "process.stderr.write('warming up'); process.stdout.write(process.argv[1])", config],
+      env: { ...process.env }, signal: new AbortController().signal,
+    });
+    let out = "";
+    child.stdout.on("data", (chunk: Buffer) => { out += chunk.toString("utf8"); });
+    await new Promise<void>((resolve) => { child.on("exit", () => resolve()); });
+    expect(out).toBe(config);
+    expect(stderr).toBe("warming up");
   });
 });
 

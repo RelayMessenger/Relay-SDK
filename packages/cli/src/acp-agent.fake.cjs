@@ -18,6 +18,15 @@
  *                the last one is reused for any further turns
  *   turnMs       how long a turn takes before it completes
  *   loadSession  whether the agent advertises `session/load` (default true)
+ *   mcpHttp      whether the agent advertises `mcpCapabilities.http` (default false)
+ *   authMethods  the sign-in methods `initialize` advertises (default none)
+ *   newSessionError  the error `session/new` answers with, when set
+ *   replayAfterLoad  after answering `session/load`, stream this text back as
+ *                an old `agent_message_chunk`, the way Gemini CLI replays a
+ *                loaded conversation after its answer instead of before
+ *   loadNeedsAuth  `session/load` answers auth_required (-32000) until
+ *                `authenticate` names an advertised method, as Gemini CLI does
+ *                when its settings name no sign-in method
  *   resumable    the session ids `session/load` accepts; anything else errors,
  *                as a real agent answers for a session it has lost
  */
@@ -56,6 +65,7 @@ const keep = (id) => {
 const active = new Map();
 let sessions = readStore().size;
 let turnCount = 0;
+let signedIn = false;
 
 const answerFor = (index) => {
   const answers = settings.answers ?? ["ok"];
@@ -83,12 +93,29 @@ const handle = (message) => {
   if (message.method === "initialize") {
     answer({
       protocolVersion: message.params.protocolVersion,
-      agentCapabilities: { loadSession: settings.loadSession !== false },
+      agentCapabilities: {
+        loadSession: settings.loadSession !== false,
+        ...(settings.mcpHttp === true ? { mcpCapabilities: { http: true } } : {}),
+      },
       agentInfo: { name: "fake-acp", version: "0.0.0" },
+      ...(settings.authMethods ? { authMethods: settings.authMethods } : {}),
     });
     return;
   }
+  if (message.method === "authenticate") {
+    if (!(settings.authMethods ?? []).some((method) => method.id === message.params.methodId)) {
+      write({ id: message.id, error: { code: -32602, message: `no auth method ${message.params.methodId}` } });
+      return;
+    }
+    signedIn = true;
+    answer({});
+    return;
+  }
   if (message.method === "session/new") {
+    if (settings.newSessionError) {
+      write({ id: message.id, error: settings.newSessionError });
+      return;
+    }
     sessions += 1;
     const sessionId = `session-${sessions}`;
     keep(sessionId);
@@ -96,11 +123,22 @@ const handle = (message) => {
     return;
   }
   if (message.method === "session/load") {
+    if (settings.loadNeedsAuth === true && !signedIn) {
+      write({ id: message.id, error: { code: -32000, message: "Authentication required" } });
+      return;
+    }
     if (!readStore().has(message.params.sessionId)) {
       write({ id: message.id, error: { code: -32602, message: `no session ${message.params.sessionId}` } });
       return;
     }
     answer({});
+    if (settings.replayAfterLoad) {
+      const sessionId = message.params.sessionId;
+      setTimeout(() => {
+        notify("session/update", { sessionId, update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: "old question" } } });
+        notify("session/update", { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: settings.replayAfterLoad } } });
+      }, 30);
+    }
     return;
   }
   if (message.method === "session/prompt") {

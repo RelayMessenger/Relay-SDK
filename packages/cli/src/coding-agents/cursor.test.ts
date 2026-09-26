@@ -46,6 +46,6 @@ it.each([undefined, "/fake/bin/cursor-agent"])("connect drives Cursor over ACP u
   expect(errors).toEqual([]);
   expect(bridge).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     kind: "acp", command: executable ?? "cursor-agent", acpArgs: ["acp"], label: "Cursor",
-    mcpServer: expect.objectContaining({ command: "npx" }),
+    mcpURL: "https://mcp.staging.relayapp.im",
   }));
 });

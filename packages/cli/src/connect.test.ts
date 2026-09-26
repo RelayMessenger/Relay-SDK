@@ -1,6 +1,6 @@
 import { consoleFixture } from "../test/console-fixture.js";
 import { NEXT_STEP } from "./error-codes.js";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -273,7 +273,7 @@ describe("the Claude Code path", () => {
     expect(f.bridge).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       kind: "claude", command: "/fake/bin/claude", label: "Claude Code", cwd: f.home,
       handle: card.handle, token, apiURL: "https://api.staging.relayapp.im",
-      mcpServer: { command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", card.handle], env: { RELAY_CONFIG_PATH: f.env.RELAY_CONFIG_PATH } },
+      mcpURL: "https://mcp.staging.relayapp.im",
     }));
     expect(f.runCommand).not.toHaveBeenCalled();
     expect(f.startCommand).not.toHaveBeenCalled();
@@ -286,10 +286,6 @@ describe("the Claude Code path", () => {
 });
 
 describe("the MCP agents", () => {
-  const server = (f: Awaited<ReturnType<typeof fixture>>): Record<string, unknown> => ({
-    command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", card.handle], env: { RELAY_CONFIG_PATH: f.env.RELAY_CONFIG_PATH },
-  });
-
   it("codex gets [mcp_servers.relay] written into this folder's .codex/config.toml, and runs no command", async () => {
     const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" } }));
     const file = join(f.home, ".codex", "config.toml");
@@ -303,9 +299,31 @@ describe("the MCP agents", () => {
     const { parse } = await import("smol-toml");
     expect(parse(await readFile(file, "utf8"))).toEqual({
       model: "o3",
-      mcp_servers: { other: { command: "x" }, relay: { ...server(f) } },
+      mcp_servers: { other: { command: "x" }, relay: { url: "https://mcp.staging.relayapp.im", bearer_token_env_var: "RELAY_AGENT_TOKEN" } },
     });
+    // The file sits in the project folder: it names the variable, never the token.
+    expect(await readFile(file, "utf8")).not.toContain(token);
     expect(f.stdout.join("")).not.toContain(token);
+  });
+
+  it("codex replaces the retired local Relay server in Codex's own config with Codex's own command, and nothing else", async () => {
+    const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" } }));
+    await mkdir(join(f.home, ".codex"), { recursive: true });
+    await writeFile(join(f.home, ".codex", "config.toml"), [
+      "[mcp_servers.relay]", 'command = "npx"', 'args = ["-y", "@relaymessenger/mcp@staging", "--profile", "calm_cangoo"]', "",
+    ].join("\n"));
+    expect(await runCLI(["connect", "codex", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+    expect(ranLines(f)).toEqual([
+      "/fake/bin/codex mcp add relay --url https://mcp.staging.relayapp.im --bearer-token-env-var RELAY_AGENT_TOKEN",
+    ]);
+    expect(f.stdout.join("")).toContain("run  codex mcp add relay --url https://mcp.staging.relayapp.im --bearer-token-env-var RELAY_AGENT_TOKEN  (replaces the retired local Relay server in Codex's own config)");
+
+    // A `relay` entry that is the person's own is never touched.
+    const g = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" } }));
+    await mkdir(join(g.home, ".codex"), { recursive: true });
+    await writeFile(join(g.home, ".codex", "config.toml"), '[mcp_servers.relay]\ncommand = "my-relay"\nargs = ["--serve"]\n');
+    expect(await runCLI(["connect", "codex", "--token", token, "--yes", "--no-skill"], g.deps)).toBe(0);
+    expect(ranLines(g)).toEqual([]);
   });
 
   it("the ACP agents write no mcp.json and run no command; Relay drives them over ACP", async () => {
@@ -322,7 +340,7 @@ describe("the MCP agents", () => {
     expect(cursorAnswer.agents[0]).toMatchObject({ agent: "cursor", files: [], bridge_command: "cursor-agent", bridge_args: ["acp"] });
 
     // Gemini CLI, OpenCode and Cline are the same: no file, and their own ACP words.
-    for (const [id, command, args] of [["gemini", "gemini", ["--experimental-acp"]], ["opencode", "opencode", ["acp"]], ["cline", "cline", ["--acp"]]] as const) {
+    for (const [id, command, args] of [["gemini", "gemini", ["--experimental-acp", "--skip-trust"]], ["opencode", "opencode", ["acp"]], ["cline", "cline", ["--acp"]]] as const) {
       const g = await fixture({}, runtimes());
       expect(await runCLI(["connect", id, "--token", token, "--yes", "--no-skill", "--json"], g.deps)).toBe(0);
       expect(g.runCommand).not.toHaveBeenCalled();
@@ -330,14 +348,25 @@ describe("the MCP agents", () => {
     }
   });
 
-  it("vscode writes servers.relay with type stdio, and keeps every other entry", async () => {
+  it("vscode writes servers.relay as the hosted server with the Agent Token, owner-only, and keeps every other entry", async () => {
     const f = await fixture({}, runtimes());
     const method = codingAgent("vscode").connect;
     if (method.kind !== "mcp-file") throw new Error("Expected a file connector");
     const file = method.file({ home: f.home, env: f.env, platform: process.platform });
-    await mkdir(join(f.home, ".config", "Code", "User"), { recursive: true }).catch(() => undefined);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, JSON.stringify({
+      servers: { other: { type: "stdio", command: "x" }, relay: { type: "stdio", command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", card.handle] } },
+      inputs: [],
+    }));
     expect(await runCLI(["connect", "vscode", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
-    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ servers: { relay: { type: "stdio", ...server(f) } } });
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      servers: {
+        other: { type: "stdio", command: "x" },
+        relay: { type: "http", url: "https://mcp.staging.relayapp.im", headers: { Authorization: `Bearer ${token}` } },
+      },
+      inputs: [],
+    });
+    if (process.platform !== "win32") expect((await stat(file)).mode & 0o777).toBe(0o600);
   });
 
   it("a config file that is not JSON is left alone and named", async () => {
@@ -535,7 +564,7 @@ describe("with no terminal", () => {
     if (method.kind !== "mcp-file") throw new Error("Expected a file connector");
     const file = method.file({ home: f.home, env: f.env, platform: process.platform });
     expect(await runCLI(["connect", "vscode", "--token", token, "-y", "--no-skill"], f.deps)).toBe(0);
-    expect(JSON.parse(await readFile(file, "utf8")).servers.relay.command).toBe("npx");
+    expect(JSON.parse(await readFile(file, "utf8")).servers.relay.url).toBe("https://mcp.staging.relayapp.im");
   });
 });
 

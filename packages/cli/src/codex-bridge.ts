@@ -22,6 +22,7 @@ import { isAbsolute } from "node:path";
 import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
+import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, codexMcpServer } from "./hosted-mcp.js";
 
 /**
  * What `relay connect codex` leaves running so Codex answers by itself.
@@ -37,8 +38,9 @@ import { spawnCommand } from "./spawn-command.js";
  * extension speak: newline-delimited JSON-RPC on stdin and stdout. One process
  * holds many threads, takes a thread back by id after a restart, and stops a
  * turn that is already running. It runs the `codex` already on this computer,
- * so the person's own sign-in, settings and Relay MCP tools
- * (`~/.codex/config.toml`, written by connect) are the ones Codex uses.
+ * so the person's own sign-in and settings are the ones Codex uses. Relay's
+ * hosted MCP server travels with every thread (`codexThreadConfig`), so Codex
+ * has Relay's tools whether or not the folder is trusted.
  */
 
 /** Relay takes 1 to 255 characters for an idempotency key (contracts/relay-v1-openapi.yaml). */
@@ -60,6 +62,22 @@ export const CODEX_SANDBOX = "workspace-write";
  * person's approvals through the chat is its own piece of work.
  */
 export const CODEX_APPROVAL_POLICY = "never";
+
+/**
+ * Relay's hosted MCP server as a per-thread config override. `thread/start`
+ * and `thread/resume` take `config`, a map of config keys applied over the
+ * loaded layers (codex-rs app-server-protocol/src/protocol/v2/thread.rs:100,
+ * :401). Codex disables a folder's own `.codex/config.toml` until the folder
+ * is trusted, so the project file connect writes gives this process nothing
+ * in a new folder (the Daytona run of 2026-09-26, `mcp_server_count=0`). The
+ * override is the path OpenClaw's Codex harness uses for the same job: it
+ * projects MCP servers into `config.mcp_servers` on thread start and resume
+ * (openclaw extensions/codex/src/app-server/attempt-startup.ts:215-219,
+ * thread-lifecycle-io.ts:151). The token stays in `RELAY_AGENT_TOKEN`.
+ */
+export const codexThreadConfig = (mcpURL: string): { mcp_servers: Record<string, ReturnType<typeof codexMcpServer>> } => ({
+  mcp_servers: { [MCP_SERVER_NAME]: codexMcpServer(mcpURL) },
+});
 
 /** The one sub-command, over stdin and stdout, which is where it listens by default. */
 export const APP_SERVER_ARGS = ["app-server"] as const;
@@ -226,12 +244,14 @@ export const startAppServer = (
   codex: CodexCommand,
   cwd: string,
   signal: AbortSignal,
+  env?: Readonly<Record<string, string>>,
 ): CodexAppServer => {
   // Started the way every other command this CLI runs is started, so the `.cmd`
   // shim npm installs on Windows runs too (spawn-command.ts). Nothing a person
   // wrote travels on this command line: messages go down stdin as JSON.
   const child = spawnCommand(codex.command, [...codex.args ?? [], ...APP_SERVER_ARGS], {
     cwd, stdio: ["pipe", "pipe", "pipe"], signal,
+    ...(env ? { env: { ...process.env, ...env } } : {}),
   });
   const pending = new Map<number, { resolve(value: Record<string, unknown>): void; reject(error: Error): void }>();
   const watchers = new Set<(note: AppServerNotification) => void>();
@@ -326,6 +346,8 @@ export interface TurnOutcome {
   /** `completed`, `interrupted`, `failed` or `inProgress`. */
   status: string;
   answer: string;
+  /** Why a `failed` turn failed (`Turn.error.message`, v2/TurnCompletedNotification.json). */
+  error?: string;
 }
 
 /**
@@ -382,9 +404,11 @@ export const runTurn = async (
     }
     if (note.method === "turn/completed") {
       const turn = asRecord(note.params.turn);
+      const error = asRecord(turn.error).message;
       settle({
         status: typeof turn.status === "string" ? turn.status : "",
         answer: answers.at(-1) ?? deltas.join(""),
+        ...(typeof error === "string" && error.trim() ? { error: error.trim() } : {}),
       });
     }
   };
@@ -421,6 +445,14 @@ export interface CodexBridgeInput {
   cwd: string;
   /** Which Codex thread belongs to which chat, across restarts. */
   threads: CodexThreadStore;
+  /**
+   * This agent's token. The folder's `.codex/config.toml` reads the hosted MCP
+   * server's token from `RELAY_AGENT_TOKEN` (hosted-mcp.ts, `codexMcpServer`),
+   * so `codex app-server` starts with it there.
+   */
+  agentToken: string;
+  /** Relay's hosted MCP server, handed to every thread (`codexThreadConfig`). */
+  mcpURL: string;
   signal: AbortSignal;
   /** One line to the terminal the person is watching. */
   say(line: string): void;
@@ -457,7 +489,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
     if (session && !sessionGone) return session;
     opened = new Map();
     session = (async () => {
-      const started = startAppServer(input.codex, input.cwd, input.signal);
+      const started = startAppServer(input.codex, input.cwd, input.signal, { [AGENT_TOKEN_ENV]: input.agentToken });
       // A stop the person asked for, with Control-C, is not news.
       void started.stopped.then((line) => {
         sessionGone = true;
@@ -490,6 +522,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
       cwd: input.cwd,
       sandbox: CODEX_SANDBOX,
       approvalPolicy: CODEX_APPROVAL_POLICY,
+      config: codexThreadConfig(input.mcpURL),
     };
     // This app-server already has the thread open; it is taken back by id once
     // per run of the process, not once per message.
@@ -528,6 +561,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
     };
     let mine: LiveTurn | undefined;
     let outcome: TurnOutcome | undefined;
+    let failure: unknown;
     try {
       const server = await appServer();
       const threadId = await openThread(server, turn.chatId);
@@ -536,11 +570,20 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
         threadId, prompt: codexPrompt(turn.sender, media.text), images: media.images,
         onStarted: (live) => { mine = live; lane.live = live; started(); },
       });
-    } catch { /* Named below, with everything else Codex can fail at. */ }
+    } catch (error) { failure = error; }
     if (lane.live === mine) lane.live = undefined;
     if (mine?.dropped === true || outcome?.status === "interrupted") {
       await stopTyping();
       input.say(`A newer message came in, so the answer to @${turn.sender} was dropped.`);
+      return;
+    }
+    // A thread or turn Codex refused is named, so the person sees why: a
+    // config Codex cannot load reads "failed to load configuration: ...".
+    if (outcome?.status === "failed" && !outcome.answer.trim()) failure ??= new Error(outcome.error ?? "the turn failed");
+    if (failure !== undefined && !input.signal.aborted) {
+      await stopTyping();
+      const why = (failure instanceof Error ? failure.message : String(failure)).trim().replace(/\s+/gu, " ");
+      input.say(`Codex could not answer @${turn.sender}: ${why}. Nothing was sent.`);
       return;
     }
     const answer = (outcome?.answer ?? "").trim();

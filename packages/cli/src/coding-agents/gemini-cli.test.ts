@@ -6,12 +6,12 @@ import type { InteractivePrompts } from "../interactive.js";
 import { runCLI } from "../program.js";
 import gemini from "./gemini-cli.js";
 
-it("connects over the ACP bridge and declares the gemini --experimental-acp command", () => {
+it("connects over the ACP bridge and declares the gemini --experimental-acp --skip-trust command", () => {
   expect(gemini.connect).toEqual({ kind: "acp-bridge" });
   expect(gemini.start).toEqual({
     kind: "acp-bridge",
     command: "gemini",
-    args: ["--experimental-acp"],
+    args: ["--experimental-acp", "--skip-trust"],
     prompt: "Answer Relay messages with Gemini CLI from this folder?",
   });
 });
@@ -45,6 +45,6 @@ it.each([undefined, "/fake/bin/gemini"])("connect drives Gemini over ACP using e
   })).toBe(0);
   expect(errors).toEqual([]);
   expect(bridge).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-    kind: "acp", command: executable ?? "gemini", acpArgs: ["--experimental-acp"], label: "Gemini CLI",
+    kind: "acp", command: executable ?? "gemini", acpArgs: ["--experimental-acp", "--skip-trust"], label: "Gemini CLI",
   }));
 });
