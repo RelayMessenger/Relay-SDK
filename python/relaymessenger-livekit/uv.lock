@@ -2720,12 +2720,14 @@ calls = [
 
 [package.metadata]
 requires-dist = [
+    { name = "a2a-sdk", marker = "extra == 'a2a'", specifier = ">=1.1.5,<2" },
     { name = "aiortc", marker = "extra == 'calls'", specifier = ">=1.15,<2" },
     { name = "av", marker = "extra == 'calls'", specifier = ">=14" },
+    { name = "httpx", marker = "extra == 'a2a'", specifier = ">=0.28.1" },
     { name = "numpy", marker = "extra == 'calls'", specifier = ">=1.26" },
     { name = "websockets", specifier = ">=14" },
 ]
-provides-extras = ["calls"]
+provides-extras = ["calls", "a2a"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2733,7 +2735,7 @@ dev = [
     { name = "mypy", specifier = ">=1.13" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
-    { name = "relaymessenger", extras = ["calls"] },
+    { name = "relaymessenger", extras = ["calls", "a2a"] },
 ]
 
 [[package]]

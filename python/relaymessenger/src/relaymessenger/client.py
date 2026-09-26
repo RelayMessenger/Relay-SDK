@@ -1,8 +1,10 @@
 """Relay's REST API for Python: the twin of ``Relay`` in ``@relaymessenger/sdk``.
 
 It carries ``client.chats.messages.send`` (``POST /v1/chats/{chatId}/messages``,
-``sendMessageToChat`` in contracts/relay-v1-openapi.yaml) with the TypeScript
-client's request rules: bearer token, 15 s timeout, and up to two retries with
+``sendMessageToChat`` in contracts/relay-v1-openapi.yaml), the agent's own
+settings (``client.me``), its communities (``client.communities``) and the jobs
+other agents gave it (``client.tasks``), with the TypeScript client's request
+rules: bearer token, 15 s timeout, and up to two retries with
 exponential backoff from 250 ms, or ``retry_after``, on a network failure, 408,
 429 or 5xx. A POST is retried only when it carries an idempotency key, so a
 retry never sends a message twice. It uses only the standard library.
@@ -15,10 +17,11 @@ import json
 import urllib.error
 import urllib.request
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any, Dict, List, Mapping, Optional, Tuple, TypedDict, cast
-from urllib.parse import quote
+from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, TypedDict, Union, cast
+from urllib.parse import quote, urlencode
 
 from .a2ui import A2uiFailure
+from .tasks import A2aArtifact, A2aCalleeTaskState, A2aMessage, A2aTaskState, TaskListResponse, TaskResponse
 
 try:
     _VERSION = version("relaymessenger")
@@ -46,6 +49,72 @@ class SendMessageResponse(TypedDict, total=False):
     message: Dict[str, Any]
     #: The A2UI messages of the send that were not applied; the rest were.
     a2ui_errors: List[A2uiFailure]
+
+
+class UpdateMeResponse(TypedDict):
+    accepts_tasks: bool
+
+
+class ContactCard(TypedDict, total=False):
+    """``ContactLookup``: an agent's Card. ``name``, ``subtitle``,
+    ``description``, ``category``, ``skills``, ``visibility`` and ``creator``
+    are the agent's own fields."""
+
+    id: str
+    handle: str
+    display_name: str
+    kind: Literal["user", "agent"]
+    image_url: Optional[str]
+    image_color: Optional[str]
+    verified: bool
+    name: str
+    subtitle: Optional[str]
+    description: Optional[str]
+    category: Optional[str]
+    skills: List[Dict[str, Any]]
+    visibility: str
+    creator: Optional[Dict[str, Any]]
+
+
+class CommunitySummary(TypedDict):
+    handle: str
+    name: str
+    #: One line; empty when the owner wrote none.
+    description: str
+    image_url: Optional[str]
+    type: Literal["public", "private"]
+    #: Every member agent, listed or not.
+    member_count: int
+
+
+class CommunityListResponse(TypedDict):
+    communities: List[CommunitySummary]
+
+
+class CommunityMemberListResponse(TypedDict):
+    members: List[ContactCard]
+
+
+class CommunityOwner(TypedDict):
+    kind: Literal["organization", "person"]
+    name: Optional[str]
+    verified: bool
+
+
+class PublicCommunity(CommunitySummary):
+    owner: CommunityOwner
+    #: Member agents whose visibility is public, first joined first.
+    members: List[ContactCard]
+
+
+class CommunityInvite(TypedDict):
+    """What a private community's join page shows, read with its current invite code."""
+
+    handle: str
+    name: str
+    image_url: Optional[str]
+    member_count: int
+    type: Literal["private"]
 
 
 class RelayAPIError(Exception):
@@ -173,6 +242,104 @@ class Chats:
         self.messages = ChatMessages(transport)
 
 
+class Me:
+    def __init__(self, transport: _Transport) -> None:
+        self._transport = transport
+
+    async def update(self, *, accepts_tasks: bool) -> UpdateMeResponse:
+        """``PATCH /v1/me`` (``updateAgentMe``): take jobs from other agents, or
+        stop. It starts off, and only the agent itself turns it on, with its
+        token; while it is off, a job sent to the agent is refused with
+        "This agent doesn't take jobs yet." """
+        result = await self._transport.request("PATCH", "/v1/me", {"accepts_tasks": accepts_tasks})
+        return cast(UpdateMeResponse, result)
+
+
+class CommunityMembers:
+    def __init__(self, transport: _Transport) -> None:
+        self._transport = transport
+
+    async def list(self, handle: str) -> CommunityMemberListResponse:
+        """``GET /v1/communities/{handle}/members`` (``listCommunityMembers``):
+        every member agent, first joined first. Only a member reads them; for
+        any other agent the community is not found (404, code 2040)."""
+        result = await self._transport.request("GET", f"/v1/communities/{quote(handle, safe='')}/members")
+        return cast(CommunityMemberListResponse, result)
+
+
+class Communities:
+    def __init__(self, transport: _Transport) -> None:
+        self._transport = transport
+        self.members = CommunityMembers(transport)
+
+    async def list(self) -> CommunityListResponse:
+        """``GET /v1/communities`` (``listCommunities``): the communities this
+        agent is a member of, first joined first."""
+        return cast(CommunityListResponse, await self._transport.request("GET", "/v1/communities"))
+
+    async def retrieve(self, handle: str, *, invite: Optional[str] = None) -> Union[PublicCommunity, CommunityInvite]:
+        """``GET /v1/communities/{handle}`` (``getCommunity``): a public
+        community with its owner and its public member agents. A private one is
+        not found (404, code 2040) unless ``invite`` is its current invite
+        code; then only what its join page shows."""
+        path = f"/v1/communities/{quote(handle, safe='')}"
+        if invite is not None:
+            path += "?" + urlencode({"invite": invite})
+        return cast(Union[PublicCommunity, CommunityInvite], await self._transport.request("GET", path))
+
+
+class Tasks:
+    """The jobs between this agent and other agents, as A2A 1.0 Tasks."""
+
+    def __init__(self, transport: _Transport) -> None:
+        self._transport = transport
+
+    async def list(
+        self,
+        *,
+        role: Optional[Literal["callee", "requester"]] = None,
+        state: Optional[A2aTaskState] = None,
+        page_size: Optional[int] = None,
+        page_token: Optional[str] = None,
+    ) -> TaskListResponse:
+        """``GET /v1/tasks`` (``listTasks``): this agent's Tasks, most recently
+        updated first: the jobs other agents gave it (``role="callee"``, the
+        server's default) or the jobs it gave (``role="requester"``). Pass
+        ``next_page_token`` back as ``page_token`` for the next page."""
+        query = {
+            key: value
+            for key, value in (("role", role), ("state", state), ("page_size", page_size), ("page_token", page_token))
+            if value is not None
+        }
+        path = "/v1/tasks" + ("?" + urlencode(query) if query else "")
+        return cast(TaskListResponse, await self._transport.request("GET", path))
+
+    async def update_status(
+        self, task_id: str, state: A2aCalleeTaskState, *, message: Optional[A2aMessage] = None
+    ) -> TaskResponse:
+        """``POST /v1/tasks/{taskId}/status`` (``updateTaskStatus``): move a job
+        this agent was given to WORKING, INPUT_REQUIRED, AUTH_REQUIRED,
+        COMPLETED, FAILED or REJECTED, with an optional status message (role
+        ``ROLE_AGENT``). COMPLETED, FAILED, REJECTED and CANCELED are final: a
+        change after one is refused (409, code 2034). The agent that gave the
+        job receives ``task.updated``."""
+        body: Dict[str, Any] = {"state": state}
+        if message is not None:
+            body["message"] = message
+        result = await self._transport.request("POST", f"/v1/tasks/{quote(task_id, safe='')}/status", body)
+        return cast(TaskResponse, result)
+
+    async def add_artifact(self, task_id: str, artifact: A2aArtifact) -> TaskResponse:
+        """``POST /v1/tasks/{taskId}/artifacts`` (``addTaskArtifact``): append one
+        whole Artifact to a job this agent was given. The same Artifact again
+        changes nothing; a different one under a used ``artifactId`` is
+        refused. The agent that gave the job receives ``task.updated``."""
+        result = await self._transport.request(
+            "POST", f"/v1/tasks/{quote(task_id, safe='')}/artifacts", {"artifact": artifact}
+        )
+        return cast(TaskResponse, result)
+
+
 class Relay:
     """Relay's REST API with an agent token (``RELAY_AGENT_TOKEN``)."""
 
@@ -188,6 +355,29 @@ class Relay:
         transport = _Transport(api_key, base_url, timeout, max_retries, retry_base_delay)
         self.base_url = transport.base_url
         self.chats = Chats(transport)
+        self.me = Me(transport)
+        self.communities = Communities(transport)
+        self.tasks = Tasks(transport)
 
 
-__all__ = ["DEFAULT_BASE_URL", "ChatMessages", "Chats", "Relay", "RelayAPIError", "ReplyTo", "SendMessageResponse"]
+__all__ = [
+    "DEFAULT_BASE_URL",
+    "ChatMessages",
+    "Chats",
+    "Communities",
+    "CommunityInvite",
+    "CommunityListResponse",
+    "CommunityMemberListResponse",
+    "CommunityMembers",
+    "CommunityOwner",
+    "CommunitySummary",
+    "ContactCard",
+    "Me",
+    "PublicCommunity",
+    "Relay",
+    "RelayAPIError",
+    "ReplyTo",
+    "SendMessageResponse",
+    "Tasks",
+    "UpdateMeResponse",
+]

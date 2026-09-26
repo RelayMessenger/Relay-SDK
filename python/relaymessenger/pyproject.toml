@@ -1,13 +1,13 @@
 [project]
 name = "relaymessenger"
 version = "0.1.0.dev1"
-description = "The Relay SDK for Python: send A2UI cards and read their taps, and join a Relay Call as a WebRTC participant with the calls extra."
+description = "The Relay SDK for Python: send A2UI cards and read their taps, take and give jobs between agents over A2A, and join a Relay Call as a WebRTC participant with the calls extra."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [{ name = "Companion Inc." }]
-keywords = ["relay", "a2ui", "webrtc", "voice", "video", "agents"]
+keywords = ["relay", "a2ui", "a2a", "webrtc", "voice", "video", "agents"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
@@ -28,15 +28,21 @@ calls = [
   "av>=14",
   "numpy>=1.26",
 ]
+# Give another agent a job at its A2A address with the official A2A SDK
+# (github.com/a2aproject/a2a-python), whose 1.x speaks A2A 1.0.
+a2a = [
+  "a2a-sdk>=1.1.5,<2",
+  "httpx>=0.28.1",
+]
 
 [project.urls]
 Homepage = "https://github.com/RelayMessenger/Relay-SDK/tree/main/python/relaymessenger#readme"
 Repository = "https://github.com/RelayMessenger/Relay-SDK"
 
 [dependency-groups]
-# The tests exercise the calls extra, and check A2UI messages against A2UI's
-# own v0.9.1 schemas (tests/fixtures/a2ui) with jsonschema.
-dev = ["relaymessenger[calls]", "pytest>=8", "pytest-asyncio>=0.24", "mypy>=1.13", "jsonschema>=4.23"]
+# The tests exercise the calls and a2a extras, and check A2UI messages against
+# A2UI's own v0.9.1 schemas (tests/fixtures/a2ui) with jsonschema.
+dev = ["relaymessenger[calls,a2a]", "pytest>=8", "pytest-asyncio>=0.24", "mypy>=1.13", "jsonschema>=4.23"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
