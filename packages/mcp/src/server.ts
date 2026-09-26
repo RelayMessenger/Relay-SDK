@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { AuthContext } from "./auth.js";
 import { collectLocalTokens, resolveAgentAuth } from "./auth.js";
 import { searchDocs } from "./search-docs.js";
-import { executeCode, type ExecutionLimits } from "./execute.js";
+import { executeCode, type ExecutionLimits, type ExecutionRuntime } from "./execute.js";
 import { redact, safeErrorMessage } from "./redact.js";
 import pkg from "../package.json" with { type: "json" };
 
@@ -15,7 +15,13 @@ export interface RelayMcpServerOptions {
   resolveClient?: () => Promise<ResolvedRelayClient>;
   collectSecrets?: () => Promise<string[]>;
   executionLimits?: Partial<ExecutionLimits>;
+  /**
+   * On Cloudflare Workers, pass `quickjsWasmModule` (import
+   * `@jitl/quickjs-wasmfile-release-sync/wasm`); Node needs nothing.
+   */
+  executionRuntime?: ExecutionRuntime;
 }
+export type { ExecutionRuntime };
 
 /** The structuredContent search_docs returns (search-docs.ts searchDocs). */
 export const searchDocsOutputSchema = z.object({
@@ -95,7 +101,7 @@ export const createRelayMcpServer = (options: RelayMcpServerOptions = {}): McpSe
       try { secrets = await collectSecrets(); } catch { /* The resolver reports invalid configuration. */ }
       const resolved = await resolveClient();
       secrets.push(...(resolved.secrets ?? []));
-      const result = await executeCode(code, resolved.client, secrets, options.executionLimits);
+      const result = await executeCode(code, resolved.client, secrets, options.executionLimits, options.executionRuntime);
       const text = redact(JSON.stringify(result), secrets);
       return { content: [{ type: "text", text }], structuredContent: JSON.parse(text) as Record<string, unknown> };
     } catch (error) {
