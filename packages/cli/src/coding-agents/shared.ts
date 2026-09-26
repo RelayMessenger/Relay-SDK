@@ -3,9 +3,7 @@ import type { AgentPaths, CodingAgentId, ConnectMethod } from "../coding-agents.
 
 export const platformPath = (platform: NodeJS.Platform) => platform === "win32" ? win32 : posix;
 
-export const appData = (paths: AgentPaths): string => paths.env.APPDATA?.trim() || win32.join(paths.home, "AppData", "Roaming");
 export const configHome = (paths: AgentPaths): string => platformPath(paths.platform).join(paths.home, ".config");
-export const appSupport = (paths: AgentPaths): string => posix.join(paths.home, "Library", "Application Support");
 
 /**
  * `CLAUDE_CONFIG_DIR` replaces the default folder rather than adding to it. The
@@ -26,10 +24,6 @@ export const hermesHome = (env: NodeJS.ProcessEnv, home: string, platform: NodeJ
 };
 export const openclawHome = (home: string, platform: NodeJS.Platform = process.platform): string => platformPath(platform).join(home, ".openclaw");
 export const piHome = (home: string, platform: NodeJS.Platform = process.platform): string => platformPath(platform).join(home, ".pi", "agent");
-
-/** Per-OS config files, quoted from Docker's registry (`paths:` per client). */
-export const byPlatform = (paths: AgentPaths, files: { darwin: string; win32: string; linux: string }): string =>
-  paths.platform === "darwin" ? files.darwin : paths.platform === "win32" ? files.win32 : files.linux;
 
 
 export interface CodingAgent {
@@ -64,4 +58,6 @@ export interface CodingAgent {
     | { kind: "restart"; instruction: string };
   /** What `@vercel/detect-agent` calls it when we are running inside it. */
   detectedAs: readonly string[];
+  /** One sentence connect says when the agent answers only after its own sign-in. */
+  signIn?: string;
 }

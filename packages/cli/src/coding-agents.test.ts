@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { posix, win32 } from "node:path";
 import { expect, it } from "vitest";
-import { CODING_AGENTS, CODING_AGENT_IDS, agentDetectedAs, codingAgent, normalizeAgentId, supportedAgentsLine } from "./coding-agents.js";
+import { CODING_AGENTS, CODING_AGENT_IDS, agentDetectedAs, codingAgent, normalizeAgentId, supportedAgentsLine, type CodingAgentId } from "./coding-agents.js";
 import { agentFiles, agentPlan, runtimeConnectPlan, type PlanContext } from "./connect.js";
 import { createProgram } from "./program.js";
 
@@ -55,20 +55,28 @@ it("@vercel/detect-agent's names map onto ours, and unknown names onto nothing",
 });
 
 /** The agents that write a config file, and the file each one writes, under
- * home; Codex's is the project layer under the folder connect runs in. The four
- * ACP-bridge agents (cursor, opencode, cline, gemini-cli) write none. */
+ * home; Codex's is the project layer under the folder connect runs in. Three
+ * ACP-bridge agents (cursor, opencode, gemini-cli) write none; Cline ignores
+ * the session's MCP servers, so it gets its own settings file. */
 const FILE_AGENTS = {
   codex: ["project", ".codex", "config.toml"],
   vscode: [".config", "Code", "User", "mcp.json"],
   hermes: [".hermes", ".env"],
+  cline: [".cline", "data", "settings", "cline_mcp_settings.json"],
 } as const;
+
+/** The ACP agents Relay's session reaches alone, so connect writes them no file. */
+const writesNoFile = (id: CodingAgentId): boolean => {
+  const method = codingAgent(id).connect;
+  return id === "claude-code" || (method.kind === "acp-bridge" && !method.mcpSettings) || method.kind === "pi-channel" || id === "openclaw";
+};
 
 it("every agent has a plan that names the file it writes, or an ACP bridge that writes none", () => {
   const home = "/home/dev";
   for (const id of AGENTS) {
     const plan = agentPlan(id, context());
     expect(plan.steps.length, id).toBeGreaterThan(0);
-    if (id === "claude-code" || codingAgent(id).connect.kind === "acp-bridge" || codingAgent(id).connect.kind === "pi-channel" || id === "openclaw") {
+    if (writesNoFile(id)) {
       // The ACP bridge writes no file; the Relay MCP server travels through the
       // agent's session (acp-bridge.ts). OpenClaw's own `channels add` keeps
       // the token, so Relay writes no OpenClaw file either.
@@ -126,9 +134,10 @@ it("every agent plan uses Windows separators independently of the host", () => {
     codex: "project/.codex/config.toml",
     vscode: "AppData/Roaming/Code/User/mcp.json",
     hermes: ".hermes/.env",
+    cline: ".cline/data/settings/cline_mcp_settings.json",
   };
   for (const id of AGENTS) {
-    if (id === "claude-code" || codingAgent(id).connect.kind === "acp-bridge" || codingAgent(id).connect.kind === "pi-channel" || id === "openclaw") {
+    if (writesNoFile(id)) {
       expect(agentFiles(id, windows), id).toEqual([]);
     } else {
       expect(agentFiles(id, windows)[0], id).toBe(win32.join(windows.home, expected[id]!));

@@ -1,11 +1,31 @@
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { expect, it, vi } from "vitest";
 import type { InteractivePrompts } from "../interactive.js";
 import { runCLI } from "../program.js";
 import type { TerminalObserver } from "../terminal-watch.js";
 import agent from "./vscode.js";
+
+/** The file connect writes for VS Code, for one platform and environment. */
+const mcpFile = (platform: NodeJS.Platform, env: NodeJS.ProcessEnv, home: string): string => {
+  if (agent.connect.kind !== "mcp-file") throw new Error("VS Code connects through its mcp.json");
+  return agent.connect.file({ env, home, platform, cwd: home });
+};
+
+it("writes mcp.json in the user-data folder VS Code itself resolves", () => {
+  // VS Code 1.139.1, out/main.js (the user-data path function, saved at
+  // _sources/vscode-connect-test-20260926/vscode-1.139.1-main.js-userDataPath.txt).
+  expect(mcpFile("linux", { XDG_CONFIG_HOME: "/home/dev/xdg" }, "/home/dev")).toBe(posix.join("/home/dev/xdg", "Code", "User", "mcp.json"));
+  expect(mcpFile("linux", {}, "/home/dev")).toBe("/home/dev/.config/Code/User/mcp.json");
+  expect(mcpFile("linux", { XDG_CONFIG_HOME: "" }, "/home/dev")).toBe("/home/dev/.config/Code/User/mcp.json");
+  expect(mcpFile("darwin", { XDG_CONFIG_HOME: "/Users/dev/xdg" }, "/Users/dev")).toBe("/Users/dev/Library/Application Support/Code/User/mcp.json");
+  expect(mcpFile("win32", { APPDATA: "D:\\Roaming", XDG_CONFIG_HOME: "C:\\xdg" }, "C:\\Users\\dev")).toBe(win32.join("D:\\Roaming", "Code", "User", "mcp.json"));
+  expect(mcpFile("win32", { USERPROFILE: "C:\\Users\\dev" }, "C:\\Users\\other")).toBe(win32.join("C:\\Users\\dev", "AppData", "Roaming", "Code", "User", "mcp.json"));
+  expect(mcpFile("linux", { VSCODE_APPDATA: "/data", XDG_CONFIG_HOME: "/home/dev/xdg" }, "/home/dev")).toBe("/data/Code/User/mcp.json");
+  expect(mcpFile("linux", { VSCODE_PORTABLE: "/opt/vscode/data", VSCODE_APPDATA: "/data" }, "/home/dev")).toBe("/opt/vscode/data/user-data/User/mcp.json");
+  expect(agent.installedIf({ env: { XDG_CONFIG_HOME: "/home/dev/xdg" }, home: "/home/dev", platform: "linux", cwd: "/home/dev" })).toContain("/home/dev/xdg/Code");
+});
 
 it("declares the VS Code restart instruction", () => {
   expect(agent.start).toEqual({

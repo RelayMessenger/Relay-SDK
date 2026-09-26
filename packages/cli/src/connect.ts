@@ -21,7 +21,8 @@ import { sniffRuntimes, type RuntimeFound, type RuntimeId, type RuntimeSniffCont
 import { readChannelEnv, writeEnvFile } from "./claude-channel.js";
 import { readFolderLink, writeFolderLink } from "./folder-link.js";
 import { writeCodexProjectMcpServer } from "./coding-agents/codex-project-config.js";
-import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, codexMcpServer, hostedMcpURL, vscodeMcpEntry, type HostedMcp } from "./hosted-mcp.js";
+import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, clineMcpEntry, codexMcpServer, hostedMcpURL, vscodeMcpEntry, type HostedMcp } from "./hosted-mcp.js";
+import { writePrivateFile } from "./private-file.js";
 import { parse as parseToml } from "smol-toml";
 import { configPath, defaultCreationApiURL, isStagingBuild, packageVersion, validateApiURL, validateProfileName, validateToken, type RelayConsoleSession } from "./config.js";
 import { HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
@@ -282,9 +283,9 @@ export const agentFiles = (agent: CodingAgentId, context: PlanContext): string[]
     case "mcp-command": return [method.file(paths(context))];
     case "codex-project": return [method.file(paths(context))];
     case "mcp-file": return [method.file(paths(context))];
-    // The ACP bridge writes no file: the Relay MCP server travels through the
-    // agent's session instead (acp-bridge.ts).
-    case "acp-bridge": return [];
+    // The ACP bridge hands the Relay MCP server to the agent's session
+    // (acp-bridge.ts); only an agent that ignores it gets a settings file.
+    case "acp-bridge": return method.mcpSettings ? [method.mcpSettings(paths(context))] : [];
     // The Relay Pi package is loaded by the CLI, and Pi's RPC process owns its
     // own state. Relay writes no Pi configuration file.
     case "pi-channel": return [];
@@ -329,10 +330,19 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
     case "mcp-file":
       steps = [`add  ${mcpRootKey(method.shape)}.${MCP_SERVER_NAME}  to  ${shown.files[0]}  (every other entry kept)`];
       break;
-    case "claude-bridge":
     case "acp-bridge":
+      if (method.mcpSettings) {
+        steps = [
+          `add  mcpServers.${MCP_SERVER_NAME}  to  ${shown.files[0]}  (${label} reads Relay's tools from there, not from the session; every other entry kept)`,
+          `keep running here, and answer your Relay messages with ${label} from this folder`,
+        ];
+        break;
+      }
       // Relay drives the agent over its own ACP server and hands Relay's MCP
       // tools into the session; no mcp.json is written.
+      steps = [`keep running here, and answer your Relay messages with ${label} from this folder  (Relay's tools travel through the session; no mcp.json is written)`];
+      break;
+    case "claude-bridge":
       steps = [`keep running here, and answer your Relay messages with ${label} from this folder  (Relay's tools travel through the session; no mcp.json is written)`];
       break;
     case "pi-channel":
@@ -482,6 +492,17 @@ export const hasRetiredCodexServer = async (home: string, platform: NodeJS.Platf
   } catch {
     return false;
   }
+};
+
+/**
+ * Adds `mcpServers.relay` to Cline's MCP settings file, every other entry
+ * kept (hosted-mcp.ts, `clineMcpEntry`). The entry holds the agent's token, so
+ * the file is written owner-only on every platform (private-file.ts).
+ */
+export const writeMcpSettingsEntry = async (path: string, mcp: HostedMcp, platform: NodeJS.Platform = process.platform): Promise<void> => {
+  const root = await readJsonConfig(path, MCP_SERVER_NAME);
+  objectAt(root, "mcpServers")[MCP_SERVER_NAME] = clineMcpEntry(mcp);
+  await writePrivateFile(path, "Cline MCP settings", `${JSON.stringify(root, null, 2)}\n`, platform);
 };
 
 /** Adds `<rootKey>.relay` to an agent's MCP config file, every other entry
@@ -721,6 +742,12 @@ export const runConnect = async (
       screen.step(`wrote  ${screen.dim(planned.files[0] ?? "")}`);
     } else if (method.kind === "claude-bridge") {
       // Relay tools travel through the Agent SDK session; no Claude config is written.
+    } else if (method.kind === "acp-bridge" && method.mcpSettings) {
+      // The agent ignores the servers an ACP session hands it, so Relay's
+      // server goes in the settings file the agent reads (cline.ts).
+      await writeMcpSettingsEntry(planned.files[0]!, hostedMcp({ version, token: agent.token }));
+      screen.step(`wrote  ${screen.dim(planned.files[0] ?? "")}`);
+      if (definition.signIn && !json) screen.say(definition.signIn);
     } else if (method.kind === "acp-bridge") {
       // Nothing is written: the Relay MCP server is handed to the agent's ACP
       // session, and this process drives the agent's turns (acp-bridge.ts).

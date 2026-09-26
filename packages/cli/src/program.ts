@@ -359,6 +359,7 @@ export const createProgram = (
           const control = new AbortController();
           const stop = (): void => control.abort();
           process.once("SIGINT", stop);
+          process.once("SIGTERM", stop);
           const relayClient = () => new Relay({ apiKey: input.token, baseURL: input.apiURL, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) });
           try {
             if (input.kind === "pi") {
@@ -413,6 +414,7 @@ export const createProgram = (
             }
           } finally {
             process.off("SIGINT", stop);
+            process.off("SIGTERM", stop);
           }
         },
         ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
