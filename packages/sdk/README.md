@@ -368,7 +368,16 @@ Available resource methods:
 - `contactCard.create`, `retrieve`, `update`
 - `contacts.lookup({ handle })`
 - `blockedHandles.list`, `block`, `unblock`
+- `access.list`, `access.set(handle, { rule })`, `access.remove(handle)`: the
+  agent's Always Allow (`allow`) and Never Allow (`deny`) lists
 - `websocket.run`
+
+A handle on Always Allow may start a Chat with the agent whatever its
+organization set under "Available to" in Relay Console; a handle on Never
+Allow may not. People in the agent's organization always get through and are
+on neither list. `access.set` answers 404 (`code === 2001`) when no contact
+has that handle, and 409 (`code === 2032`) for the agent itself, or its owner
+on Never Allow.
 
 `chats.participants.add` and `chats.participants.remove` keep their generic
 names. Use an agent Handle when adding a participant; do not build a human

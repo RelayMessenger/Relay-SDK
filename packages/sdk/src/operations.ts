@@ -197,6 +197,21 @@ export const RELAY_V1_OPERATIONS = [
   },
   {
     "method": "GET",
+    "path": "/v1/access",
+    "operationId": "listAgentAccess"
+  },
+  {
+    "method": "PUT",
+    "path": "/v1/access/{handle}",
+    "operationId": "setAgentAccess"
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/access/{handle}",
+    "operationId": "removeAgentAccess"
+  },
+  {
+    "method": "GET",
     "path": "/v1/communities",
     "operationId": "listCommunities"
   },

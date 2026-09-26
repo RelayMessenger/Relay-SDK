@@ -114,7 +114,7 @@ const openBrowser = async (url: string): Promise<void> => {
   });
 };
 
-const saveSession = async (context: ConfigContext, session: RelayConsoleSession): Promise<void> => {
+export const saveSession = async (context: ConfigContext, session: RelayConsoleSession): Promise<void> => {
   const config = await readConfig(context);
   config.console = session;
   await writeConfig(config, context);
@@ -133,7 +133,7 @@ const postDeviceStart = async (deps: ConsoleAuthDependencies): Promise<DeviceSta
 };
 
 /** The person the bearer belongs to, and when the session ends. */
-const fetchSession = async (deps: ConsoleAuthDependencies, accessToken: string): Promise<DeviceToken> => {
+export const fetchSession = async (deps: ConsoleAuthDependencies, accessToken: string): Promise<DeviceToken> => {
   const response = await httpFetch(deps)(`${authURL(deps)}/api/auth/get-session`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -199,7 +199,7 @@ const pollDevice = async (deps: ConsoleAuthDependencies, start: DeviceStart): Pr
  * belongs to several and has not chosen one. The 409 body carries no list, so
  * the choice is made in Console, not here.
  */
-const readOrganization = async (deps: ConsoleAuthDependencies, token: DeviceToken): Promise<string> => {
+export const readOrganization = async (deps: ConsoleAuthDependencies, token: DeviceToken): Promise<string> => {
   const api = defaultConsoleApiURL(deps.apiURL ?? defaultCreationApiURL(), deps.context.env ?? process.env);
   const response = await httpFetch(deps)(`${api}/me`, {
     headers: { Authorization: `Bearer ${token.access_token}`, "X-Relay-CLI": "1" },
