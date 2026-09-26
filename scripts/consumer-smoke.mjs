@@ -136,6 +136,7 @@ try {
   assert.deepEqual(interfaceFields("MessageContent"), [
     "parts",
     "reply_to",
+    "metadata",
     "idempotency_key",
     "silent",
   ]);
