@@ -1,22 +1,111 @@
 # `relaymessenger`
 
 The Relay SDK for Python, the twin of the npm package `@relaymessenger/sdk`.
-`relaymessenger.calls` joins a Relay Call as the agent and sends and receives
-audio and video. It is the framework-neutral core under
+`relaymessenger.a2ui` sends [A2UI](https://a2ui.org) cards to a chat and reads
+their taps. `relaymessenger.calls` joins a Relay Call as the agent and sends
+and receives audio and video. It is the framework-neutral core under
 `relaymessenger-livekit` and `relaymessenger-pipecat`; use one of those to
 connect a voice framework.
 
 ```sh
-pip install 'relaymessenger[calls]'
+pip install relaymessenger            # cards
+pip install 'relaymessenger[calls]'   # cards and calls
 ```
 
-The `calls` extra installs the media dependencies (aiortc, av, numpy), the
-way `livekit-agents[images]` does. Python 3.10 or newer. It uses only Relay's
-public API: the Call room WebSocket (`GET /v1/calls/{callId}/room`) with the
-agent's token. The package owns the WebRTC peer (aiortc), so your code never
-handles SDP, ICE, or SFU credentials.
+Python 3.10 or newer. It uses only Relay's public API with the agent's token.
+
+## Send a card
+
+A card is an A2UI v0.9.1 surface in a message part,
+`{"type": "data", "media_type": "application/a2ui+json", "data": [...]}`.
+`send_a2ui_surface` creates the surface, sends its components and, when you
+give one, its data model. Components come from Relay's catalog
+(`RELAY_A2UI_CATALOG_ID`, the A2UI basic catalog plus `PaymentRequest`) unless
+you pass `catalog_id`; one must have the id `root`:
+
+```python
+import os
+
+from relaymessenger import Relay
+from relaymessenger.a2ui import read_a2ui_action, send_a2ui_surface, update_a2ui_surface
+
+relay = Relay(os.environ["RELAY_AGENT_TOKEN"])
+
+BET = [
+    {"id": "root", "component": "Card", "child": "body"},
+    {"id": "body", "component": "Column", "children": ["title", "status", "bet"]},
+    {"id": "title", "component": "Text", "text": "Lakers win tonight?", "variant": "h3"},
+    {"id": "status", "component": "Text", "text": {"path": "/status"}},
+    {"id": "bet_label", "component": "Text", "text": "Bet $50"},
+    {
+        "id": "bet",
+        "component": "Button",
+        "child": "bet_label",
+        "variant": "primary",
+        "action": {"event": {"name": "place_bet", "context": {"side": "yes", "stake": 50}}},
+    },
+]
+
+await send_a2ui_surface(relay, chat_id, "bet-lakers", BET, data_model={"status": "Open"})
+```
+
+A tap on the button reaches your agent as `message.received`, through its
+webhook or the Agent WebSocket, with the A2UI `action` in a data part.
+`read_a2ui_action` takes the event, or its raw JSON body, and returns the tap
+or `None`. Answer by changing the same surface: `update_a2ui_surface` changes
+the card in place for everyone in the chat and adds no message:
+
+```python
+async def on_event(event: dict) -> None:
+    tap = read_a2ui_action(event)
+    if tap is None or tap.name != "place_bet":
+        return
+    await update_a2ui_surface(
+        relay,
+        tap.chat_id,
+        tap.surface_id,
+        components=[{"id": "body", "component": "Column", "children": ["title", "status"]}],
+        data_model=f"Done: ${tap.context['stake']} on {tap.context['side']}",
+        path="/status",
+    )
+```
+
+`tap.context` is the button's `action.event.context`, and `tap.data_model` is
+the surface's data model when you created it with `send_data_model=True`.
+`delete_a2ui_surface` removes the surface; a message whose every surface is
+deleted is removed for everyone. `client_capabilities(event)` lists the
+catalogs the reader's app draws, in order of preference.
+
+Relay applies each A2UI message of a send in order. Each one it did not apply
+comes back in the response's `a2ui_errors` as an `A2uiFailure`:
+`part_index` and `data_index` say where the message sits in your request, and
+`a2ui_message` is A2UI's own `error` message for it, its `path` a JSON Pointer
+into that message's body. A send that applied nothing raises `RelayAPIError`
+with the same `a2ui_errors`:
+
+```python
+from relaymessenger import RelayAPIError
+
+try:
+    await send_a2ui_surface(relay, chat_id, "bet-lakers", BET)
+except RelayAPIError as error:
+    for failure in error.a2ui_errors:
+        print(failure["data_index"], failure["a2ui_message"]["error"]["message"])
+```
+
+To send A2UI messages you built
+yourself, use `send_a2ui`, or put `a2ui_part(messages)` in
+`relay.chats.messages.send`. The builders (`surface_messages`,
+`create_surface`, `update_components`, `update_data_model`, `delete_surface`)
+and the types (`A2uiDataPart`, `A2uiServerMessage`, `A2uiActionMessage`,
+`A2uiErrorMessage`, ...) follow A2UI v0.9.1's schemas field for field.
 
 ## Answer a Call
+
+The `calls` extra installs the media dependencies (aiortc, av, numpy), the
+way `livekit-agents[images]` does. It uses the Call room WebSocket
+(`GET /v1/calls/{callId}/room`) with the agent's token. The package owns the
+WebRTC peer (aiortc), so your code never handles SDP, ICE, or SFU credentials.
 
 Agents receive `call.created` through a Relay webhook or the Agent WebSocket.
 Joining the Call's room answers it:
