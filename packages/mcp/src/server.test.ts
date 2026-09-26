@@ -127,6 +127,20 @@ describe("approved two-tool MCP", () => {
     expect((result(r) as {signing_secret:string}).signing_secret).toBe(WITHHELD_SECRET);
     expect((result(r) as {id:string}).id).toBe("sub_1");
   });
+  it("hands submitted code the SDK's JSON exactly: a null stays a present null, in objects and arrays", async () => {
+    const community={handle:"mhacks",name:"MHacks",image_url:null,type:"public",member_count:null,owner:{kind:"organization",name:null,verified:false},members:[{handle:"a",subtitle:null}],tags:[null,"x",[null]]};
+    const s=await ready({},sdk(vi.fn(async () => Response.json(community)) as never));
+    const r=await s.execute(`async function run(client) {
+      const c: any = await client.communities.retrieve("mhacks");
+      return { isNull: c.member_count === null, isUndefined: c.member_count === undefined, has: "member_count" in c,
+        keys: Object.keys(c), nestedNull: c.members[0].subtitle === null, nestedHas: "subtitle" in c.members[0],
+        ownerNameNull: c.owner.name === null, arrayNull: c.tags[0] === null && 0 in c.tags, deepArrayNull: c.tags[2][0] === null,
+        absent: "description" in c, whole: c };
+    }`);
+    expect(r.isError).not.toBe(true);
+    expect(result(r)).toEqual({ isNull:true, isUndefined:false, has:true, keys:Object.keys(community), nestedNull:true, nestedHas:true,
+      ownerNameNull:true, arrayNull:true, deepArrayNull:true, absent:false, whole:community });
+  });
   it("declares an output schema for both tools that their structured content satisfies", async () => {
     const client=await connect();
     const tools=(await client.listTools()).tools;
