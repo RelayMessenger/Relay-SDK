@@ -43,8 +43,8 @@ interface FakeLine {
   argv?: string[];
 }
 
-/** The Relay MCP server connect would build, reduced to what the bridge passes on. */
-const RELAY_MCP = { command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", "calm"], env: {} as Record<string, string> };
+/** Relay's hosted MCP server as connect hands it over: the staging server and the agent's token. */
+const RELAY_MCP = { url: "https://mcp.staging.relayapp.im", token: "rel_token_calm" };
 
 /**
  * An agent whose ACP command is the script beside this test. It is started
@@ -56,6 +56,7 @@ const fakeAcpAgent = async (settings: {
   answers?: string[];
   turnMs?: number;
   loadSession?: boolean;
+  mcpHttp?: boolean;
   resumable?: string[];
 } = {}): Promise<{ acp: AcpCommand; cwd: string; log(): Promise<FakeLine[]> }> => {
   const folder = await scratch("fake-acp");
@@ -154,7 +155,6 @@ const runBridge = async (input: {
   endings?: number;
   media?: Omit<InboundMediaOptions, "chatId">;
   relay?: ReturnType<typeof fakeRelay>;
-  mcpServers?: ReturnType<typeof relayMcpServer>[];
 }): Promise<{ said: string[]; relay: ReturnType<typeof fakeRelay> }> => {
   const relay = input.relay ?? fakeRelay(input.events);
   const said: string[] = [];
@@ -163,7 +163,7 @@ const runBridge = async (input: {
     await runAcpBridge({
       ...(input.media ? { media: input.media } : {}),
       client: relay.client, acp: input.acp, cwd: input.cwd,
-      mcpServers: input.mcpServers ?? [relayMcpServer(RELAY_MCP)],
+      mcp: RELAY_MCP,
       label: "Cursor",
       sessions: input.sessions ?? memorySessions(),
       signal: control.signal, say: (line) => said.push(line),
@@ -201,7 +201,7 @@ describe("the ACP agent the bridge starts", () => {
     });
   });
 
-  it("opens a session in the folder and hands it the Relay MCP server", async () => {
+  it("hands an agent without mcpCapabilities.http the hosted server through mcp-remote over stdio", async () => {
     const acp = await fakeAcpAgent();
     await runBridge({ ...acp, events: [received("event-1", "chat-1", "Hey, what's up")] });
     const start = (await acp.log()).find((line) => line.in === "session/new");
@@ -209,9 +209,30 @@ describe("the ACP agent the bridge starts", () => {
       cwd: acp.cwd,
       mcpServers: [{
         name: "relay", command: "npx",
-        args: ["-y", "@relaymessenger/mcp@staging", "--profile", "calm"], env: [],
+        args: ["-y", "mcp-remote", "https://mcp.staging.relayapp.im", "--header", "Authorization:${AUTH_HEADER}"],
+        env: [{ name: "AUTH_HEADER", value: "Bearer rel_token_calm" }],
       }],
     });
+  });
+
+  it("hands an agent with mcpCapabilities.http the hosted server over HTTP with the Agent Token", async () => {
+    const acp = await fakeAcpAgent({ mcpHttp: true });
+    await runBridge({ ...acp, events: [received("event-1", "chat-1", "Hey, what's up")] });
+    const start = (await acp.log()).find((line) => line.in === "session/new");
+    expect(start?.params).toEqual({
+      cwd: acp.cwd,
+      mcpServers: [{
+        type: "http", name: "relay", url: "https://mcp.staging.relayapp.im",
+        headers: [{ name: "Authorization", value: "Bearer rel_token_calm" }],
+      }],
+    });
+  });
+
+  it("picks the transport from the agent's own answer, nothing else", () => {
+    for (const capabilities of [undefined, null, {}, { http: false }]) {
+      expect(relayMcpServer(RELAY_MCP, capabilities)).not.toHaveProperty("type");
+    }
+    expect(relayMcpServer(RELAY_MCP, { http: true })).toHaveProperty("type", "http");
   });
 
   it("sends the message as the prompt's text, and never on a command line", async () => {

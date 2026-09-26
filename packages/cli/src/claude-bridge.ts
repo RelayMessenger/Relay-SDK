@@ -5,6 +5,7 @@ import type Relay from "@relaymessenger/sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { bridgeTurn, codexPrompt, sendAnswer, type BridgeTurn } from "./codex-bridge.js";
 import type { ClaudeThreadStore } from "./claude-threads.js";
+import { MCP_SERVER_NAME, claudeMcpServer, type HostedMcp } from "./hosted-mcp.js";
 
 export interface ClaudeBridgeInput {
   client: Pick<Relay, "chats" | "paymentRequests" | "websocket">;
@@ -12,7 +13,8 @@ export interface ClaudeBridgeInput {
   claude: { executable: string };
   cwd: string;
   threads: ClaudeThreadStore;
-  mcpServer: { command: string; args: readonly string[]; env: Record<string, string> };
+  /** Relay's hosted MCP server and this agent's token (hosted-mcp.ts). */
+  mcp: HostedMcp;
   signal: AbortSignal;
   say(line: string): void;
   query?: typeof query;
@@ -70,11 +72,7 @@ export const runClaudeBridge = async (input: ClaudeBridgeInput): Promise<void> =
             // Like CODEX_APPROVAL_POLICY = "never", no person is at the keyboard.
             permissionMode: "bypassPermissions",
             allowDangerouslySkipPermissions: true,
-            mcpServers: { relay: {
-              command: input.mcpServer.command,
-              args: [...input.mcpServer.args],
-              env: { ...input.mcpServer.env },
-            } },
+            mcpServers: { [MCP_SERVER_NAME]: claudeMcpServer(input.mcp) },
             abortController: mine.control,
           },
         });

@@ -16,10 +16,10 @@ it("acknowledges a FULL sync after telling the operator what was skipped", async
   } } } as unknown as Pick<Relay, "chats" | "paymentRequests" | "websocket">;
   const common = { client, cwd: "/unused", signal: new AbortController().signal, say: (line: string) => { said.push(line); } };
   const threads = { get: () => undefined, set: async () => {} };
-  await runCodexBridge({ ...common, threads, codex: { command: "unused", args: [] } });
+  await runCodexBridge({ ...common, threads, codex: { command: "unused", args: [] }, agentToken: "unused" });
   await runClaudeBridge({ ...common, threads, claude: { executable: "unused" },
-    mcpServer: { command: "unused", args: [], env: {} } });
-  await runAcpBridge({ ...common, sessions: threads, label: "ACP", mcpServers: [],
+    mcp: { url: "https://unused", token: "unused" } });
+  await runAcpBridge({ ...common, sessions: threads, label: "ACP", mcp: { url: "https://unused", token: "unused" },
     acp: { command: "unused", args: [] } });
   expect(completed).toBe(3);
   expect(said).toEqual([

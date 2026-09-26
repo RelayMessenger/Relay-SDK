@@ -22,6 +22,7 @@ import { isAbsolute } from "node:path";
 import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
+import { AGENT_TOKEN_ENV } from "./hosted-mcp.js";
 
 /**
  * What `relay connect codex` leaves running so Codex answers by itself.
@@ -226,12 +227,14 @@ export const startAppServer = (
   codex: CodexCommand,
   cwd: string,
   signal: AbortSignal,
+  env?: Readonly<Record<string, string>>,
 ): CodexAppServer => {
   // Started the way every other command this CLI runs is started, so the `.cmd`
   // shim npm installs on Windows runs too (spawn-command.ts). Nothing a person
   // wrote travels on this command line: messages go down stdin as JSON.
   const child = spawnCommand(codex.command, [...codex.args ?? [], ...APP_SERVER_ARGS], {
     cwd, stdio: ["pipe", "pipe", "pipe"], signal,
+    ...(env ? { env: { ...process.env, ...env } } : {}),
   });
   const pending = new Map<number, { resolve(value: Record<string, unknown>): void; reject(error: Error): void }>();
   const watchers = new Set<(note: AppServerNotification) => void>();
@@ -421,6 +424,12 @@ export interface CodexBridgeInput {
   cwd: string;
   /** Which Codex thread belongs to which chat, across restarts. */
   threads: CodexThreadStore;
+  /**
+   * This agent's token. The folder's `.codex/config.toml` reads the hosted MCP
+   * server's token from `RELAY_AGENT_TOKEN` (hosted-mcp.ts, `codexMcpServer`),
+   * so `codex app-server` starts with it there.
+   */
+  agentToken: string;
   signal: AbortSignal;
   /** One line to the terminal the person is watching. */
   say(line: string): void;
@@ -457,7 +466,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
     if (session && !sessionGone) return session;
     opened = new Map();
     session = (async () => {
-      const started = startAppServer(input.codex, input.cwd, input.signal);
+      const started = startAppServer(input.codex, input.cwd, input.signal, { [AGENT_TOKEN_ENV]: input.agentToken });
       // A stop the person asked for, with Control-C, is not news.
       void started.stopped.then((line) => {
         sessionGone = true;

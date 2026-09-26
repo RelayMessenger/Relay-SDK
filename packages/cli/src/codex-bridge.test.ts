@@ -31,6 +31,7 @@ interface FakeLine {
   out?: string;
   params?: Record<string, unknown>;
   argv?: string[];
+  tokenEnv?: string | null;
 }
 
 /**
@@ -144,6 +145,7 @@ const runBridge = async (input: {
   endings?: number;
   media?: Omit<InboundMediaOptions, "chatId">;
   relay?: ReturnType<typeof fakeRelay>;
+  agentToken?: string;
 }): Promise<{ said: string[]; relay: ReturnType<typeof fakeRelay> }> => {
   const relay = input.relay ?? fakeRelay(input.events);
   const said: string[] = [];
@@ -151,6 +153,7 @@ const runBridge = async (input: {
   try {
     await runCodexBridge({
       ...(input.media ? { media: input.media } : {}),
+      agentToken: input.agentToken ?? "rel_token_test",
       client: relay.client, codex: input.codex, cwd: input.cwd,
       threads: input.threads ?? memoryThreads(),
       signal: control.signal, say: (line) => said.push(line),
@@ -183,6 +186,12 @@ describe("the app-server the bridge starts", () => {
     // stand-in: `<codex> app-server`.
     expect(log[0]!.argv).toEqual([expect.stringContaining("settings.json"), "app-server"]);
     expect(log[0]!.params).toEqual({ clientInfo: { name: "relaymessenger", title: "Relay", version: expect.any(String) } });
+  });
+
+  it("hands app-server the Agent Token in RELAY_AGENT_TOKEN, where the folder's config reads it", async () => {
+    const codex = await fakeAppServer();
+    await runBridge({ ...codex, agentToken: "rel_token_calm", events: [received("event-1", "chat-1", "Hey, what's up")] });
+    expect((await codex.log()).find((line) => line.in === "initialize")?.tokenEnv).toBe("rel_token_calm");
   });
 
   it("opens a thread that may write in the folder and asks nobody anything", async () => {

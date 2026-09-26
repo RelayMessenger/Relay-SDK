@@ -13,8 +13,8 @@ const agent: CodingAgent =
       "/Applications/Visual Studio Code.app",
     ],
     // https://code.visualstudio.com/docs/copilot/reference/mcp-configuration: the
-    // user file holds `servers.<name>` with `type: "stdio"`, `command`, `args`,
-    // `env`. Its location is the User folder of the profile (Docker's registry,
+    // user file holds `servers.<name>`; a remote server is `type: "http"`, `url`,
+    // `headers` (hosted-mcp.ts, `vscodeMcpEntry`). Its location is the User folder of the profile (Docker's registry,
     // row `vscode`: ~/.config/Code/User/mcp.json, ~/Library/Application
     // Support/Code/User/mcp.json, %APPDATA%\Code\User\mcp.json).
     connect: {

@@ -82,7 +82,12 @@ const completeTurn = (turnId, status) => {
 };
 
 const handle = (message) => {
-  record({ in: message.method, params: message.params, argv: process.argv.slice(2) });
+  record({
+    in: message.method, params: message.params, argv: process.argv.slice(2),
+    // The variable the folder's .codex/config.toml reads the hosted MCP
+    // server's token from (hosted-mcp.ts), as this process received it.
+    ...(message.method === "initialize" ? { tokenEnv: process.env.RELAY_AGENT_TOKEN ?? null } : {}),
+  });
   const answer = (result) => { write({ id: message.id, result }); };
   if (message.method === "initialize") {
     answer({ userAgent: "fake/0.154.0", codexHome: "/fake", platformFamily: "unix", platformOs: "macos" });

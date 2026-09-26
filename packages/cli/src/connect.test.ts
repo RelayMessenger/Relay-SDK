@@ -1,6 +1,6 @@
 import { consoleFixture } from "../test/console-fixture.js";
 import { NEXT_STEP } from "./error-codes.js";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -273,7 +273,7 @@ describe("the Claude Code path", () => {
     expect(f.bridge).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       kind: "claude", command: "/fake/bin/claude", label: "Claude Code", cwd: f.home,
       handle: card.handle, token, apiURL: "https://api.staging.relayapp.im",
-      mcpServer: { command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", card.handle], env: { RELAY_CONFIG_PATH: f.env.RELAY_CONFIG_PATH } },
+      mcpURL: "https://mcp.staging.relayapp.im",
     }));
     expect(f.runCommand).not.toHaveBeenCalled();
     expect(f.startCommand).not.toHaveBeenCalled();
@@ -286,10 +286,6 @@ describe("the Claude Code path", () => {
 });
 
 describe("the MCP agents", () => {
-  const server = (f: Awaited<ReturnType<typeof fixture>>): Record<string, unknown> => ({
-    command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", card.handle], env: { RELAY_CONFIG_PATH: f.env.RELAY_CONFIG_PATH },
-  });
-
   it("codex gets [mcp_servers.relay] written into this folder's .codex/config.toml, and runs no command", async () => {
     const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" } }));
     const file = join(f.home, ".codex", "config.toml");
@@ -303,8 +299,10 @@ describe("the MCP agents", () => {
     const { parse } = await import("smol-toml");
     expect(parse(await readFile(file, "utf8"))).toEqual({
       model: "o3",
-      mcp_servers: { other: { command: "x" }, relay: { ...server(f) } },
+      mcp_servers: { other: { command: "x" }, relay: { url: "https://mcp.staging.relayapp.im", bearer_token_env_var: "RELAY_AGENT_TOKEN" } },
     });
+    // The file sits in the project folder: it names the variable, never the token.
+    expect(await readFile(file, "utf8")).not.toContain(token);
     expect(f.stdout.join("")).not.toContain(token);
   });
 
@@ -330,14 +328,25 @@ describe("the MCP agents", () => {
     }
   });
 
-  it("vscode writes servers.relay with type stdio, and keeps every other entry", async () => {
+  it("vscode writes servers.relay as the hosted server with the Agent Token, owner-only, and keeps every other entry", async () => {
     const f = await fixture({}, runtimes());
     const method = codingAgent("vscode").connect;
     if (method.kind !== "mcp-file") throw new Error("Expected a file connector");
     const file = method.file({ home: f.home, env: f.env, platform: process.platform });
-    await mkdir(join(f.home, ".config", "Code", "User"), { recursive: true }).catch(() => undefined);
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, JSON.stringify({
+      servers: { other: { type: "stdio", command: "x" }, relay: { type: "stdio", command: "npx", args: ["-y", "@relaymessenger/mcp@staging", "--profile", card.handle] } },
+      inputs: [],
+    }));
     expect(await runCLI(["connect", "vscode", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
-    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ servers: { relay: { type: "stdio", ...server(f) } } });
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+      servers: {
+        other: { type: "stdio", command: "x" },
+        relay: { type: "http", url: "https://mcp.staging.relayapp.im", headers: { Authorization: `Bearer ${token}` } },
+      },
+      inputs: [],
+    });
+    if (process.platform !== "win32") expect((await stat(file)).mode & 0o777).toBe(0o600);
   });
 
   it("a config file that is not JSON is left alone and named", async () => {
@@ -535,7 +544,7 @@ describe("with no terminal", () => {
     if (method.kind !== "mcp-file") throw new Error("Expected a file connector");
     const file = method.file({ home: f.home, env: f.env, platform: process.platform });
     expect(await runCLI(["connect", "vscode", "--token", token, "-y", "--no-skill"], f.deps)).toBe(0);
-    expect(JSON.parse(await readFile(file, "utf8")).servers.relay.command).toBe("npx");
+    expect(JSON.parse(await readFile(file, "utf8")).servers.relay.url).toBe("https://mcp.staging.relayapp.im");
   });
 });
 

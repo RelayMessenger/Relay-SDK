@@ -17,6 +17,7 @@ import { bridgeTurn, codexPrompt, sendAnswer, type BridgeTurn } from "./codex-br
 import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
+import { MCP_SERVER_NAME, mcpRemoteServer, type HostedMcp } from "./hosted-mcp.js";
 
 /**
  * What `relay connect cursor|gemini-cli|cline|opencode` leaves running so the
@@ -30,9 +31,9 @@ import { spawnCommand } from "./spawn-command.js";
  * (`cursor-agent acp`, `gemini --experimental-acp`, `opencode acp`), gives every
  * chat its own ACP session, and sends the final answer back to the same chat.
  *
- * Relay's own tools travel through the session, natively: the Relay MCP server
- * connect would otherwise write into the agent's `mcp.json` is handed to
- * `session/new` instead, so the agent keeps Relay's send, read and react tools
+ * Relay's own tools travel through the session, natively: Relay's hosted MCP
+ * server, with this agent's token, is handed to `session/new` instead of being
+ * written into the agent's `mcp.json`, so the agent keeps Relay's send, read and react tools
  * while this process drives its turns. This mirrors `codex-bridge.ts`, which
  * does the same over Codex's `app-server`; the two never share a session file.
  */
@@ -78,15 +79,36 @@ export const acpCommand = async (
   return { command: onPath ?? (platform === "win32" ? `${found}.cmd` : found), args };
 };
 
-/** The Relay MCP server as ACP takes it (`McpServerStdio`, schema/types.gen). */
+/**
+ * Relay's hosted MCP server as ACP takes it. HTTP is optional in ACP: a client
+ * sends an `McpServerHttp` (`type: "http"`, `name`, `url`, `headers` as
+ * `{ name, value }` pairs) only to an agent whose `initialize` answer carries
+ * `mcpCapabilities.http`, and every agent must take stdio (ACP "Session Setup",
+ * MCP Servers; _sources/mcp-hosted-docs-20260926/acp-session-setup.md:374-470;
+ * `McpServerHttp`, `McpCapabilities` in @agentclientprotocol/sdk 1.4.0
+ * schema/types.gen). An agent without it gets the stdio `mcp-remote` entry
+ * Relay-Docs gives clients without remote support (hosted-mcp.ts).
+ */
 export const relayMcpServer = (
-  spec: { command: string; args: readonly string[]; env: Record<string, string> },
-): McpServer => ({
-  name: "relay",
-  command: spec.command,
-  args: [...spec.args],
-  env: Object.entries(spec.env).map(([name, value]) => ({ name, value })),
-});
+  mcp: HostedMcp,
+  capabilities: { http?: boolean } | null | undefined,
+): McpServer => {
+  if (capabilities?.http === true) {
+    return {
+      type: "http",
+      name: MCP_SERVER_NAME,
+      url: mcp.url,
+      headers: [{ name: "Authorization", value: `Bearer ${mcp.token}` }],
+    };
+  }
+  const remote = mcpRemoteServer(mcp);
+  return {
+    name: MCP_SERVER_NAME,
+    command: remote.command,
+    args: remote.args,
+    env: Object.entries(remote.env).map(([name, value]) => ({ name, value })),
+  };
+};
 
 /**
  * Nobody is at the keyboard, so a tool the agent asks to run is allowed the
@@ -115,6 +137,8 @@ export interface AcpAgent {
   collect(sessionId: string, sink: (text: string) => void): () => void;
   /** True once the agent advertised `session/load`; set after `initialize`. */
   canLoad: boolean;
+  /** What the agent said it can reach an MCP server over; set after `initialize`. */
+  mcp?: { http?: boolean } | null;
   /** Resolves, with the line to show the person, when the process is gone. */
   stopped: Promise<string>;
   /** True once the process is gone, so the next message starts a new one. */
@@ -225,8 +249,9 @@ export interface AcpBridgeInput {
   /** The agent's ACP command, and the folder to run it in. */
   acp: AcpCommand;
   cwd: string;
-  /** The Relay MCP server handed to every session, so Relay's tools travel with it. */
-  mcpServers: readonly McpServer[];
+  /** Relay's hosted MCP server and this agent's token, handed to every
+   * session so Relay's tools travel with it. */
+  mcp: HostedMcp;
   /** The label shown to the person, e.g. "Cursor". */
   label: string;
   /** Which ACP session belongs to which chat, across restarts. */
@@ -283,6 +308,7 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
         clientInfo: { name: CLIENT_NAME, title: "Relay", version: packageVersion() },
       });
       started.canLoad = info.agentCapabilities?.loadSession === true;
+      started.mcp = info.agentCapabilities?.mcpCapabilities ?? null;
       return started;
     })().catch((error: unknown) => {
       sessionGone = true;
@@ -299,7 +325,7 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
    * session, the same fallback the Codex bridge makes for a lost thread.
    */
   const openSession = async (agent: AcpAgent, chatId: string): Promise<string> => {
-    const settings = { cwd: input.cwd, mcpServers: [...input.mcpServers] };
+    const settings = { cwd: input.cwd, mcpServers: [relayMcpServer(input.mcp, agent.mcp)] };
     // This agent already has the session open; it is taken back by id once per
     // run of the process, not once per message.
     const open = opened.get(chatId);

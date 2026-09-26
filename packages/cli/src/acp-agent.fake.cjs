@@ -18,6 +18,7 @@
  *                the last one is reused for any further turns
  *   turnMs       how long a turn takes before it completes
  *   loadSession  whether the agent advertises `session/load` (default true)
+ *   mcpHttp      whether the agent advertises `mcpCapabilities.http` (default false)
  *   resumable    the session ids `session/load` accepts; anything else errors,
  *                as a real agent answers for a session it has lost
  */
@@ -83,7 +84,10 @@ const handle = (message) => {
   if (message.method === "initialize") {
     answer({
       protocolVersion: message.params.protocolVersion,
-      agentCapabilities: { loadSession: settings.loadSession !== false },
+      agentCapabilities: {
+        loadSession: settings.loadSession !== false,
+        ...(settings.mcpHttp === true ? { mcpCapabilities: { http: true } } : {}),
+      },
       agentInfo: { name: "fake-acp", version: "0.0.0" },
     });
     return;

@@ -82,7 +82,7 @@ const memoryThreads = (): ClaudeThreadStore => {
 };
 
 
-const mcpServer = { command: "npx", args: ["-y", "@relaymessenger/mcp", "--profile", "test"], env: { RELAY_CONFIG_PATH: "profile.json" } };
+const mcp = { url: "https://mcp.relayapp.im", token: "rel_token_test" };
 const init = (id: string): SDKMessage => ({ type: "system", subtype: "init", session_id: id } as SDKMessage);
 const success = (text = "Answer"): SDKMessage => ({ type: "result", subtype: "success", is_error: false, result: text, session_id: "session-1" } as SDKMessage);
 const fakeQuery = (generate: (input: Parameters<typeof query>[0]) => AsyncGenerator<SDKMessage>): typeof query =>
@@ -94,7 +94,7 @@ const setup = (ask: typeof query, events: RelayWebhookEvent[]) => {
   const control = new AbortController();
   const said: string[] = [];
   const input = { client: relay.client, threads, query: ask, signal: control.signal, say: (line: string) => said.push(line),
-    claude: { executable: "/bin/claude" }, cwd: "/project", mcpServer };
+    claude: { executable: "/bin/claude" }, cwd: "/project", mcp };
   return { relay, threads, control, said, input };
 };
 
@@ -204,7 +204,8 @@ describe("Claude Agent SDK bridge", () => {
     expect(calls[0]).toEqual({ prompt: codexPrompt("alice", "hello"), options: {
       cwd: "/project", resume: undefined, pathToClaudeCodeExecutable: "/bin/claude",
       permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true,
-      mcpServers: { relay: mcpServer }, abortController: expect.any(AbortController),
+      mcpServers: { relay: { type: "http", url: "https://mcp.relayapp.im", headers: { Authorization: "Bearer rel_token_test" } } },
+      abortController: expect.any(AbortController),
     } });
     expect(state.threads.get("chat-1")).toBe("session-1");
     expect(state.relay.sent).toEqual([{ chatId: "chat-1", text: "Answer", key: "codex-bridge-event-1", parts: [{ type: "text", value: "Answer" }] }]);
