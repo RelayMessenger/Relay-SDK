@@ -21,6 +21,9 @@
  *   mcpHttp      whether the agent advertises `mcpCapabilities.http` (default false)
  *   authMethods  the sign-in methods `initialize` advertises (default none)
  *   newSessionError  the error `session/new` answers with, when set
+ *   replayAfterLoad  after answering `session/load`, stream this text back as
+ *                an old `agent_message_chunk`, the way Gemini CLI replays a
+ *                loaded conversation after its answer instead of before
  *   loadNeedsAuth  `session/load` answers auth_required (-32000) until
  *                `authenticate` names an advertised method, as Gemini CLI does
  *                when its settings name no sign-in method
@@ -129,6 +132,13 @@ const handle = (message) => {
       return;
     }
     answer({});
+    if (settings.replayAfterLoad) {
+      const sessionId = message.params.sessionId;
+      setTimeout(() => {
+        notify("session/update", { sessionId, update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: "old question" } } });
+        notify("session/update", { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: settings.replayAfterLoad } } });
+      }, 30);
+    }
     return;
   }
   if (message.method === "session/prompt") {

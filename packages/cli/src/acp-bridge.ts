@@ -126,6 +126,20 @@ export const autoPermission = (params: RequestPermissionRequest): RequestPermiss
     : { outcome: { outcome: "cancelled" } };
 };
 
+/**
+ * How long a loaded session must stay silent before the bridge prompts it.
+ * ACP says an agent replays the whole conversation and only then answers
+ * `session/load` (Session Setup, "Loading Sessions";
+ * _sources/mcp-hosted-docs-20260926/acp-session-setup.md:137,181). Gemini CLI
+ * answers first and replays after (`session.streamHistory` is not awaited,
+ * acpSessionManager.ts `loadSession`; acpSession.ts:241), so without a wait the
+ * old answers stream into the new turn's answer (the Daytona run of
+ * 2026-09-26 sent "Probe a8749ac6Probe a8749ac6"). An agent that follows the
+ * spec sends nothing after its answer and costs one window.
+ */
+export const REPLAY_QUIET_MS = 300;
+export const REPLAY_MAX_MS = 10_000;
+
 /** ACP's `auth_required` error code (`RequestError.authRequired`, jsonrpc.js). */
 export const AUTH_REQUIRED = -32000;
 
@@ -175,6 +189,11 @@ export interface AcpAgent {
    * is registered per session at a time.
    */
   collect(sessionId: string, sink: (text: string) => void): () => void;
+  /**
+   * Resolves once the agent has sent nothing for this session for `windowMs`,
+   * or after `maxMs` at most. See `REPLAY_QUIET_MS`.
+   */
+  quiet(sessionId: string, windowMs?: number, maxMs?: number): Promise<void>;
   /** True once the agent advertised `session/load`; set after `initialize`. */
   canLoad: boolean;
   /** What the agent said it can reach an MCP server over; set after `initialize`. */
@@ -202,6 +221,7 @@ export const startAcpAgent = (
     cwd, stdio: ["pipe", "pipe", "pipe"], signal,
   });
   const sinks = new Map<string, (text: string) => void>();
+  const heard = new Map<string, number>();
   let dead = false;
   let announce!: (line: string) => void;
   const stopped = new Promise<string>((resolve) => { announce = resolve; });
@@ -227,6 +247,7 @@ export const startAcpAgent = (
 
   const handlers: Client = {
     sessionUpdate: async (params: SessionNotification): Promise<void> => {
+      heard.set(params.sessionId, Date.now());
       const sink = sinks.get(params.sessionId);
       if (!sink) return;
       const update = params.update;
@@ -244,6 +265,16 @@ export const startAcpAgent = (
     collect: (sessionId, sink) => {
       sinks.set(sessionId, sink);
       return () => { if (sinks.get(sessionId) === sink) sinks.delete(sessionId); };
+    },
+    quiet: async (sessionId, windowMs = REPLAY_QUIET_MS, maxMs = REPLAY_MAX_MS) => {
+      // The window starts now: a replay that has not begun yet still counts.
+      const from = Date.now();
+      const until = from + maxMs;
+      for (;;) {
+        const since = Date.now() - Math.max(heard.get(sessionId) ?? 0, from);
+        if (since >= windowMs || Date.now() >= until || dead) return;
+        await new Promise((resolve) => setTimeout(resolve, Math.min(windowMs - since, until - Date.now())));
+      }
     },
     canLoad: false,
     stopped,
@@ -402,6 +433,7 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
     if (saved !== undefined && agent.canLoad) {
       try {
         await signedIn(agent, () => agent.client.loadSession({ ...settings, sessionId: saved }));
+        await agent.quiet(saved);
         opened.set(chatId, saved);
         return saved;
       } catch { /* Named below, once, for the one case a person can act on. */ }

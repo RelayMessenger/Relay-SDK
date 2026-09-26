@@ -60,6 +60,7 @@ const fakeAcpAgent = async (settings: {
   authMethods?: { id: string; name: string }[];
   loadNeedsAuth?: boolean;
   newSessionError?: { code: number; message: string; data?: unknown };
+  replayAfterLoad?: string;
   resumable?: string[];
 } = {}): Promise<{ acp: AcpCommand; cwd: string; log(): Promise<FakeLine[]> }> => {
   const folder = await scratch("fake-acp");
@@ -424,6 +425,16 @@ describe("one session for each chat", () => {
     expect(acpFailure({ code: -32000, message: "Authentication required", data: { details: "Gemini API key is missing" } }))
       .toBe("Authentication required (Gemini API key is missing)");
     expect(acpFailure(new Error("spawn EINVAL"))).toBe("spawn EINVAL");
+  });
+
+  it("waits out a replay the agent streams after answering session/load, so old answers stay out of the new one", async () => {
+    const home = await scratch("sessions-replay");
+    const store = await openAcpSessions({ apiURL: "https://api.relayapp.im", handle: "agent" }, { env: { RELAY_CONFIG_DIR: home } });
+    await store.set("chat-1", "session-saved");
+    const agent = await fakeAcpAgent({ answers: ["new answer"], replayAfterLoad: "old answer", resumable: ["session-saved"], turnMs: 200 });
+    const { relay } = await runBridge({ ...agent, events: [received("event-1", "chat-1", "first")], sessions: store });
+    expect(traffic(await agent.log()).filter((line) => line.startsWith("session/") && line !== "session/prompt")).toEqual(["session/load"]);
+    expect(relay.sent.map((sent) => sent.text)).toEqual(["new answer"]);
   });
 
   it("never picks a sign-in method whose credential is not there", async () => {
