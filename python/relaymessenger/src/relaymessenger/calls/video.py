@@ -239,9 +239,9 @@ class RelayH264Encoder(H264Encoder):
             max_framerate=self.encoding.max_framerate or preset.max_framerate,
         )
 
-    @property  # type: ignore[override]
+    @property
     def target_bitrate(self) -> int:
-        estimate = H264Encoder.target_bitrate.fget(self)  # type: ignore[attr-defined]
+        estimate = int(H264Encoder.target_bitrate.fget(self))  # type: ignore[attr-defined]
         return min(estimate, self._max_bitrate) if self._max_bitrate else estimate
 
     @target_bitrate.setter
@@ -256,6 +256,7 @@ class RelayH264Encoder(H264Encoder):
         if codec is None or (
             frame.width != codec.width
             or frame.height != codec.height
+            or not codec.bit_rate
             or abs(self.target_bitrate - codec.bit_rate) / codec.bit_rate > 0.1
         ):
             self.buffer_data = b""
