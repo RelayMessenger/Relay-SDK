@@ -53,7 +53,17 @@ const openclaw = openClawRoot;
 if (openclaw === dirname(openclaw) || !existsSync(openclaw)) {
   throw new Error("could not locate the OpenClaw CLI entry");
 }
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+// npm's JS entry point, run with this Node: Node refuses to spawn npm.cmd on
+// Windows without a shell (EINVAL, CVE-2024-27980), the same reason
+// scripts/agent-cli-platforms.mjs runs npm this way.
+function runNpm(args, options) {
+  return process.env.npm_execpath
+    ? execFileSync(process.execPath, [process.env.npm_execpath, ...args], options)
+    : execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", args, {
+      ...options,
+      shell: process.platform === "win32",
+    });
+}
 // --overlap: another agent sends two Messages in one Chat, the second while
 // the model still answers the first, as two overlapping A2A calls do. Relay's
 // A2A door gives each caller only the answer whose reply_to names its Message.
@@ -129,7 +139,7 @@ let gateway;
 try {
   mkdirSync(home, { recursive: true });
   mkdirSync(pack, { recursive: true });
-  execFileSync(npm, ["pack", ".", "--pack-destination", pack], {
+  runNpm(["pack", ".", "--pack-destination", pack], {
     cwd: root,
     stdio: "pipe",
     env: {
@@ -199,7 +209,7 @@ try {
       manifestPath,
       `${JSON.stringify(candidateConsumerManifest(manifest, [candidate]), null, 2)}\n`,
     );
-    execFileSync(npm, [
+    runNpm([
       "install",
       "--prefix", project,
       "--ignore-scripts",
