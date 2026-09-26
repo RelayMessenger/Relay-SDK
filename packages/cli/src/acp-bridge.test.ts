@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
-  acpCommand, acpFailure, acpPrompt, authMethodFromEnv, autoPermission, relayMcpServer, replyKey, runAcpBridge,
+  acpCommand, acpEnvironment, acpFailure, acpPrompt, authMethodFromEnv, autoPermission, relayMcpServer, replyKey, runAcpBridge,
   type AcpCommand,
 } from "./acp-bridge.js";
 import { openAcpSessions, type AcpSessionStore } from "./acp-threads.js";
@@ -41,6 +41,8 @@ interface FakeLine {
   out?: string;
   params?: Record<string, unknown>;
   argv?: string[];
+  /** RELAY_AGENT_TOKEN as the agent's own environment held it; null when absent. */
+  tokenEnv?: string | null;
 }
 
 /** Relay's hosted MCP server as connect hands it over: the staging server and the agent's token. */
@@ -342,6 +344,26 @@ describe("what the bridge sends back", () => {
       outcome: { outcome: "cancelled" },
     });
   });
+
+  it("strips only Relay's secrets from the agent's environment, and keeps each client's own sign-in", () => {
+    expect(acpEnvironment({
+      RELAY_AGENT_TOKEN: "rel_token_x", RELAY_WEBHOOK_SECRET: "whsec_x",
+      GEMINI_API_KEY: "gemini", CLINE_API_KEY: "cline", CURSOR_API_KEY: "cursor", PATH: "/bin", RELAY_API_URL: "https://api",
+    })).toEqual({ GEMINI_API_KEY: "gemini", CLINE_API_KEY: "cline", CURSOR_API_KEY: "cursor", PATH: "/bin", RELAY_API_URL: "https://api" });
+  });
+
+  it("starts the agent without this agent's Relay token in its environment", async () => {
+    const acp = await fakeAcpAgent({ answers: ["Hi"] });
+    const before = process.env.RELAY_AGENT_TOKEN;
+    process.env.RELAY_AGENT_TOKEN = "rel_token_must_not_leak";
+    try {
+      await runBridge({ ...acp, events: [received("event-1", "chat-1", "hello")] });
+    } finally {
+      if (before === undefined) delete process.env.RELAY_AGENT_TOKEN; else process.env.RELAY_AGENT_TOKEN = before;
+    }
+    const log = await acp.log();
+    expect(log.find((line) => line.in === "initialize")?.tokenEnv).toBeNull();
+  });
 });
 
 describe("one session for each chat", () => {
@@ -426,6 +448,9 @@ describe("one session for each chat", () => {
     expect(acpFailure({ code: -32000, message: "Authentication required", data: { details: "Gemini API key is missing" } }))
       .toBe("Authentication required (Gemini API key is missing)");
     expect(acpFailure(new Error("spawn EINVAL"))).toBe("spawn EINVAL");
+    // Cursor puts the step a signed-out person must take in `data.message`.
+    expect(acpFailure({ code: -32000, message: "Authentication required", data: { message: "Please run 'agent login'" } }))
+      .toBe("Authentication required (Please run 'agent login')");
   });
 
   it("waits out a replay the agent streams after answering session/load, so old answers stay out of the new one", async () => {

@@ -170,11 +170,19 @@ it("doctor checks real native file permissions and updates preserve parent permi
   const report = () => runDoctor({ offline: true }, { configContext: ctx, createClient: () => { throw new Error("No network expected"); } });
   expect((await report()).checks.find((check) => check.name === "Relay config file")?.ok).toBe(true);
   if (beforeACL && parentACL) {
+    const { agentDependencies, createAgent } = await import("./agents.js");
     // Deliberately weaken ONLY this synthetic fixture file, not its parent.
+    // Everyone may read it: the file is this account's own and nobody else
+    // may write it, so the preflight tightens it and goes on (private-file.ts).
     await protectWindowsPath(path, false, `O:${beforeACL.user}G:${beforeACL.user}D:P(A;;FA;;;${beforeACL.user})(A;;FR;;;WD)`);
     expect((await inspectConfigPermissions(ctx)).secure).toBe(false);
-    const { agentDependencies, createAgent } = await import("./agents.js");
     let posts = 0;
+    await expect(createAgent({}, agentDependencies(ctx, async () => { posts++; throw new Error("No network expected"); }))).rejects.not.toThrow("could not prepare a private file");
+    expect(privateWindowsAcl(await inspectWindowsAcl(path))).toBe(true);
+    expect((await inspectWindowsAcl(parent)).sddl).toBe(parentACL.sddl);
+    // Everyone may write it: refused before any POST, and left as it was.
+    await protectWindowsPath(path, false, `O:${beforeACL.user}G:${beforeACL.user}D:P(A;;FA;;;${beforeACL.user})(A;;FA;;;WD)`);
+    posts = 0;
     await expect(createAgent({}, agentDependencies(ctx, async () => { posts++; throw new Error("No network expected"); }))).rejects.toThrow("could not prepare a private file");
     expect(posts).toBe(0);
     expect((await inspectWindowsAcl(parent)).sddl).toBe(parentACL.sddl);

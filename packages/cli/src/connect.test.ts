@@ -419,7 +419,7 @@ describe("Hermes and OpenClaw", () => {
     const f = await fixture({}, runtimes({ hermes: { found: true, executable: "/fake/bin/hermes" } }));
     f.runCommand.mockResolvedValueOnce({ code: 0, stdout: "[]", stderr: "" });
     expect(await runCLI(["connect", "hermes", "--subtitle", "Helps with tasks", "--token", token, "--yes", "--allow", "00000000-0000-7000-8000-000000000901", "--no-skill"], f.deps)).toBe(0);
-    expect(ranLines(f)).toEqual(["/fake/bin/hermes plugins list --json", "/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --enable"]);
+    expect(ranLines(f)).toEqual(["/fake/bin/hermes plugins list --json", "/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --no-enable", "/fake/bin/hermes plugins enable relay-hermes"]);
     const envPath = join(f.home, ".hermes", ".env");
     const written = await readFile(envPath, "utf8");
     expect(written).toContain(`RELAY_AGENT_TOKEN="${token}"`);
@@ -456,7 +456,8 @@ describe("Hermes and OpenClaw", () => {
       "hermes plugins enable relay-hermes",
     ] : [
       "hermes plugins list --json",
-      "hermes plugins install RelayMessenger/Relay-Hermes --enable",
+      "hermes plugins install RelayMessenger/Relay-Hermes --no-enable",
+      "hermes plugins enable relay-hermes",
     ]);
     if (installed) expect(answer.agents[0].commands.join("\n")).not.toContain("plugins install");
   });
@@ -472,7 +473,7 @@ describe("Hermes and OpenClaw", () => {
     expect(await runCLI(["connect", "hermes", "--subtitle", "Helps with tasks", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
     expect(ranLines(f)).toEqual([
       "/fake/bin/hermes plugins list --json",
-      "/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --enable",
+      "/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --no-enable", "/fake/bin/hermes plugins enable relay-hermes",
     ]);
   });
 
@@ -482,14 +483,14 @@ describe("Hermes and OpenClaw", () => {
     expect(await runCLI(["connect", "hermes", "--subtitle", "Helps with tasks", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
     expect(ranLines(f)).toEqual([
       "/fake/bin/hermes plugins list --json",
-      "/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --enable",
+      "/fake/bin/hermes plugins install RelayMessenger/Relay-Hermes --no-enable", "/fake/bin/hermes plugins enable relay-hermes",
     ]);
   });
 
   it("Hermes dry run explains install or update without running commands", async () => {
     const f = await fixture();
     expect(await runCLI(["connect", "hermes", "--subtitle", "Helps with tasks", "--dry-run"], f.deps)).toBe(0);
-    expect(f.stdout.join("")).toContain("install the Relay plugin for Hermes, or update it if it is already installed");
+    expect(f.stdout.join("")).toContain("install the Relay plugin for Hermes and enable it, or update it if it is already installed");
     expect(f.runCommand).not.toHaveBeenCalled();
   });
 
