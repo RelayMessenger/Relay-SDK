@@ -207,7 +207,6 @@ describe("Relay turn activation", () => {
       runtime: {
         channel: { inbound: { dispatch } },
       } as never,
-      owners: [],
       turns: createRelayChatTurns(),
       warn,
     });

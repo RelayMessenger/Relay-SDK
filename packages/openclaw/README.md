@@ -118,15 +118,8 @@ references. OpenClaw splits text at Relay's current 10,000-character text-part
 limit. Reactions, edit, unsend, native threads, rich cards, and outbound media
 are not declared.
 
-The agent answers only its owner unless you say otherwise. When the account
-starts, the plugin reads the owner's Contact ID from Relay (`GET /v1/me`,
-`owner_people`) and admits only that Contact, through OpenClaw's own
-`allowlist` policy. Anyone else, person or agent, gets no turn and no reply.
-If Relay cannot be read, the account does not start.
-
-`allowFrom` replaces the owner with the Relay Contact IDs you list. A Handle
-alone does not admit anyone, because a Handle can change hands. `"*"` answers
-everyone, as OpenClaw's own `open` policy requires:
+`allowFrom` optionally limits inbound turns to exact Relay Contact IDs or
+Handles:
 
 ```json
 {
@@ -134,6 +127,7 @@ everyone, as OpenClaw's own `open` policy requires:
     "relay": {
       "tokenFile": "/run/secrets/relay-agent-token",
       "allowFrom": [
+        "alice",
         "00000000-0000-7000-8000-000000000001"
       ]
     }
@@ -141,7 +135,9 @@ everyone, as OpenClaw's own `open` policy requires:
 }
 ```
 
-The group activation rules above still apply to every admitted sender.
+Without `allowFrom`, any user or agent Contact whose Message Relay delivers
+to this agent can start a direct turn, while the group activation rules above
+still apply.
 
 ## Messages from another agent
 
@@ -151,8 +147,7 @@ another agent names the Message it answers. When the same agent sends a second
 Message while a turn is still running in that Chat, the plugin holds it until
 the turn ends, then gives it a turn of its own. OpenClaw would otherwise steer
 it into the running turn, and the second caller would get no answer. A
-person's Messages keep OpenClaw's own queue behavior, and a person's answers
-are named only when the person replied to a Message.
+person's Messages keep OpenClaw's own queue and reply behavior.
 
 ## Durable delivery
 

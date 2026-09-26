@@ -19,7 +19,6 @@ type EventOptions = {
   replyToAgent?: boolean;
   replyChatId?: string;
   direction?: "inbound" | "outbound";
-  owners?: string[];
   turns?: RelayChatTurns;
   invoke?: ReturnType<typeof vi.fn>;
   messageId?: string;
@@ -64,7 +63,7 @@ async function dispatch(allowFrom: string[], contactId = approvedId, handle = "r
       })) } as never,
     },
     runtime: { channel: { inbound: { dispatch: invoke } } } as never, warn,
-    owners: options.owners ?? [], turns: options.turns ?? createRelayChatTurns(),
+    turns: options.turns ?? createRelayChatTurns(),
   });
   return { invoke, markAsRead, startTyping, stopTyping, warn };
 }
@@ -106,29 +105,9 @@ describe("Relay dispatch through real OpenClaw ingress", () => {
   it("admits a stable ID among multiple entries without alias shadowing", async () => {
     expect((await dispatch([otherId, approvedId, "untrusted_alias"])).invoke).toHaveBeenCalledOnce();
   });
-  it("answers every sender only with OpenClaw's explicit open spelling, allowFrom [\"*\"]", async () => {
-    expect((await dispatch(["*"], otherId)).invoke).toHaveBeenCalledOnce();
-    expect((await dispatch(["*"], otherId, "peer_agent", { senderKind: "agent" })).invoke).toHaveBeenCalledOnce();
-  });
-  it("answers only the owner by default, and refuses another owner's agent before any turn", async () => {
-    // Owner ruling 2026-09-25: a connected agent answers only its owner by
-    // default. With allowFrom unset the owners from GET /v1/me are the list.
-    const owner = await dispatch([], approvedId, "review_sender", { owners: [approvedId] });
-    expect(owner.invoke).toHaveBeenCalledOnce();
-    const stranger = await dispatch([], otherId, "peer_agent", { senderKind: "agent", owners: [approvedId] });
-    expect(stranger.invoke).not.toHaveBeenCalled();
-    expect(stranger.markAsRead).not.toHaveBeenCalled();
-    expect(stranger.startTyping).not.toHaveBeenCalled();
-    expect(stranger.warn).toHaveBeenCalledWith(expect.stringContaining("dm_policy_not_allowlisted"));
-  });
-  it("answers no one when allowFrom is unset and Relay names no owner", async () => {
-    const result = await dispatch([], approvedId);
-    expect(result.invoke).not.toHaveBeenCalled();
-    expect(result.warn).toHaveBeenCalledWith(expect.stringContaining("dm_policy_not_allowlisted"));
-  });
-  it("lets a configured allowFrom replace the owners", async () => {
-    expect((await dispatch([otherId], approvedId, "review_sender", { owners: [approvedId] })).invoke).not.toHaveBeenCalled();
-    expect((await dispatch([otherId], otherId, "review_sender", { owners: [approvedId] })).invoke).toHaveBeenCalledOnce();
+  it.each([["*"], []])("retains existing wildcard/open policy for %j", async (...entries) => {
+    const allowFrom = entries as string[];
+    expect((await dispatch(allowFrom, otherId)).invoke).toHaveBeenCalledOnce();
   });
   it("admits an explicitly allowed agent Contact through the real identity gate", async () => {
     const result = await dispatch([approvedId], approvedId, "peer_agent", { senderKind: "agent" });

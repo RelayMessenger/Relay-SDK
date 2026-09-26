@@ -10,7 +10,6 @@ import { dispatchRelayEvent } from "./dispatch.js";
 import { commitRelayFullSync } from "./full-sync.js";
 import { createRelayIngressMonitor } from "./ingress.js";
 import { createRelaySdkClient } from "./outbound.js";
-import { resolveRelayOwners } from "./owners.js";
 import { createRelayChatTurns } from "./turns.js";
 import { getRelayRuntime } from "./runtime.js";
 import {
@@ -99,8 +98,6 @@ export async function startRelayAccount(
   });
   const relay = createRelaySdkClient(account);
   const turns = createRelayChatTurns();
-  // Filled before the ingress starts; owner-only whenever allowFrom is unset.
-  let owners: readonly string[] = [];
   const ingress = createRelayIngressMonitor({
     queue: openIngressQueue({
       transportId,
@@ -124,7 +121,6 @@ export async function startRelayAccount(
         cfg: ctx.cfg as RelayCoreConfig,
         relay,
         runtime,
-        owners,
         turns,
         warn,
       });
@@ -146,18 +142,6 @@ export async function startRelayAccount(
       accountId: account.accountId,
       signal: abortSignal,
     });
-    if (account.allowFrom.length === 0) {
-      owners = await resolveRelayOwners({
-        baseUrl: account.baseUrl,
-        token: account.token,
-        signal: abortSignal,
-      });
-      if (owners.length === 0) {
-        warn(
-          `relay: account "${account.accountId}" has no owner Relay can name, so it answers no one; set channels.relay.allowFrom`,
-        );
-      }
-    }
 
     ingress.start();
     ctx.setStatus({

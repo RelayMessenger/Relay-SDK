@@ -249,13 +249,16 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> =
             baseUrl: account.baseUrl,
           };
         },
-        // Unset means the owners, read from Relay when the account starts
-        // (owners.ts); only an explicit "*" answers everyone.
         resolveAllowFrom: ({ cfg, accountId }) =>
-          resolveRelayAccount({
-            cfg: cfg as RelayCoreConfig,
-            accountId,
-          }).allowFrom,
+          (() => {
+            const account = resolveRelayAccount({
+              cfg: cfg as RelayCoreConfig,
+              accountId,
+            });
+            return account.allowFrom.length > 0
+              ? account.allowFrom
+              : ["*"];
+          })(),
       },
       messaging: {
         targetPrefixes: ["relay"],
@@ -297,9 +300,10 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> =
       dm: {
         channelKey: RELAY_CHANNEL_ID,
         resolvePolicy: (account) =>
-          account.allowFrom.includes("*") ? "open" : "allowlist",
-        resolveAllowFrom: (account) => account.allowFrom,
-        defaultPolicy: "allowlist",
+          account.allowFrom.length > 0 ? "allowlist" : "open",
+        resolveAllowFrom: (account) =>
+          account.allowFrom.length > 0 ? account.allowFrom : ["*"],
+        defaultPolicy: "open",
       },
     },
     outbound: {

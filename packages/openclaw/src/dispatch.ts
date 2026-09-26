@@ -14,7 +14,6 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-payload";
 import { buildRelayInboundFacts } from "./inbound.js";
 import type { RelayIngressLifecycle } from "./ingress.js";
-import { relaySenderPolicy } from "./owners.js";
 import type { PluginRuntime } from "./runtime.js";
 import { type RelayChatTurns, waitForIdleChat } from "./turns.js";
 import type {
@@ -114,8 +113,6 @@ export async function dispatchRelayEvent(params: {
   cfg: RelayCoreConfig;
   relay: Pick<Relay, "chats" | "messages">;
   runtime: PluginRuntime;
-  /** The agent's owners (`GET /v1/me` `owner_people`), answered when `allowFrom` is unset. */
-  owners: readonly string[];
   turns: RelayChatTurns;
   warn?: (message: string) => void;
 }): Promise<void> {
@@ -147,10 +144,10 @@ export async function dispatchRelayEvent(params: {
       id: facts.chatId,
     },
   });
-  const policy = relaySenderPolicy({
-    allowFrom: params.account.allowFrom,
-    owners: params.owners,
-  });
+  const restricted = params.account.allowFrom.length > 0;
+  const effectiveAllowFrom = restricted
+    ? params.account.allowFrom
+    : ["*"];
   const access = await resolveStableChannelMessageIngress({
     channelId: "relay",
     accountId: params.account.accountId,
@@ -188,8 +185,8 @@ export async function dispatchRelayEvent(params: {
       nativeChannelId: facts.chatId,
       inboundEventKind: "user_request",
     },
-    dmPolicy: policy.dmPolicy,
-    groupPolicy: policy.dmPolicy,
+    dmPolicy: restricted ? "allowlist" : "open",
+    groupPolicy: restricted ? "allowlist" : "open",
     policy: {
       groupAllowFromFallbackToAllowFrom: true,
       ...(facts.chatType === "group"
@@ -217,8 +214,8 @@ export async function dispatchRelayEvent(params: {
           },
         }
       : {}),
-    allowFrom: policy.allowFrom,
-    groupAllowFrom: policy.allowFrom,
+    allowFrom: effectiveAllowFrom,
+    groupAllowFrom: effectiveAllowFrom,
   });
   if (access.ingress.admission !== "dispatch") {
     params.warn?.(

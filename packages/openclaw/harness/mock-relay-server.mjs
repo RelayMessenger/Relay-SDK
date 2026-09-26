@@ -165,18 +165,6 @@ const server = http.createServer(async (req, res) => {
     json(res, 401, { error: { message: "bad Agent Token" } });
     return;
   }
-  if (req.method === "GET" && url.pathname === "/v1/me") {
-    // The harness sender owns the agent, so the owner-only default answers it.
-    json(res, 200, {
-      id: agentId,
-      handle: "relay",
-      kind: "agent",
-      display_name: "Relay",
-      owner: null,
-      owner_people: [{ id: contactId, handle: "harness", display_name: "Harness" }],
-    });
-    return;
-  }
   if (
     req.method === "GET" &&
     url.pathname === "/v1/webhook-subscriptions"
