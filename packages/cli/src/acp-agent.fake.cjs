@@ -29,6 +29,9 @@
  *                when its settings name no sign-in method
  *   resumable    the session ids `session/load` accepts; anything else errors,
  *                as a real agent answers for a session it has lost
+ *   askPermission  a `toolCall` sent as `session/request_permission` at the
+ *                start of every turn, with allow and reject options; the
+ *                client's answer is recorded as `{ permission: outcome }`
  */
 const fs = require("node:fs");
 
@@ -88,7 +91,12 @@ const completePrompt = (sessionId, stopReason) => {
 };
 
 const handle = (message) => {
-  record({ in: message.method, params: message.params, argv: process.argv.slice(2) });
+  // A client's answer to a request this agent sent (`session/request_permission`).
+  if (message.method === undefined && message.id !== undefined && String(message.id).startsWith("perm-")) {
+    record({ permission: message.result?.outcome ?? message.error });
+    return;
+  }
+  record({ in: message.method, params: message.params, argv: process.argv.slice(2), tokenEnv: process.env.RELAY_AGENT_TOKEN ?? null });
   const answer = (result) => { write({ id: message.id, result }); };
   if (message.method === "initialize") {
     answer({
@@ -150,6 +158,16 @@ const handle = (message) => {
       timer: setTimeout(() => { completePrompt(sessionId, "end_turn"); }, settings.turnMs ?? 5),
     };
     active.set(sessionId, turn);
+    if (settings.askPermission) {
+      write({ id: `perm-${turnCount}`, method: "session/request_permission", params: {
+        sessionId,
+        toolCall: { toolCallId: `call-${turnCount}`, ...settings.askPermission },
+        options: [
+          { optionId: "proceed_once", name: "Allow", kind: "allow_once" },
+          { optionId: "cancel", name: "Reject", kind: "reject_once" },
+        ],
+      } });
+    }
     return;
   }
   if (message.method === "session/cancel") {

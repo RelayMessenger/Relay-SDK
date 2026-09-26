@@ -1,7 +1,7 @@
 import { requireSubtitle } from "./agent-create.js";
 import { existsSync, statSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { basename, extname, join, resolve } from "node:path";
 import { createAgentWithPicture, incompletePictureMessage } from "./agent-create.js";
 import { validateFirstName, validateHandle, type AgentDependencies } from "./agents.js";
 import { savedAgentShareURL } from "./agent-session.js";
@@ -33,6 +33,7 @@ import { safeMetadata } from "./output.js";
 import { spawnCommand } from "./spawn-command.js";
 import { runTerminalWatch, type TerminalObserver } from "./terminal-watch.js";
 import { consoleLoginOrReuse } from "./console-auth.js";
+import { bridgeLine, type BridgeAccess } from "./bridge-access.js";
 
 /** Still used by agent-driver.ts for its Claude plugin hint. */
 export const CLAUDE_PLUGIN_ID = "relay@relay-messenger";
@@ -58,6 +59,8 @@ export interface ConnectOptions {
   avatar?: string;
   token?: string;
   allow?: string;
+  /** Each maker's own permission-skipping mode (bridge-access.ts). */
+  dangerouslySkipPermissions?: boolean;
   yes?: boolean;
   dryRun?: boolean;
   /** Commander delivers `--no-start` and `--no-skill` as false. */
@@ -115,6 +118,8 @@ export interface ConnectDependencies {
     mcpURL: string;
     label: string;
     cwd: string;
+    /** Whether the agent's permission checks are off (bridge-access.ts). */
+    access: BridgeAccess;
     say(line: string): void;
   }) => Promise<void>;
   renderQR?: (url: string) => string;
@@ -201,6 +206,8 @@ export interface PlanContext {
   handle: string;
   /** What the person allowed with --allow, when anything. */
   allow: readonly string[];
+  /** `--dangerously-skip-permissions` was chosen. */
+  fullAccess?: boolean;
   /** The agent's token and API address, once an agent exists: OpenClaw's own
    * `channels add` takes them as flags. Absent before an agent exists. */
   token?: string;
@@ -323,7 +330,7 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
         ...(shown.commands.length ? [`run  ${shown.commands[0]}  (replaces the retired local Relay server in Codex's own config)`] : []),
         `write  ./.codex/config.toml  (Relay's MCP server for this folder; Codex loads it when the folder is trusted)`,
         ...(context.start && codingAgent(agent).start?.kind === "bridge"
-          ? [`keep running here, and answer your Relay messages with ${label} from this folder`]
+          ? [bridgeLine(label, context.fullAccess === true)]
           : []),
       ];
       break;
@@ -334,19 +341,19 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
       if (method.mcpSettings) {
         steps = [
           `add  mcpServers.${MCP_SERVER_NAME}  to  ${shown.files[0]}  (${label} reads Relay's tools from there, not from the session; every other entry kept)`,
-          `keep running here, and answer your Relay messages with ${label} from this folder`,
+          bridgeLine(label, context.fullAccess === true),
         ];
         break;
       }
       // Relay drives the agent over its own ACP server and hands Relay's MCP
       // tools into the session; no mcp.json is written.
-      steps = [`keep running here, and answer your Relay messages with ${label} from this folder  (Relay's tools travel through the session; no mcp.json is written)`];
+      steps = [bridgeLine(label, context.fullAccess === true, ["Relay's tools travel through the session", "no mcp.json is written"])];
       break;
     case "claude-bridge":
-      steps = [`keep running here, and answer your Relay messages with ${label} from this folder  (Relay's tools travel through the session; no mcp.json is written)`];
+      steps = [bridgeLine(label, context.fullAccess === true, ["Relay's tools travel through the session", "no mcp.json is written"])];
       break;
     case "pi-channel":
-      steps = [`keep running here, and answer your Relay messages with Pi from this folder  (Relay drives Pi through its native RPC mode)`];
+      steps = [bridgeLine("Pi", context.fullAccess === true, ["Relay drives Pi through its native RPC mode"])];
       break;
     case "hermes-plugin":
       steps = [
@@ -458,14 +465,6 @@ const readJsonConfig = async (path: string, what: string): Promise<Record<string
   return parsed as Record<string, unknown>;
 };
 
-/** Writes the whole object back, same folder temp then rename, every other key kept. */
-const writeJsonConfig = async (path: string, value: Record<string, unknown>, mode?: number): Promise<void> => {
-  await mkdir(dirname(path), { recursive: true });
-  const temp = join(dirname(path), `.relay-connect-${process.pid}-${Date.now()}.tmp`);
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", ...(mode === undefined ? {} : { mode }) });
-  await rename(temp, path);
-};
-
 const objectAt = (root: Record<string, unknown>, key: string): Record<string, unknown> => {
   const existing = root[key];
   if (existing !== undefined && (existing === null || typeof existing !== "object" || Array.isArray(existing))) {
@@ -510,7 +509,7 @@ export const writeMcpSettingsEntry = async (path: string, mcp: HostedMcp, platfo
 export const writeMcpFileEntry = async (path: string, shape: "vscode", mcp: HostedMcp): Promise<void> => {
   const root = await readJsonConfig(path, MCP_SERVER_NAME);
   objectAt(root, mcpRootKey(shape))[MCP_SERVER_NAME] = vscodeMcpEntry(mcp);
-  await writeJsonConfig(path, root, 0o600);
+  await writePrivateFile(path, "VS Code MCP", `${JSON.stringify(root, null, 2)}\n`);
 };
 
 const runAgentCommands = async (
@@ -569,6 +568,7 @@ export const runConnect = async (
   if (options.handle !== undefined) validateHandle(options.handle);
   if (options.name !== undefined) validateFirstName(options.name);
   if (options.token !== undefined) validateToken(options.token);
+  const fullAccess = options.dangerouslySkipPermissions === true;
   if (options.avatar !== undefined && options.image !== undefined) throw new CliError("Choose --avatar or --image, not both.", "usage");
   const avatarFlag = options.avatar === undefined ? undefined : avatarFile(options.avatar, { cwd: deps.cwd, home: deps.home });
   if (options.avatar !== undefined && !avatarFlag) throw new CliError(`Not an image file: ${options.avatar}. --avatar takes a PNG or JPEG on this computer.`, "usage");
@@ -618,6 +618,7 @@ export const runConnect = async (
     ...(retiredCodexServer ? { retiredCodexServer } : {}),
     handle: agent?.handle ?? options.handle ?? "<handle>",
     allow, start: options.start !== false,
+    ...(fullAccess ? { fullAccess } : {}),
     ...(agent && "token" in agent ? { token: agent.token, apiURL: agent.apiURL } : {}),
     ...(agent && "pending" in agent ? { apiURL: agent.apiURL, create: agent.identity } : {}),
     ...(replacing ? { replacing } : {}),
@@ -824,6 +825,7 @@ export const runConnect = async (
         kind: bridge.kind, token: agent.token, apiURL: agent.apiURL, handle: agent.handle,
         command: bridge.command, ...(bridge.acpArgs ? { acpArgs: bridge.acpArgs } : {}),
         mcpURL: bridge.mcpURL, label: bridge.label, cwd: deps.cwd,
+        access: { fullAccess },
         say: (line) => screen.say(safeMetadata(line, secrets)),
       });
       screen.say(`Stopped. ${bridge.label} no longer answers your Relay messages.`);

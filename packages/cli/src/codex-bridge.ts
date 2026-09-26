@@ -23,6 +23,7 @@ import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
 import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, RELAY_WRITE_TOOLS, codexMcpServer } from "./hosted-mcp.js";
+import type { BridgeAccess } from "./bridge-access.js";
 
 /**
  * What `relay connect codex` leaves running so Codex answers by itself.
@@ -51,10 +52,20 @@ export const MAX_RELAY_TEXT = 10_000;
 
 /**
  * `SandboxMode` (codex-app-server-protocol-0.154.0, v2/ThreadStartParams.json,
- * `definitions.SandboxMode`): Codex may write files in the folder it was
- * started in, and nowhere else.
+ * `definitions.SandboxMode`). By default Codex writes nothing: `read-only`,
+ * the built-in that "keeps local command execution read-only"
+ * (codex-permissions.txt:39). `workspace-write` still runs commands and reads
+ * the whole disk ("can read the entire disk, but can only write to the current
+ * working directory", `new_workspace_write_policy`,
+ * codex-protocol-protocol.rs.txt:1210-1220), so it is kept only for
+ * `--dangerously-skip-permissions`, where it is what connect ran before.
  */
-export const CODEX_SANDBOX = "workspace-write";
+export const CODEX_SANDBOX = "read-only";
+export const CODEX_FULL_ACCESS_SANDBOX = "workspace-write";
+
+/** The thread's sandbox for this run. */
+export const codexSandbox = (fullAccess: boolean): typeof CODEX_SANDBOX | typeof CODEX_FULL_ACCESS_SANDBOX =>
+  fullAccess ? CODEX_FULL_ACCESS_SANDBOX : CODEX_SANDBOX;
 
 /**
  * `AskForApproval` (same file, `definitions.AskForApproval`): nobody is at the
@@ -109,11 +120,21 @@ export const CODEX_APPROVAL_POLICY = "never";
  * bridge threads run without shell snapshots, which also keeps the token out
  * of `CODEX_HOME/shell_snapshots`. The commands' environment is otherwise
  * the same; only the speed-up is gone.
+ *
+ * A read-only sandbox still runs commands: it only stops their writes, and it
+ * reads the whole disk (`has_full_disk_read_access` is true for every policy,
+ * codex-protocol-protocol.rs.txt:1222-1224), so `env` or `cat` of a token file
+ * would run. By default the thread therefore has no command tool at all:
+ * `features.shell_tool`, "Enable the default shell tool for running commands
+ * (stable; on by default)", and `features.unified_exec`, "Use the unified
+ * PTY-backed exec tool (stable; enabled by default except on Windows)", are
+ * both off (codex-config-reference.txt:1453-1457, 1465-1469). Codex keeps its
+ * Relay tools and its answer. `--dangerously-skip-permissions` leaves both on.
  */
-export const codexThreadConfig = (mcpURL: string): {
+export const codexThreadConfig = (mcpURL: string, fullAccess = false): {
   mcp_servers: Record<string, ReturnType<typeof codexMcpServer> & { tools: Record<string, { approval_mode: "approve" }> }>;
   shell_environment_policy: { filters: Record<string, "exclude"> };
-  features: { shell_snapshot: false };
+  features: { shell_snapshot: false; shell_tool?: false; unified_exec?: false };
 } => ({
   mcp_servers: {
     [MCP_SERVER_NAME]: {
@@ -122,7 +143,7 @@ export const codexThreadConfig = (mcpURL: string): {
     },
   },
   shell_environment_policy: { filters: { [AGENT_TOKEN_ENV]: "exclude" } },
-  features: { shell_snapshot: false },
+  features: { shell_snapshot: false, ...(fullAccess ? {} : { shell_tool: false, unified_exec: false } as const) },
 });
 
 /** The one sub-command, over stdin and stdout, which is where it listens by default. */
@@ -517,6 +538,8 @@ export interface CodexBridgeInput {
   agentToken: string;
   /** Relay's hosted MCP server, handed to every thread (`codexThreadConfig`). */
   mcpURL: string;
+  /** Whether its permission checks are off (bridge-access.ts). */
+  access: BridgeAccess;
   signal: AbortSignal;
   /** One line to the terminal the person is watching. */
   say(line: string): void;
@@ -587,9 +610,9 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
   const openThread = async (server: CodexAppServer, chatId: string): Promise<string> => {
     const settings = {
       cwd: input.cwd,
-      sandbox: CODEX_SANDBOX,
+      sandbox: codexSandbox(input.access.fullAccess),
       approvalPolicy: CODEX_APPROVAL_POLICY,
-      config: codexThreadConfig(input.mcpURL),
+      config: codexThreadConfig(input.mcpURL, input.access.fullAccess),
     };
     // This app-server already has the thread open; it is taken back by id once
     // per run of the process, not once per message.

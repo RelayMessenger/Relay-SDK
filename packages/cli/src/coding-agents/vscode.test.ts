@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, posix, win32 } from "node:path";
+import { dirname, join, posix, win32 } from "node:path";
 import { expect, it, vi } from "vitest";
 import type { InteractivePrompts } from "../interactive.js";
 import { runCLI } from "../program.js";
@@ -91,4 +91,29 @@ it("connect prints the VS Code restart instruction and waits for the bounded rep
   } finally {
     vi.useRealTimers();
   }
+});
+
+// VS Code writes its own mcp.json 0644 on Linux. It is the person's own file,
+// so connect tightens it to 0600 and adds Relay, instead of refusing
+// (private-file.ts); one other accounts can write is still refused.
+it.runIf(process.platform !== "win32").each([
+  [0o644, 0, 0o600],
+  [0o666, 1, 0o666],
+])("connect vscode over an existing mcp.json of mode %s exits %s and leaves it %s", async (mode, exit, after) => {
+  const home = await mkdtemp(join(tmpdir(), "relay-vscode-mode-"));
+  const env = { RELAY_CONFIG_PATH: join(home, "config.json"), PATH: "" };
+  const file = mcpFile(process.platform, env, home);
+  await mkdir(dirname(file), { recursive: true, mode: 0o755 });
+  await writeFile(file, '{"servers":{"other":{"type":"http","url":"https://example.com"}}}\n');
+  await chmod(file, mode);
+  const code = await runCLI(["connect", "vscode", "--token", `rel_token_${"C".repeat(43)}`, "--yes", "--no-skill", "--no-start"], {
+    configContext: { home, env, platform: process.platform }, cwd: home, isInteractive: false,
+    stdout: () => undefined, stderr: () => undefined,
+    fetch: async () => Response.json({ contact_cards: [{ handle: "calm_cangoo", first_name: "Calm Canada Goose", last_name: null, image_url: null, kind: "agent", is_active: true }] }),
+    connect: { sniff: async () => [{ id: "vscode", label: "VS Code", found: true }], renderQR: () => "[QR]\n" },
+  });
+  expect(code).toBe(exit);
+  expect((await stat(file)).mode & 0o777).toBe(after);
+  const written = JSON.parse(await readFile(file, "utf8")) as { servers: Record<string, unknown> };
+  expect(Object.keys(written.servers).sort()).toEqual(exit === 0 ? ["other", "relay"] : ["other"]);
 });

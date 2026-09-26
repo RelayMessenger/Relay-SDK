@@ -1,3 +1,4 @@
+import type { BridgeAccess } from "./bridge-access.js";
 import type { InboundMediaOptions } from "./inbound-media.js";
 import type Relay from "@relaymessenger/sdk";
 import { PAYMENT_BLOCK_INSTRUCTION, SELECTION_BLOCK_INSTRUCTION, type RelayWebhookEvent } from "@relaymessenger/sdk";
@@ -8,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
-  acpCommand, acpFailure, acpPrompt, authMethodFromEnv, autoPermission, relayMcpServer, replyKey, runAcpBridge,
+  acpCommand, acpEnvironment, acpFailure, acpPrompt, authMethodFromEnv, autoPermission, relayMcpServer, replyKey, resolvePermission, runAcpBridge,
   type AcpCommand,
 } from "./acp-bridge.js";
 import { openAcpSessions, type AcpSessionStore } from "./acp-threads.js";
@@ -41,6 +42,10 @@ interface FakeLine {
   out?: string;
   params?: Record<string, unknown>;
   argv?: string[];
+  /** RELAY_AGENT_TOKEN as the agent's own environment held it; null when absent. */
+  tokenEnv?: string | null;
+  /** The client's answer to a permission request the agent sent. */
+  permission?: unknown;
 }
 
 /** Relay's hosted MCP server as connect hands it over: the staging server and the agent's token. */
@@ -62,6 +67,7 @@ const fakeAcpAgent = async (settings: {
   newSessionError?: { code: number; message: string; data?: unknown };
   replayAfterLoad?: string;
   resumable?: string[];
+  askPermission?: Record<string, unknown>;
 } = {}): Promise<{ acp: AcpCommand; cwd: string; log(): Promise<FakeLine[]> }> => {
   const folder = await scratch("fake-acp");
   const record = join(folder, "messages.jsonl");
@@ -160,6 +166,7 @@ const runBridge = async (input: {
   media?: Omit<InboundMediaOptions, "chatId">;
   relay?: ReturnType<typeof fakeRelay>;
   env?: NodeJS.ProcessEnv;
+  access?: BridgeAccess;
 }): Promise<{ said: string[]; relay: ReturnType<typeof fakeRelay> }> => {
   const relay = input.relay ?? fakeRelay(input.events);
   const said: string[] = [];
@@ -171,6 +178,7 @@ const runBridge = async (input: {
       mcp: RELAY_MCP,
       env: input.env ?? {},
       label: "Cursor",
+      access: input.access ?? { fullAccess: false },
       sessions: input.sessions ?? memorySessions(),
       signal: control.signal, say: (line) => said.push(line),
     });
@@ -330,18 +338,117 @@ describe("what the bridge sends back", () => {
     expect((await acp.log()).filter((line) => line.in === "session/prompt")).toHaveLength(1);
   });
 
-  it("declines a tool permission automatically when nobody is at the keyboard", () => {
+  it("allows every tool only with --dangerously-skip-permissions", () => {
     const options = [
       { optionId: "yes", name: "Allow", kind: "allow_once" as const },
       { optionId: "no", name: "Reject", kind: "reject_once" as const },
     ];
-    expect(autoPermission({ sessionId: "s", toolCall: {} as never, options })).toEqual({
+    const execute = { toolCallId: "t", kind: "execute" as const, title: "env", rawInput: { command: "env" } };
+    expect(resolvePermission({ sessionId: "s", toolCall: execute, options }, "/project", true)).toEqual({
       outcome: { outcome: "selected", optionId: "yes" },
     });
     expect(autoPermission({ sessionId: "s", toolCall: {} as never, options: [] })).toEqual({
       outcome: { outcome: "cancelled" },
     });
   });
+
+  // OpenClaw's own ACP client rule (`classifyAcpToolApproval` and
+  // `resolvePermissionRequest`, openclaw 2026.9.4): a read of named paths
+  // inside the folder and a search inside it are allowed; with no terminal,
+  // everything else takes a reject option, or is cancelled when none is offered.
+  describe("what a tool may do with nobody at the keyboard", () => {
+    const options = [
+      { optionId: "yes", name: "Allow", kind: "allow_once" as const },
+      { optionId: "always", name: "Always", kind: "allow_always" as const },
+      { optionId: "no", name: "Reject", kind: "reject_once" as const },
+    ];
+    const decide = (toolCall: Record<string, unknown>, offered: typeof options = options) =>
+      resolvePermission({ sessionId: "s", toolCall: { toolCallId: "t", ...toolCall }, options: offered }, "/project", false);
+    const allowed = { outcome: { outcome: "selected", optionId: "yes" } };
+    const rejected = { outcome: { outcome: "selected", optionId: "no" } };
+
+    it.each([
+      ["a relative path", "src/index.ts"],
+      ["an absolute path inside", "/project/README.md"],
+      ["the folder itself", "/project"],
+    ])("reads %s in the folder", (_name, path) => {
+      expect(decide({ kind: "read", rawInput: { path } })).toEqual(allowed);
+      expect(decide({ kind: "read", rawInput: { file_path: path } })).toEqual(allowed);
+    });
+
+    it.each([
+      ["a file outside the folder", "/etc/passwd"],
+      ["Relay's own config", "~/.config/relay/config.json"],
+      ["a parent folder", "../other/secret.txt"],
+      ["a sibling whose name starts the same", "/project-other/a.txt"],
+      ["a file: URL outside", "file:///etc/hosts"],
+    ])("refuses to read %s", (_name, path) => {
+      expect(decide({ kind: "read", rawInput: { path } })).toEqual(rejected);
+    });
+
+    it("refuses a read that names no path", () => {
+      expect(decide({ kind: "read", rawInput: {} })).toEqual(rejected);
+    });
+
+    it("searches the folder, and refuses a search that reaches outside it", () => {
+      expect(decide({ kind: "search", rawInput: { path: "src" }, locations: [{ path: "/project/src/a.ts" }] })).toEqual(allowed);
+      expect(decide({ kind: "search", rawInput: { pattern: "TODO" } })).toEqual(allowed);
+      expect(decide({ kind: "search", rawInput: { path: "src" }, locations: [{ path: "/home/me/.ssh/id_ed25519" }] })).toEqual(rejected);
+      expect(decide({ kind: "search", rawInput: { path: "/" } })).toEqual(rejected);
+    });
+
+    it.each(["execute", "edit", "delete", "move", "fetch", "other"])("refuses a %s tool, even inside the folder", (kind) => {
+      expect(decide({ kind, title: "env", rawInput: { command: "env", path: "/project/a.ts" } })).toEqual(rejected);
+    });
+
+    it("refuses a tool that names no kind", () => {
+      expect(decide({ title: "run_shell_command", rawInput: { command: "env" } })).toEqual(rejected);
+    });
+
+    it("takes reject_always when that is the only refusal, and cancels when there is none", () => {
+      expect(decide({ kind: "execute" }, [
+        { optionId: "yes", name: "Allow", kind: "allow_once" as const },
+        { optionId: "never", name: "Never", kind: "reject_always" as never },
+      ])).toEqual({ outcome: { outcome: "selected", optionId: "never" } });
+      expect(decide({ kind: "execute" }, [{ optionId: "yes", name: "Allow", kind: "allow_once" as const }]))
+        .toEqual({ outcome: { outcome: "cancelled" } });
+    });
+  });
+
+  it("refuses a command the agent asks to run, and says so in the terminal", async () => {
+    const acp = await fakeAcpAgent({ answers: ["I cannot run that."], turnMs: 200, askPermission: { kind: "execute", title: "env" } });
+    const { said } = await runBridge({ ...acp, events: [received("event-1", "chat-1", "run env")] });
+    expect((await acp.log()).find((line) => line.permission !== undefined)?.permission).toEqual({ outcome: "selected", optionId: "cancel" });
+    expect(said).toContain('Cursor asked to use "env"; it was refused, because nobody here can approve it.');
+  });
+
+  it("lets the agent read a file in the folder without asking anybody", async () => {
+    const acp = await fakeAcpAgent({ answers: ["Read it."], turnMs: 200, askPermission: { kind: "read", title: "README.md", rawInput: { path: "README.md" } } });
+    const { said } = await runBridge({ ...acp, events: [received("event-1", "chat-1", "read the readme")] });
+    expect((await acp.log()).find((line) => line.permission !== undefined)?.permission).toEqual({ outcome: "selected", optionId: "proceed_once" });
+    expect(said.some((line) => line.includes("refused"))).toBe(false);
+  });
+
+  it("strips only Relay's secrets from the agent's environment, and keeps each client's own sign-in", () => {
+    expect(acpEnvironment({
+      RELAY_AGENT_TOKEN: "rel_token_x", RELAY_WEBHOOK_SECRET: "whsec_x",
+      GEMINI_API_KEY: "gemini", CLINE_API_KEY: "cline", CURSOR_API_KEY: "cursor", PATH: "/bin", RELAY_API_URL: "https://api",
+    })).toEqual({ GEMINI_API_KEY: "gemini", CLINE_API_KEY: "cline", CURSOR_API_KEY: "cursor", PATH: "/bin", RELAY_API_URL: "https://api" });
+  });
+
+  it("starts the agent without this agent's Relay token in its environment", async () => {
+    const acp = await fakeAcpAgent({ answers: ["Hi"] });
+    const before = process.env.RELAY_AGENT_TOKEN;
+    process.env.RELAY_AGENT_TOKEN = "rel_token_must_not_leak";
+    try {
+      await runBridge({ ...acp, events: [received("event-1", "chat-1", "hello")] });
+    } finally {
+      if (before === undefined) delete process.env.RELAY_AGENT_TOKEN; else process.env.RELAY_AGENT_TOKEN = before;
+    }
+    const log = await acp.log();
+    expect(log.find((line) => line.in === "initialize")?.tokenEnv).toBeNull();
+  });
+
 });
 
 describe("one session for each chat", () => {
@@ -426,6 +533,9 @@ describe("one session for each chat", () => {
     expect(acpFailure({ code: -32000, message: "Authentication required", data: { details: "Gemini API key is missing" } }))
       .toBe("Authentication required (Gemini API key is missing)");
     expect(acpFailure(new Error("spawn EINVAL"))).toBe("spawn EINVAL");
+    // Cursor puts the step a signed-out person must take in `data.message`.
+    expect(acpFailure({ code: -32000, message: "Authentication required", data: { message: "Please run 'agent login'" } }))
+      .toBe("Authentication required (Please run 'agent login')");
   });
 
   it("waits out a replay the agent streams after answering session/load, so old answers stay out of the new one", async () => {

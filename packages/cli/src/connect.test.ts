@@ -124,7 +124,7 @@ describe("the plan screen", () => {
     expect(await runCLI(["connect", "claude", "--subtitle", "Helps with tasks", "--dry-run"], f.deps)).toBe(0);
     const printed = f.stdout.join("");
     expect(printed).not.toContain("found on this computer");
-    expect(printed).toContain("keep running here, and answer your Relay messages with Claude Code from this folder  (Relay's tools travel through the session; no mcp.json is written)");
+    expect(printed).toContain("keep running here, and answer your Relay messages with Claude Code from this folder; it runs no commands  (Relay's tools travel through the session; no mcp.json is written; --dangerously-skip-permissions turns every permission check off)");
     expect(printed).not.toMatch(/marketplace|\.env|start Claude Code/);
     expect(printed).toContain("Dry run: nothing was changed.");
     expect(f.fetch).not.toHaveBeenCalled();
@@ -412,6 +412,26 @@ describe("the MCP agents", () => {
   });
 
 
+});
+
+describe("what a connected agent may do", () => {
+  const gemini = runtimes({ "gemini-cli": { found: true, executable: "/fake/bin/gemini" } });
+  const accessOf = (f: Awaited<ReturnType<typeof fixture>>) =>
+    (f.bridge.mock.calls[0]?.[0] as unknown as { access?: unknown } | undefined)?.access;
+
+  it("runs no commands by default, and the plan says so", async () => {
+    const f = await fixture({}, gemini);
+    expect(await runCLI(["connect", "gemini-cli", "--subtitle", "Helps with tasks", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+    expect(accessOf(f)).toEqual({ fullAccess: false });
+    expect(f.stdout.join("")).toContain("keep running here, and answer your Relay messages with Gemini CLI from this folder; it runs no commands  (Relay's tools travel through the session; no mcp.json is written; --dangerously-skip-permissions turns every permission check off)");
+  });
+
+  it("turns every permission check off only with --dangerously-skip-permissions, and says so in the plan", async () => {
+    const f = await fixture({}, gemini);
+    expect(await runCLI(["connect", "gemini-cli", "--subtitle", "Helps with tasks", "--token", token, "--yes", "--no-skill", "--dangerously-skip-permissions"], f.deps)).toBe(0);
+    expect(accessOf(f)).toEqual({ fullAccess: true });
+    expect(f.stdout.join("")).toContain("from this folder; it runs every tool with no permission checks  (Relay's tools travel through the session; no mcp.json is written; --dangerously-skip-permissions: recommended only for sandboxes with no internet access)");
+  });
 });
 
 describe("Hermes and OpenClaw", () => {

@@ -45,13 +45,16 @@ npx relaymessenger connect claude     # names it outright
 `connect` finds the runtimes on this computer, makes an agent or takes one you
 already have, shows every file it will write and every command it will run,
 writes the runtime's own configuration, then offers to start the runtime.
-Anyone can message the agent; `--allow` narrows that to the handles you list. This build
-writes Claude Code; Hermes and OpenClaw are detected, their plan is printed, and
-the command stops without changing anything.
+Anyone can message the agent; `--allow` narrows that to the handles you list.
+By default the agent runs no commands and changes no files.
+`--dangerously-skip-permissions` turns every permission check off, the way
+Claude Code's flag of the same name does; use it only in a sandbox with no
+internet access.
 
 Every question has a flag for scripts: `--new`, `--handle`, `--name`, `--image`,
-`--token`, `--allow`, `--yes`, `--dry-run`, `--no-start`, `--no-skill`, `--json`
-and `--api-url`. `--dry-run` prints the plan and changes nothing.
+`--token`, `--allow`, `--dangerously-skip-permissions`, `--yes`, `--dry-run`,
+`--no-start`, `--no-skill`, `--json` and `--api-url`. `--dry-run` prints the
+plan and changes nothing.
 
 ## Interactive use
 

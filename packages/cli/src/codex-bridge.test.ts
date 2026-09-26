@@ -1,3 +1,4 @@
+import type { BridgeAccess } from "./bridge-access.js";
 import type { InboundMediaOptions } from "./inbound-media.js";
 import type Relay from "@relaymessenger/sdk";
 import { PAYMENT_BLOCK_INSTRUCTION, SELECTION_BLOCK_INSTRUCTION, type RelayWebhookEvent } from "@relaymessenger/sdk";
@@ -39,7 +40,9 @@ const RELAY_THREAD_CONFIG = {
   // The token reaches the relay entry, never a shell command the model runs,
   // and no shell snapshot puts it back or saves it.
   shell_environment_policy: { filters: { RELAY_AGENT_TOKEN: "exclude" } },
-  features: { shell_snapshot: false },
+  // No command tool at all unless --dangerously-skip-permissions was chosen:
+  // a read-only sandbox still runs `env` (codex-bridge.ts, codexThreadConfig).
+  features: { shell_snapshot: false, shell_tool: false, unified_exec: false },
 };
 
 const folders: string[] = [];
@@ -178,6 +181,7 @@ const runBridge = async (input: {
   media?: Omit<InboundMediaOptions, "chatId">;
   relay?: ReturnType<typeof fakeRelay>;
   agentToken?: string;
+  access?: BridgeAccess;
 }): Promise<{ said: string[]; relay: ReturnType<typeof fakeRelay> }> => {
   const relay = input.relay ?? fakeRelay(input.events);
   const said: string[] = [];
@@ -187,6 +191,7 @@ const runBridge = async (input: {
       ...(input.media ? { media: input.media } : {}),
       agentToken: input.agentToken ?? "rel_token_test",
       mcpURL: "https://mcp.staging.relayapp.im",
+      access: input.access ?? { fullAccess: false },
       client: relay.client, codex: input.codex, cwd: input.cwd,
       threads: input.threads ?? memoryThreads(),
       signal: control.signal, say: (line) => said.push(line),
@@ -264,11 +269,21 @@ describe("the app-server the bridge starts", () => {
     expect((await codex.log()).find((line) => line.in === "initialize")?.tokenEnv).toBe("rel_token_calm");
   });
 
-  it("opens a thread that may write in the folder and asks nobody anything", async () => {
+  it("opens a read-only thread with no command tool, and asks nobody anything", async () => {
     const codex = await fakeAppServer();
     await runBridge({ ...codex, events: [received("event-1", "chat-1", "Hey, what's up")] });
     const start = (await codex.log()).find((line) => line.in === "thread/start");
-    expect(start?.params).toEqual({ cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "never", config: RELAY_THREAD_CONFIG });
+    expect(start?.params).toEqual({ cwd: codex.cwd, sandbox: "read-only", approvalPolicy: "never", config: RELAY_THREAD_CONFIG });
+  });
+
+  it("gives the thread commands and folder writes back only with --dangerously-skip-permissions", async () => {
+    const codex = await fakeAppServer();
+    await runBridge({ ...codex, access: { fullAccess: true }, events: [received("event-1", "chat-1", "Hey, what's up")] });
+    const start = (await codex.log()).find((line) => line.in === "thread/start");
+    expect(start?.params).toEqual({
+      cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "never",
+      config: { ...RELAY_THREAD_CONFIG, features: { shell_snapshot: false } },
+    });
   });
 
   it("sends the message as the turn's text input, and never on a command line", async () => {
@@ -443,7 +458,7 @@ describe("one thread for each chat", () => {
       .toEqual(["thread/start", "thread/resume"]);
     const resume = (await codex.log()).find((line) => line.in === "thread/resume");
     expect(resume?.params).toEqual({
-      threadId: "thread-1", cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "never", config: RELAY_THREAD_CONFIG,
+      threadId: "thread-1", cwd: codex.cwd, sandbox: "read-only", approvalPolicy: "never", config: RELAY_THREAD_CONFIG,
     });
   });
 

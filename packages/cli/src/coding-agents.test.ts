@@ -122,7 +122,7 @@ it("every agent's plan is at most three lines: what is installed, what is writte
     expect(plan.agents.map((entry) => entry.agent)).toEqual([id]);
   }
   expect(runtimeConnectPlan({ ...context({ start: true }), agents: ["claude-code"] }).steps).toEqual([
-    "keep running here, and answer your Relay messages with Claude Code from this folder  (Relay's tools travel through the session; no mcp.json is written)",
+    "keep running here, and answer your Relay messages with Claude Code from this folder; it runs no commands  (Relay's tools travel through the session; no mcp.json is written; --dangerously-skip-permissions turns every permission check off)",
   ]);
   expect(runtimeConnectPlan({ ...context(), agents: ["cursor"], ask: false }).headline).toBe("Relay will do 1 thing.");
 });

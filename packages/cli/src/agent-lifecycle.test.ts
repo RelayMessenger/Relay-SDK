@@ -210,9 +210,11 @@ it("a chosen-handle 409 leaves all profiles intact and never retries without the
 });
 
 describe("creation storage preflight", { timeout: 120_000 }, () => {
-  it("does zero POSTs for unreadable or unwritable config files", async () => {
+  it("does zero POSTs for unreadable or unwritable config files, or one other accounts can write", async () => {
     const { chmod } = await import("node:fs/promises");
-    for (const mode of process.platform === "win32" ? [0o444, 0o000] : [0o444, 0o000, 0o644]) {
+    // 0o644 is no longer here: a config of yours that others can only read is
+    // tightened to 0o600 and written (private-file.ts); 0o664 lets others write.
+    for (const mode of process.platform === "win32" ? [0o444, 0o000] : [0o444, 0o000, 0o664]) {
       const { deps, fetch, env } = await fixture();
       await writeFile(env.RELAY_CONFIG_PATH!, JSON.stringify(emptyConfig()), { mode: 0o600 });
       await chmod(env.RELAY_CONFIG_PATH!, mode);

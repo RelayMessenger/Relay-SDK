@@ -1,3 +1,4 @@
+import type { BridgeAccess } from "./bridge-access.js";
 import type Relay from "@relaymessenger/sdk";
 import { PAYMENT_BLOCK_INSTRUCTION, RelayAPIError, SELECTION_BLOCK_INSTRUCTION, type RelayWebhookEvent } from "@relaymessenger/sdk";
 import type { query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -88,13 +89,15 @@ const success = (text = "Answer"): SDKMessage => ({ type: "result", subtype: "su
 const fakeQuery = (generate: (input: Parameters<typeof query>[0]) => AsyncGenerator<SDKMessage>): typeof query =>
   generate as typeof query;
 
+const OPEN: BridgeAccess = { fullAccess: false };
+
 const setup = (ask: typeof query, events: RelayWebhookEvent[]) => {
   const relay = fakeRelay(events);
   const threads = memoryThreads();
   const control = new AbortController();
   const said: string[] = [];
   const input = { client: relay.client, threads, query: ask, signal: control.signal, say: (line: string) => said.push(line),
-    claude: { executable: "/bin/claude" }, cwd: "/project", mcp };
+    claude: { executable: "/bin/claude" }, cwd: "/project", mcp, access: OPEN as BridgeAccess };
   return { relay, threads, control, said, input };
 };
 
@@ -203,7 +206,15 @@ describe("Claude Agent SDK bridge", () => {
     await untilEnded(state.said, 1);
     expect(calls[0]).toEqual({ prompt: codexPrompt("alice", "hello"), options: {
       cwd: "/project", resume: undefined, pathToClaudeCodeExecutable: "/bin/claude",
-      permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true,
+      // Nobody is watching, so nothing may prompt: `dontAsk` denies it, only
+      // the read and search tools exist, the shell, edits and the web are
+      // denied by name, Relay's own tools run, and reads outside the folder
+      // are refused (claude-bridge.ts, claudePermissions).
+      permissionMode: "dontAsk",
+      tools: ["Read", "Grep", "Glob"],
+      allowedTools: ["mcp__relay__*"],
+      disallowedTools: ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"],
+      settings: { permissions: { blockReadsOutsideWorkingDirectories: true } },
       mcpServers: { relay: { type: "http", url: "https://mcp.relayapp.im", headers: { Authorization: "Bearer rel_token_test" } } },
       // On Windows every executable that is not an `.exe` starts through the
       // shell (spawn-command.ts, `platformCommand`), so the bridge hands the SDK
@@ -222,6 +233,21 @@ describe("Claude Agent SDK bridge", () => {
     await untilEnded(state.said, 2);
     expect(calls[1]?.options?.resume).toBe("session-1");
     expect(calls[1]?.prompt).toBe(codexPrompt("alice", "again"));
+    state.control.abort();
+  });
+
+  it("skips every permission check only with --dangerously-skip-permissions", async () => {
+    const calls: Parameters<typeof query>[0][] = [];
+    const ask = fakeQuery(async function* (input) {
+      calls.push(input);
+      yield init("session-1");
+      yield success("Answer");
+    });
+    const state = setup(ask, [received("event-1", "chat-1", "hello")]);
+    await runClaudeBridge({ ...state.input, access: { fullAccess: true } });
+    await untilEnded(state.said, 1);
+    expect(calls[0]?.options).toMatchObject({ permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true });
+    for (const key of ["tools", "allowedTools", "disallowedTools", "settings"]) expect(calls[0]?.options).not.toHaveProperty(key);
     state.control.abort();
   });
 

@@ -8,6 +8,7 @@ import { bridgeTurn, codexPrompt, sendAnswer, type BridgeTurn } from "./codex-br
 import { replacesLiveTurn } from "./bridge-turn.js";
 import type { ClaudeThreadStore } from "./claude-threads.js";
 import { MCP_SERVER_NAME, claudeMcpServer, type HostedMcp } from "./hosted-mcp.js";
+import type { BridgeAccess } from "./bridge-access.js";
 
 export interface ClaudeBridgeInput {
   client: Pick<Relay, "chats" | "paymentRequests" | "websocket">;
@@ -19,6 +20,8 @@ export interface ClaudeBridgeInput {
   threads: ClaudeThreadStore;
   /** Relay's hosted MCP server and this agent's token (hosted-mcp.ts). */
   mcp: HostedMcp;
+  /** Whether its permission checks are off (bridge-access.ts). */
+  access: BridgeAccess;
   signal: AbortSignal;
   say(line: string): void;
   query?: typeof query;
@@ -34,6 +37,49 @@ export const claudeCommand = async (
   const onPath = await findExecutable(found, env, platform);
   return { executable: onPath ?? (platform === "win32" ? `${found}.cmd` : found) };
 };
+
+/**
+ * What Claude Code may do in a turn nobody is watching.
+ *
+ * By default the turn runs in `dontAsk`: "Claude Code denies every call that
+ * would otherwise prompt, which is useful for locked-down CI runs"
+ * (claude-code-headless.md:274-277). Only Read, Grep and Glob exist
+ * (`tools`, sdk.d.ts: "Specify the base set of available built-in tools"), the
+ * shell, edits and the web are denied by name, and Relay's own server is the
+ * one MCP server whose tools run without a prompt (`mcp__relay__*`; "Allow
+ * rules accept tool-name globs only after a literal `mcp__<server>__`
+ * prefix", claude-code-permissions.md:197). Relay's read tools are allowed
+ * beside its six write tools because in `dontAsk` a tool no rule allows is
+ * denied, and the hosted server's read tools are the agent's own chats and
+ * communities.
+ *
+ * Reads outside the folder are refused with
+ * `permissions.blockReadsOutsideWorkingDirectories`, which "make[s] the file
+ * tools refuse the paths it fences in every permission mode"
+ * (claude-code-permissions.md:546; "true in any settings source wins",
+ * sdk.d.ts). A deny rule cannot say "outside the project": a `!` carve-out
+ * "can't reach a rule anchored with" `//` (claude-code-permissions.md:417-424).
+ *
+ * `--dangerously-skip-permissions` restores `bypassPermissions`, which is for
+ * "Isolated containers and VMs only" and "offers no protection against prompt
+ * injection" (claude-code-permission-modes.md:24,584).
+ */
+export const claudePermissions = (fullAccess: boolean): {
+  permissionMode: "dontAsk" | "bypassPermissions";
+  allowDangerouslySkipPermissions?: true;
+  tools?: string[];
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  settings?: { permissions: { blockReadsOutsideWorkingDirectories: true } };
+} => fullAccess
+  ? { permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true }
+  : {
+    permissionMode: "dontAsk",
+    tools: ["Read", "Grep", "Glob"],
+    allowedTools: [`mcp__${MCP_SERVER_NAME}__*`],
+    disallowedTools: ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"],
+    settings: { permissions: { blockReadsOutsideWorkingDirectories: true } },
+  };
 
 /** The last bytes Claude Code wrote to stderr, kept to name a failed start. */
 const STDERR_TAIL = 2_000;
@@ -127,9 +173,8 @@ export const runClaudeBridge = async (input: ClaudeBridgeInput): Promise<void> =
             cwd: input.cwd,
             ...(resume !== undefined ? { resume } : {}),
             pathToClaudeCodeExecutable: input.claude.executable,
-            // Like CODEX_APPROVAL_POLICY = "never", no person is at the keyboard.
-            permissionMode: "bypassPermissions",
-            allowDangerouslySkipPermissions: true,
+            // Nobody is at the keyboard, so nothing may wait on a prompt.
+            ...claudePermissions(input.access.fullAccess),
             mcpServers: { [MCP_SERVER_NAME]: claudeMcpServer(input.mcp) },
             ...(spawner.spawn ? { spawnClaudeCodeProcess: spawner.spawn } : {}),
             abortController: mine.control,

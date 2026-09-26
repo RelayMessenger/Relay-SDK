@@ -12,14 +12,17 @@ import {
   type AuthMethod,
 } from "@agentclientprotocol/sdk";
 import { Readable, Writable } from "node:stream";
-import { isAbsolute } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AcpSessionStore } from "./acp-threads.js";
 import { bridgeTurn, codexPrompt, sendAnswer, type BridgeTurn } from "./codex-bridge.js";
 import { replacesLiveTurn } from "./bridge-turn.js";
 import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
-import { MCP_SERVER_NAME, mcpRemoteServer, type HostedMcp } from "./hosted-mcp.js";
+import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, mcpRemoteServer, type HostedMcp } from "./hosted-mcp.js";
+import type { BridgeAccess } from "./bridge-access.js";
 
 /**
  * What `relay connect cursor|gemini-cli|cline|opencode` leaves running so the
@@ -113,11 +116,9 @@ export const relayMcpServer = (
 };
 
 /**
- * Nobody is at the keyboard, so a tool the agent asks to run is allowed the
- * same way Codex's `approvalPolicy: "never"` allows it: the agent proceeds. The
- * first `allow` option is chosen; when none is offered the request is cancelled
- * (`RequestPermissionOutcome`, schema/types.gen), which the reference client
- * does too (openclaw/src/acp/client-helpers.ts, `resolvePermissionRequest`).
+ * `--dangerously-skip-permissions`: a tool the agent asks to run is allowed.
+ * The first `allow` option is chosen; when none is offered the request is
+ * cancelled (`RequestPermissionOutcome`, schema/types.gen).
  */
 export const autoPermission = (params: RequestPermissionRequest): RequestPermissionResponse => {
   const allow = params.options.find((option) => option.kind === "allow_once")
@@ -125,6 +126,114 @@ export const autoPermission = (params: RequestPermissionRequest): RequestPermiss
   return allow
     ? { outcome: { outcome: "selected", optionId: allow.optionId } }
     : { outcome: { outcome: "cancelled" } };
+};
+
+/** The raw-input keys a tool call names its file under (OpenClaw's `resolveToolPathCandidates`). */
+const PATH_KEYS = ["path", "file_path", "filePath"] as const;
+
+const firstPath = (input: unknown): string | undefined => {
+  if (input === null || typeof input !== "object") return undefined;
+  const record = input as Record<string, unknown>;
+  for (const key of PATH_KEYS) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+};
+
+/** A tool's path, resolved against the working folder: `file:` URLs, `~`, and relative paths. */
+const scopedPath = (raw: string, cwd: string): string | undefined => {
+  let candidate = raw.trim();
+  if (/^file:/iu.test(candidate)) {
+    try { candidate = fileURLToPath(candidate); } catch { return undefined; }
+  }
+  if (!candidate) return undefined;
+  if (candidate === "~") candidate = homedir();
+  else if (candidate.startsWith("~/")) candidate = join(homedir(), candidate.slice(2));
+  return isAbsolute(candidate) ? normalize(candidate) : resolve(cwd, candidate);
+};
+
+/** True when the path is the working folder or inside it. */
+export const insideFolder = (raw: string, cwd: string): boolean => {
+  const path = scopedPath(raw, cwd);
+  if (path === undefined) return false;
+  const within = relative(resolve(cwd), path);
+  return within === "" || (!within.startsWith("..") && !isAbsolute(within));
+};
+
+/**
+ * Whether a tool call may run with nobody at the keyboard. The rule OpenClaw's
+ * own ACP client applies (`classifyAcpToolApproval`, openclaw 2026.9.4
+ * dist/client-D3GZHQ8S.mjs; the permission part is saved at
+ * _sources/unattended-agent-permissions-20260926/openclaw-2026.9.4-acp-client-helpers.mjs.txt):
+ * a read is approved only when it names at least one path and every path it
+ * names is inside the working folder; a search is approved unless a path it
+ * names, its locations included, is outside the folder; nothing else is
+ * approved. OpenClaw tells a read and a search apart by its own tool names
+ * (`read`, `search`); an ACP agent that is not OpenClaw reports the same thing
+ * as the tool call's `kind` (`ToolKind`, schema/types.gen: "read" | "search" |
+ * "execute" | …), so the kind is what is read here.
+ */
+export const approvedWithoutAsking = (params: RequestPermissionRequest, cwd: string): boolean => {
+  const call = params.toolCall;
+  const named = firstPath(call.rawInput);
+  if (call.kind === "read") return named !== undefined && insideFolder(named, cwd);
+  if (call.kind === "search") {
+    const paths = [...(named === undefined ? [] : [named]), ...(call.locations ?? []).map((location) => location.path)];
+    return paths.every((path) => insideFolder(path, cwd));
+  }
+  return false;
+};
+
+/**
+ * The answer to a permission request. With no terminal attached, OpenClaw's
+ * client denies anything it does not approve on its own
+ * (`promptUserPermission`: "[permission denied] …: non-interactive terminal"),
+ * picks `reject_once` or `reject_always`, and cancels when the agent offered
+ * no reject option (`resolvePermissionRequest`, same file). This process never
+ * has a terminal for the agent, so it answers the same way.
+ * `--dangerously-skip-permissions` allows everything instead (`autoPermission`).
+ */
+export const resolvePermission = (
+  params: RequestPermissionRequest,
+  cwd: string,
+  fullAccess: boolean,
+): RequestPermissionResponse => {
+  if (fullAccess) return autoPermission(params);
+  const pick = (kinds: readonly string[]) => kinds
+    .map((kind) => params.options.find((option) => option.kind === kind))
+    .find((option) => option !== undefined);
+  const chosen = approvedWithoutAsking(params, cwd)
+    ? pick(["allow_once", "allow_always"])
+    : pick(["reject_once", "reject_always"]);
+  return chosen
+    ? { outcome: { outcome: "selected", optionId: chosen.optionId } }
+    : { outcome: { outcome: "cancelled" } };
+};
+
+/** Relay's own secrets a person may hold in the shell that runs connect. */
+export const RELAY_SECRET_ENV = [AGENT_TOKEN_ENV, "RELAY_WEBHOOK_SECRET"] as const;
+
+/**
+ * The agent's environment: this process's own, without Relay's secrets. The
+ * agent reaches Relay through the MCP server handed to its session, which
+ * carries the token itself (`relayMcpServer`), so nothing the model runs needs
+ * it. The Codex bridge keeps the same name out of every command Codex runs
+ * (`shell_environment_policy`, codex-bridge.ts).
+ *
+ * Everything else passes through, the client's own sign-in variables above
+ * all: Gemini CLI reads `GEMINI_API_KEY` (docs/reference/configuration.md; see
+ * `ENV_AUTH_METHODS`), and Cline reads `CLINE_API_KEY`, "Authenticate with an
+ * API key instead of interactive sign-in" (Cline docs, usage/acp;
+ * _sources/unattended-agent-permissions-20260926/cline-docs-usage-acp.mdx.txt:131),
+ * and Cursor's agent reads `CURSOR_API_KEY` (Cursor docs, cli/headless;
+ * cursor-com-docs-cli-headless.txt:13). Without them the agent cannot sign in
+ * and answers nothing.
+ */
+export const acpEnvironment = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const copy = { ...env };
+  for (const name of RELAY_SECRET_ENV) delete copy[name];
+  return copy;
 };
 
 /**
@@ -171,10 +280,15 @@ export const authMethodFromEnv = (
 /** An ACP error, an Error, or anything thrown, as one line. */
 export const acpFailure = (error: unknown): string => {
   if (error instanceof Error && !("code" in error)) return error.message.trim().replace(/\s+/gu, " ");
-  const record = (error ?? {}) as { message?: unknown; data?: { details?: unknown } };
+  const record = (error ?? {}) as { message?: unknown; data?: { details?: unknown; message?: unknown } };
   const message = typeof record.message === "string" ? record.message : String(error);
-  const details = typeof record.data?.details === "string" ? record.data.details : "";
-  return `${message}${details && !message.includes(details) ? ` (${details})` : ""}`.trim().replace(/\s+/gu, " ");
+  // An agent may put what the person should do in `data.message` rather than
+  // `data.details`: Cursor answers a signed-out `session/new` with "Please run
+  // 'agent login'" there.
+  const said = [record.data?.details, record.data?.message]
+    .filter((value): value is string => typeof value === "string" && value.trim() !== "")
+    .filter((value, index, all) => !message.includes(value) && all.indexOf(value) === index);
+  return `${message}${said.length ? ` (${said.join("; ")})` : ""}`.trim().replace(/\s+/gu, " ");
 };
 
 const isAuthRequired = (error: unknown): boolean =>
@@ -214,12 +328,18 @@ export const startAcpAgent = (
   acp: AcpCommand,
   cwd: string,
   signal: AbortSignal,
+  options: {
+    fullAccess?: boolean;
+    env?: NodeJS.ProcessEnv;
+    /** Told the title of every tool call refused, as OpenClaw's client logs "[permission denied]". */
+    refused?: (title: string) => void;
+  } = {},
 ): AcpAgent => {
   // Started the way every other command this CLI runs is started, so the `.cmd`
   // shim npm installs on Windows runs too (spawn-command.ts). Nothing a person
   // wrote travels on this command line: messages go down the ACP stream.
   const child = spawnCommand(acp.command, acp.args, {
-    cwd, stdio: ["pipe", "pipe", "pipe"], signal,
+    cwd, stdio: ["pipe", "pipe", "pipe"], signal, env: acpEnvironment(options.env ?? process.env),
   });
   const sinks = new Map<string, (text: string) => void>();
   const heard = new Map<string, number>();
@@ -256,8 +376,13 @@ export const startAcpAgent = (
         sink(update.content.text);
       }
     },
-    requestPermission: async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> =>
-      autoPermission(params),
+    requestPermission: async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
+      const answer = resolvePermission(params, cwd, options.fullAccess === true);
+      const chosen = answer.outcome.outcome === "selected" ? answer.outcome.optionId : undefined;
+      const allowed = params.options.some((option) => option.optionId === chosen && option.kind.startsWith("allow"));
+      if (!allowed) options.refused?.((params.toolCall.title ?? params.toolCall.kind ?? "a tool").replace(/\s+/gu, " ").slice(0, 120));
+      return answer;
+    },
   };
   const client = new ClientSideConnection(() => handlers, stream);
 
@@ -330,6 +455,8 @@ export interface AcpBridgeInput {
   mcp: HostedMcp;
   /** The label shown to the person, e.g. "Cursor". */
   label: string;
+  /** Whether its permission checks are off (bridge-access.ts). */
+  access: BridgeAccess;
   /** Which ACP session belongs to which chat, across restarts. */
   sessions: AcpSessionStore;
   signal: AbortSignal;
@@ -374,7 +501,10 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
     if (session && !sessionGone) return session;
     opened = new Map();
     session = (async () => {
-      const started = startAcpAgent(input.acp, input.cwd, input.signal);
+      const started = startAcpAgent(input.acp, input.cwd, input.signal, {
+        fullAccess: input.access.fullAccess,
+        refused: (title) => input.say(`${input.label} asked to use "${title}"; it was refused, because nobody here can approve it.`),
+      });
       // A stop the person asked for, with Control-C, is not news.
       void started.stopped.then((line) => {
         sessionGone = true;
