@@ -16,6 +16,8 @@
  *   answers     what to answer, in order; each entry is a list of agent
  *               messages `{text, phase}`, or an empty list for no answer
  *   turnMs      how long a turn takes before it completes
+ *   toolCalls   `mcpToolCall` items each turn completes before its answer,
+ *               e.g. one Codex stopped: `{status: "failed", error: {message}}`
  *   turnError   when set, every turn ends `failed` with this error message,
  *               the way the real one ends a turn its model refused (401)
  *   threadError the error `thread/start` answers with, when set, the way the
@@ -65,6 +67,12 @@ const completeTurn = (turnId, status) => {
   turns.delete(turnId);
   clearTimeout(turn.timer);
   if (status === "completed" && !settings.turnError) {
+    for (const [index, call] of (settings.toolCalls ?? []).entries()) {
+      notify("item/completed", {
+        threadId: turn.threadId, turnId, completedAtMs: 0,
+        item: { type: "mcpToolCall", id: `${turnId}-tool-${index}`, arguments: {}, ...call },
+      });
+    }
     for (const message of turn.answers) {
       notify("item/agentMessage/delta", {
         threadId: turn.threadId, turnId, itemId: `${turnId}-item`, delta: message.text,

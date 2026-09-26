@@ -19,7 +19,22 @@ import { platformCommand } from "./spawn-command.js";
  * … --bearer-token-env-var RELAY_AGENT_TOKEN` writes, as a thread override.
  */
 const RELAY_THREAD_CONFIG = {
-  mcp_servers: { relay: { url: "https://mcp.staging.relayapp.im", bearer_token_env_var: "RELAY_AGENT_TOKEN" } },
+  mcp_servers: {
+    relay: {
+      url: "https://mcp.staging.relayapp.im",
+      bearer_token_env_var: "RELAY_AGENT_TOKEN",
+      // Relay's six write tools, and nothing else, run without a question
+      // (Codex's `tools.<tool>.approval_mode`).
+      tools: {
+        send_message: { approval_mode: "approve" },
+        create_post: { approval_mode: "approve" },
+        comment: { approval_mode: "approve" },
+        upvote: { approval_mode: "approve" },
+        send_task: { approval_mode: "approve" },
+        update_task: { approval_mode: "approve" },
+      },
+    },
+  },
 };
 
 const folders: string[] = [];
@@ -51,6 +66,7 @@ interface FakeLine {
  */
 const fakeAppServer = async (settings: {
   answers?: FakeAnswer[][];
+  toolCalls?: Record<string, unknown>[];
   threadError?: string;
   turnError?: string;
   turnMs?: number;
@@ -206,6 +222,28 @@ describe("the app-server the bridge starts", () => {
     const { said, relay } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "Hey")] });
     expect(relay.sent).toEqual([]);
     expect(said).toContain("Codex could not answer @alice: failed to load configuration: url is not supported for stdio in `mcp_servers.relay`. Nothing was sent.");
+  });
+
+  it("never sends Codex's answer about a Relay tool call it could not make; names the failure instead", async () => {
+    const codex = await fakeAppServer({
+      toolCalls: [{ server: "relay", tool: "create_post", status: "failed", error: { message: "MCP tool call requires approval, but approval policy is never" } }],
+      answers: [[{ text: "Creating the post was blocked by the approval policy.", phase: "final_answer" }]],
+    });
+    const { said, relay } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "Post it")] });
+    expect(relay.sent).toEqual([]);
+    expect(said).toContain("Codex could not answer @alice: Relay's create_post: MCP tool call requires approval, but approval policy is never. Nothing was sent.");
+  });
+
+  it("still sends the answer when a Relay tool answered, even with an error of its own, or another server failed", async () => {
+    const codex = await fakeAppServer({
+      toolCalls: [
+        { server: "relay", tool: "send_message", status: "completed", result: { content: [{ type: "text", text: "Your agent is not in that chat." }], isError: true } },
+        { server: "github", tool: "search", status: "failed", error: { message: "timed out" } },
+      ],
+      answers: [[{ text: "I am not in that chat, so I could not post there.", phase: "final_answer" }]],
+    });
+    const { relay } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "Post it")] });
+    expect(relay.sent.map((sent) => sent.text)).toEqual(["I am not in that chat, so I could not post there."]);
   });
 
   it("names a turn Codex ended as failed instead of saying it gave no answer", async () => {
