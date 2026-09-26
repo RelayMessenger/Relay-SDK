@@ -16,6 +16,7 @@ const token = `rel_token_${'V'.repeat(43)}`;
 const invalidToken = `rel_token_${'X'.repeat(43)}`;
 const syntheticTokens = [token, invalidToken, `rel_token_${'I'.repeat(43)}`, `rel_token_${'P'.repeat(43)}`];
 let tokenServer;
+let interactiveServer;
 const env = { ...process.env, RELAY_CONFIG_PATH: join(scratch, 'config.json'), RELAY_API_URL: 'http://127.0.0.1:1', CI: 'true' };
 for (const key of ['RELAY_AGENT_TOKEN', 'RELAY_PROFILE', 'NODE_AUTH_TOKEN', 'NPM_TOKEN']) delete env[key];
 const report = { platform: platform(), arch: arch(), release: release(), node: process.version, sandbox: process.env.RELAY_DAYTONA_SANDBOX_ID ?? null, commands: [], coverage: 'native offline package/config proof; no live runtime claim' };
@@ -28,6 +29,27 @@ function run(command, args, options = {}) {
   assert.ok(syntheticTokens.every(value => !output.includes(value)), 'CLI leaked synthetic token');
   assert.equal(r.status, options.expectedExit ?? 0, JSON.stringify(item));
   return r.stdout ?? '';
+}
+// Each fixture logs only the requests made to it (agent-cli-platforms-token-server.mjs).
+async function startFixture(name) {
+  const ready = join(scratch, `${name}-server-ready.json`);
+  const log = join(scratch, `${name}-http.json`);
+  let serverError;
+  const server = spawn(process.execPath, [join(root, 'scripts/agent-cli-platforms-token-server.mjs'), ready, log], { env, stdio: 'ignore' });
+  server.on('error', error => { serverError = error; });
+  const deadline = Date.now() + 10000;
+  while (!existsSync(ready)) {
+    if (serverError || server.exitCode !== null || Date.now() > deadline) throw Error('Native token HTTP fixture failed to start');
+    await new Promise(done => setTimeout(done, 25));
+  }
+  return { server, origin: JSON.parse(readFileSync(ready)).origin, log };
+}
+async function stopFixture(server) {
+  if (!server || server.exitCode !== null || server.signalCode !== null) return;
+  const exited = new Promise(done => server.once('exit', done));
+  server.kill();
+  await Promise.race([exited, new Promise(done => setTimeout(done, 2000))]);
+  if (server.exitCode === null && server.signalCode === null) server.kill('SIGKILL');
 }
 // Invoking npm's JS entry point avoids Windows .cmd spawn limitations.
 const npmLocation = spawnSync(platform() === 'win32' ? 'where.exe' : 'which', ['npm'], { encoding: 'utf8' });
@@ -94,17 +116,10 @@ try {
   for (const executable of Object.keys(cliManifest.bin)) {
     assert.equal(npm(['exec', '--offline', '--', executable, '--version'], { cwd: consumer }).trim(), expectedVersion);
   }
-  const ready = join(scratch, 'token-server-ready.json');
-  const httpLog = join(scratch, 'token-http.json');
-  let serverError;
-  tokenServer = spawn(process.execPath, [join(root, 'scripts/agent-cli-platforms-token-server.mjs'), ready, httpLog], { env, stdio: 'ignore' });
-  tokenServer.on('error', error => { serverError = error; });
-  const deadline = Date.now() + 10000;
-  while (!existsSync(ready)) {
-    if (serverError || tokenServer.exitCode !== null || Date.now() > deadline) throw Error('Native token HTTP fixture failed to start');
-    await new Promise(done => setTimeout(done, 25));
-  }
-  env.RELAY_API_URL = JSON.parse(readFileSync(ready)).origin;
+  const tokenFixture = await startFixture('token');
+  tokenServer = tokenFixture.server;
+  const httpLog = tokenFixture.log;
+  env.RELAY_API_URL = tokenFixture.origin;
   cli('profiles', 'add', 'verification', '--api-url', env.RELAY_API_URL);
   cli('profiles', 'use', 'verification');
   shim(['auth', 'login', '--with-token'], { input: `${token}\n` });
@@ -117,14 +132,32 @@ try {
   shim(['auth', 'login'], { env: { ...env, RELAY_AGENT_TOKEN: token } });
   run(process.execPath, [join(root, 'scripts/agent-cli-platforms-config-acl.mjs'), consumer, env.RELAY_CONFIG_PATH, scratch], { cwd: consumer });
   report.authConfigAclProof = 'passed: actual private config and intentionally broad fixture';
-  if (platform() !== 'win32') {
-    run('python3', [join(root, 'scripts/agent-cli-platforms-pty.py'), '--shim', join(consumer, 'node_modules/.bin/relaymessenger'), '--origin', env.RELAY_API_URL, '--scratch', scratch, '--receipt', join(receipts, 'pty.json')]);
-    report.interactivePty = 'passed: real hidden prompt, no echo, cancellation restores terminal';
-  } else report.interactivePty = 'not exercised on Windows; .cmd stdin proof is separate';
-  if (process.env.RELAY_TMUX_PROOF === '1') {
-    run('python3', [join(root, 'scripts/agent-cli-platforms-tmux.py'), '--shim', join(consumer, 'node_modules/.bin/relaymessenger'), '--origin', env.RELAY_API_URL, '--workspace', root, '--receipt', join(receipts, 'tmux.json')]);
-    report.tmux = 'owned native server: hidden auth, cancellation, stdin, detach/reattach, post-reattach runtime event/reply';
+  // A successful interactive `auth login` opens the saved agent's live view,
+  // which starts its watch-only WebSocket (agent-session.ts, terminal-session.ts).
+  // The PTY presses `q` as soon as the view draws, so whether that upgrade
+  // reaches the server first is a timing race: staging 6941c38f's macos-15 run
+  // logged GET /v1/websocket on the token-import fixture and failed "Token
+  // import must never bootstrap". The interactive logins get their own fixture,
+  // so the token-import log holds only the token-import commands above and below.
+  if (platform() !== 'win32' || process.env.RELAY_TMUX_PROOF === '1') {
+    const interactiveFixture = await startFixture('interactive');
+    interactiveServer = interactiveFixture.server;
+    if (platform() !== 'win32') {
+      run('python3', [join(root, 'scripts/agent-cli-platforms-pty.py'), '--shim', join(consumer, 'node_modules/.bin/relaymessenger'), '--origin', interactiveFixture.origin, '--scratch', scratch, '--receipt', join(receipts, 'pty.json')]);
+      report.interactivePty = 'passed: real hidden prompt, no echo, cancellation restores terminal';
+    }
+    if (process.env.RELAY_TMUX_PROOF === '1') {
+      run('python3', [join(root, 'scripts/agent-cli-platforms-tmux.py'), '--shim', join(consumer, 'node_modules/.bin/relaymessenger'), '--origin', interactiveFixture.origin, '--workspace', root, '--receipt', join(receipts, 'tmux.json')]);
+      report.tmux = 'owned native server: hidden auth, cancellation, stdin, detach/reattach, post-reattach runtime event/reply';
+    }
+    await stopFixture(interactiveServer);
+    report.interactiveHTTP = JSON.parse(readFileSync(interactiveFixture.log));
+    // The hidden login validates the token, then the live view reads the card again
+    // and may open its watch-only socket; nothing else reaches this fixture.
+    assert.ok(report.interactiveHTTP.some(request => request.path === '/v1/contact_card' && request.status === 200), 'Interactive login must validate its token');
+    assert.ok(report.interactiveHTTP.every(request => request.method === 'GET' && ['/v1/contact_card', '/v1/websocket'].includes(request.path)), 'Interactive login may only validate and watch');
   }
+  if (platform() === 'win32') report.interactivePty = 'not exercised on Windows; .cmd stdin proof is separate';
   cli('doctor', '--offline');
   const envStatus = JSON.parse(shim(['auth', 'status'], { env: { ...env, RELAY_AGENT_TOKEN: token } }));
   assert.equal(envStatus.token_source, 'environment');
@@ -170,12 +203,8 @@ try {
 } catch (error) {
   report.result = 'failed'; report.failure = error.message; process.exitCode = 1;
 } finally {
-  if (tokenServer && tokenServer.exitCode === null && tokenServer.signalCode === null) {
-    const exited = new Promise(done => tokenServer.once('exit', done));
-    tokenServer.kill();
-    await Promise.race([exited, new Promise(done => setTimeout(done, 2000))]);
-    if (tokenServer.exitCode === null && tokenServer.signalCode === null) tokenServer.kill('SIGKILL');
-  }
+  await stopFixture(tokenServer);
+  await stopFixture(interactiveServer);
   writeFileSync(join(receipts, 'receipt.json'), JSON.stringify(report, null, 2));
   rmSync(scratch, { recursive: true, force: true });
   // The job log carries the reason, not only the uploaded receipt (agent-cli-platforms-runtime.mjs does the same).

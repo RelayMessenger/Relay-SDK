@@ -720,8 +720,9 @@ Examples:
     .option("--code <code>", "the code from the text message")
     .option("--json", "JSON output")
     .addHelpText("after", `
-Linking is optional; no other command needs it. Once linked, the Relay app
-signs in to this same account with your phone.
+Linking is optional. Once linked, the Relay app signs in to this same
+account with your phone, and tool approvals from your connected agents
+reach you there.
 
 Without a terminal, run it twice: once with --number to get the code, then
 again with --number and --code.
