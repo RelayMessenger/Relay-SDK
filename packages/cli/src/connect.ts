@@ -1,7 +1,7 @@
 import { requireSubtitle } from "./agent-create.js";
 import { existsSync, statSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { basename, extname, join, resolve } from "node:path";
 import { createAgentWithPicture, incompletePictureMessage } from "./agent-create.js";
 import { validateFirstName, validateHandle, type AgentDependencies } from "./agents.js";
 import { savedAgentShareURL } from "./agent-session.js";
@@ -254,7 +254,15 @@ export const agentCommands = (agent: CodingAgentId, context: PlanContext): strin
         ? [["codex", "mcp", "add", MCP_SERVER_NAME, "--url", hostedMcpURL(context.version), "--bearer-token-env-var", AGENT_TOKEN_ENV]]
         : [];
     case "hermes":
-      return [["hermes", "plugins", "install", HERMES_PLUGIN_SOURCE, "--enable"]];
+      // Two steps, because `install --enable` asks before it prepares the
+      // plugin's Python dependencies and, with no terminal, skips them and
+      // leaves the plugin disabled; `enable` prepares them without a prompt
+      // (Relay-Hermes README, "To install the plugin manually instead", PR 41;
+      // _sources/connect-safety-20260926/relay-hermes-README-0f99dec9.md:142-150).
+      return [
+        ["hermes", "plugins", "install", HERMES_PLUGIN_SOURCE, "--no-enable"],
+        ["hermes", "plugins", "enable", "relay-hermes"],
+      ];
     case "openclaw":
       // OpenClaw stops on any npm source that is not ClawHub-reviewed unless
       // told `--force` ("Confirm non-ClawHub sources"), and refuses to enable a
@@ -350,7 +358,7 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
       break;
     case "hermes-plugin":
       steps = [
-        "install the Relay plugin for Hermes, or update it if it is already installed",
+        "install the Relay plugin for Hermes and enable it, or update it if it is already installed",
         write(shown.files[0]!, `token, API address, state folder${context.allow.length ? ", allowed contacts" : ""}; Hermes has one Relay agent per install`),
         ...(context.start ? ["start the Hermes gateway when you are ready:  hermes gateway run"] : []),
       ];
@@ -458,14 +466,6 @@ const readJsonConfig = async (path: string, what: string): Promise<Record<string
   return parsed as Record<string, unknown>;
 };
 
-/** Writes the whole object back, same folder temp then rename, every other key kept. */
-const writeJsonConfig = async (path: string, value: Record<string, unknown>, mode?: number): Promise<void> => {
-  await mkdir(dirname(path), { recursive: true });
-  const temp = join(dirname(path), `.relay-connect-${process.pid}-${Date.now()}.tmp`);
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", ...(mode === undefined ? {} : { mode }) });
-  await rename(temp, path);
-};
-
 const objectAt = (root: Record<string, unknown>, key: string): Record<string, unknown> => {
   const existing = root[key];
   if (existing !== undefined && (existing === null || typeof existing !== "object" || Array.isArray(existing))) {
@@ -510,7 +510,7 @@ export const writeMcpSettingsEntry = async (path: string, mcp: HostedMcp, platfo
 export const writeMcpFileEntry = async (path: string, shape: "vscode", mcp: HostedMcp): Promise<void> => {
   const root = await readJsonConfig(path, MCP_SERVER_NAME);
   objectAt(root, mcpRootKey(shape))[MCP_SERVER_NAME] = vscodeMcpEntry(mcp);
-  await writeJsonConfig(path, root, 0o600);
+  await writePrivateFile(path, "VS Code MCP", `${JSON.stringify(root, null, 2)}\n`);
 };
 
 const runAgentCommands = async (

@@ -15,6 +15,15 @@ import { dirname, join } from "node:path";
  * The write goes through an exclusive temporary file in the same folder that
  * is made private before any secret byte lands in it, then renamed over the
  * destination, then read back to confirm it is still private.
+ *
+ * A file that is already there is tightened, not refused, when it belongs to
+ * this account and no other account can write it or its folder: other
+ * programs make their own config files readable by everyone (VS Code writes
+ * its `mcp.json` as 0644 on Linux), and those files are this person's own.
+ * Relay refuses, and changes nothing, only when another account owns the file
+ * or can write the file or its folder, because then that account could swap
+ * the file or read the token as it lands. Relay's own config follows the same
+ * rule.
  */
 export const PRIVATE_FILE_MODE = 0o600;
 export const PRIVATE_DIR_MODE = 0o700;
@@ -30,6 +39,9 @@ export interface PrivateDestination {
 const isMissing = (error: unknown): boolean =>
   error instanceof Error && "code" in error && error.code === "ENOENT";
 
+/** Whether this process's account owns a file, by its POSIX owner id. */
+const ownedHere = (uid: number): boolean => typeof process.getuid !== "function" || uid === process.getuid();
+
 /** Shared by preflight and the final write: no secret bytes are changed here. */
 export const preparePrivateDestination = async (
   path: string,
@@ -38,11 +50,17 @@ export const preparePrivateDestination = async (
 ): Promise<PrivateDestination> => {
   const directory = dirname(path);
   const windows = platform === "win32";
+  // Mode bits and owner ids mean something only on a POSIX host; a Windows host
+  // reports 0o666 and 0o777 for everything, even when a test names another platform.
+  const posixBits = !windows && process.platform !== "win32";
   await mkdir(directory, { recursive: true, mode: PRIVATE_DIR_MODE });
   const directoryInfo = await lstat(directory);
   if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()) throw new Error(`The ${what} folder is a link or a file, not a folder. Move it aside and sign in again.`);
   if ((directoryInfo.mode & 0o222) === 0) throw new Error(`You do not have permission to write in the ${what} folder.`);
   await access(directory, constants.W_OK);
+  if (posixBits && (!ownedHere(directoryInfo.uid) || (directoryInfo.mode & 0o022) !== 0)) {
+    throw new Error(`Other accounts on this computer can write in the ${what} folder. Limit it to your account; Relay changed nothing.`);
+  }
   if (!windows) await chmod(directory, PRIVATE_DIR_MODE);
   else if (!privateWindowsAcl(await inspectWindowsAcl(directory), true)) {
     throw new Error(`Other Windows accounts can write in the ${what} folder. Limit it to your account; Relay changed nothing.`);
@@ -51,17 +69,25 @@ export const preparePrivateDestination = async (
   try {
     const existing = await lstat(path);
     if (!existing.isFile() || existing.isSymbolicLink() || existing.nlink !== 1) throw new Error(`The ${what} file must be a regular file, not a link, and it must not be hard-linked from anywhere else.`);
-    if (!windows && (existing.mode & 0o077) !== 0) throw new Error(`Other people on this computer can read the ${what} file. Make it readable by you alone.`);
+    if (posixBits && !ownedHere(existing.uid)) throw new Error(`Another account on this computer owns the ${what} file. Relay changed nothing.`);
+    if (posixBits && (existing.mode & 0o022) !== 0) throw new Error(`Other accounts on this computer can write the ${what} file. Make it writable by you alone; Relay changed nothing.`);
     if ((existing.mode & 0o444) === 0) throw new Error(`You do not have permission to read the ${what} file.`);
     if ((existing.mode & 0o222) === 0) throw new Error(`You do not have permission to write the ${what} file.`);
     // Opening with r+ proves the operating system allows reading and writing,
     // without emptying the file or writing to it.
     const probe = await open(path, "r+"); await probe.close();
     if (windows) {
-      const acl = await inspectWindowsAcl(path);
-      if (!privateWindowsAcl(acl)) throw new Error(`Windows permissions on the ${what} file let other accounts read or write it. Limit it to your account before saving a token.`);
+      let acl = await inspectWindowsAcl(path);
+      if (!privateWindowsAcl(acl)) {
+        // Read by others, but owned here and written by nobody else: tightened
+        // to Relay's protected owner-only descriptor before a token lands.
+        // `metadata` judges write rights alone (windows-acl.ts).
+        if (!privateWindowsAcl(acl, false, true)) throw new Error(`Other Windows accounts own the ${what} file or can write it. Limit it to your account; Relay changed nothing.`);
+        acl = await protectWindowsPath(path, false);
+        if (!privateWindowsAcl(acl)) throw new Error(`Relay could not limit the ${what} file to your Windows account, so it did not save the token. (Descriptor: ${acl.sddl})`);
+      }
       existingACL = acl.sddl;
-    }
+    } else if (posixBits && (existing.mode & 0o077) !== 0) await chmod(path, PRIVATE_FILE_MODE);
   } catch (error) {
     if (!isMissing(error)) throw error;
   }
@@ -125,10 +151,11 @@ export const writePrivateDestination = async (
  * Writes a token-holding file some other program reads (an agent's MCP config),
  * with the same checks and the same writer as Relay's own config: a new file is
  * made owner-only before the token lands in it (POSIX 0o600, or a private
- * Windows ACL that does not inherit the folder's), and an existing file that
- * other accounts can already read, or a folder they can write, is refused with
- * nothing changed. A POSIX mode alone is not enough: Windows ignores it, so a
- * file in a folder that lets Users read would be readable (2026-09-26).
+ * Windows ACL that does not inherit the folder's), an existing file of this
+ * account that others can only read is tightened first, and a file another
+ * account owns or can write, or a folder it can write, is refused with nothing
+ * changed. A POSIX mode alone is not enough: Windows ignores it, so a file in a
+ * folder that lets Users read would be readable (2026-09-26).
  */
 export const writePrivateFile = async (
   path: string,

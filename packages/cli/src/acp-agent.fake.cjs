@@ -88,7 +88,7 @@ const completePrompt = (sessionId, stopReason) => {
 };
 
 const handle = (message) => {
-  record({ in: message.method, params: message.params, argv: process.argv.slice(2) });
+  record({ in: message.method, params: message.params, argv: process.argv.slice(2), tokenEnv: process.env.RELAY_AGENT_TOKEN ?? null });
   const answer = (result) => { write({ id: message.id, result }); };
   if (message.method === "initialize") {
     answer({
