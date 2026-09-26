@@ -184,22 +184,25 @@ export const answerMessages = (
 /**
  * Sends an answer, one message at a time in order. The message that arrived
  * is the key, so a retry after a dropped connection cannot answer the same
- * person twice; each message past the first carries its index. A payment
- * request is created with the card's own key after the words go out; when
- * Relay refuses it (Stripe not connected, Stripe's own 400) the terminal says
- * why and no card is sent.
+ * person twice; each message past the first carries its index. The first
+ * message replies to the one that arrived (`turn.replyTo`), so a caller
+ * waiting on that message gets this answer even while another of its
+ * messages is open. A payment request is created with the card's own key
+ * after the words go out; when Relay refuses it (Stripe not connected,
+ * Stripe's own 400) the terminal says why and no card is sent.
  */
 export const sendAnswer = async (
   client: Pick<Relay, "chats" | "paymentRequests">,
-  turn: Pick<BridgeTurn, "chatId" | "eventId" | "sender">,
+  turn: Pick<BridgeTurn, "chatId" | "eventId" | "sender" | "replyTo">,
   answer: string,
   say: (line: string) => void,
   key: string = replyKey(turn.eventId),
 ): Promise<void> => {
   const { messages, payment } = answerMessages(answer, turn.sender, say);
+  const replyTo = (index: number) => (index === 0 && turn.replyTo ? { reply_to: turn.replyTo } : {});
   for (const [index, parts] of messages.entries()) {
     await client.chats.messages.send(turn.chatId, {
-      message: { parts, idempotency_key: indexedIdempotencyKey(key, index) },
+      message: { parts, idempotency_key: indexedIdempotencyKey(key, index), ...replyTo(index) },
     });
   }
   if (!payment) return;
@@ -213,7 +216,7 @@ export const sendAnswer = async (
     return;
   }
   await client.chats.messages.send(turn.chatId, {
-    message: { parts: [card], idempotency_key: cardKey },
+    message: { parts: [card], idempotency_key: cardKey, ...replyTo(messages.length) },
   });
 };
 

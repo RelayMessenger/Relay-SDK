@@ -180,6 +180,12 @@ export class PiChannel {
     if (!answer) throw new Error("Pi returned no final text answer");
     const messages = answerMessages(answer);
     if (messages[0]?.error) console.error(`Relay: the component block in pi's answer was left as text: ${messages[0].error}.`);
+    // The first Message replies to the one pi answered, as a bot's reply names
+    // the message it answers (Telegram `reply_to_message_id`); Relay's A2A door
+    // gives a caller the reply that names its message. An agent may not reply
+    // to buttons or a selection, and a reply names part 0.
+    const opening = data.parts[0]?.type;
+    const replyTo = opening !== "buttons" && opening !== "selection" ? { reply_to: { message_id: data.id } } : {};
     for (const [index, message] of messages.entries()) {
       const key = `pi-${event.event_id}-${index}`;
       let parts = message.parts;
@@ -192,7 +198,7 @@ export class PiChannel {
           continue;
         }
       }
-      await this.#relay.chats.messages.send(data.chat.id, { message: { parts, idempotency_key: key } });
+      await this.#relay.chats.messages.send(data.chat.id, { message: { parts, idempotency_key: key, ...(index === 0 ? replyTo : {}) } });
     }
   }
 }

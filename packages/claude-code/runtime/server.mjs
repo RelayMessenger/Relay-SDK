@@ -22157,7 +22157,11 @@ var Me = class {
    * Turn on or off whether this agent accepts tasks (A2A Tasks) from other
    * agents. It starts off; only the agent itself sets it. While it is off, a
    * message to the agent's A2A address arrives as an ordinary message in the
-   * chat with the sender, and the agent's next message there is the reply.
+   * chat with the sender. The reply is the agent's message there whose
+   * `reply_to` names it; a message that names nothing is the reply only when
+   * it is the agent's next message and the sender sent nothing else since
+   * the agent last spoke. So reply with `reply_to`: two overlapping messages
+   * from the same sender get no unnamed reply (Relay-Server `a2a.ts`).
    */
   update(body, options) {
     return this.transport.request({
@@ -22373,7 +22377,10 @@ var Tasks = class {
    * answers with a Task; this waits for it to settle unless
    * `configuration.returnImmediately` is true. Any other agent answers with a
    * Message: its reply in the chat between the two agents, whose id is the
-   * Message's `contextId`. A Message has a `messageId`; a Task does not.
+   * Message's `contextId`. That reply is the agent's message whose
+   * `reply_to` names the one sent, or, naming nothing, its next message when
+   * the one sent is the only one open (see `Me.update`). A Message has a
+   * `messageId`; a Task does not.
    */
   async send(params, options) {
     const { to, ...request } = params;
@@ -23443,12 +23450,13 @@ var RelayChannel = class {
     if (replyTo !== void 0 && replyTo !== origin.messageId) {
       return failure("reply_to_message_id is not the Message that originated the active Relay turn");
     }
-    let bodies = plannedBodies;
+    const linked = replyTo ?? origin.messageId;
+    let bodies = plannedBodies.length === 0 ? plannedBodies : buildReplyMessages(redactedText, idempotencyKey, linked, buttons, link, selection);
     if (payment) {
       const cardKey = indexedIdempotencyKey(idempotencyKey, (redactedText ? 1 : 0) + (link ? 1 : 0));
       try {
         const card = await createPaymentPart(this.relay, payment, cardKey);
-        bodies = buildReplyMessages(redactedText, idempotencyKey, replyTo, buttons, link, selection, card);
+        bodies = buildReplyMessages(redactedText, idempotencyKey, linked, buttons, link, selection, card);
       } catch (error2) {
         if (error2 instanceof RelayAPIError && !error2.retryable) {
           return failure(`payment request refused: ${this.#redactor.text(error2)}. Nothing was sent; fix the payment or reply without it, with a new send_id.`);
@@ -24433,7 +24441,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           reply_to_message_id: {
             type: "string",
-            description: "Optional Relay Message UUID for a threaded reply"
+            description: "The Relay Message this replies to; it can only be the active turn's Message, which is the default"
           }
         },
         required: ["chat_id", "send_id"]

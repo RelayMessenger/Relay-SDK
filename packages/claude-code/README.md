@@ -189,13 +189,15 @@ Sends plain text through `chats.messages.send` with:
 - `text` of at most 10,000 UTF-16 code units;
 - a caller-selected stable `send_id`;
 - optional `buttons`, `link`, `selection`, or `payment`; and
-- optional `reply_to_message_id`.
+- optional `reply_to_message_id`, which defaults to the active turn's Message.
 
 The mapping from `send_id` to request hash and Relay idempotency key is persisted
 before the REST request. An unknown-outcome retry must reuse the same arguments
 and `send_id`; changed content is refused. A deliberate second Message uses a
 new `send_id`. The tool refuses a Chat other than the authenticated origin of
-the active turn, and any `reply_to_message_id` must be that turn's Message. A
+the active turn, and any `reply_to_message_id` must be that turn's Message.
+The reply names that Message whether or not the model passes it, so a caller
+waiting on Relay's A2A door gets the answer to its own message. A
 confirmed send completes and clears the turn automatically. A byte-identical
 retry of an already-confirmed `send_id` remains an idempotent success without
 reopening its turn.

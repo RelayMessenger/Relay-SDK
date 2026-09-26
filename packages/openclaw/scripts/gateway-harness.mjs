@@ -371,6 +371,12 @@ try {
       throw new Error(`missing gateway proof "${proof}"\n${mockOutput}`);
     }
   }
+  // The answer replies to the message it answers, as a bot's reply names the
+  // message it answers (Telegram reply_to_message_id): Relay's A2A door gives
+  // a caller only the reply that names its message.
+  if (!mockOutput.includes("Message send count=1 key=") || !/Message send count=1 key=\S+ replayed=false reply_to=00000000-0000-7000-8000-000000000012\b/u.test(mockOutput)) {
+    throw new Error(`the answer does not reply to the message it answers\n${mockOutput}`);
+  }
   if (
     mockOutput.includes("completion request count=2") ||
     mockOutput.includes("Message send count=2")
@@ -383,6 +389,7 @@ try {
     }
   }
 
+  console.log(mockOutput.split("\n").filter((line) => line.includes("Message send")).join("\n"));
   console.log(
     `Relay OpenClaw installed npm-pack inspect + WebSocket gateway harness passed (${candidate ? "local candidate; NOT registry/release validation" : "registry dependencies"}).`,
   );

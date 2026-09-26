@@ -433,10 +433,13 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     await mcp.take((message) => message.id === 3, "reply response");
     expect(relay.sends).toHaveLength(1);
     expect(relay.sends[0]?.key).toMatch(/^claude-reply-[a-f0-9]{64}$/u);
+    // The model named no Message; the reply still names the turn's own, so a
+    // caller waiting on Relay's A2A door gets it.
     expect(relay.sends[0]?.body).toEqual({
       message: {
         parts: [{ type: "text", value: "done" }],
         idempotency_key: relay.sends[0]?.key,
+        reply_to: { message_id: MESSAGE_ID },
       },
     });
     replyCall(4);
@@ -556,6 +559,7 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     expect(relay.sends[0]?.body).toEqual({ message: {
       parts: [{ type: "text", value: "Next?" }, { type: "selection", ...selection }],
       idempotency_key: relay.sends[0]?.key,
+      reply_to: { message_id: MESSAGE_ID },
     } });
     mcp.send({
       jsonrpc: "2.0",

@@ -221,7 +221,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           reply_to_message_id: {
             type: "string",
-            description: "Optional Relay Message UUID for a threaded reply",
+            description: "The Relay Message this replies to; it can only be the active turn's Message, which is the default",
           },
         },
         required: ["chat_id", "send_id"],

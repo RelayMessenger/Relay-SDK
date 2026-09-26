@@ -99,7 +99,7 @@ const received = (eventId: string, chatId: string, text: string, sender = "alice
   api_version: "v1", webhook_version: "2026-08-30", event_type: "message.received",
   event_id: eventId, created_at: "2026-09-11T00:00:00.000Z", trace_id: "trace", agent_id: "agent",
   data: {
-    chat: { id: chatId }, id: "message", direction: "inbound",
+    chat: { id: chatId }, id: `message-${eventId}`, direction: "inbound",
     sender_handle: { id: "sender", handle: sender, kind: "user" },
     parts: [{ type: "text", value: text, reactions: null }],
   },
@@ -323,7 +323,22 @@ describe("which messages the bridge answers", () => {
   it("answers an inbound message that has text", () => {
     expect(bridgeTurn(received("event-1", "chat-1", "Hey, what's up"))).toEqual({
       eventId: "event-1", chatId: "chat-1", sender: "alice", text: "Hey, what's up", media: [],
+      replyTo: { message_id: "message-event-1" },
     });
+  });
+
+  it.each([["buttons"], ["selection"]])("answers a message that opens with %s without replying to it, since an agent may not", (type) => {
+    const event = received("event-1", "chat-1", "Pick one");
+    if (event.event_type !== "message.received") throw new Error("fixture");
+    event.data.parts = [
+      type === "buttons"
+        ? { type: "buttons", items: [{ label: "Yes" }] }
+        : { type: "selection", title: "Pick", options: [{ value: "a", label: "A" }] },
+      { type: "text", value: "Pick one", reactions: null },
+    ] as never;
+    const turn = bridgeTurn(event);
+    expect(turn?.text).toBe("Pick one");
+    expect(turn?.replyTo).toBeUndefined();
   });
 
   it.each([
@@ -344,6 +359,7 @@ describe("what the bridge sends back", () => {
       text: "Not much. Your README says this is a test project.",
       key: "codex-bridge-event-1",
       parts: [{ type: "text", value: "Not much. Your README says this is a test project." }],
+      replyTo: { message_id: "message-event-1" },
     }]);
     expect(relay.typing).toEqual(["start chat-1", "stop chat-1"]);
     expect(said).toEqual(["@alice  Hey, what's up", "Sent the answer to @alice."]);
@@ -511,6 +527,7 @@ it("teaches the payment block and sends a payment answer as the words, then the 
   ]);
   // The bridge created the request once, on the card's own key, from the block's fields.
   expect(result.relay.created).toEqual([{ body: { description: "House blend, 250 g", category: "physical_goods", amount: 2400, currency: "usd" }, key: "codex-bridge-pay-1" }]);
-  // The reply_to that came in is context for Codex, not a quote on the answer.
-  expect(result.relay.sent.map((message) => message.replyTo)).toEqual([undefined, undefined]);
+  // The answer replies to the message that came in, never to the reply_to
+  // that came with it (context for Codex), and only its first message does.
+  expect(result.relay.sent.map((message) => message.replyTo)).toEqual([{ message_id: "message-pay" }, undefined]);
 });
