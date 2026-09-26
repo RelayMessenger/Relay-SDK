@@ -259,6 +259,7 @@ async def test_send_a2ui_surface_posts_the_data_part(server: _Server) -> None:
     method, path, headers, body = server.seen[0]
     assert (method, path) == ("POST", "/v1/chats/chat%2F1/messages")
     assert headers["authorization"] == "Bearer tok"
+    assert headers["user-agent"].startswith("relaymessenger-python/")
     assert headers["content-type"] == "application/json"
     assert "idempotency-key" not in headers
     parts = body["message"]["parts"]

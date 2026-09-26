@@ -14,10 +14,20 @@ import asyncio
 import json
 import urllib.error
 import urllib.request
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Dict, List, Mapping, Optional, Tuple, TypedDict, cast
 from urllib.parse import quote
 
 from .a2ui import A2uiFailure
+
+try:
+    _VERSION = version("relaymessenger")
+except PackageNotFoundError:
+    _VERSION = "0"
+
+# Relay's API sits behind Cloudflare, which refuses urllib's default
+# "Python-urllib/x.y" User-Agent with 403 error 1010; name the SDK instead.
+USER_AGENT = f"relaymessenger-python/{_VERSION}"
 
 DEFAULT_BASE_URL = "https://api.relayapp.im"
 
@@ -89,7 +99,7 @@ class _Transport:
     async def request(
         self, method: str, path: str, body: Any = None, *, idempotency_key: Optional[str] = None
     ) -> Any:
-        headers = {"authorization": f"Bearer {self._api_key}", "accept": "application/json"}
+        headers = {"authorization": f"Bearer {self._api_key}", "accept": "application/json", "user-agent": USER_AGENT}
         data: Optional[bytes] = None
         if body is not None:
             headers["content-type"] = "application/json"
