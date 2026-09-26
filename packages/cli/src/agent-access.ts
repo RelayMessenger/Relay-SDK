@@ -10,8 +10,11 @@ import { CliError } from "./error-codes.js";
  * agents_can_message; GET, PUT and DELETE /orgs/:orgId/agents/:id/access).
  * Relay Server decides every chat (relationships.ts agentReach): people in
  * the agent's organization and its organization's agents always get through,
- * then Never Allow, then Always Allow, then the two settings. There is no
- * "private" mode: private is people off, agents nobody, plus Always Allow.
+ * then Never Allow, then Always Allow, then the two settings. Private and
+ * Open are names for two combinations of those settings, not a server mode:
+ * the words follow `gh repo edit --visibility private` and the Console's
+ * default ("open, like a Discord or Telegram bot"); "public" already means
+ * listed in the directory (Relay Server's AgentVisibility).
  */
 
 /** Relay Server's values for "Other agents" (migration 0090, AGENTS_CAN_MESSAGE). */
@@ -69,12 +72,33 @@ const findAgent = async (request: ConsoleRequest, handle: string): Promise<{ pat
   return { path: `/orgs/${encodeURIComponent(me.org.id)}/agents/${encodeURIComponent(agent.id)}` };
 };
 
-const reach = (detail: ConsoleAgentDetail) => ({
-  handle: detail.handle,
+/** The two settings each named combination sets. */
+export const REACH_PRESETS = {
+  private: { people: false, agents: "nobody" },
+  open: { people: true, agents: "everyone" },
+} as const satisfies Record<string, { people: boolean; agents: AgentsCanMessage }>;
+export type ReachPreset = keyof typeof REACH_PRESETS;
+const PRESET_LABEL: Record<ReachPreset, "Private" | "Open"> = { private: "Private", open: "Open" };
+
+/** "Private" or "Open" when the two settings are exactly that combination; otherwise nothing. */
+export const reachLabel = (people: boolean, agents: AgentsCanMessage): "Private" | "Open" | undefined => {
+  const match = (Object.keys(REACH_PRESETS) as ReachPreset[])
+    .find((name) => REACH_PRESETS[name].people === people && REACH_PRESETS[name].agents === agents);
+  return match === undefined ? undefined : PRESET_LABEL[match];
+};
+
+const reach = (detail: ConsoleAgentDetail) => {
   // Relay Server's defaults when a row predates 0090: open, like a Discord or Telegram bot.
-  people_can_message: detail.people_can_message ?? true,
-  agents_can_message: detail.agents_can_message ?? "everyone",
-});
+  const people = detail.people_can_message ?? true;
+  const agents = detail.agents_can_message ?? "everyone";
+  const label = reachLabel(people, agents);
+  return {
+    handle: detail.handle,
+    ...(label === undefined ? {} : { available_to: label }),
+    people_can_message: people,
+    agents_can_message: agents,
+  };
+};
 
 /** "Available to" and both lists, the way the agent's Console page shows them. */
 export async function showAccess(request: ConsoleRequest, handle: string) {
@@ -106,6 +130,11 @@ export async function updateReach(
     }),
   });
   return reach(saved);
+}
+
+/** Sets both settings to a named combination, through the same route as `updateReach`. */
+export async function setReachPreset(request: ConsoleRequest, handle: string, preset: ReachPreset) {
+  return updateReach(request, handle, REACH_PRESETS[preset]);
 }
 
 /** Relay Server's refusal about the handle, with its own code and sentence. */

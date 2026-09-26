@@ -91,7 +91,7 @@ it("shows Available to and both lists for an organization's agent, with the Cons
   const shown = await f.run("agents", "access", "show", "weather");
   expect(shown.code).toBe(0);
   expect(shown.out).toEqual({
-    handle: "weather", people_can_message: true, agents_can_message: "everyone",
+    handle: "weather", available_to: "Open", people_can_message: true, agents_can_message: "everyone",
     allow: [{ handle: "alice", display_name: "ALICE", kind: "user" }],
     deny: [{ handle: "outside_bot", display_name: "OUTSIDE_BOT", kind: "agent" }],
   });
@@ -112,6 +112,65 @@ it("makes an agent private with the two existing settings, sending only what was
   await f.run("agents", "access", "update", "weather", "--people", "on");
   expect(f.calls.at(-1)?.body).toEqual({ people_can_message: true });
   expect(f.agent).toMatchObject({ people_can_message: true, agents_can_message: "communities" });
+});
+
+it("private turns people off and other agents to nobody, through the same Console route update uses", async () => {
+  const f = await fixture();
+  f.rules.set("alice", "allow");
+  const made = await f.run("agents", "access", "private", "@Weather");
+  expect(made).toEqual({ code: 0, err: undefined, out: { handle: "weather", available_to: "Private", people_can_message: false, agents_can_message: "nobody" } });
+  expect(f.calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+    "GET /me", "GET /orgs/org_a/agents", "PATCH /orgs/org_a/agents/agent-uuid",
+  ]);
+  expect(f.calls.at(-1)?.body).toEqual({ people_can_message: false, agents_can_message: "nobody" });
+  // Always Allow is untouched: private keeps the handles the owner chose.
+  expect(f.rules.get("alice")).toBe("allow");
+  expect((await f.run("agents", "access", "show", "weather")).out).toMatchObject({
+    available_to: "Private", people_can_message: false, agents_can_message: "nobody",
+    allow: [{ handle: "alice" }],
+  });
+});
+
+it("open turns people on and other agents to everyone, the default", async () => {
+  const f = await fixture();
+  f.agent.people_can_message = false;
+  f.agent.agents_can_message = "nobody";
+  const opened = await f.run("agents", "access", "open", "weather");
+  expect(opened.out).toEqual({ handle: "weather", available_to: "Open", people_can_message: true, agents_can_message: "everyone" });
+  expect(f.calls.at(-1)).toMatchObject({ method: "PATCH", path: "/orgs/org_a/agents/agent-uuid", body: { people_can_message: true, agents_can_message: "everyone" } });
+  expect(f.agent).toMatchObject({ people_can_message: true, agents_can_message: "everyone" });
+});
+
+it.each([
+  [false, "everyone"],
+  [true, "nobody"],
+  [true, "communities"],
+  [false, "communities"],
+] as const)("show names neither Private nor Open for people %s and agents %s, and prints the two settings", async (people, agents) => {
+  const f = await fixture();
+  f.agent.people_can_message = people;
+  f.agent.agents_can_message = agents;
+  const shown = await f.run("agents", "access", "show", "weather");
+  expect(shown.out).toEqual({ handle: "weather", people_can_message: people, agents_can_message: agents, allow: [], deny: [] });
+  expect(shown.out).not.toHaveProperty("available_to");
+});
+
+it("help names private and open, keeps the organization line, and no longer says there is no private mode", async () => {
+  const out: string[] = [];
+  const home = await mkdtemp(join(tmpdir(), "relay-access-help-"));
+  homes.push(home);
+  for (const args of [["agents", "access", "--help"], ["agents", "access", "private", "--help"], ["agents", "access", "open", "--help"]]) {
+    out.length = 0;
+    await runCLI(args, {
+      configContext: { env: { RELAY_CONFIG_PATH: join(home, "config.json") }, cwd: home },
+      fetch: vi.fn(), isInteractive: false, stdout: (value) => out.push(value), stderr: (value) => out.push(value),
+    });
+    const help = out.join("");
+    expect(help).toContain("People in your organization can always message the agent");
+    expect(help).toContain("relay agents access private weather");
+    expect(help).toContain("relay agents access open weather");
+    expect(help).not.toMatch(/no private mode/iu);
+  }
 });
 
 it.each([
