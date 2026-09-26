@@ -16,6 +16,8 @@
  *   answers     what to answer, in order; each entry is a list of agent
  *               messages `{text, phase}`, or an empty list for no answer
  *   turnMs      how long a turn takes before it completes
+ *   turnError   when set, every turn ends `failed` with this error message,
+ *               the way the real one ends a turn its model refused (401)
  *   threadError the error `thread/start` answers with, when set, the way the
  *               real one refuses a config it cannot load
  *   resumable   the thread ids `thread/resume` accepts; anything else is an
@@ -62,7 +64,7 @@ const completeTurn = (turnId, status) => {
   if (!turn) return;
   turns.delete(turnId);
   clearTimeout(turn.timer);
-  if (status === "completed") {
+  if (status === "completed" && !settings.turnError) {
     for (const message of turn.answers) {
       notify("item/agentMessage/delta", {
         threadId: turn.threadId, turnId, itemId: `${turnId}-item`, delta: message.text,
@@ -80,7 +82,11 @@ const completeTurn = (turnId, status) => {
       });
     }
   }
-  notify("turn/completed", { threadId: turn.threadId, turn: { id: turnId, status } });
+  const failed = status === "completed" && settings.turnError;
+  notify("turn/completed", {
+    threadId: turn.threadId,
+    turn: { id: turnId, status: failed ? "failed" : status, ...(failed ? { error: { message: settings.turnError } } : {}) },
+  });
 };
 
 const handle = (message) => {

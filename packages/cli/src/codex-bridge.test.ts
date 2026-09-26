@@ -52,6 +52,7 @@ interface FakeLine {
 const fakeAppServer = async (settings: {
   answers?: FakeAnswer[][];
   threadError?: string;
+  turnError?: string;
   turnMs?: number;
   resumable?: string[];
 } = {}): Promise<{ codex: CodexCommand; cwd: string; log(): Promise<FakeLine[]> }> => {
@@ -205,6 +206,13 @@ describe("the app-server the bridge starts", () => {
     const { said, relay } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "Hey")] });
     expect(relay.sent).toEqual([]);
     expect(said).toContain("Codex could not answer @alice: failed to load configuration: url is not supported for stdio in `mcp_servers.relay`. Nothing was sent.");
+  });
+
+  it("names a turn Codex ended as failed instead of saying it gave no answer", async () => {
+    const codex = await fakeAppServer({ turnError: "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header" });
+    const { said, relay } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "Hey")] });
+    expect(relay.sent).toEqual([]);
+    expect(said).toContain("Codex could not answer @alice: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header. Nothing was sent.");
   });
 
   it("hands app-server the Agent Token in RELAY_AGENT_TOKEN, where the folder's config reads it", async () => {

@@ -346,6 +346,8 @@ export interface TurnOutcome {
   /** `completed`, `interrupted`, `failed` or `inProgress`. */
   status: string;
   answer: string;
+  /** Why a `failed` turn failed (`Turn.error.message`, v2/TurnCompletedNotification.json). */
+  error?: string;
 }
 
 /**
@@ -402,9 +404,11 @@ export const runTurn = async (
     }
     if (note.method === "turn/completed") {
       const turn = asRecord(note.params.turn);
+      const error = asRecord(turn.error).message;
       settle({
         status: typeof turn.status === "string" ? turn.status : "",
         answer: answers.at(-1) ?? deltas.join(""),
+        ...(typeof error === "string" && error.trim() ? { error: error.trim() } : {}),
       });
     }
   };
@@ -575,6 +579,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
     }
     // A thread or turn Codex refused is named, so the person sees why: a
     // config Codex cannot load reads "failed to load configuration: ...".
+    if (outcome?.status === "failed" && !outcome.answer.trim()) failure ??= new Error(outcome.error ?? "the turn failed");
     if (failure !== undefined && !input.signal.aborted) {
       await stopTyping();
       const why = (failure instanceof Error ? failure.message : String(failure)).trim().replace(/\s+/gu, " ");
