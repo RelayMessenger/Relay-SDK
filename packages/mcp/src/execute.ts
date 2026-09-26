@@ -16,7 +16,26 @@ const defaults: ExecutionLimits = { timeoutMs: 30_000, memoryBytes: 64 * 1024 * 
  * it here; it is loaded with quickjs-emscripten's newVariant over the same
  * RELEASE_SYNC variant getQuickJS() uses.
  */
-export interface ExecutionRuntime { quickjsWasmModule?: WebAssembly.Module }
+/**
+ * A sandbox that runs submitted code somewhere other than QuickJS. The shape is
+ * Cloudflare Code Mode's `Executor` (@cloudflare/codemode, "Executor API"), so
+ * a Workers host passes Code Mode's own `DynamicWorkerExecutor`, which runs the
+ * code in a Dynamic Worker (Worker Loader) with outbound network blocked
+ * (`globalOutbound: null`). The code reaches Relay only through the `relay`
+ * provider below: its functions run on the host, where the SDK client, method
+ * allow-list, output limits, and secret withholding live.
+ */
+export interface CodeExecutor {
+  execute(
+    code: string,
+    providers: Array<{ name: string; fns: Record<string, (...args: unknown[]) => Promise<unknown>>; prelude?: string }>,
+  ): Promise<{ result: unknown; error?: string; logs?: string[] }>;
+}
+export interface ExecutionRuntime {
+  quickjsWasmModule?: WebAssembly.Module;
+  /** Runs execute in this sandbox instead of QuickJS (see CodeExecutor). */
+  executor?: CodeExecutor;
+}
 const loadedModules = new WeakMap<WebAssembly.Module, Promise<QuickJSWASMModule>>();
 const loadQuickJS = (runtime: ExecutionRuntime): Promise<QuickJSWASMModule> => {
   const wasmModule = runtime.quickjsWasmModule;
@@ -28,25 +47,51 @@ const loadQuickJS = (runtime: ExecutionRuntime): Promise<QuickJSWASMModule> => {
   }
   return loaded;
 };
+/**
+ * The sandbox half of the SDK bridge, as source: given `call(method, argsJson)`
+ * (a promise of the host's JSON envelope) and `log(level, ...values)`, it
+ * builds the frozen `client` the submitted `run(client)` receives and routes
+ * console output to `log`. Both sandboxes (QuickJS, a CodeExecutor) run it.
+ */
+const relayRuntime = (client: Relay): string => `((call, log) => {
+        const hydrate = envelope => {
+          const value = envelope.value;
+          if (envelope.page !== undefined && value !== null) {
+            Object.defineProperties(value, {
+              hasNextPage: { value: () => value.nextCursor !== null },
+              getNextPage: { value: () => invoke('__pageNext', [envelope.page]) },
+              [Symbol.asyncIterator]: { value: async function* () {
+                let page = value;
+                while (page) { yield* page.data; page = await page.getNextPage(); }
+              } },
+            });
+          }
+          return value;
+        };
+        const invoke = (method, args) => call(method, JSON.stringify(args)).then(text => hydrate(JSON.parse(text)));
+        const client = Object.create(null);
+        for (const method of ${JSON.stringify([...methods.keys()])}) {
+          const parts = method.split('.'); let target = client;
+          for (const part of parts.slice(0, -1)) target = target[part] ??= Object.create(null);
+          target[parts[parts.length - 1]] = (...args) => invoke(method, args);
+        }
+        client.baseURL = ${JSON.stringify(client.baseURL ?? null)};
+        const freeze = value => { for (const key of Object.keys(value)) if (value[key] && typeof value[key] === 'object') freeze(value[key]); return Object.freeze(value); };
+        Object.defineProperty(globalThis, '__relayClient', { value: freeze(client) });
+        Object.defineProperty(globalThis, 'console', { value: Object.freeze(Object.fromEntries(['log','info','warn','error','debug'].map(level => [level, (...values) => log(level, ...values)]))) });
+})`;
 const methods = new Map(METHOD_DOCS.filter(row => row.executable).map(row => [row.method.slice("client.".length), row]));
 
-export async function executeCode(code: string, client: Relay, secrets: readonly string[], overrides: Partial<ExecutionLimits> = {}, runtimeOptions: ExecutionRuntime = {}): Promise<{ result: unknown; logs: Array<{ level: string; text: string }> }> {
-  const limits = { ...defaults, ...overrides };
-  const javascript = compile(code);
-  const QuickJS = await loadQuickJS(runtimeOptions);
-  const runtime = QuickJS.newRuntime();
-  runtime.setMemoryLimit(limits.memoryBytes);
-  runtime.setMaxStackSize(512 * 1024);
-  const deadline = Date.now() + limits.timeoutMs;
-  const abort = new AbortController();
-  runtime.setInterruptHandler(() => Date.now() >= deadline || abort.signal.aborted);
-  const vm = runtime.newContext();
-  const promises: QuickJSDeferredPromise[] = [];
+/**
+ * The host half of the SDK bridge, shared by both sandboxes: the method
+ * allow-list, the SDK call, the page registry, output limits, and secret
+ * withholding. Nothing here runs inside the sandbox.
+ */
+const hostBridge = (client: Relay, secrets: readonly string[], limits: ExecutionLimits) => {
   const pages = new Map<number, RelayPage<unknown>>();
   const logs: Array<{ level: string; text: string }> = [];
+  const abort = new AbortController();
   let outputBytes = 0;
-  let disposed = false;
-  let promiseHandle: QuickJSHandle | undefined;
   let outputError: Error | undefined;
   const limited = (text: string): string => {
     outputBytes += Buffer.byteLength(text);
@@ -83,6 +128,103 @@ export async function executeCode(code: string, client: Relay, secrets: readonly
     args[doc.optionsIndex] = { ...(options as Record<string, unknown> | undefined), signal: abort.signal };
     return Reflect.apply(fn, target, args);
   }
+  const log = (level: string, text: string): void => {
+    logs.push({ level, text: limited(redact(text, secrets)) });
+  };
+  const result = (text: string): unknown => JSON.parse(limited(redact(text, secrets)));
+  return { call, encode, limited, log, logs, result, abort, outputError: () => outputError };
+};
+
+/** The code a CodeExecutor runs: the submitted program, then run(client). */
+const executorProgram = (javascript: string): string => `async () => {
+${javascript}
+if (typeof run !== 'function') throw new Error('Define a top-level async function run(client).');
+const __result = await run(globalThis.__relayClient);
+await Promise.all(globalThis.__relayPendingLogs);
+return JSON.stringify(__result ?? null);
+}`;
+
+/**
+ * Its prelude: the same runtime QuickJS gets, wired to the `relay` provider.
+ * An error envelope from the host becomes an Error with the SDK's `status`, as
+ * in QuickJS. Log lines are sent as they happen and awaited before the result.
+ */
+const executorPrelude = (client: Relay): string => `
+Object.defineProperty(globalThis, '__relayPendingLogs', { value: [] });
+(${relayRuntime(client)})(
+  async (method, argsJson) => {
+    const text = await relay.call(method, argsJson);
+    const envelope = JSON.parse(text);
+    if (envelope.error) {
+      const error = new Error(envelope.error.message);
+      if (typeof envelope.error.status === 'number') error.status = envelope.error.status;
+      throw error;
+    }
+    return text;
+  },
+  (level, ...values) => {
+    globalThis.__relayPendingLogs.push(relay.log(level, values.map(value => typeof value === 'string' ? value : JSON.stringify(value)).join(' ')));
+  },
+);`;
+
+const executeInExecutor = async (
+  executor: CodeExecutor,
+  javascript: string,
+  client: Relay,
+  secrets: readonly string[],
+  limits: ExecutionLimits,
+): Promise<{ result: unknown; logs: Array<{ level: string; text: string }> }> => {
+  const host = hostBridge(client, secrets, limits);
+  // Both arguments arrive from the sandbox, so both are checked here.
+  const relay = {
+    call: async (method: unknown, argsJson: unknown): Promise<string> => {
+      try {
+        if (typeof method !== "string" || typeof argsJson !== "string") throw new Error("SDK calls take a method name and JSON arguments.");
+        const args: unknown = JSON.parse(host.limited(argsJson));
+        if (!Array.isArray(args)) throw new Error("SDK arguments must be a JSON array.");
+        return host.encode(await host.call(method, args));
+      } catch (error) {
+        const status = error && typeof error === "object" && "status" in error && typeof error.status === "number" ? error.status : undefined;
+        return JSON.stringify({ error: { message: safeErrorMessage(error, secrets), ...(status === undefined ? {} : { status }) } });
+      }
+    },
+    log: async (level: unknown, text: unknown): Promise<void> => { host.log(String(level), String(text)); },
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const outcome = await Promise.race([
+      executor.execute(executorProgram(javascript), [{ name: "relay", fns: relay, prelude: executorPrelude(client) }]),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Execution timed out.")), limits.timeoutMs); }),
+    ]);
+    const outputError = host.outputError();
+    if (outputError) throw outputError;
+    if (outcome.error !== undefined) throw new Error(outcome.error);
+    if (typeof outcome.result !== "string") throw new Error("Execution returned no result.");
+    return { result: host.result(outcome.result), logs: host.logs };
+  } finally {
+    clearTimeout(timer);
+    host.abort.abort(new Error("Execution ended."));
+  }
+};
+
+export async function executeCode(code: string, client: Relay, secrets: readonly string[], overrides: Partial<ExecutionLimits> = {}, runtimeOptions: ExecutionRuntime = {}): Promise<{ result: unknown; logs: Array<{ level: string; text: string }> }> {
+  const limits = { ...defaults, ...overrides };
+  const javascript = compile(code);
+  if (runtimeOptions.executor) return executeInExecutor(runtimeOptions.executor, javascript, client, secrets, limits);
+  const QuickJS = await loadQuickJS(runtimeOptions);
+  const runtime = QuickJS.newRuntime();
+  runtime.setMemoryLimit(limits.memoryBytes);
+  runtime.setMaxStackSize(512 * 1024);
+  const deadline = Date.now() + limits.timeoutMs;
+  const host = hostBridge(client, secrets, limits);
+  const { abort, limited, logs } = host;
+  runtime.setInterruptHandler(() => Date.now() >= deadline || abort.signal.aborted);
+  const vm = runtime.newContext();
+  const promises: QuickJSDeferredPromise[] = [];
+  let disposed = false;
+  let promiseHandle: QuickJSHandle | undefined;
+  const call = host.call;
+  const encode = host.encode;
   const bridge = vm.newFunction("relaySdkCall", (methodHandle, argsHandle) => {
     const method = vm.getString(methodHandle);
     const args: unknown = JSON.parse(limited(vm.getString(argsHandle)));
@@ -114,33 +256,7 @@ export async function executeCode(code: string, client: Relay, secrets: readonly
   vm.setProp(vm.global, "__relayLog", logger); logger.dispose();
   try {
     vm.unwrapResult(vm.evalCode(`
-      ((call, log) => {
-        const hydrate = envelope => {
-          const value = envelope.value;
-          if (envelope.page !== undefined && value !== null) {
-            Object.defineProperties(value, {
-              hasNextPage: { value: () => value.nextCursor !== null },
-              getNextPage: { value: () => invoke('__pageNext', [envelope.page]) },
-              [Symbol.asyncIterator]: { value: async function* () {
-                let page = value;
-                while (page) { yield* page.data; page = await page.getNextPage(); }
-              } },
-            });
-          }
-          return value;
-        };
-        const invoke = (method, args) => call(method, JSON.stringify(args)).then(text => hydrate(JSON.parse(text)));
-        const client = Object.create(null);
-        for (const method of ${JSON.stringify([...methods.keys()])}) {
-          const parts = method.split('.'); let target = client;
-          for (const part of parts.slice(0, -1)) target = target[part] ??= Object.create(null);
-          target[parts[parts.length - 1]] = (...args) => invoke(method, args);
-        }
-        client.baseURL = ${JSON.stringify(client.baseURL ?? null)};
-        const freeze = value => { for (const key of Object.keys(value)) if (value[key] && typeof value[key] === 'object') freeze(value[key]); return Object.freeze(value); };
-        Object.defineProperty(globalThis, '__relayClient', { value: freeze(client) });
-        Object.defineProperty(globalThis, 'console', { value: Object.freeze(Object.fromEntries(['log','info','warn','error','debug'].map(level => [level, (...values) => log(level, ...values)]))) });
-      })(__relayCall, __relayLog);
+      (${relayRuntime(client)})(__relayCall, __relayLog);
       delete globalThis.__relayCall; delete globalThis.__relayLog;
     `, "relay-runtime.js")).dispose();
     promiseHandle = vm.unwrapResult(vm.evalCode(`(async () => {
@@ -151,6 +267,7 @@ export async function executeCode(code: string, client: Relay, secrets: readonly
     })()`, "relay-execute.js"));
     for (;;) {
       if (Date.now() >= deadline) throw new Error("Execution timed out.");
+      const outputError = host.outputError();
       if (outputError) throw outputError;
       const jobs = runtime.executePendingJobs();
       if (jobs.error) { const error = vm.dump(jobs.error); jobs.error.dispose(); throw new Error(`Execution failed: ${JSON.stringify(error)}`); }

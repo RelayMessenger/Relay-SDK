@@ -111,10 +111,28 @@ import { createRelayMcpServer } from "@relaymessenger/mcp";
 const server = createRelayMcpServer({ resolveClient, executionRuntime: { quickjsWasmModule } });
 ```
 
+To run `execute` in a Dynamic Worker instead, hand it Cloudflare Code Mode's
+executor over a Worker Loader binding (`"worker_loaders": [{ "binding":
+"LOADER" }]`). The code runs with outbound network blocked; its SDK calls reach
+Relay through the host, where the client, its credentials, and the output
+limits stay:
+
+```ts
+import { DynamicWorkerExecutor } from "@cloudflare/codemode";
+import { createRelayMcpServer } from "@relaymessenger/mcp";
+
+const server = createRelayMcpServer({
+  resolveClient,
+  executionRuntime: { executor: new DynamicWorkerExecutor({ loader: env.LOADER }) },
+});
+```
+
+Any object with Code Mode's `Executor` shape works as `executor`.
+
 On Workers, `execute` strips TypeScript with Sucrase and checks for module
 syntax with acorn (the `workerd` condition of the package's `#transpile`
 import). On Node it uses TypeScript, as before. `npm run test:workerd` boots the
-server on workerd and runs one `execute` call.
+server on workerd and runs `execute` in QuickJS and in a Dynamic Worker.
 
 ## Development
 
