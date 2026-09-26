@@ -2,7 +2,7 @@ import Relay, { RelayPage } from "@relaymessenger/sdk";
 import { getQuickJS, type QuickJSDeferredPromise, type QuickJSHandle } from "quickjs-emscripten";
 import ts from "typescript";
 import { METHOD_DOCS } from "./generated-docs.js";
-import { redact, safeErrorMessage } from "./redact.js";
+import { redact, safeErrorMessage, withholdSecretFields } from "./redact.js";
 
 export interface ExecutionLimits { timeoutMs: number; memoryBytes: number; outputBytes: number }
 const defaults: ExecutionLimits = { timeoutMs: 30_000, memoryBytes: 64 * 1024 * 1024, outputBytes: 1024 * 1024 };
@@ -55,7 +55,9 @@ export async function executeCode(code: string, client: Relay, secrets: readonly
   const encode = (value: unknown): string => {
     const page = value instanceof RelayPage ? pages.size + 1 : undefined;
     if (page !== undefined) pages.set(page, value as RelayPage<unknown>);
-    return limited(redact(JSON.stringify({ value: value ?? null, ...(page === undefined ? {} : { page }) }), secrets));
+    // Secret fields are withheld on the host, before a value enters the
+    // sandbox, so neither submitted code nor its result or logs can see them.
+    return limited(redact(JSON.stringify({ value: value ?? null, ...(page === undefined ? {} : { page }) }, withholdSecretFields), secrets));
   };
   async function call(method: string, args: unknown[]): Promise<unknown> {
     if (abort.signal.aborted) throw new Error("Execution ended.");

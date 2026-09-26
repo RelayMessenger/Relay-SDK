@@ -2,7 +2,8 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import Relay, { PAYMENT_GUIDANCE } from "@relaymessenger/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultApiURL } from "./auth.js";
-import { createRelayMcpServer, PACKAGE_VERSION, type RelayMcpServerOptions } from "./server.js";
+import { createRelayMcpServer, executeOutputSchema, PACKAGE_VERSION, searchDocsOutputSchema, type RelayMcpServerOptions } from "./server.js";
+import { WITHHELD_SECRET } from "./redact.js";
 import { METHOD_DOCS } from "./generated-docs.js";
 import pkg from "../package.json" with { type: "json" };
 const TOKEN = "rel_token_mcp_test_secret_never_given_to_guest";
@@ -86,7 +87,7 @@ describe("approved two-tool MCP", () => {
     expect(r.isError).not.toBe(true); expect(text(r)).not.toContain(TOKEN); expect(text(r)).toContain("[REDACTED]");
   });
   it("indexes every HTTP operation and exposes only initialized client methods", () => {
-    expect(new Set(METHOD_DOCS.map(x=>`${x.httpMethod} ${x.path}`)).size).toBe(56);
+    expect(new Set(METHOD_DOCS.filter(x=>x.path.startsWith("/v1/")).map(x=>`${x.httpMethod} ${x.path}`)).size).toBe(56);
     expect(METHOD_DOCS.some(x=>x.method==="Relay.createAgent")).toBe(false);
     expect(METHOD_DOCS.some(x=>x.httpMethod==="POST"&&x.path==="/v1/agents")).toBe(false);
     const relay=sdk().client;
@@ -95,6 +96,50 @@ describe("approved two-tool MCP", () => {
       for (const part of row.method.split(".").slice(1)) value=(value as Record<string,unknown>)[part];
       expect(typeof value,row.method).toBe("function");
     }
+  });
+  it("indexes and executes the A2A job calls tasks.send, tasks.get and tasks.cancel", async () => {
+    expect(METHOD_DOCS.filter(x=>x.path==="{a2aBaseURL}/{to}").map(x=>[x.method,x.operationId,x.executable]).sort()).toEqual([
+      ["client.tasks.cancel","CancelTask",true],["client.tasks.get","GetTask",true],["client.tasks.send","SendMessage",true],
+    ]);
+    const found=await (await connect()).callTool({name:"search_docs",arguments:{query:"tasks send job agent",language:"typescript",detail:"default"}});
+    expect(text(found)).toContain("client.tasks.send");
+    const task={id:"0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b",contextId:"c",status:{state:"TASK_STATE_COMPLETED",timestamp:"2026-09-26T04:00:00.000Z"},metadata:{relay:{requester:{handle:"me"}}}};
+    const card={name:"Worker",description:"",version:"1",capabilities:{},defaultInputModes:[],defaultOutputModes:[],skills:[],
+      supportedInterfaces:[{url:"http://127.0.0.1:1/a2a/worker",protocolBinding:"JSONRPC",protocolVersion:"1.0"}]};
+    const fetch=vi.fn(async (_input:unknown, init?:RequestInit) => init?.method==="POST"
+      ? Response.json({jsonrpc:"2.0",id:JSON.parse(String(init.body)).id,result:task})
+      : Response.json(card));
+    const s=await ready({},sdk(fetch as never));
+    const r=await s.execute(`async function run(client) { const t = await client.tasks.get({ to: "worker", id: ${JSON.stringify(task.id)} }); return t.status.state; }`);
+    expect(r.isError).not.toBe(true); expect(result(r)).toBe("TASK_STATE_COMPLETED");
+    const rpc=fetch.mock.calls.find(call=>call[1]?.method==="POST") as unknown as [string,RequestInit];
+    expect(String(rpc[0])).toBe("http://127.0.0.1:1/a2a/worker");
+    expect(new Headers(rpc[1].headers).get("authorization")).toBe(`Bearer ${TOKEN}`);
+    expect(JSON.parse(String(rpc[1].body)).method).toBe("GetTask");
+  });
+  it("never shows a webhook signing_secret to the model or its code", async () => {
+    const secret="whsec_c2lnbmluZy1zZWNyZXQtbmV2ZXItc2hvd24=";
+    const fetch=vi.fn(async () => Response.json({id:"sub_1",target_url:"https://r.test/hook",subscribed_events:["message.received"],is_active:true,signing_secret:secret},{status:201}));
+    const s=await ready({},sdk(fetch as never));
+    const r=await s.execute('async function run(client) { const created = await client.webhookSubscriptions.create({ target_url: "https://r.test/hook", subscribed_events: ["message.received"] }); console.log(created.signing_secret); return created; }');
+    expect(r.isError).not.toBe(true);
+    expect(text(r)).not.toContain(secret);
+    expect((result(r) as {signing_secret:string}).signing_secret).toBe(WITHHELD_SECRET);
+    expect((result(r) as {id:string}).id).toBe("sub_1");
+  });
+  it("declares an output schema for both tools that their structured content satisfies", async () => {
+    const client=await connect();
+    const tools=(await client.listTools()).tools;
+    for (const name of ["search_docs","execute"]) {
+      const tool=tools.find(x=>x.name===name)!;
+      expect(tool.outputSchema?.type,name).toBe("object");
+    }
+    expect(Object.keys(tools.find(x=>x.name==="execute")!.outputSchema!.properties!).sort()).toEqual(["logs","result"]);
+    expect(Object.keys(tools.find(x=>x.name==="search_docs")!.outputSchema!.properties!).sort()).toEqual(["contractSha256","language","note","query","results"]);
+    const found=await client.callTool({name:"search_docs",arguments:{query:"payment",language:"typescript",detail:"verbose"}});
+    expect(searchDocsOutputSchema.safeParse(found.structuredContent).success).toBe(true);
+    const s=await ready(); const r=await s.execute('async function run() { console.log("x"); return { ok: true }; }');
+    expect(executeOutputSchema.safeParse(r.structuredContent).success).toBe(true);
   });
   it("does not advertise anonymous signup in documentation search", async () => {
     const client=await connect();

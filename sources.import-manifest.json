@@ -1042,10 +1042,10 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/redact.test.ts",
       "source_sha256": "e955bf82c32d9ea276f21d8c38e4d7bdfbb73d48c2a4b241ab1de7f28dfb0beb",
-      "destination_sha256": "e955bf82c32d9ea276f21d8c38e4d7bdfbb73d48c2a4b241ab1de7f28dfb0beb",
+      "destination_sha256": "9e2263bbe126ce59f53445b9477a68155bf2e2ce72d2a405bfcba72880b150f1",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/mcp/src/redact.ts",
@@ -1053,10 +1053,10 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/redact.ts",
       "source_sha256": "9c143677a872c65047c4792d73b83f967bf8952d5bef9e821af9fbbe3def3ddb",
-      "destination_sha256": "9c143677a872c65047c4792d73b83f967bf8952d5bef9e821af9fbbe3def3ddb",
+      "destination_sha256": "4d54a093b43f4180b4ce52ee3a691b2c85e4aa056d4e46205a9c96d5716cc33a",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/mcp/src/server.test.ts",
@@ -1064,7 +1064,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/server.test.ts",
       "source_sha256": "139f264949013c31d667e8e2ef72619ab2a5ead79ce5a896ecf909c10de80dcd",
-      "destination_sha256": "b0780e8d37f562e81b8fe694080d37d5912e1aae92999a809ec653a6331b79fd",
+      "destination_sha256": "0b8344f544c8d437c1766eeafe8a728d518464b1b9851908d5824fe95671218c",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1075,7 +1075,7 @@
       "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914",
       "source": "src/server.ts",
       "source_sha256": "6040d775b0546cbabe46206f2a87b4b3d67f624163ce2de4c0ec0428dff49156",
-      "destination_sha256": "d3385d1ab8aa0135ec45919dcc371a8da2fbea6a59b9717d1ff3f9173c465868",
+      "destination_sha256": "d35864fb81c69890f353d300fe4e37aff37b5f87c2795a5c45bbcb60cd6ce00a",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

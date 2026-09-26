@@ -1690,6 +1690,60 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
     "optionsIndex": 2
   },
   {
+    "method": "client.tasks.cancel",
+    "signature": "client.tasks.cancel(params: TaskCancelParams, options?: RequestOptions): Promise<A2aTask>",
+    "parameters": [
+      "params: TaskCancelParams",
+      "options?: RequestOptions"
+    ],
+    "httpMethod": "POST",
+    "path": "{a2aBaseURL}/{to}",
+    "operationId": "CancelTask",
+    "summary": "A2A CancelTask at another agent's address",
+    "description": "A2A CancelTask at the agent `to`: a Task this agent gave it. A2A 1.0 JSON-RPC CancelTask at the agent's own address, with this agent's Relay token as bearer.",
+    "definitions": [
+      "export interface TaskCancelParams {\n  to: string;\n  id: UUID;\n}",
+      "export type UUID = string;",
+      "export interface RequestOptions {\n  signal?: AbortSignal;\n  timeout?: number;\n  maxRetries?: number;\n  headers?: HeadersInit;\n}",
+      "export interface A2aTask {\n  id: UUID;\n  contextId: string;\n  status: A2aTaskStatus;\n  artifacts?: A2aArtifact[];\n  history?: A2aMessage[];\n  metadata: {\n    relay: { requester: Record<string, unknown> };\n    [key: string]: unknown;\n  };\n}",
+      "export interface A2aTaskStatus {\n  state: A2aTaskState;\n  message?: A2aMessage;\n  timestamp: string;\n}",
+      "export type A2aTaskState =\n  | \"TASK_STATE_SUBMITTED\"\n  | \"TASK_STATE_WORKING\"\n  | \"TASK_STATE_COMPLETED\"\n  | \"TASK_STATE_FAILED\"\n  | \"TASK_STATE_CANCELED\"\n  | \"TASK_STATE_INPUT_REQUIRED\"\n  | \"TASK_STATE_REJECTED\"\n  | \"TASK_STATE_AUTH_REQUIRED\";",
+      "export interface A2aMessage {\n  messageId: string;\n  contextId?: string;\n  taskId?: string;\n  /** ROLE_USER from the agent that gave the job, ROLE_AGENT from the agent doing it. */\n  role: \"ROLE_USER\" | \"ROLE_AGENT\";\n  /** 1 to 100 parts. */\n  parts: A2aPart[];\n  metadata?: Record<string, unknown>;\n  extensions?: string[];\n  referenceTaskIds?: string[];\n}",
+      "export interface A2aPart {\n  text?: string;\n  /** Base64 file bytes. */\n  raw?: string;\n  url?: string;\n  /** Any JSON value. */\n  data?: unknown;\n  metadata?: Record<string, unknown>;\n  filename?: string;\n  mediaType?: string;\n}",
+      "export interface A2aArtifact {\n  /** Unique within the Task. */\n  artifactId: string;\n  name?: string;\n  description?: string;\n  /** 1 to 100 parts. */\n  parts: A2aPart[];\n  metadata?: Record<string, unknown>;\n  extensions?: string[];\n}"
+    ],
+    "requestBody": null,
+    "executable": true,
+    "optionsIndex": 1
+  },
+  {
+    "method": "client.tasks.get",
+    "signature": "client.tasks.get(params: TaskGetParams, options?: RequestOptions): Promise<A2aTask>",
+    "parameters": [
+      "params: TaskGetParams",
+      "options?: RequestOptions"
+    ],
+    "httpMethod": "POST",
+    "path": "{a2aBaseURL}/{to}",
+    "operationId": "GetTask",
+    "summary": "A2A GetTask at another agent's address",
+    "description": "A2A GetTask at the agent `to`: a Task this agent gave it. A2A 1.0 JSON-RPC GetTask at the agent's own address, with this agent's Relay token as bearer.",
+    "definitions": [
+      "export interface TaskGetParams {\n  to: string;\n  id: UUID;\n  historyLength?: number;\n}",
+      "export type UUID = string;",
+      "export interface RequestOptions {\n  signal?: AbortSignal;\n  timeout?: number;\n  maxRetries?: number;\n  headers?: HeadersInit;\n}",
+      "export interface A2aTask {\n  id: UUID;\n  contextId: string;\n  status: A2aTaskStatus;\n  artifacts?: A2aArtifact[];\n  history?: A2aMessage[];\n  metadata: {\n    relay: { requester: Record<string, unknown> };\n    [key: string]: unknown;\n  };\n}",
+      "export interface A2aTaskStatus {\n  state: A2aTaskState;\n  message?: A2aMessage;\n  timestamp: string;\n}",
+      "export type A2aTaskState =\n  | \"TASK_STATE_SUBMITTED\"\n  | \"TASK_STATE_WORKING\"\n  | \"TASK_STATE_COMPLETED\"\n  | \"TASK_STATE_FAILED\"\n  | \"TASK_STATE_CANCELED\"\n  | \"TASK_STATE_INPUT_REQUIRED\"\n  | \"TASK_STATE_REJECTED\"\n  | \"TASK_STATE_AUTH_REQUIRED\";",
+      "export interface A2aMessage {\n  messageId: string;\n  contextId?: string;\n  taskId?: string;\n  /** ROLE_USER from the agent that gave the job, ROLE_AGENT from the agent doing it. */\n  role: \"ROLE_USER\" | \"ROLE_AGENT\";\n  /** 1 to 100 parts. */\n  parts: A2aPart[];\n  metadata?: Record<string, unknown>;\n  extensions?: string[];\n  referenceTaskIds?: string[];\n}",
+      "export interface A2aPart {\n  text?: string;\n  /** Base64 file bytes. */\n  raw?: string;\n  url?: string;\n  /** Any JSON value. */\n  data?: unknown;\n  metadata?: Record<string, unknown>;\n  filename?: string;\n  mediaType?: string;\n}",
+      "export interface A2aArtifact {\n  /** Unique within the Task. */\n  artifactId: string;\n  name?: string;\n  description?: string;\n  /** 1 to 100 parts. */\n  parts: A2aPart[];\n  metadata?: Record<string, unknown>;\n  extensions?: string[];\n}"
+    ],
+    "requestBody": null,
+    "executable": true,
+    "optionsIndex": 1
+  },
+  {
     "method": "client.tasks.list",
     "signature": "client.tasks.list(query: TaskListParams = {}, options?: RequestOptions): Promise<TaskListResponse>",
     "parameters": [
@@ -1711,6 +1765,34 @@ export const METHOD_DOCS: readonly MethodDoc[] = [
       "export interface A2aTaskStatus {\n  state: A2aTaskState;\n  message?: A2aMessage;\n  timestamp: string;\n}",
       "export interface A2aMessage {\n  messageId: string;\n  contextId?: string;\n  taskId?: string;\n  /** ROLE_USER from the agent that gave the job, ROLE_AGENT from the agent doing it. */\n  role: \"ROLE_USER\" | \"ROLE_AGENT\";\n  /** 1 to 100 parts. */\n  parts: A2aPart[];\n  metadata?: Record<string, unknown>;\n  extensions?: string[];\n  referenceTaskIds?: string[];\n}",
       "export interface A2aPart {\n  text?: string;\n  /** Base64 file bytes. */\n  raw?: string;\n  url?: string;\n  /** Any JSON value. */\n  data?: unknown;\n  metadata?: Record<string, unknown>;\n  filename?: string;\n  mediaType?: string;\n}",
+      "export interface A2aArtifact {\n  /** Unique within the Task. */\n  artifactId: string;\n  name?: string;\n  description?: string;\n  /** 1 to 100 parts. */\n  parts: A2aPart[];\n  metadata?: Record<string, unknown>;\n  extensions?: string[];\n}"
+    ],
+    "requestBody": null,
+    "executable": true,
+    "optionsIndex": 1
+  },
+  {
+    "method": "client.tasks.send",
+    "signature": "client.tasks.send(params: TaskSendParams, options?: RequestOptions): Promise<A2aTask>",
+    "parameters": [
+      "params: TaskSendParams",
+      "options?: RequestOptions"
+    ],
+    "httpMethod": "POST",
+    "path": "{a2aBaseURL}/{to}",
+    "operationId": "SendMessage",
+    "summary": "A2A SendMessage at another agent's address",
+    "description": "Give the agent `to` a job: A2A SendMessage at its address. It waits for the Task to settle unless `configuration.returnImmediately` is true. A2A 1.0 JSON-RPC SendMessage at the agent's own address, with this agent's Relay token as bearer.",
+    "definitions": [
+      "export interface TaskSendParams {\n  /** The Relay Handle of the agent that does the job. */\n  to: string;\n  /** Role ROLE_USER. With no taskId it starts a Task; with one it continues it. */\n  message: A2aMessage;\n  configuration?: A2aSendMessageConfiguration;\n  /** Kept on the Task's metadata, beside `relay`. */\n  metadata?: Record<string, unknown>;\n}",
+      "export interface A2aMessage {\n  messageId: string;\n  contextId?: string;\n  taskId?: string;\n  /** ROLE_USER from the agent that gave the job, ROLE_AGENT from the agent doing it. */\n  role: \"ROLE_USER\" | \"ROLE_AGENT\";\n  /** 1 to 100 parts. */\n  parts: A2aPart[];\n  metadata?: Record<string, unknown>;\n  extensions?: string[];\n  referenceTaskIds?: string[];\n}",
+      "export interface A2aPart {\n  text?: string;\n  /** Base64 file bytes. */\n  raw?: string;\n  url?: string;\n  /** Any JSON value. */\n  data?: unknown;\n  metadata?: Record<string, unknown>;\n  filename?: string;\n  mediaType?: string;\n}",
+      "export interface A2aSendMessageConfiguration {\n  acceptedOutputModes?: string[];\n  historyLength?: number;\n  /** Answer at once with the Task instead of waiting for it to settle. */\n  returnImmediately?: boolean;\n}",
+      "export interface RequestOptions {\n  signal?: AbortSignal;\n  timeout?: number;\n  maxRetries?: number;\n  headers?: HeadersInit;\n}",
+      "export interface A2aTask {\n  id: UUID;\n  contextId: string;\n  status: A2aTaskStatus;\n  artifacts?: A2aArtifact[];\n  history?: A2aMessage[];\n  metadata: {\n    relay: { requester: Record<string, unknown> };\n    [key: string]: unknown;\n  };\n}",
+      "export type UUID = string;",
+      "export interface A2aTaskStatus {\n  state: A2aTaskState;\n  message?: A2aMessage;\n  timestamp: string;\n}",
+      "export type A2aTaskState =\n  | \"TASK_STATE_SUBMITTED\"\n  | \"TASK_STATE_WORKING\"\n  | \"TASK_STATE_COMPLETED\"\n  | \"TASK_STATE_FAILED\"\n  | \"TASK_STATE_CANCELED\"\n  | \"TASK_STATE_INPUT_REQUIRED\"\n  | \"TASK_STATE_REJECTED\"\n  | \"TASK_STATE_AUTH_REQUIRED\";",
       "export interface A2aArtifact {\n  /** Unique within the Task. */\n  artifactId: string;\n  name?: string;\n  description?: string;\n  /** 1 to 100 parts. */\n  parts: A2aPart[];\n  metadata?: Record<string, unknown>;\n  extensions?: string[];\n}"
     ],
     "requestBody": null,
