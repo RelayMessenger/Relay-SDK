@@ -264,7 +264,15 @@ export const agentCommands = (agent: CodingAgentId, context: PlanContext): strin
         ? [["codex", "mcp", "add", MCP_SERVER_NAME, "--url", hostedMcpURL(context.version), "--bearer-token-env-var", AGENT_TOKEN_ENV]]
         : [];
     case "hermes":
-      return [["hermes", "plugins", "install", HERMES_PLUGIN_SOURCE, "--enable"]];
+      // Two steps, because `install --enable` asks before it prepares the
+      // plugin's Python dependencies and, with no terminal, skips them and
+      // leaves the plugin disabled; `enable` prepares them without a prompt
+      // (Relay-Hermes README, "To install the plugin manually instead", PR 41;
+      // _sources/connect-safety-20260926/relay-hermes-README-0f99dec9.md:142-150).
+      return [
+        ["hermes", "plugins", "install", HERMES_PLUGIN_SOURCE, "--no-enable"],
+        ["hermes", "plugins", "enable", "relay-hermes"],
+      ];
     case "openclaw":
       // OpenClaw stops on any npm source that is not ClawHub-reviewed unless
       // told `--force` ("Confirm non-ClawHub sources"), and refuses to enable a
@@ -360,7 +368,7 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
       break;
     case "hermes-plugin":
       steps = [
-        "install the Relay plugin for Hermes, or update it if it is already installed",
+        "install the Relay plugin for Hermes and enable it, or update it if it is already installed",
         write(shown.files[0]!, `token, API address, state folder${context.allow.length ? ", allowed contacts" : ""}; Hermes has one Relay agent per install`),
         ...(context.start ? ["start the Hermes gateway when you are ready:  hermes gateway run"] : []),
       ];
