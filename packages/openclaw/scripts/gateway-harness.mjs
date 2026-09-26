@@ -29,7 +29,11 @@ const candidate = candidateTarball({
   version: packageJson.dependencies["@relaymessenger/sdk"],
   variable: "RELAY_SDK_CANDIDATE_TARBALL",
 });
-const temp = realpathSync(mkdtempSync(join(tmpdir(), "relay-openclaw-gateway-")));
+// realpathSync.native expands Windows 8.3 short names (C:\Users\RUNNER~1), as
+// OpenClaw does when it matches the installed package to its install record;
+// the JavaScript realpathSync keeps the short name and the install fails with
+// "has no authoritative runtime child list".
+const temp = realpathSync.native(mkdtempSync(join(tmpdir(), "relay-openclaw-gateway-")));
 const home = join(temp, "home");
 const pack = join(temp, "pack");
 const require = createRequire(import.meta.url);

@@ -987,7 +987,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "scripts/gateway-harness.mjs",
       "source_sha256": "da567285e213b9facc5c3d78b34df429f86fe610acd122230b1dc77fb81ac0c9",
-      "destination_sha256": "0cc6191fe37000abedb2a2a77c648031ee695691fe39375d35855e1250b01498",
+      "destination_sha256": "563d8018d13fd8397143f5b0253b0cc3a2bfa09d6cd82c83ee9dcedc5b56c6a0",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
