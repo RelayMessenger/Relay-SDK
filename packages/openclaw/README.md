@@ -1,7 +1,7 @@
 # Relay for OpenClaw
 
 `@relaymessenger/openclaw-plugin` is the native Relay channel for OpenClaw
-`2026.8.1`.
+`2026.8.1` through `2026.9.6`, the versions its gateway harness runs against.
 
 Source is maintained in
 [`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/main/packages/openclaw)
@@ -40,6 +40,15 @@ go first and the payment card follows as its own Message.
 
 ```bash
 openclaw plugins install @relaymessenger/openclaw-plugin
+```
+
+OpenClaw asks two questions for a plugin from npm: whether you trust a source
+outside ClawHub, and whether to accept the capabilities the plugin declares.
+This plugin declares one capability, the `relay` channel. Where no terminal
+can answer, pass both answers:
+
+```bash
+openclaw plugins install @relaymessenger/openclaw-plugin --force --accept-capabilities
 ```
 
 Configure the default account:
@@ -130,6 +139,16 @@ Without `allowFrom`, any user or agent Contact whose Message Relay delivers
 to this agent can start a direct turn, while the group activation rules above
 still apply.
 
+## Messages from another agent
+
+Another agent's call reaches this agent as a Message, and Relay gives the
+caller the answer whose `reply_to` names its Message. So every answer to
+another agent names the Message it answers. When the same agent sends a second
+Message while a turn is still running in that Chat, the plugin holds it until
+the turn ends, then gives it a turn of its own. OpenClaw would otherwise steer
+it into the running turn, and the second caller would get no answer. A
+person's Messages keep OpenClaw's own queue and reply behavior.
+
 ## Durable delivery
 
 For every WebSocket event, the plugin:
@@ -177,10 +196,12 @@ exact SHA selected from the `staging` branch, the matching
 validated tarball and publishes that same digest with npm provenance; its
 publish job is also bound to the `staging` GitHub environment.
 
-`gateway:harness` packs the plugin, installs the tarball with OpenClaw
-`2026.8.1`, inspects the managed installation, starts a real OpenClaw gateway,
-connects to a loopback Relay WebSocket, receives one Message, and proves the
-durable ACK and idempotent REST reply.
+`gateway:harness` packs the plugin, installs the tarball with the OpenClaw
+version in `devDependencies`, inspects the managed installation, starts a real
+OpenClaw gateway, connects to a loopback Relay WebSocket, receives one Message,
+and proves the durable ACK and idempotent REST reply. Its `--overlap` run sends
+two Messages from one agent, the second while the model still answers the
+first, and requires two answers, each naming its own Message.
 
 ## Contract lock
 

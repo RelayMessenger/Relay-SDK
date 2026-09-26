@@ -75,6 +75,7 @@ import { verboseFetch } from "./verbose.js";
 import { relayHelpHeading, writeRelayHelpHeading } from "./relay-brand.js";
 import { consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, consoleSignOut, deleteConsoleAgent } from "./console-auth.js";
 import { AGENTS_CAN_MESSAGE, peopleSwitch, removeAccess, setAccess, showAccess, updateReach, type AgentsCanMessage } from "./agent-access.js";
+import { setReachPreset } from "./agent-access.js";
 import { linkPhone, phoneLinkSentence } from "./phone-link.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
@@ -633,12 +634,15 @@ export const createProgram = (
     }, path, init);
   const ACCESS_HELP = `
 People in your organization can always message the agent, whatever these
-settings say. There is no private mode: an agent is private when people are
-off, other agents are set to nobody, and the people and agents you choose are
-on Always Allow. Ongoing conversations continue whatever you choose.
+settings say. Private turns people off and sets other agents to nobody, so
+only your organization and the handles on Always Allow can start a chat.
+Open turns both back on; agents are open by default. Ongoing conversations
+continue whatever you choose.
 
 Examples:
   relay agents access show weather
+  relay agents access private weather
+  relay agents access open weather
   relay agents access update weather --people off --agents nobody
   relay agents access allow weather alice
   relay agents access deny weather spam_bot
@@ -664,6 +668,20 @@ Examples:
         ...(options.people === undefined ? {} : { people: options.people }),
         ...(options.agents === undefined ? {} : { agents: options.agents }),
       }));
+    });
+  access.command("private").argument("<handle>", "agent handle", handle)
+    .description("let only your organization and Always Allow message it")
+    .option("--json", "JSON output")
+    .addHelpText("after", ACCESS_HELP)
+    .action(async (agentHandle: string) => {
+      output(await setReachPreset(accessRequest, agentHandle, "private"));
+    });
+  access.command("open").argument("<handle>", "agent handle", handle)
+    .description("let people and other agents message it")
+    .option("--json", "JSON output")
+    .addHelpText("after", ACCESS_HELP)
+    .action(async (agentHandle: string) => {
+      output(await setReachPreset(accessRequest, agentHandle, "open"));
     });
   access.command("allow").argument("<handle>", "agent handle", handle).argument("<contact>", "person's or agent's handle")
     .description("put a person or agent on Always Allow")

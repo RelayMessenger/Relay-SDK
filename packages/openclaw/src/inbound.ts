@@ -78,9 +78,22 @@ export function buildRelayInboundFacts(
   const timestampValue = event.data.sent_at ?? event.created_at;
   const timestamp = Date.parse(timestampValue);
   const selection = selectionReply(event.data.parts, event.data.reply_to);
+  const fromAgent = event.data.sender_handle.kind === "agent";
+  // Another agent's Message is named by the answer, as Relay's CLI bridges
+  // do (packages/cli/src/bridge-turn.ts, PR 366): Relay's A2A door gives a
+  // calling agent only the answer whose reply_to names its Message
+  // (Relay-Server a2a.ts replyTo). A Message that opens with buttons or a
+  // selection is not named: an agent may not reply to those parts, and a
+  // reply names part 0.
+  const opening = event.data.parts[0]?.type;
+  const agentReplyLink = fromAgent && opening !== "buttons" && opening !== "selection"
+    ? event.data.id
+    : undefined;
   return {
     ...(selection ? { selection } : {}),
     ...(richMessage ? { richMessage } : {}),
+    fromAgent,
+    ...(agentReplyLink ? { agentReplyLink } : {}),
     eventId: event.event_id,
     messageId: event.data.id,
     chatId: event.data.chat.id,
@@ -101,8 +114,9 @@ export function buildRelayInboundFacts(
         // The answer quotes the person's message, the one it answers (a bot's
         // reply_to in Telegram and Discord names the person's message). A
         // tap's reply_to names the agent's buttons part, which no reply may
-        // target, so this is also what keeps a tap answerable.
-        replyAnchorId: event.data.id,
+        // target, so this is also what keeps a tap answerable. An agent's
+        // Message is quoted only through agentReplyLink.
+        ...(fromAgent ? {} : { replyAnchorId: event.data.id }),
       }
       : {}),
     ...(Number.isFinite(timestamp) ? { timestamp } : {}),

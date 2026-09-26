@@ -97,12 +97,12 @@ Send a video feed with LiveKit's names (`VideoSource.capture_frame`,
 from livekit import rtc
 from relaymessenger_livekit import LocalVideoTrack, VideoSource
 
-source = VideoSource(640, 480)
+source = VideoSource(1280, 720)
 track = LocalVideoTrack.create_video_track("camera", source)
 await call.transport.publish_track(track)
 
-# RGBA, BGRA, ARGB, ABGR, RGB24 or I420 bytes, tightly packed.
-source.capture_frame(rtc.VideoFrame(640, 480, rtc.VideoBufferType.RGBA, rgba))
+# RGBA, BGRA, ARGB, ABGR, RGB24 or I420 bytes, tightly packed, 30 frames a second.
+source.capture_frame(rtc.VideoFrame(1280, 720, rtc.VideoBufferType.RGBA, rgba))
 
 # Camera off, then on again; the track stays negotiated.
 await call.transport.unpublish_track(track)
@@ -129,8 +129,10 @@ def _on_camera(on: bool) -> None:
     ...  # the other participant's camera started or stopped sending
 ```
 
-Video is H.264 constrained baseline (`42e01f`), the profile Cloudflare's SFU
-accepts, encoded by aiortc with libx264; received H.264 and VP8 are decoded.
+Video is H.264 constrained baseline, the profile Cloudflare's SFU accepts,
+encoded by aiortc with libx264, up to 1920x1080 at 30 fps; received H.264 and
+VP8 are decoded. Without a `VideoEncoding`, each frame size gets
+[LiveKit's camera preset](https://github.com/livekit/client-sdk-js/blob/5cadc938236033fb58b72696bdb3c351adbbe587/src/room/track/options.ts#L507-L532), for example 3 Mbps at 30 fps for 1920x1080.
 Frames arrive upright as sent; aiortc does not negotiate the video-orientation
 extension, so `rotation` is always 0. `call.transport.video_stats()` reports
 frames captured, sent, decoded and dropped.

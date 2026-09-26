@@ -98,6 +98,7 @@ describe("Relay inbound Message mapping", () => {
       },
       replyToId: "00000000-0000-7000-8000-000000000006",
       replyAnchorId: "00000000-0000-7000-8000-000000000005",
+      fromAgent: false,
       timestamp: Date.parse("2026-09-01T00:00:01.000Z"),
     });
   });
@@ -146,9 +147,45 @@ describe("Relay inbound Message mapping", () => {
     const agentSender = { ...sender, kind: "agent" as const };
     const input = event();
     (input.data as { sender_handle: ChatHandle }).sender_handle = agentSender;
-    expect(buildRelayInboundFacts(input)).toEqual(
-      buildRelayInboundFacts(event()),
-    );
+    const { replyAnchorId: _personAnchor, ...personFacts } = buildRelayInboundFacts(event())!;
+    expect(buildRelayInboundFacts(input)).toEqual({
+      ...personFacts,
+      fromAgent: true,
+      agentReplyLink: "00000000-0000-7000-8000-000000000005",
+    });
+  });
+
+  it("names another agent's own Message as the answer's target, never a person's", () => {
+    // Relay's A2A door gives a calling agent only the answer whose reply_to
+    // names its Message (Relay-Server a2a.ts replyTo; CLI bridges, PR 366).
+    const input = event();
+    const data = input.data as RelayMessageReceivedEvent["data"];
+    data.sender_handle = { ...sender, kind: "agent" };
+    data.reply_to = null;
+    expect(buildRelayInboundFacts(input)).toMatchObject({
+      fromAgent: true,
+      agentReplyLink: "00000000-0000-7000-8000-000000000005",
+    });
+    data.sender_handle = sender;
+    const person = buildRelayInboundFacts(input);
+    expect(person?.fromAgent).toBe(false);
+    expect(person).not.toHaveProperty("agentReplyLink");
+  });
+
+  it("does not name another agent's Message that opens with buttons or a selection", () => {
+    // An agent may not reply to those parts, and a reply names part 0.
+    for (const opening of [
+      { type: "buttons", items: [{ label: "Yes" }], reactions: null },
+      { type: "selection", title: "Pick", options: [{ value: "a", label: "A" }], reactions: null },
+    ]) {
+      const input = event();
+      const data = input.data as RelayMessageReceivedEvent["data"];
+      data.sender_handle = { ...sender, kind: "agent" };
+      data.parts = [opening, { type: "text", value: "Which one?", mention: "relay", reactions: null }] as never;
+      const facts = buildRelayInboundFacts(input);
+      expect(facts?.fromAgent).toBe(true);
+      expect(facts).not.toHaveProperty("agentReplyLink");
+    }
   });
 
   it("does not map outbound/self echoes from either Contact kind", () => {

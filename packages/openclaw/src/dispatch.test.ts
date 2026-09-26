@@ -8,6 +8,7 @@ import {
   dispatchRelayEvent,
   resolveRelayTurnActivation,
 } from "./dispatch.js";
+import { createRelayChatTurns } from "./turns.js";
 import type {
   RelayInboundFacts,
   ResolvedRelayAccount,
@@ -40,6 +41,7 @@ function facts(
     text: "Hello",
     mentionHandles: [],
     ownerHandle,
+    fromAgent: false,
     ...overrides,
   };
 }
@@ -205,6 +207,7 @@ describe("Relay turn activation", () => {
       runtime: {
         channel: { inbound: { dispatch } },
       } as never,
+      turns: createRelayChatTurns(),
       warn,
     });
     expect(dispatch).not.toHaveBeenCalled();

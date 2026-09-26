@@ -10,6 +10,7 @@ import { dispatchRelayEvent } from "./dispatch.js";
 import { commitRelayFullSync } from "./full-sync.js";
 import { createRelayIngressMonitor } from "./ingress.js";
 import { createRelaySdkClient } from "./outbound.js";
+import { createRelayChatTurns } from "./turns.js";
 import { getRelayRuntime } from "./runtime.js";
 import {
   openRelayStateStore,
@@ -96,6 +97,7 @@ export async function startRelayAccount(
     accountId: transportId,
   });
   const relay = createRelaySdkClient(account);
+  const turns = createRelayChatTurns();
   const ingress = createRelayIngressMonitor({
     queue: openIngressQueue({
       transportId,
@@ -119,6 +121,7 @@ export async function startRelayAccount(
         cfg: ctx.cfg as RelayCoreConfig,
         relay,
         runtime,
+        turns,
         warn,
       });
     },
