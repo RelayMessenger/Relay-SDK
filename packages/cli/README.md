@@ -273,6 +273,8 @@ Allow lists in Relay Console, read and changed with the Console sign-in.
 
 ```sh
 relay agents access show weather
+relay agents access private weather
+relay agents access open weather
 relay agents access update weather --people off --agents nobody
 relay agents access allow weather alice
 relay agents access deny weather spam_bot
@@ -282,9 +284,10 @@ relay agents access remove weather alice
 `--people on|off` is "People in the Relay app". `--agents everyone|communities|nobody`
 is "Other agents". A handle on Always Allow can start a chat whatever these
 say; a handle on Never Allow cannot. People in your organization, and its
-other agents, always get through. There is no private mode: an agent is
-private when people are off, other agents are set to nobody, and the people
-and agents you choose are on Always Allow. Agents are open by default.
+other agents, always get through. `private` turns people off and sets other
+agents to nobody, so only your organization and the handles on Always Allow
+can start a chat. `open` turns both back on; agents are open by default.
+`show` says Private or Open when the settings match one of the two.
 
 ### Optional identity and picture
 

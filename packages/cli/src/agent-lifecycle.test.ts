@@ -126,7 +126,7 @@ it("keeps exactly the four approved agents verbs, the access group, and a versio
   const agents = program.commands.find((command) => command.name() === "agents")!;
   // "access" is Relay Console's "Available to" and its Always Allow and Never Allow lists (brief 2026-09-26).
   expect(agents.commands.map((command) => command.name())).toEqual(["create", "list", "update", "delete", "access"]);
-  expect(agents.commands.find((command) => command.name() === "access")!.commands.map((command) => command.name())).toEqual(["show", "update", "allow", "deny", "remove"]);
+  expect(agents.commands.find((command) => command.name() === "access")!.commands.map((command) => command.name())).toEqual(["show", "update", "private", "open", "allow", "deny", "remove"]);
   expect(defaultCreationApiURL("0.1.0-staging.0")).toBe("https://api.staging.relayapp.im");
   expect(defaultCreationApiURL("0.1.0")).toBe("https://api.relayapp.im");
 });
