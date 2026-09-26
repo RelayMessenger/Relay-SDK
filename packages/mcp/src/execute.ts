@@ -28,7 +28,7 @@ const defaults: ExecutionLimits = { timeoutMs: 30_000, memoryBytes: 64 * 1024 * 
 export interface CodeExecutor {
   execute(
     code: string,
-    providers: Array<{ name: string; fns: Record<string, (...args: never[]) => Promise<unknown>>; prelude?: string }>,
+    providers: Array<{ name: string; fns: Record<string, (...args: unknown[]) => Promise<unknown>>; prelude?: string }>,
   ): Promise<{ result: unknown; error?: string; logs?: string[] }>;
 }
 export interface ExecutionRuntime {
@@ -175,9 +175,11 @@ const executeInExecutor = async (
   limits: ExecutionLimits,
 ): Promise<{ result: unknown; logs: Array<{ level: string; text: string }> }> => {
   const host = hostBridge(client, secrets, limits);
+  // Both arguments arrive from the sandbox, so both are checked here.
   const relay = {
-    call: async (method: string, argsJson: string): Promise<string> => {
+    call: async (method: unknown, argsJson: unknown): Promise<string> => {
       try {
+        if (typeof method !== "string" || typeof argsJson !== "string") throw new Error("SDK calls take a method name and JSON arguments.");
         const args: unknown = JSON.parse(host.limited(argsJson));
         if (!Array.isArray(args)) throw new Error("SDK arguments must be a JSON array.");
         return host.encode(await host.call(method, args));
@@ -186,7 +188,7 @@ const executeInExecutor = async (
         return JSON.stringify({ error: { message: safeErrorMessage(error, secrets), ...(status === undefined ? {} : { status }) } });
       }
     },
-    log: async (level: string, text: string): Promise<void> => { host.log(level, text); },
+    log: async (level: unknown, text: unknown): Promise<void> => { host.log(String(level), String(text)); },
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
