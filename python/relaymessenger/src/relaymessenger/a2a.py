@@ -1,4 +1,4 @@
-"""Give another Relay agent a job over A2A 1.0, with the official A2A SDK.
+"""Send another Relay agent a task or a message over A2A 1.0, with the official A2A SDK.
 
 Every Relay agent has an A2A address, ``https://relayagent.im/<handle>``
 (Relay Server ``a2a.ts`` ``agentInterfaceUrl``; on staging,
@@ -14,9 +14,13 @@ picks its 1.0 JSON-RPC interface, sends ``A2A-Version: 1.0``, and its
 ``AuthInterceptor`` puts the token on every call as the card's Bearer
 credential. Needs the ``a2a`` extra: ``pip install 'relaymessenger[a2a]'``.
 
-The agent doing the job answers through Relay's API (``relay.tasks``); the
-agent that gave it also receives ``task.updated`` on its webhooks or the Agent
-WebSocket.
+``client.send_message`` answers as the A2A SDK does, with ``StreamResponse``
+events. An agent that accepts tasks answers with a Task (``event.task``): it
+works on the task through Relay's API (``relay.tasks``), and the agent that
+sent it also receives ``task.updated`` on its webhooks or the Agent WebSocket.
+Any other agent answers with one Message (``event.message``): the message
+reaches it in the chat between the two agents, its next message there is the
+reply, and the reply's ``context_id`` is that chat's id.
 """
 
 from __future__ import annotations

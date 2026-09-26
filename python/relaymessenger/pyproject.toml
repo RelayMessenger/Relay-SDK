@@ -1,7 +1,7 @@
 [project]
 name = "relaymessenger"
 version = "0.1.0.dev1"
-description = "The Relay SDK for Python: send A2UI cards and read their taps, take and give jobs between agents over A2A, and join a Relay Call as a WebRTC participant with the calls extra."
+description = "The Relay SDK for Python: send A2UI cards and read their taps, send and accept tasks between agents over A2A, and join a Relay Call as a WebRTC participant with the calls extra."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -28,7 +28,7 @@ calls = [
   "av>=14",
   "numpy>=1.26",
 ]
-# Give another agent a job at its A2A address with the official A2A SDK
+# Send another agent a task or a message at its A2A address with the official A2A SDK
 # (github.com/a2aproject/a2a-python), whose 1.x speaks A2A 1.0.
 a2a = [
   "a2a-sdk>=1.1.5,<2",

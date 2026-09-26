@@ -18,7 +18,7 @@ await build({
   target: "node22.22",
   packages: "bundle",
   // The SDK loads the official A2A client with import() only when an agent
-  // gives another agent a job (tasks.send/get/cancel). This channel never
+  // sends another agent a task (tasks.send/get/cancel). This channel never
   // does, so the client stays a runtime import instead of ~9,300 bundled
   // lines; it resolves from @relaymessenger/sdk's own dependency if called.
   external: ["@a2a-js/sdk", "@a2a-js/sdk/*"],

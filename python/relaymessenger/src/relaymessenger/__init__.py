@@ -2,11 +2,11 @@
 
 ``relaymessenger.Relay`` is Relay's REST API; ``relaymessenger.a2ui`` builds
 A2UI cards, sends them and reads their taps; ``relaymessenger.tasks`` types the
-A2A 1.0 Tasks of jobs between agents and their events. All three use only the
+A2A 1.0 Tasks between agents and their events. All three use only the
 standard library.
 
-``relaymessenger.a2a`` gives another Relay agent a job at its A2A address with
-the official A2A SDK; it needs the ``a2a`` extra
+``relaymessenger.a2a`` sends another Relay agent a task or a message at its A2A
+address with the official A2A SDK; it needs the ``a2a`` extra
 (``pip install 'relaymessenger[a2a]'``).
 
 ``relaymessenger.calls`` joins a Relay Call as a WebRTC participant; it needs

@@ -1,5 +1,6 @@
-"""Jobs between agents and communities: Relay's REST routes against a local
-HTTP server, and a job sent with the official A2A SDK to a local A2A address.
+"""Tasks between agents and communities: Relay's REST routes against a local
+HTTP server, and a task or a message sent with the official A2A SDK to a local
+A2A address.
 
 Every path, method and body is Relay Server's (server/src/me.ts,
 communities.ts, agent-tasks.ts); the AgentCard is what a2a.ts ``agentCard``
@@ -12,8 +13,9 @@ import json
 import subprocess
 import sys
 import threading
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, Iterator, List, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import pytest
 
@@ -39,6 +41,9 @@ class _Server:
         self.seen: Seen = []
         self.replies: List[Tuple[int, Any]] = []
         self.card: Dict[str, Any] = {}
+        #: a2a.ts message mode: an agent that does not accept tasks answers
+        #: SendMessage with {message}, and a stream sends that one Message.
+        self.reply: Optional[A2aMessage] = None
 
     @property
     def base_url(self) -> str:
@@ -67,6 +72,9 @@ class _Server:
                 # the Task first, then closes at a terminal state; GetTask and
                 # CancelTask answer the Task itself.
                 method = request["method"]
+                if server.reply is not None and method in ("SendMessage", "SendStreamingMessage"):
+                    self._message(request, method)
+                    return
                 task = dict(TASK, history=[request["params"]["message"]]) if "message" in (request.get("params") or {}) else TASK
                 if method == "SendStreamingMessage":
                     frame = json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": {"task": task}})
@@ -81,6 +89,18 @@ class _Server:
                     TASK, status={"state": "TASK_STATE_COMPLETED", "timestamp": "2026-09-26T00:00:01.000Z"}
                 )
                 self._json(200, {"jsonrpc": "2.0", "id": request["id"], "result": result})
+
+            def _message(self, request: Dict[str, Any], method: str) -> None:
+                answer = {"jsonrpc": "2.0", "id": request["id"], "result": {"message": server.reply}}
+                if method == "SendMessage":
+                    self._json(200, answer)
+                    return
+                data = f"data: {json.dumps(answer)}\n\n".encode()
+                self.send_response(200)
+                self.send_header("content-type", "text/event-stream")
+                self.send_header("content-length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
 
             def _json(self, status: int, reply: Any) -> None:
                 if status == 204:
@@ -119,7 +139,7 @@ def server() -> Iterator[_Server]:
 # Relay's REST routes -------------------------------------------------------------
 
 
-async def test_me_update_turns_taking_jobs_on_with_patch_v1_me(server: _Server) -> None:
+async def test_me_update_turns_accepting_tasks_on_with_patch_v1_me(server: _Server) -> None:
     server.replies.append((200, {"accepts_tasks": True}))
     relay = Relay("tok", base_url=server.base_url)
     assert await relay.me.update(accepts_tasks=True) == {"accepts_tasks": True}
@@ -154,6 +174,29 @@ async def test_communities_list_members_and_the_public_read(server: _Server) -> 
     ]
 
 
+def _contract_required(schema: str) -> List[str]:
+    """The ``required`` list of one ``components.schemas`` entry in the carried
+    contract (contracts/relay-v1-openapi.yaml), read from its YAML text."""
+    lines = (Path(__file__).resolve().parents[3] / "contracts" / "relay-v1-openapi.yaml").read_text().splitlines()
+    start = lines.index(f"    {schema}:")
+    required = lines.index("      required:", start)
+    names: List[str] = []
+    for line in lines[required + 1 :]:
+        if not line.startswith("        - "):
+            break
+        names.append(line.removeprefix("        - ").strip())
+    return names
+
+
+def test_a_public_communitys_about_box_has_every_field_the_contract_requires() -> None:
+    # Relay-Server 0ccaba4b (PR 394): rules, links, created_at and contributor_count.
+    from relaymessenger.client import CommunityLink, CommunityRule, PublicCommunity
+
+    assert sorted(PublicCommunity.__required_keys__) == sorted(_contract_required("PublicCommunity"))
+    assert sorted(CommunityRule.__required_keys__) == sorted(_contract_required("CommunityRule"))
+    assert sorted(CommunityLink.__required_keys__) == sorted(_contract_required("CommunityLink"))
+
+
 async def test_tasks_list_sends_only_the_filters_given(server: _Server) -> None:
     server.replies += [(200, {"tasks": [TASK], "next_page_token": "n"}), (200, {"tasks": [], "next_page_token": ""})]
     relay = Relay("tok", base_url=server.base_url)
@@ -183,7 +226,7 @@ async def test_tasks_update_status_and_add_artifact_post_the_contracts_bodies(se
     assert all("idempotency-key" not in headers for _, _, headers, _ in server.seen)
 
 
-# A job sent over A2A -------------------------------------------------------------
+# A task or a message sent over A2A ---------------------------------------------
 
 
 def relay_card(address: str) -> Dict[str, Any]:
@@ -206,7 +249,7 @@ def relay_card(address: str) -> Dict[str, Any]:
     }
 
 
-async def test_a_job_goes_to_the_agents_address_with_the_token_and_a2a_version(server: _Server) -> None:
+async def test_a_task_goes_to_the_agents_address_with_the_token_and_a2a_version(server: _Server) -> None:
     from a2a.helpers import new_text_message
     from a2a.types import GetTaskRequest, Role, SendMessageRequest, TaskState
 
@@ -216,8 +259,8 @@ async def test_a_job_goes_to_the_agents_address_with_the_token_and_a2a_version(s
     server.card = relay_card(f"{server.base_url}/translator")
     client = await connect_agent("rly_tok", "translator", a2a_origin=server.base_url)
     try:
-        job = SendMessageRequest(message=new_text_message("Translate hello", role=Role.ROLE_USER))
-        events = [event async for event in client.send_message(job)]
+        request = SendMessageRequest(message=new_text_message("Translate hello", role=Role.ROLE_USER))
+        events = [event async for event in client.send_message(request)]
         task = await client.get_task(GetTaskRequest(id=events[0].task.id))
     finally:
         await client.close()
@@ -235,6 +278,52 @@ async def test_a_job_goes_to_the_agents_address_with_the_token_and_a2a_version(s
     assert send[3]["params"]["message"]["role"] == "ROLE_USER"
     assert send[3]["params"]["message"]["parts"] == [{"text": "Translate hello"}]
     assert (get[3]["method"], get[3]["params"]) == ("GetTask", {"id": TASK["id"]})
+
+
+REPLY: A2aMessage = {
+    "messageId": "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a3a",
+    "contextId": "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a3b",
+    "role": "ROLE_AGENT",
+    "parts": [{"text": "I answer questions about Relay."}],
+}
+
+
+def message_card(address: str) -> Dict[str, Any]:
+    """a2a.ts ``agentCard`` for an agent that does not accept tasks (MESSAGE_MODES)."""
+    return dict(
+        relay_card(address),
+        defaultInputModes=["text/plain", "application/a2ui+json"],
+        defaultOutputModes=["text/plain", "application/json", "application/a2ui+json"],
+    )
+
+
+@pytest.mark.parametrize("streaming", [True, False])
+async def test_an_agent_that_does_not_accept_tasks_answers_with_one_message(server: _Server, streaming: bool) -> None:
+    from a2a.client import ClientConfig
+    from a2a.helpers import new_text_message
+    from a2a.types import Role, SendMessageRequest
+
+    from relaymessenger.a2a import connect_agent
+
+    server.card = message_card(f"{server.base_url}/relay")
+    server.reply = REPLY
+    config = None if streaming else ClientConfig(streaming=False)
+    client = await connect_agent("rly_tok", "relay", a2a_origin=server.base_url, config=config)
+    try:
+        request = SendMessageRequest(message=new_text_message("What can you do?", role=Role.ROLE_USER))
+        events = [event async for event in client.send_message(request)]
+    finally:
+        await client.close()
+
+    assert len(events) == 1
+    assert events[0].HasField("message") and not events[0].HasField("task")
+    assert events[0].message.message_id == REPLY["messageId"]
+    assert events[0].message.context_id == REPLY["contextId"]
+    assert events[0].message.role == Role.ROLE_AGENT
+    assert [part.text for part in events[0].message.parts] == ["I answer questions about Relay."]
+    send = server.seen[1]
+    assert send[3]["method"] == ("SendStreamingMessage" if streaming else "SendMessage")
+    assert send[2]["authorization"] == "Bearer rly_tok"
 
 
 def test_relaymessenger_imports_without_the_a2a_extra_and_a2a_names_the_extra() -> None:
