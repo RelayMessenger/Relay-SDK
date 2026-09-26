@@ -24,6 +24,10 @@
  *               real one refuses a config it cannot load
  *   resumable   the thread ids `thread/resume` accepts; anything else is an
  *               error, as the real one answers for a thread it has lost
+ *   approval    `{method, params}`: each turn first sends this server request
+ *               (with the turn's threadId, turnId and itemId) and waits for
+ *               the client's answer, which it records as `approvalResponse`,
+ *               the way the real one asks under `approvalPolicy: "on-request"`
  */
 const fs = require("node:fs");
 
@@ -98,6 +102,14 @@ const completeTurn = (turnId, status) => {
 };
 
 const handle = (message) => {
+  if (message.method === undefined && typeof message.id === "string" && message.id.startsWith("approval-")) {
+    // The client's answer to the approval request: the turn goes on.
+    record({ approvalResponse: message.result ?? null, approvalError: message.error ?? null, id: message.id });
+    const turnId = message.id.slice("approval-".length);
+    const turn = turns.get(turnId);
+    if (turn) turn.timer = setTimeout(() => { completeTurn(turnId, "completed"); }, settings.turnMs ?? 5);
+    return;
+  }
   record({
     in: message.method, params: message.params, argv: process.argv.slice(2),
     // The variable the folder's .codex/config.toml reads the hosted MCP
@@ -137,6 +149,18 @@ const handle = (message) => {
     const answers = (settings.answers ?? [])[answerCount - 1]
       ?? (settings.answers ?? []).at(-1)
       ?? [{ text: "ok", phase: "final_answer" }];
+    if (settings.approval) {
+      turns.set(turnId, { threadId: message.params.threadId, answers, timer: undefined });
+      answer({ turn: { id: turnId, status: "inProgress" } });
+      const request = {
+        id: `approval-${turnId}`,
+        method: settings.approval.method,
+        params: { threadId: message.params.threadId, turnId, itemId: `${turnId}-item`, startedAtMs: 0, ...settings.approval.params },
+      };
+      record({ out: request.method, id: request.id, params: request.params });
+      write(request);
+      return;
+    }
     const timer = setTimeout(() => { completeTurn(turnId, "completed"); }, settings.turnMs ?? 5);
     turns.set(turnId, { threadId: message.params.threadId, answers, timer });
     answer({ turn: { id: turnId, status: "inProgress" } });

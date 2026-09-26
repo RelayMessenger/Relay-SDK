@@ -7,12 +7,19 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
-  bridgeTurn, codexCommand, codexPrompt, isFinalMessage, replyKey, runCodexBridge,
+  bridgeTurn, codexApprovalResponse, codexCommand, codexPrompt, codexTimeout, isFinalMessage, replyKey, runCodexBridge,
   type CodexCommand,
 } from "./codex-bridge.js";
 import { openCodexThreads, type CodexThreadStore } from "./codex-threads.js";
 import { replacesLiveTurn } from "./bridge-turn.js";
 import { platformCommand } from "./spawn-command.js";
+import type { ApprovalRequest, OwnerApprovals } from "./approvals.js";
+
+/** Owners nobody asks: every prompt goes unanswered, and no event is a tap. */
+const NO_APPROVALS: Pick<OwnerApprovals, "ask" | "take"> = {
+  ask: async () => ({ reason: "no_owner" }),
+  take: async () => false,
+};
 
 /**
  * Relay's hosted MCP server as every thread carries it, so Codex has Relay's
@@ -61,6 +68,7 @@ interface FakeLine {
   params?: Record<string, unknown>;
   argv?: string[];
   tokenEnv?: string | null;
+  approvalResponse?: unknown;
 }
 
 /**
@@ -76,6 +84,7 @@ const fakeAppServer = async (settings: {
   turnError?: string;
   turnMs?: number;
   resumable?: string[];
+  approval?: { method: string; params: Record<string, unknown> };
 } = {}): Promise<{ codex: CodexCommand; cwd: string; log(): Promise<FakeLine[]> }> => {
   const folder = await scratch("fake-app-server");
   const record = join(folder, "messages.jsonl");
@@ -178,6 +187,7 @@ const runBridge = async (input: {
   media?: Omit<InboundMediaOptions, "chatId">;
   relay?: ReturnType<typeof fakeRelay>;
   agentToken?: string;
+  approvals?: Pick<OwnerApprovals, "ask" | "take">;
 }): Promise<{ said: string[]; relay: ReturnType<typeof fakeRelay> }> => {
   const relay = input.relay ?? fakeRelay(input.events);
   const said: string[] = [];
@@ -189,12 +199,66 @@ const runBridge = async (input: {
       mcpURL: "https://mcp.staging.relayapp.im",
       client: relay.client, codex: input.codex, cwd: input.cwd,
       threads: input.threads ?? memoryThreads(),
+      approvals: input.approvals ?? NO_APPROVALS,
       signal: control.signal, say: (line) => said.push(line),
     });
     await untilEnded(said, input.endings ?? input.events.length);
   } finally { control.abort(); }
   return { said, relay };
 };
+
+describe("Codex approvals relayed to the agent's owners", () => {
+  const picking = (picked: string, asked: ApprovalRequest[]): Pick<OwnerApprovals, "ask" | "take"> => ({
+    ask: async (request) => {
+      asked.push(request);
+      const choice = request.choices.find((option) => option.decision === picked);
+      return choice ? { reason: "answered", choice, by: "owner" } : { reason: "timeout" };
+    },
+    take: async () => false,
+  });
+
+  it("answers a command approval with Codex's own decision for each choice", async () => {
+    const asked: ApprovalRequest[] = [];
+    for (const [picked, decision] of [["allow_once", "accept"], ["allow_session", "acceptForSession"], ["deny", "decline"]] as const) {
+      const codex = await fakeAppServer({ approval: { method: "item/commandExecution/requestApproval", params: { command: "uname -a", cwd: "/work", reason: "check the kernel" } } });
+      await runBridge({ ...codex, events: [received("event-1", "chat-1", "run uname")], approvals: picking(picked, asked) });
+      expect((await codex.log()).find((line) => "approvalResponse" in line)?.approvalResponse).toEqual({ decision });
+    }
+    expect(asked[0]).toMatchObject({ harness: "Codex", tool: "shell", title: "Codex asks to run a command.", summary: "uname -a" });
+    expect(asked[0]?.detail).toContain("check the kernel");
+    expect(asked[0]?.choices.map((choice) => choice.id)).toEqual(["accept", "acceptForSession", "decline"]);
+  });
+
+  it("declines a file change nobody answered, naming the files Codex announced", async () => {
+    const asked: ApprovalRequest[] = [];
+    const codex = await fakeAppServer({ approval: { method: "item/fileChange/requestApproval", params: { reason: "write the fix" } } });
+    await runBridge({ ...codex, events: [received("event-1", "chat-1", "fix it")], approvals: picking("timeout", asked) });
+    expect((await codex.log()).find((line) => "approvalResponse" in line)?.approvalResponse).toEqual({ decision: "decline" });
+    expect(asked[0]).toMatchObject({ tool: "apply_patch", title: "Codex asks to change files." });
+  });
+
+  it("grants only the permissions asked for, for the turn or the session, and nothing on a deny", () => {
+    const params = { permissions: { network: { enabled: true }, fileSystem: null } };
+    const choice = (decision: "allow_once" | "allow_session" | "deny") => ({ reason: "answered" as const, choice: { id: decision, label: decision, decision } });
+    expect(codexApprovalResponse("item/permissions/requestApproval", params, choice("allow_once"))).toEqual({ permissions: { network: { enabled: true } }, scope: "turn" });
+    expect(codexApprovalResponse("item/permissions/requestApproval", params, choice("allow_session"))).toEqual({ permissions: { network: { enabled: true } }, scope: "session" });
+    expect(codexApprovalResponse("item/permissions/requestApproval", params, choice("deny"))).toEqual({ permissions: {}, scope: "turn" });
+    expect(codexApprovalResponse("item/permissions/requestApproval", params, { reason: "timeout" })).toEqual({ permissions: {}, scope: "turn" });
+  });
+
+  it("waits Codex's own time when the request names one", () => {
+    expect(codexTimeout({ autoResolutionMs: 30_000 })).toBe(30_000);
+    expect(codexTimeout({ autoResolutionMs: null })).toBeUndefined();
+    expect(codexTimeout({})).toBeUndefined();
+  });
+
+  it("refuses a request it does not relay, so the turn never hangs", async () => {
+    const codex = await fakeAppServer({ approval: { method: "item/tool/call", params: {} } });
+    await runBridge({ ...codex, events: [received("event-1", "chat-1", "go")] });
+    const line = (await codex.log()).find((entry) => "approvalResponse" in entry) as { approvalError?: { code?: number } } | undefined;
+    expect(line?.approvalError?.code).toBe(-32601);
+  });
+});
 
 describe("the app-server the bridge starts", () => {
   it("a photo with no text starts a turn", async () => {
@@ -264,11 +328,11 @@ describe("the app-server the bridge starts", () => {
     expect((await codex.log()).find((line) => line.in === "initialize")?.tokenEnv).toBe("rel_token_calm");
   });
 
-  it("opens a thread that may write in the folder and asks nobody anything", async () => {
+  it("opens a thread that may write in the folder and asks when Codex's own rules say to", async () => {
     const codex = await fakeAppServer();
     await runBridge({ ...codex, events: [received("event-1", "chat-1", "Hey, what's up")] });
     const start = (await codex.log()).find((line) => line.in === "thread/start");
-    expect(start?.params).toEqual({ cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "never", config: RELAY_THREAD_CONFIG });
+    expect(start?.params).toEqual({ cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "on-request", config: RELAY_THREAD_CONFIG });
   });
 
   it("sends the message as the turn's text input, and never on a command line", async () => {
@@ -443,7 +507,7 @@ describe("one thread for each chat", () => {
       .toEqual(["thread/start", "thread/resume"]);
     const resume = (await codex.log()).find((line) => line.in === "thread/resume");
     expect(resume?.params).toEqual({
-      threadId: "thread-1", cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "never", config: RELAY_THREAD_CONFIG,
+      threadId: "thread-1", cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "on-request", config: RELAY_THREAD_CONFIG,
     });
   });
 

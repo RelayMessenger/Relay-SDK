@@ -53,15 +53,14 @@ const sourceOnlyOperations = [
   { method: "PUT", path: "/v1/contacts/{handle}/rating", operationId: "rateAgent" },
   { method: "DELETE", path: "/v1/contacts/{handle}/rating", operationId: "deleteAgentRating" },
   { method: "GET", path: "/v1/contacts/{handle}/ratings", operationId: "listAgentRatings" },
-  // Server 972cde2e (an agent reads its own owner) carries no SDK client yet.
   // POST /v1/tasks is the REST twin of A2A SendMessage; the SDK sends tasks
   // at the agent's A2A address instead (tasks.send), through the official A2A
   // client. Always and Never Allow (Server 00093564) is client.access.
-  { method: "GET", path: "/v1/me", operationId: "getMe" },
   { method: "POST", path: "/v1/tasks", operationId: "createTask" },
 ];
 const allowedOperationSignatures = [
   "DELETE /v1/agents/{handle}",
+  "GET /v1/me",
   "PATCH /v1/me",
   "POST /v1/chats",
   "GET /v1/chats",
@@ -138,13 +137,13 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 67);
+assert.equal(manifest.operation_count, 68);
 assert.equal(manifest.path_count, 45);
 assert.equal(manifest.source_path_count, 50);
 assert.equal(manifest.source_schema_count, 226);
 assert.equal(manifest.callback_count, 30);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 45);
-assert.equal(operationJSON.length, 67);
+assert.equal(operationJSON.length, 68);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 30);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),

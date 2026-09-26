@@ -23,6 +23,7 @@ import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
 import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, RELAY_WRITE_TOOLS, codexMcpServer } from "./hosted-mcp.js";
+import { inputDetail, inputSummary, type ApprovalChoice, type ApprovalOutcome, type ApprovalRequest, type OwnerApprovals } from "./approvals.js";
 
 /**
  * What `relay connect codex` leaves running so Codex answers by itself.
@@ -57,11 +58,96 @@ export const MAX_RELAY_TEXT = 10_000;
 export const CODEX_SANDBOX = "workspace-write";
 
 /**
- * `AskForApproval` (same file, `definitions.AskForApproval`): nobody is at the
- * keyboard to answer a question, so Codex is never asked one. Passing a
- * person's approvals through the chat is its own piece of work.
+ * `AskForApproval` (same file, `definitions.AskForApproval`): Codex asks when
+ * its own rules say to, the policy Inkbox's Codex plugin runs with
+ * (`"approvalPolicy": ... or "on-request"`,
+ * _sources/approvals-inkbox-20260926/inkbox-codex-plugin-codex_client.py.txt:252,358).
+ * Each question reaches this process as a server request and goes to the
+ * agent's owners in Relay (`codexApproval`).
  */
-export const CODEX_APPROVAL_POLICY = "never";
+export const CODEX_APPROVAL_POLICY = "on-request";
+
+/** The three answers, in Codex's decisions: `accept`, `acceptForSession`, `decline` (v2/CommandExecutionApprovalDecision.ts). */
+export const CODEX_CHOICES: readonly ApprovalChoice[] = [
+  { id: "accept", label: "Allow once", decision: "allow_once" },
+  { id: "acceptForSession", label: "Allow for this session", decision: "allow_session" },
+  { id: "decline", label: "Deny", decision: "deny" },
+];
+
+/**
+ * The approval requests app-server sends a client (v2 ServerRequest.ts,
+ * "Approvals" in the app-server docs,
+ * _sources/approvals-inkbox-20260926/codex-app-server-docs.txt): a command,
+ * a file change, and the built-in `request_permissions` tool. The same three
+ * Inkbox's plugin formats (inkbox-codex-plugin-escalation.py.txt,
+ * `format_codex_approval_request`).
+ */
+export const CODEX_APPROVAL_METHODS = [
+  "item/commandExecution/requestApproval",
+  "item/fileChange/requestApproval",
+  "item/permissions/requestApproval",
+] as const;
+
+/** A file change app-server announced, by item id, so its card can name the files. */
+export type CodexFileChanges = ReadonlyMap<string, readonly string[]>;
+
+/**
+ * One approval request as the card shows it, in Codex's own tool names
+ * (`shell`, `apply_patch`, `request_permissions`).
+ */
+export const codexApprovalRequest = (
+  method: string,
+  params: Record<string, unknown>,
+  files: CodexFileChanges = new Map(),
+): Pick<ApprovalRequest, "tool" | "title" | "summary" | "detail"> => {
+  const reason = typeof params.reason === "string" && params.reason.trim() ? params.reason.trim() : "";
+  const { threadId: _thread, turnId: _turn, itemId: _item, startedAtMs: _started, ...shown } = params;
+  const detail = inputDetail(shown);
+  if (method === "item/commandExecution/requestApproval") {
+    const command = typeof params.command === "string" ? params.command : "";
+    return { tool: "shell", title: "Codex asks to run a command.", summary: command || reason || "a command", detail };
+  }
+  if (method === "item/fileChange/requestApproval") {
+    const paths = files.get(String(params.itemId)) ?? [];
+    const root = typeof params.grantRoot === "string" ? params.grantRoot : "";
+    return { tool: "apply_patch", title: "Codex asks to change files.", summary: paths.join(", ") || root || reason || "file changes", detail: inputDetail({ ...shown, ...(paths.length ? { files: paths } : {}) }) };
+  }
+  return { tool: "request_permissions", title: "Codex asks for more permissions.", summary: reason || inputSummary(asRecord(params.permissions)), detail };
+};
+
+/**
+ * Codex's answer to one approval request (the `*RequestApprovalResponse`
+ * types in v2). A command or a file change takes the decision itself; a
+ * permissions request takes the permissions granted and their scope, and an
+ * empty grant is a refusal ("Respond with permissions containing only the
+ * granted subset", app-server docs, "Permission requests").
+ */
+export const codexApprovalResponse = (
+  method: string,
+  params: Record<string, unknown>,
+  outcome: ApprovalOutcome,
+): Record<string, unknown> => {
+  const decision = outcome.choice?.decision;
+  if (method === "item/permissions/requestApproval") {
+    if (decision !== "allow_once" && decision !== "allow_session") return { permissions: {}, scope: "turn" };
+    const requested = asRecord(params.permissions);
+    const permissions = Object.fromEntries(Object.entries(requested).filter(([, value]) => value !== null && value !== undefined));
+    return { permissions, scope: decision === "allow_session" ? "session" : "turn" };
+  }
+  if (decision === "allow_once") return { decision: "accept" };
+  if (decision === "allow_session") return { decision: "acceptForSession" };
+  return { decision: "decline" };
+};
+
+/**
+ * The harness's own wait, when it names one: `autoResolutionMs`, "an integer
+ * millisecond timeout or null" after which "host clients can resolve the
+ * prompt automatically" (app-server docs, `tool/requestUserInput`). The
+ * 0.154.0 schema carries it on `ToolRequestUserInputParams` only, so an
+ * approval request without it waits `APPROVAL_TIMEOUT_MS`.
+ */
+export const codexTimeout = (params: Record<string, unknown>): number | undefined =>
+  typeof params.autoResolutionMs === "number" && params.autoResolutionMs > 0 ? params.autoResolutionMs : undefined;
 
 /**
  * Relay's hosted MCP server as a per-thread config override. `thread/start`
@@ -75,17 +161,17 @@ export const CODEX_APPROVAL_POLICY = "never";
  * (openclaw extensions/codex/src/app-server/attempt-startup.ts:215-219,
  * thread-lifecycle-io.ts:151). The token stays in `RELAY_AGENT_TOKEN`.
  *
- * Relay's own write tools are approved on that one server. The thread runs
- * with `approvalPolicy: "never"` because nobody is at the keyboard, so Codex
- * stops every tool call that needs an approval: "MCP tool call requires
- * approval, but approval policy is never" (the Mac run of 2026-09-26, on
- * `create_post`). The person connected this agent so it acts through Relay,
- * so `send_message`, `create_post`, `comment`, `upvote`, `send_task` and
+ * Relay's own write tools are approved on that one server, so they run
+ * without a card, as Inkbox's own tools do (inkbox-claude-code-plugin-
+ * sessions.py.txt:1171-1173). Without it Codex stops them: "MCP tool call
+ * requires approval, but approval policy is never" (the Mac run of
+ * 2026-09-26, on `create_post`). The person connected this agent so it acts
+ * through Relay, so `send_message`, `create_post`, `comment`, `upvote`, `send_task` and
  * `update_task` carry Codex's per-tool setting `tools.<tool>.approval_mode =
  * "approve"` ("Per-tool approval behavior override",
  * learn.chatgpt.com/docs/extend/mcp?surface=cli; saved at
  * _sources/mcp-hosted-docs-20260926/codex-extend-mcp-cli.txt:1010-1011,
- * 1318-1319). No other server, and no approval policy, changes.
+ * 1318-1319). No other server changes.
  *
  * The agent's token is kept out of every shell command the model runs.
  * app-server gets `RELAY_AGENT_TOKEN` in its own environment so the relay
@@ -294,6 +380,11 @@ export const startAppServer = (
   cwd: string,
   signal: AbortSignal,
   env?: Readonly<Record<string, string>>,
+  /**
+   * Answers one server request, or returns undefined to refuse it. The
+   * promise's value is the JSON-RPC `result`.
+   */
+  onRequest?: (method: string, params: Record<string, unknown>, id: number | string) => Promise<Record<string, unknown>> | undefined,
 ): CodexAppServer => {
   // Started the way every other command this CLI runs is started, so the `.cmd`
   // shim npm installs on Windows runs too (spawn-command.ts). Nothing a person
@@ -335,10 +426,19 @@ export const startAppServer = (
     }
     if (message.id !== undefined && message.method !== undefined) {
       // app-server asks a client to approve what its settings do not allow it
-      // to do by itself. This bridge approves nothing, and a request left
-      // unanswered would hold the turn open, so it is refused in JSON-RPC's
-      // own words.
-      write({ id: message.id, error: { code: -32601, message: "This Relay bridge answers no app-server requests." } });
+      // to do by itself. An approval goes to `onRequest`; anything else, and
+      // every request when there is no handler, is refused in JSON-RPC's own
+      // words, because a request left unanswered would hold the turn open.
+      const id = message.id;
+      const handled = onRequest?.(message.method, asRecord(message.params), id);
+      if (!handled) {
+        write({ id, error: { code: -32601, message: "This Relay bridge answers no such app-server request." } });
+        return;
+      }
+      void handled.then(
+        (result) => { if (!dead) write({ id, result }); },
+        (error: unknown) => { if (!dead) write({ id, error: { code: -32000, message: error instanceof Error ? error.message : String(error) } }); },
+      );
       return;
     }
     if (message.method === undefined) return;
@@ -517,6 +617,8 @@ export interface CodexBridgeInput {
   agentToken: string;
   /** Relay's hosted MCP server, handed to every thread (`codexThreadConfig`). */
   mcpURL: string;
+  /** Asks the agent's owners, in Relay, whatever Codex would ask at its terminal. */
+  approvals: Pick<OwnerApprovals, "ask" | "take">;
   signal: AbortSignal;
   /** One line to the terminal the person is watching. */
   say(line: string): void;
@@ -556,7 +658,39 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
     if (session && !sessionGone) return session;
     opened = new Map();
     session = (async () => {
-      const started = startAppServer(input.codex, input.cwd, input.signal, { [AGENT_TOKEN_ENV]: input.agentToken });
+      // The files each announced change touches, so its card can name them;
+      // and each open approval's stop, for when app-server clears it.
+      const files = new Map<string, string[]>();
+      const waiting = new Map<string, AbortController>();
+      const approve = (method: string, params: Record<string, unknown>, id: number | string): Promise<Record<string, unknown>> | undefined => {
+        if (!(CODEX_APPROVAL_METHODS as readonly string[]).includes(method)) return undefined;
+        const stop = new AbortController();
+        const onAbort = (): void => stop.abort();
+        input.signal.addEventListener("abort", onAbort, { once: true });
+        waiting.set(String(id), stop);
+        const timeoutMs = codexTimeout(params);
+        return input.approvals.ask({
+          harness: "Codex",
+          ...codexApprovalRequest(method, params, files),
+          choices: CODEX_CHOICES,
+          ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+          signal: stop.signal,
+        }).then((outcome) => codexApprovalResponse(method, params, outcome)).finally(() => {
+          waiting.delete(String(id));
+          input.signal.removeEventListener("abort", onAbort);
+        });
+      };
+      const started = startAppServer(input.codex, input.cwd, input.signal, { [AGENT_TOKEN_ENV]: input.agentToken }, approve);
+      started.watch((note) => {
+        // "serverRequest/resolved confirms that the pending request has been
+        // answered or cleared" (app-server docs, "Approvals"); a cleared one
+        // stops waiting, as Inkbox's client cancels it (codex_client.py.txt:618-622).
+        if (note.method === "serverRequest/resolved") waiting.get(String(note.params.requestId))?.abort();
+        const item = asRecord(note.params.item);
+        if (note.method === "item/started" && item.type === "fileChange" && typeof item.id === "string" && Array.isArray(item.changes)) {
+          files.set(item.id, item.changes.flatMap((change) => typeof asRecord(change).path === "string" ? [String(asRecord(change).path)] : []));
+        }
+      });
       // A stop the person asked for, with Control-C, is not news.
       void started.stopped.then((line) => {
         sessionGone = true;
@@ -675,6 +809,8 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
   await input.client.websocket.run({
     signal: input.signal,
     onEvent: async (event) => {
+      // A tap on an approval card answers a prompt; it is not a message to answer.
+      if (await input.approvals.take(event)) return;
       const turn = bridgeTurn(event);
       if (!turn || answered.has(turn.eventId)) return;
       answered.add(turn.eventId);

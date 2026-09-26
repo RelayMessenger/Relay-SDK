@@ -6,6 +6,7 @@ import type {
   A2aSendMessageResult,
   A2aTask,
   AcceptedResponse,
+  AgentMe,
   AgentMeUpdateParams,
   AgentMeUpdateResponse,
   AgentAccessEntry,
@@ -1062,6 +1063,20 @@ export class Calls {
 /** The authenticated agent's own settings. */
 export class Me {
   constructor(private readonly transport: Transport) {}
+
+  /**
+   * The agent this Agent Token authenticates and who owns it: `owner`, as
+   * every Handle of the agent names it, and `owner_people`, the people who
+   * administer it. For an agent a person owns, that person; for an
+   * organization's agent, the person who issued the calling Agent Token.
+   */
+  retrieve(options?: RequestOptions): Promise<AgentMe> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/me",
+      options,
+    });
+  }
 
   /**
    * Turn on or off whether this agent accepts tasks (A2A Tasks) from other

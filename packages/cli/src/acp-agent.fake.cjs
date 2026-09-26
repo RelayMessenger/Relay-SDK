@@ -29,6 +29,9 @@
  *                when its settings name no sign-in method
  *   resumable    the session ids `session/load` accepts; anything else errors,
  *                as a real agent answers for a session it has lost
+ *   permission   `{toolCall, options}`: each turn first sends
+ *                `session/request_permission` with these and waits for the
+ *                client's answer, recorded as `permissionResponse`
  */
 const fs = require("node:fs");
 
@@ -87,7 +90,17 @@ const completePrompt = (sessionId, stopReason) => {
   write({ id: turn.id, result: { stopReason } });
 };
 
+const pendingPermission = new Map();
 const handle = (message) => {
+  if (message.method === undefined && pendingPermission.has(message.id)) {
+    // The client's answer to the permission request: the turn goes on.
+    const sessionId = pendingPermission.get(message.id);
+    pendingPermission.delete(message.id);
+    record({ permissionResponse: message.result ?? null, permissionError: message.error ?? null, id: message.id });
+    const turn = active.get(sessionId);
+    if (turn) turn.timer = setTimeout(() => { completePrompt(sessionId, "end_turn"); }, settings.turnMs ?? 5);
+    return;
+  }
   record({ in: message.method, params: message.params, argv: process.argv.slice(2), tokenEnv: process.env.RELAY_AGENT_TOKEN ?? null });
   const answer = (result) => { write({ id: message.id, result }); };
   if (message.method === "initialize") {
@@ -144,6 +157,15 @@ const handle = (message) => {
   if (message.method === "session/prompt") {
     turnCount += 1;
     const sessionId = message.params.sessionId;
+    if (settings.permission) {
+      const turn = { id: message.id, answer: answerFor(turnCount - 1), timer: undefined };
+      active.set(sessionId, turn);
+      const request = { id: `permission-${turnCount}`, method: "session/request_permission", params: { sessionId, ...settings.permission } };
+      pendingPermission.set(request.id, sessionId);
+      record({ out: request.method, id: request.id, params: request.params });
+      write(request);
+      return;
+    }
     const turn = {
       id: message.id,
       answer: answerFor(turnCount - 1),

@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeCommand, claudeSpawn, runClaudeBridge, spawnClaude } from "./claude-bridge.js";
+import { CLAUDE_ALLOWED_TOOLS, CLAUDE_SETTING_SOURCES, claudeCommand, claudePermission, claudeSpawn, runClaudeBridge, sessionRules, spawnClaude } from "./claude-bridge.js";
+import type { ApprovalOutcome, ApprovalRequest, OwnerApprovals } from "./approvals.js";
 import { codexPrompt } from "./codex-bridge.js";
 import type { ClaudeThreadStore } from "./claude-threads.js";
 
@@ -93,8 +94,9 @@ const setup = (ask: typeof query, events: RelayWebhookEvent[]) => {
   const threads = memoryThreads();
   const control = new AbortController();
   const said: string[] = [];
+  const approvals: Pick<OwnerApprovals, "ask" | "take"> = { ask: async () => ({ reason: "no_owner" }), take: async () => false };
   const input = { client: relay.client, threads, query: ask, signal: control.signal, say: (line: string) => said.push(line),
-    claude: { executable: "/bin/claude" }, cwd: "/project", mcp };
+    claude: { executable: "/bin/claude" }, cwd: "/project", mcp, approvals };
   return { relay, threads, control, said, input };
 };
 
@@ -203,7 +205,9 @@ describe("Claude Agent SDK bridge", () => {
     await untilEnded(state.said, 1);
     expect(calls[0]).toEqual({ prompt: codexPrompt("alice", "hello"), options: {
       cwd: "/project", resume: undefined, pathToClaudeCodeExecutable: "/bin/claude",
-      permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true,
+      settingSources: ["user", "project"],
+      allowedTools: ["Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite", "Task", "NotebookRead", "mcp__relay__*"],
+      canUseTool: expect.any(Function),
       mcpServers: { relay: { type: "http", url: "https://mcp.relayapp.im", headers: { Authorization: "Bearer rel_token_test" } } },
       // On Windows every executable that is not an `.exe` starts through the
       // shell (spawn-command.ts, `platformCommand`), so the bridge hands the SDK
@@ -493,4 +497,44 @@ it("teaches Claude the payment block and sends a payment answer as the words, th
   // An answer to an agent replies to the message that came in, never to the
   // reply_to that came with it (context for Claude), and only its first message does.
   expect(state.relay.sent.map((item) => item.replyTo)).toEqual([{ message_id: "message-pay" }, undefined]);
+});
+
+describe("Claude Code's own permission prompts, relayed to the agent's owners", () => {
+  const options = { signal: new AbortController().signal, toolUseID: "tool-1" } as Parameters<ReturnType<typeof claudePermission>>[2];
+  const answering = (outcome: (request: ApprovalRequest) => ApprovalOutcome, asked: ApprovalRequest[] = []) => ({
+    ask: async (request: ApprovalRequest) => { asked.push(request); return outcome(request); },
+  });
+  const pick = (decision: string) => (request: ApprovalRequest): ApprovalOutcome => {
+    const choice = request.choices.find((option) => option.decision === decision);
+    return choice ? { reason: "answered", choice, by: "owner" } : { reason: "timeout" };
+  };
+
+  it("starts Claude Code in its ask mode with the person's settings, never bypassing permissions", () => {
+    expect(CLAUDE_SETTING_SOURCES).toEqual(["user", "project"]);
+    expect(CLAUDE_ALLOWED_TOOLS).toContain("mcp__relay__*");
+    expect(CLAUDE_ALLOWED_TOOLS).not.toContain("Bash");
+    expect(CLAUDE_ALLOWED_TOOLS).not.toContain("Write");
+  });
+
+  it("maps each owner answer to the Agent SDK's own result", async () => {
+    const input = { command: "uname -a", description: "kernel" };
+    const asked: ApprovalRequest[] = [];
+    expect(await claudePermission(answering(pick("allow_once"), asked))("Bash", input, options)).toEqual({ behavior: "allow", updatedInput: input });
+    expect(asked[0]).toMatchObject({ harness: "Claude Code", tool: "Bash", summary: "uname -a" });
+    expect(asked[0]?.choices.map((choice) => choice.label)).toEqual(["Allow once", "Allow for this session", "Deny"]);
+    const suggestion = { type: "addRules" as const, rules: [{ toolName: "Bash", ruleContent: "uname:*" }], behavior: "allow" as const, destination: "localSettings" as const };
+    expect(await claudePermission(answering(pick("allow_session")))("Bash", input, { ...options, suggestions: [suggestion] })).toEqual({
+      behavior: "allow", updatedInput: input, updatedPermissions: [{ ...suggestion, destination: "session" }],
+    });
+    expect(await claudePermission(answering(pick("deny")))("Bash", input, options)).toEqual({
+      behavior: "deny", message: "The agent's owner denied this, so treating that as not approved.",
+    });
+    expect(await claudePermission(answering(() => ({ reason: "timeout" })))("Bash", input, options)).toEqual({
+      behavior: "deny", message: "The agent's owner did not answer in time, so treating that as not approved.",
+    });
+  });
+
+  it("keeps a session grant in the session when Claude Code suggests none", () => {
+    expect(sessionRules("Write", undefined)).toEqual([{ type: "addRules", rules: [{ toolName: "Write" }], behavior: "allow", destination: "session" }]);
+  });
 });
