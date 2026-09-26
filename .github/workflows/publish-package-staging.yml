@@ -237,20 +237,9 @@ jobs:
     secrets:
       NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
 
-  mcp:
-    needs: [bump, sdk, cli, land]
-    if: ${{ !cancelled() && needs.bump.result == 'success' && needs.land.result == 'success' && needs.sdk.result != 'failure' && needs.cli.result != 'failure' && contains(needs.bump.outputs.changed, ',mcp,') }}
-    uses: ./.github/workflows/staging-package.yml
-    with:
-      package: mcp
-      sha: ${{ needs.bump.outputs.sha }}
-      base: ${{ needs.bump.outputs.base }}
-    secrets:
-      NPM_PUBLISH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
-
   openclaw:
-    needs: [bump, sdk, mcp, land]
-    if: ${{ !cancelled() && needs.bump.result == 'success' && needs.land.result == 'success' && needs.sdk.result != 'failure' && needs.mcp.result != 'failure' && contains(needs.bump.outputs.changed, ',openclaw,') }}
+    needs: [bump, sdk, cli, land]
+    if: ${{ !cancelled() && needs.bump.result == 'success' && needs.land.result == 'success' && needs.sdk.result != 'failure' && needs.cli.result != 'failure' && contains(needs.bump.outputs.changed, ',openclaw,') }}
     uses: ./.github/workflows/staging-package.yml
     with:
       package: openclaw
