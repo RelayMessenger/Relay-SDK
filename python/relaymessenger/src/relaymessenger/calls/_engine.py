@@ -20,7 +20,11 @@ from aiortc.rtcrtpparameters import RTCRtpCodecCapability
 from aiortc.sdp import candidate_from_sdp
 
 #: H.264 constrained baseline, the only H.264 profile Cloudflare's SFU accepts
-#: (engine-werift.ts `videoCodecs`), with packetization-mode 1.
+#: (engine-werift.ts `videoCodecs`), with packetization-mode 1. Level 3.1 with
+#: ``level-asymmetry-allowed=1`` is what libwebrtc offers for its software
+#: H.264 (modules/video_coding/codecs/h264/h264.cc ``SupportedH264Codecs``) and
+#: LiveKit for its hardware H.264; both send 1080p at the level the encoder
+#: picks, as `RelayH264Encoder` does (4.0 at 1920x1080 and 30 fps).
 H264_PROFILE_LEVEL_ID = "42e01f"
 
 

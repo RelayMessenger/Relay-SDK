@@ -10,9 +10,18 @@
  *   dynamic build linked against system FFmpeg first).
  * - `hardwareAcceleration: "prefer-software"` on encoder and decoder: on a
  *   Mac, VideoToolbox otherwise takes the stream.
- * - H.264 is sent as constrained baseline `avc1.42e01f`, Annex-B; the codec
- *   string FFmpeg reports for H.264 is "MPEG4/ISO/AVC", so the codec is never
- *   matched by FFmpeg's name, only by the negotiated MIME type.
+ * - H.264 is sent as constrained baseline, Annex-B; the codec string FFmpeg
+ *   reports for H.264 is "MPEG4/ISO/AVC", so the codec is never matched by
+ *   FFmpeg's name, only by the negotiated MIME type.
+ * - The H.264 level in the stream is OpenH264's own choice for the frame
+ *   size, as in libwebrtc, whose OpenH264 encoder sets no level
+ *   (modules/video_coding/codecs/h264/h264_encoder_impl.cc): measured on
+ *   2026-09-26, the SPS carries level 3.1 at 1280x720 and 4.0 at 1920x1080
+ *   whatever level the codec string names. The string names level 4.0
+ *   (`H264_ENCODER_CODEC`), the level of 1080p at 30 fps.
+ * - With no `videoEncoding`, the bitrate and framerate are LiveKit's preset
+ *   for the frame size being sent (video-presets.ts); a `videoEncoding` field
+ *   the caller sets wins over the preset's.
  * - A keyframe every 1 s, and on every PLI or FIR from the SFU.
  * - The send codec is the first codec of the SFU's answer (werift
  *   rtpSender.js:408 `this.codec = params.codecs[0]`).
@@ -40,8 +49,10 @@ import {
   type RelayVideoSenderStats,
   type TrackPublishOptions,
   VideoCodec,
+  type VideoEncoding,
   type VideoFrameEvent,
 } from "./video.js";
+import { defaultVideoEncoding } from "./video-presets.js";
 import { VideoBufferType, VideoFrame, VideoRotation, videoFrameLength } from "./video-frame.js";
 import {
   type AssembledVideoFrame,
@@ -61,8 +72,12 @@ type WcPixelFormat = "I420" | "RGBA" | "BGRA";
 
 export const KEYFRAME_INTERVAL_MS = 1_000;
 export const KEYFRAME_REQUEST_INTERVAL_MS = 1_000;
-export const DEFAULT_VIDEO_BITRATE = 800_000;
-export const DEFAULT_VIDEO_FRAMERATE = 30;
+/**
+ * Constrained baseline (profile_idc 66, constraint_set0 and set1), level 4.0:
+ * ITU-T H.264 Table A-1 allows 8,192 macroblocks a frame and 245,760 a second
+ * at level 4.0, and 1920x1080 at 30 fps is 8,160 and 244,800.
+ */
+export const H264_ENCODER_CODEC = "avc1.42e028";
 /** Frames waiting in the encoder before new captures are dropped instead of queued. */
 const MAX_ENCODE_QUEUE = 3;
 /** Reorder window ahead of the frame assembler (rtp-packet `JitterBuffer` default). */
@@ -139,8 +154,7 @@ export class WeriftVideoSender implements RelayVideoSenderLike {
   readonly track: RelayMediaStreamTrackLike;
   readonly #track: MediaStreamTrack;
   readonly #wc: WebCodecs;
-  readonly #bitrate: number;
-  readonly #framerate: number;
+  readonly #encoding: VideoEncoding | undefined;
   readonly #preferred: RelayVideoCodecName;
   readonly #ssrc = (Math.random() * 0xffffffff) >>> 0;
   #transceiver: RTCRtpTransceiver | undefined;
@@ -168,8 +182,7 @@ export class WeriftVideoSender implements RelayVideoSenderLike {
 
   constructor(wc: WebCodecs, options: TrackPublishOptions = {}) {
     this.#wc = wc;
-    this.#bitrate = Number(options.videoEncoding?.maxBitrate ?? DEFAULT_VIDEO_BITRATE);
-    this.#framerate = options.videoEncoding?.maxFramerate ?? DEFAULT_VIDEO_FRAMERATE;
+    this.#encoding = options.videoEncoding;
     this.#preferred = options.videoCodec === VideoCodec.VP8 ? "vp8" : "h264";
     this.#track = new MediaStreamTrack({ kind: "video", id: "camera", streamId: "relay-call" });
     this.track = this.#track as unknown as RelayMediaStreamTrackLike;
@@ -304,12 +317,13 @@ export class WeriftVideoSender implements RelayVideoSenderLike {
         if (this.#encoder === encoder) this.#encoder = undefined;
       },
     });
+    const preset = defaultVideoEncoding(width, height);
     encoder.configure({
-      codec: codec === "h264" ? "avc1.42e01f" : "vp8",
+      codec: codec === "h264" ? H264_ENCODER_CODEC : "vp8",
       width,
       height,
-      bitrate: this.#bitrate,
-      framerate: this.#framerate,
+      bitrate: Number(this.#encoding?.maxBitrate ?? preset.maxBitrate),
+      framerate: this.#encoding?.maxFramerate ?? preset.maxFramerate,
       latencyMode: "realtime",
       hardwareAcceleration: "prefer-software",
       ...(codec === "h264" ? { avc: { format: "annexb" as const } } : {}),

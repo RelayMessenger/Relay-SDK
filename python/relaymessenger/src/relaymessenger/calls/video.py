@@ -7,8 +7,9 @@ source)`, `VideoStream(track)` yielding `VideoFrameEvent`. Frames here are
 `RelayVideoFrame` (tightly packed bytes plus a format name) or PyAV's
 `av.VideoFrame`; framework adapters override `VideoSource._to_av` and
 `RemoteVideoTrack._event` to speak their own frame class instead. aiortc does
-the encoding (libx264 via PyAV, H.264 constrained baseline ``42e01f``, the
-profile Cloudflare's SFU accepts) and the decoding (H.264 and VP8).
+the encoding (libx264 via PyAV, H.264 constrained baseline, the profile
+Cloudflare's SFU accepts, through `RelayH264Encoder`) and the decoding (H.264
+and VP8).
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from typing import Any, AsyncIterator, Callable, Literal, Optional
 
 import av
 import numpy as np
+from aiortc.codecs.h264 import MAX_FRAME_RATE, H264Encoder
 from aiortc.mediastreams import MediaStreamError, MediaStreamTrack
 
 from ._engine import media_ssrc
@@ -150,10 +152,138 @@ class VideoFrameEvent:
 
 @dataclass
 class VideoEncoding:
-    """LiveKit's ``VideoEncoding``. aiortc adapts its bitrate from REMB; these are recorded for parity."""
+    """LiveKit's ``VideoEncoding``: the encoder's bitrate ceiling and framerate hint.
+
+    A field left at 0 takes LiveKit's camera preset for the frame size being
+    sent (`default_video_encoding`). aiortc sets the bitrate from the SFU's
+    REMB estimate, between 500 kbps and 3 Mbps (aiortc/codecs/h264.py
+    ``MIN_BITRATE``, ``MAX_BITRATE``); `RelayH264Encoder` keeps it at or below
+    ``max_bitrate``.
+    """
 
     max_bitrate: int = 0
     max_framerate: float = 0
+
+
+#: LiveKit's camera presets, ``(width, height, max_bitrate, max_framerate)``:
+#: ``VideoPresets`` (16:9) and ``VideoPresets43`` (4:3) in livekit/client-sdk-js
+#: src/room/track/options.ts:507-532 at 5cadc938
+#: (https://github.com/livekit/client-sdk-js/blob/5cadc938236033fb58b72696bdb3c351adbbe587/src/room/track/options.ts#L507-L532),
+#: the same table as packages/sdk/src/calls/video-presets.ts.
+VIDEO_PRESETS_169: tuple[tuple[int, int, int, float], ...] = (
+    (160, 90, 90_000, 20),
+    (320, 180, 160_000, 20),
+    (384, 216, 180_000, 20),
+    (640, 360, 450_000, 20),
+    (960, 540, 800_000, 25),
+    (1280, 720, 1_700_000, 30),
+    (1920, 1080, 3_000_000, 30),
+    (2560, 1440, 5_000_000, 30),
+    (3840, 2160, 8_000_000, 30),
+)
+VIDEO_PRESETS_43: tuple[tuple[int, int, int, float], ...] = (
+    (160, 120, 70_000, 20),
+    (240, 180, 125_000, 20),
+    (320, 240, 140_000, 20),
+    (480, 360, 330_000, 20),
+    (640, 480, 500_000, 20),
+    (720, 540, 600_000, 25),
+    (960, 720, 1_300_000, 30),
+    (1440, 1080, 2_300_000, 30),
+    (1920, 1440, 3_800_000, 30),
+)
+
+
+def default_video_encoding(width: int, height: int) -> VideoEncoding:
+    """LiveKit's ``determineAppropriateEncoding`` for a camera frame of ``width`` x ``height``.
+
+    livekit/client-sdk-js src/room/participant/publishUtils.ts:310-368 at
+    5cadc938: the 16:9 or 4:3 list, whichever aspect ratio is nearer; the
+    first preset whose width reaches the frame's longer side, else the
+    largest. LiveKit changes the bitrate only for VP9, AV1 and H.265.
+    """
+    aspect = width / height if width > height else height / width
+    presets = VIDEO_PRESETS_169 if abs(aspect - 16 / 9) < abs(aspect - 4 / 3) else VIDEO_PRESETS_43
+    size = max(width, height)
+    chosen = presets[0]
+    for chosen in presets:
+        if chosen[0] >= size:
+            break
+    return VideoEncoding(max_bitrate=chosen[2], max_framerate=chosen[3])
+
+
+class RelayH264Encoder(H264Encoder):
+    """aiortc's H.264 encoder with LiveKit's encoding and the level libx264 picks for the frame.
+
+    aiortc opens libx264 at level 3.1 whatever the frame size
+    (aiortc/codecs/h264.py ``_encode_frame``: ``"level": "31"``), so a 1080p
+    stream says 3.1 in its SPS. This encoder opens libx264 the same way but
+    leaves the level out, and libx264 picks it from the frame size and rate,
+    as libwebrtc leaves it to OpenH264
+    (modules/video_coding/codecs/h264/h264_encoder_impl.cc sets no level):
+    3.1 at 1280x720 and 4.0 at 1920x1080 at 30 fps. The bitrate is aiortc's
+    REMB estimate, at most the encoding's ``max_bitrate``; the framerate hint
+    is the encoding's ``max_framerate``.
+    """
+
+    def __init__(self, encoding: Optional[VideoEncoding] = None) -> None:
+        super().__init__()
+        self.encoding = encoding or VideoEncoding()
+        self._max_bitrate = 0
+
+    def settings(self, width: int, height: int) -> VideoEncoding:
+        """The encoding for one frame size: each field the caller set, else LiveKit's preset."""
+        preset = default_video_encoding(width, height)
+        return VideoEncoding(
+            max_bitrate=self.encoding.max_bitrate or preset.max_bitrate,
+            max_framerate=self.encoding.max_framerate or preset.max_framerate,
+        )
+
+    @property
+    def target_bitrate(self) -> int:
+        estimate = int(H264Encoder.target_bitrate.fget(self))  # type: ignore[attr-defined]
+        return min(estimate, self._max_bitrate) if self._max_bitrate else estimate
+
+    @target_bitrate.setter
+    def target_bitrate(self, bitrate: int) -> None:
+        H264Encoder.target_bitrate.fset(self, bitrate)  # type: ignore[attr-defined]
+
+    def _encode_frame(self, frame: av.VideoFrame, force_keyframe: bool) -> Any:
+        settings = self.settings(frame.width, frame.height)
+        self._max_bitrate = settings.max_bitrate
+        codec = self.codec
+        # aiortc's own reopen rule: a new size, or a bitrate more than 10% away.
+        if codec is None or (
+            frame.width != codec.width
+            or frame.height != codec.height
+            or not codec.bit_rate
+            or abs(self.target_bitrate - codec.bit_rate) / codec.bit_rate > 0.1
+        ):
+            self.buffer_data = b""
+            self.buffer_pts = None
+            codec = av.CodecContext.create("libx264", "w")
+            codec.width = frame.width
+            codec.height = frame.height
+            codec.bit_rate = self.target_bitrate
+            codec.pix_fmt = "yuv420p"
+            codec.framerate = fractions.Fraction(settings.max_framerate).limit_denominator(1001)
+            # aiortc's time base, unchanged: frames keep arriving at the caller's pace.
+            codec.time_base = fractions.Fraction(1, MAX_FRAME_RATE)
+            codec.options = {"tune": "zerolatency"}
+            codec.profile = "Baseline"
+            self.codec = codec
+        return super()._encode_frame(frame, force_keyframe)
+
+
+def use_relay_encoder(sender: Any, encoding: Optional[VideoEncoding]) -> None:
+    """Give an aiortc video sender a `RelayH264Encoder` before its first frame.
+
+    aiortc creates the encoder on the first frame only when it has none
+    (aiortc/rtcrtpsender.py ``_next_encoded_frame``: ``if self.__encoder is
+    None``) and releases it when the sender stops; the published video offers
+    H.264 alone (`prefer_h264`), so the encoder is always H.264.
+    """
+    sender._RTCRtpSender__encoder = RelayH264Encoder(encoding)
 
 
 @dataclass

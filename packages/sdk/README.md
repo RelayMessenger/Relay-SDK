@@ -558,19 +558,22 @@ import {
 
 await transport.connect();
 
-const source = new VideoSource(640, 480);
+const source = new VideoSource(1280, 720);
 const track = LocalVideoTrack.createVideoTrack("camera", source);
-await transport.publishTrack(track, {
-  videoEncoding: { maxBitrate: 800_000, maxFramerate: 15 },
-});
+await transport.publishTrack(track);
 
-// RGBA, BGRA or I420 bytes, tightly packed.
-source.captureFrame(new VideoFrame(rgba, 640, 480, VideoBufferType.RGBA));
+// RGBA, BGRA or I420 bytes, tightly packed, 30 frames a second.
+source.captureFrame(new VideoFrame(rgba, 1280, 720, VideoBufferType.RGBA));
 
 // Camera off, then on again; the track stays negotiated.
 await transport.unpublishTrack(track);
 await transport.publishTrack(track);
 ```
+
+Send frames up to 1920x1080 at 30 fps. Without `videoEncoding`, each frame
+size gets [LiveKit's camera preset](https://github.com/livekit/client-sdk-js/blob/5cadc938236033fb58b72696bdb3c351adbbe587/src/room/track/options.ts#L507-L532): 3 Mbps at 30 fps for 1920x1080,
+1.7 Mbps at 30 fps for 1280x720 and 450 kbps at 20 fps for 640x360. Pass
+`videoEncoding: { maxBitrate, maxFramerate }` to set your own.
 
 Receive the other participant's video:
 

@@ -550,6 +550,20 @@ async def test_subscribed_needs_receiving_audio_after_this_peers_answer_and_a_re
     await transport.aclose()
 
 
+async def test_the_camera_encodes_with_relay_h264_encoder_and_the_publish_encoding() -> None:
+    transport, room = make(session_connect_timeout_ms=30)
+    encoding = video_module.VideoEncoding(max_bitrate=1_000_000)
+    track = LocalVideoTrack.create_video_track("camera", VideoSource(64, 48))
+    await transport.publish_track(track, video_module.TrackPublishOptions(video_encoding=encoding))
+    task = asyncio.ensure_future(transport.connect())
+    await settle()
+    # LiveKit's preset per frame size, or the caller's encoding (`use_relay_encoder`).
+    encoder = FakePeer.instances[-1].transceivers[1].sender._RTCRtpSender__encoder
+    assert isinstance(encoder, video_module.RelayH264Encoder) and encoder.encoding is encoding
+    task.cancel()
+    await transport.aclose()
+
+
 async def test_the_camera_sends_a_keyframe_when_the_person_starts_receiving_it() -> None:
     transport, room = make(session_connect_timeout_ms=30)
     await transport.publish_track(LocalVideoTrack.create_video_track("camera", VideoSource(64, 48)))
