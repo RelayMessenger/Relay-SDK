@@ -1,7 +1,8 @@
 """The native proof of `relaymessenger connect` on a real pseudo-terminal.
 
-It drives the installed CLI through the redesigned screens: the one question
-`Where does your agent run?` answered with Enter, the plan (`create a new agent`
+It drives the installed CLI through the redesigned screens: the question
+`Where does your agent run?` answered with Enter, the required `Subtitle`
+typed in, the plan (`create a new agent`
 first, then the Claude Code bridge line), the agent created immediately,
 `Say hi from your phone`, the share link and the QR,
 then the agent's first reply. Relay is loopback only (agent-cli-platforms-terminal-server.mjs);
@@ -52,8 +53,9 @@ def drain(fd, seconds):
             except OSError: break
     return out
 
-# One question, answered with Enter: the runtime picker takes its default.
-steps = [(b'Where does your agent run?', b'\r')]
+# Two questions: the runtime picker takes its default with Enter; the required
+# Subtitle (agent-create.ts requireSubtitle) is typed, as a person would.
+steps = [(b'Where does your agent run?', b'\r'), (b'Subtitle', b'Helps with tasks\r')]
 # 24 and 32 rows have no room for a full-cell code; 60 rows has. All three are proved.
 modes = [('light', 80, 24), ('dark', 100, 32), ('tall', 100, 60)]
 for mode, columns, rows in modes:
@@ -82,18 +84,18 @@ for mode, columns, rows in modes:
         assert stage == len(steps), {'mode': mode, 'stage': stage, 'exit': process.poll()}
         assert process.wait(timeout=4) == 0, {'mode': mode, 'exit': process.returncode}
         assert termios.tcgetattr(slave) == before
-        # The screens, in order: the wordmark, the one question, the create line,
+        # The screens, in order: the wordmark, the two questions, the create line,
         # the two plan lines, the agent, the phone step, the reply.
-        order = [b'Relay', b'Where does your agent run?', b'create a new agent  (Relay picks the name)', b'keep running here, and answer your Relay messages with Claude Code from this folder',
+        order = [b'Relay', b'Where does your agent run?', b'Subtitle', b'create a new agent  subtitle: Helps with tasks', b'keep running here, and answer your Relay messages with Claude Code from this folder',
                  b'Created @' + handle.encode(), b'Say hi from your phone', b'Answered from your phone: owned integrated agent reply']
         text = plain(output); at = 0
         for needle in order:
             found = text.find(needle, at); assert found >= 0, {'mode': mode, 'missing': needle}; at = found
-        plan = text[text.find(b'create a new agent  (Relay picks the name)'):text.find(b'Created @')]
+        plan = text[text.find(b'create a new agent  subtitle: Helps with tasks'):text.find(b'Created @')]
         planLines = [
             line for line in plan.split(b'\n')
             if any(marker in line for marker in (
-                b'create a new agent  (Relay picks the name)',
+                b'create a new agent  subtitle: Helps with tasks',
                 b'keep running here, and answer your Relay messages with Claude Code from this folder',
             ))
         ]
@@ -105,8 +107,11 @@ for mode, columns, rows in modes:
         # spaces per module (white 231 / black 16), while the whole code fits the window; the compact
         # half-block form below that. Either one scans. What must never appear is a window that
         # shows no whole code at all.
-        fullCells = b'\x1b[48;5;16m' in output and b'\x1b[48;5;231m' in output
-        halfBlocks = any(glyph.encode() in output for glyph in '▀▄█')
+        # The QR is drawn after the `Say hi from your phone` step (connect.ts showAddQR). The Subtitle
+        # input draws its cursor as █ too, so the QR glyphs are looked for only after that step.
+        qr = output[output.find(b'Say hi from your phone'):]
+        fullCells = b'\x1b[48;5;16m' in qr and b'\x1b[48;5;231m' in qr
+        halfBlocks = any(glyph.encode() in qr for glyph in '▀▄█')
         # The offline Console fixture has no public hostname, so the
         # organization-owned path has no QR/link to draw here. Staging-origin
         # QR rendering remains covered by the CLI's focused QR tests; this
@@ -124,7 +129,7 @@ for mode, columns, rows in modes:
         # Same saved identity in a real non-TTY command must exit, not open another watch connection.
         nonTTY = subprocess.run([node, shim, '--profile', handle, 'auth', 'status'], env=env, cwd=home, input='', capture_output=True, text=True, timeout=10); assert nonTTY.returncode == 0, nonTTY
         assert json.loads(report.read_text())['observers'] == 1 and (home / 'config.json').read_bytes() == saved
-        results.append({'mode': mode, 'size': [columns, rows], 'inputSteps': stage, 'installedShim': True, 'oneQuestion': True, 'planLines': len(planLines),
+        results.append({'mode': mode, 'size': [columns, rows], 'inputSteps': stage, 'installedShim': True, 'twoQuestions': True, 'planLines': len(planLines),
                         'noConfirmationPrompt': True, 'folderLink': True, 'apexURL': True, 'QRfits': True, 'QRform': 'full' if fullCells and not halfBlocks else 'compact',
                         'noGreenSGR': True, 'noTokenEcho': True, 'firstReply': True, 'rawRestored': True, 'nonTTYNoNewWatch': True, 'server': state})
     finally:

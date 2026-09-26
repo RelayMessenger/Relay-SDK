@@ -1,5 +1,4 @@
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import Relay, {
   type A2aMessage,
@@ -192,7 +191,8 @@ describe("tasks between agents", () => {
   it("loads the A2A client only when a task call is made", () => {
     // A child Node process records every @a2a-js/* module it resolves while
     // it loads the built SDK, makes a client, and then calls tasks.get.
-    const entry = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+    // A file: URL, not a path: the ESM loader rejects a bare Windows path (D:\...).
+    const entry = new URL("../dist/index.js", import.meta.url).href;
     const script = `
       import { registerHooks } from "node:module";
       const seen = [];
