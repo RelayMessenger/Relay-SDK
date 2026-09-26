@@ -50,12 +50,33 @@ it("reports a file that is not there as absent and safe", async () => {
   expect(await inspectPrivateFile(join(await scratch(), "absent"))).toEqual({ exists: false, secure: true });
 });
 
-it.runIf(process.platform !== "win32")("refuses to write over a file other people can read", async () => {
+it.runIf(process.platform !== "win32")("tightens a file of yours that other people can only read, then writes it", async () => {
   const directory = await scratch();
   const path = join(directory, "secret.txt");
   await writeFile(path, "old\n", { mode: 0o644 });
-  await expect(preparePrivateDestination(path, "test")).rejects.toThrow("Other people on this computer can read the test file");
-  expect(await inspectPrivateFile(path)).toMatchObject({ exists: true, secure: false });
+  await writePrivateDestination(await preparePrivateDestination(path, "test"), ".test", "new\n");
+  expect(await readFile(path, "utf8")).toBe("new\n");
+  await expectOwnerOnly(path, directory);
+});
+
+it.runIf(process.platform !== "win32")("refuses, and changes nothing, when other accounts can write the file", async () => {
+  const directory = await scratch();
+  const path = join(directory, "secret.txt");
+  await writeFile(path, "old\n", { mode: 0o600 });
+  await chmod(path, 0o664);
+  await expect(preparePrivateDestination(path, "test")).rejects.toThrow("Other accounts on this computer can write the test file");
+  expect((await stat(path)).mode & 0o777).toBe(0o664);
+  expect(await readFile(path, "utf8")).toBe("old\n");
+});
+
+it.runIf(process.platform !== "win32")("refuses, and changes nothing, when other accounts can write the folder", async () => {
+  const directory = await scratch();
+  await chmod(directory, 0o775);
+  const path = join(directory, "secret.txt");
+  await writeFile(path, "old\n", { mode: 0o600 });
+  await expect(preparePrivateDestination(path, "test")).rejects.toThrow("Other accounts on this computer can write in the test folder");
+  expect((await stat(directory)).mode & 0o777).toBe(0o775);
+  expect(await readFile(path, "utf8")).toBe("old\n");
 });
 
 /** BUILTIN\\Users, the group every local account is in. */
@@ -83,15 +104,29 @@ it("writePrivateFile makes an agent's config owner-only in a folder other people
   expect((await readdir(directory)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
 });
 
-it("writePrivateFile refuses, and changes nothing, when other people can already read the file", async () => {
+it("writePrivateFile tightens the agent's own config that other people can read, as VS Code leaves mcp.json", async () => {
   const directory = await scratch();
   const path = join(directory, "mcp.json");
   await writeFile(path, "{}\n", { mode: 0o644 });
   if (process.platform === "win32") {
     await promisify(execFile)("icacls", [path, "/grant", `*${WINDOWS_USERS}:(R)`], { windowsHide: true });
-    await expect(writePrivateFile(path, "VS Code MCP", "token\n")).rejects.toThrow("Windows permissions on the VS Code MCP file let other accounts read or write it");
+    expect(privateWindowsAcl(await inspectWindowsAcl(path))).toBe(false);
+  }
+  await writePrivateFile(path, "VS Code MCP", "token\n");
+  expect(await readFile(path, "utf8")).toBe("token\n");
+  await expectOwnerOnly(path, directory);
+});
+
+it("writePrivateFile refuses, and changes nothing, when other people can write the file", async () => {
+  const directory = await scratch();
+  const path = join(directory, "mcp.json");
+  await writeFile(path, "{}\n", { mode: 0o600 });
+  if (process.platform === "win32") {
+    await promisify(execFile)("icacls", [path, "/grant", `*${WINDOWS_USERS}:(M)`], { windowsHide: true });
+    await expect(writePrivateFile(path, "VS Code MCP", "token\n")).rejects.toThrow("Other Windows accounts own the VS Code MCP file or can write it");
   } else {
-    await expect(writePrivateFile(path, "VS Code MCP", "token\n")).rejects.toThrow("Other people on this computer can read the VS Code MCP file");
+    await chmod(path, 0o666);
+    await expect(writePrivateFile(path, "VS Code MCP", "token\n")).rejects.toThrow("Other accounts on this computer can write the VS Code MCP file");
   }
   expect(await readFile(path, "utf8")).toBe("{}\n");
 });
