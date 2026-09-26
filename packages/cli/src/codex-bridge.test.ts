@@ -13,6 +13,15 @@ import {
 import { openCodexThreads, type CodexThreadStore } from "./codex-threads.js";
 import { platformCommand } from "./spawn-command.js";
 
+/**
+ * Relay's hosted MCP server as every thread carries it, so Codex has Relay's
+ * tools in a folder it does not trust yet: the keys `codex mcp add relay --url
+ * … --bearer-token-env-var RELAY_AGENT_TOKEN` writes, as a thread override.
+ */
+const RELAY_THREAD_CONFIG = {
+  mcp_servers: { relay: { url: "https://mcp.staging.relayapp.im", bearer_token_env_var: "RELAY_AGENT_TOKEN" } },
+};
+
 const folders: string[] = [];
 afterAll(async () => { for (const folder of folders.splice(0)) await rm(folder, { recursive: true, force: true }); });
 
@@ -154,6 +163,7 @@ const runBridge = async (input: {
     await runCodexBridge({
       ...(input.media ? { media: input.media } : {}),
       agentToken: input.agentToken ?? "rel_token_test",
+      mcpURL: "https://mcp.staging.relayapp.im",
       client: relay.client, codex: input.codex, cwd: input.cwd,
       threads: input.threads ?? memoryThreads(),
       signal: control.signal, say: (line) => said.push(line),
@@ -198,7 +208,7 @@ describe("the app-server the bridge starts", () => {
     const codex = await fakeAppServer();
     await runBridge({ ...codex, events: [received("event-1", "chat-1", "Hey, what's up")] });
     const start = (await codex.log()).find((line) => line.in === "thread/start");
-    expect(start?.params).toEqual({ cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "never" });
+    expect(start?.params).toEqual({ cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "never", config: RELAY_THREAD_CONFIG });
   });
 
   it("sends the message as the turn's text input, and never on a command line", async () => {
@@ -349,7 +359,7 @@ describe("one thread for each chat", () => {
       .toEqual(["thread/start", "thread/resume"]);
     const resume = (await codex.log()).find((line) => line.in === "thread/resume");
     expect(resume?.params).toEqual({
-      threadId: "thread-1", cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "never",
+      threadId: "thread-1", cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "never", config: RELAY_THREAD_CONFIG,
     });
   });
 

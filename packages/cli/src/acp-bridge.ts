@@ -9,6 +9,7 @@ import {
   type RequestPermissionResponse,
   type SessionNotification,
   type McpServer,
+  type AuthMethod,
 } from "@agentclientprotocol/sdk";
 import { Readable, Writable } from "node:stream";
 import { isAbsolute } from "node:path";
@@ -125,9 +126,39 @@ export const autoPermission = (params: RequestPermissionRequest): RequestPermiss
     : { outcome: { outcome: "cancelled" } };
 };
 
+/** ACP's `auth_required` error code (`RequestError.authRequired`, jsonrpc.js). */
+export const AUTH_REQUIRED = -32000;
+
+/**
+ * Sign-in methods whose credential is an environment variable the agent reads
+ * itself, by method id. ACP leaves the choice of method to the client
+ * (Authentication, "Protocol-driven authentication";
+ * _sources/mcp-hosted-docs-20260926/acp-v1-authentication.md:138-170), and no
+ * person is at this client to choose, so the bridge picks only a method whose
+ * credential is already present, the rule acpx follows (`selectAuthMethod`,
+ * _sources/network-20260926/mcp-xos/acpx-src-src_acp_client.ts.txt:2054-2103).
+ * `gemini-api-key` is Gemini CLI's `AuthType.USE_GEMINI`, read from
+ * `GEMINI_API_KEY` (Gemini CLI docs/reference/configuration.md; Zed hands the
+ * same variable to Gemini, zed-agent_servers-custom.rs.txt:250-253).
+ */
+export const ENV_AUTH_METHODS: Readonly<Record<string, readonly string[]>> = {
+  "gemini-api-key": ["GEMINI_API_KEY"],
+};
+
+/** The advertised method whose credential this environment holds, when there is one. */
+export const authMethodFromEnv = (
+  methods: readonly AuthMethod[] | undefined,
+  env: NodeJS.ProcessEnv,
+): string | undefined => methods?.find((method) =>
+  !("type" in method && method.type === "terminal")
+  && (ENV_AUTH_METHODS[method.id] ?? []).some((name) => Boolean(env[name]?.trim())))?.id;
+
+const isAuthRequired = (error: unknown): boolean =>
+  error !== null && typeof error === "object" && (error as { code?: unknown }).code === AUTH_REQUIRED;
+
 /** One running ACP agent, and the calls this bridge makes to it. */
 export interface AcpAgent {
-  client: Pick<ClientSideConnection, "initialize" | "newSession" | "loadSession" | "prompt" | "cancel">;
+  client: Pick<ClientSideConnection, "initialize" | "authenticate" | "newSession" | "loadSession" | "prompt" | "cancel">;
   /**
    * Collect the answer streamed for one session's running turn. Every
    * `agent_message_chunk` of text is handed to the sink until the returned
@@ -139,6 +170,10 @@ export interface AcpAgent {
   canLoad: boolean;
   /** What the agent said it can reach an MCP server over; set after `initialize`. */
   mcp?: { http?: boolean } | null;
+  /** The sign-in methods the agent advertised in `initialize`. */
+  authMethods?: readonly AuthMethod[];
+  /** Set once `authenticate` has been sent, so it is sent at most once per process. */
+  authenticated?: boolean;
   /** Resolves, with the line to show the person, when the process is gone. */
   stopped: Promise<string>;
   /** True once the process is gone, so the next message starts a new one. */
@@ -259,6 +294,8 @@ export interface AcpBridgeInput {
   signal: AbortSignal;
   /** One line to the terminal the person is watching. */
   say(line: string): void;
+  /** Where a sign-in method's credential is looked for; this process's own by default. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /** One line of what arrived, short enough to read at a glance. */
@@ -309,6 +346,7 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
       });
       started.canLoad = info.agentCapabilities?.loadSession === true;
       started.mcp = info.agentCapabilities?.mcpCapabilities ?? null;
+      started.authMethods = info.authMethods ?? [];
       return started;
     })().catch((error: unknown) => {
       sessionGone = true;
@@ -324,6 +362,27 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
    * (`agentCapabilities.loadSession`); a load the agent refuses starts a new
    * session, the same fallback the Codex bridge makes for a lost thread.
    */
+  /**
+   * Runs one session call, and when the agent answers `auth_required`, signs in
+   * the way ACP's initialize → authenticate flow gives it: `authenticate` with
+   * an advertised method, once per agent process, then the call again. Gemini
+   * CLI answers `session/load` this way whenever its settings name no sign-in
+   * method, even though `session/new` works (acpSessionManager.ts,
+   * `prepareSessionConfig`; the Daytona run of 2026-09-26).
+   */
+  const signedIn = async <T>(agent: AcpAgent, call: () => Promise<T>): Promise<T> => {
+    try {
+      return await call();
+    } catch (error) {
+      if (!isAuthRequired(error) || agent.authenticated) throw error;
+      const methodId = authMethodFromEnv(agent.authMethods, input.env ?? process.env);
+      if (methodId === undefined) throw error;
+      agent.authenticated = true;
+      await agent.client.authenticate({ methodId });
+      return await call();
+    }
+  };
+
   const openSession = async (agent: AcpAgent, chatId: string): Promise<string> => {
     const settings = { cwd: input.cwd, mcpServers: [relayMcpServer(input.mcp, agent.mcp)] };
     // This agent already has the session open; it is taken back by id once per
@@ -333,13 +392,13 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
     const saved = input.sessions.get(chatId);
     if (saved !== undefined && agent.canLoad) {
       try {
-        await agent.client.loadSession({ ...settings, sessionId: saved });
+        await signedIn(agent, () => agent.client.loadSession({ ...settings, sessionId: saved }));
         opened.set(chatId, saved);
         return saved;
       } catch { /* Named below, once, for the one case a person can act on. */ }
       input.say(`${input.label} no longer has this chat's session. It starts a new one.`);
     }
-    const created = await agent.client.newSession(settings);
+    const created = await signedIn(agent, () => agent.client.newSession(settings));
     const id = created.sessionId;
     if (!id) throw new Error("The agent opened a session with no id.");
     opened.set(chatId, id);

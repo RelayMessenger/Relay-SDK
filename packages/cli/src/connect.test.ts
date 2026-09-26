@@ -320,7 +320,7 @@ describe("the MCP agents", () => {
     expect(cursorAnswer.agents[0]).toMatchObject({ agent: "cursor", files: [], bridge_command: "cursor-agent", bridge_args: ["acp"] });
 
     // Gemini CLI, OpenCode and Cline are the same: no file, and their own ACP words.
-    for (const [id, command, args] of [["gemini", "gemini", ["--experimental-acp"]], ["opencode", "opencode", ["acp"]], ["cline", "cline", ["--acp"]]] as const) {
+    for (const [id, command, args] of [["gemini", "gemini", ["--experimental-acp", "--skip-trust"]], ["opencode", "opencode", ["acp"]], ["cline", "cline", ["--acp"]]] as const) {
       const g = await fixture({}, runtimes());
       expect(await runCLI(["connect", id, "--token", token, "--yes", "--no-skill", "--json"], g.deps)).toBe(0);
       expect(g.runCommand).not.toHaveBeenCalled();

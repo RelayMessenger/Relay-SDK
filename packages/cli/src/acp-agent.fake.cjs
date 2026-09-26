@@ -19,6 +19,10 @@
  *   turnMs       how long a turn takes before it completes
  *   loadSession  whether the agent advertises `session/load` (default true)
  *   mcpHttp      whether the agent advertises `mcpCapabilities.http` (default false)
+ *   authMethods  the sign-in methods `initialize` advertises (default none)
+ *   loadNeedsAuth  `session/load` answers auth_required (-32000) until
+ *                `authenticate` names an advertised method, as Gemini CLI does
+ *                when its settings name no sign-in method
  *   resumable    the session ids `session/load` accepts; anything else errors,
  *                as a real agent answers for a session it has lost
  */
@@ -57,6 +61,7 @@ const keep = (id) => {
 const active = new Map();
 let sessions = readStore().size;
 let turnCount = 0;
+let signedIn = false;
 
 const answerFor = (index) => {
   const answers = settings.answers ?? ["ok"];
@@ -89,7 +94,17 @@ const handle = (message) => {
         ...(settings.mcpHttp === true ? { mcpCapabilities: { http: true } } : {}),
       },
       agentInfo: { name: "fake-acp", version: "0.0.0" },
+      ...(settings.authMethods ? { authMethods: settings.authMethods } : {}),
     });
+    return;
+  }
+  if (message.method === "authenticate") {
+    if (!(settings.authMethods ?? []).some((method) => method.id === message.params.methodId)) {
+      write({ id: message.id, error: { code: -32602, message: `no auth method ${message.params.methodId}` } });
+      return;
+    }
+    signedIn = true;
+    answer({});
     return;
   }
   if (message.method === "session/new") {
@@ -100,6 +115,10 @@ const handle = (message) => {
     return;
   }
   if (message.method === "session/load") {
+    if (settings.loadNeedsAuth === true && !signedIn) {
+      write({ id: message.id, error: { code: -32000, message: "Authentication required" } });
+      return;
+    }
     if (!readStore().has(message.params.sessionId)) {
       write({ id: message.id, error: { code: -32602, message: `no session ${message.params.sessionId}` } });
       return;

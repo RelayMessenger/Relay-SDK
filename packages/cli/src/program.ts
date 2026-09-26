@@ -403,9 +403,10 @@ export const createProgram = (
                 // The chat's Codex thread outlives this run, so a restart picks
                 // every chat up where it stopped (codex-threads.ts).
                 threads: await openCodexThreads({ apiURL: input.apiURL, handle: input.handle }, configContext),
-                // The folder's .codex/config.toml reads the hosted MCP
-                // server's token from RELAY_AGENT_TOKEN (hosted-mcp.ts).
+                // Every thread gets Relay's hosted MCP server, which reads
+                // its token from RELAY_AGENT_TOKEN (codex-bridge.ts).
                 agentToken: input.token,
+                mcpURL: input.mcpURL,
                 signal: control.signal,
                 say: input.say,
               });

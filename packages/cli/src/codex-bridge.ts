@@ -22,7 +22,7 @@ import { isAbsolute } from "node:path";
 import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
-import { AGENT_TOKEN_ENV } from "./hosted-mcp.js";
+import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, codexMcpServer } from "./hosted-mcp.js";
 
 /**
  * What `relay connect codex` leaves running so Codex answers by itself.
@@ -38,8 +38,9 @@ import { AGENT_TOKEN_ENV } from "./hosted-mcp.js";
  * extension speak: newline-delimited JSON-RPC on stdin and stdout. One process
  * holds many threads, takes a thread back by id after a restart, and stops a
  * turn that is already running. It runs the `codex` already on this computer,
- * so the person's own sign-in, settings and Relay MCP tools
- * (`~/.codex/config.toml`, written by connect) are the ones Codex uses.
+ * so the person's own sign-in and settings are the ones Codex uses. Relay's
+ * hosted MCP server travels with every thread (`codexThreadConfig`), so Codex
+ * has Relay's tools whether or not the folder is trusted.
  */
 
 /** Relay takes 1 to 255 characters for an idempotency key (contracts/relay-v1-openapi.yaml). */
@@ -61,6 +62,22 @@ export const CODEX_SANDBOX = "workspace-write";
  * person's approvals through the chat is its own piece of work.
  */
 export const CODEX_APPROVAL_POLICY = "never";
+
+/**
+ * Relay's hosted MCP server as a per-thread config override. `thread/start`
+ * and `thread/resume` take `config`, a map of config keys applied over the
+ * loaded layers (codex-rs app-server-protocol/src/protocol/v2/thread.rs:100,
+ * :401). Codex disables a folder's own `.codex/config.toml` until the folder
+ * is trusted, so the project file connect writes gives this process nothing
+ * in a new folder (the Daytona run of 2026-09-26, `mcp_server_count=0`). The
+ * override is the path OpenClaw's Codex harness uses for the same job: it
+ * projects MCP servers into `config.mcp_servers` on thread start and resume
+ * (openclaw extensions/codex/src/app-server/attempt-startup.ts:215-219,
+ * thread-lifecycle-io.ts:151). The token stays in `RELAY_AGENT_TOKEN`.
+ */
+export const codexThreadConfig = (mcpURL: string): { mcp_servers: Record<string, ReturnType<typeof codexMcpServer>> } => ({
+  mcp_servers: { [MCP_SERVER_NAME]: codexMcpServer(mcpURL) },
+});
 
 /** The one sub-command, over stdin and stdout, which is where it listens by default. */
 export const APP_SERVER_ARGS = ["app-server"] as const;
@@ -430,6 +447,8 @@ export interface CodexBridgeInput {
    * so `codex app-server` starts with it there.
    */
   agentToken: string;
+  /** Relay's hosted MCP server, handed to every thread (`codexThreadConfig`). */
+  mcpURL: string;
   signal: AbortSignal;
   /** One line to the terminal the person is watching. */
   say(line: string): void;
@@ -499,6 +518,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
       cwd: input.cwd,
       sandbox: CODEX_SANDBOX,
       approvalPolicy: CODEX_APPROVAL_POLICY,
+      config: codexThreadConfig(input.mcpURL),
     };
     // This app-server already has the thread open; it is taken back by id once
     // per run of the process, not once per message.
