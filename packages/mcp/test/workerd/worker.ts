@@ -1,9 +1,9 @@
 // A Worker that hosts the Relay MCP server the way a hosted MCP does: the
 // published entry point and a Relay client whose fetch is local. GET / runs
 // one execute call end to end through an MCP client in QuickJS (its
-// WebAssembly handed in as a module); POST /executor runs the posted code in
-// a Dynamic Worker through Cloudflare Code Mode's DynamicWorkerExecutor over
-// the LOADER Worker Loader binding.
+// WebAssembly handed in as a module); POST /quickjs runs the posted code
+// there; POST /executor runs it in a Dynamic Worker through Cloudflare Code
+// Mode's DynamicWorkerExecutor over the LOADER Worker Loader binding.
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import Relay from "@relaymessenger/sdk";
 import quickjsWasmModule from "@jitl/quickjs-wasmfile-release-sync/wasm";
@@ -11,6 +11,13 @@ import { DynamicWorkerExecutor } from "@cloudflare/codemode";
 import { createRelayMcpServer, type ExecutionRuntime } from "@relaymessenger/mcp";
 
 const TOKEN = "rel_workerd_test_token_never_shown";
+/** What GET /v1/communities/{handle} answers here: JSON nulls in objects and arrays. */
+export const COMMUNITY = {
+  handle: "mhacks", name: "MHacks", image_url: null, type: "public", member_count: null,
+  owner: { kind: "organization", name: null, verified: false },
+  members: [{ handle: "a", subtitle: null }],
+  tags: [null, "x", [null]],
+};
 
 export const runExecute = async (
   code: string,
@@ -26,6 +33,7 @@ export const runExecute = async (
       if (String(input).includes("/v1/chats/missing")) {
         return Response.json({ error: { status: 404, code: 2001, message: "Chat was not found." } }, { status: 404 });
       }
+      if (String(input).includes("/v1/communities/")) return Response.json(COMMUNITY);
       return Response.json({ handle: "workerd", first_name: "Workerd" });
     },
   });
@@ -48,6 +56,9 @@ export const runExecute = async (
 
 export default {
   async fetch(request: Request, env: { LOADER: WorkerLoader }): Promise<Response> {
+    if (new URL(request.url).pathname === "/quickjs") {
+      return Response.json(await runExecute(await request.text()));
+    }
     if (new URL(request.url).pathname === "/executor") {
       const executor = new DynamicWorkerExecutor({ loader: env.LOADER });
       return Response.json(await runExecute(await request.text(), { executor }));

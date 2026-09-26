@@ -1,5 +1,6 @@
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import { COMMUNITY } from "./worker";
 
 describe("Relay MCP on workerd", () => {
   it("boots the server and runs one TypeScript execute call end to end", async () => {
@@ -48,4 +49,22 @@ describe("Relay MCP on workerd", () => {
     expect(result.token).toBe(false);
     expect(JSON.stringify(outcome)).not.toContain("rel_workerd_test_token_never_shown");
   });
+
+  const JSON_PROBE = `async function run(client) {
+    const c: any = await client.communities.retrieve("mhacks");
+    return { isNull: c.member_count === null, isUndefined: c.member_count === undefined, has: "member_count" in c,
+      keys: Object.keys(c), nestedNull: c.members[0].subtitle === null, nestedHas: "subtitle" in c.members[0],
+      ownerNameNull: c.owner.name === null, arrayNull: c.tags[0] === null && 0 in c.tags, deepArrayNull: c.tags[2][0] === null,
+      absent: "description" in c, whole: c };
+  }`;
+  for (const path of ["/quickjs", "/executor"]) {
+    it(`hands submitted code the SDK's JSON exactly in ${path === "/quickjs" ? "QuickJS" : "a Dynamic Worker"}: a null stays a present null`, async () => {
+      const response = await exports.default.fetch(`https://example.test${path}`, { method: "POST", body: JSON_PROBE });
+      expect(response.status).toBe(200);
+      const outcome = await response.json() as { result: { isError?: boolean; content: Array<{ text: string }>; structuredContent?: { result?: unknown } } };
+      expect(outcome.result.isError, outcome.result.content[0]?.text).not.toBe(true);
+      expect(outcome.result.structuredContent?.result).toEqual({ isNull: true, isUndefined: false, has: true, keys: Object.keys(COMMUNITY),
+        nestedNull: true, nestedHas: true, ownerNameNull: true, arrayNull: true, deepArrayNull: true, absent: false, whole: COMMUNITY });
+    });
+  }
 });
