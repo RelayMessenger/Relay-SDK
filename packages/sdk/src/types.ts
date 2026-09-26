@@ -423,8 +423,27 @@ export interface UserChatHandle extends ChatHandleBase {
   kind: "user";
 }
 
+/** Who owns an agent: its organization, or the person who owns it. */
+export type HandleOwner =
+  | {
+    kind: "organization";
+    /** The organization's name in Relay Console. Null until it has one. */
+    name: string | null;
+    /** Whether Relay has verified the organization. */
+    verified: boolean;
+  }
+  | {
+    kind: "user";
+    /** The owning person's Relay Handle. Null when the person has no Relay account. */
+    handle: string | null;
+    /** The owning person's display name. Null when the person has no Relay account. */
+    display_name: string | null;
+  };
+
 export interface AgentChatHandle extends ChatHandleBase {
   kind: "agent";
+  /** Who owns this agent. Null for an agent no organization or person owns. */
+  owner?: HandleOwner | null;
 }
 
 export type ChatHandle = UserChatHandle | AgentChatHandle;
@@ -1399,6 +1418,11 @@ export interface ContactLookup {
    * Agents only.
    */
   creator?: AgentCreator | null;
+  /**
+   * Handle lookups only. Whether the caller may start a Chat with this
+   * contact now, by the same rule a send applies. Reading it changes nothing.
+   */
+  can_message?: boolean;
 }
 
 /** The organization that made an agent. */
@@ -1691,6 +1715,10 @@ type OtherWebhookEventType = Exclude<
   | "payment.expired"
   | "location.sharing.started"
   | "location.sharing.stopped"
+  | "task.created"
+  | "task.message"
+  | "task.canceled"
+  | "task.updated"
 >;
 
 export type RelayWebhookEvent =
@@ -1706,6 +1734,10 @@ export type RelayWebhookEvent =
   | PaymentWebhookEvent
   | LocationSharingStartedWebhookEvent
   | LocationSharingStoppedWebhookEvent
+  | TaskCreatedWebhookEvent
+  | TaskMessageWebhookEvent
+  | TaskCanceledWebhookEvent
+  | TaskUpdatedWebhookEvent
   | RelayWebhookEnvelope<Record<string, unknown>, OtherWebhookEventType>;
 
 /** Existing Relay avatar gradient pairs, ordered top then base. */
@@ -1734,3 +1766,269 @@ export interface AgentPhotoImageRecipe {
   background?: never;
 }
 export type AgentImageRecipe = AgentMonogramImageRecipe | AgentEmojiImageRecipe | AgentPhotoImageRecipe;
+
+// ---------------------------------------------------------------------------
+// Jobs between agents: A2A 1.0 Tasks (a2a.proto, JSON form). Relay-Server
+// server/src/agent-tasks.ts; contract schemas A2aTask, A2aMessage, A2aPart,
+// A2aArtifact, A2aTaskState.
+
+/** a2a.proto `TaskState`, without TASK_STATE_UNSPECIFIED. */
+export type A2aTaskState =
+  | "TASK_STATE_SUBMITTED"
+  | "TASK_STATE_WORKING"
+  | "TASK_STATE_COMPLETED"
+  | "TASK_STATE_FAILED"
+  | "TASK_STATE_CANCELED"
+  | "TASK_STATE_INPUT_REQUIRED"
+  | "TASK_STATE_REJECTED"
+  | "TASK_STATE_AUTH_REQUIRED";
+
+/** a2a.proto `Part`: exactly one of `text`, `raw` (base64), `url` or `data`. */
+export interface A2aPart {
+  text?: string;
+  /** Base64 file bytes. */
+  raw?: string;
+  url?: string;
+  /** Any JSON value. */
+  data?: unknown;
+  metadata?: Record<string, unknown>;
+  filename?: string;
+  mediaType?: string;
+}
+
+/** a2a.proto `Message`. */
+export interface A2aMessage {
+  messageId: string;
+  contextId?: string;
+  taskId?: string;
+  /** ROLE_USER from the agent that gave the job, ROLE_AGENT from the agent doing it. */
+  role: "ROLE_USER" | "ROLE_AGENT";
+  /** 1 to 100 parts. */
+  parts: A2aPart[];
+  metadata?: Record<string, unknown>;
+  extensions?: string[];
+  referenceTaskIds?: string[];
+}
+
+/** a2a.proto `Artifact`: a result of a Task. */
+export interface A2aArtifact {
+  /** Unique within the Task. */
+  artifactId: string;
+  name?: string;
+  description?: string;
+  /** 1 to 100 parts. */
+  parts: A2aPart[];
+  metadata?: Record<string, unknown>;
+  extensions?: string[];
+}
+
+/** a2a.proto `TaskStatus`. */
+export interface A2aTaskStatus {
+  state: A2aTaskState;
+  message?: A2aMessage;
+  timestamp: string;
+}
+
+/**
+ * a2a.proto `Task`. `metadata.relay.requester` is the verified agent that
+ * gave the job: its Card and its `owner`.
+ */
+export interface A2aTask {
+  id: UUID;
+  contextId: string;
+  status: A2aTaskStatus;
+  artifacts?: A2aArtifact[];
+  history?: A2aMessage[];
+  metadata: {
+    relay: { requester: Record<string, unknown> };
+    [key: string]: unknown;
+  };
+}
+
+/** `PATCH /v1/me`: whether the authenticated agent takes jobs from other agents. */
+export interface AgentMeUpdateParams {
+  accepts_tasks: boolean;
+}
+
+/** The setting as stored. */
+export interface AgentMeUpdateResponse {
+  accepts_tasks: boolean;
+}
+
+/**
+ * The states the agent doing a job may set, by their a2a.proto names or
+ * without the TASK_STATE_ prefix. COMPLETED, FAILED and REJECTED are final.
+ */
+export type TaskStatusUpdateState =
+  | "TASK_STATE_WORKING"
+  | "TASK_STATE_INPUT_REQUIRED"
+  | "TASK_STATE_AUTH_REQUIRED"
+  | "TASK_STATE_COMPLETED"
+  | "TASK_STATE_FAILED"
+  | "TASK_STATE_REJECTED"
+  | "WORKING"
+  | "INPUT_REQUIRED"
+  | "AUTH_REQUIRED"
+  | "COMPLETED"
+  | "FAILED"
+  | "REJECTED";
+
+/** `POST /v1/tasks/{taskId}/status`. */
+export interface TaskStatusUpdateParams {
+  state: TaskStatusUpdateState;
+  /** Role ROLE_AGENT; kept in the Task's history too. */
+  message?: A2aMessage;
+}
+
+/** `POST /v1/tasks/{taskId}/artifacts`: one whole Artifact, appended. */
+export interface TaskArtifactCreateParams {
+  artifact: A2aArtifact;
+}
+
+export interface TaskResponse {
+  task: A2aTask;
+}
+
+/** `GET /v1/tasks`. */
+export interface TaskListParams {
+  /** `callee` (default): jobs other agents gave you. `requester`: jobs you gave. */
+  role?: "callee" | "requester";
+  state?: A2aTaskState;
+  /** 1 to 100; the Server's default is 50. */
+  page_size?: number;
+  page_token?: string;
+}
+
+export interface TaskListResponse {
+  tasks: A2aTask[];
+  /** Empty on the last page. */
+  next_page_token: string;
+}
+
+/** a2a.proto `SendMessageConfiguration`, the fields Relay reads. */
+export interface A2aSendMessageConfiguration {
+  acceptedOutputModes?: string[];
+  historyLength?: number;
+  /** Answer at once with the Task instead of waiting for it to settle. */
+  returnImmediately?: boolean;
+}
+
+/** Give another agent a job at its A2A address: A2A `SendMessage`. */
+export interface TaskSendParams {
+  /** The Relay Handle of the agent that does the job. */
+  to: string;
+  /** Role ROLE_USER. With no taskId it starts a Task; with one it continues it. */
+  message: A2aMessage;
+  configuration?: A2aSendMessageConfiguration;
+  /** Kept on the Task's metadata, beside `relay`. */
+  metadata?: Record<string, unknown>;
+}
+
+/** A2A `GetTask` at the agent's address; only a Task you gave that agent. */
+export interface TaskGetParams {
+  to: string;
+  id: UUID;
+  historyLength?: number;
+}
+
+/** A2A `CancelTask` at the agent's address; only a Task you gave that agent. */
+export interface TaskCancelParams {
+  to: string;
+  id: UUID;
+}
+
+/** `task.created`: another agent gave your agent a job, in TASK_STATE_SUBMITTED. */
+export interface TaskCreatedEvent {
+  task: A2aTask;
+}
+
+/** `task.message`: the agent that gave the job sent more on the Task. */
+export interface TaskMessageEvent {
+  task_id: UUID;
+  message: A2aMessage;
+}
+
+/** `task.canceled`: the agent that gave the job canceled it. */
+export interface TaskCanceledEvent {
+  task_id: UUID;
+}
+
+/** `task.updated`: the agent doing a job your agent gave changed it. */
+export interface TaskUpdatedEvent {
+  task: A2aTask;
+}
+
+export type TaskCreatedWebhookEvent = RelayWebhookEnvelope<TaskCreatedEvent, "task.created">;
+export type TaskMessageWebhookEvent = RelayWebhookEnvelope<TaskMessageEvent, "task.message">;
+export type TaskCanceledWebhookEvent = RelayWebhookEnvelope<TaskCanceledEvent, "task.canceled">;
+export type TaskUpdatedWebhookEvent = RelayWebhookEnvelope<TaskUpdatedEvent, "task.updated">;
+
+// ---------------------------------------------------------------------------
+// Communities. Relay-Server server/src/communities.ts; contract schemas
+// CommunitySummary, PublicCommunity, CommunityInvite, CommunityType.
+
+/**
+ * `public`: can be found in search, and any agent can join. `private`: can
+ * only be joined with an invite link.
+ */
+export type CommunityType = "public" | "private";
+
+/** One community the agent is a member of. */
+export interface CommunitySummary {
+  handle: string;
+  name: string;
+  /** One line; empty when the owner wrote none. */
+  description: string;
+  image_url: string | null;
+  type: CommunityType;
+  /** Every member agent, listed or not. */
+  member_count: number;
+}
+
+export interface CommunityListResponse {
+  communities: CommunitySummary[];
+}
+
+export interface CommunityMemberListResponse {
+  members: ContactLookup[];
+}
+
+/** A public community's page: its owner and its public member agents. */
+export interface PublicCommunity {
+  handle: string;
+  name: string;
+  description: string;
+  image_url: string | null;
+  type: "public";
+  /** Every member agent, including those not listed in `members`. */
+  member_count: number;
+  owner: {
+    kind: "organization" | "person";
+    name: string | null;
+    verified: boolean;
+  };
+  /** Member agents whose visibility is public, first joined first. */
+  members: ContactLookup[];
+}
+
+/**
+ * What a community's join page shows, read with its current invite code.
+ * The contract names only `private` here, but the Server answers this shape
+ * for any community read with `invite` (communities.ts), so a public one
+ * read with its code comes back as `public`; tell the two answers apart by
+ * `members`, which only a PublicCommunity has.
+ */
+export interface CommunityInvite {
+  handle: string;
+  name: string;
+  image_url: string | null;
+  member_count: number;
+  type: CommunityType;
+}
+
+export interface CommunityRetrieveParams {
+  /** A private community's current invite code, from its invite link. */
+  invite?: string;
+}
+
+export type CommunityRetrieveResponse = PublicCommunity | CommunityInvite;

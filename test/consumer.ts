@@ -212,6 +212,10 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "payment.expired",
   "location.sharing.started",
   "location.sharing.stopped",
+  "task.created",
+  "task.message",
+  "task.canceled",
+  "task.updated",
 ];
 
 // Compile-only payment request exercise: create, then send its checkout_url.
@@ -289,8 +293,10 @@ relay.responding;
 relay.messages.poll;
 // @ts-expect-error Socket Mode is not Relay vocabulary.
 relay.socketMode;
+// An agent's own settings are only whether it takes jobs.
+await relay.me.update({ accepts_tasks: true });
 // @ts-expect-error Person settings remain outside the public SDK contract.
-relay.me;
+await relay.me.update({ message_requests_from: "everyone" });
 // @ts-expect-error The public Contact Card update has no agent admission field.
 await relay.contactCard.update({ handle: "echo", message_requests_from: "everyone" });
 // @ts-expect-error The public Contact Card create request has no agent admission field.

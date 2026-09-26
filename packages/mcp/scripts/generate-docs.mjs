@@ -20,9 +20,15 @@ const httpMethods = new Set(["get", "post", "put", "patch", "delete", "head", "o
 const sourceOnlyPaths = new Set([
   "/v1/websocket", "/v1/calls/{callId}/media", "/v1/calls/{callId}/room",
   "/v1/directory", "/v1/contacts/{handle}/rating", "/v1/contacts/{handle}/ratings",
+  "/v1/access", "/v1/access/{handle}",
 ]);
+// Source-only operations on a path the SDK otherwise carries (the same list
+// scripts/validate-contract.mjs keeps): an agent reading its owner, and the
+// REST twin of A2A SendMessage (the SDK gives jobs over A2A, tasks.send).
+const sourceOnlyOperations = new Set(["get /v1/me", "post /v1/tasks"]);
 const operationCount = Object.entries(contract.paths).reduce(
-  (count, [path, item]) => count + (sourceOnlyPaths.has(path) ? 0 : Object.keys(item).filter(method => httpMethods.has(method)).length), 0,
+  (count, [path, item]) => count + (sourceOnlyPaths.has(path) ? 0 : Object.keys(item)
+    .filter(method => httpMethods.has(method) && !sourceOnlyOperations.has(`${method} ${path}`)).length), 0,
 );
 const clientFile = ts.createSourceFile("client.ts", clientText, ts.ScriptTarget.Latest, true);
 const typesFile = ts.createSourceFile("types.ts", typesText, ts.ScriptTarget.Latest, true);

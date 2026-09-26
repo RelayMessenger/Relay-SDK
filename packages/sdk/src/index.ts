@@ -4,11 +4,15 @@ export {
   BlockedHandles,
   Chats,
   Calls,
+  Communities,
+  CommunityMembers,
   ContactCard,
   Contacts,
+  Me,
   Messages,
   PaymentRequests,
   Relay,
+  Tasks,
   WebSocket,
   WebhookEvents,
   WebhookSubscriptions,
@@ -25,6 +29,7 @@ export {
 } from "./calls/call-room.js";
 export {
   RelayAPIError,
+  RelayUnknownEventTypeError,
   RelayWebhookConfiguredError,
   type RelayAPIErrorOptions,
   type RelayWebhookConfiguredErrorOptions,

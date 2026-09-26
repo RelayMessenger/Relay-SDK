@@ -1,15 +1,15 @@
 {
   "source": "contracts/relay-v1-openapi.yaml",
-  "source_openapi_sha256": "d724f38784e54027775e518fd70190147fc1af7baaec74943b58e60a98611640",
+  "source_openapi_sha256": "4758ee873ab6c350791c179c10ee66307c2065cf3d1083684a4c831c269ed937",
   "upstream": {
     "repository": "https://github.com/RelayMessenger/Relay-Server.git",
-    "commit": "efd780128d1f71d90c05947fcf919e3e0d03acbb",
+    "commit": "5daac94da260f8258deddf9c1d7f930b5b24aa61",
     "path": "contracts/developer/openapi.yaml",
-    "sha256": "d724f38784e54027775e518fd70190147fc1af7baaec74943b58e60a98611640"
+    "sha256": "4758ee873ab6c350791c179c10ee66307c2065cf3d1083684a4c831c269ed937"
   },
-  "source_path_count": 36,
-  "source_schema_count": 180,
-  "callback_count": 24,
+  "source_path_count": 45,
+  "source_schema_count": 213,
+  "callback_count": 28,
   "transport_decision": {
     "source": "contracts/agent-transport-decision.md",
     "sha256": "6140351159f830a4a6b4be67e2e6a9cce27eeb9a6cd83c67c54331df26d2fe74",
@@ -19,13 +19,18 @@
       "path": "research/relay-rebuild-20260828/TRANSPORT-DECISION-20260829.md"
     }
   },
-  "path_count": 31,
-  "operation_count": 48,
+  "path_count": 38,
+  "operation_count": 55,
   "operations": [
     {
       "method": "DELETE",
       "path": "/v1/agents/{handle}",
       "operationId": "deleteAgent"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/me",
+      "operationId": "updateAgentMe"
     },
     {
       "method": "POST",
@@ -191,6 +196,36 @@
       "method": "DELETE",
       "path": "/v1/blocked_handles",
       "operationId": "unblockHandle"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tasks",
+      "operationId": "listTasks"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{taskId}/status",
+      "operationId": "updateTaskStatus"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tasks/{taskId}/artifacts",
+      "operationId": "addTaskArtifact"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/communities",
+      "operationId": "listCommunities"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/communities/{handle}",
+      "operationId": "getCommunity"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/communities/{handle}/members",
+      "operationId": "listCommunityMembers"
     },
     {
       "method": "GET",

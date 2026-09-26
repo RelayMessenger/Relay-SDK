@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "efd780128d1f71d90c05947fcf919e3e0d03acbb", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "5daac94da260f8258deddf9c1d7f930b5b24aa61", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -53,9 +53,19 @@ const sourceOnlyOperations = [
   { method: "PUT", path: "/v1/contacts/{handle}/rating", operationId: "rateAgent" },
   { method: "DELETE", path: "/v1/contacts/{handle}/rating", operationId: "deleteAgentRating" },
   { method: "GET", path: "/v1/contacts/{handle}/ratings", operationId: "listAgentRatings" },
+  // Server 972cde2e (an agent reads its own owner) and 00093564 (Always and
+  // Never Allow) carry no SDK client yet. POST /v1/tasks is the REST twin of
+  // A2A SendMessage; the SDK gives jobs at the agent's A2A address instead
+  // (tasks.send), through the official A2A client.
+  { method: "GET", path: "/v1/me", operationId: "getMe" },
+  { method: "POST", path: "/v1/tasks", operationId: "createTask" },
+  { method: "GET", path: "/v1/access", operationId: "listAgentAccess" },
+  { method: "PUT", path: "/v1/access/{handle}", operationId: "setAgentAccess" },
+  { method: "DELETE", path: "/v1/access/{handle}", operationId: "removeAgentAccess" },
 ];
 const allowedOperationSignatures = [
   "DELETE /v1/agents/{handle}",
+  "PATCH /v1/me",
   "POST /v1/chats",
   "GET /v1/chats",
   "GET /v1/chats/{chatId}",
@@ -89,6 +99,12 @@ const allowedOperationSignatures = [
   "GET /v1/blocked_handles",
   "POST /v1/blocked_handles",
   "DELETE /v1/blocked_handles",
+  "GET /v1/tasks",
+  "POST /v1/tasks/{taskId}/status",
+  "POST /v1/tasks/{taskId}/artifacts",
+  "GET /v1/communities",
+  "GET /v1/communities/{handle}",
+  "GET /v1/communities/{handle}/members",
   "GET /v1/webhook-events",
   "POST /v1/webhook-subscriptions",
   "GET /v1/webhook-subscriptions",
@@ -113,14 +129,14 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 48);
-assert.equal(manifest.path_count, 31);
-assert.equal(manifest.source_path_count, 36);
-assert.equal(manifest.source_schema_count, 180);
-assert.equal(manifest.callback_count, 24);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 31);
-assert.equal(operationJSON.length, 48);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 24);
+assert.equal(manifest.operation_count, 55);
+assert.equal(manifest.path_count, 38);
+assert.equal(manifest.source_path_count, 45);
+assert.equal(manifest.source_schema_count, 213);
+assert.equal(manifest.callback_count, 28);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 38);
+assert.equal(operationJSON.length, 55);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
@@ -221,10 +237,13 @@ assert.deepEqual(Object.keys(client).sort(), [
   "blockedHandles",
   "calls",
   "chats",
+  "communities",
   "contactCard",
   "contacts",
+  "me",
   "messages",
   "paymentRequests",
+  "tasks",
   "webhookEvents",
   "webhookSubscriptions",
   "webhooks",
@@ -232,6 +251,12 @@ assert.deepEqual(Object.keys(client).sort(), [
 ]);
 assert.equal("createAgent" in Relay, false);
 assert.deepEqual(publicMethods(client.agents), ["delete"]);
+assert.deepEqual(publicMethods(client.me), ["update"]);
+assert.deepEqual(publicMethods(client.communities), ["list", "retrieve"]);
+assert.deepEqual(publicMethods(client.communities.members), ["list"]);
+assert.deepEqual(publicMethods(client.tasks), [
+  "addArtifact", "cancel", "get", "list", "send", "updateStatus",
+]);
 assert.deepEqual(publicMethods(client.calls), [
   "create", "end", "list", "retrieve", "room",
 ]);
@@ -397,7 +422,14 @@ const validateOpenAPI = () => {
     assert.deepEqual(description.type, ["string", "null"]);
     assert.equal(description.maxLength, 2000);
   }
-  assert.equal(document.paths["/v1/me"], undefined);
+  // /v1/me is the agent's own: GET reads its owner, PATCH sets only
+  // accepts_tasks. A person's message_requests_from stays out of the contract.
+  assert.deepEqual(Object.keys(document.paths["/v1/me"]), ["get", "patch"]);
+  const meBody = document.paths["/v1/me"].patch.requestBody.content["application/json"].schema;
+  assert.equal(meBody.additionalProperties, false);
+  assert.deepEqual(meBody.required, ["accepts_tasks"]);
+  assert.deepEqual(Object.keys(meBody.properties), ["accepts_tasks"]);
+  assert.match(declaredTypes, /accepts_tasks: boolean/u);
   assert.doesNotMatch(declaredTypes, /\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/u);
   const deletion = document.paths["/v1/agents/{handle}"].delete;
   assert.equal(deletion.operationId, "deleteAgent");
@@ -412,6 +444,12 @@ const validateOpenAPI = () => {
       // Server; this SDK carries no client for it yet, so it is not held to
       // the agent-token rule that every SDK operation satisfies.
       if (sourceOnly.has(`${method.toUpperCase()} ${path}`)) continue;
+      // A community's page is public (communities.ts isPublicCommunityPath):
+      // the SDK reads it with the agent's token, which the Server ignores.
+      if (method === "get" && path === "/v1/communities/{handle}") {
+        assert.deepEqual(operation.security, [], "a community's page needs no credential");
+        continue;
+      }
       assert.deepEqual(operation.security ?? document.security, [{ BearerAuth: [] }], `${method} ${path} still requires authentication`);
     }
   }
@@ -479,7 +517,11 @@ const validateOpenAPI = () => {
   assert.deepEqual(Object.keys(contactLookup.properties), [
     ...contactLookup.required,
     "name", "subtitle", "description", "category", "skills", "visibility", "creator",
+    // Server 00093564: handle lookups say whether the caller may message now.
+    "can_message",
   ]);
+  assert.equal(contactLookup.properties.can_message.type, "boolean");
+  assert.match(declaredTypes, /can_message\?: boolean/u);
   assert.equal(contactLookup.additionalProperties, false);
   assert.equal(contactLookup.properties.description.maxLength, 2000);
   assert.equal("about" in contactLookup.properties, false);
@@ -717,11 +759,14 @@ const validateOpenAPI = () => {
       "image_color",
       "subtitle",
       "verified",
+      // Server 972cde2e: an agent's handle names its owner.
+      "owner",
       "is_contact",
       "activity_version",
       "activity",
     ],
   );
+  assert.match(declaredTypes, /owner\?: HandleOwner \| null/u);
   const activityPath = document.paths["/v1/chats/{chatId}/activity"];
   assert.deepEqual(Object.keys(activityPath), ["parameters", "get", "put", "delete"]);
   assert.equal(activityPath.get.operationId, "getActivity");

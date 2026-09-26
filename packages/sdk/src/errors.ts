@@ -55,5 +55,23 @@ export class RelayWebhookConfiguredError extends RelayAPIError {
   }
 }
 
+/**
+ * Relay delivered an event whose `event_type` this SDK release does not know.
+ * Relay adds event types over time and new ones reach running agents first,
+ * so the event is skipped and acknowledged rather than stopping the consumer.
+ * Passed to `onError` once per event type per `websocket.run`.
+ */
+export class RelayUnknownEventTypeError extends Error {
+  readonly eventType: string;
+  readonly sequence: string;
+
+  constructor(eventType: string, sequence: string) {
+    super(`Relay delivered event type "${eventType}", which this SDK release does not know; it was skipped and acknowledged. Upgrade @relaymessenger/sdk to receive it.`);
+    this.name = "RelayUnknownEventTypeError";
+    this.eventType = eventType;
+    this.sequence = sequence;
+  }
+}
+
 export const isAbortError = (error: unknown): boolean =>
   error instanceof Error && error.name === "AbortError";
