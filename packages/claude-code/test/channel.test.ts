@@ -622,20 +622,31 @@ it("validates selection tool arguments and sends the native part on the existing
     accept(state, origin, 1);
     await channel.flush();
     await channel.beginProcessing({ delivery_id: origin.event_id });
-    const args = { chat_id: CHAT_A, text: "Topics?", send_id: "selection-1", selection: [{ value: "research", label: " Research " }] };
-    for (const selection of [[], [{ label: "Missing value" }], [{ value: "a", label: "A" }, { value: "a", label: "B" }], [{ value: "x", label: "X", url: "https://example.test" }]]) {
+    const args = { chat_id: CHAT_A, text: "Topics?", send_id: "selection-1", selection: { title: " Topics ", options: [{ value: "research", label: " Research " }] } };
+    for (const options of [[], [{ label: "Missing value" }], [{ value: "a", label: "A" }, { value: "a", label: "B" }], [{ value: "x", label: "X", url: "https://example.test" }]]) {
+      expect((await channel.reply({ ...args, selection: { title: "Topics", options } })).isError).toBe(true);
+    }
+    for (const selection of [args.selection.options, { options: args.selection.options }, { ...args.selection, title: "x".repeat(61) }, { ...args.selection, title: " " }]) {
       expect((await channel.reply({ ...args, selection })).isError).toBe(true);
     }
     expect((await channel.reply({ ...args, buttons: [{ label: "Yes" }] })).isError).toBe(true);
     expect((await channel.reply({ ...args, link: "https://example.test" })).isError).toBe(true);
-    expect((await channel.reply({ ...args, text: "  " })).isError).toBe(true);
     expect(fake.sends).toHaveLength(0);
     expect((await channel.reply(args)).isError).not.toBe(true);
     expect(fake.sends[0]?.body.message.parts).toEqual([
-      { type: "text", value: "Topics?" }, { type: "selection", options: [{ value: "research", label: "Research" }] },
+      { type: "text", value: "Topics?" }, { type: "selection", title: "Topics", options: [{ value: "research", label: "Research" }] },
     ]);
     expect((await channel.reply(args)).isError).not.toBe(true);
     expect(fake.sends).toHaveLength(1);
+    const next = event({ sequence: 2, text: "just the options" });
+    accept(state, next, 2);
+    await channel.flush();
+    await channel.beginProcessing({ delivery_id: next.event_id });
+    const { text: _text, ...untexted } = args;
+    expect((await channel.reply({ ...untexted, send_id: "selection-2" })).isError).not.toBe(true);
+    expect(fake.sends[1]?.body.message.parts).toEqual([
+      { type: "selection", title: "Topics", options: [{ value: "research", label: "Research" }] },
+    ]);
   } finally { state.close(); }
 });
 
@@ -660,7 +671,7 @@ it("validates payment tool arguments, creates the request first and sends its ca
       expect((await channel.reply({ ...args, payment: bad })).isError).toBe(true);
     }
     expect((await channel.reply({ ...args, buttons: [{ label: "Pay" }] })).isError).toBe(true);
-    expect((await channel.reply({ ...args, selection: [{ value: "a", label: "A" }] })).isError).toBe(true);
+    expect((await channel.reply({ ...args, selection: { title: "Pick", options: [{ value: "a", label: "A" }] } })).isError).toBe(true);
     expect(fake.sends).toHaveLength(0);
     expect(fake.paymentRequests).toHaveLength(0);
     expect((await channel.reply(args)).isError).not.toBe(true);

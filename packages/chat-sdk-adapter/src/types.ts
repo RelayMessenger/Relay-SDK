@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 45369bf6b8a0539524d819f9cd6f47c2a0e05cd0
- * OpenAPI 80739bed9987023e19a7e2d9fcafb9eb934fe88125e0ab38d57b065d9cc13583
+ * Relay Server e53138b79536f2fb8bbd339e6d344819c0afe8ff
+ * OpenAPI 3ac33f08a16f83be44585a34df34d7067f9157a8971e63686ab41f44374ce5f8
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -128,9 +128,11 @@ export interface RelayButtonsPart {
   items: RelayButtonItem[];
 }
 
-/** Values are stable ASCII tokens, independent of trimmed labels. */
+/** Values are stable ASCII tokens, independent of trimmed labels. A text part is optional and shows as an ordinary bubble above the card. */
 export interface RelaySelectionPart {
   type: "selection";
+  /** The question: the card's title and the sheet's title. Trimmed, 1–60 characters. */
+  title: string;
   options: Array<{ value: string; label: string }>;
 }
 

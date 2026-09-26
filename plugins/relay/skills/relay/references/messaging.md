@@ -54,8 +54,10 @@ Adjacent text parts are invalid. Replies use `reply_to.message_id` and optional
 
 ## Selection
 
-- Author one `selection` part beside a nonblank text question, with 1 to 25
-  options. Each has an explicit unique case-sensitive ASCII token `value`
+- Author one `selection` part with its question in `title` (trimmed, 1 to 60
+  characters, a few words such as "Pizza toppings") and 1 to 25 options. A
+  text part is optional; anything else you want to say goes there, and it
+  shows as a normal message above the card. Each option has an explicit unique case-sensitive ASCII token `value`
   (1 to 100 characters, `^[A-Za-z0-9][A-Za-z0-9._:-]*$`) and trimmed readable
   `label` (1 to 80 characters). Do not combine it with buttons.
 - The person opens the prompt, checks any number of options and submits them

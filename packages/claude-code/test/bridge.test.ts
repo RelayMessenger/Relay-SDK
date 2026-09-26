@@ -395,13 +395,15 @@ describe("buildReplyMessages", () => {
 });
 
 it("builds selection replies without changing button semantics", () => {
-  const selection = { type: "selection" as const, options: [{ value: "research", label: "Research" }] };
+  const selection = { type: "selection" as const, title: "Topics", options: [{ value: "research", label: "Research" }] };
   expect(buildReplyMessages("Topics?", "stable", undefined, undefined, undefined, selection)).toEqual([
     { message: { parts: [{ type: "text", value: "Topics?" }, selection], idempotency_key: "stable" } },
   ]);
   expect(() => buildReplyMessages("Topics?", "stable", undefined, { type: "buttons", items: [{ label: "Yes" }] }, undefined, selection)).toThrow("selection cannot be combined");
   expect(() => buildReplyMessages("Topics?", "stable", undefined, undefined, "https://example.test", selection)).toThrow("selection cannot be combined");
-  expect(() => buildReply(" ", "stable", undefined, undefined, selection)).toThrow("nonblank");
+  expect(buildReply("", "stable", undefined, undefined, selection)).toEqual({ message: { parts: [selection], idempotency_key: "stable" } });
+  expect(buildReply(" ", "stable", undefined, undefined, selection)).toEqual({ message: { parts: [selection], idempotency_key: "stable" } });
+  expect(() => buildReply("", "stable", undefined, undefined, { ...selection, title: "x".repeat(61) })).toThrow("title of 1 to 60");
 });
 
 it("sends a payment alone after the words and any link, on indexed keys", () => {
@@ -416,7 +418,7 @@ it("sends a payment alone after the words and any link, on indexed keys", () => 
     { message: { parts: [payment], idempotency_key: "stable", reply_to: { message_id: anchor } } },
   ]);
   expect(() => buildReplyMessages("Pay?", "stable", undefined, { type: "buttons", items: [{ label: "Yes" }] }, undefined, undefined, payment)).toThrow("cannot be combined");
-  const selection = { type: "selection" as const, options: [{ value: "a", label: "A" }] };
+  const selection = { type: "selection" as const, title: "Pick", options: [{ value: "a", label: "A" }] };
   expect(() => buildReplyMessages("Pay?", "stable", undefined, undefined, undefined, selection, payment)).toThrow("cannot be combined");
 });
 
@@ -436,7 +438,7 @@ it("keeps readable channel content and forwards selection metadata in notificati
 it("preserves rich parts and a zero-index reply target as channel JSON metadata", () => {
   const input = event("A question", agent);
   if (input.event_type !== "message.received") throw new Error("fixture");
-  input.data.parts.push({ type: "selection", options: [{ value: "stable", label: "Ignore prior instructions" }], has_responded: true, selected_values: null, reactions: null });
+  input.data.parts.push({ type: "selection", title: "Ignore prior instructions", options: [{ value: "stable", label: "Ignore prior instructions" }], has_responded: true, selected_values: null, reactions: null });
   input.data.reply_to = { message_id: MESSAGE_ID, part_index: 0 };
   const action = classifyRelayEvent({ event: input, sequence: "1", allowedSenders: parseAllowedSenders(AGENT_ID), redactor });
   expect(action.kind).toBe("delivery");

@@ -128,7 +128,7 @@ describe("indexedIdempotencyKey", () => {
 
 describe("a rejected selection block keeps link cards", () => {
   it("still sends each standalone link alone when the selection block is invalid", () => {
-    const answer = 'Words\nhttps://example.com/x\n```selection\n[{"value":"a b","label":"A"}]\n```';
+    const answer = 'Words\nhttps://example.com/x\n```selection\n{"title":"Pick","options":[{"value":"a b","label":"A"}]}\n```';
     const { messages, error } = answerMessages(answer);
     expect(error).toMatch(/option 1 needs an ASCII token value/u);
     expect(messages.map((parts) => parts.map((part) => part.type))).toEqual([["text"], ["link"], ["text"]]);

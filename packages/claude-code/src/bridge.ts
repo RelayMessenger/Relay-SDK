@@ -256,7 +256,7 @@ export function buildReply(
   selection?: SelectionPart,
 ): MessageSendParams {
   if (selection && buttons) throw new Error("selection and buttons do not go together");
-  if (text.length > MAX_RELAY_TEXT || (!text && !buttons)) {
+  if (text.length > MAX_RELAY_TEXT || (!text && !buttons && !selection)) {
     throw new Error(`text must be 1-${MAX_RELAY_TEXT} UTF-16 code units`);
   }
   return {

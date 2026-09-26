@@ -10,7 +10,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "80739bed9987023e19a7e2d9fcafb9eb934fe88125e0ab38d57b065d9cc13583";
+  "3ac33f08a16f83be44585a34df34d7067f9157a8971e63686ab41f44374ce5f8";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -104,6 +104,9 @@ describe("locked Relay Server contract", () => {
     const document = parse(await readFile(new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8")) as OpenApiDocument;
     const schemas = document.components.schemas;
     expect(schemas.SelectionPart).toHaveProperty("additionalProperties", false);
+    expect(schemas.SelectionPart).toHaveProperty("required", ["type", "title", "options"]);
+    expect(schemas.SelectionPart).toHaveProperty("properties.title.maxLength", 60);
+    expect(schemas.SelectionPartResponse).toHaveProperty("required", expect.arrayContaining(["title"]));
     expect(schemas.SelectionPart).toHaveProperty("properties.options.minItems", 1);
     expect(schemas.SelectionPart).toHaveProperty("properties.options.maxItems", 25);
     expect(schemas.SelectionPartResponse).toHaveProperty("properties.has_responded.readOnly", true);

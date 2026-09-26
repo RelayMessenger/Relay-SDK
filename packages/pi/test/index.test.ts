@@ -89,14 +89,14 @@ it("teaches selection authoring and passes structured inbound values to Pi", asy
   if (event.event_type !== "message.received") throw new Error("fixture");
   event.data.parts = [{ type: "text", value: "• Research", reactions: null }, { type: "selection_response", selected_values: ["research"] }];
   event.data.reply_to = { message_id: "source", part_index: 1 };
-  const process = fakePi(records('Topics?\n```selection\n[{"value":"design","label":"Design"}]\n```'));
+  const process = fakePi(records('Topics?\n```selection\n{"title":"Topics","options":[{"value":"design","label":"Design"}]}\n```'));
   const { relay, send } = relayFor([event]);
   await new PiChannel({ agentToken: "test", relay, spawnPi: () => process }).run();
   const commands = vi.mocked(process.stdin.write).mock.calls.map(([line]) => JSON.parse(String(line)));
   expect(JSON.stringify(commands)).toContain('selected_values');
   expect(JSON.stringify(commands)).toContain('research');
   expect(send).toHaveBeenCalledWith("chat", { message: { parts: [
-    { type: "text", value: "Topics?" }, { type: "selection", options: [{ value: "design", label: "Design" }] },
+    { type: "text", value: "Topics?" }, { type: "selection", title: "Topics", options: [{ value: "design", label: "Design" }] },
   ], idempotency_key: "pi-selection-0" } });
 });
 
@@ -150,7 +150,7 @@ it("does not let a concurrent replay ACK before the original selection send fini
     await Promise.all([original, replay]);
   } } } as unknown as Relay;
   await new PiChannel({ agentToken: "test", relay, spawnPi: () => fakePi(records(
-    'Topics?\n```selection\n[{"value":"research","label":"Research"}]\n```',
+    'Topics?\n```selection\n{"title":"Topics","options":[{"value":"research","label":"Research"}]}\n```',
   )) }).run();
   expect(replayDone).toBe(true);
   expect(send).toHaveBeenCalledTimes(1);

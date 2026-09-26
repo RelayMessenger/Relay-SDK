@@ -13,8 +13,9 @@ or private Agent identity APIs.
 
 ## Selection
 
-The `reply` tool accepts a `selection` options array alongside nonblank
-question `text`, never together with `buttons` or `link`. Inbound `relay_parts`,
+The `reply` tool accepts a `selection` of a `title` (the question, 1 to 60
+characters) and its `options`, never together with `buttons` or `link`. Its
+`text` is optional and shows as a normal message above the card. Inbound `relay_parts`,
 `selection_response`, and `reply_to` tags preserve untrusted JSON data, including
 history restored during FULL sync.
 

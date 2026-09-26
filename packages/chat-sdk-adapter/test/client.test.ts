@@ -388,10 +388,10 @@ it("sends a typed native selection without losing the existing idempotency ident
     return Response.json({ chat_id: IDS.chat, message: { id: IDS.message } }, { status: 202 });
   } });
   await client.sendMessage({ chatId: IDS.chat, idempotencyKey: "selection-operation", parts: [
-    { type: "text", value: "Topics?" }, { type: "selection", options: [{ value: "research", label: "Research" }] },
+    { type: "text", value: "Topics?" }, { type: "selection", title: "Topics", options: [{ value: "research", label: "Research" }] },
   ] });
   expect(new Headers(requests[0]?.headers).get("idempotency-key")).toBe("selection-operation");
-  expect(JSON.parse(String(requests[0]?.body)).message.parts[1]).toEqual({ type: "selection", options: [{ value: "research", label: "Research" }] });
+  expect(JSON.parse(String(requests[0]?.body)).message.parts[1]).toEqual({ type: "selection", title: "Topics", options: [{ value: "research", label: "Research" }] });
 });
 
 const PAYMENT = { type: "payment" as const, checkout_url: "https://pay.relayapp.im/pr_token_123" };
