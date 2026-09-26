@@ -74,6 +74,8 @@ import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
 import { verboseFetch } from "./verbose.js";
 import { relayHelpHeading, writeRelayHelpHeading } from "./relay-brand.js";
 import { consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, consoleSignOut, deleteConsoleAgent } from "./console-auth.js";
+import { AGENTS_CAN_MESSAGE, peopleSwitch, removeAccess, setAccess, showAccess, updateReach, type AgentsCanMessage } from "./agent-access.js";
+import { linkPhone, phoneLinkSentence } from "./phone-link.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
 // source file may carry its own copy.
@@ -359,6 +361,7 @@ export const createProgram = (
           const control = new AbortController();
           const stop = (): void => control.abort();
           process.once("SIGINT", stop);
+          process.once("SIGTERM", stop);
           const relayClient = () => new Relay({ apiKey: input.token, baseURL: input.apiURL, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) });
           try {
             if (input.kind === "pi") {
@@ -413,6 +416,7 @@ export const createProgram = (
             }
           } finally {
             process.off("SIGINT", stop);
+            process.off("SIGTERM", stop);
           }
         },
         ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
@@ -617,6 +621,97 @@ export const createProgram = (
           ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
         }, handle, agentToken),
       }));
+    });
+
+  // Who may start a chat with an agent: Relay Console's "Available to" field
+  // and its Always Allow and Never Allow lists, through the Console's own routes.
+  const accessRequest = <T>(path: string, init?: RequestInit): Promise<T> =>
+    dependencies.consoleRequest?.<T>(path, init) ?? consoleRequest<T>({
+      context: configContext,
+      apiURL: defaultCreationApiURL(),
+      ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+    }, path, init);
+  const ACCESS_HELP = `
+People in your organization can always message the agent, whatever these
+settings say. There is no private mode: an agent is private when people are
+off, other agents are set to nobody, and the people and agents you choose are
+on Always Allow. Ongoing conversations continue whatever you choose.
+
+Examples:
+  relay agents access show weather
+  relay agents access update weather --people off --agents nobody
+  relay agents access allow weather alice
+  relay agents access deny weather spam_bot
+  relay agents access remove weather alice
+`;
+  const access = agents.command("access")
+    .description("show and change who can message an agent");
+  access.addHelpText("after", ACCESS_HELP);
+  access.command("show").argument("<handle>", "agent handle", handle)
+    .description("show who can start a chat with an agent")
+    .option("--json", "JSON output")
+    .action(async (agentHandle: string) => {
+      output(await showAccess(accessRequest, agentHandle));
+    });
+  access.command("update").argument("<handle>", "agent handle", handle)
+    .description("change who can start a chat with an agent")
+    .addOption(new Option("--people <on|off>", "People in the Relay app").argParser(peopleSwitch))
+    .addOption(new Option("--agents <who>", "Other agents").choices(AGENTS_CAN_MESSAGE))
+    .option("--json", "JSON output")
+    .addHelpText("after", ACCESS_HELP)
+    .action(async (agentHandle: string, options: { people?: boolean; agents?: AgentsCanMessage }) => {
+      output(await updateReach(accessRequest, agentHandle, {
+        ...(options.people === undefined ? {} : { people: options.people }),
+        ...(options.agents === undefined ? {} : { agents: options.agents }),
+      }));
+    });
+  access.command("allow").argument("<handle>", "agent handle", handle).argument("<contact>", "person's or agent's handle")
+    .description("put a person or agent on Always Allow")
+    .option("--json", "JSON output")
+    .action(async (agentHandle: string, contact: string) => {
+      output(await setAccess(accessRequest, agentHandle, contact, "allow"));
+    });
+  access.command("deny").argument("<handle>", "agent handle", handle).argument("<contact>", "person's or agent's handle")
+    .description("put a person or agent on Never Allow")
+    .option("--json", "JSON output")
+    .action(async (agentHandle: string, contact: string) => {
+      output(await setAccess(accessRequest, agentHandle, contact, "deny"));
+    });
+  access.command("remove").argument("<handle>", "agent handle", handle).argument("<contact>", "person's or agent's handle")
+    .description("take a person or agent off both lists")
+    .option("--json", "JSON output")
+    .action(async (agentHandle: string, contact: string) => {
+      output(await removeAccess(accessRequest, agentHandle, contact));
+    });
+
+  // Optional: link a phone so this account is also the Relay app account.
+  const phone = program.command("phone")
+    .description("link your phone to your Relay account")
+    .helpGroup(HELP_GROUPS.everythingElse);
+  phone.command("link")
+    .description("text a code to your phone and link it")
+    .option("--number <number>", "your number, with its country code")
+    .option("--code <code>", "the code from the text message")
+    .option("--json", "JSON output")
+    .addHelpText("after", `
+Linking is optional; no other command needs it. Once linked, the Relay app
+signs in to this same account with your phone.
+
+Without a terminal, run it twice: once with --number to get the code, then
+again with --number and --code.
+`)
+    .action(async (options: { number?: string; code?: string }, command: Command) => {
+      const interactive = !globals(command).nonInteractive && !globals(command).json && dependencies.isInteractive === true;
+      const result = await linkPhone(options, {
+        context: configContext,
+        apiURL: defaultCreationApiURL(),
+        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+        ...(interactive && dependencies.prompts ? { prompts: dependencies.prompts } : {}),
+        stderr,
+      });
+      output(result);
+      const sentence = phoneLinkSentence(result);
+      if (sentence && !globals(command).json) stderr(`${sentence}\n`);
     });
 
   const authCommands = program.command("auth", { hidden: true }).description("manage the token this computer signs in with").helpGroup(HELP_GROUPS.everythingElse);

@@ -89,7 +89,8 @@
     "command": "cline",
     "installedIf": "(paths) => [platformPath(paths.platform).join(paths.home, \".cline\")]",
     "connect": {
-      "kind": "acp-bridge"
+      "kind": "acp-bridge",
+      "mcpSettings": "(paths            )         => {\n  const path = platformPath(paths.platform);\n  const explicit = paths.env.CLINE_MCP_SETTINGS_PATH?.trim();\n  if (explicit) return path.resolve(paths.cwd, explicit);\n  const data = paths.env.CLINE_DATA_DIR?.trim()\n    || path.join(paths.env.CLINE_DIR?.trim() || path.join(paths.home, \".cline\"), \"data\");\n  return path.join(data, \"settings\", \"cline_mcp_settings.json\");\n}"
     },
     "start": {
       "kind": "acp-bridge",
@@ -99,7 +100,8 @@
       ],
       "prompt": "Answer Relay messages with Cline from this folder?"
     },
-    "detectedAs": []
+    "detectedAs": [],
+    "signIn": "Cline needs its own sign-in to answer: run cline auth once, or set CLINE_API_KEY."
   },
   {
     "id": "vscode",
@@ -108,10 +110,10 @@
       "vs-code",
       "code"
     ],
-    "installedIf": "(paths) => [\n      platformPath(paths.platform).join(configHome(paths), \"Code\"),\n      win32.join(appData(paths), \"Code\"),\n      \"/Applications/Visual Studio Code.app\",\n    ]",
+    "installedIf": "(paths) => [\n      platformPath(paths.platform).join(configHome(paths), \"Code\"),\n      vscodeUserData(paths),\n      \"/Applications/Visual Studio Code.app\",\n    ]",
     "connect": {
       "kind": "mcp-file",
-      "file": "(paths) => byPlatform(paths, {\n        darwin: posix.join(appSupport(paths), \"Code\", \"User\", \"mcp.json\"),\n        win32: win32.join(appData(paths), \"Code\", \"User\", \"mcp.json\"),\n        linux: posix.join(paths.home, \".config\", \"Code\", \"User\", \"mcp.json\"),\n      })",
+      "file": "(paths) => platformPath(paths.platform).join(vscodeUserData(paths), \"User\", \"mcp.json\")",
       "shape": "vscode"
     },
     "start": {

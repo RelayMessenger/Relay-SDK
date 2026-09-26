@@ -66,6 +66,21 @@ export const vscodeMcpEntry = (mcp: HostedMcp): { type: "http"; url: string; hea
 });
 
 /**
+ * Cline's `mcpServers.relay`: `type: "streamableHttp"`, `url`, and `headers`
+ * with a static `Authorization` (docs.cline.bot/mcp/mcp-overview, "Remote
+ * server (Streamable HTTP)"; cline 3.0.65, sdk/packages/core/src/extensions/mcp/
+ * config-loader.ts, the URL registration schema; client.ts,
+ * `hasStaticAuthorizationHeader`). Cline expands no variables in a header, so
+ * the value is the token itself; the file lives in Cline's own data folder,
+ * outside the project, written owner-only. Saved at _sources/cline-mcp-20260926/.
+ */
+export const clineMcpEntry = (mcp: HostedMcp): { type: "streamableHttp"; url: string; headers: Record<string, string> } => ({
+  type: "streamableHttp",
+  url: mcp.url,
+  headers: { Authorization: bearer(mcp.token) },
+});
+
+/**
  * Codex's `[mcp_servers.relay]` for a streamable HTTP server: `url` and
  * `bearer_token_env_var`, byte for byte what `codex mcp add relay --url <url>
  * --bearer-token-env-var RELAY_AGENT_TOKEN` writes (codex-cli 0.155.1,
