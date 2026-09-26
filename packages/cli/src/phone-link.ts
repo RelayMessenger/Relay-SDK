@@ -7,7 +7,8 @@ import { HeadlessPrompt, type InteractivePrompts } from "./interactive.js";
  * Links a phone to the signed-in Relay account, so the same account signs in
  * to the Relay app (owner, 2026-09-26: "You can link your phone number in the
  * console or via the CLI. Once linked, it is your own account for the Relay
- * app too."). Optional; no other command needs it.
+ * app too."). Optional; tool approvals from connected agents reach an owner
+ * only in the Relay app (approvals.ts, noOwnerLine), so linking is how they arrive.
  *
  * Relay-Auth texts and checks the code (branch phone-link-20260926):
  *   POST {auth}/api/auth/phone-link/send-otp {phoneNumber}

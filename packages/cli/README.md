@@ -132,9 +132,9 @@ organization after you. Use `organization update --name` to rename it and
 optional `--website` to set its website.
 
 `relay phone link` links your phone to the same account, so the Relay app
-signs in to it too. It is optional, and no other command needs it. At a
-terminal it asks for the number, texts a code, and asks for the code. Without
-a terminal, run it twice:
+signs in to it too. It is optional, and it lets tool approvals from your
+connected agents reach you in the Relay app. At a terminal it asks for the
+number, texts a code, and asks for the code. Without a terminal, run it twice:
 
 ```sh
 relay phone link --number +15551234567
