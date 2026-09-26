@@ -153,6 +153,15 @@ export const authMethodFromEnv = (
   !("type" in method && method.type === "terminal")
   && (ENV_AUTH_METHODS[method.id] ?? []).some((name) => Boolean(env[name]?.trim())))?.id;
 
+/** An ACP error, an Error, or anything thrown, as one line. */
+export const acpFailure = (error: unknown): string => {
+  if (error instanceof Error && !("code" in error)) return error.message.trim().replace(/\s+/gu, " ");
+  const record = (error ?? {}) as { message?: unknown; data?: { details?: unknown } };
+  const message = typeof record.message === "string" ? record.message : String(error);
+  const details = typeof record.data?.details === "string" ? record.data.details : "";
+  return `${message}${details && !message.includes(details) ? ` (${details})` : ""}`.trim().replace(/\s+/gu, " ");
+};
+
 const isAuthRequired = (error: unknown): boolean =>
   error !== null && typeof error === "object" && (error as { code?: unknown }).code === AUTH_REQUIRED;
 
@@ -417,6 +426,7 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
     };
     let mine: LiveTurn | undefined;
     let outcome: TurnOutcome | undefined;
+    let failure: unknown;
     try {
       const agent = await acpAgent();
       const sessionId = await openSession(agent, turn.chatId);
@@ -425,11 +435,17 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
         sessionId, prompt: acpPrompt(turn.sender, media.text),
         onStarted: (live) => { mine = live; lane.live = live; started(); },
       });
-    } catch { /* Named below, with everything else the agent can fail at. */ }
+    } catch (error) { failure = error; }
     if (lane.live === mine) lane.live = undefined;
     if (mine?.dropped === true || outcome?.stopReason === "cancelled") {
       await stopTyping();
       input.say(`A newer message came in, so the answer to @${turn.sender} was dropped.`);
+      return;
+    }
+    // What the agent refused is named, so the person sees why.
+    if (failure !== undefined && !input.signal.aborted) {
+      await stopTyping();
+      input.say(`${input.label} could not answer @${turn.sender}: ${acpFailure(failure)}. Nothing was sent.`);
       return;
     }
     const answer = (outcome?.answer ?? "").trim();

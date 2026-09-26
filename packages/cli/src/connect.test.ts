@@ -306,6 +306,26 @@ describe("the MCP agents", () => {
     expect(f.stdout.join("")).not.toContain(token);
   });
 
+  it("codex replaces the retired local Relay server in Codex's own config with Codex's own command, and nothing else", async () => {
+    const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" } }));
+    await mkdir(join(f.home, ".codex"), { recursive: true });
+    await writeFile(join(f.home, ".codex", "config.toml"), [
+      "[mcp_servers.relay]", 'command = "npx"', 'args = ["-y", "@relaymessenger/mcp@staging", "--profile", "calm_cangoo"]', "",
+    ].join("\n"));
+    expect(await runCLI(["connect", "codex", "--token", token, "--yes", "--no-skill"], f.deps)).toBe(0);
+    expect(ranLines(f)).toEqual([
+      "/fake/bin/codex mcp add relay --url https://mcp.staging.relayapp.im --bearer-token-env-var RELAY_AGENT_TOKEN",
+    ]);
+    expect(f.stdout.join("")).toContain("run  codex mcp add relay --url https://mcp.staging.relayapp.im --bearer-token-env-var RELAY_AGENT_TOKEN  (replaces the retired local Relay server in Codex's own config)");
+
+    // A `relay` entry that is the person's own is never touched.
+    const g = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" } }));
+    await mkdir(join(g.home, ".codex"), { recursive: true });
+    await writeFile(join(g.home, ".codex", "config.toml"), '[mcp_servers.relay]\ncommand = "my-relay"\nargs = ["--serve"]\n');
+    expect(await runCLI(["connect", "codex", "--token", token, "--yes", "--no-skill"], g.deps)).toBe(0);
+    expect(ranLines(g)).toEqual([]);
+  });
+
   it("the ACP agents write no mcp.json and run no command; Relay drives them over ACP", async () => {
     // Cursor: no mcp.json is written even when one is already there, and no
     // command is run. The Relay MCP server travels through the session instead.

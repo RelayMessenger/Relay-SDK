@@ -20,6 +20,7 @@
  *   loadSession  whether the agent advertises `session/load` (default true)
  *   mcpHttp      whether the agent advertises `mcpCapabilities.http` (default false)
  *   authMethods  the sign-in methods `initialize` advertises (default none)
+ *   newSessionError  the error `session/new` answers with, when set
  *   loadNeedsAuth  `session/load` answers auth_required (-32000) until
  *                `authenticate` names an advertised method, as Gemini CLI does
  *                when its settings name no sign-in method
@@ -108,6 +109,10 @@ const handle = (message) => {
     return;
   }
   if (message.method === "session/new") {
+    if (settings.newSessionError) {
+      write({ id: message.id, error: settings.newSessionError });
+      return;
+    }
     sessions += 1;
     const sessionId = `session-${sessions}`;
     keep(sessionId);

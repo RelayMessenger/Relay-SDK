@@ -11,6 +11,7 @@ import {
   codingAgent,
   platformPath,
   hermesHome,
+  codexHome,
   normalizeAgentId,
   supportedAgentsLine,
   type AgentPaths,
@@ -20,7 +21,8 @@ import { sniffRuntimes, type RuntimeFound, type RuntimeId, type RuntimeSniffCont
 import { readChannelEnv, writeEnvFile } from "./claude-channel.js";
 import { readFolderLink, writeFolderLink } from "./folder-link.js";
 import { writeCodexProjectMcpServer } from "./coding-agents/codex-project-config.js";
-import { MCP_SERVER_NAME, codexMcpServer, hostedMcpURL, vscodeMcpEntry, type HostedMcp } from "./hosted-mcp.js";
+import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, codexMcpServer, hostedMcpURL, vscodeMcpEntry, type HostedMcp } from "./hosted-mcp.js";
+import { parse as parseToml } from "smol-toml";
 import { configPath, defaultCreationApiURL, isStagingBuild, packageVersion, validateApiURL, validateProfileName, validateToken, type RelayConsoleSession } from "./config.js";
 import { HeadlessPrompt, InteractiveCancelled, type InteractivePrompts } from "./interactive.js";
 import { CliError, type CliErrorCode } from "./error-codes.js";
@@ -205,6 +207,9 @@ export interface PlanContext {
   start: boolean;
   /** The agents whose file already holds a token for someone else. */
   replacing?: Partial<Record<CodingAgentId, string>>;
+  /** Codex's own config still runs the retired local Relay MCP server as
+   * `relay` (`retiredCodexServer`), so connect replaces that entry. */
+  retiredCodexServer?: boolean;
   /** Present when the plan creates a new agent: what was chosen for it, when anything was. */
   create?: AgentIdentity;
   /** How a command or a path is marked inside a step. Absent means unmarked, so
@@ -237,6 +242,16 @@ export const shownCommandLine = (words: readonly string[]): string =>
 export const agentCommands = (agent: CodingAgentId, context: PlanContext): string[][] => {
   switch (agent) {
     case "claude-code": return [];
+    case "codex":
+      // `codex mcp add` replaces the whole `relay` entry and keeps every other
+      // one (measured on codex-cli 0.155.1). Without it the stdio keys of the
+      // retired entry merge with the hosted server the bridge hands each
+      // thread, and Codex refuses the thread: "url is not supported for stdio
+      // in `mcp_servers.relay`" (measured on this Mac, 2026-09-26). The
+      // entry is the one Relay-Docs gives Codex (integrations/mcp.mdx).
+      return context.retiredCodexServer
+        ? [["codex", "mcp", "add", MCP_SERVER_NAME, "--url", hostedMcpURL(context.version), "--bearer-token-env-var", AGENT_TOKEN_ENV]]
+        : [];
     case "hermes":
       return [["hermes", "plugins", "install", HERMES_PLUGIN_SOURCE, "--enable"]];
     case "openclaw":
@@ -304,6 +319,7 @@ export const agentPlan = (agent: CodingAgentId, context: PlanContext): AgentPlan
       break;
     case "codex-project":
       steps = [
+        ...(shown.commands.length ? [`run  ${shown.commands[0]}  (replaces the retired local Relay server in Codex's own config)`] : []),
         `write  ./.codex/config.toml  (Relay's MCP server for this folder; Codex loads it when the folder is trusted)`,
         ...(context.start && codingAgent(agent).start?.kind === "bridge"
           ? [`keep running here, and answer your Relay messages with ${label} from this folder`]
@@ -450,6 +466,24 @@ const objectAt = (root: Record<string, unknown>, key: string): Record<string, un
   return value;
 };
 
+/**
+ * True when Codex's own `config.toml` still lists `relay` as the retired local
+ * package (`npx -y @relaymessenger/mcp …`, written by earlier versions of this
+ * command through `codex mcp add`). A `relay` entry that is anything else is
+ * the person's own and is never touched. An unreadable file counts as none.
+ */
+export const hasRetiredCodexServer = async (home: string, platform: NodeJS.Platform = process.platform): Promise<boolean> => {
+  try {
+    const config = parseToml(await readFile(platformPath(platform).join(home, "config.toml"), "utf8")) as Record<string, unknown>;
+    const servers = config.mcp_servers as Record<string, unknown> | undefined;
+    const entry = servers?.[MCP_SERVER_NAME] as { command?: unknown; args?: unknown } | undefined;
+    return typeof entry?.command === "string" && Array.isArray(entry.args)
+      && entry.args.some((arg) => typeof arg === "string" && /^@relaymessenger\/mcp(@|$)/u.test(arg));
+  } catch {
+    return false;
+  }
+};
+
 /** Adds `<rootKey>.relay` to an agent's MCP config file, every other entry
  * kept. The entry carries the agent's token, so the file is written owner-only. */
 export const writeMcpFileEntry = async (path: string, shape: "vscode", mcp: HostedMcp): Promise<void> => {
@@ -557,8 +591,10 @@ export const runConnect = async (
 
   const version = deps.version ?? packageVersion();
   const allow = (options.allow ?? "").split(",").map((entry) => entry.trim().replace(/^@/u, "")).filter(Boolean);
+  let retiredCodexServer = false;
   const context = (agent: ConnectAgent | PendingAgent | undefined, replacing?: PlanContext["replacing"]): PlanContext => ({
     env: deps.env, home: deps.home, platform, version, cwd: deps.cwd,
+    ...(retiredCodexServer ? { retiredCodexServer } : {}),
     handle: agent?.handle ?? options.handle ?? "<handle>",
     allow, start: options.start !== false,
     ...(agent && "token" in agent ? { token: agent.token, apiURL: agent.apiURL } : {}),
@@ -615,6 +651,7 @@ export const runConnect = async (
     }
   }
 
+  if (targets.includes("codex")) retiredCodexServer = await hasRetiredCodexServer(codexHome(deps.env, deps.home, platform), platform);
   const plan = runtimeConnectPlan({ ...context(chosen, replacing), agents: targets, ask: options.nonInteractive !== true });
   screen.plan(plan.headline, plan.steps);
   // The explicit connect command is the user's approval. Only the existing
@@ -670,6 +707,13 @@ export const runConnect = async (
         () => `Relay MCP server added to ${codingAgent(target).label}  ${screen.dim(planned.files[0] ?? "")}`,
       );
     } else if (method.kind === "codex-project") {
+      if (ctx.retiredCodexServer) {
+        result.commands = await screen.work(
+          "Replacing the retired Relay server in Codex",
+          () => runAgentCommands(target, runtime, ctx, runCommand),
+          () => "Replaced the retired Relay server in Codex",
+        );
+      }
       const file = await writeCodexProjectMcpServer(deps.cwd, { name: MCP_SERVER_NAME, ...codexMcpServer(hostedMcpURL(version)) });
       screen.step(`wrote  ${screen.dim(file)}`);
     } else if (method.kind === "mcp-file") {

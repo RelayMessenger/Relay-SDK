@@ -51,6 +51,7 @@ interface FakeLine {
  */
 const fakeAppServer = async (settings: {
   answers?: FakeAnswer[][];
+  threadError?: string;
   turnMs?: number;
   resumable?: string[];
 } = {}): Promise<{ codex: CodexCommand; cwd: string; log(): Promise<FakeLine[]> }> => {
@@ -121,7 +122,7 @@ function fakeRelay(events: readonly RelayWebhookEvent[]) {
 }
 
 /** Every way one message can end on the terminal. */
-const ENDED = /Sent the answer|gave no answer|did not reach Relay|was dropped/u;
+const ENDED = /Sent the answer|gave no answer|could not answer|did not reach Relay|was dropped/u;
 
 /**
  * The bridge hands a message to Codex and lets the turn finish behind it, so a
@@ -196,6 +197,14 @@ describe("the app-server the bridge starts", () => {
     // stand-in: `<codex> app-server`.
     expect(log[0]!.argv).toEqual([expect.stringContaining("settings.json"), "app-server"]);
     expect(log[0]!.params).toEqual({ clientInfo: { name: "relaymessenger", title: "Relay", version: expect.any(String) } });
+  });
+
+  it("names a thread Codex refuses instead of saying it gave no answer", async () => {
+    const refusal = "failed to load configuration: url is not supported for stdio\nin `mcp_servers.relay`\n";
+    const codex = await fakeAppServer({ threadError: refusal });
+    const { said, relay } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "Hey")] });
+    expect(relay.sent).toEqual([]);
+    expect(said).toContain("Codex could not answer @alice: failed to load configuration: url is not supported for stdio in `mcp_servers.relay`. Nothing was sent.");
   });
 
   it("hands app-server the Agent Token in RELAY_AGENT_TOKEN, where the folder's config reads it", async () => {

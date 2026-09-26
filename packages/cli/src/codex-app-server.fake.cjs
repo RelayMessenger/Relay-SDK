@@ -16,6 +16,8 @@
  *   answers     what to answer, in order; each entry is a list of agent
  *               messages `{text, phase}`, or an empty list for no answer
  *   turnMs      how long a turn takes before it completes
+ *   threadError the error `thread/start` answers with, when set, the way the
+ *               real one refuses a config it cannot load
  *   resumable   the thread ids `thread/resume` accepts; anything else is an
  *               error, as the real one answers for a thread it has lost
  */
@@ -95,6 +97,10 @@ const handle = (message) => {
   }
   if (message.method === "initialized") return;
   if (message.method === "thread/start") {
+    if (settings.threadError) {
+      write({ id: message.id, error: { code: -32600, message: settings.threadError } });
+      return;
+    }
     threads += 1;
     const id = `thread-${threads}`;
     keepRollout(id);

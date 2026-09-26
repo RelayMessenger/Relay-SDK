@@ -557,6 +557,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
     };
     let mine: LiveTurn | undefined;
     let outcome: TurnOutcome | undefined;
+    let failure: unknown;
     try {
       const server = await appServer();
       const threadId = await openThread(server, turn.chatId);
@@ -565,11 +566,19 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
         threadId, prompt: codexPrompt(turn.sender, media.text), images: media.images,
         onStarted: (live) => { mine = live; lane.live = live; started(); },
       });
-    } catch { /* Named below, with everything else Codex can fail at. */ }
+    } catch (error) { failure = error; }
     if (lane.live === mine) lane.live = undefined;
     if (mine?.dropped === true || outcome?.status === "interrupted") {
       await stopTyping();
       input.say(`A newer message came in, so the answer to @${turn.sender} was dropped.`);
+      return;
+    }
+    // A thread or turn Codex refused is named, so the person sees why: a
+    // config Codex cannot load reads "failed to load configuration: ...".
+    if (failure !== undefined && !input.signal.aborted) {
+      await stopTyping();
+      const why = (failure instanceof Error ? failure.message : String(failure)).trim().replace(/\s+/gu, " ");
+      input.say(`Codex could not answer @${turn.sender}: ${why}. Nothing was sent.`);
       return;
     }
     const answer = (outcome?.answer ?? "").trim();
