@@ -106,6 +106,7 @@ try {
   ]);
   assert.deepEqual(interfaceFields("AgentChatHandle"), [
     "kind",
+    "owner",
   ]);
   assert.deepEqual(interfaceFields("ChatActivity"), [
     "id", "text", "emoji", "updated_at", "expires_at",
@@ -123,6 +124,7 @@ try {
   assert.deepEqual(interfaceFields("ContactLookup"), [
     "id", "handle", "display_name", "kind", "image_url", "image_color", "verified",
     "name", "subtitle", "description", "category", "skills", "visibility", "creator",
+    "can_message",
   ]);
   for (const name of ["ContactCardItem", "ContactCardUpdateParams", "ContactCardCreateParams"]) {
     assert.equal(interfaceFields(name).includes("message_requests_from"), false);
@@ -157,8 +159,8 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 48);
-      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 24);
+      assert.equal(RELAY_V1_OPERATIONS.length, 55);
+      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
       const allowedOperations = new Set([
         "POST /v1/chats",
         "GET /v1/chats",
@@ -193,6 +195,13 @@ try {
         "GET /v1/blocked_handles",
         "POST /v1/blocked_handles",
         "DELETE /v1/blocked_handles",
+        "PATCH /v1/me",
+        "GET /v1/tasks",
+        "POST /v1/tasks/{taskId}/status",
+        "POST /v1/tasks/{taskId}/artifacts",
+        "GET /v1/communities",
+        "GET /v1/communities/{handle}",
+        "GET /v1/communities/{handle}/members",
         "GET /v1/webhook-events",
         "POST /v1/webhook-subscriptions",
         "GET /v1/webhook-subscriptions",
@@ -244,6 +253,12 @@ try {
           .sort();
       assert.equal("createAgent" in Relay, false);
       assert.deepEqual(methods(client.agents), ["delete"]);
+      assert.deepEqual(methods(client.me), ["update"]);
+      assert.deepEqual(methods(client.communities), ["list", "retrieve"]);
+      assert.deepEqual(methods(client.communities.members), ["list"]);
+      assert.deepEqual(methods(client.tasks), [
+        "addArtifact", "cancel", "get", "list", "send", "updateStatus",
+      ]);
       assert.deepEqual(methods(client.contacts), ["lookup"]);
       assert.deepEqual(methods(client.chats), [
         "clearActivity",

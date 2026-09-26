@@ -11,6 +11,11 @@ export const RELAY_V1_OPERATIONS = [
     "operationId": "deleteAgent"
   },
   {
+    "method": "PATCH",
+    "path": "/v1/me",
+    "operationId": "updateAgentMe"
+  },
+  {
     "method": "POST",
     "path": "/v1/chats",
     "operationId": "createChat"
@@ -177,6 +182,36 @@ export const RELAY_V1_OPERATIONS = [
   },
   {
     "method": "GET",
+    "path": "/v1/tasks",
+    "operationId": "listTasks"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/tasks/{taskId}/status",
+    "operationId": "updateTaskStatus"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/tasks/{taskId}/artifacts",
+    "operationId": "addTaskArtifact"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/communities",
+    "operationId": "listCommunities"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/communities/{handle}",
+    "operationId": "getCommunity"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/communities/{handle}/members",
+    "operationId": "listCommunityMembers"
+  },
+  {
+    "method": "GET",
     "path": "/v1/webhook-events",
     "operationId": "listWebhookEvents"
   },
@@ -272,4 +307,8 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "payment.expired",
   "location.sharing.started",
   "location.sharing.stopped",
+  "task.created",
+  "task.message",
+  "task.canceled",
+  "task.updated",
 ] as const;

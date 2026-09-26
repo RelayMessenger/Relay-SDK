@@ -2,7 +2,10 @@ import { RelayAPIError, isAbortError } from "./errors.js";
 import { ChatsPage, MessagesPage } from "./pagination.js";
 import { CallRoom, type CallRoomOptions } from "./calls/call-room.js";
 import type {
+  A2aTask,
   AcceptedResponse,
+  AgentMeUpdateParams,
+  AgentMeUpdateResponse,
   Attachment,
   AttachmentCreateParams,
   AttachmentCreateResponse,
@@ -25,6 +28,10 @@ import type {
   ChatSetActivityParams,
   ChatUpdateParams,
   ChatUpdateResponse,
+  CommunityListResponse,
+  CommunityMemberListResponse,
+  CommunityRetrieveParams,
+  CommunityRetrieveResponse,
   ContactCardItem,
   ContactCardCreateParams,
   ContactCardRetrieveParams,
@@ -51,6 +58,14 @@ import type {
   PaymentRequestListParams,
   PaymentRequestListResponse,
   RequestOptions,
+  TaskArtifactCreateParams,
+  TaskCancelParams,
+  TaskGetParams,
+  TaskListParams,
+  TaskListResponse,
+  TaskResponse,
+  TaskSendParams,
+  TaskStatusUpdateParams,
   UnblockHandleParams,
   WebhookEventListResponse,
   WebhookSubscription,
@@ -73,6 +88,14 @@ type FetchLike = (
 export interface RelayOptions {
   apiKey: string;
   baseURL?: string;
+  /**
+   * Where other agents' A2A addresses live, `<a2aBaseURL>/<handle>`. By
+   * default it follows `baseURL` as Relay serves it: https://relayagent.im
+   * for api.relayapp.im, https://staging.relayagent.im for
+   * api.staging.relayapp.im, and `<baseURL origin>/a2a` for any other host
+   * (a local Relay Server).
+   */
+  a2aBaseURL?: string;
   webhookSecret?: string | null;
   maxRetries?: number;
   timeout?: number;
@@ -115,8 +138,27 @@ const delay = async (milliseconds: number, signal?: AbortSignal): Promise<void> 
 
 const pathID = (value: string): string => encodeURIComponent(value);
 
+/**
+ * Relay-Server's A2A_ORIGIN for each API host (wrangler.jsonc env.staging:
+ * PUBLIC_ORIGIN api.staging.relayapp.im, A2A_ORIGIN staging.relayagent.im;
+ * production drops the "staging" label, scripts/production-config.mjs). With
+ * no A2A_ORIGIN the Server serves agents under /a2a/ on its own origin
+ * (config.ts, a2a.ts agentInterfaceUrl).
+ */
+const defaultA2aBaseURL = (baseURL: string): string => {
+  const url = new URL(baseURL);
+  if (url.hostname === "api.relayapp.im") return "https://relayagent.im";
+  if (url.hostname === "api.staging.relayapp.im") return "https://staging.relayagent.im";
+  return `${url.origin}/a2a`;
+};
+
+type A2aClientModule = typeof import("@a2a-js/sdk/client");
+type A2aClient = Awaited<ReturnType<InstanceType<A2aClientModule["ClientFactory"]>["createFromUrl"]>>;
+
 class Transport {
   readonly baseURL: string;
+  readonly a2aBaseURL: string;
+  readonly #a2aClients = new Map<string, Promise<A2aClient>>();
   readonly #apiKey: string;
   readonly #fetch: FetchLike;
   readonly #maxRetries: number;
@@ -125,6 +167,7 @@ class Transport {
 
   constructor(options: RelayOptions) {
     this.baseURL = (options.baseURL ?? "https://api.relayapp.im").replace(/\/+$/, "");
+    this.a2aBaseURL = (options.a2aBaseURL ?? defaultA2aBaseURL(this.baseURL)).replace(/\/+$/, "");
     this.#apiKey = options.apiKey;
     const selectedFetch = options.fetch ?? globalThis.fetch;
     // Workerd's native fetch validates its receiver. Retaining the bare
@@ -257,6 +300,45 @@ class Transport {
         { status: response.status },
       );
     }
+  }
+
+  /**
+   * The official A2A 1.0 client (@a2a-js/sdk) for one agent's address, made
+   * from its Agent Card at `<a2aBaseURL>/<handle>/agent-card.json` and kept
+   * for this Relay instance. Every JSON-RPC call carries this agent's Relay
+   * token as its bearer credential (the card's `relay` HTTP bearer scheme);
+   * the client adds `A2A-Version: 1.0`. Loaded on first use, so an agent
+   * that never gives jobs never loads it.
+   */
+  a2a(handle: string): Promise<A2aClient> {
+    const key = handle.replace(/^@/, "").trim().toLowerCase();
+    let client = this.#a2aClients.get(key);
+    if (!client) {
+      client = this.#createA2aClient(key);
+      this.#a2aClients.set(key, client);
+      client.catch(() => this.#a2aClients.delete(key));
+    }
+    return client;
+  }
+
+  async #createA2aClient(handle: string): Promise<A2aClient> {
+    const {
+      ClientFactory,
+      DefaultAgentCardResolver,
+      JsonRpcTransportFactory,
+      createAuthenticatingFetchWithRetry,
+    } = await import("@a2a-js/sdk/client");
+    const fetchImpl = this.#fetch as typeof fetch;
+    const apiKey = this.#apiKey;
+    const authenticated = createAuthenticatingFetchWithRetry(fetchImpl, {
+      headers: async () => ({ authorization: `Bearer ${apiKey}` }),
+      shouldRetryWithHeaders: async () => undefined,
+    });
+    const factory = new ClientFactory({
+      transports: [new JsonRpcTransportFactory({ fetchImpl: authenticated })],
+      cardResolver: new DefaultAgentCardResolver({ fetchImpl }),
+    });
+    return factory.createFromUrl(`${this.a2aBaseURL}/${pathID(handle)}/agent-card.json`, "");
   }
 
   runWebSocket(options: WebSocketRunOptions): Promise<void> {
@@ -920,6 +1002,175 @@ export class Calls {
 
 }
 
+/** The authenticated agent's own settings. */
+export class Me {
+  constructor(private readonly transport: Transport) {}
+
+  /**
+   * Turn on or off whether this agent takes jobs (A2A Tasks) from other
+   * agents. It starts off; only the agent itself sets it.
+   */
+  update(
+    body: AgentMeUpdateParams,
+    options?: RequestOptions,
+  ): Promise<AgentMeUpdateResponse> {
+    return this.transport.request({
+      method: "PATCH",
+      path: "/v1/me",
+      body,
+      options,
+    });
+  }
+}
+
+export class CommunityMembers {
+  constructor(private readonly transport: Transport) {}
+
+  /** Every member agent, first joined first. Only a member agent may read them. */
+  list(
+    handle: string,
+    options?: RequestOptions,
+  ): Promise<CommunityMemberListResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/communities/${pathID(handle)}/members`,
+      options,
+    });
+  }
+}
+
+export class Communities {
+  readonly members: CommunityMembers;
+
+  constructor(private readonly transport: Transport) {
+    this.members = new CommunityMembers(transport);
+  }
+
+  /** The communities this agent is a member of, first joined first. */
+  list(options?: RequestOptions): Promise<CommunityListResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/communities",
+      options,
+    });
+  }
+
+  /**
+   * A public community's page, or, with `invite`, what a community's join
+   * page shows. A private community without its current invite code is not
+   * found (404, code 2040).
+   */
+  retrieve(
+    handle: string,
+    query: CommunityRetrieveParams = {},
+    options?: RequestOptions,
+  ): Promise<CommunityRetrieveResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/communities/${pathID(handle)}`,
+      query,
+      options,
+    });
+  }
+}
+
+const a2aOptions = (options?: RequestOptions): { signal?: AbortSignal } =>
+  options?.signal ? { signal: options.signal } : {};
+
+/**
+ * Jobs between agents: A2A 1.0 Tasks. The agent doing a job moves it with
+ * `updateStatus` and adds results with `addArtifact` over Relay's API. The
+ * agent giving a job calls the other agent's A2A address with `send`, `get`
+ * and `cancel`, through the official A2A client; its errors are that
+ * client's (for example a refused job is a JSON-RPC error whose message is
+ * "This agent doesn't take jobs yet.").
+ */
+export class Tasks {
+  constructor(private readonly transport: Transport) {}
+
+  /** This agent's Tasks, most recently updated first. */
+  list(
+    query: TaskListParams = {},
+    options?: RequestOptions,
+  ): Promise<TaskListResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/tasks",
+      query,
+      options,
+    });
+  }
+
+  /** Set the state of a Task another agent gave this agent. */
+  updateStatus(
+    taskID: string,
+    body: TaskStatusUpdateParams,
+    options?: RequestOptions,
+  ): Promise<TaskResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/tasks/${pathID(taskID)}/status`,
+      body,
+      options,
+    });
+  }
+
+  /**
+   * Append one whole Artifact to a Task another agent gave this agent. The
+   * same Artifact again changes nothing, so this is retried.
+   */
+  addArtifact(
+    taskID: string,
+    body: TaskArtifactCreateParams,
+    options?: RequestOptions,
+  ): Promise<TaskResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/tasks/${pathID(taskID)}/artifacts`,
+      body,
+      options,
+      retryable: true,
+    });
+  }
+
+  /**
+   * Give the agent `to` a job: A2A SendMessage at its address. It waits for
+   * the Task to settle unless `configuration.returnImmediately` is true.
+   */
+  async send(params: TaskSendParams, options?: RequestOptions): Promise<A2aTask> {
+    const { to, ...request } = params;
+    const [client, { SendMessageRequest, Task }] = await Promise.all([
+      this.transport.a2a(to),
+      import("@a2a-js/sdk"),
+    ]);
+    const result = await client.sendMessage(SendMessageRequest.fromJSON(request), a2aOptions(options));
+    if (!("status" in result)) {
+      throw new Error("The agent answered with a Message, not a Task.");
+    }
+    return Task.toJSON(result) as A2aTask;
+  }
+
+  /** A2A GetTask at the agent `to`: a Task this agent gave it. */
+  async get(params: TaskGetParams, options?: RequestOptions): Promise<A2aTask> {
+    const { to, ...request } = params;
+    const [client, { GetTaskRequest, Task }] = await Promise.all([
+      this.transport.a2a(to),
+      import("@a2a-js/sdk"),
+    ]);
+    return Task.toJSON(await client.getTask(GetTaskRequest.fromJSON(request), a2aOptions(options))) as A2aTask;
+  }
+
+  /** A2A CancelTask at the agent `to`: a Task this agent gave it. */
+  async cancel(params: TaskCancelParams, options?: RequestOptions): Promise<A2aTask> {
+    const { to, ...request } = params;
+    const [client, { CancelTaskRequest, Task }] = await Promise.all([
+      this.transport.a2a(to),
+      import("@a2a-js/sdk"),
+    ]);
+    return Task.toJSON(await client.cancelTask(CancelTaskRequest.fromJSON(request), a2aOptions(options))) as A2aTask;
+  }
+}
+
 export class Relay {
   readonly agents: Agents;
   readonly baseURL: string;
@@ -933,6 +1184,9 @@ export class Relay {
   readonly contactCard: ContactCard;
   readonly contacts: Contacts;
   readonly blockedHandles: BlockedHandles;
+  readonly communities: Communities;
+  readonly me: Me;
+  readonly tasks: Tasks;
   readonly websocket: WebSocket;
   readonly webhooks: Webhooks;
 
@@ -951,6 +1205,9 @@ export class Relay {
     this.contactCard = new ContactCard(transport);
     this.contacts = new Contacts(transport);
     this.blockedHandles = new BlockedHandles(transport);
+    this.communities = new Communities(transport);
+    this.me = new Me(transport);
+    this.tasks = new Tasks(transport);
     this.websocket = new WebSocket(transport);
     this.webhooks = new Webhooks(options.webhookSecret ?? null);
   }

@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server efd780128d1f71d90c05947fcf919e3e0d03acbb
- * OpenAPI d724f38784e54027775e518fd70190147fc1af7baaec74943b58e60a98611640
+ * Relay Server 5daac94da260f8258deddf9c1d7f930b5b24aa61
+ * OpenAPI 4758ee873ab6c350791c179c10ee66307c2065cf3d1083684a4c831c269ed937
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -34,6 +34,10 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "payment.expired",
   "location.sharing.started",
   "location.sharing.stopped",
+  "task.created",
+  "task.message",
+  "task.canceled",
+  "task.updated",
 ] as const;
 
 export type RelayWebhookEventType =
