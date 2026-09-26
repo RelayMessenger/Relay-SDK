@@ -3,17 +3,21 @@ import type { InboundMediaOptions } from "./inbound-media.js";
 import type Relay from "@relaymessenger/sdk";
 import { PAYMENT_BLOCK_INSTRUCTION, SELECTION_BLOCK_INSTRUCTION, type RelayWebhookEvent } from "@relaymessenger/sdk";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
-  acpCommand, acpEnvironment, acpFailure, acpPrompt, authMethodFromEnv, autoPermission, relayMcpServer, replyKey, resolvePermission, runAcpBridge,
+  acpCommand, acpEnvironment, acpFailure, applyNoCommands, isRelayMcpCall, type AcpNoCommands, acpPrompt, authMethodFromEnv, autoPermission, relayMcpServer, replyKey, resolvePermission, runAcpBridge,
   type AcpCommand,
 } from "./acp-bridge.js";
 import { openAcpSessions, type AcpSessionStore } from "./acp-threads.js";
 import { platformCommand } from "./spawn-command.js";
+import geminiAgent from "./coding-agents/gemini-cli.js";
+import opencodeAgent from "./coding-agents/opencode.js";
+import clineAgent from "./coding-agents/cline.js";
+import cursorAgent from "./coding-agents/cursor.js";
 
 const folders: string[] = [];
 afterAll(async () => {
@@ -46,6 +50,8 @@ interface FakeLine {
   tokenEnv?: string | null;
   /** The client's answer to a permission request the agent sent. */
   permission?: unknown;
+  /** The variable named by `envProbe`, as the agent's environment held it. */
+  probe?: string | null;
 }
 
 /** Relay's hosted MCP server as connect hands it over: the staging server and the agent's token. */
@@ -68,6 +74,7 @@ const fakeAcpAgent = async (settings: {
   replayAfterLoad?: string;
   resumable?: string[];
   askPermission?: Record<string, unknown>;
+  envProbe?: string;
 } = {}): Promise<{ acp: AcpCommand; cwd: string; log(): Promise<FakeLine[]> }> => {
   const folder = await scratch("fake-acp");
   const record = join(folder, "messages.jsonl");
@@ -167,6 +174,7 @@ const runBridge = async (input: {
   relay?: ReturnType<typeof fakeRelay>;
   env?: NodeJS.ProcessEnv;
   access?: BridgeAccess;
+  noCommands?: AcpNoCommands;
 }): Promise<{ said: string[]; relay: ReturnType<typeof fakeRelay> }> => {
   const relay = input.relay ?? fakeRelay(input.events);
   const said: string[] = [];
@@ -179,6 +187,7 @@ const runBridge = async (input: {
       env: input.env ?? {},
       label: "Cursor",
       access: input.access ?? { fullAccess: false },
+      ...(input.noCommands ? { noCommands: input.noCommands } : {}),
       sessions: input.sessions ?? memorySessions(),
       signal: control.signal, say: (line) => said.push(line),
     });
@@ -427,6 +436,79 @@ describe("what the bridge sends back", () => {
     const { said } = await runBridge({ ...acp, events: [received("event-1", "chat-1", "read the readme")] });
     expect((await acp.log()).find((line) => line.permission !== undefined)?.permission).toEqual({ outcome: "selected", optionId: "proceed_once" });
     expect(said.some((line) => line.includes("refused"))).toBe(false);
+  });
+
+  it("approves Relay's own MCP tools, known by the title Gemini CLI gives an MCP call", () => {
+    const options = [
+      { optionId: "yes", name: "Allow", kind: "allow_once" as const },
+      { optionId: "no", name: "Reject", kind: "reject_once" as const },
+    ];
+    const decide = (toolCall: Record<string, unknown>) =>
+      resolvePermission({ sessionId: "s", toolCall: { toolCallId: "t", ...toolCall }, options }, "/project", false);
+    for (const tool of ["list_chats", "send_message", "create_post"]) {
+      expect(decide({ kind: "other", title: `${tool} (relay MCP Server)` })).toEqual({ outcome: { outcome: "selected", optionId: "yes" } });
+    }
+    // Another server's tool, a command that merely looks like one, and titles
+    // no agent is shown to send for Relay's server are all refused.
+    for (const call of [
+      { kind: "other", title: "create_issue (github MCP Server)" },
+      { kind: "execute", title: "list_chats (relay MCP Server)" },
+      { title: "list_chats (relay MCP Server)" },
+      { kind: "other", title: "env; list_chats (relay MCP Server)" },
+      { kind: "other", title: "relay: list_chats" },
+    ]) {
+      expect(isRelayMcpCall({ toolCallId: "t", ...call } as never)).toBe(false);
+      expect(decide(call)).toEqual({ outcome: { outcome: "selected", optionId: "no" } });
+    }
+  });
+
+  it("an agent asking for Relay's own tool gets it, and says nothing in the terminal", async () => {
+    const acp = await fakeAcpAgent({ answers: ["Two chats."], turnMs: 200, askPermission: { kind: "other", title: "list_chats (relay MCP Server)" } });
+    const { said } = await runBridge({ ...acp, events: [received("event-1", "chat-1", "how many chats?")] });
+    expect((await acp.log()).find((line) => line.permission !== undefined)?.permission).toEqual({ outcome: "selected", optionId: "proceed_once" });
+    expect(said.some((line) => line.includes("refused"))).toBe(false);
+  });
+
+  describe("each agent's own switch against commands it approves by itself", () => {
+    it("adds its words, merges its JSON config into the person's own, and writes a private policy file it removes", async () => {
+      const applied = await applyNoCommands({
+        args: ["--auto-approve", "false"],
+        jsonEnv: { name: "OPENCODE_CONFIG_CONTENT", merge: { permission: { bash: "deny", edit: "deny" } } },
+        policyFile: { flag: "--admin-policy", name: "relay-no-shell.toml", contents: "[[rule]]\n" },
+      }, { OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: "x", permission: { read: "allow", bash: "allow" } }) });
+      expect(applied.args.slice(0, 3)).toEqual(["--auto-approve", "false", "--admin-policy"]);
+      const policy = applied.args[3]!;
+      expect(await readFile(policy, "utf8")).toBe("[[rule]]\n");
+      if (process.platform !== "win32") expect((await stat(policy)).mode & 0o777).toBe(0o600);
+      expect(JSON.parse(applied.env.OPENCODE_CONFIG_CONTENT!)).toEqual({ model: "x", permission: { read: "allow", bash: "deny", edit: "deny" } });
+      await applied.cleanup();
+      await expect(stat(policy)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    it("starts the agent with it, and without it only under --dangerously-skip-permissions", async () => {
+      const noCommands: AcpNoCommands = { args: ["--no-shell"], jsonEnv: { name: "RELAY_TEST_CONFIG", merge: { permission: { bash: "deny" } } } };
+      const locked = await fakeAcpAgent({ answers: ["Hi"], envProbe: "RELAY_TEST_CONFIG" });
+      await runBridge({ ...locked, noCommands, events: [received("event-1", "chat-1", "hello")] });
+      const first = (await locked.log()).find((line) => line.in === "initialize");
+      expect(first?.argv?.slice(-2)).toEqual(["acp", "--no-shell"]);
+      expect(JSON.parse(first?.probe ?? "{}")).toEqual({ permission: { bash: "deny" } });
+      const open = await fakeAcpAgent({ answers: ["Hi"], envProbe: "RELAY_TEST_CONFIG" });
+      await runBridge({ ...open, noCommands, access: { fullAccess: true }, events: [received("event-1", "chat-1", "hello")] });
+      const second = (await open.log()).find((line) => line.in === "initialize");
+      expect(second?.argv?.at(-1)).toBe("acp");
+      expect(second?.probe).toBeNull();
+    });
+
+    it("is the documented switch for each agent that has one", () => {
+      const start = (agent: { start?: unknown }) => agent.start as { noCommands?: AcpNoCommands };
+      const gemini = start(geminiAgent).noCommands?.policyFile;
+      expect(gemini?.flag).toBe("--admin-policy");
+      expect(gemini?.contents).toMatch(/toolName = "run_shell_command"\ndecision = "deny"/u);
+      expect(start(opencodeAgent).noCommands?.jsonEnv).toEqual({ name: "OPENCODE_CONFIG_CONTENT", merge: { permission: { bash: "deny", edit: "deny" } } });
+      expect(start(clineAgent).noCommands?.args).toEqual(["--auto-approve", "false"]);
+      // Cursor documents no per-run switch; its commands already ask the client.
+      expect(start(cursorAgent).noCommands).toBeUndefined();
+    });
   });
 
   it("strips only Relay's secrets from the agent's environment, and keeps each client's own sign-in", () => {

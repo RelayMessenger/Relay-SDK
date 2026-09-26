@@ -396,6 +396,7 @@ export const createProgram = (
                 mcp: { url: input.mcpURL, token: input.token },
                 label: input.label,
                 access: input.access,
+                ...(input.acpNoCommands ? { noCommands: input.acpNoCommands } : {}),
                 // The chat's ACP session outlives this run, so a restart picks
                 // every chat up where it stopped (acp-threads.ts).
                 sessions: await openAcpSessions({ apiURL: input.apiURL, handle: input.handle }, configContext),

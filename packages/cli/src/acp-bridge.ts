@@ -12,7 +12,8 @@ import {
   type AuthMethod,
 } from "@agentclientprotocol/sdk";
 import { Readable, Writable } from "node:stream";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AcpSessionStore } from "./acp-threads.js";
@@ -169,13 +170,33 @@ export const insideFolder = (raw: string, cwd: string): boolean => {
  * a read is approved only when it names at least one path and every path it
  * names is inside the working folder; a search is approved unless a path it
  * names, its locations included, is outside the folder; nothing else is
- * approved. OpenClaw tells a read and a search apart by its own tool names
+ * approved, besides Relay's own tools (`isRelayMcpCall`). OpenClaw tells a
+ * read and a search apart by its own tool names
  * (`read`, `search`); an ACP agent that is not OpenClaw reports the same thing
  * as the tool call's `kind` (`ToolKind`, schema/types.gen: "read" | "search" |
  * "execute" | …), so the kind is what is read here.
  */
+/**
+ * Whether a tool call is one of Relay's own MCP tools, on the `relay` server
+ * this bridge handed to the session (`relayMcpServer`). They are approved the
+ * way the other bridges approve them: `mcp__relay__*` for Claude Code, and
+ * Relay's write tools for Codex. ACP carries no server field on a tool call
+ * (`ToolCallUpdate`: toolCallId, kind, title, locations, rawInput, …;
+ * schema/types.gen), so the call is known by what the agent sends for an MCP
+ * tool: Gemini CLI asks with `kind: "other"` and the title
+ * `<tool> (<server> MCP Server)`, its `DiscoveredMCPTool` display name
+ * (gemini-cli 0.61.0; _sources/connect-safety-20260926/
+ * gemini-cli-0.61.0-bundle-excerpts.js.txt). A shell command's title is the
+ * command itself, so it is never mistaken for one: it comes as `execute`.
+ */
+export const isRelayMcpCall = (call: RequestPermissionRequest["toolCall"]): boolean =>
+  call.kind === "other" && typeof call.title === "string" && RELAY_TOOL_TITLE.test(call.title);
+
+const RELAY_TOOL_TITLE = new RegExp(`^[A-Za-z0-9_.-]+ \\(${MCP_SERVER_NAME} MCP Server\\)$`, "u");
+
 export const approvedWithoutAsking = (params: RequestPermissionRequest, cwd: string): boolean => {
   const call = params.toolCall;
+  if (isRelayMcpCall(call)) return true;
   const named = firstPath(call.rawInput);
   if (call.kind === "read") return named !== undefined && insideFolder(named, cwd);
   if (call.kind === "search") {
@@ -209,6 +230,54 @@ export const resolvePermission = (
   return chosen
     ? { outcome: { outcome: "selected", optionId: chosen.optionId } }
     : { outcome: { outcome: "cancelled" } };
+};
+
+/**
+ * An agent's own documented switch that stops it from running commands it
+ * would approve by itself, which the ACP client never sees (coding-agents/
+ * gemini-cli.ts, opencode.ts, cline.ts). The bridge applies it unless the
+ * person chose `--dangerously-skip-permissions`.
+ */
+export interface AcpNoCommands {
+  /** Words added to the agent's ACP command. */
+  args?: readonly string[];
+  /** A JSON config in an environment variable, merged into any value the person set. */
+  jsonEnv?: { name: string; merge: Record<string, Record<string, unknown>> };
+  /** A policy file written to a private folder for this run and named by `flag`. */
+  policyFile?: { flag: string; name: string; contents: string };
+}
+
+/** The switch as the agent's command line and environment, and what to remove afterwards. */
+export const applyNoCommands = async (
+  noCommands: AcpNoCommands,
+  env: NodeJS.ProcessEnv,
+): Promise<{ args: string[]; env: Record<string, string>; cleanup(): Promise<void> }> => {
+  const args = [...noCommands.args ?? []];
+  const extra: Record<string, string> = {};
+  if (noCommands.jsonEnv) {
+    const { name, merge } = noCommands.jsonEnv;
+    let current: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(env[name] ?? "{}");
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) current = parsed as Record<string, unknown>;
+    } catch { /* A value that is not JSON is replaced. */ }
+    for (const [key, value] of Object.entries(merge)) {
+      const before = current[key];
+      current[key] = before !== null && typeof before === "object" && !Array.isArray(before) ? { ...before, ...value } : value;
+    }
+    extra[name] = JSON.stringify(current);
+  }
+  let folder: string | undefined;
+  if (noCommands.policyFile) {
+    folder = await mkdtemp(join(tmpdir(), "relay-connect-"));
+    const path = join(folder, noCommands.policyFile.name);
+    await writeFile(path, noCommands.policyFile.contents, { encoding: "utf8", mode: 0o600 });
+    args.push(noCommands.policyFile.flag, path);
+  }
+  return {
+    args, env: extra,
+    cleanup: async () => { if (folder) await rm(folder, { recursive: true, force: true }); },
+  };
 };
 
 /** Relay's own secrets a person may hold in the shell that runs connect. */
@@ -333,13 +402,16 @@ export const startAcpAgent = (
     env?: NodeJS.ProcessEnv;
     /** Told the title of every tool call refused, as OpenClaw's client logs "[permission denied]". */
     refused?: (title: string) => void;
+    /** Words added to the ACP command, and variables set, by the agent's no-commands switch. */
+    extraArgs?: readonly string[];
+    extraEnv?: Readonly<Record<string, string>>;
   } = {},
 ): AcpAgent => {
   // Started the way every other command this CLI runs is started, so the `.cmd`
   // shim npm installs on Windows runs too (spawn-command.ts). Nothing a person
   // wrote travels on this command line: messages go down the ACP stream.
-  const child = spawnCommand(acp.command, acp.args, {
-    cwd, stdio: ["pipe", "pipe", "pipe"], signal, env: acpEnvironment(options.env ?? process.env),
+  const child = spawnCommand(acp.command, [...acp.args, ...options.extraArgs ?? []], {
+    cwd, stdio: ["pipe", "pipe", "pipe"], signal, env: { ...acpEnvironment(options.env ?? process.env), ...options.extraEnv },
   });
   const sinks = new Map<string, (text: string) => void>();
   const heard = new Map<string, number>();
@@ -457,6 +529,8 @@ export interface AcpBridgeInput {
   label: string;
   /** Whether its permission checks are off (bridge-access.ts). */
   access: BridgeAccess;
+  /** The agent's own switch against commands it approves by itself (`AcpNoCommands`). */
+  noCommands?: AcpNoCommands;
   /** Which ACP session belongs to which chat, across restarts. */
   sessions: AcpSessionStore;
   signal: AbortSignal;
@@ -490,6 +564,18 @@ interface ChatLane {
  * (`replacesLiveTurn`).
  */
 export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
+  // The agent's own switch against commands it approves by itself, prepared
+  // once for every process this run starts, and removed when the run ends.
+  const locked = input.noCommands && !input.access.fullAccess
+    ? await applyNoCommands(input.noCommands, input.env ?? process.env)
+    : undefined;
+  try { await runAcpBridgeWith(input, locked); } finally { await locked?.cleanup(); }
+};
+
+const runAcpBridgeWith = async (
+  input: AcpBridgeInput,
+  locked: { args: readonly string[]; env: Readonly<Record<string, string>> } | undefined,
+): Promise<void> => {
   const answered = new Set<string>();
   const lanes = new Map<string, ChatLane>();
   let session: Promise<AcpAgent> | undefined;
@@ -503,6 +589,7 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
     session = (async () => {
       const started = startAcpAgent(input.acp, input.cwd, input.signal, {
         fullAccess: input.access.fullAccess,
+        ...(locked ? { extraArgs: locked.args, extraEnv: locked.env } : {}),
         refused: (title) => input.say(`${input.label} asked to use "${title}"; it was refused, because nobody here can approve it.`),
       });
       // A stop the person asked for, with Control-C, is not news.

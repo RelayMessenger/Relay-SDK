@@ -27,6 +27,7 @@ it("connects over the ACP bridge with Cline's confirmed --acp command, plus Clin
     command: "cline",
     args: ["--acp"],
     prompt: "Answer Relay messages with Cline from this folder?",
+    noCommands: { args: ["--auto-approve", "false"] },
   });
 });
 

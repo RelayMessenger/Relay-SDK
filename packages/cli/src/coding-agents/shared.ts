@@ -1,5 +1,6 @@
 import { posix, win32 } from "node:path";
 import type { AgentPaths, CodingAgentId, ConnectMethod } from "../coding-agents.js";
+import type { AcpNoCommands } from "../acp-bridge.js";
 
 export const platformPath = (platform: NodeJS.Platform) => platform === "win32" ? win32 : posix;
 
@@ -52,8 +53,11 @@ export interface CodingAgent {
      * sub-command, confirmed from the agent's own docs (`cursor-agent acp`,
      * `gemini --experimental-acp`, `opencode acp`, `cline --acp`). It is
      * required: an agent whose ACP command is not confirmed is not wired here.
+     * `noCommands` is the agent's own documented switch that keeps it from
+     * running commands it would approve by itself, applied unless the person
+     * chose `--dangerously-skip-permissions` (acp-bridge.ts).
      */
-    | { kind: "acp-bridge"; command: string; args: readonly string[]; prompt: string }
+    | { kind: "acp-bridge"; command: string; args: readonly string[]; prompt: string; noCommands?: AcpNoCommands }
     | { kind: "pi-bridge"; command: string; prompt: string }
     | { kind: "restart"; instruction: string };
   /** What `@vercel/detect-agent` calls it when we are running inside it. */

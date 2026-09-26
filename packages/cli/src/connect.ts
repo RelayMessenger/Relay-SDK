@@ -34,6 +34,7 @@ import { spawnCommand } from "./spawn-command.js";
 import { runTerminalWatch, type TerminalObserver } from "./terminal-watch.js";
 import { consoleLoginOrReuse } from "./console-auth.js";
 import { bridgeLine, type BridgeAccess } from "./bridge-access.js";
+import type { AcpNoCommands } from "./acp-bridge.js";
 
 /** Still used by agent-driver.ts for its Claude plugin hint. */
 export const CLAUDE_PLUGIN_ID = "relay@relay-messenger";
@@ -113,6 +114,8 @@ export interface ConnectDependencies {
     command: string;
     /** For an ACP agent, the words that put it in ACP mode, e.g. ["acp"]. */
     acpArgs?: readonly string[];
+    /** For an ACP agent, its own switch that keeps it from running commands by itself. */
+    acpNoCommands?: AcpNoCommands;
     /** Relay's hosted MCP server, handed to the agent's session with this
      * agent's token, so its tools travel with it (hosted-mcp.ts). */
     mcpURL: string;
@@ -713,6 +716,7 @@ export const runConnect = async (
     command: string;
     kind: "codex" | "acp" | "pi" | "claude";
     acpArgs?: readonly string[];
+    acpNoCommands?: AcpNoCommands;
     mcpURL: string;
   } | undefined;
   for (const target of targets) {
@@ -787,7 +791,7 @@ export const runConnect = async (
       result.bridge_command = command;
       result.bridge_args = [...start.args];
       if (!json && options.start !== false && (options.yes === true || ui !== undefined)) {
-        bridge = { label: definition.label, command, kind: "acp", acpArgs: start.args, mcpURL: hostedMcpURL(version) };
+        bridge = { label: definition.label, command, kind: "acp", acpArgs: start.args, ...(start.noCommands ? { acpNoCommands: start.noCommands } : {}), mcpURL: hostedMcpURL(version) };
       }
     } else if (start?.kind === "pi-bridge") {
       const command = runtime?.executable ?? start.command;
@@ -824,6 +828,7 @@ export const runConnect = async (
       await deps.bridge({
         kind: bridge.kind, token: agent.token, apiURL: agent.apiURL, handle: agent.handle,
         command: bridge.command, ...(bridge.acpArgs ? { acpArgs: bridge.acpArgs } : {}),
+        ...(bridge.acpNoCommands ? { acpNoCommands: bridge.acpNoCommands } : {}),
         mcpURL: bridge.mcpURL, label: bridge.label, cwd: deps.cwd,
         access: { fullAccess },
         say: (line) => screen.say(safeMetadata(line, secrets)),

@@ -13,6 +13,7 @@ it("connects over the ACP bridge and declares the opencode acp command", () => {
     command: "opencode",
     args: ["acp"],
     prompt: "Answer Relay messages with OpenCode from this folder?",
+    noCommands: { jsonEnv: { name: "OPENCODE_CONFIG_CONTENT", merge: { permission: { bash: "deny", edit: "deny" } } } },
   });
 });
 

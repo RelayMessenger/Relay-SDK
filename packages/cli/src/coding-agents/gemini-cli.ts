@@ -28,6 +28,33 @@ const agent: CodingAgent =
       command: "gemini",
       args: ["--experimental-acp", "--skip-trust"],
       prompt: "Answer Relay messages with Gemini CLI from this folder?",
+      // Gemini CLI runs its own "known safe" shell commands (`uname`, `cat`,
+      // `ls`, `echo`, …) with no approval request, so the ACP client never sees
+      // them: its policy engine turns ASK_USER into ALLOW for them, but keeps a
+      // DENY (`applyShellHeuristics`: `if (decision === "deny") return "deny"`;
+      // gemini-cli 0.61.0, _sources/connect-safety-20260926/
+      // gemini-cli-0.61.0-bundle-excerpts.js.txt). So a deny rule for
+      // `run_shell_command` is loaded with `--admin-policy`, "Additional admin
+      // policy files or directories to load" (the option's own help, same
+      // file), which puts it in the Admin tier above user and default policies
+      // (docs/reference/policy-engine.md, "Supplemental Admin Policies";
+      // gemini-cli-0.61.0-policy-engine.md:249-261). Gemini ignores it where an
+      // administrator already keeps policies in the system policy folder.
+      noCommands: {
+        policyFile: {
+          flag: "--admin-policy",
+          name: "relay-no-shell.toml",
+          contents: [
+            "# Written by relay connect: this Gemini CLI answers Relay messages with nobody at the keyboard.",
+            "[[rule]]",
+            'toolName = "run_shell_command"',
+            'decision = "deny"',
+            "priority = 999",
+            'denyMessage = "Relay runs this agent with no shell commands. Its owner can allow them with relay connect --dangerously-skip-permissions."',
+            "",
+          ].join("\n"),
+        },
+      },
     },
     detectedAs: ["gemini"],
   };

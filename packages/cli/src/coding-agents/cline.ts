@@ -40,6 +40,15 @@ const agent: CodingAgent =
       command: "cline",
       args: ["--acp"],
       prompt: "Answer Relay messages with Cline from this folder?",
+      // Over ACP "every file edit and command goes through the client's
+      // permission UI", and `--auto-approve` sets that at launch (Cline docs,
+      // usage/acp, "Auto-approving tools"; _sources/
+      // unattended-agent-permissions-20260926/cline-docs-usage-acp.mdx.txt:103-106).
+      // `false` pins the default, so a changed default cannot approve commands
+      // by itself (cline 3.0.65 starts ACP with
+      // `autoApproveTools: autoApproveOverride === true`;
+      // _sources/connect-safety-20260926/cline-cli-3.0.65-binary-excerpts.txt).
+      noCommands: { args: ["--auto-approve", "false"] },
     },
     detectedAs: [],
     // Over ACP, Cline refuses a session until it is signed in: credentials

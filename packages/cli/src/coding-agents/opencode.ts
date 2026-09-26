@@ -22,6 +22,18 @@ const agent: CodingAgent =
       command: "opencode",
       args: ["acp"],
       prompt: "Answer Relay messages with OpenCode from this folder?",
+      // OpenCode runs shell commands and edits files with no approval request:
+      // "Most permissions default to "allow"" (opencode.ai/docs/permissions,
+      // Defaults; _sources/unattended-agent-permissions-20260926/
+      // opencode-permissions.mdx.txt:170-172), so the ACP client never sees
+      // them. `"deny"` blocks them ("block the action", same page:18), set in
+      // the inline config OpenCode reads from `OPENCODE_CONFIG_CONTENT`,
+      // "runtime overrides" above the project's own opencode.json
+      // (opencode.ai/docs/config, Precedence order;
+      // _sources/connect-safety-20260926/opencode-config.mdx.txt:51).
+      noCommands: {
+        jsonEnv: { name: "OPENCODE_CONFIG_CONTENT", merge: { permission: { bash: "deny", edit: "deny" } } },
+      },
     },
     detectedAs: ["opencode"],
   };

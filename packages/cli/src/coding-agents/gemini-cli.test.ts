@@ -13,6 +13,7 @@ it("connects over the ACP bridge and declares the gemini --experimental-acp --sk
     command: "gemini",
     args: ["--experimental-acp", "--skip-trust"],
     prompt: "Answer Relay messages with Gemini CLI from this folder?",
+    noCommands: { policyFile: expect.objectContaining({ flag: "--admin-policy", name: "relay-no-shell.toml" }) },
   });
 });
 

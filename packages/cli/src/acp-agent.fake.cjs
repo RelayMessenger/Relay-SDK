@@ -29,6 +29,7 @@
  *                when its settings name no sign-in method
  *   resumable    the session ids `session/load` accepts; anything else errors,
  *                as a real agent answers for a session it has lost
+ *   envProbe     the name of one environment variable recorded as `probe`
  *   askPermission  a `toolCall` sent as `session/request_permission` at the
  *                start of every turn, with allow and reject options; the
  *                client's answer is recorded as `{ permission: outcome }`
@@ -96,7 +97,8 @@ const handle = (message) => {
     record({ permission: message.result?.outcome ?? message.error });
     return;
   }
-  record({ in: message.method, params: message.params, argv: process.argv.slice(2), tokenEnv: process.env.RELAY_AGENT_TOKEN ?? null });
+  record({ in: message.method, params: message.params, argv: process.argv.slice(2), tokenEnv: process.env.RELAY_AGENT_TOKEN ?? null,
+    ...(settings.envProbe ? { probe: process.env[settings.envProbe] ?? null } : {}) });
   const answer = (result) => { write({ id: message.id, result }); };
   if (message.method === "initialize") {
     answer({

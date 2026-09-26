@@ -76,7 +76,18 @@
       "args": [
         "acp"
       ],
-      "prompt": "Answer Relay messages with OpenCode from this folder?"
+      "prompt": "Answer Relay messages with OpenCode from this folder?",
+      "noCommands": {
+        "jsonEnv": {
+          "name": "OPENCODE_CONFIG_CONTENT",
+          "merge": {
+            "permission": {
+              "bash": "deny",
+              "edit": "deny"
+            }
+          }
+        }
+      }
     },
     "detectedAs": [
       "opencode"
@@ -98,7 +109,13 @@
       "args": [
         "--acp"
       ],
-      "prompt": "Answer Relay messages with Cline from this folder?"
+      "prompt": "Answer Relay messages with Cline from this folder?",
+      "noCommands": {
+        "args": [
+          "--auto-approve",
+          "false"
+        ]
+      }
     },
     "detectedAs": [],
     "signIn": "Cline needs its own sign-in to answer: run cline auth once, or set CLINE_API_KEY."
@@ -140,7 +157,14 @@
         "--experimental-acp",
         "--skip-trust"
       ],
-      "prompt": "Answer Relay messages with Gemini CLI from this folder?"
+      "prompt": "Answer Relay messages with Gemini CLI from this folder?",
+      "noCommands": {
+        "policyFile": {
+          "flag": "--admin-policy",
+          "name": "relay-no-shell.toml",
+          "contents": "# Written by relay connect: this Gemini CLI answers Relay messages with nobody at the keyboard.\n[[rule]]\ntoolName = \"run_shell_command\"\ndecision = \"deny\"\npriority = 999\ndenyMessage = \"Relay runs this agent with no shell commands. Its owner can allow them with relay connect --dangerously-skip-permissions.\"\n"
+        }
+      }
     },
     "detectedAs": [
       "gemini"
