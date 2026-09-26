@@ -349,7 +349,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "src/adapter.ts",
       "source_sha256": "5cf9ae13db199cdffa265b7499712a250cdaf0b28fcf47f8435806245fbeb8d2",
-      "destination_sha256": "b4cce8da60a23c6264128cc6f9ff18315d12edeb5d5a014199d6176145920a45",
+      "destination_sha256": "6b900ab8d126f2cd6d67af0bfcfcf78a0df0e109a4ec66e26aa9d0cd954457f0",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -459,7 +459,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "src/webhook.ts",
       "source_sha256": "d01b0d345d36e030449d62af553a6f972e9451eb50162cd0b03def556211258d",
-      "destination_sha256": "606e8ac21d421879d9ebe606cedfd8eac9c1007a3c9bfe6711f19e69df723711",
+      "destination_sha256": "1743c9fff22742cd52608e000014ba835e168178594b592c7704d9bbed9e8563",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -470,7 +470,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "test/adapter.test.ts",
       "source_sha256": "e9ba85c37bd36735cb391a56728cd7b22f21839072366e8ee2b5b834e95cd9b8",
-      "destination_sha256": "aed4bb0e1f95b4c2e6c4b35e8fea69fc39f28a5d80696e3d6a201490d55fde96",
+      "destination_sha256": "da896a20c5ff03c57f18096c777d913be856292b5a8eb8ad439ae5690873dc19",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
