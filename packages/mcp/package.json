@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/mcp",
-  "version": "0.1.7-staging.32",
+  "version": "0.1.7-staging.33",
   "description": "Local MCP v2 stdio server for current Relay messaging tools.",
   "type": "module",
   "bin": {
