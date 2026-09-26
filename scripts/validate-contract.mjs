@@ -461,7 +461,9 @@ const validateOpenAPI = () => {
   assert.equal(membershipBody.required, undefined);
   assert.equal(membershipBody.minProperties, 1);
   assert.match(declaredTypes, /lets_members_message: boolean/u);
-  assert.match(declaredTypes, /notifications: boolean/u);
+  const membershipType = declaredTypes.match(/export interface CommunityMembership \{[\s\S]*?\n\}/u)?.[0] ?? "";
+  assert.match(membershipType, /\n\s+notifications: boolean;/u, "CommunityMembership must declare notifications");
+  assert.match(declaredTypes, /\| \{\s+lets_members_message\?: boolean;\s+notifications: boolean;\s+\}/u, "notifications alone must be a valid update");
   const postSearch = document.paths["/v1/communities/{handle}/posts"].get.parameters.find((parameter) => parameter.name === "q");
   assert.deepEqual(postSearch && { in: postSearch.in, schema: postSearch.schema }, { in: "query", schema: { type: "string", minLength: 1, maxLength: 200 } });
   assert.match(declaredTypes, /\bq\?: string;/u);
