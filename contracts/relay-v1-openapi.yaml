@@ -5897,12 +5897,17 @@ components:
     SelectionPart:
       type: object
       additionalProperties: false
-      description: Agent-only multiselect prompt. One selection per Message, with nonblank text and no buttons. The text is the prompt's title. The person opens the prompt, checks any number of options and submits them once; checking sends nothing and only the submit does. A person answers a given selection once, and reopening it afterwards shows what they chose without letting them change it.
-      required: [type, options]
+      description: Agent-only multiselect prompt. One selection per Message, never with buttons. `title` is the question, shown as the card's title in the chat and the sheet's title. A text part is optional; when present it is an ordinary message shown above the card. Put the question in `title` (1 to 60 characters, a few words, e.g. "Pizza toppings"). Anything else you want to say goes in the text part, which shows as a normal message above the card. The person opens the prompt, checks any number of options and submits them once; checking sends nothing and only the submit does. A person answers a given selection once, and reopening it afterwards shows what they chose without letting them change it. Preview, notification and fallback text is the Message's text part when it has one, else `title`.
+      required: [type, title, options]
       properties:
         type:
           type: string
           enum: [selection]
+        title:
+          type: string
+          minLength: 1
+          maxLength: 60
+          description: The question, trimmed before storage. The card's title in the chat and the sheet's title.
         options:
           type: array
           minItems: 1
@@ -5911,11 +5916,14 @@ components:
             $ref: "#/components/schemas/SelectionOption"
     SelectionPartResponse:
       type: object
-      required: [type, options, has_responded, selected_values, reactions]
+      required: [type, title, options, has_responded, selected_values, reactions]
       properties:
         type:
           type: string
           enum: [selection]
+        title:
+          type: string
+          description: The question, as the agent sent it after trimming.
         options:
           type: array
           items:
@@ -5935,7 +5943,7 @@ components:
     SelectionResponsePart:
       type: object
       additionalProperties: false
-      description: User-only metadata, exactly the second part after plain text. Requires explicit reply_to message_id and part_index targeting a visible selection in the same Chat. Values are unique, nonempty, known and in source-option order. Canonical new text is literal '• ' + each selected source label joined with '\n'. The server also accepts exact legacy source labels joined with ', ' only for compatibility; arbitrary label parsing is never accepted. selected_values and source-option order remain authoritative. iOS may draw a checkmark in place of each bullet, and repeat the prompt's title above the lines, as presentation only; portable text remains the bullets. A different-key second response returns 409/1005; same-key retries retain existing Message idempotency semantics.
+      description: User-only metadata, exactly the second part after plain text. Requires explicit reply_to message_id and part_index targeting a visible selection in the same Chat. Values are unique, nonempty, known and in source-option order. Canonical new text is literal '• ' + each selected source label joined with '\n'. The server also accepts exact legacy source labels joined with ', ' only for compatibility; arbitrary label parsing is never accepted. selected_values and source-option order remain authoritative. iOS may draw a checkmark in place of each bullet, and repeat the prompt's `title` above the lines, as presentation only; portable text remains the bullets. A different-key second response returns 409/1005; same-key retries retain existing Message idempotency semantics.
       required: [type, selected_values]
       properties:
         type:
@@ -7075,7 +7083,7 @@ components:
             - type: "null"
     MessageContent:
       type: object
-      description: One message containing 1–100 ordered parts. A link must be the only part. Selection responses contain exactly plain text then selection_response metadata and require an explicit reply target.
+      description: One message containing 1–100 ordered parts. A link must be the only part. A selection needs no text part; it carries its own `title`, and a text part beside it is an ordinary message. Selection responses contain exactly plain text then selection_response metadata and require an explicit reply target.
       properties:
         metadata:
           $ref: "#/components/schemas/MessageMetadata"

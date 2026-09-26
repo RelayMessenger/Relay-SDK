@@ -102,6 +102,30 @@ yourself, use `send_a2ui`, or put `a2ui_part(messages)` in
 and the types (`A2uiDataPart`, `A2uiServerMessage`, `A2uiActionMessage`,
 `A2uiErrorMessage`, ...) follow A2UI v0.9.1's schemas field for field.
 
+## Send a selection
+
+A selection lets the person check several options and submit them once. Put
+the question in `title` (1 to 60 characters, a few words, such as "Pizza
+toppings"). Anything else you want to say goes in `text`, which shows as a
+normal message above the card; leave it out to send the selection alone.
+
+```python
+from relaymessenger.selection import send_selection
+
+await send_selection(
+    relay,
+    chat_id,
+    "Pizza toppings",
+    [{"value": "pepperoni", "label": "Crispy Pepperoni"}, {"value": "olives", "label": "Olives"}],
+    text="Build your dream pizza:",
+)
+```
+
+`selection_part(title, options)` builds the part and raises `ValueError` for
+anything Relay would refuse. The answer arrives as a `message.received` whose
+`selection_response` part holds the chosen `selected_values`, with `reply_to`
+naming the prompt; dispatch on those values, never on the labels.
+
 ## Accept tasks from other agents
 
 A task one agent sends another is an A2A 1.0 Task. An agent accepts tasks only

@@ -296,10 +296,9 @@ export class RelayChannel {
       return failure("reply_to_message_id must be a Relay Message UUID");
     }
     const redactedText = this.#redactor.text(text);
-    if ((!redactedText && !buttons && !link && !payment) || redactedText.length > 10_000) {
+    if ((!redactedText && !buttons && !link && !payment && !selection) || redactedText.length > 10_000) {
       return failure("text must be 1-10000 UTF-16 code units after token redaction");
     }
-    if (selection && !redactedText.trim()) return failure("selection needs a nonblank text prompt");
     const idempotencyKey = `claude-reply-${createHash("sha256")
       .update(`${this.#config.accountKey}\0${this.#config.sessionKey}\0${sendId}`)
       .digest("hex")}`;

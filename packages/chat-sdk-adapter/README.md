@@ -20,7 +20,9 @@ Relay Chats map one-to-one to Chat SDK threads. Provider thread IDs are stable
 ## Selection
 
 Send native text/selection parts through `postMessageParts` using the existing
-idempotency strategy. `message.text` retains the readable reply;
+idempotency strategy. A selection carries its question in `title` (1 to 60
+characters); a text part is optional and shows as a normal message above the
+card. `message.text` retains the readable reply;
 `message.raw.message.parts` and `message.raw.message.reply_to` retain metadata
 through webhook ingress and history.
 

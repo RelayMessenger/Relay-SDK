@@ -10,8 +10,10 @@ under `packages/cli`.
 
 ## Selection
 
-Codex and Claude bridges accept a final `selection` JSON fence after the question.
-The shared ACP bridge uses the same format. Inbound model context preserves
+Codex and Claude bridges accept a final `selection` JSON fence holding the
+question as `title` (1 to 60 characters) and the `options`; any words outside
+the fence go as a normal message above the card. The shared ACP bridge uses the
+same format. Inbound model context preserves
 ordered rich parts, `selected_values`, and `reply_to` as data.
 
 New human reply text is literal `• ` + each selected source label joined with

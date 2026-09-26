@@ -88,8 +88,9 @@ export interface AnswerMessages {
  * payment never does — it must be the only part of its Message, so the words
  * around it are sent first, and the payment request it describes is returned
  * beside them for the bridge to create and send as its own, final Message.
- * Selection requires a nonblank question; conflicting components remain text
- * with an error.
+ * Selection carries its question in its own title, so the words are
+ * optional; a selection with none is a Message of its own. Conflicting
+ * components remain text with an error.
  */
 export const answerMessages = (answer: string): AnswerMessages => {
   const paid = splitPayment(answer);
@@ -110,10 +111,8 @@ export const answerMessages = (answer: string): AnswerMessages => {
   if (selected.selection) {
     const messages: MessagePart[][] = splitLinks(selected.text).map((segment) => [segment]);
     const prompt = messages.findLast((parts) => parts[0]?.type === "text" && parts[0].value.trim());
-    if (!prompt) {
-      return { messages: [[{ type: "text", value: answer }]], error: "selection needs a nonblank text prompt" };
-    }
-    prompt.push(selected.selection);
+    if (prompt) prompt.push(selected.selection);
+    else messages.push([selected.selection]);
     return { messages };
   }
   const { text, buttons, error } = splitButtons(answer);

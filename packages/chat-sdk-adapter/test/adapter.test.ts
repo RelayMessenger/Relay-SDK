@@ -1938,7 +1938,7 @@ it("keeps rich parts and explicit targets in both signed ingress and REST histor
   } } });
 
   const parts = [{ type: "text", value: "Topics?", reactions: null }, {
-    type: "selection", options: [{ value: "research", label: "Research" }], has_responded: true, selected_values: null, reactions: null,
+    type: "selection", title: "Topics", options: [{ value: "research", label: "Research" }], has_responded: true, selected_values: null, reactions: null,
   }];
   const history = createRelayAdapter({ token: "test", webhookSecret: WEBHOOK_SECRET,
     fetch: vi.fn(async () => jsonResponse({ messages: [{
@@ -1971,7 +1971,7 @@ it("posts native selections on the same idempotency lane as plain text, includin
   await adapter.initialize(chat);
   const parts = [
     { type: "text" as const, value: "Topics?" },
-    { type: "selection" as const, options: [{ value: "research", label: "Research" }] },
+    { type: "selection" as const, title: "Topics", options: [{ value: "research", label: "Research" }] },
   ];
   vi.mocked(chat.processMessage).mockImplementation(async () => {
     await adapter.postMessageParts(THREAD_ID, parts);
@@ -1996,7 +1996,7 @@ it("requires an external key strategy for native selections just like text", asy
   const adapter = createRelayAdapter({ token: "test", fetch: fetchMock as typeof fetch });
   await expect(adapter.postMessageParts(THREAD_ID, [
     { type: "text", value: "Topics?" },
-    { type: "selection", options: [{ value: "research", label: "Research" }] },
+    { type: "selection", title: "Topics", options: [{ value: "research", label: "Research" }] },
   ])).rejects.toThrow("idempotencyKeyResolver");
   expect(fetchMock).not.toHaveBeenCalled();
 });

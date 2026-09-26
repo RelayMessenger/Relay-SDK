@@ -1,9 +1,9 @@
 """Relay for Python, the twin of the npm package ``@relaymessenger/sdk``.
 
 ``relaymessenger.Relay`` is Relay's REST API; ``relaymessenger.a2ui`` builds
-A2UI cards, sends them and reads their taps; ``relaymessenger.tasks`` types the
-A2A 1.0 Tasks between agents and their events. All three use only the
-standard library.
+A2UI cards, sends them and reads their taps; ``relaymessenger.selection`` builds
+and sends selection prompts; ``relaymessenger.tasks`` types the A2A 1.0 Tasks
+between agents and their events. All four use only the standard library.
 
 ``relaymessenger.a2a`` sends another Relay agent a task or a message at its A2A
 address with the official A2A SDK; it needs the ``a2a`` extra
@@ -14,7 +14,7 @@ the ``calls`` extra (``pip install 'relaymessenger[calls]'``). Importing
 ``relaymessenger`` alone loads no media dependency.
 """
 
-from . import a2ui, tasks
+from . import a2ui, selection, tasks
 from .client import DEFAULT_BASE_URL, Relay, RelayAPIError, ReplyTo, SendMessageResponse
 
-__all__ = ["DEFAULT_BASE_URL", "Relay", "RelayAPIError", "ReplyTo", "SendMessageResponse", "a2ui", "tasks"]
+__all__ = ["DEFAULT_BASE_URL", "Relay", "RelayAPIError", "ReplyTo", "SendMessageResponse", "a2ui", "selection", "tasks"]

@@ -504,10 +504,12 @@ export interface SelectionOption {
   label: string;
 }
 
-/** Agent-only, 1–25 options; requires nonblank text and cannot mix with buttons. */
+/** Agent-only, 1–25 options; one per Message, never with buttons. A text part is optional and shows as an ordinary bubble above the card. */
 export interface SelectionPart {
   type: "selection";
-  /** The text is the prompt's title; the person checks any number of options and submits them once, and checking sends nothing. */
+  /** The question: the card's title in the chat and the sheet's title. Trimmed, 1–60 characters. */
+  title: string;
+  /** The person checks any number of options and submits them once; checking sends nothing. */
   options: SelectionOption[];
 }
 

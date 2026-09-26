@@ -14,7 +14,9 @@ does not contain a copied Relay client or protocol implementation.
 
 ## Selection
 
-End the final answer with a `selection` JSON fence after the question.
+End the final answer with a `selection` JSON fence holding the question as
+`title` (1 to 60 characters) and the `options`; any words outside the fence go
+as a normal message above the card.
 `BodyForAgent` carries structured response and rich-message JSON; `RawBody` and
 `CommandBody` retain readable text. Stable values are not executable commands.
 

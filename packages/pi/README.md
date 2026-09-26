@@ -18,7 +18,9 @@ Set `RELAY_AGENT_TOKEN` before using `/relay-connect`. Set
 
 ## Selection
 
-End the final Pi answer with a `selection` JSON fence after the question.
+End the final Pi answer with a `selection` JSON fence holding the question as
+`title` (1 to 60 characters) and the `options`; any words outside the fence go
+as a normal message above the card.
 The RPC prompt preserves ordered rich parts, `selected_values`, and `reply_to`
 as data. FULL sync still fails closed rather than discarding skipped context.
 
