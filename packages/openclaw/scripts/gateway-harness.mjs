@@ -54,6 +54,10 @@ if (openclaw === dirname(openclaw) || !existsSync(openclaw)) {
   throw new Error("could not locate the OpenClaw CLI entry");
 }
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+// --overlap: another agent sends two Messages in one Chat, the second while
+// the model still answers the first, as two overlapping A2A calls do. Relay's
+// A2A door gives each caller only the answer whose reply_to names its Message.
+const overlap = process.argv.includes("--overlap");
 
 function ownedPath(path, owner) {
   assert.ok(typeof path === "string" && isAbsolute(path), "expected an absolute managed path");
@@ -297,7 +301,11 @@ try {
   let gatewayOutput = "";
   mock = spawn(process.execPath, [join(root, "harness", "mock-relay-server.mjs")], {
     cwd: temp,
-    env: { ...env, MOCK_RELAY_PORT: String(relayPort) },
+    env: {
+      ...env,
+      MOCK_RELAY_PORT: String(relayPort),
+      ...(overlap ? { RELAY_OPENCLAW_HARNESS_OVERLAP: "1", RELAY_OPENCLAW_HARNESS_SENDER_KIND: "agent" } : {}),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   mock.stdout.on("data", (chunk) => {
@@ -335,10 +343,10 @@ try {
     gatewayOutput += chunk.toString();
   });
 
-  const deadline = Date.now() + 60_000;
+  const deadline = Date.now() + (overlap ? 90_000 : 60_000);
   while (
     !/cumulative ACK 1 durable=\w+ count=2/u.test(mockOutput) ||
-    !mockOutput.includes("Message send count=1")
+    !mockOutput.includes(overlap ? "Message send count=2" : "Message send count=1")
   ) {
     if (gateway.exitCode !== null) {
       throw new Error(
@@ -358,6 +366,18 @@ try {
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
 
+  if (overlap) {
+    // Let a late third send or turn show itself before judging.
+    await new Promise((resolveWait) => setTimeout(resolveWait, 5_000));
+    const sends = [...mockOutput.matchAll(/Message send count=\d+ key=\S+ replayed=false reply_to=(\S+)/gu)].map((match) => match[1]);
+    console.log(mockOutput.split("\n").filter((line) => /Message send|completion request|second Message/u.test(line)).join("\n"));
+    assert.deepEqual(
+      [...sends].sort(),
+      ["00000000-0000-7000-8000-000000000012", "00000000-0000-7000-8000-000000000016"],
+      `each overlapping Message needs its own answer naming it\n${mockOutput}`,
+    );
+    console.log("Relay OpenClaw overlap harness passed: two overlapping agent Messages, two answers, each naming its own Message.");
+  } else {
   for (const proof of [
     "GET /v1/webhook-subscriptions",
     "UPGRADE /v1/websocket",
@@ -396,6 +416,7 @@ try {
   console.log(
     "Proof: durable cumulative ACK, replay suppression, heartbeat, one model turn, one idempotent Chat Message.",
   );
+  }
 } finally {
   await Promise.all([stop(gateway), stop(mock)]);
   rmSync(temp, { recursive: true, force: true, maxRetries: 10 });

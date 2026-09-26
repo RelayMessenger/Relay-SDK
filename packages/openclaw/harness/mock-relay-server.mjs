@@ -16,11 +16,27 @@ const senderKind = process.env.RELAY_OPENCLAW_HARNESS_SENDER_KIND ?? "user";
 if (senderKind !== "user" && senderKind !== "agent") {
   throw new Error("RELAY_OPENCLAW_HARNESS_SENDER_KIND must be user or agent");
 }
+// Overlap mode: a second Message from the same sender arrives while the model
+// is still answering the first, the way two overlapping A2A calls reach an
+// agent. Each Message must get its own answer, naming the Message it answers.
+const overlap = process.env.RELAY_OPENCLAW_HARNESS_OVERLAP === "1";
+const secondEventId = "00000000-0000-7000-8000-000000000015";
+const secondMessageId = "00000000-0000-7000-8000-000000000016";
+let liveSocket;
 const sockets = new WebSocketServer({ noServer: true });
 const sentMessages = new Map();
 let completionCount = 0;
 let sendCount = 0;
 let acknowledgementCount = 0;
+
+function messageEvent(id, event, text) {
+  return {
+    ...inboundEvent,
+    event_id: event,
+    created_at: new Date().toISOString(),
+    data: { ...inboundEvent.data, id, parts: [{ type: "text", value: text, reactions: null }], sent_at: new Date().toISOString() },
+  };
+}
 
 const inboundEvent = {
   api_version: "v1",
@@ -90,7 +106,15 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
     completionCount += 1;
     const request = await body(req);
-    console.log(`[mock-llm] completion request count=${completionCount}`);
+    const turn = completionCount;
+    console.log(`[mock-llm] completion request count=${turn}`);
+    if (overlap && turn === 1) {
+      // The second Message lands mid-turn; the first answer is held long
+      // enough for OpenClaw to queue or steer it.
+      liveSocket?.send(JSON.stringify({ type: "event", sequence: "2", event: messageEvent(secondMessageId, secondEventId, "second call from Relay") }));
+      console.log("[mock-relay] second Message sent mid-turn");
+      await new Promise((resolveWait) => setTimeout(resolveWait, 3_000));
+    }
     if (request?.stream) {
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.write(
@@ -139,6 +163,18 @@ const server = http.createServer(async (req, res) => {
 
   if (req.headers.authorization !== `Bearer ${token}`) {
     json(res, 401, { error: { message: "bad Agent Token" } });
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/v1/me") {
+    // The harness sender owns the agent, so the owner-only default answers it.
+    json(res, 200, {
+      id: agentId,
+      handle: "relay",
+      kind: "agent",
+      display_name: "Relay",
+      owner: null,
+      owner_people: [{ id: contactId, handle: "harness", display_name: "Harness" }],
+    });
     return;
   }
   if (
@@ -221,6 +257,7 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 sockets.on("connection", (socket) => {
+  liveSocket = socket;
   console.log(`[mock-relay] WebSocket connected senderKind=${senderKind}`);
   socket.send(
     JSON.stringify({

@@ -11,9 +11,12 @@ import {
 import { resolveStableChannelMessageIngress } from "openclaw/plugin-sdk/channel-ingress-runtime";
 import { bindIngressLifecycleToReplyOptions } from "openclaw/plugin-sdk/channel-outbound";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { ReplyPayload } from "openclaw/plugin-sdk/reply-payload";
 import { buildRelayInboundFacts } from "./inbound.js";
 import type { RelayIngressLifecycle } from "./ingress.js";
+import { relaySenderPolicy } from "./owners.js";
 import type { PluginRuntime } from "./runtime.js";
+import { type RelayChatTurns, waitForIdleChat } from "./turns.js";
 import type {
   RelayCoreConfig,
   RelayInboundFacts,
@@ -86,6 +89,24 @@ export async function resolveRelayTurnActivation(params: {
   };
 }
 
+/**
+ * The answer to another agent names the Message it answers: the model's own
+ * reply target when it chose one, else the agent's Message. Where no reply may
+ * point (a Message opening with buttons or a selection), OpenClaw's implicit
+ * current-message reply is removed.
+ */
+export function agentReplyPayload(
+  payload: ReplyPayload,
+  facts: Pick<RelayInboundFacts, "messageId" | "agentReplyLink">,
+): ReplyPayload {
+  if (facts.agentReplyLink) {
+    return { ...payload, replyToId: payload.replyToId ?? facts.agentReplyLink };
+  }
+  if (payload.replyToId !== facts.messageId) return payload;
+  const { replyToId: _unlinked, ...rest } = payload;
+  return rest;
+}
+
 export async function dispatchRelayEvent(params: {
   event: RelayWebhookEvent;
   lifecycle: RelayIngressLifecycle;
@@ -93,6 +114,9 @@ export async function dispatchRelayEvent(params: {
   cfg: RelayCoreConfig;
   relay: Pick<Relay, "chats" | "messages">;
   runtime: PluginRuntime;
+  /** The agent's owners (`GET /v1/me` `owner_people`), answered when `allowFrom` is unset. */
+  owners: readonly string[];
+  turns: RelayChatTurns;
   warn?: (message: string) => void;
 }): Promise<void> {
   const facts = buildRelayInboundFacts(params.event);
@@ -123,10 +147,10 @@ export async function dispatchRelayEvent(params: {
       id: facts.chatId,
     },
   });
-  const restricted = params.account.allowFrom.length > 0;
-  const effectiveAllowFrom = restricted
-    ? params.account.allowFrom
-    : ["*"];
+  const policy = relaySenderPolicy({
+    allowFrom: params.account.allowFrom,
+    owners: params.owners,
+  });
   const access = await resolveStableChannelMessageIngress({
     channelId: "relay",
     accountId: params.account.accountId,
@@ -164,8 +188,8 @@ export async function dispatchRelayEvent(params: {
       nativeChannelId: facts.chatId,
       inboundEventKind: "user_request",
     },
-    dmPolicy: restricted ? "allowlist" : "open",
-    groupPolicy: restricted ? "allowlist" : "open",
+    dmPolicy: policy.dmPolicy,
+    groupPolicy: policy.dmPolicy,
     policy: {
       groupAllowFromFallbackToAllowFrom: true,
       ...(facts.chatType === "group"
@@ -193,8 +217,8 @@ export async function dispatchRelayEvent(params: {
           },
         }
       : {}),
-    allowFrom: effectiveAllowFrom,
-    groupAllowFrom: effectiveAllowFrom,
+    allowFrom: policy.allowFrom,
+    groupAllowFrom: policy.allowFrom,
   });
   if (access.ingress.admission !== "dispatch") {
     params.warn?.(
@@ -203,6 +227,11 @@ export async function dispatchRelayEvent(params: {
     return;
   }
 
+  // An agent's reply target is only its own Message (agentReplyLink); a
+  // person's is the Message they replied from, as before.
+  const replyTarget = facts.fromAgent
+    ? facts.agentReplyLink
+    : facts.replyAnchorId ?? facts.replyToId;
   const body = buildEnvelope({
     channel: "Relay",
     from: `${facts.displayName} (@${facts.handle})`,
@@ -237,9 +266,7 @@ export async function dispatchRelayEvent(params: {
     reply: {
       to: facts.chatId,
       originatingTo: facts.chatId,
-      ...((facts.replyAnchorId ?? facts.replyToId)
-        ? { replyToId: facts.replyAnchorId ?? facts.replyToId }
-        : {}),
+      ...(replyTarget ? { replyToId: replyTarget } : {}),
     },
     message: {
       inboundEventKind: "user_request",
@@ -267,6 +294,16 @@ export async function dispatchRelayEvent(params: {
     },
   });
 
+  // Another agent's Message waits for the turn running in its Chat, so it
+  // gets a turn and an answer of its own (turns.ts).
+  if (facts.fromAgent) {
+    await waitForIdleChat({
+      turns: params.turns,
+      chatId: facts.chatId,
+      lifecycle: params.lifecycle,
+    });
+  }
+
   await Promise.allSettled([
     params.relay.chats.markAsRead(facts.chatId),
     params.relay.chats.startTyping(facts.chatId),
@@ -280,7 +317,7 @@ export async function dispatchRelayEvent(params: {
 
   let deliveryError: unknown;
   try {
-    await params.runtime.channel.inbound.dispatch({
+    await params.turns.track(facts.chatId, () => params.runtime.channel.inbound.dispatch({
       cfg: params.cfg as OpenClawConfig,
       channel: "relay",
       accountId: params.account.accountId,
@@ -293,9 +330,18 @@ export async function dispatchRelayEvent(params: {
       delivery: {
         durable: {
           to: facts.chatId,
-          replyToId: null,
+          replyToId: facts.fromAgent ? facts.agentReplyLink ?? null : null,
           requiredCapabilities: { reconcileUnknownSend: true },
         },
+        // Every answer to another agent names its Message, whatever
+        // `replyToMode` the operator chose; OpenClaw's own implicit
+        // current-message reply is dropped where no reply may point.
+        ...(facts.fromAgent
+          ? {
+              preparePayload: (payload: ReplyPayload) =>
+                agentReplyPayload(payload, facts),
+            }
+          : {}),
         deliver: async (_payload, info) => {
           if (info.kind === "final") {
             throw new Error(
@@ -320,7 +366,7 @@ export async function dispatchRelayEvent(params: {
             : new Error(`relay: session record failed: ${String(error)}`);
         },
       },
-    });
+    }));
     if (deliveryError) {
       throw deliveryError instanceof Error
         ? deliveryError

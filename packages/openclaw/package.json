@@ -33,7 +33,7 @@
     "contract:verify": "node scripts/verify-contract-provenance.mjs",
     "contract:test": "node --test test/*.test.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",
-    "gateway:harness": "node scripts/gateway-harness.mjs",
+    "gateway:harness": "node scripts/gateway-harness.mjs && node scripts/gateway-harness.mjs --overlap",
     "prepack": "npm run build"
   },
   "dependencies": {
