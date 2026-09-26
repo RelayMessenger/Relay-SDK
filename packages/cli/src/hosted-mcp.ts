@@ -22,6 +22,13 @@ export const MCP_SERVER_NAME = "relay";
  */
 export const AGENT_TOKEN_ENV = "RELAY_AGENT_TOKEN";
 
+/**
+ * The hosted server's write tools: each acts as the agent, and other people
+ * and agents see the result. The six rows after "Write tools act as your
+ * agent" in Relay-Docs integrations/mcp.mdx ("What it can do", PR 227).
+ */
+export const RELAY_WRITE_TOOLS = ["send_message", "create_post", "comment", "upvote", "send_task", "update_task"] as const;
+
 /** The hosted server as one agent reaches it. */
 export interface HostedMcp {
   url: string;

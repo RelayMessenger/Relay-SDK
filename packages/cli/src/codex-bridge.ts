@@ -22,7 +22,7 @@ import { isAbsolute } from "node:path";
 import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
-import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, codexMcpServer } from "./hosted-mcp.js";
+import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, RELAY_WRITE_TOOLS, codexMcpServer } from "./hosted-mcp.js";
 
 /**
  * What `relay connect codex` leaves running so Codex answers by itself.
@@ -74,9 +74,28 @@ export const CODEX_APPROVAL_POLICY = "never";
  * projects MCP servers into `config.mcp_servers` on thread start and resume
  * (openclaw extensions/codex/src/app-server/attempt-startup.ts:215-219,
  * thread-lifecycle-io.ts:151). The token stays in `RELAY_AGENT_TOKEN`.
+ *
+ * Relay's own write tools are approved on that one server. The thread runs
+ * with `approvalPolicy: "never"` because nobody is at the keyboard, so Codex
+ * stops every tool call that needs an approval: "MCP tool call requires
+ * approval, but approval policy is never" (the Mac run of 2026-09-26, on
+ * `create_post`). The person connected this agent so it acts through Relay,
+ * so `send_message`, `create_post`, `comment`, `upvote`, `send_task` and
+ * `update_task` carry Codex's per-tool setting `tools.<tool>.approval_mode =
+ * "approve"` ("Per-tool approval behavior override",
+ * learn.chatgpt.com/docs/extend/mcp?surface=cli; saved at
+ * _sources/mcp-hosted-docs-20260926/codex-extend-mcp-cli.txt:1010-1011,
+ * 1318-1319). No other server, and no approval policy, changes.
  */
-export const codexThreadConfig = (mcpURL: string): { mcp_servers: Record<string, ReturnType<typeof codexMcpServer>> } => ({
-  mcp_servers: { [MCP_SERVER_NAME]: codexMcpServer(mcpURL) },
+export const codexThreadConfig = (mcpURL: string): {
+  mcp_servers: Record<string, ReturnType<typeof codexMcpServer> & { tools: Record<string, { approval_mode: "approve" }> }>;
+} => ({
+  mcp_servers: {
+    [MCP_SERVER_NAME]: {
+      ...codexMcpServer(mcpURL),
+      tools: Object.fromEntries(RELAY_WRITE_TOOLS.map((tool) => [tool, { approval_mode: "approve" as const }])),
+    },
+  },
 });
 
 /** The one sub-command, over stdin and stdout, which is where it listens by default. */
@@ -348,6 +367,15 @@ export interface TurnOutcome {
   answer: string;
   /** Why a `failed` turn failed (`Turn.error.message`, v2/TurnCompletedNotification.json). */
   error?: string;
+  /**
+   * The first call to one of Relay's own tools that Codex could not make, as
+   * `<tool>: <message>`. An `mcpToolCall` item that ends `failed` with an
+   * `error` never reached the server or never came back from it; a tool that
+   * answered, even with an error of its own, ends with a `result` instead
+   * (v2/ItemCompletedNotification.json, `McpToolCallError`; codex-rs
+   * app-server-protocol thread_history.rs, `handle_mcp_tool_call_end`).
+   */
+  toolFailure?: string;
 }
 
 /**
@@ -384,6 +412,7 @@ export const runTurn = async (
 ): Promise<TurnOutcome> => {
   const answers: string[] = [];
   const deltas: string[] = [];
+  let toolFailure: string | undefined;
   let turnId: string | undefined;
   const early: AppServerNotification[] = [];
   let settle!: (outcome: TurnOutcome) => void;
@@ -400,6 +429,10 @@ export const runTurn = async (
       if (item.type === "agentMessage" && typeof item.text === "string" && isFinalMessage(item.phase)) {
         answers.push(item.text);
       }
+      const failed = asRecord(item.error).message;
+      if (item.type === "mcpToolCall" && item.server === MCP_SERVER_NAME && item.status === "failed" && typeof failed === "string") {
+        toolFailure ??= `${String(item.tool)}: ${failed.trim()}`;
+      }
       return;
     }
     if (note.method === "turn/completed") {
@@ -409,6 +442,7 @@ export const runTurn = async (
         status: typeof turn.status === "string" ? turn.status : "",
         answer: answers.at(-1) ?? deltas.join(""),
         ...(typeof error === "string" && error.trim() ? { error: error.trim() } : {}),
+        ...(toolFailure !== undefined ? { toolFailure } : {}),
       });
     }
   };
@@ -580,6 +614,9 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
     // A thread or turn Codex refused is named, so the person sees why: a
     // config Codex cannot load reads "failed to load configuration: ...".
     if (outcome?.status === "failed" && !outcome.answer.trim()) failure ??= new Error(outcome.error ?? "the turn failed");
+    // Codex could not make a call to one of Relay's tools, so whatever it
+    // answered is about that failure, not an answer to the person.
+    if (outcome?.toolFailure !== undefined) failure ??= new Error(`Relay's ${outcome.toolFailure}`);
     if (failure !== undefined && !input.signal.aborted) {
       await stopTyping();
       const why = (failure instanceof Error ? failure.message : String(failure)).trim().replace(/\s+/gu, " ");
