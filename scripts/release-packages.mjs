@@ -135,23 +135,6 @@ export const releasePackages = {
       },
     },
   },
-  mcp: {
-    directory: "packages/mcp",
-    workspace: "@relaymessenger/mcp",
-    validate: "validate:mcp",
-    tagPrefix: "mcp-v",
-    smoke: {
-      files: ["dist/cli.js"],
-      parse: ["dist/cli.js"],
-      imports: [
-        { specifier: "@relaymessenger/mcp", named: ["createRelayMcpServer"] },
-        {
-          specifier: "@relaymessenger/mcp/auth",
-          named: ["DEFAULT_API_URL", "resolveAgentAuth", "validateApiURL"],
-        },
-      ],
-    },
-  },
   openclaw: {
     directory: "packages/openclaw",
     workspace: "@relaymessenger/openclaw-plugin",

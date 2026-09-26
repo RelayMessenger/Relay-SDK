@@ -6,12 +6,14 @@ import { createHash } from "node:crypto";
 // files are not historical imports and must not acquire invented upstream origins.
 //
 // This digest moves only when a record is removed with its file. It last moved
-// on 2026-09-08, when the npm registry receipts for @relaymessenger/sdk
-// 0.3.0-staging.4 and 0.3.0-staging.8 were deleted: they described versions
-// nothing depends on any more, and stale evidence is deleted, never rewritten.
-// No surviving record's repository, commit, source path, bytes or mode changed.
+// on 2026-09-26, when packages/mcp (@relaymessenger/mcp, imported from
+// RelayMessenger/Relay-MCP) was retired for Relay's hosted MCP server and its
+// 19 records went with it. Before that, on 2026-09-08, the npm registry
+// receipts for @relaymessenger/sdk 0.3.0-staging.4 and 0.3.0-staging.8 were
+// deleted. Stale evidence is deleted, never rewritten: no surviving record's
+// repository, commit, source path, bytes or mode changed.
 export const HISTORICAL_IMPORTS_SHA256 =
-  "edba75059a7428305706d62955a9b855bde97cc6aa91a179da732329c9957897";
+  "df6cb7527be58bb05a73580ea24871016676031d5a6fd9b0743cc6848f9071a0";
 
 export function historicalImportDigest(entries) {
   const records = entries.map(({

@@ -1,7 +1,7 @@
 # Relay public developer monorepo
 
 - This is the canonical public source for Relay's TypeScript SDK, Chat SDK
-  adapter, CLI, MCP server, OpenClaw and Claude Code channels, portable Skill,
+  adapter, CLI, OpenClaw and Claude Code channels, portable Skill,
   generated Codex/Cursor distributions, and runnable Cookbook.
 - `contracts/relay-v1-openapi.yaml` is the sole checked-in API authority.
   Package fixtures may copy it only when a validator proves byte identity.
