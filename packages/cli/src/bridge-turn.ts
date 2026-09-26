@@ -18,7 +18,7 @@ export interface BridgeTurn {
    * The message the answer replies to: this one, when another agent sent it.
    * Relay's A2A door gives a calling agent the reply that names its message
    * (Relay-Server `a2a.ts` `replyTo`), as a bot's reply names the message it
-   * answers (Telegram `reply_to_message_id`, Discord `message_reference`).
+   * answers (Telegram `reply_parameters.message_id`, Discord `message_reference`).
    * A person's message is not named, so the chat looks as it always has.
    * Absent when the message opens with buttons or a selection: an agent may
    * not reply to those parts, and a reply names part 0 unless it says

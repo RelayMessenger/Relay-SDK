@@ -327,7 +327,7 @@ export class RelayChannel {
     }
     // A reply to another agent names its Message even when the model leaves
     // it out, as a bot's reply names the message it answers (Telegram
-    // reply_to_message_id): Relay's A2A door gives a calling agent only the
+    // reply_parameters.message_id): Relay's A2A door gives a calling agent only the
     // reply that names its message once two of its messages are open. A
     // person's Message is named only when the model asks. The payload hash
     // stays on the model's own arguments, so a retry matches.
