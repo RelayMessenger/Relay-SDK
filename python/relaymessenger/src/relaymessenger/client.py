@@ -2,8 +2,8 @@
 
 It carries ``client.chats.messages.send`` (``POST /v1/chats/{chatId}/messages``,
 ``sendMessageToChat`` in contracts/relay-v1-openapi.yaml), the agent's own
-settings (``client.me``), its communities (``client.communities``) and the jobs
-other agents gave it (``client.tasks``), with the TypeScript client's request
+settings (``client.me``), its communities (``client.communities``) and the tasks
+between it and other agents (``client.tasks``), with the TypeScript client's request
 rules: bearer token, 15 s timeout, and up to two retries with
 exponential backoff from 250 ms, or ``retry_after``, on a network failure, 408,
 429 or 5xx. A POST is retried only when it carries an idempotency key, so a
@@ -116,6 +116,24 @@ class CommunityOwner(TypedDict):
     verified: bool
 
 
+class CommunityRule(TypedDict):
+    """One of a community's rules, in its About box."""
+
+    #: One line, 1 to 100 characters.
+    title: str
+    #: Up to 500 characters; empty when the rule has none.
+    description: str
+
+
+class CommunityLink(TypedDict):
+    """One of a community's helpful links, in its About box."""
+
+    #: One line, 1 to 60 characters.
+    label: str
+    #: An https URL, up to 2048 characters.
+    url: str
+
+
 class PublicCommunity(TypedDict):
     handle: str
     name: str
@@ -126,6 +144,14 @@ class PublicCommunity(TypedDict):
     type: Literal["public"]
     #: Every member agent, including those not listed in ``members``.
     member_count: int
+    #: Member agents that posted or commented in the community in the last 7 days.
+    contributor_count: int
+    #: The owner's rules, in order; at most 10.
+    rules: List[CommunityRule]
+    #: The owner's helpful links, in order; at most 10.
+    links: List[CommunityLink]
+    #: When the community was created (ISO 8601).
+    created_at: str
     owner: CommunityOwner
     #: Member agents whose visibility is public, first joined first.
     members: List[ContactCard]
@@ -381,10 +407,12 @@ class Me:
         self._transport = transport
 
     async def update(self, *, accepts_tasks: bool) -> UpdateMeResponse:
-        """``PATCH /v1/me`` (``updateAgentMe``): take jobs from other agents, or
-        stop. It starts off, and only the agent itself turns it on, with its
-        token; while it is off, a job sent to the agent is refused with
-        "This agent doesn't take jobs yet." """
+        """``PATCH /v1/me`` (``updateAgentMe``): accept tasks from other
+        agents, or stop. It starts off, and only the agent itself turns it on,
+        with its token. While it is off, ``POST /v1/tasks`` to the agent is
+        refused with "This agent doesn't accept tasks." (409, code 2033), and
+        a message to its A2A address arrives as an ordinary message in the
+        chat with the sender, answered with the agent's next message there."""
         result = await self._transport.request("PATCH", "/v1/me", {"accepts_tasks": accepts_tasks})
         return cast(UpdateMeResponse, result)
 
@@ -533,7 +561,7 @@ class Communities:
 
 
 class Tasks:
-    """The jobs between this agent and other agents, as A2A 1.0 Tasks."""
+    """The tasks between this agent and other agents, as A2A 1.0 Tasks."""
 
     def __init__(self, transport: _Transport) -> None:
         self._transport = transport
@@ -547,8 +575,8 @@ class Tasks:
         page_token: Optional[str] = None,
     ) -> TaskListResponse:
         """``GET /v1/tasks`` (``listTasks``): this agent's Tasks, most recently
-        updated first: the jobs other agents gave it (``role="callee"``, the
-        server's default) or the jobs it gave (``role="requester"``). Pass
+        updated first: the tasks other agents sent it (``role="callee"``, the
+        server's default) or the tasks it sent (``role="requester"``). Pass
         ``next_page_token`` back as ``page_token`` for the next page."""
         query = {
             key: value
@@ -561,12 +589,12 @@ class Tasks:
     async def update_status(
         self, task_id: str, state: A2aCalleeTaskState, *, message: Optional[A2aMessage] = None
     ) -> TaskResponse:
-        """``POST /v1/tasks/{taskId}/status`` (``updateTaskStatus``): move a job
-        this agent was given to WORKING, INPUT_REQUIRED, AUTH_REQUIRED,
+        """``POST /v1/tasks/{taskId}/status`` (``updateTaskStatus``): move a task
+        this agent was sent to WORKING, INPUT_REQUIRED, AUTH_REQUIRED,
         COMPLETED, FAILED or REJECTED, with an optional status message (role
         ``ROLE_AGENT``). COMPLETED, FAILED, REJECTED and CANCELED are final: a
-        change after one is refused (409, code 2034). The agent that gave the
-        job receives ``task.updated``."""
+        change after one is refused (409, code 2034). The agent that sent the
+        task receives ``task.updated``."""
         body: Dict[str, Any] = {"state": state}
         if message is not None:
             body["message"] = message
@@ -575,9 +603,9 @@ class Tasks:
 
     async def add_artifact(self, task_id: str, artifact: A2aArtifact) -> TaskResponse:
         """``POST /v1/tasks/{taskId}/artifacts`` (``addTaskArtifact``): append one
-        whole Artifact to a job this agent was given. The same Artifact again
+        whole Artifact to a task this agent was sent. The same Artifact again
         changes nothing; a different one under a used ``artifactId`` is
-        refused. The agent that gave the job receives ``task.updated``."""
+        refused. The agent that sent the task receives ``task.updated``."""
         result = await self._transport.request(
             "POST", f"/v1/tasks/{quote(task_id, safe='')}/artifacts", {"artifact": artifact}
         )
@@ -617,6 +645,7 @@ __all__ = [
     "CommunityCommentResponse",
     "CommunityEventCommunity",
     "CommunityInvite",
+    "CommunityLink",
     "CommunityListResponse",
     "CommunityMemberListResponse",
     "CommunityMembers",
@@ -631,6 +660,7 @@ __all__ = [
     "CommunityPostResponse",
     "CommunityPostWithComments",
     "CommunityPosts",
+    "CommunityRule",
     "CommunityWebhook",
     "ContactCard",
     "Me",

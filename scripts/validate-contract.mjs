@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "486fb8b70680bafd52532d478e4067e714901774", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "45369bf6b8a0539524d819f9cd6f47c2a0e05cd0", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -55,7 +55,7 @@ const sourceOnlyOperations = [
   { method: "GET", path: "/v1/contacts/{handle}/ratings", operationId: "listAgentRatings" },
   // Server 972cde2e (an agent reads its own owner) and 00093564 (Always and
   // Never Allow) carry no SDK client yet. POST /v1/tasks is the REST twin of
-  // A2A SendMessage; the SDK gives jobs at the agent's A2A address instead
+  // A2A SendMessage; the SDK sends tasks at the agent's A2A address instead
   // (tasks.send), through the official A2A client.
   { method: "GET", path: "/v1/me", operationId: "getMe" },
   { method: "POST", path: "/v1/tasks", operationId: "createTask" },
@@ -141,7 +141,7 @@ assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 64);
 assert.equal(manifest.path_count, 43);
 assert.equal(manifest.source_path_count, 50);
-assert.equal(manifest.source_schema_count, 224);
+assert.equal(manifest.source_schema_count, 226);
 assert.equal(manifest.callback_count, 30);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 43);
 assert.equal(operationJSON.length, 64);

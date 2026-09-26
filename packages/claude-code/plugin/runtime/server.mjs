@@ -21603,7 +21603,7 @@ var Transport = class {
    * for this Relay instance. Every JSON-RPC call carries this agent's Relay
    * token as its bearer credential (the card's `relay` HTTP bearer scheme);
    * the client adds `A2A-Version: 1.0`. Loaded on first use, so an agent
-   * that never gives jobs never loads it.
+   * that never sends another agent a task or message there never loads it.
    */
   a2a(handle) {
     const key = handle.replace(/^@/, "").trim().toLowerCase();
@@ -22154,8 +22154,10 @@ var Me = class {
     this.transport = transport2;
   }
   /**
-   * Turn on or off whether this agent takes jobs (A2A Tasks) from other
-   * agents. It starts off; only the agent itself sets it.
+   * Turn on or off whether this agent accepts tasks (A2A Tasks) from other
+   * agents. It starts off; only the agent itself sets it. While it is off, a
+   * message to the agent's A2A address arrives as an ordinary message in the
+   * chat with the sender, and the agent's next message there is the reply.
    */
   update(body, options) {
     return this.transport.request({
@@ -22342,7 +22344,7 @@ var Tasks = class {
       options
     });
   }
-  /** Set the state of a Task another agent gave this agent. */
+  /** Set the state of a Task another agent sent this agent. */
   updateStatus(taskID, body, options) {
     return this.transport.request({
       method: "POST",
@@ -22352,7 +22354,7 @@ var Tasks = class {
     });
   }
   /**
-   * Append one whole Artifact to a Task another agent gave this agent. The
+   * Append one whole Artifact to a Task another agent sent this agent. The
    * same Artifact again changes nothing, so this is retried.
    */
   addArtifact(taskID, body, options) {
@@ -22365,22 +22367,26 @@ var Tasks = class {
     });
   }
   /**
-   * Give the agent `to` a job: A2A SendMessage at its address. It waits for
-   * the Task to settle unless `configuration.returnImmediately` is true.
+   * Send the agent `to` a message: A2A SendMessage at its address. The answer
+   * is what the official A2A client's `sendMessage` answers, a Task or a
+   * Message (@a2a-js/sdk `SendMessageResult`). An agent that accepts tasks
+   * answers with a Task; this waits for it to settle unless
+   * `configuration.returnImmediately` is true. Any other agent answers with a
+   * Message: its reply in the chat between the two agents, whose id is the
+   * Message's `contextId`. A Message has a `messageId`; a Task does not.
    */
   async send(params, options) {
     const { to, ...request } = params;
-    const [client, { SendMessageRequest, Task }] = await Promise.all([
+    const [client, { Message, SendMessageRequest, Task }] = await Promise.all([
       this.transport.a2a(to),
       import("@a2a-js/sdk")
     ]);
     const result = await client.sendMessage(SendMessageRequest.fromJSON(request), a2aOptions(options));
-    if (!("status" in result)) {
-      throw new Error("The agent answered with a Message, not a Task.");
-    }
+    if ("messageId" in result)
+      return Message.toJSON(result);
     return Task.toJSON(result);
   }
-  /** A2A GetTask at the agent `to`: a Task this agent gave it. */
+  /** A2A GetTask at the agent `to`: a Task this agent sent it. */
   async get(params, options) {
     const { to, ...request } = params;
     const [client, { GetTaskRequest, Task }] = await Promise.all([
@@ -22389,7 +22395,7 @@ var Tasks = class {
     ]);
     return Task.toJSON(await client.getTask(GetTaskRequest.fromJSON(request), a2aOptions(options)));
   }
-  /** A2A CancelTask at the agent `to`: a Task this agent gave it. */
+  /** A2A CancelTask at the agent `to`: a Task this agent sent it. */
   async cancel(params, options) {
     const { to, ...request } = params;
     const [client, { CancelTaskRequest, Task }] = await Promise.all([

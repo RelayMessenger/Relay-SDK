@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import Relay, {
+  type A2aMessage,
+  type A2aSendMessageResult,
   type A2aTask,
   type RelayWebhookEvent,
   type TaskCreatedWebhookEvent,
@@ -19,7 +21,7 @@ interface Captured {
 // 0.3, at https://staging.relayagent.im/worker, HTTP bearer "relay".
 const card = {
   name: "Worker",
-  description: "Does jobs",
+  description: "Does tasks",
   supportedInterfaces: [
     { url: "https://staging.relayagent.im/worker", protocolBinding: "JSONRPC", protocolVersion: "1.0" },
     { url: "https://staging.relayagent.im/worker", protocolBinding: "JSONRPC", protocolVersion: "0.3" },
@@ -41,11 +43,29 @@ const task: A2aTask = {
   contextId: "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2c",
   status: { state: "TASK_STATE_COMPLETED", timestamp: "2026-09-26T04:00:00.000Z" },
   artifacts: [{ artifactId: "answer", parts: [{ text: "42" }] }],
-  history: [{ messageId: "job-1", role: "ROLE_USER", parts: [{ text: "Add 40 and 2." }] }],
+  history: [{ messageId: "task-1", role: "ROLE_USER", parts: [{ text: "Add 40 and 2." }] }],
   metadata: { relay: { requester: { handle: "boss" } } },
 };
 
-const a2aFixture = (baseURL = "https://api.staging.relayapp.im") => {
+// a2a.ts `runMethod` for an agent that does not accept tasks: SendMessage
+// answers {message}, the agent's next message in the chat between the two
+// agents, with that chat's id as contextId; its card's modes are MESSAGE_MODES.
+const reply: A2aMessage = {
+  messageId: "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a3a",
+  contextId: "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a3b",
+  role: "ROLE_AGENT",
+  parts: [{ text: "I answer questions about Relay." }],
+};
+const messageCard = {
+  ...card,
+  defaultInputModes: ["text/plain", "application/a2ui+json"],
+  defaultOutputModes: ["text/plain", "application/json", "application/a2ui+json"],
+};
+
+const a2aFixture = (
+  baseURL = "https://api.staging.relayapp.im",
+  answer: { card: object; sent: { task: A2aTask } | { message: A2aMessage } } = { card, sent: { task } },
+) => {
   const calls: Captured[] = [];
   const client = new Relay({
     apiKey: "boss-agent-token",
@@ -55,21 +75,21 @@ const a2aFixture = (baseURL = "https://api.staging.relayapp.im") => {
       const method = init?.method ?? "GET";
       const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
       calls.push({ url, method, headers: new Headers(init?.headers), body });
-      if (method === "GET") return Response.json(card);
+      if (method === "GET") return Response.json(answer.card);
       const rpc = body as { id: number; method: string };
-      const result = rpc.method === "SendMessage" ? { task } : task;
+      const result = rpc.method === "SendMessage" ? answer.sent : task;
       return Response.json({ jsonrpc: "2.0", id: rpc.id, result });
     },
   });
   return { client, calls };
 };
 
-describe("jobs between agents", () => {
-  it("sends a job over A2A 1.0 with the agent's Relay token as bearer", async () => {
+describe("tasks between agents", () => {
+  it("sends a task over A2A 1.0 with the agent's Relay token as bearer", async () => {
     const { client, calls } = a2aFixture();
     const sent = await client.tasks.send({
       to: "@Worker",
-      message: { messageId: "job-1", role: "ROLE_USER", parts: [{ text: "Add 40 and 2." }] },
+      message: { messageId: "task-1", role: "ROLE_USER", parts: [{ text: "Add 40 and 2." }] },
       configuration: { returnImmediately: true },
       metadata: { priority: "high" },
     });
@@ -87,7 +107,7 @@ describe("jobs between agents", () => {
       jsonrpc: "2.0",
       method: "SendMessage",
       params: {
-        message: { messageId: "job-1", role: "ROLE_USER", parts: [{ text: "Add 40 and 2." }] },
+        message: { messageId: "task-1", role: "ROLE_USER", parts: [{ text: "Add 40 and 2." }] },
         configuration: { returnImmediately: true },
         metadata: { priority: "high" },
       },
@@ -96,7 +116,34 @@ describe("jobs between agents", () => {
     expect(calls[0]!.headers.get("authorization")).toBeNull();
   });
 
-  it("reads and cancels a job with GetTask and CancelTask at the same address, reusing the card", async () => {
+  it("answers with the agent's Message when the agent does not accept tasks, as @a2a-js/sdk does", async () => {
+    const { client, calls } = a2aFixture(undefined, { card: messageCard, sent: { message: reply } });
+    const sent: A2aSendMessageResult = await client.tasks.send({
+      to: "relay",
+      message: { messageId: "hello-relay-1", role: "ROLE_USER", parts: [{ text: "What can you do?" }] },
+    });
+
+    expect(sent).toEqual(reply);
+    if (!("messageId" in sent)) throw new Error("expected a Message");
+    expect(sent.contextId).toBe(reply.contextId);
+    expect(calls.map((call) => call.body && (call.body as { method: string }).method)).toEqual([
+      undefined,
+      "SendMessage",
+    ]);
+  });
+
+  it("tells a Task from a Message by messageId", async () => {
+    const { client } = a2aFixture();
+    const sent = await client.tasks.send({
+      to: "worker",
+      message: { messageId: "task-2", role: "ROLE_USER", parts: [{ text: "Add 1 and 1." }] },
+    });
+    expect("messageId" in sent).toBe(false);
+    if ("messageId" in sent) throw new Error("expected a Task");
+    expect(sent.status.state).toBe("TASK_STATE_COMPLETED");
+  });
+
+  it("reads and cancels a task with GetTask and CancelTask at the same address, reusing the card", async () => {
     const { client, calls } = a2aFixture();
     expect(await client.tasks.get({ to: "worker", id: task.id, historyLength: 0 })).toEqual(task);
     expect(await client.tasks.cancel({ to: "worker", id: task.id })).toEqual(task);
@@ -142,7 +189,7 @@ describe("jobs between agents", () => {
     }
   });
 
-  it("loads the A2A client only when a job call is made", () => {
+  it("loads the A2A client only when a task call is made", () => {
     // A child Node process records every @a2a-js/* module it resolves while
     // it loads the built SDK, makes a client, and then calls tasks.get.
     const entry = fileURLToPath(new URL("../dist/index.js", import.meta.url));

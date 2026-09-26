@@ -1,13 +1,13 @@
-"""Jobs between agents: A2A 1.0 Tasks, and the events that carry them.
+"""Tasks between agents: A2A 1.0 Tasks, and the events that carry them.
 
-A job one Relay agent gives another is an A2A 1.0 Task (a2a.proto), in its
+A task one Relay agent sends another is an A2A 1.0 Task (a2a.proto), in its
 JSON form: camelCase fields, enum values by their proto names. These types
 copy ``A2aTask``, ``A2aMessage``, ``A2aArtifact`` and ``A2aPart`` of Relay's
 API contract field for field (Relay Server ``server/src/agent-tasks.ts``).
 
 Four events reach an agent on its webhooks or the Agent WebSocket
-(``webhook-events.ts``): the agent doing a job receives ``task.created``,
-``task.message`` and ``task.canceled``; the agent that gave it receives
+(``webhook-events.ts``): the agent working on a task receives ``task.created``,
+``task.message`` and ``task.canceled``; the agent that sent it receives
 ``task.updated``. Only the standard library is used.
 """
 
@@ -26,9 +26,9 @@ A2aTaskState = Literal[
     "TASK_STATE_REJECTED",
     "TASK_STATE_AUTH_REQUIRED",
 ]
-#: The states the agent doing a job may set with ``relay.tasks.update_status``,
+#: The states the agent working on a task may set with ``relay.tasks.update_status``,
 #: with or without the ``TASK_STATE_`` prefix. Only creation sets SUBMITTED,
-#: and only the agent that gave the job cancels it.
+#: and only the agent that sent the task cancels it.
 A2aCalleeTaskState = Literal[
     "TASK_STATE_WORKING",
     "TASK_STATE_INPUT_REQUIRED",
@@ -63,7 +63,7 @@ class A2aPart(TypedDict, total=False):
 
 class _A2aMessageRequired(TypedDict):
     messageId: str
-    #: ``ROLE_USER`` from the agent that gave the job, ``ROLE_AGENT`` from the agent doing it.
+    #: ``ROLE_USER`` from the agent that sent the task or message, ``ROLE_AGENT`` from the agent that answers.
     role: Literal["ROLE_USER", "ROLE_AGENT"]
     parts: List[A2aPart]
 
@@ -106,8 +106,8 @@ class _A2aTaskRequired(TypedDict):
     id: str
     contextId: str
     status: A2aTaskStatus
-    #: ``metadata["relay"]["requester"]`` is the verified agent that gave the
-    #: job: its Card, with its ``owner``.
+    #: ``metadata["relay"]["requester"]`` is the verified agent that sent the
+    #: task: its Card, with its ``owner``.
     metadata: Dict[str, Any]
 
 
@@ -122,13 +122,13 @@ class A2aTask(_A2aTaskRequired, total=False):
 
 
 class TaskCreatedEvent(TypedDict):
-    """``task.created``: another agent gave this agent a job, in TASK_STATE_SUBMITTED."""
+    """``task.created``: another agent sent this agent a task, in TASK_STATE_SUBMITTED."""
 
     task: A2aTask
 
 
 class TaskMessageEvent(TypedDict):
-    """``task.message``: the agent that gave the job sent more, usually the
+    """``task.message``: the agent that sent the task sent more, usually the
     answer this agent asked for with TASK_STATE_INPUT_REQUIRED."""
 
     task_id: str
@@ -136,13 +136,13 @@ class TaskMessageEvent(TypedDict):
 
 
 class TaskCanceledEvent(TypedDict):
-    """``task.canceled``: the agent that gave the job canceled it."""
+    """``task.canceled``: the agent that sent the task canceled it."""
 
     task_id: str
 
 
 class TaskUpdatedEvent(TypedDict):
-    """``task.updated``: the agent doing a job this agent gave changed its
+    """``task.updated``: the agent working on a task this agent sent changed its
     state or added an Artifact. It carries the whole Task."""
 
     task: A2aTask

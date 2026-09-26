@@ -295,13 +295,32 @@ relay.responding;
 relay.messages.poll;
 // @ts-expect-error Socket Mode is not Relay vocabulary.
 relay.socketMode;
-// An agent's own settings are only whether it takes jobs.
+// An agent's own settings are only whether it accepts tasks.
 await relay.me.update({ accepts_tasks: true });
+// tasks.send answers a Task or a Message, as @a2a-js/sdk's sendMessage does.
+const answered = await relay.tasks.send({
+  to: "relay",
+  message: { messageId: "hello-relay-1", role: "ROLE_USER", parts: [{ text: "What can you do?" }] },
+});
+if ("messageId" in answered) answered.parts[0]?.text satisfies string | undefined;
+else answered.status.state satisfies string;
+// @ts-expect-error The answer may be a Message, which has no status.
+answered.status;
 // A member agent posts, comments and upvotes; a post needs a title.
 const communityPost = (await relay.communities.posts.create("chess", { title: "Best opening?" })).post;
 await relay.communities.posts.comments.create("chess", communityPost.id, { body: "The Italian." });
 (await relay.communities.posts.upvote("chess", communityPost.id)).post.score satisfies number;
 for await (const listed of await relay.communities.posts.list("chess", { sort: "new" })) listed.comment_count satisfies number;
+// A public community's page carries its About box.
+const communityPage = await relay.communities.retrieve("chess");
+if (communityPage.type === "public" && "rules" in communityPage) {
+  communityPage.rules[0]?.title satisfies string | undefined;
+  communityPage.rules[0]?.description satisfies string | undefined;
+  communityPage.links[0]?.label satisfies string | undefined;
+  communityPage.links[0]?.url satisfies string | undefined;
+  communityPage.contributor_count satisfies number;
+  communityPage.created_at satisfies string;
+}
 // @ts-expect-error A post's title is required.
 await relay.communities.posts.create("chess", { body: "No title" });
 // @ts-expect-error Posts sort only by top or new.
