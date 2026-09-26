@@ -84,12 +84,12 @@ const fakeAcpAgent = async (settings: {
 const traffic = (log: FakeLine[]): string[] =>
   log.map((line) => line.in ?? `out ${line.out ?? ""}`);
 
-const received = (eventId: string, chatId: string, text: string, sender = "alice"): RelayWebhookEvent => ({
+const received = (eventId: string, chatId: string, text: string, sender = "alice", kind: "user" | "agent" = "user"): RelayWebhookEvent => ({
   api_version: "v1", webhook_version: "2026-08-30", event_type: "message.received",
   event_id: eventId, created_at: "2026-09-11T00:00:00.000Z", trace_id: "trace", agent_id: "agent",
   data: {
     chat: { id: chatId }, id: `message-${eventId}`, direction: "inbound",
-    sender_handle: { id: "sender", handle: sender, kind: "user" },
+    sender_handle: { id: "sender", handle: sender, kind },
     parts: [{ type: "text", value: text, reactions: null }],
   },
 } as unknown as RelayWebhookEvent);
@@ -299,8 +299,8 @@ describe("what the bridge sends back", () => {
       text: "Not much. Your README says this is a test project.",
       key: "acp-bridge-event-1",
       parts: [{ type: "text", value: "Not much. Your README says this is a test project." }],
-      replyTo: { message_id: "message-event-1" },
     }]);
+    expect(relay.sent[0]).not.toHaveProperty("replyTo.message_id");
     expect(relay.typing).toEqual(["start chat-1", "stop chat-1"]);
     expect(said).toEqual(["@alice  Hey, what's up", "Sent the answer to @alice."]);
   });
@@ -476,6 +476,24 @@ describe("when turns run", () => {
     expect(relay.sent.map((message) => message.key)).toEqual(["acp-bridge-event-2"]);
   });
 
+  it("answers an agent's overlapping messages in one chat in turn, each linked to its own", async () => {
+    // A2A 1.0 3.1.1: each Message answers its own request, so a calling
+    // agent's older message is never cancelled for its newer one.
+    const acp = await fakeAcpAgent({ turnMs: 300 });
+    const { said, relay } = await runBridge({
+      ...acp,
+      events: [received("event-1", "chat-1", "first", "caller", "agent"), received("event-2", "chat-1", "second", "caller", "agent")],
+      endings: 2,
+    });
+    expect(traffic(await acp.log()).filter((line) => line.includes("session/prompt") || line.includes("session/cancel")))
+      .toEqual(["session/prompt", "session/prompt"]);
+    expect(said.join("\n")).not.toContain("was dropped");
+    expect(relay.sent.map((message) => [message.key, message.replyTo])).toEqual([
+      ["acp-bridge-event-1", { message_id: "message-event-1" }],
+      ["acp-bridge-event-2", { message_id: "message-event-2" }],
+    ]);
+  });
+
   it("runs turns in two chats at the same time", async () => {
     const acp = await fakeAcpAgent({ turnMs: 120 });
     const { relay } = await runBridge({
@@ -529,7 +547,7 @@ it("preserves selection context and native authoring across the generic ACP brid
 });
 
 it("teaches the ACP agent the payment block and sends a payment answer as the words, then the payment alone, once on replay", async () => {
-  const event = received("pay", "chat-1", "I'll take the house blend");
+  const event = received("pay", "chat-1", "I'll take the house blend", "shop_agent", "agent");
   if (event.event_type !== "message.received") throw new Error("fixture");
   event.data.reply_to = { message_id: "source", part_index: 0 };
   const agent = await fakeAcpAgent({ answers: [
@@ -548,7 +566,7 @@ it("teaches the ACP agent the payment block and sends a payment answer as the wo
   ]);
   // The bridge created the request once, on the card's own key, from the block's fields.
   expect(result.relay.created).toEqual([{ body: { description: "House blend, 250 g", category: "physical_goods", amount: 2400, currency: "usd" }, key: "acp-bridge-pay-1" }]);
-  // The answer replies to the message that came in, never to the reply_to
-  // that came with it (context for the agent), and only its first message does.
+  // An answer to an agent replies to the message that came in, never to the
+  // reply_to that came with it (context for the agent), and only its first message does.
   expect(result.relay.sent.map((message) => message.replyTo)).toEqual([{ message_id: "message-pay" }, undefined]);
 });

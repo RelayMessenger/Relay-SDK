@@ -1,3 +1,6 @@
+import { existsSync, realpathSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { PAYMENT_BLOCK_INSTRUCTION, PAYMENT_GUIDANCE, type RelayWebhookEvent } from "@relaymessenger/sdk";
 import { dispatchRelayEvent } from "./dispatch.js";
@@ -58,6 +61,16 @@ async function dispatch(allowFrom: string[], contactId = approvedId, handle = "r
 }
 
 describe("Relay dispatch through real OpenClaw ingress", () => {
+  it("keeps OpenClaw's databases in the throwaway state directory, never the real HOME", async () => {
+    // test/isolated-home.ts: the real ingress path opens OpenClaw's state and
+    // agent databases, which must never be the owner's ~/.openclaw.
+    const stateDir = process.env.OPENCLAW_STATE_DIR ?? "";
+    expect(stateDir.startsWith(tmpdir()) || stateDir.startsWith(realpathSync(tmpdir()))).toBe(true);
+    expect(homedir()).toBe(dirname(stateDir));
+    await dispatch([approvedId]);
+    expect(existsSync(join(stateDir, "state", "openclaw.sqlite"))).toBe(true);
+  });
+
   it("admits the explicitly allowed stable Contact ID despite the dangerous username alias", async () => {
     const result = await dispatch([approvedId]);
     expect(result.invoke).toHaveBeenCalledOnce();

@@ -22952,6 +22952,10 @@ function selectionMeta(parts, replyTo, redactor2) {
     } : {}
   };
 }
+function linksReply(senderKind, parts) {
+  const opening = parts[0]?.type;
+  return senderKind === "agent" && opening !== "buttons" && opening !== "selection";
+}
 function isRecord3(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -23052,6 +23056,7 @@ function classifyRelayEvent(params) {
       source_sequence: params.sequence,
       sent_at: typeof data.sent_at === "string" ? data.sent_at : event.created_at
     },
+    ...linksReply(senderKind, parts) ? { linksReply: true } : {},
     createdAt: event.created_at
   };
   return {
@@ -23101,6 +23106,7 @@ function deliveryFromSnapshotMessage(params) {
       sent_at: message.sent_at ?? message.created_at,
       full_sync: "true"
     },
+    ...linksReply(sender.kind, parts) ? { linksReply: true } : {},
     createdAt: message.created_at
   };
 }
@@ -23450,7 +23456,7 @@ var RelayChannel = class {
     if (replyTo !== void 0 && replyTo !== origin.messageId) {
       return failure("reply_to_message_id is not the Message that originated the active Relay turn");
     }
-    const linked = replyTo ?? origin.messageId;
+    const linked = replyTo ?? (origin.linksReply ? origin.messageId : void 0);
     let bodies = plannedBodies.length === 0 ? plannedBodies : buildReplyMessages(redactedText, idempotencyKey, linked, buttons, link, selection);
     if (payment) {
       const cardKey = indexedIdempotencyKey(idempotencyKey, (redactedText ? 1 : 0) + (link ? 1 : 0));
@@ -23516,8 +23522,8 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join as join2 } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-var SCHEMA_VERSION = 4;
-var MIGRATABLE_SCHEMA_VERSIONS = /* @__PURE__ */ new Set(["1", "2", "3", String(SCHEMA_VERSION)]);
+var SCHEMA_VERSION = 5;
+var MIGRATABLE_SCHEMA_VERSIONS = /* @__PURE__ */ new Set(["1", "2", "3", "4", String(SCHEMA_VERSION)]);
 var MAX_PENDING_DELIVERIES = 1e4;
 var MAX_UNREAD_FULL_SYNC_DELIVERIES = 1e5;
 var ACTIVE_TURN_TTL_MS = 10 * 6e4;
@@ -23658,6 +23664,7 @@ function deliveryFromRow(row) {
     senderHandle: row.sender_handle,
     content: row.content,
     meta: JSON.parse(row.meta_json),
+    ...row.links_reply === 1 ? { linksReply: true } : {},
     createdAt: row.created_at,
     status: row.status,
     lastNotifiedAt: row.last_notified_at,
@@ -23703,6 +23710,7 @@ var RelayStateStore = class {
         sender_handle TEXT NOT NULL,
         content TEXT NOT NULL,
         meta_json TEXT NOT NULL,
+        links_reply INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         status TEXT NOT NULL CHECK(status IN ('pending','starting','processing')),
         last_notified_at INTEGER,
@@ -23735,6 +23743,10 @@ var RelayStateStore = class {
     `);
     if (existingSchema !== null && existingSchema < SCHEMA_VERSION) {
       transaction(this.#db, () => {
+        const columns = this.#db.prepare("PRAGMA table_info(deliveries)").all();
+        if (!columns.some((column) => column.name === "links_reply")) {
+          this.#db.exec("ALTER TABLE deliveries ADD COLUMN links_reply INTEGER NOT NULL DEFAULT 0");
+        }
         this.#db.exec("DROP TABLE IF EXISTS permissions");
         this.#db.prepare("DELETE FROM metadata WHERE key LIKE 'active_origin:%'").run();
         this.#db.prepare(
@@ -23852,8 +23864,8 @@ var RelayStateStore = class {
         this.#db.prepare(`
           INSERT INTO deliveries(
             delivery_id, event_id, message_id, chat_id, sender_id, sender_handle,
-            content, meta_json, created_at, status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            content, meta_json, links_reply, created_at, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         `).run(
           delivery.deliveryId,
           delivery.eventId,
@@ -23863,6 +23875,7 @@ var RelayStateStore = class {
           delivery.senderHandle,
           delivery.content,
           JSON.stringify(delivery.meta),
+          delivery.linksReply === true ? 1 : 0,
           delivery.createdAt
         );
       }
@@ -23981,7 +23994,8 @@ var RelayStateStore = class {
       messageId: row.message_id,
       chatId: row.chat_id,
       senderId: row.sender_id,
-      senderHandle: row.sender_handle
+      senderHandle: row.sender_handle,
+      linksReply: row.links_reply === 1
     };
   }
   #closeActiveTurn(outcome, now, expectedDeliveryId) {
@@ -24214,8 +24228,8 @@ var RelayStateStore = class {
         this.#db.prepare(`
           INSERT INTO deliveries(
             delivery_id, event_id, message_id, chat_id, sender_id, sender_handle,
-            content, meta_json, created_at, status
-          ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            content, meta_json, links_reply, created_at, status
+          ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         `).run(
           delivery.deliveryId,
           delivery.messageId,
@@ -24224,6 +24238,7 @@ var RelayStateStore = class {
           delivery.senderHandle,
           delivery.content,
           JSON.stringify(delivery.meta),
+          delivery.linksReply === true ? 1 : 0,
           delivery.createdAt
         );
         this.#db.prepare(`
@@ -24441,7 +24456,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           reply_to_message_id: {
             type: "string",
-            description: "The Relay Message this replies to; it can only be the active turn's Message, which is the default"
+            description: "The Relay Message this replies to; it can only be the active turn's Message. A reply to an agent names it by default"
           }
         },
         required: ["chat_id", "send_id"]

@@ -4,9 +4,9 @@ import type { RelayWebhookEvent } from "@relaymessenger/sdk";
 import { answerMessages, PiChannel, piPrompt, type PiProcess } from "../src/index.js";
 import native from "../src/native.js";
 
-const makeEvent = (id: string, chat: string): RelayWebhookEvent => ({
+const makeEvent = (id: string, chat: string, kind: "user" | "agent" = "agent"): RelayWebhookEvent => ({
   event_type: "message.received", event_id: id, api_version: "v1", webhook_version: "2026-08-30", trace_id: "trace", agent_id: "agent",
-  created_at: "2026-01-01T00:00:00Z", data: { direction: "inbound", id: `message-${id}`, chat: { id: chat } as never, sender_handle: { handle: "alice" } as never, parts: [{ type: "text", value: "hello", reactions: null }] },
+  created_at: "2026-01-01T00:00:00Z", data: { direction: "inbound", id: `message-${id}`, chat: { id: chat } as never, sender_handle: { handle: "alice", kind } as never, parts: [{ type: "text", value: "hello", reactions: null }] },
 });
 const records = (answer: string, settledFirst = false): string[] => settledFirst
   ? [JSON.stringify({ type: "agent_settled" }), JSON.stringify({ id: "1", type: "response", success: true }), JSON.stringify({ id: "2", type: "response", success: true, data: { text: answer } })]
@@ -25,11 +25,23 @@ describe("Pi channel", () => {
     const { relay, send } = relayFor([makeEvent("a", "one"), makeEvent("b", "two")]); const spawned: string[] = [];
     await new PiChannel({ agentToken: "secret", relay, spawnPi: (_command, _args, chat) => { spawned.push(chat); return fakePi(records(chat, true)); } }).run();
     expect(spawned).toEqual(["one", "two"]); expect(send).toHaveBeenCalledTimes(2);
-    // Each answer replies to the message it answers, so two callers waiting at
-    // once on Relay's A2A door each get their own.
+    // Each answer to an agent replies to the message it answers, so two
+    // callers waiting at once on Relay's A2A door each get their own.
     expect(send.mock.calls.map(([chat, body]) => [chat, body.message.reply_to])).toEqual(expect.arrayContaining([
       ["one", { message_id: "message-a" }], ["two", { message_id: "message-b" }],
     ]));
+  });
+  it("answers one agent's two messages in one chat in turn, each linked to its own", async () => {
+    const { relay, send } = relayFor([makeEvent("a", "one"), makeEvent("b", "one")]);
+    await new PiChannel({ agentToken: "secret", relay, spawnPi: () => fakePi([...records("first"), ...records("second").map((line) => line.replace('"id":"1"', '"id":"3"').replace('"id":"2"', '"id":"4"'))]) }).run();
+    expect(send.mock.calls.map(([chat, body]) => [chat, body.message.parts[0].value, body.message.reply_to])).toEqual([
+      ["one", "first", { message_id: "message-a" }], ["one", "second", { message_id: "message-b" }],
+    ]);
+  });
+  it("names no Message when answering a person", async () => {
+    const { relay, send } = relayFor([makeEvent("person", "one", "user")]);
+    await new PiChannel({ agentToken: "secret", relay, spawnPi: () => fakePi(records("hi")) }).run();
+    expect(send.mock.calls).toEqual([["one", { message: { parts: [{ type: "text", value: "hi" }], idempotency_key: "pi-person-0" } }]]);
   });
   it("deduplicates concurrent replay and chunks replies", async () => {
     const event = makeEvent("same", "one"); const send = vi.fn().mockResolvedValue({}); const { relay } = relayFor([event, event], send);

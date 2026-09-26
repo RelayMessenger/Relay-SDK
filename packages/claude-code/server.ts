@@ -221,7 +221,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           reply_to_message_id: {
             type: "string",
-            description: "The Relay Message this replies to; it can only be the active turn's Message, which is the default",
+            description: "The Relay Message this replies to; it can only be the active turn's Message. A reply to an agent names it by default",
           },
         },
         required: ["chat_id", "send_id"],

@@ -5,6 +5,7 @@ import type Relay from "@relaymessenger/sdk";
 import { query, type SpawnOptions, type SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import { platformCommand, spawnCommand } from "./spawn-command.js";
 import { bridgeTurn, codexPrompt, sendAnswer, type BridgeTurn } from "./codex-bridge.js";
+import { replacesLiveTurn } from "./bridge-turn.js";
 import type { ClaudeThreadStore } from "./claude-threads.js";
 import { MCP_SERVER_NAME, claudeMcpServer, type HostedMcp } from "./hosted-mcp.js";
 
@@ -86,6 +87,7 @@ const failureLine = (error: unknown, stderr: string): string => {
 interface LiveTurn {
   control: AbortController;
   dropped: boolean;
+  fromAgent: boolean;
 }
 
 interface ChatLane {
@@ -93,7 +95,10 @@ interface ChatLane {
   live?: LiveTurn | undefined;
 }
 
-/** One Agent SDK session per Relay chat; newer messages cancel the current turn. */
+/**
+ * One Agent SDK session per Relay chat. A person's newer message cancels the
+ * current turn; an agent's waits for it (`replacesLiveTurn`).
+ */
 export const runClaudeBridge = async (input: ClaudeBridgeInput): Promise<void> => {
   const answered = new Set<string>();
   const lanes = new Map<string, ChatLane>();
@@ -101,7 +106,7 @@ export const runClaudeBridge = async (input: ClaudeBridgeInput): Promise<void> =
   const spawner = claudeSpawn(input.claude.executable, input.platform);
 
   const answerOne = async (turn: BridgeTurn, lane: ChatLane, started: () => void): Promise<void> => {
-    const mine: LiveTurn = { control: new AbortController(), dropped: false };
+    const mine: LiveTurn = { control: new AbortController(), dropped: false, fromAgent: turn.fromAgent };
     lane.live = mine;
     const abort = (): void => mine.control.abort();
     input.signal.addEventListener("abort", abort, { once: true });
@@ -183,14 +188,19 @@ export const runClaudeBridge = async (input: ClaudeBridgeInput): Promise<void> =
       input.say(`@${turn.sender}  ${turn.text.replace(/\s+/gu, " ").slice(0, 160)}`);
       const lane = lanes.get(turn.chatId) ?? { chain: Promise.resolve() };
       lanes.set(turn.chatId, lane);
-      if (lane.live) {
-        lane.live.dropped = true;
-        lane.live.control.abort();
+      const live = lane.live;
+      const replacing = live !== undefined && replacesLiveTurn(turn, live);
+      if (live !== undefined && replacing) {
+        live.dropped = true;
+        live.control.abort();
       }
       let ready!: () => void;
       const handed = new Promise<void>((resolve) => { ready = resolve; });
       lane.chain = lane.chain.then(() => answerOne(turn, lane, ready))
         .catch(() => undefined).finally(() => { ready(); });
+      // A message that waits behind the live turn is taken now, so the turn
+      // it waits for does not hold this connection for every other chat.
+      if (live !== undefined && !replacing) ready();
       await handed;
     },
     onFullSync: async () => {

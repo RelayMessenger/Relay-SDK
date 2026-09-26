@@ -9,12 +9,12 @@ import { claudeCommand, claudeSpawn, runClaudeBridge, spawnClaude } from "./clau
 import { codexPrompt } from "./codex-bridge.js";
 import type { ClaudeThreadStore } from "./claude-threads.js";
 
-const received = (eventId: string, chatId: string, text: string, sender = "alice"): RelayWebhookEvent => ({
+const received = (eventId: string, chatId: string, text: string, sender = "alice", kind: "user" | "agent" = "user"): RelayWebhookEvent => ({
   api_version: "v1", webhook_version: "2026-08-30", event_type: "message.received",
   event_id: eventId, created_at: "2026-09-11T00:00:00.000Z", trace_id: "trace", agent_id: "agent",
   data: {
     chat: { id: chatId }, id: `message-${eventId}`, direction: "inbound",
-    sender_handle: { id: "sender", handle: sender, kind: "user" },
+    sender_handle: { id: "sender", handle: sender, kind },
     parts: [{ type: "text", value: text, reactions: null }],
   },
 } as unknown as RelayWebhookEvent);
@@ -213,7 +213,8 @@ describe("Claude Agent SDK bridge", () => {
     } });
     if (process.platform !== "win32") expect(calls[0]?.options).not.toHaveProperty("spawnClaudeCodeProcess");
     expect(state.threads.get("chat-1")).toBe("session-1");
-    expect(state.relay.sent).toEqual([{ chatId: "chat-1", text: "Answer", key: "codex-bridge-event-1", parts: [{ type: "text", value: "Answer" }], replyTo: { message_id: "message-event-1" } }]);
+    expect(state.relay.sent).toEqual([{ chatId: "chat-1", text: "Answer", key: "codex-bridge-event-1", parts: [{ type: "text", value: "Answer" }] }]);
+    expect(state.relay.sent[0]).not.toHaveProperty("replyTo.message_id");
     expect(state.relay.typing).toEqual(["start chat-1", "stop chat-1"]);
     expect(state.said).toEqual(["@alice  hello", "Sent the answer to @alice."]);
     const second = fakeRelay([received("event-2", "chat-1", "again")]);
@@ -235,8 +236,8 @@ describe("Claude Agent SDK bridge", () => {
       if (!String(prompt).includes("first question")) releaseFirst();
     });
     const state = setup(ask, [
-      received("event-1", "chat-1", "first question", "caller_one"),
-      received("event-2", "chat-2", "second question", "caller_two"),
+      received("event-1", "chat-1", "first question", "caller_one", "agent"),
+      received("event-2", "chat-2", "second question", "caller_two", "agent"),
     ]);
     await runClaudeBridge(state.input);
     await untilEnded(state.said, 2);
@@ -244,6 +245,34 @@ describe("Claude Agent SDK bridge", () => {
       ["chat-2", "Second answer", { message_id: "message-event-2" }],
       ["chat-1", "First answer", { message_id: "message-event-1" }],
     ]);
+    state.control.abort();
+  });
+
+  it("answers an agent's overlapping messages in one chat in turn, each linked to its own", async () => {
+    // One agent calls twice before the first answer: A2A 1.0 3.1.1, each
+    // Message answers its own request, so neither answer may be dropped.
+    const order: string[] = [];
+    let calls = 0;
+    const ask = fakeQuery(async function* ({ prompt }) {
+      const call = ++calls;
+      order.push(`start ${call}`);
+      yield init("session-1");
+      if (call === 1) await new Promise((resolve) => { setTimeout(resolve, 150); });
+      order.push(`end ${call}`);
+      yield success(String(prompt).includes("first") ? "first answer" : "second answer");
+    });
+    const state = setup(ask, [
+      received("event-1", "chat-1", "first", "caller", "agent"),
+      received("event-2", "chat-1", "second", "caller", "agent"),
+    ]);
+    await runClaudeBridge(state.input);
+    await untilEnded(state.said, 2);
+    expect(order).toEqual(["start 1", "end 1", "start 2", "end 2"]);
+    expect(state.relay.sent.map((item) => [item.text, item.replyTo])).toEqual([
+      ["first answer", { message_id: "message-event-1" }],
+      ["second answer", { message_id: "message-event-2" }],
+    ]);
+    expect(state.said.join("\n")).not.toContain("was dropped");
     state.control.abort();
   });
 
@@ -440,7 +469,7 @@ it("passes selected values to Claude and authors a native selection through the 
 });
 
 it("teaches Claude the payment block and sends a payment answer as the words, then the payment alone, once on replay", async () => {
-  const event = received("pay", "chat-1", "I'll take the house blend");
+  const event = received("pay", "chat-1", "I'll take the house blend", "shop_agent", "agent");
   if (event.event_type !== "message.received") throw new Error("fixture");
   event.data.reply_to = { message_id: "source", part_index: 0 };
   let prompt = "";
@@ -461,7 +490,7 @@ it("teaches Claude the payment block and sends a payment answer as the words, th
   ]);
   // The bridge created the request once, on the card's own key, from the block's fields.
   expect(state.relay.created).toEqual([{ body: { description: "House blend, 250 g", category: "physical_goods", amount: 2400, currency: "usd" }, key: "codex-bridge-pay-1" }]);
-  // The answer replies to the message that came in, never to the reply_to
-  // that came with it (context for Claude), and only its first message does.
+  // An answer to an agent replies to the message that came in, never to the
+  // reply_to that came with it (context for Claude), and only its first message does.
   expect(state.relay.sent.map((item) => item.replyTo)).toEqual([{ message_id: "message-pay" }, undefined]);
 });

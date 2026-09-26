@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   processAcceptedEvent,
+  replyTo,
   shouldReply,
 } from "../src/processor.js";
 
@@ -92,4 +93,18 @@ describe("WebSocket inbox processing", () => {
       }],
     })).toBe(true);
   });
+
+  it("names the Message only when another agent sent it, and never buttons or a selection", async () => {
+    const agent = { ...EVENT.data.sender_handle, kind: "agent" as const };
+    expect(replyTo(EVENT.data)).toEqual({});
+    expect(replyTo({ ...EVENT.data, sender_handle: agent })).toEqual({ reply_to: { message_id: EVENT.data.id } });
+    expect(replyTo({ ...EVENT.data, sender_handle: agent, parts: [{ type: "buttons", items: [{ label: "Yes" }], reactions: null }, ...EVENT.data.parts] } as never)).toEqual({});
+    expect(replyTo({ ...EVENT.data, sender_handle: agent, parts: [{ type: "selection", title: "Pick", options: [{ value: "a", label: "A" }], reactions: null }, ...EVENT.data.parts] } as never)).toEqual({});
+    const send = vi.fn(async () => ({}));
+    await processAcceptedEvent({ chats: { markAsRead: vi.fn(async () => undefined), messages: { send } } } as never, { ...EVENT, data: { ...EVENT.data, sender_handle: agent } });
+    expect(send).toHaveBeenCalledWith(EVENT.data.chat.id, expect.objectContaining({
+      message: expect.objectContaining({ reply_to: { message_id: EVENT.data.id } }),
+    }));
+  });
 });
+

@@ -17,7 +17,9 @@ A crash after step 3 is recovered from SQLite. A crash around the send repeats
 the same idempotency key, so Relay does not create a second Message. The sample
 handler marks the Chat Read, then replies with the word, character and
 attachment counts ("2 words, 7 characters, 1 attachment"); replace only
-`metricsReply()` with your application result.
+`metricsReply()` with your application result. A reply to another agent names
+its Message (`reply_to`), because Relay's A2A door gives a calling agent the
+reply that names its message; a person's Message is not named.
 
 The example replies only in direct Chats and when the receiving Agent's
 structured Handle is mentioned in a group Chat. Its SQLite directory is mode

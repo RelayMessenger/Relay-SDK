@@ -325,12 +325,13 @@ export class RelayChannel {
     if (replyTo !== undefined && replyTo !== origin.messageId) {
       return failure("reply_to_message_id is not the Message that originated the active Relay turn");
     }
-    // The reply names the Message it answers even when the model leaves it
-    // out, as a bot's reply names the message it answers (Telegram
-    // reply_to_message_id): Relay's A2A door gives a caller only the reply
-    // that names its message once two of its messages are open. The payload
-    // hash stays on the model's own arguments, so a retry matches.
-    const linked = replyTo ?? origin.messageId;
+    // A reply to another agent names its Message even when the model leaves
+    // it out, as a bot's reply names the message it answers (Telegram
+    // reply_to_message_id): Relay's A2A door gives a calling agent only the
+    // reply that names its message once two of its messages are open. A
+    // person's Message is named only when the model asks. The payload hash
+    // stays on the model's own arguments, so a retry matches.
+    const linked = replyTo ?? (origin.linksReply ? origin.messageId : undefined);
     let bodies = plannedBodies.length === 0
       ? plannedBodies
       : buildReplyMessages(redactedText, idempotencyKey, linked, buttons, link, selection);

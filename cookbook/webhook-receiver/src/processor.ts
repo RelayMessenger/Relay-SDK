@@ -47,6 +47,24 @@ export function shouldReply(data: MessageWebhookData): boolean {
   );
 }
 
+/**
+ * An answer to another agent replies to its Message, as a bot's reply names
+ * the message it answers (Telegram `reply_to_message_id`): Relay's A2A door
+ * gives a calling agent the reply that names its message. A person's Message
+ * is not named. An agent may not reply to buttons or a selection, and a reply
+ * names part 0.
+ */
+export function replyTo(
+  data: MessageWebhookData,
+): { reply_to: { message_id: string } } | Record<string, never> {
+  // Read as a string: this example's pinned SDK types predate buttons and
+  // selection parts, which Relay sends all the same.
+  const opening: string | undefined = data.parts[0]?.type;
+  return data.sender_handle.kind === "agent" && opening !== "buttons" && opening !== "selection"
+    ? { reply_to: { message_id: data.id } }
+    : {};
+}
+
 export async function processAcceptedEvent(
   relay: RelayMessageSender,
   event: RelayWebhookEvent,
@@ -67,6 +85,7 @@ export async function processAcceptedEvent(
     message: {
       parts: [{ type: "text", value: metricsReply(event.data) }],
       idempotency_key: `relay-example:webhook:${event.event_id}`,
+      ...replyTo(event.data),
     },
   });
 }
