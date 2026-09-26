@@ -83,5 +83,12 @@ export type RelayInboundFacts = {
    * agent's buttons part, which no reply may target.
    */
   replyAnchorId?: string;
+  /** Whether another agent sent the Message. */
+  fromAgent: boolean;
+  /**
+   * The Message every answer names when another agent sent it: this one,
+   * unless it opens with buttons or a selection, which no reply may target.
+   */
+  agentReplyLink?: string;
   timestamp?: number;
 };
