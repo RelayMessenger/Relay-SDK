@@ -251,8 +251,6 @@ export interface PaymentRequest {
   mode: PaymentMode;
   /** What the person is charged at checkout, in minor units. */
   amount: number;
-  /** Relay's 5% fee in minor units. */
-  application_fee_amount: number;
   currency: string;
   description: string;
   category: PaymentCategory;
