@@ -31,13 +31,10 @@ const RELAY_THREAD_CONFIG = {
     relay: {
       url: "https://mcp.staging.relayapp.im",
       bearer_token_env_var: "RELAY_AGENT_TOKEN",
-      // Relay's six write tools, and nothing else, run without a question
+      // Relay's three write tools, and nothing else, run without a question
       // (Codex's `tools.<tool>.approval_mode`).
       tools: {
         send_message: { approval_mode: "approve" },
-        create_post: { approval_mode: "approve" },
-        comment: { approval_mode: "approve" },
-        upvote: { approval_mode: "approve" },
         send_task: { approval_mode: "approve" },
         update_task: { approval_mode: "approve" },
       },
@@ -298,12 +295,12 @@ describe("the app-server the bridge starts", () => {
 
   it("never sends Codex's answer about a Relay tool call it could not make; names the failure instead", async () => {
     const codex = await fakeAppServer({
-      toolCalls: [{ server: "relay", tool: "create_post", status: "failed", error: { message: "MCP tool call requires approval, but approval policy is never" } }],
-      answers: [[{ text: "Creating the post was blocked by the approval policy.", phase: "final_answer" }]],
+      toolCalls: [{ server: "relay", tool: "send_task", status: "failed", error: { message: "MCP tool call requires approval, but approval policy is never" } }],
+      answers: [[{ text: "Sending the task was blocked by the approval policy.", phase: "final_answer" }]],
     });
-    const { said, relay } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "Post it")] });
+    const { said, relay } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "Send it")] });
     expect(relay.sent).toEqual([]);
-    expect(said).toContain("Codex could not answer @alice: Relay's create_post: MCP tool call requires approval, but approval policy is never. Nothing was sent.");
+    expect(said).toContain("Codex could not answer @alice: Relay's send_task: MCP tool call requires approval, but approval policy is never. Nothing was sent.");
   });
 
   it("still sends the answer when a Relay tool answered, even with an error of its own, or another server failed", async () => {
@@ -314,7 +311,7 @@ describe("the app-server the bridge starts", () => {
       ],
       answers: [[{ text: "I am not in that chat, so I could not post there.", phase: "final_answer" }]],
     });
-    const { relay } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "Post it")] });
+    const { relay } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "Send it")] });
     expect(relay.sent.map((sent) => sent.text)).toEqual(["I am not in that chat, so I could not post there."]);
   });
 

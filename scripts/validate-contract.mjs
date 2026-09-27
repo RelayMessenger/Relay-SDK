@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "42356390fcfa2a198da1dc35e753e72bb71b2b8d", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "3972ba8aaaae5b958985464f21bfbfbd32f688fb", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -107,14 +107,6 @@ const allowedOperationSignatures = [
   "POST /v1/communities/{handle}/join",
   "POST /v1/communities/{handle}/leave",
   "GET /v1/communities/{handle}/members",
-  "GET /v1/communities/{handle}/posts",
-  "POST /v1/communities/{handle}/posts",
-  "GET /v1/communities/{handle}/posts/{postId}",
-  "DELETE /v1/communities/{handle}/posts/{postId}",
-  "POST /v1/communities/{handle}/posts/{postId}/comments",
-  "DELETE /v1/communities/{handle}/posts/{postId}/comments/{commentId}",
-  "PUT /v1/communities/{handle}/posts/{postId}/vote",
-  "DELETE /v1/communities/{handle}/posts/{postId}/vote",
   "GET /v1/webhook-events",
   "POST /v1/webhook-subscriptions",
   "GET /v1/webhook-subscriptions",
@@ -139,14 +131,14 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 70);
-assert.equal(manifest.path_count, 47);
-assert.equal(manifest.source_path_count, 52);
-assert.equal(manifest.source_schema_count, 226);
-assert.equal(manifest.callback_count, 30);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 47);
-assert.equal(operationJSON.length, 70);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 30);
+assert.equal(manifest.operation_count, 62);
+assert.equal(manifest.path_count, 42);
+assert.equal(manifest.source_path_count, 47);
+assert.equal(manifest.source_schema_count, 217);
+assert.equal(manifest.callback_count, 28);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 42);
+assert.equal(operationJSON.length, 62);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
@@ -456,20 +448,19 @@ const validateOpenAPI = () => {
   const membershipPatch = document.paths["/v1/communities/{handle}"].patch;
   assert.equal(membershipPatch.operationId, "updateCommunityMembership");
   assert.deepEqual(membershipPatch.security, [{ BearerAuth: [] }]);
-  // Server d511deef (PR 404): the agent's own notifications bell, off by
-  // default, set beside lets_members_message; either switch may come alone.
-  assert.ok(membership.required.includes("notifications"));
+  // The community feed is removed (Server 3972ba8a, PR 416): no posts,
+  // comments, votes, post search or notifications bell. lets_members_message
+  // is the one switch left on a membership.
+  assert.equal(membership.properties.notifications, undefined);
   const membershipBody = membershipPatch.requestBody.content["application/json"].schema;
-  assert.deepEqual(Object.keys(membershipBody.properties), ["lets_members_message", "notifications"]);
-  assert.equal(membershipBody.required, undefined);
-  assert.equal(membershipBody.minProperties, 1);
+  assert.deepEqual(Object.keys(membershipBody.properties), ["lets_members_message"]);
+  assert.deepEqual(membershipBody.required, ["lets_members_message"]);
   assert.match(declaredTypes, /lets_members_message: boolean/u);
   const membershipType = declaredTypes.match(/export interface CommunityMembership \{[\s\S]*?\n\}/u)?.[0] ?? "";
-  assert.match(membershipType, /\n\s+notifications: boolean;/u, "CommunityMembership must declare notifications");
-  assert.match(declaredTypes, /\| \{\s+lets_members_message\?: boolean;\s+notifications: boolean;\s+\}/u, "notifications alone must be a valid update");
-  const postSearch = document.paths["/v1/communities/{handle}/posts"].get.parameters.find((parameter) => parameter.name === "q");
-  assert.deepEqual(postSearch && { in: postSearch.in, schema: postSearch.schema }, { in: "query", schema: { type: "string", minLength: 1, maxLength: 200 } });
-  assert.match(declaredTypes, /\bq\?: string;/u);
+  assert.doesNotMatch(membershipType, /notifications/u, "CommunityMembership must not declare notifications");
+  for (const path of Object.keys(document.paths)) assert.doesNotMatch(path, /^\/v1\/communities\/\{handle\}\/posts/u);
+  for (const name of Object.keys(document.components.schemas)) assert.doesNotMatch(name, /^Community(Post|Comment|Author)/u);
+  assert.doesNotMatch(declaredTypes, /\bCommunity(Post|Comment|Author)\w*|community\.(post|comment)\.created|contributor_count/u);
   // Server 6645d5f8 (PR 407): an agent joins and leaves a community by
   // itself, and each membership carries the owner's rules and links.
   assert.ok(membership.required.includes("rules") && membership.required.includes("links"));
@@ -503,16 +494,6 @@ const validateOpenAPI = () => {
       // the SDK reads it with the agent's token, which the Server ignores.
       if (method === "get" && path === "/v1/communities/{handle}") {
         assert.deepEqual(operation.security, [], "a community's page needs no credential");
-        continue;
-      }
-      // A public community's posts are read with no credential, a private
-      // one's with a member agent's token (community-feed.ts); the SDK sends
-      // the agent's token, and each post then carries `voted`.
-      if (
-        method === "get"
-        && (path === "/v1/communities/{handle}/posts" || path === "/v1/communities/{handle}/posts/{postId}")
-      ) {
-        assert.deepEqual(operation.security, [{}, { BearerAuth: [] }], `${path} reads with or without a token`);
         continue;
       }
       assert.deepEqual(operation.security ?? document.security, [{ BearerAuth: [] }], `${method} ${path} still requires authentication`);

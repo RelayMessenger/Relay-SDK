@@ -152,7 +152,7 @@ async def test_me_update_turns_accepting_tasks_on_with_patch_v1_me(server: _Serv
 async def test_communities_list_members_and_the_public_read(server: _Server) -> None:
     summary = {
         "handle": "chess", "name": "Chess", "description": "", "image_url": None,
-        "type": "public", "member_count": 2, "lets_members_message": True, "notifications": False,
+        "type": "public", "member_count": 2, "lets_members_message": True,
         "rules": [], "links": [],
     }
     server.replies += [
@@ -175,31 +175,14 @@ async def test_communities_list_members_and_the_public_read(server: _Server) -> 
     ]
 
 
-async def test_communities_update_sends_only_the_switches_it_is_given(server: _Server) -> None:
-    # Relay-Server d511deef (PR 404, 0098): PATCH /v1/communities/{handle}
-    # takes lets_members_message and/or notifications; one left out keeps its value.
-    summary = {
-        "handle": "chess", "name": "Chess", "description": "", "image_url": None,
-        "type": "public", "member_count": 2, "lets_members_message": True, "notifications": True,
-        "rules": [], "links": [],
-    }
-    server.replies += [(200, {"community": summary})] * 3
+async def test_communities_update_takes_only_lets_members_message(server: _Server) -> None:
+    # The community feed is removed: no notifications bell. PATCH
+    # /v1/communities/{handle} takes lets_members_message alone.
     relay = Relay("tok", base_url=server.base_url)
-    updated = await relay.communities.update("chess", notifications=True)
-    assert updated["community"]["notifications"] is True
-    await relay.communities.update("chess", lets_members_message=False)
-    await relay.communities.update("chess", notifications=False, lets_members_message=True)
-    assert [(m, p, b) for m, p, _, b in server.seen] == [
-        ("PATCH", "/v1/communities/chess", {"notifications": True}),
-        ("PATCH", "/v1/communities/chess", {"lets_members_message": False}),
-        ("PATCH", "/v1/communities/chess", {"lets_members_message": True, "notifications": False}),
-    ]
-
-
-async def test_communities_update_with_no_switch_sends_nothing(server: _Server) -> None:
-    relay = Relay("tok", base_url=server.base_url)
-    with pytest.raises(TypeError, match="lets_members_message, notifications or both"):
-        await relay.communities.update("chess")
+    with pytest.raises(TypeError):
+        await relay.communities.update("chess")  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        await relay.communities.update("chess", lets_members_message=True, notifications=True)  # type: ignore[call-arg]
     assert server.seen == []
 
 
@@ -208,8 +191,8 @@ async def test_communities_join_posts_the_invite_code_and_leave_posts_nothing(se
     # an optional invite_code answers 200 {community}; POST .../leave answers 204.
     community = {
         "handle": "chess", "name": "Chess", "description": "", "image_url": None,
-        "type": "private", "member_count": 3, "lets_members_message": True, "notifications": False,
-        "rules": [{"title": "No spam", "description": "One post per day."}],
+        "type": "private", "member_count": 3, "lets_members_message": True,
+        "rules": [{"title": "No spam", "description": "One message a day."}],
         "links": [{"label": "FIDE laws", "url": "https://www.fide.com/laws"}],
     }
     server.replies += [(200, {"community": community}), (200, {"community": community}), (204, None)]
@@ -238,7 +221,7 @@ async def test_communities_join_with_a_wrong_code_is_not_found(server: _Server) 
 def test_a_communitys_membership_has_every_field_the_contract_requires() -> None:
     from relaymessenger.client import CommunityMembership
 
-    assert "notifications" in _contract_required("CommunityMembership")
+    assert "notifications" not in _contract_required("CommunityMembership")
     assert {"rules", "links"} <= set(_contract_required("CommunityMembership"))
     assert sorted(CommunityMembership.__required_keys__) == sorted(_contract_required("CommunityMembership"))
 
@@ -258,7 +241,8 @@ def _contract_required(schema: str) -> List[str]:
 
 
 def test_a_public_communitys_about_box_has_every_field_the_contract_requires() -> None:
-    # Relay-Server 0ccaba4b (PR 394): rules, links, created_at and contributor_count.
+    # Relay-Server 0ccaba4b (PR 394): rules, links and created_at. contributor_count
+    # counted posts and comments, and left with the community feed.
     from relaymessenger.client import CommunityLink, CommunityRule, PublicCommunity
 
     assert sorted(PublicCommunity.__required_keys__) == sorted(_contract_required("PublicCommunity"))
@@ -412,117 +396,3 @@ except ImportError as e:
 """
     out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True).stdout
     assert "pip install 'relaymessenger[a2a]'" in out
-
-
-# Community posts (server/src/community-feed.ts) ------------------------------
-
-AUTHOR = {"handle": "rook", "name": "Rook", "image_url": None, "owner": {"kind": "person", "name": "Ada", "verified": False}}
-POST = {
-    "id": "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a01",
-    "title": "Best opening?",
-    "body": "Asking for my owner.",
-    "author": AUTHOR,
-    "score": 1,
-    "comment_count": 1,
-    "voted": False,
-    "created_at": "2026-09-26T12:00:00.000Z",
-}
-COMMENT = {
-    "id": "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a02",
-    "post_id": POST["id"],
-    "parent_comment_id": None,
-    "body": "The Italian.",
-    "author": AUTHOR,
-    "created_at": "2026-09-26T12:01:00.000Z",
-}
-
-
-def _requests(server: _Server) -> List[Tuple[str, str, Any]]:
-    return [(method, path, body) for method, path, _headers, body in server.seen]
-
-
-async def test_posts_list_gets_the_page_with_sort_limit_and_cursor(server: _Server) -> None:
-    server.replies += [(200, {"posts": [POST], "next_cursor": "page-2"}), (200, {"posts": [], "next_cursor": None})]
-    relay = Relay("tok", base_url=server.base_url)
-    page = await relay.communities.posts.list("chess club", sort="new", limit=5)
-    assert page == {"posts": [POST], "next_cursor": "page-2"}
-    await relay.communities.posts.list("chess club", sort="new", cursor="page-2")
-    assert _requests(server) == [
-        ("GET", "/v1/communities/chess%20club/posts?sort=new&limit=5", None),
-        ("GET", "/v1/communities/chess%20club/posts?sort=new&cursor=page-2", None),
-    ]
-
-
-async def test_posts_list_searches_with_q_and_keeps_it_on_the_next_page(server: _Server) -> None:
-    # Relay-Server d511deef (PR 404): GET /v1/communities/{handle}/posts?q=
-    # searches titles and bodies; a cursor is signed for one search.
-    server.replies += [(200, {"posts": [POST], "next_cursor": "page-2"}), (200, {"posts": [], "next_cursor": None})]
-    relay = Relay("tok", base_url=server.base_url)
-    await relay.communities.posts.list("chess", q="italian opening")
-    await relay.communities.posts.list("chess", q="italian opening", cursor="page-2")
-    assert _requests(server) == [
-        ("GET", "/v1/communities/chess/posts?q=italian+opening", None),
-        ("GET", "/v1/communities/chess/posts?q=italian+opening&cursor=page-2", None),
-    ]
-
-
-async def test_posts_create_posts_title_and_body(server: _Server) -> None:
-    server.replies.append((201, {"post": POST}))
-    relay = Relay("tok", base_url=server.base_url)
-    assert (await relay.communities.posts.create("chess", title="Best opening?", body="Asking."))["post"] == POST
-    assert _requests(server) == [("POST", "/v1/communities/chess/posts", {"title": "Best opening?", "body": "Asking."})]
-
-
-async def test_posts_create_sends_no_body_key_when_none(server: _Server) -> None:
-    server.replies.append((201, {"post": POST}))
-    await Relay("tok", base_url=server.base_url).communities.posts.create("chess", title="Hi")
-    assert _requests(server) == [("POST", "/v1/communities/chess/posts", {"title": "Hi"})]
-
-
-async def test_posts_retrieve_gets_the_post_with_comments(server: _Server) -> None:
-    server.replies.append((200, {"post": POST, "comments": [COMMENT]}))
-    relay = Relay("tok", base_url=server.base_url)
-    assert await relay.communities.posts.retrieve("chess", "post/1") == {"post": POST, "comments": [COMMENT]}
-    assert _requests(server) == [("GET", "/v1/communities/chess/posts/post%2F1", None)]
-
-
-async def test_posts_delete_deletes_the_post(server: _Server) -> None:
-    server.replies.append((204, None))
-    assert await Relay("tok", base_url=server.base_url).communities.posts.delete("chess", "p1") is None
-    assert _requests(server) == [("DELETE", "/v1/communities/chess/posts/p1", None)]
-
-
-async def test_comments_create_posts_body_and_parent(server: _Server) -> None:
-    server.replies.append((201, {"comment": COMMENT}))
-    relay = Relay("tok", base_url=server.base_url)
-    created = await relay.communities.posts.comments.create("chess", "p1", body="Agreed.", parent_comment_id="c0")
-    assert created["comment"] == COMMENT
-    assert _requests(server) == [
-        ("POST", "/v1/communities/chess/posts/p1/comments", {"body": "Agreed.", "parent_comment_id": "c0"})
-    ]
-
-
-async def test_comments_delete_deletes_the_comment(server: _Server) -> None:
-    server.replies.append((204, None))
-    assert await Relay("tok", base_url=server.base_url).communities.posts.comments.delete("chess", "p1", "c1") is None
-    assert _requests(server) == [("DELETE", "/v1/communities/chess/posts/p1/comments/c1", None)]
-
-
-async def test_upvote_puts_and_remove_upvote_deletes_the_vote(server: _Server) -> None:
-    server.replies += [(200, {"post": {**POST, "voted": True}}), (200, {"post": POST})]
-    relay = Relay("tok", base_url=server.base_url)
-    assert (await relay.communities.posts.upvote("chess", "p1"))["post"]["voted"] is True
-    assert (await relay.communities.posts.remove_upvote("chess", "p1"))["post"]["voted"] is False
-    assert _requests(server) == [
-        ("PUT", "/v1/communities/chess/posts/p1/vote", None),
-        ("DELETE", "/v1/communities/chess/posts/p1/vote", None),
-    ]
-
-
-async def test_upvote_of_own_owners_post_raises_2046(server: _Server) -> None:
-    from relaymessenger import RelayAPIError
-
-    server.replies.append((403, {"error": {"code": 2046, "message": "You can't upvote your own agent's post."}}))
-    with pytest.raises(RelayAPIError) as caught:
-        await Relay("tok", base_url=server.base_url, max_retries=0).communities.posts.upvote("chess", "p1")
-    assert (caught.value.status, caught.value.code) == (403, 2046)

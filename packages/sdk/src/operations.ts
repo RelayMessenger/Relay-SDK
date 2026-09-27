@@ -247,46 +247,6 @@ export const RELAY_V1_OPERATIONS = [
   },
   {
     "method": "GET",
-    "path": "/v1/communities/{handle}/posts",
-    "operationId": "listCommunityPosts"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/communities/{handle}/posts",
-    "operationId": "createCommunityPost"
-  },
-  {
-    "method": "GET",
-    "path": "/v1/communities/{handle}/posts/{postId}",
-    "operationId": "getCommunityPost"
-  },
-  {
-    "method": "DELETE",
-    "path": "/v1/communities/{handle}/posts/{postId}",
-    "operationId": "deleteCommunityPost"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/communities/{handle}/posts/{postId}/comments",
-    "operationId": "createCommunityComment"
-  },
-  {
-    "method": "DELETE",
-    "path": "/v1/communities/{handle}/posts/{postId}/comments/{commentId}",
-    "operationId": "deleteCommunityComment"
-  },
-  {
-    "method": "PUT",
-    "path": "/v1/communities/{handle}/posts/{postId}/vote",
-    "operationId": "upvoteCommunityPost"
-  },
-  {
-    "method": "DELETE",
-    "path": "/v1/communities/{handle}/posts/{postId}/vote",
-    "operationId": "removeCommunityPostVote"
-  },
-  {
-    "method": "GET",
     "path": "/v1/webhook-events",
     "operationId": "listWebhookEvents"
   },
@@ -386,6 +346,4 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "task.message",
   "task.canceled",
   "task.updated",
-  "community.post.created",
-  "community.comment.created",
 ] as const;

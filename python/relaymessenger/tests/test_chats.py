@@ -77,7 +77,7 @@ def _requests(server: _Server) -> List[Tuple[str, str, Any]]:
     return [(method, path, body) for method, path, _headers, body in server.seen]
 
 
-async def test_create_posts_v1_chats_with_the_idempotency_key_header_and_retries(server: _Server) -> None:
+async def test_create_sends_post_v1_chats_with_the_idempotency_key_header_and_retries(server: _Server) -> None:
     created = {"chat": {**{k: CHAT[k] for k in ("id", "display_name", "is_group", "handles")}, "message": {"id": "m1"}}}
     server.replies += [(503, {"error": {"message": "busy"}}), (201, created)]
     relay = Relay("tok", base_url=server.base_url, retry_base_delay=0)

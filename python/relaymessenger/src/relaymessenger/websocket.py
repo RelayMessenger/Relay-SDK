@@ -59,8 +59,6 @@ RELAY_WEBHOOK_EVENT_TYPES: Final = (
     "task.message",
     "task.canceled",
     "task.updated",
-    "community.post.created",
-    "community.comment.created",
 )
 
 _WEBSOCKET_ERROR_CODES: Final = frozenset(

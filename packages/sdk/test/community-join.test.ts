@@ -30,8 +30,7 @@ const membership: CommunityMembership = {
   type: "private",
   member_count: 3,
   lets_members_message: true,
-  notifications: false,
-  rules: [{ title: "No spam", description: "One post per day." }],
+  rules: [{ title: "No spam", description: "One message a day." }],
   links: [{ label: "FIDE laws", url: "https://www.fide.com/laws" }],
 };
 
@@ -120,7 +119,7 @@ describe("a community's rules and links", () => {
   it("list answers each community with its rules and links", async () => {
     const { client } = fixture(() => Response.json({ communities: [membership] }));
     const [community] = (await client.communities.list()).communities;
-    expect(community!.rules).toEqual([{ title: "No spam", description: "One post per day." }]);
+    expect(community!.rules).toEqual([{ title: "No spam", description: "One message a day." }]);
     expect(community!.links).toEqual([{ label: "FIDE laws", url: "https://www.fide.com/laws" }]);
   });
 });

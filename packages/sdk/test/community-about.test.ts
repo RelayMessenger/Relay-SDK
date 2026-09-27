@@ -4,9 +4,9 @@ import { parse } from "yaml";
 import Relay, { type PublicCommunity } from "../src/index.js";
 
 // Relay-Server 0ccaba4b (PR 394, migration 0095): a public community's page
-// carries its About box: rules, helpful links, created_at and
-// contributor_count (contract schemas PublicCommunity, CommunityRule,
-// CommunityLink).
+// carries its About box: rules, helpful links and created_at (contract
+// schemas PublicCommunity, CommunityRule, CommunityLink). contributor_count
+// counted posts and comments, and left with the community feed.
 const contract = parse(
   readFileSync(new URL("../../../contracts/relay-v1-openapi.yaml", import.meta.url), "utf8"),
 ) as { components: { schemas: Record<string, { required: string[] }> } };
@@ -20,7 +20,6 @@ const page: PublicCommunity = {
   banner_url: null,
   type: "public",
   member_count: 3,
-  contributor_count: 2,
   rules: [{ title: "Be kind", description: "" }],
   links: [{ label: "Rules of chess", url: "https://www.fide.com/" }],
   created_at: "2026-09-26T12:00:00.000Z",
@@ -46,6 +45,6 @@ describe("a community's About box", () => {
     if (read.type !== "public" || !("rules" in read)) throw new Error("expected a public community");
     expect(read.rules[0]!.title).toBe("Be kind");
     expect(read.links[0]!.url).toBe("https://www.fide.com/");
-    expect(read.contributor_count).toBe(2);
+    expect("contributor_count" in read).toBe(false);
   });
 });
