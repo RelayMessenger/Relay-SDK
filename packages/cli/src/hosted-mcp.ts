@@ -1,4 +1,4 @@
-import { isStagingBuild, packageVersion } from "./config.js";
+import { DEFAULT_API_URL, STAGING_API_URL, isStagingBuild, packageVersion } from "./config.js";
 
 /**
  * Relay has one MCP server, and it is hosted: the local `@relaymessenger/mcp`
@@ -11,6 +11,21 @@ export const HOSTED_MCP_URL = "https://mcp.relayapp.im";
 export const STAGING_HOSTED_MCP_URL = "https://mcp.staging.relayapp.im";
 export const hostedMcpURL = (version: string = packageVersion()): string =>
   isStagingBuild(version) ? STAGING_HOSTED_MCP_URL : HOSTED_MCP_URL;
+
+/**
+ * The hosted server of the environment the agent lives in. An Agent Token is
+ * valid only on the API that issued it, so the server that acts as the agent
+ * is the one beside that API: the staging API's agents use the staging
+ * server and production's use production, whichever build of the CLI runs
+ * (`--api-url` or RELAY_API_URL can pick either). An API address that is
+ * neither, a local or custom server, keeps the build's own server.
+ */
+export const hostedMcpURLFor = (apiURL: string | undefined, version: string = packageVersion()): string => {
+  const host = apiURL ? new URL(apiURL).host : undefined;
+  if (host === new URL(STAGING_API_URL).host) return STAGING_HOSTED_MCP_URL;
+  if (host === new URL(DEFAULT_API_URL).host) return HOSTED_MCP_URL;
+  return hostedMcpURL(version);
+};
 
 /** The name every agent lists the server under. */
 export const MCP_SERVER_NAME = "relay";

@@ -71,7 +71,7 @@ jobs:
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
       - run: npm ci
       - name: Prove the release derivation and order
-        run: node --test scripts/release-derive.test.mjs
+        run: node --test scripts/release-derive.test.mjs scripts/release-cookbook-land.test.mjs
       - name: Build the canonical SDK workspace
         run: npm run build --workspace @relaymessenger/sdk
       # npm@12 is the first release whose publish accepts --no-provenance.

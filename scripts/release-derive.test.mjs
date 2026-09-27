@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  cookbookPrereleasePins,
+  rewriteCookbook,
+  rewriteCookbooks,
   deriveVersion,
   filesCarryingVersion,
   readManifests,
@@ -96,4 +99,115 @@ test("lists every shipped file that still carries the pre-rewrite version", () =
   assert.deepEqual(filesCarryingVersion(temp, "0.9.0-staging.3"), ["runtime/server.mjs"]);
   writeFileSync(join(temp, "runtime/server.mjs"), 'var v = "0.9.0";');
   assert.deepEqual(filesCarryingVersion(temp, "0.9.0-staging.3"), []);
+});
+
+// A plan like the one release-run derives, without reading a workspace.
+const cookbookPlan = [
+  { name: "@relaymessenger/sdk", current: "0.3.6-staging.46", version: "0.3.6" },
+  { name: "@relaymessenger/chat-sdk-adapter", current: "0.3.7-staging.29", version: "0.3.7" },
+];
+
+function lockedCookbook(root, name, { nested = null } = {}) {
+  const directory = join(root, "cookbook", name);
+  mkdirSync(join(directory, "test"), { recursive: true });
+  mkdirSync(join(directory, "node_modules/@relaymessenger/sdk"), { recursive: true });
+  writeFileSync(join(directory, "package.json"), `${JSON.stringify({
+    name,
+    dependencies: {
+      "@relaymessenger/chat-sdk-adapter": "0.3.7-staging.29",
+      "@relaymessenger/sdk": "0.3.6-staging.46",
+      zod: "4.6.5",
+    },
+  }, null, 2)}\n`);
+  const packages = {
+    "": { name, dependencies: { "@relaymessenger/chat-sdk-adapter": "0.3.7-staging.29", "@relaymessenger/sdk": "0.3.6-staging.46", zod: "4.6.5" } },
+    "node_modules/@relaymessenger/chat-sdk-adapter": {
+      version: "0.3.7-staging.29",
+      resolved: "https://registry.npmjs.org/@relaymessenger/chat-sdk-adapter/-/chat-sdk-adapter-0.3.7-staging.29.tgz",
+      integrity: "sha512-oldadapter",
+    },
+    "node_modules/@relaymessenger/sdk": {
+      version: "0.3.6-staging.46",
+      resolved: "https://registry.npmjs.org/@relaymessenger/sdk/-/sdk-0.3.6-staging.46.tgz",
+      integrity: "sha512-oldsdk",
+    },
+  };
+  if (nested) packages["node_modules/@relaymessenger/chat-sdk-adapter/node_modules/@relaymessenger/sdk"] = { version: nested };
+  writeFileSync(join(directory, "package-lock.json"), `${JSON.stringify({ name, lockfileVersion: 3, packages }, null, 2)}\n`);
+  writeFileSync(join(directory, "test/contracts.test.ts"),
+    'expect(sdk).toBe("0.3.6-staging.46");\nexpect(lock).toMatchObject({ integrity: "sha512-oldadapter" });\n');
+  writeFileSync(join(directory, "node_modules/@relaymessenger/sdk/package.json"), '{"version":"0.3.6-staging.46"}');
+  return directory;
+}
+
+test("a cookbook's exact staging pins become the released versions, lockfile and tests with them", () => {
+  const root = mkdtempSync(join(tmpdir(), "release-cookbook-"));
+  const directory = lockedCookbook(root, "think");
+  const integrityByName = new Map([
+    ["@relaymessenger/sdk", "sha512-newsdk"],
+    ["@relaymessenger/chat-sdk-adapter", "sha512-newadapter"],
+  ]);
+  const written = rewriteCookbooks(root, cookbookPlan, { integrityByName });
+  assert.deepEqual(written.map((path) => path.slice(directory.length + 1)),
+    ["package-lock.json", "package.json", "test/contracts.test.ts"]);
+  const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
+  assert.deepEqual(manifest.dependencies, {
+    "@relaymessenger/chat-sdk-adapter": "0.3.7", "@relaymessenger/sdk": "0.3.6", zod: "4.6.5",
+  });
+  assert.deepEqual(cookbookPrereleasePins(manifest, cookbookPlan), []);
+  const lock = JSON.parse(readFileSync(join(directory, "package-lock.json"), "utf8"));
+  assert.deepEqual(lock.packages[""].dependencies, manifest.dependencies);
+  assert.deepEqual(lock.packages["node_modules/@relaymessenger/sdk"], {
+    version: "0.3.6",
+    resolved: "https://registry.npmjs.org/@relaymessenger/sdk/-/sdk-0.3.6.tgz",
+    integrity: "sha512-newsdk",
+  });
+  assert.equal(lock.packages["node_modules/@relaymessenger/chat-sdk-adapter"].integrity, "sha512-newadapter");
+  assert.equal(readFileSync(join(directory, "test/contracts.test.ts"), "utf8"),
+    'expect(sdk).toBe("0.3.6");\nexpect(lock).toMatchObject({ integrity: "sha512-newadapter" });\n');
+  // Installed copies are not source.
+  assert.equal(readFileSync(join(directory, "node_modules/@relaymessenger/sdk/package.json"), "utf8"),
+    '{"version":"0.3.6-staging.46"}');
+  // Idempotent: nothing is left to derive.
+  assert.deepEqual(rewriteCookbooks(root, cookbookPlan, { integrityByName }), []);
+});
+
+test("an unlocked cookbook's staging range keeps its operator and loses only the prerelease", () => {
+  const root = mkdtempSync(join(tmpdir(), "release-cookbook-range-"));
+  const directory = join(root, "cookbook", "send-a-message");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "package.json"), JSON.stringify({
+    dependencies: { "@relaymessenger/sdk": "^0.3.0-staging.0" },
+    devDependencies: { "@relaymessenger/chat-sdk-adapter": "~0.3.7-staging.2", typescript: "7.0.2" },
+  }));
+  rewriteCookbooks(root, cookbookPlan);
+  const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
+  assert.equal(manifest.dependencies["@relaymessenger/sdk"], "^0.3.0");
+  assert.equal(manifest.devDependencies["@relaymessenger/chat-sdk-adapter"], "~0.3.7");
+  assert.equal(manifest.devDependencies.typescript, "7.0.2");
+});
+
+test("the cookbook rewrite fails closed", () => {
+  const root = mkdtempSync(join(tmpdir(), "release-cookbook-closed-"));
+  // No integrity for a locked package: the lockfile would name bytes nobody checked.
+  const noIntegrity = lockedCookbook(root, "no-integrity");
+  assert.throws(() => rewriteCookbook(noIntegrity, cookbookPlan, {
+    integrityByName: new Map([["@relaymessenger/sdk", "sha512-newsdk"]]),
+  }), /no integrity for @relaymessenger\/chat-sdk-adapter@0.3.7/u);
+  // A staging version nested under another package survives the rewrite.
+  const nested = lockedCookbook(root, "nested", { nested: "0.3.6-staging.46" });
+  assert.doesNotThrow(() => rewriteCookbook(nested, cookbookPlan, {
+    integrityByName: new Map([["@relaymessenger/sdk", "s1"], ["@relaymessenger/chat-sdk-adapter", "s2"]]),
+  }));
+  const stale = lockedCookbook(root, "stale", { nested: "0.3.6-staging.40" });
+  const pins = JSON.parse(readFileSync(join(stale, "package.json"), "utf8"));
+  assert.equal(cookbookPrereleasePins(pins, cookbookPlan).length, 2);
+  assert.throws(() => rewriteCookbook(stale, cookbookPlan, {
+    integrityByName: new Map([["@relaymessenger/sdk", "s1"], ["@relaymessenger/chat-sdk-adapter", "s2"]]),
+  }), /still resolves node_modules\/@relaymessenger\/chat-sdk-adapter\/node_modules\/@relaymessenger\/sdk to 0.3.6-staging.40/u);
+  // A pin shape the release cannot derive.
+  const odd = join(root, "cookbook", "odd");
+  mkdirSync(odd, { recursive: true });
+  writeFileSync(join(odd, "package.json"), JSON.stringify({ dependencies: { "@relaymessenger/sdk": ">=0.3.0-staging.1 <1" } }));
+  assert.throws(() => rewriteCookbook(odd, cookbookPlan), /only X.Y.Z-staging.N/u);
 });

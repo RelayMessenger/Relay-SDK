@@ -21,7 +21,7 @@ import { sniffRuntimes, type RuntimeFound, type RuntimeId, type RuntimeSniffCont
 import { readChannelEnv, writeEnvFile } from "./claude-channel.js";
 import { readFolderLink, writeFolderLink } from "./folder-link.js";
 import { writeCodexProjectMcpServer } from "./coding-agents/codex-project-config.js";
-import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, clineMcpEntry, codexMcpServer, hostedMcpURL, vscodeMcpEntry, type HostedMcp } from "./hosted-mcp.js";
+import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, clineMcpEntry, codexMcpServer, hostedMcpURLFor, vscodeMcpEntry, type HostedMcp } from "./hosted-mcp.js";
 import { writePrivateFile } from "./private-file.js";
 import { parse as parseToml } from "smol-toml";
 import { configPath, defaultCreationApiURL, isStagingBuild, packageVersion, validateApiURL, validateProfileName, validateToken, type RelayConsoleSession } from "./config.js";
@@ -221,10 +221,10 @@ export interface PlanContext {
 const paths = (context: { env: NodeJS.ProcessEnv; home: string; platform: NodeJS.Platform; cwd: string }): AgentPaths =>
   ({ env: context.env, home: context.home, platform: context.platform, cwd: context.cwd });
 
-/** Relay's hosted MCP server as this agent reaches it: the build's server and
- * the agent's own token (hosted-mcp.ts). */
-export const hostedMcp = (context: { version: string; token: string }): HostedMcp =>
-  ({ url: hostedMcpURL(context.version), token: context.token });
+/** Relay's hosted MCP server as this agent reaches it: the server of the API
+ * the agent lives on, and the agent's own token (hosted-mcp.ts). */
+export const hostedMcp = (context: { version: string; token: string; apiURL?: string }): HostedMcp =>
+  ({ url: hostedMcpURLFor(context.apiURL, context.version), token: context.token });
 
 /** The key VS Code keeps its servers under (hosted-mcp.ts, `vscodeMcpEntry`). */
 const mcpRootKey = (_shape: "vscode"): string => "servers";
@@ -251,7 +251,7 @@ export const agentCommands = (agent: CodingAgentId, context: PlanContext): strin
       // in `mcp_servers.relay`" (measured on this Mac, 2026-09-26). The
       // entry is the one Relay-Docs gives Codex (integrations/mcp.mdx).
       return context.retiredCodexServer
-        ? [["codex", "mcp", "add", MCP_SERVER_NAME, "--url", hostedMcpURL(context.version), "--bearer-token-env-var", AGENT_TOKEN_ENV]]
+        ? [["codex", "mcp", "add", MCP_SERVER_NAME, "--url", hostedMcpURLFor(context.apiURL, context.version), "--bearer-token-env-var", AGENT_TOKEN_ENV]]
         : [];
     case "hermes":
       // Two steps, because `install --enable` asks before it prepares the
@@ -735,17 +735,17 @@ export const runConnect = async (
           () => "Replaced the retired Relay server in Codex",
         );
       }
-      const file = await writeCodexProjectMcpServer(deps.cwd, { name: MCP_SERVER_NAME, ...codexMcpServer(hostedMcpURL(version)) });
+      const file = await writeCodexProjectMcpServer(deps.cwd, { name: MCP_SERVER_NAME, ...codexMcpServer(hostedMcpURLFor(agent.apiURL, version)) });
       screen.step(`wrote  ${screen.dim(file)}`);
     } else if (method.kind === "mcp-file") {
-      await writeMcpFileEntry(planned.files[0]!, method.shape, hostedMcp({ version, token: agent.token }));
+      await writeMcpFileEntry(planned.files[0]!, method.shape, hostedMcp({ version, token: agent.token, apiURL: agent.apiURL }));
       screen.step(`wrote  ${screen.dim(planned.files[0] ?? "")}`);
     } else if (method.kind === "claude-bridge") {
       // Relay tools travel through the Agent SDK session; no Claude config is written.
     } else if (method.kind === "acp-bridge" && method.mcpSettings) {
       // The agent ignores the servers an ACP session hands it, so Relay's
       // server goes in the settings file the agent reads (cline.ts).
-      await writeMcpSettingsEntry(planned.files[0]!, hostedMcp({ version, token: agent.token }));
+      await writeMcpSettingsEntry(planned.files[0]!, hostedMcp({ version, token: agent.token, apiURL: agent.apiURL }));
       screen.step(`wrote  ${screen.dim(planned.files[0] ?? "")}`);
       if (definition.signIn && !json) screen.say(definition.signIn);
     } else if (method.kind === "acp-bridge") {
@@ -772,27 +772,27 @@ export const runConnect = async (
       const command = runtime?.executable ?? start.command;
       result.bridge_command = command;
       if (!json && options.start !== false && (options.yes === true || ui !== undefined)) {
-        bridge = { label: definition.label, command, kind: "claude", mcpURL: hostedMcpURL(version) };
+        bridge = { label: definition.label, command, kind: "claude", mcpURL: hostedMcpURLFor(agent.apiURL, version) };
       }
     } else if (start?.kind === "bridge") {
       const command = runtime?.executable ?? start.command;
       result.bridge_command = command;
       // The plan's last line said this starts, and Continue took it.
       if (!json && options.start !== false && (options.yes === true || ui !== undefined)) {
-        bridge = { label: definition.label, command, kind: "codex", mcpURL: hostedMcpURL(version) };
+        bridge = { label: definition.label, command, kind: "codex", mcpURL: hostedMcpURLFor(agent.apiURL, version) };
       }
     } else if (start?.kind === "acp-bridge") {
       const command = runtime?.executable ?? start.command;
       result.bridge_command = command;
       result.bridge_args = [...start.args];
       if (!json && options.start !== false && (options.yes === true || ui !== undefined)) {
-        bridge = { label: definition.label, command, kind: "acp", acpArgs: start.args, mcpURL: hostedMcpURL(version) };
+        bridge = { label: definition.label, command, kind: "acp", acpArgs: start.args, mcpURL: hostedMcpURLFor(agent.apiURL, version) };
       }
     } else if (start?.kind === "pi-bridge") {
       const command = runtime?.executable ?? start.command;
       result.bridge_command = command;
       if (!json && options.start !== false && (options.yes === true || ui !== undefined)) {
-        bridge = { label: definition.label, command, kind: "pi", mcpURL: hostedMcpURL(version) };
+        bridge = { label: definition.label, command, kind: "pi", mcpURL: hostedMcpURLFor(agent.apiURL, version) };
       }
     } else if (start?.kind === "command") {
       const command = runtime?.executable ?? start.command;

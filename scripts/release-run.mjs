@@ -18,11 +18,15 @@ import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { landCookbookPins } from "./release-cookbook-land.mjs";
 import {
+  cookbookDirectories,
+  cookbookPrereleasePins,
   filesCarryingVersion,
   internalDependencies,
   readManifests,
   releasePlan,
+  rewriteCookbooks,
   rewritePackage,
   rewriteReleaseWorkspace,
 } from "./release-derive.mjs";
@@ -159,10 +163,18 @@ for (const row of plan.filter((entry) => entry.action === "skip")) {
   run(npm, ["run", "build", "--workspace", row.name]);
 }
 
+// The integrity and tarball of every release version, for the cookbooks.
+const integrityByName = new Map();
+const tarballs = [];
 rmSync(join(root, ".release-tmp", "release"), { recursive: true, force: true });
 for (const row of plan) {
   say(`\n=== ${row.key}: ${row.name}@${row.version} (${row.action}) ===`);
-  if (row.action === "skip") continue;
+  if (row.action === "skip") {
+    if (!assumed.has(`${row.name}@${row.version}`)) {
+      integrityByName.set(row.name, view(`${row.name}@${row.version}`, "dist.integrity").value);
+    }
+    continue;
+  }
   const entry = releasePackages[row.key];
   const written = rewritePackage(root, row.key, plan, { sdkIntegrity });
   say(`rewrote ${written.map((path) => path.slice(root.length + 1)).join(", ")}`);
@@ -204,6 +216,8 @@ for (const row of plan) {
     run(npm, ["run", entry.validate], { env: { RELAY_RELEASE: "1" } });
   }
   const tarball = tarballFor(row);
+  integrityByName.set(row.name, tarball.integrity);
+  tarballs.push(tarball.path);
   // Fail closed: nothing that ships may still carry the staging version the
   // tree had before the rewrite, whether checked in or generated.
   const unpacked = join(root, ".release-tmp", "release", `${row.key}-unpacked`);
@@ -238,6 +252,38 @@ for (const row of plan) {
   await recordTag(row);
   if (row.key === "sdk") sdkIntegrity = tarball.integrity;
 }
+// Cookbooks: every Relay staging pin becomes the version just released, the
+// same derivation as the packages above, then each folder is proven the way
+// main's cookbook-standalone check proves it: copied out, installed on the
+// release channel, type-checked. Before the publish (the dry run) the new
+// versions exist only as the tarballs packed above, which the check installs
+// from a private cache by their integrity; after it, npm has them.
+say("\n=== cookbooks ===");
+const cookbookPins = rewriteCookbooks(root, plan, { integrityByName });
+say(cookbookPins.length > 0
+  ? `rewrote ${cookbookPins.map((path) => path.slice(root.length + 1)).join(", ")}`
+  : "no cookbook pins a staging build");
+for (const directory of cookbookDirectories(root)) {
+  const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
+  assert.deepEqual(cookbookPrereleasePins(manifest, plan), [], `${directory} still pins a staging build`);
+}
+run(process.execPath, [
+  "scripts/validate-cookbook-standalone.mjs",
+  "--channel", "release",
+  ...(dryRun ? tarballs.flatMap((path) => ["--tarball", path]) : []),
+]);
+if (!dryRun) {
+  // Carry the pins to staging so the next promotion takes them into main.
+  const landed = landCookbookPins({
+    root,
+    paths: cookbookPins,
+    remote: `https://github.com/${process.env.GITHUB_REPOSITORY}.git`,
+    auth: `basic ${Buffer.from(`x-access-token:${process.env.GH_TOKEN}`).toString("base64")}`,
+    say,
+  });
+  if (!landed.landed) say(`cookbook pins not landed: ${landed.reason}`);
+}
+
 say(`\nrelease ${dryRun ? "dry run" : "publish"} finished: ${
   plan.map((row) => `${row.key}=${row.action}`).join(" ")
 }`);

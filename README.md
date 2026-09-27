@@ -146,7 +146,12 @@ Nothing is published by hand. Two npm channels, kept apart:
      --no-provenance` on Blacksmith with the `npm-release` credential;
   5. creates the git tag `<prefix><version>` after each successful publish, as
      the record, never as the trigger;
-  6. installs each published version clean from the registry and exercises it.
+  6. installs each published version clean from the registry and exercises it;
+  7. rewrites every cookbook's Relay staging pins to the versions it published
+     (lockfile, tarball URL and integrity with them), proves each folder on the
+     release channel the way `cookbook-standalone` does on `main`, and lands
+     that one commit on `staging` so the next promotion carries release pins.
+     The dry run proves the same folders from the tarballs it packed.
 
 Order and record tags, from [`scripts/release-packages.mjs`](scripts/release-packages.mjs):
 

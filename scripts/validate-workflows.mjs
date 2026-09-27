@@ -422,7 +422,7 @@ assert.match(
   "only a push to main may run the publishing release",
 );
 assert.match(release, /run: node scripts\/release-run\.mjs --dry-run$/mu);
-assert.match(release, /run: node --test scripts\/release-derive\.test\.mjs$/mu);
+assert.match(release, /run: node --test scripts\/release-derive\.test\.mjs scripts\/release-cookbook-land\.test\.mjs$/mu);
 // The staging bump rehearses on every change the way the release does: the
 // same decisions against the live registry, writing nothing.
 const ci = readFileSync(".github/workflows/ci.yml", "utf8");

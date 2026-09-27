@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AGENT_TOKEN_ENV, HOSTED_MCP_URL, MCP_SERVER_NAME, STAGING_HOSTED_MCP_URL,
-  claudeMcpServer, codexMcpServer, hostedMcpURL, mcpRemoteServer, vscodeMcpEntry,
+  claudeMcpServer, codexMcpServer, hostedMcpURL, hostedMcpURLFor, mcpRemoteServer, vscodeMcpEntry,
 } from "./hosted-mcp.js";
 
 const mcp = { url: STAGING_HOSTED_MCP_URL, token: "rel_token_calm" };
@@ -14,6 +14,17 @@ describe("Relay's hosted MCP server", () => {
     expect(hostedMcpURL("0.4.3-staging.7")).toBe("https://mcp.staging.relayapp.im");
     expect(MCP_SERVER_NAME).toBe("relay");
     expect(AGENT_TOKEN_ENV).toBe("RELAY_AGENT_TOKEN");
+  });
+
+  it("follows the API the agent lives on, whichever build runs", () => {
+    // A staging build connecting a production agent, and the reverse.
+    expect(hostedMcpURLFor("https://api.relayapp.im", "0.4.3-staging.7")).toBe("https://mcp.relayapp.im");
+    expect(hostedMcpURLFor("https://api.relayapp.im/", "0.4.3-staging.7")).toBe("https://mcp.relayapp.im");
+    expect(hostedMcpURLFor("https://api.staging.relayapp.im", "0.4.2")).toBe("https://mcp.staging.relayapp.im");
+    // A local or custom API has no hosted twin: the build's own server.
+    expect(hostedMcpURLFor("http://127.0.0.1:8787", "0.4.2")).toBe("https://mcp.relayapp.im");
+    expect(hostedMcpURLFor("http://127.0.0.1:8787", "0.4.3-staging.7")).toBe("https://mcp.staging.relayapp.im");
+    expect(hostedMcpURLFor(undefined, "0.4.3-staging.7")).toBe("https://mcp.staging.relayapp.im");
   });
 
   it("reaches Claude Code as the Agent SDK's McpHttpServerConfig", () => {

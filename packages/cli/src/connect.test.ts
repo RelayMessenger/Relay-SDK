@@ -307,6 +307,25 @@ describe("the MCP agents", () => {
     expect(f.stdout.join("")).not.toContain(token);
   });
 
+  it("the MCP server follows the API the agent was connected on, not the CLI build", async () => {
+    // A staging build told to use production writes production's server.
+    const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" } }));
+    f.env.RELAY_API_URL = "https://api.relayapp.im";
+    expect(await runCLI(["connect", "codex", "--subtitle", "Helps with tasks", "--new", "--yes", "--no-skill", "--json"], f.deps)).toBe(0);
+    const { parse } = await import("smol-toml");
+    const written = parse(await readFile(join(f.home, ".codex", "config.toml"), "utf8")) as { mcp_servers: { relay: { url: string } } };
+    expect(JSON.parse(f.stdout.join("")).link.api_url).toBe("https://api.relayapp.im");
+    expect(written.mcp_servers.relay.url).toBe("https://mcp.relayapp.im");
+
+    // A release build told to use staging bridges to staging's server.
+    const g = await fixture();
+    g.deps.connect = { ...g.deps.connect!, version: "0.1.6" };
+    expect(await runCLI(["connect", "claude", "--subtitle", "Helps with tasks", "--token", token, "--yes", "--no-skill"], g.deps)).toBe(0);
+    expect(g.bridge).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      apiURL: "https://api.staging.relayapp.im", mcpURL: "https://mcp.staging.relayapp.im",
+    }));
+  });
+
   it("codex replaces the retired local Relay server in Codex's own config with Codex's own command, and nothing else", async () => {
     const f = await fixture({}, runtimes({ codex: { found: true, executable: "/fake/bin/codex" } }));
     await mkdir(join(f.home, ".codex"), { recursive: true });
