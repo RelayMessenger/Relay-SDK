@@ -69,7 +69,7 @@ describe("relay auth token", () => {
   it.each([
     [["auth", "token"], "Profile default has no saved token."],
     [["--profile", "empty", "auth", "token"], "Profile empty has no saved token."],
-    [["--json", "auth", "token"], "\"code\":\"no_token\""],
+    [["--json", "auth", "token"], "\"code\": \"no_token\""],
   ])("with no token %j exits 4, prints nothing on stdout, and says so on stderr", async (args, message) => {
     const f = await fixture();
     if (args.includes("empty")) await saved(f.deps.configContext);
