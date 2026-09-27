@@ -8,7 +8,7 @@ import { bridgeTurn, codexPrompt, sendAnswer, type BridgeTurn } from "./codex-br
 import { replacesLiveTurn } from "./bridge-turn.js";
 import type { ClaudeThreadStore } from "./claude-threads.js";
 import { MCP_SERVER_NAME, claudeMcpServer, type HostedMcp } from "./hosted-mcp.js";
-import { denialMessage, inputDetail, inputSummary, type ApprovalChoice, type OwnerApprovals } from "./approvals.js";
+import { denialMessage, inputCard, type ApprovalChoice, type OwnerApprovals } from "./approvals.js";
 
 export interface ClaudeBridgeInput {
   client: Pick<Relay, "chats" | "paymentRequests" | "websocket">;
@@ -100,8 +100,7 @@ export const claudePermission = (
   const outcome = await approvals.ask({
     harness: "Claude Code",
     tool: toolName,
-    summary: inputSummary(input),
-    detail: inputDetail(input),
+    ...inputCard(input),
     choices: CLAUDE_CHOICES,
     signal: options.signal,
   });

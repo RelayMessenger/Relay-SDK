@@ -21,7 +21,7 @@ import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
 import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, mcpRemoteServer, type HostedMcp } from "./hosted-mcp.js";
-import { inputDetail, inputSummary, type ApprovalChoice, type ApprovalOutcome, type OwnerApprovals } from "./approvals.js";
+import { beyond, inputCard, inputDetail, type ApprovalChoice, type ApprovalOutcome, type OwnerApprovals } from "./approvals.js";
 
 /**
  * What `relay connect cursor|gemini-cli|cline|opencode` leaves running so the
@@ -222,12 +222,22 @@ export const acpPermission = (
   const raw = call.rawInput !== null && typeof call.rawInput === "object" ? call.rawInput as Record<string, unknown> : undefined;
   const title = call.title?.trim();
   const paths = (call.locations ?? []).map((location) => location.path);
+  // The card shows the title, else the raw input's own summary, else the
+  // paths; the kind is its first line. Anything else is for "See more".
+  const card = !title && raw ? inputCard(raw) : undefined;
+  const summary = title || card?.summary || paths.join(", ") || call.toolCallId;
   const outcome = await approvals.ask({
     harness: label,
     tool: title || call.kind || "a tool",
     title: `${label} asks to ${KIND_ACTION[call.kind ?? ""] ?? "use a tool"}.`,
-    summary: title || (raw ? inputSummary(raw) : "") || paths.join(", ") || call.toolCallId,
-    detail: inputDetail({ ...(title ? { title } : {}), ...(call.kind ? { kind: call.kind } : {}), ...(raw ? { input: raw } : {}), ...(paths.length ? { paths } : {}) }),
+    summary,
+    ...(card?.note !== undefined ? { note: card.note } : {}),
+    detail: [
+      inputDetail({ ...(title ? { title } : {}), ...(call.kind ? { kind: call.kind } : {}) }),
+      ...(raw ? [inputDetail(raw)] : []),
+      ...(paths.length ? [inputDetail({ paths })] : []),
+    ].filter(Boolean).join("\n"),
+    extra: (card ? card.extra : raw !== undefined && beyond(raw, [])) || (paths.length > 0 && summary !== paths.join(", ")),
     choices: acpChoices(params.options),
     ...(signal ? { signal } : {}),
   });

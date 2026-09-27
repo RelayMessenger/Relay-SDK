@@ -62,10 +62,20 @@ export interface ApprovalRequest {
   tool: string;
   /** The card's first line, one sentence; `<harness> asks to use <tool>.` when absent. */
   title?: string;
-  /** The command or file, in one line. */
+  /** The command or file, drawn as code in one line. */
   summary: string;
-  /** The full input, shown under "See more". */
+  /**
+   * A plain line under the command: Bash's own description of it, which
+   * Claude Code's terminal prompt shows under the command too.
+   */
+  note?: string;
+  /** The full input as a person reads it, shown under "See more". */
   detail: string;
+  /**
+   * Whether `detail` holds anything the card does not show: an input field
+   * beyond the summarized value and the note. See `seeMore`.
+   */
+  extra: boolean;
   /** The harness's own choices, allow first. */
   choices: readonly ApprovalChoice[];
   /**
@@ -135,25 +145,61 @@ export const codeSpan = (text: string): string => {
   return `${fence}${pad}${text}${pad}${fence}`;
 };
 
+/**
+ * Plain text as Markdown that shows every character: each inline marker is
+ * backslash-escaped (CommonMark, "Backslash escapes"), so a `*` or `_` in a
+ * diff or a description is not read as emphasis. The Relay app parses Text as
+ * inline Markdown with whitespace kept (Relay-iOS RelayA2UICatalog.swift,
+ * `interpretedSyntax: .inlineOnlyPreservingWhitespace`), where an escaped
+ * `**bold**` stays as typed.
+ */
+export const literal = (text: string): string => text.replace(/[\\`*_[\]<>~&]/gu, "\\$&");
+
 const oneLine = (text: string): string => text.replace(/\s+/gu, " ").trim();
 
-/** The card's first lines: the sentence, and the command or file when there is one. */
-const head = (request: ApprovalRequest): string[] => oneLine(request.summary) ? ["title", "summary"] : ["title"];
+/** A line as the card draws it: whitespace collapsed to one line, then clipped. */
+const cardLine = (text: string): string => clip(oneLine(text), MAX_SUMMARY);
+
+/** Whether the card had to cut a line: a newline or run of spaces collapsed, or the end clipped. */
+const cut = (text: string): boolean => cardLine(text) !== text.trim();
+
+/**
+ * Whether the card offers "See more": only when the sheet shows something the
+ * card does not, because the card cut the command or its note, or because the
+ * input holds more than them (approved option B of the internet-of-agents
+ * mock mocks/approval-see-more.html, 2026-09-26).
+ */
+export const seeMore = (request: Pick<ApprovalRequest, "summary" | "note" | "extra">): boolean =>
+  request.extra || cut(request.summary) || (request.note !== undefined && cut(request.note));
+
+/** The card's first lines: the sentence, the command or file, and its note. */
+const head = (request: ApprovalRequest): string[] => [
+  "title",
+  ...(oneLine(request.summary) ? ["summary"] : []),
+  ...(request.note !== undefined && oneLine(request.note) ? ["note"] : []),
+];
+
+/** The card's body: its first lines, "See more" when the sheet adds something, then `last`. */
+const bodyChildren = (request: ApprovalRequest, last: string): string[] =>
+  [...head(request), ...(seeMore(request) ? ["more"] : []), last];
 
 /** The card's components, before any answer. */
 export const approvalComponents = (request: ApprovalRequest): A2uiComponent[] => {
   const buttons = request.choices.map((choice, index) => ({ choice, id: `choice_${index}` }));
   return [
     { id: "root", component: "Card", child: "body" },
-    { id: "body", component: "Column", children: [...head(request), "more", "answers"] },
+    { id: "body", component: "Column", children: bodyChildren(request, "answers") },
     { id: "title", component: "Text", text: request.title ?? `${request.harness} asks to use ${request.tool}.`, variant: "h4" },
-    ...(oneLine(request.summary) ? [{ id: "summary", component: "Text", text: codeSpan(clip(oneLine(request.summary), MAX_SUMMARY)) }] : []),
-    { id: "more", component: "Modal", trigger: "more_button", content: "more_sheet" },
-    { id: "more_button", component: "Button", child: "more_label", variant: "borderless", action: { event: { name: SEE_MORE_EVENT } } },
-    { id: "more_label", component: "Text", text: "See more" },
-    { id: "more_sheet", component: "Column", children: ["more_title", "more_text"] },
-    { id: "more_title", component: "Text", text: request.tool, variant: "h4" },
-    { id: "more_text", component: "Text", text: clip(request.detail, MAX_DETAIL) },
+    ...(oneLine(request.summary) ? [{ id: "summary", component: "Text", text: codeSpan(cardLine(request.summary)) }] : []),
+    ...(request.note !== undefined && oneLine(request.note) ? [{ id: "note", component: "Text", text: literal(cardLine(request.note)) }] : []),
+    ...(seeMore(request) ? [
+      { id: "more", component: "Modal", trigger: "more_button", content: "more_sheet" },
+      { id: "more_button", component: "Button", child: "more_label", variant: "borderless", action: { event: { name: SEE_MORE_EVENT } } },
+      { id: "more_label", component: "Text", text: "See more" },
+      { id: "more_sheet", component: "Column", children: ["more_title", "more_text"] },
+      { id: "more_title", component: "Text", text: request.tool, variant: "h4" },
+      { id: "more_text", component: "Text", text: literal(clip(request.detail, MAX_DETAIL)) },
+    ] : []),
     { id: "answers", component: "Column", children: buttons.map((button) => button.id) },
     ...buttons.flatMap(({ choice, id }, index) => [
       {
@@ -170,7 +216,7 @@ export const approvalComponents = (request: ApprovalRequest): A2uiComponent[] =>
 
 /** The card after the prompt ended: the buttons give way to what happened. */
 export const settledComponents = (request: ApprovalRequest, outcome: ApprovalOutcome): A2uiComponent[] => [
-  { id: "body", component: "Column", children: [...head(request), "more", "outcome"] },
+  { id: "body", component: "Column", children: bodyChildren(request, "outcome") },
   { id: "outcome", component: "Text", text: outcomeLine(outcome), variant: "caption" },
 ];
 
@@ -309,19 +355,109 @@ export const denialMessage = (outcome: ApprovalOutcome): string => {
   }
 };
 
+/** The input field the card's summary shows, in order of preference. */
+const summaryKey = (input: Record<string, unknown>): string | undefined =>
+  ["command", "cmd", "file_path", "path", "notebook_path", "url", "pattern", "query"].find((key) => {
+    const value = input[key];
+    return (typeof value === "string" && value.trim() !== "") || (Array.isArray(value) && value.every((part) => typeof part === "string"));
+  });
+
 /** One line of a tool input, for the card's summary. */
 export const inputSummary = (input: Record<string, unknown>): string => {
-  for (const key of ["command", "cmd", "file_path", "path", "notebook_path", "url", "pattern", "query"]) {
-    const value = input[key];
-    if (typeof value === "string" && value.trim()) return value;
-    if (Array.isArray(value) && value.every((part) => typeof part === "string")) return value.join(" ");
-  }
+  const key = summaryKey(input);
+  const value = key === undefined ? undefined : input[key];
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.join(" ");
   return JSON.stringify(input);
 };
 
-/** The whole tool input, for "See more". */
+/** Whether a value says anything: not absent, false, blank, or empty. */
+const says = (value: unknown): boolean => {
+  if (value === undefined || value === null || value === false) return false;
+  if (typeof value === "string") return value.trim() !== "";
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return true;
+};
+
+/** Whether an input says anything in a field other than `shown`, the ones the card draws. */
+export const beyond = (input: Record<string, unknown>, shown: readonly string[]): boolean =>
+  Object.entries(input).some(([key, value]) => !shown.includes(key) && says(value));
+
+/**
+ * A tool input as its card shows it: the summarized value, Bash's own
+ * description as the note, the readable detail, and whether the input holds
+ * more. An input with no field to summarize is summarized whole.
+ */
+export const inputCard = (input: Record<string, unknown>): Pick<ApprovalRequest, "summary" | "note" | "detail" | "extra"> => {
+  const key = summaryKey(input);
+  const description = key === "command" && typeof input.description === "string" && input.description.trim() ? input.description : undefined;
+  return {
+    summary: inputSummary(input),
+    ...(description !== undefined ? { note: description } : {}),
+    detail: inputDetail(input),
+    extra: key !== undefined && beyond(input, description !== undefined ? [key, "description"] : [key]),
+  };
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const isScalar = (value: unknown): boolean => value === null || typeof value !== "object";
+
+/** A value on one line, for an item of a list. */
+const inline = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  if (isRecord(value)) return Object.entries(value).map(([key, item]) => `${key}: ${inline(item)}`).join(", ");
+  if (Array.isArray(value)) return value.map(inline).join(", ");
+  return String(value);
+};
+
+/** One `name: value` line per field; a multi-line value kept as it is, a nested one indented under its name. */
+const fields = (input: Record<string, unknown>, indent = ""): string[] =>
+  Object.entries(input).filter(([, value]) => value !== undefined).flatMap(([key, value]) => {
+    if (isRecord(value)) return [`${indent}${key}:`, ...fields(value, `${indent}  `)];
+    if (Array.isArray(value) && !value.every(isScalar)) return [`${indent}${key}:`, ...value.map((item) => `${indent}  - ${inline(item)}`)];
+    return [`${indent}${key}: ${inline(value)}`];
+  });
+
+/** A replacement as a diff: `-` before each old line, `+` before each new one. */
+const diff = (before: string, after: string): string[] => [
+  ...before.split("\n").map((line) => `- ${line}`),
+  ...after.split("\n").map((line) => `+ ${line}`),
+];
+
+const isReplacement = (value: unknown): value is Record<string, unknown> & { old_string: string; new_string: string } =>
+  isRecord(value) && typeof value.old_string === "string" && typeof value.new_string === "string";
+
+/**
+ * The whole tool input as a person reads it, for "See more": an Edit is its
+ * file and a diff (a MultiEdit, a diff per edit), a Write its file and the
+ * content, anything else one `name: value` line per field.
+ */
 export const inputDetail = (input: unknown): string => {
-  try { return JSON.stringify(input, null, 2) ?? String(input); } catch { return String(input); }
+  if (typeof input === "string") return input;
+  if (!isRecord(input)) {
+    try { return JSON.stringify(input) ?? String(input); } catch { return String(input); }
+  }
+  const { file_path: path, ...rest } = input;
+  if (typeof path === "string" && isReplacement(input)) {
+    const { old_string: _old, new_string: _new, ...other } = rest;
+    return [path, ...diff(input.old_string, input.new_string), ...fields(other)].join("\n");
+  }
+  if (typeof path === "string" && Array.isArray(input.edits) && input.edits.every(isReplacement)) {
+    const { edits, ...other } = rest;
+    return [
+      path,
+      ...(edits as { old_string: string; new_string: string }[]).flatMap(({ old_string: before, new_string: after, ...more }) => [...diff(before, after), ...fields(more)]),
+      ...fields(other),
+    ].join("\n");
+  }
+  if (typeof path === "string" && typeof input.content === "string") {
+    const { content, ...other } = rest;
+    return [path, content as string, ...fields(other)].join("\n");
+  }
+  return fields(input).join("\n");
 };
 
 /**
@@ -340,6 +476,8 @@ export const piApprovals = (approvals: Pick<OwnerApprovals, "ask" | "take">): Pi
       title: dialog.title.trim() || "Pi asks a question.",
       summary: dialog.message ?? "",
       detail: [dialog.title, dialog.message].filter(Boolean).join("\n\n"),
+      // The title is the card's first line and the message its summary.
+      extra: false,
       choices,
       ...(dialog.timeoutMs !== undefined ? { timeoutMs: dialog.timeoutMs } : {}),
       ...(dialog.signal ? { signal: dialog.signal } : {}),
