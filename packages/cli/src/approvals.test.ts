@@ -2,7 +2,6 @@ import type { A2uiComponent, RelayWebhookEvent } from "@relaymessenger/sdk";
 import { describe, expect, it } from "vitest";
 import {
   ANSWER_EVENT,
-  NOT_AUTHORIZED,
   OwnerApprovals,
   SEE_MORE_EVENT,
   approvalComponents,
@@ -109,19 +108,20 @@ describe("owner approvals", () => {
     ]);
   });
 
-  it("refuses a tap from anyone who is not an owner, says Not authorized., and keeps waiting", async () => {
+  it("does not register a tap from anyone who is not an owner, sends nothing, and leaves the card to an owner", async () => {
     const relay = fakeRelay();
-    const said: string[] = [];
-    const approvals = new OwnerApprovals({ client: relay.client, say: (line) => said.push(line), surfaceId: () => "approval-3" });
-    const asked = approvals.ask({ ...REQUEST, timeoutMs: 200 });
+    const approvals = new OwnerApprovals({ client: relay.client, say: () => undefined, surfaceId: () => "approval-3" });
+    const asked = approvals.ask({ ...REQUEST, timeoutMs: 1_000 });
     await flush();
     expect(await approvals.take(tap("approval-3", { handle: "mallory", kind: "user" }, "chat-with-ada"))).toBe(true);
     expect(await approvals.take(tap("approval-3", { handle: "ada", kind: "agent" }, "chat-with-ada"))).toBe(true);
-    expect(relay.sent.filter((send) => JSON.stringify(send.parts) === JSON.stringify([{ type: "text", value: NOT_AUTHORIZED }])))
-      .toHaveLength(2);
-    expect(said.some((line) => line.includes("@mallory is not an owner"))).toBe(true);
-    // Nothing the stranger did answered it: it runs out, not approved.
-    expect(await asked).toEqual({ reason: "timeout" });
+    await flush();
+    // No message and no card change: a refusal is never a message sent on someone's behalf.
+    expect(relay.sent).toEqual([]);
+    // The card is still open: an owner's tap answers it.
+    expect(await approvals.take(tap("approval-3", { handle: "ada", kind: "user" }, "chat-with-ada", ANSWER_EVENT, "cancel"))).toBe(true);
+    expect(await asked).toEqual({ reason: "answered", by: "ada", choice: REQUEST.choices[2] });
+    expect(relay.sent.every((send) => updates([send]).length === 1)).toBe(true);
   });
 
   it("denies and updates the card when nobody answers in time", async () => {
