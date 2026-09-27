@@ -39,18 +39,28 @@ export const claudeCommand = async (
 };
 
 /**
- * The tools that run without asking, as Inkbox's Claude Code plugin runs them:
- * its read-only set (`DEFAULT_AUTO_ALLOWED_TOOLS`,
- * _sources/approvals-inkbox-20260926/inkbox-claude-code-plugin-config.py.txt:40-49)
- * plus every tool of its own MCP server (sessions.py.txt:1171-1173). Relay's
- * are `mcp__relay__*`, the rule that "matches all tools from the server"
- * (Claude Code permissions, _sources/mcp-tool-design-20260926/
- * claude-code-permissions-docs.md:482-483). Everything else goes through the
- * person's own settings (`settingSources`) and, where those ask, to the
- * agent's owners (`claudePermission`).
+ * The only tools Relay lets run without asking: its own messaging tools,
+ * `mcp__relay__*`, the rule that "matches all tools from the server" (Claude
+ * Code permissions, _sources/mcp-tool-design-20260926/
+ * claude-code-permissions-docs.md:482-483). Relay is the integration, not
+ * the harness, so it adds no allow rule for Claude Code's own tools.
+ *
+ * Inkbox's Claude Code plugin does the opposite: it auto-allows a read-only
+ * set (`DEFAULT_AUTO_ALLOWED_TOOLS`, Read, Glob, Grep, WebFetch, WebSearch and
+ * more; _sources/approvals-inkbox-20260926/
+ * inkbox-claude-code-plugin-config.py.txt:40-49). Relay does not, because
+ * anyone can message a Relay agent: an allowed Read reads any path on the
+ * owner's computer, and an allowed WebFetch fetches any URL, with nobody
+ * asked. Relay keeps Claude Code's own terminal defaults instead
+ * (claude-code-permissions-docs.md:17-21): a file read needs no approval only
+ * "within the working directory and additional directories"; a web fetch
+ * needs approval "except a built-in set of preapproved documentation
+ * domains"; a web search needs approval. The person's own allow and deny
+ * rules still decide first (`CLAUDE_SETTING_SOURCES`), so whoever wants reads
+ * auto-allowed writes that rule in their own Claude Code settings; what is
+ * left to a prompt goes to the agent's owners (`claudePermission`).
  */
 export const CLAUDE_ALLOWED_TOOLS: readonly string[] = [
-  "Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite", "Task", "NotebookRead",
   `mcp__${MCP_SERVER_NAME}__*`,
 ];
 

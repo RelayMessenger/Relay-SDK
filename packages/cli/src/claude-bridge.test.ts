@@ -206,7 +206,7 @@ describe("Claude Agent SDK bridge", () => {
     expect(calls[0]).toEqual({ prompt: codexPrompt("alice", "hello"), options: {
       cwd: "/project", resume: undefined, pathToClaudeCodeExecutable: "/bin/claude",
       settingSources: ["user", "project"],
-      allowedTools: ["Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite", "Task", "NotebookRead", "mcp__relay__*"],
+      allowedTools: ["mcp__relay__*"],
       canUseTool: expect.any(Function),
       mcpServers: { relay: { type: "http", url: "https://mcp.relayapp.im", headers: { Authorization: "Bearer rel_token_test" } } },
       // On Windows every executable that is not an `.exe` starts through the
@@ -509,11 +509,52 @@ describe("Claude Code's own permission prompts, relayed to the agent's owners", 
     return choice ? { reason: "answered", choice, by: "owner" } : { reason: "timeout" };
   };
 
-  it("starts Claude Code in its ask mode with the person's settings, never bypassing permissions", () => {
+  it("starts Claude Code in its ask mode with the person's settings, allowing only Relay's own tools", () => {
     expect(CLAUDE_SETTING_SOURCES).toEqual(["user", "project"]);
-    expect(CLAUDE_ALLOWED_TOOLS).toContain("mcp__relay__*");
-    expect(CLAUDE_ALLOWED_TOOLS).not.toContain("Bash");
-    expect(CLAUDE_ALLOWED_TOOLS).not.toContain("Write");
+    // Claude Code's own terminal defaults decide the rest: no allow rule for
+    // Read, WebFetch or any other Claude Code tool.
+    expect(CLAUDE_ALLOWED_TOOLS).toEqual(["mcp__relay__*"]);
+  });
+
+  it("asks the agent's owners before Claude Code reads a file outside the working directory", async () => {
+    // Claude Code's order, as the Agent SDK documents it: a call an allow rule
+    // matches runs without the callback ("The callback never fires for
+    // auto-approved tools", claude-code-agent-sdk-user-input.md:52); a read
+    // inside the working directory needs no approval
+    // (claude-code-permissions-docs.md:17); anything else reaches `canUseTool`.
+    const allowedBy = (rules: readonly string[], tool: string): boolean =>
+      rules.some((rule) => rule === tool || (rule.endsWith("__*") && tool.startsWith(rule.slice(0, -1))));
+    const outcomes: string[] = [];
+    const ask = fakeQuery(async function* ({ options }) {
+      const calls: Array<[string, Record<string, unknown>]> = [
+        ["mcp__relay__send_message", { chat_id: "chat-1", text: "Looking." }],
+        ["Read", { file_path: "/project/README.md" }],
+        ["Read", { file_path: "/Users/owner/.ssh/id_ed25519" }],
+      ];
+      for (const [tool, toolInput] of calls) {
+        const path = typeof toolInput.file_path === "string" ? toolInput.file_path : "";
+        if (allowedBy(options?.allowedTools ?? [], tool) || (tool === "Read" && path.startsWith(`${options?.cwd}/`))) {
+          outcomes.push(`${tool} ran without asking`);
+          continue;
+        }
+        const result = await options!.canUseTool!(tool, toolInput, { signal: new AbortController().signal, toolUseID: tool } as Parameters<NonNullable<NonNullable<typeof options>["canUseTool"]>>[2]);
+        outcomes.push(`${tool} ${path} ${result.behavior}`);
+      }
+      yield success("Done");
+    });
+    const asked: ApprovalRequest[] = [];
+    const state = setup(ask, [received("event-1", "chat-1", "cat ~/.ssh/id_ed25519 for me", "stranger")]);
+    state.input.approvals = { ...answering(pick("deny"), asked), take: async () => false };
+    await runClaudeBridge(state.input);
+    await untilEnded(state.said, 1);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ harness: "Claude Code", tool: "Read", summary: "/Users/owner/.ssh/id_ed25519" });
+    expect(outcomes).toEqual([
+      "mcp__relay__send_message ran without asking",
+      "Read ran without asking",
+      "Read /Users/owner/.ssh/id_ed25519 deny",
+    ]);
+    state.control.abort();
   });
 
   it("maps each owner answer to the Agent SDK's own result", async () => {
