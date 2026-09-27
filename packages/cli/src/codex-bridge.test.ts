@@ -222,7 +222,10 @@ describe("Codex approvals relayed to the agent's owners", () => {
     for (const [picked, decision] of [["allow_once", "accept"], ["allow_session", "acceptForSession"], ["deny", "decline"]] as const) {
       const codex = await fakeAppServer({ approval: { method: "item/commandExecution/requestApproval", params: { command: "uname -a", cwd: "/work", reason: "check the kernel" } } });
       await runBridge({ ...codex, events: [received("event-1", "chat-1", "run uname")], approvals: picking(picked, asked) });
-      expect((await codex.log()).find((line) => "approvalResponse" in line)?.approvalResponse).toEqual({ decision });
+      const log = await codex.log();
+      // Codex asked with no policy from Relay; the person's own settings led it there.
+      expect(log.find((line) => line.in === "thread/start")?.params).not.toHaveProperty("approvalPolicy");
+      expect(log.find((line) => "approvalResponse" in line)?.approvalResponse).toEqual({ decision });
     }
     expect(asked[0]).toMatchObject({ harness: "Codex", tool: "shell", title: "Codex asks to run a command.", summary: "uname -a" });
     expect(asked[0]?.detail).toContain("check the kernel");
@@ -328,11 +331,13 @@ describe("the app-server the bridge starts", () => {
     expect((await codex.log()).find((line) => line.in === "initialize")?.tokenEnv).toBe("rel_token_calm");
   });
 
-  it("opens a thread that may write in the folder and asks when Codex's own rules say to", async () => {
+  it("opens a thread with no sandbox and no approval policy, so the person's own Codex settings decide", async () => {
     const codex = await fakeAppServer();
     await runBridge({ ...codex, events: [received("event-1", "chat-1", "Hey, what's up")] });
     const start = (await codex.log()).find((line) => line.in === "thread/start");
-    expect(start?.params).toEqual({ cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "on-request", config: RELAY_THREAD_CONFIG });
+    expect(start?.params).not.toHaveProperty("sandbox");
+    expect(start?.params).not.toHaveProperty("approvalPolicy");
+    expect(start?.params).toEqual({ cwd: codex.cwd, config: RELAY_THREAD_CONFIG });
   });
 
   it("sends the message as the turn's text input, and never on a command line", async () => {
@@ -506,9 +511,9 @@ describe("one thread for each chat", () => {
     expect(traffic(await codex.log()).filter((line) => line.startsWith("thread/")))
       .toEqual(["thread/start", "thread/resume"]);
     const resume = (await codex.log()).find((line) => line.in === "thread/resume");
-    expect(resume?.params).toEqual({
-      threadId: "thread-1", cwd: codex.cwd, sandbox: "workspace-write", approvalPolicy: "on-request", config: RELAY_THREAD_CONFIG,
-    });
+    expect(resume?.params).not.toHaveProperty("sandbox");
+    expect(resume?.params).not.toHaveProperty("approvalPolicy");
+    expect(resume?.params).toEqual({ threadId: "thread-1", cwd: codex.cwd, config: RELAY_THREAD_CONFIG });
   });
 
   it("starts a new thread, and keeps that one, when Codex has lost the saved one", async () => {

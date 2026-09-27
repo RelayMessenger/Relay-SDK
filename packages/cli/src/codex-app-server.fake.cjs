@@ -27,7 +27,7 @@
  *   approval    `{method, params}`: each turn first sends this server request
  *               (with the turn's threadId, turnId and itemId) and waits for
  *               the client's answer, which it records as `approvalResponse`,
- *               the way the real one asks under `approvalPolicy: "on-request"`
+ *               the way the real one asks when its own approval policy says to
  */
 const fs = require("node:fs");
 

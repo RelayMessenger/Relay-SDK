@@ -51,21 +51,35 @@ export const replyKey = (eventId: string): string => `codex-bridge-${eventId}`;
 export const MAX_RELAY_TEXT = 10_000;
 
 /**
- * `SandboxMode` (codex-app-server-protocol-0.154.0, v2/ThreadStartParams.json,
- * `definitions.SandboxMode`): Codex may write files in the folder it was
- * started in, and nowhere else.
+ * What the bridge sends on `thread/start` and `thread/resume`: the folder and
+ * Relay's thread config (`codexThreadConfig`), and no `sandbox` and no
+ * `approvalPolicy`. Relay is the integration, not the harness, so Codex's own
+ * settings decide what Codex may do.
+ *
+ * Both fields are optional in the app-server protocol (`approval_policy:
+ * Option<AskForApproval>` and `sandbox: Option<SandboxMode>`, codex-rs
+ * app-server-protocol/src/protocol/v2/thread.rs:88,94, saved at
+ * _sources/codex/). A value sent there wins over the person's own: "Explicitly
+ * setting on-request overrides the project-derived policy"
+ * (developers.openai.com/codex/agent-approvals-security, saved at
+ * _sources/unattended-agent-permissions-20260926/
+ * codex-agent-approvals-security.txt:32-33). Left out, Codex uses the person's
+ * `config.toml`, the project's policy, or its default, the Auto preset: "no
+ * flags needed or --sandbox workspace-write --ask-for-approval on-request"
+ * (same file, :266-268).
+ *
+ * When Codex asks, the request still reaches this process as a server request
+ * (`CODEX_APPROVAL_METHODS`) and goes to the agent's owners in Relay as a
+ * card (`codexApprovalRequest`). Relay's own write tools stay approved on
+ * its one server (`codexThreadConfig`). This is the Claude Code bridge's rule
+ * too: there only `mcp__relay__*` is allowed without asking, and the
+ * person's settings and Claude Code's defaults decide the rest (Relay-SDK
+ * PR 380, `claude-bridge.ts`).
  */
-export const CODEX_SANDBOX = "workspace-write";
-
-/**
- * `AskForApproval` (same file, `definitions.AskForApproval`): Codex asks when
- * its own rules say to, the policy Inkbox's Codex plugin runs with
- * (`"approvalPolicy": ... or "on-request"`,
- * _sources/approvals-inkbox-20260926/inkbox-codex-plugin-codex_client.py.txt:252,358).
- * Each question reaches this process as a server request and goes to the
- * agent's owners in Relay (`codexApproval`).
- */
-export const CODEX_APPROVAL_POLICY = "on-request";
+export const codexThreadSettings = (cwd: string, mcpURL: string): { cwd: string; config: ReturnType<typeof codexThreadConfig> } => ({
+  cwd,
+  config: codexThreadConfig(mcpURL),
+});
 
 /** The three answers, in Codex's decisions: `accept`, `acceptForSession`, `decline` (v2/CommandExecutionApprovalDecision.ts). */
 export const CODEX_CHOICES: readonly ApprovalChoice[] = [
@@ -584,9 +598,9 @@ export const runTurn = async (
   const unwatch = server.watch((note) => { if (turnId === undefined) early.push(note); else take(note); });
   try {
     // `turn/start` (v2/TurnStartParams.json): `threadId` and `input` are the
-    // required two, and `TextUserInput` is `{type: "text", text}`. The folder,
-    // the sandbox and the approval policy belong to the thread and are set
-    // there, so they are not repeated on every turn.
+    // required two, and `TextUserInput` is `{type: "text", text}`. The folder and
+    // the thread config belong to the thread and are set there, so they are
+    // not repeated on every turn.
     const started = await server.request("turn/start", {
       threadId: input.threadId,
       input: [{ type: "text", text: input.prompt }, ...input.images.map((path) => ({ type: "localImage", path }))],
@@ -721,12 +735,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
    * read from codex-cli 0.154.0 on 2026-09-11).
    */
   const openThread = async (server: CodexAppServer, chatId: string): Promise<string> => {
-    const settings = {
-      cwd: input.cwd,
-      sandbox: CODEX_SANDBOX,
-      approvalPolicy: CODEX_APPROVAL_POLICY,
-      config: codexThreadConfig(input.mcpURL),
-    };
+    const settings = codexThreadSettings(input.cwd, input.mcpURL);
     // This app-server already has the thread open; it is taken back by id once
     // per run of the process, not once per message.
     const open = opened.get(chatId);
