@@ -181,9 +181,9 @@ export const codexTimeout = (params: Record<string, unknown>): number | undefine
  * without a card, as Inkbox's own tools do (inkbox-claude-code-plugin-
  * sessions.py.txt:1171-1173). Without it Codex stops them: "MCP tool call
  * requires approval, but approval policy is never" (the Mac run of
- * 2026-09-26, on `create_post`). The person connected this agent so it acts
- * through Relay, so `send_message`, `create_post`, `comment`, `upvote`, `send_task` and
- * `update_task` carry Codex's per-tool setting `tools.<tool>.approval_mode =
+ * 2026-09-26, on the community feed's post tool, since removed). The person
+ * connected this agent so it acts through Relay, so `send_message`,
+ * `send_task` and `update_task` carry Codex's per-tool setting `tools.<tool>.approval_mode =
  * "approve"` ("Per-tool approval behavior override",
  * learn.chatgpt.com/docs/extend/mcp?surface=cli; saved at
  * _sources/mcp-hosted-docs-20260926/codex-extend-mcp-cli.txt:1010-1011,

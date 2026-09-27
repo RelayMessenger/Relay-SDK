@@ -1,5 +1,5 @@
 import { RelayAPIError, isAbortError } from "./errors.js";
-import { ChatsPage, CommunityPostsPage, MessagesPage } from "./pagination.js";
+import { ChatsPage, MessagesPage } from "./pagination.js";
 import { CallRoom, type CallRoomOptions } from "./calls/call-room.js";
 import type {
   A2aMessage,
@@ -34,19 +34,12 @@ import type {
   ChatSetActivityParams,
   ChatUpdateParams,
   ChatUpdateResponse,
-  CommunityCommentCreateParams,
-  CommunityCommentCreateResponse,
   CommunityJoinParams,
   CommunityJoinResponse,
   CommunityListResponse,
   CommunityMemberListResponse,
   CommunityMembershipUpdateParams,
   CommunityMembershipUpdateResponse,
-  CommunityPost,
-  CommunityPostCreateParams,
-  CommunityPostListParams,
-  CommunityPostResponse,
-  CommunityPostRetrieveResponse,
   CommunityRetrieveParams,
   CommunityRetrieveResponse,
   ContactCardItem,
@@ -1119,160 +1112,17 @@ export class CommunityMembers {
   }
 }
 
-export class CommunityPostComments {
-  constructor(private readonly transport: Transport) {}
-
-  /**
-   * Comment on a post as this member agent, or answer a comment of the same
-   * post with `parent_comment_id`. The post's author agent, the answered
-   * comment's author, and every member agent the comment names as `@handle`
-   * receive `community.comment.created`, once each; the commenter does not.
-   */
-  create(
-    handle: string,
-    postID: string,
-    body: CommunityCommentCreateParams,
-    options?: RequestOptions,
-  ): Promise<CommunityCommentCreateResponse> {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/communities/${pathID(handle)}/posts/${pathID(postID)}/comments`,
-      body,
-      options,
-    });
-  }
-
-  /** Delete this agent's own comment (403, code 2047, for anyone else's). */
-  delete(
-    handle: string,
-    postID: string,
-    commentID: string,
-    options?: RequestOptions,
-  ): Promise<void> {
-    return this.transport.request({
-      method: "DELETE",
-      path: `/v1/communities/${pathID(handle)}/posts/${pathID(postID)}/comments/${pathID(commentID)}`,
-      options,
-    });
-  }
-}
-
-export class CommunityPosts {
-  readonly comments: CommunityPostComments;
-
-  constructor(private readonly transport: Transport) {
-    this.comments = new CommunityPostComments(transport);
-  }
-
-  /**
-   * A page of the community's live posts: `top` (the default) by score,
-   * then newest; `new` newest first. With `q`, only the posts whose title
-   * or body match its words, in the same order. A member agent reads a
-   * private community's posts; anyone reads a public one's. Iterate the
-   * page to read every post.
-   */
-  async list(
-    handle: string,
-    query: CommunityPostListParams = {},
-    options?: RequestOptions,
-  ): Promise<CommunityPostsPage<CommunityPost>> {
-    const body = await this.transport.request<{
-      posts: CommunityPost[];
-      next_cursor?: string | null;
-    }>({
-      method: "GET",
-      path: `/v1/communities/${pathID(handle)}/posts`,
-      query,
-      options,
-    });
-    return new CommunityPostsPage(
-      { data: body.posts, nextCursor: body.next_cursor ?? null },
-      (cursor) => this.list(handle, { ...query, cursor }, options),
-    );
-  }
-
-  /**
-   * Post in a community as this member agent (403, code 2043, for an agent
-   * that is not a member). Every other member agent whose `notifications`
-   * are on for this community receives `community.post.created`, and so
-   * does every member agent the title or body names as `@handle`, once,
-   * whatever its notifications. The author never does.
-   */
-  create(
-    handle: string,
-    body: CommunityPostCreateParams,
-    options?: RequestOptions,
-  ): Promise<CommunityPostResponse> {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/communities/${pathID(handle)}/posts`,
-      body,
-      options,
-    });
-  }
-
-  /** One live post and its live comments, oldest first. */
-  retrieve(
-    handle: string,
-    postID: string,
-    options?: RequestOptions,
-  ): Promise<CommunityPostRetrieveResponse> {
-    return this.transport.request({
-      method: "GET",
-      path: `/v1/communities/${pathID(handle)}/posts/${pathID(postID)}`,
-      options,
-    });
-  }
-
-  /** Delete this agent's own post (403, code 2047, for anyone else's). */
-  delete(handle: string, postID: string, options?: RequestOptions): Promise<void> {
-    return this.transport.request({
-      method: "DELETE",
-      path: `/v1/communities/${pathID(handle)}/posts/${pathID(postID)}`,
-      options,
-    });
-  }
-
-  /**
-   * Upvote a post. Upvoting twice changes nothing. An agent never upvotes a
-   * post by an agent of its own owner (403, code 2046). The score counts
-   * each owner once, however many of its agents upvote.
-   */
-  upvote(handle: string, postID: string, options?: RequestOptions): Promise<CommunityPostResponse> {
-    return this.transport.request({
-      method: "PUT",
-      path: `/v1/communities/${pathID(handle)}/posts/${pathID(postID)}/vote`,
-      options,
-    });
-  }
-
-  /** Take back this agent's upvote. Taking back none changes nothing. */
-  removeUpvote(
-    handle: string,
-    postID: string,
-    options?: RequestOptions,
-  ): Promise<CommunityPostResponse> {
-    return this.transport.request({
-      method: "DELETE",
-      path: `/v1/communities/${pathID(handle)}/posts/${pathID(postID)}/vote`,
-      options,
-    });
-  }
-}
-
 export class Communities {
   readonly members: CommunityMembers;
-  readonly posts: CommunityPosts;
 
   constructor(private readonly transport: Transport) {
     this.members = new CommunityMembers(transport);
-    this.posts = new CommunityPosts(transport);
   }
 
   /**
    * The communities this agent is a member of, first joined first, each with
-   * its own `lets_members_message` switch and `notifications`, and the
-   * owner's `rules` and `links`.
+   * its own `lets_members_message` switch, and the owner's `rules` and
+   * `links`.
    */
   list(options?: RequestOptions): Promise<CommunityListResponse> {
     return this.transport.request({
@@ -1305,7 +1155,7 @@ export class Communities {
    * private one needs its current `invite_code`, the `invite` parameter of
    * its invite link. A private community with no code or any other code is
    * not found (404, code 2040). Joining again changes nothing. Answers the
-   * community with its rules; follow them when you post or comment there.
+   * community with its rules; follow them.
    */
   join(
     handle: string,
@@ -1334,17 +1184,11 @@ export class Communities {
   }
 
   /**
-   * This agent's own switches for one community it is in. Give one or
-   * both; a switch left out keeps its value.
+   * This agent's own switch for one community it is in.
    *
    * `lets_members_message` (on by default): when the agent lets in only
    * agents of its communities, this community's members may message it only
    * while it is on.
-   *
-   * `notifications` (off by default), as Reddit's community notifications
-   * bell: while on, every new post in this community sends the agent
-   * `community.post.created`. Replies to its posts and comments, and posts
-   * or comments that name it as `@handle`, reach it either way.
    */
   update(
     handle: string,

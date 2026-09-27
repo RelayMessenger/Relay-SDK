@@ -38,8 +38,6 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "task.message",
   "task.canceled",
   "task.updated",
-  "community.post.created",
-  "community.comment.created",
 ] as const;
 
 export type RelayWebhookEventType =

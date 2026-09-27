@@ -1384,11 +1384,6 @@ export class RelayAdapter
       case "task.canceled":
       case "task.updated":
         return;
-      // Community posts and comments live on the community's page, not in a
-      // chat; the Chat SDK has no primitive for them.
-      case "community.post.created":
-      case "community.comment.created":
-        return;
       default:
         return assertExhaustiveEvent(envelope.event_type);
     }

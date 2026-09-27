@@ -209,14 +209,6 @@ try {
         "POST /v1/communities/{handle}/join",
         "POST /v1/communities/{handle}/leave",
         "GET /v1/communities/{handle}/members",
-        "GET /v1/communities/{handle}/posts",
-        "POST /v1/communities/{handle}/posts",
-        "GET /v1/communities/{handle}/posts/{postId}",
-        "DELETE /v1/communities/{handle}/posts/{postId}",
-        "POST /v1/communities/{handle}/posts/{postId}/comments",
-        "DELETE /v1/communities/{handle}/posts/{postId}/comments/{commentId}",
-        "PUT /v1/communities/{handle}/posts/{postId}/vote",
-        "DELETE /v1/communities/{handle}/posts/{postId}/vote",
         "GET /v1/webhook-events",
         "POST /v1/webhook-subscriptions",
         "GET /v1/webhook-subscriptions",
@@ -272,10 +264,7 @@ try {
       assert.deepEqual(methods(client.me), ["retrieve", "update"]);
       assert.deepEqual(methods(client.communities), ["join", "leave", "list", "retrieve", "update"]);
       assert.deepEqual(methods(client.communities.members), ["list"]);
-      assert.deepEqual(methods(client.communities.posts), [
-        "create", "delete", "list", "removeUpvote", "retrieve", "upvote",
-      ]);
-      assert.deepEqual(methods(client.communities.posts.comments), ["create", "delete"]);
+      assert.equal("posts" in client.communities, false);
       assert.deepEqual(methods(client.tasks), [
         "addArtifact", "cancel", "get", "list", "send", "updateStatus",
       ]);
