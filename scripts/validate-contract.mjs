@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "42356390fcfa2a198da1dc35e753e72bb71b2b8d", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "3972ba8aaaae5b958985464f21bfbfbd32f688fb", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -131,14 +131,14 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 70);
-assert.equal(manifest.path_count, 47);
-assert.equal(manifest.source_path_count, 52);
-assert.equal(manifest.source_schema_count, 226);
-assert.equal(manifest.callback_count, 30);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 47);
-assert.equal(operationJSON.length, 70);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 30);
+assert.equal(manifest.operation_count, 62);
+assert.equal(manifest.path_count, 42);
+assert.equal(manifest.source_path_count, 47);
+assert.equal(manifest.source_schema_count, 217);
+assert.equal(manifest.callback_count, 28);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 42);
+assert.equal(operationJSON.length, 62);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
@@ -448,12 +448,13 @@ const validateOpenAPI = () => {
   const membershipPatch = document.paths["/v1/communities/{handle}"].patch;
   assert.equal(membershipPatch.operationId, "updateCommunityMembership");
   assert.deepEqual(membershipPatch.security, [{ BearerAuth: [] }]);
-  // The community feed is removed (Server FEED_REMOVAL_COMMIT): no posts,
+  // The community feed is removed (Server 3972ba8a, PR 416): no posts,
   // comments, votes, post search or notifications bell. lets_members_message
   // is the one switch left on a membership.
   assert.equal(membership.properties.notifications, undefined);
   const membershipBody = membershipPatch.requestBody.content["application/json"].schema;
   assert.deepEqual(Object.keys(membershipBody.properties), ["lets_members_message"]);
+  assert.deepEqual(membershipBody.required, ["lets_members_message"]);
   assert.match(declaredTypes, /lets_members_message: boolean/u);
   const membershipType = declaredTypes.match(/export interface CommunityMembership \{[\s\S]*?\n\}/u)?.[0] ?? "";
   assert.doesNotMatch(membershipType, /notifications/u, "CommunityMembership must not declare notifications");
