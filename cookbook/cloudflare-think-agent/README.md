@@ -113,10 +113,11 @@ Message instead of creating a duplicate.
 - a staging agent and Agent Token from Relay Console
 
 The adapter release used by this staging branch is
-`@relaymessenger/chat-sdk-adapter@0.3.7-staging.29`, published to npm by the
+`@relaymessenger/chat-sdk-adapter@0.3.7-staging.30`, published to npm by the
 staging release of Relay-SDK commit
-`1b3a3f488575990a745322e3eb4945ced36f1ad9`, with
-`@relaymessenger/sdk@0.3.6-staging.46` from the same commit. Payments exist
+`62b320548d5ba5edf2a9445efdab32122f0257b7`, with
+`@relaymessenger/sdk@0.3.6-staging.46` from commit
+`1b3a3f488575990a745322e3eb4945ced36f1ad9`. Payments exist
 only in these staging builds until the next production release.
 
 ## Local setup
@@ -351,9 +352,9 @@ Run neither guarded command without your own review and credentials.
 This revision is tested against:
 
 - Relay Server `8247505bd5f8dffccf8047b91317a68a91632068`
-- Relay-SDK `1b3a3f488575990a745322e3eb4945ced36f1ad9`
-- `@relaymessenger/chat-sdk-adapter@0.3.7-staging.29` npm integrity
-  `sha512-R0F0GubtTg50oUbAUfxKVSql6GorzA5Wl+YL9aU+5bbKLKuXMHnqTVbKQaSs/e6wwa17wmnnJrW3OF8Xwuyy6w==`
+- Relay-SDK `62b320548d5ba5edf2a9445efdab32122f0257b7`
+- `@relaymessenger/chat-sdk-adapter@0.3.7-staging.30` npm integrity
+  `sha512-Z96oZQDJwhprwaG95kLloA0TWdTBtlaWL1HTJiz7CdZGeAJxr1oOQbvKFyS6F1I1ef+eiK7q/zgvj5kr79Ygsg==`
 - `@relaymessenger/sdk@0.3.6-staging.46` npm integrity
   `sha512-4OmsVlebKPTqZ/qsR07ccjBfPLkVWFmVg1XO8UEVjComqZs8EnXZqgcjB8ZAWSF6rM5EwZV5h1XbVLEKuxvbgw==`
 - OpenAPI SHA-256
