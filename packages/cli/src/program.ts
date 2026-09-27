@@ -64,7 +64,7 @@ import {
   writeConfig,
 } from "./config.js";
 import { runDoctor } from "./doctor.js";
-import { DOCS_LINE, formatRelayHelp, HELP_GROUPS, helpFooter } from "./help-groups.js";
+import { docsLine, formatRelayHelp, HELP_GROUPS, helpFooter } from "./help-groups.js";
 import { AGENT_MODES, CLAUDE_CODE_HINT, DOCS_LLMS_URL, agentDetectedLines, agentMode, docsSection, docsSections, readDocs, resolveDrivingAgent, skillTargets } from "./agent-driver.js";
 import { supportedAgentsLine } from "./coding-agents.js";
 import { errorText, jsonText, safeMetadata } from "./output.js";
@@ -259,7 +259,7 @@ export const createProgram = (
   // protocol-error class obeys the same format as every other error; ledger
   // rows P05 and P49, captures/relay/exit-usage-badflag-json.txt).
   const usageError = (message: string, write: (value: string) => void): void => {
-    if (!dependencies.json) write(`${message.replace(/(?:rly_|rel_org_)[A-Za-z0-9_-]+/gu, "[REDACTED]")}${DOCS_LINE}\n`);
+    if (!dependencies.json) write(`${message.replace(/(?:rly_|rel_org_)[A-Za-z0-9_-]+/gu, "[REDACTED]")}${docsLine(configContext.env ?? process.env)}\n`);
   };
   program.configureOutput({
     writeOut: stdout,
@@ -272,7 +272,7 @@ export const createProgram = (
     minWidthToWrap: Number.POSITIVE_INFINITY,
   });
   // Every help screen ends the same way (GNU 4.8.2; gh's LEARN MORE block).
-  program.addHelpText("afterAll", (context) => helpFooter(context.command === program));
+  program.addHelpText("afterAll", (context) => helpFooter(context.command === program, configContext.env ?? process.env));
 
   const agentDeps = dependencies.agents ?? agentDependencies(configContext, dependencies.fetch);
   const readStdinText = dependencies.readStdin ?? (async () => {
@@ -567,7 +567,7 @@ export const createProgram = (
       const imageUpdate = created.image;
       if (globals(command).json) output({ ...result, ...(imageUpdate ? { image: imageUpdate } : {}) });
       else {
-        stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\n`);
+        stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\nPrint it with \`relay auth token --profile ${result.profile}\`.\n`);
         const liveViewFollows = imageUpdate?.status !== "incomplete" && willShowSavedAgent(command);
         if (!liveViewFollows) {
           try { stdout(renderTerminalQRForOutput(result.share_url)); }
@@ -793,6 +793,20 @@ again with --number and --code.
         await showSavedAgent(command, { profile: resolved.profile, apiURL: resolved.apiURL });
       }
   };
+  // gh's `gh auth token`: `gh auth --help` lists it as "Print the
+  // authentication token gh uses for a hostname and account", and its manual
+  // page (cli.github.com/manual/gh_auth_token, saved 2026-09-27 in
+  // _sources/gh-auth-token-20260927) says "This command outputs the
+  // authentication token for an account on a given GitHub host." gh writes the
+  // token and a newline to stdout and nothing else (pkg/cmd/auth/token/token.go,
+  // `fmt.Fprintf(opts.IO.Out, "%s\n", val)`). This is the one command that
+  // prints an Agent Token, and only on stdout, so a script can run
+  // `export RELAY_AGENT_TOKEN=$(relay auth token)`. It resolves the token the
+  // way `auth status` reports it, and fails with the same no_token error.
+  const authToken = async (_options: object, command: Command): Promise<void> => {
+    const resolved = await resolveAuth(globals(command).profile, configContext);
+    stdout(`${resolved.token}\n`);
+  };
   const authLogout = async (_options: object, command: Command, clearConsole = false): Promise<void> => {
       if (!globals(command).nonInteractive && !globals(command).json && dependencies.confirmLogout && !await dependencies.confirmLogout()) throw new InteractiveCancelled();
       const config = await readConfig(configContext);
@@ -840,6 +854,9 @@ again with --number and --code.
   const authStatusCommand = authCommands.command("status")
     .description("show the token source without revealing the token");
   addAuthStatus(authStatusCommand);
+  authCommands.command("token")
+    .description("print the token, for a script")
+    .action(authToken);
   const authLogoutCommand = authCommands.command("logout")
     .description("remove the selected profile's stored token");
   addAuthLogout(authLogoutCommand);
@@ -2002,7 +2019,7 @@ export const runCLI = async (
         "commander.optionMissingArgument", "commander.missingMandatoryOptionValue",
         "commander.excessArguments", "commander.invalidArgument",
       ].includes(error.code);
-      if (error.message && !alreadyReported) stderr(`Error: ${failure.error}\n${DOCS_LINE}\n`);
+      if (error.message && !alreadyReported) stderr(`Error: ${failure.error}\n${docsLine(env)}\n`);
       return failure.exit;
     }
     if (error instanceof HeadlessPrompt) {

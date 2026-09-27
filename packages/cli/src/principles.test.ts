@@ -9,6 +9,7 @@ import { flagRows } from "./help-groups.js";
 import { CLI_ERROR_CODES, NEXT_STEP } from "./error-codes.js";
 import { protectWindowsPath } from "./runtime-connect/windows-acl.js";
 import { docsSection, docsSections } from "./agent-driver.js";
+import { isStagingBuild, packageVersion } from "./config.js";
 
 const homes: string[] = [];
 async function privateHome(prefix: string): Promise<string> {
@@ -57,7 +58,8 @@ it("JSON usage errors contain only the promised fields", async () => {
 it("root and nested help end in the two documentation lines", async () => {
   for (const args of [["--help"], ["help", "connect"], ["help", "exit-codes"]]) {
     expect((await run(args)).out.trimEnd().split("\n").slice(-2)).toEqual([
-      "Docs: https://docs.relayapp.im", "Report a problem: https://github.com/RelayMessenger/Relay-SDK/issues",
+      `Docs: ${isStagingBuild(packageVersion()) ? "https://docs.staging.relayapp.im" : "https://docs.relayapp.im"}`,
+      "Report a problem: https://github.com/RelayMessenger/Relay-SDK/issues",
     ]);
   }
 });
