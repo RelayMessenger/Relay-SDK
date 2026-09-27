@@ -429,6 +429,13 @@ const ci = readFileSync(".github/workflows/ci.yml", "utf8");
 assert.match(ci, /run: node --test scripts\/staging-bump\.test\.mjs$/mu);
 assert.match(ci, /run: node scripts\/staging-bump\.mjs --dry-run$/mu);
 assert.doesNotMatch(ci, /staging-bump\.mjs --write/u, "CI never writes a bump");
+// The cookbook standalone check proves which npm channel it picks for the
+// branch before it installs from that channel.
+assert.match(
+  ci,
+  /run: node --test scripts\/validate-cookbook-standalone\.test\.mjs\n\s*- run: node scripts\/validate-cookbook-standalone\.mjs$/mu,
+  "ci.yml must test the cookbook channel choice before the standalone check",
+);
 for (const [source, text] of workflowFiles) {
   assert.doesNotMatch(
     text,

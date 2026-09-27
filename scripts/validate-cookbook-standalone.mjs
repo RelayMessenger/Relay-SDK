@@ -1,19 +1,34 @@
 // Proves every cookbook folder is a self-contained project a developer can
-// copy out of GitHub and run with `npm install && npm start` against
-// production, with nothing but an Agent Token.
+// copy out of GitHub and run with `npm install && npm start`, with nothing but
+// an Agent Token: against production on main, against staging on staging.
 //
 //   node scripts/validate-cookbook-standalone.mjs               copy, install, type-check
 //   node scripts/validate-cookbook-standalone.mjs --link-check  workspace-side checks only
 //   ... --only webhook-receiver                                  one folder
+//   ... --channel staging|release                                name the channel outside CI
 //
 // Two properties, checked from two sides:
 //
 // 1. Standalone (default mode, network): each folder is copied to a temp dir
 //    OUTSIDE the workspace, `npm install` runs against the real registry, the
-//    installed @relaymessenger/sdk is a release build (never a staging
-//    prerelease; the newest release when the folder carries no lockfile), and
+//    installed Relay packages are builds of the branch's own channel, and
 //    `tsc --noEmit` runs from the folder's OWN devDependencies. The workspace
 //    is never installed here, so nothing can leak in from it.
+//
+//    The channel follows the branch, as the two publish flows do: a push to
+//    staging publishes X.Y.Z-staging.N under the `staging` dist-tag
+//    (scripts/publish-package-staging.mjs), a push to main publishes the plain
+//    X.Y.Z as `latest` (scripts/release-run.mjs). CI names the branch in
+//    GITHUB_REF (refs/heads/<branch>) on a push and in GITHUB_BASE_REF (the
+//    branch a pull request merges into) on a pull request.
+//
+//    release (main, and every branch that is not staging): every installed
+//      Relay package is a release, never a prerelease; a folder without a
+//      lockfile installs the newest one, npm's `latest`.
+//    staging: a folder without a lockfile installs npm's `staging` dist-tag,
+//      the newest staging build. A folder with a lockfile installs what it
+//      pins, which may be a release or a staging build (X.Y.Z-staging.N), never
+//      another prerelease.
 //
 // 2. Workspace (--link-check, no network): every Relay dependency a cookbook
 //    declares resolves to the workspace package (packages/<name>), so the
@@ -36,6 +51,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -45,9 +61,6 @@ import { releasePackages } from "./release-packages.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const cookbookRoot = join(root, "cookbook");
-const linkCheckOnly = process.argv.includes("--link-check");
-const onlyIndex = process.argv.indexOf("--only");
-const only = onlyIndex === -1 ? null : process.argv[onlyIndex + 1];
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const npx = process.platform === "win32" ? "npx.cmd" : "npx";
 const say = (message) => process.stdout.write(`${message}\n`);
@@ -64,8 +77,8 @@ const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 // resolve the workspace prerelease: the workspace-link rule below does not
 // apply to it. Its `npm ci` from that lockfile in a temp copy, then its full
 // test suite, runs under `npm run validate:cookbook`. The standalone check
-// still applies: a copied folder must install a release build from npm and
-// type-check on its own (measured passing on 2026-09-07 once it pinned
+// still applies: a copied folder must install its channel's builds from npm
+// and type-check on its own (measured passing on 2026-09-07 once it pinned
 // sdk 0.3.0 and chat-sdk-adapter 0.3.0).
 function selfProving(name) {
   const directory = join(cookbookRoot, name);
@@ -73,19 +86,61 @@ function selfProving(name) {
     && Boolean(readJson(join(directory, "package.json")).scripts?.["test:installed"]);
 }
 
-const cookbooks = readdirSync(cookbookRoot, { withFileTypes: true })
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => entry.name)
-  .filter((name) => existsSync(join(cookbookRoot, name, "package.json")))
-  .filter((name) => only === null || name === only)
-  .sort();
-assert.ok(cookbooks.length > 0, `no cookbook matches ${only ?? "*"}`);
-if (linkCheckOnly) {
-  for (const name of cookbooks.filter(selfProving)) {
-    say(`  ${name}: link check skipped; its lockfile pins published releases and test:installed proves it under validate:cookbook`);
+/** The npm dist-tag each channel installs from. */
+export const CHANNEL_TAGS = Object.freeze({ release: "latest", staging: "staging" });
+
+/**
+ * The channel a copied cookbook installs from: `--channel` when given,
+ * otherwise the branch CI names. A pull request's GITHUB_REF is
+ * refs/pull/<n>/merge, so its base branch, GITHUB_BASE_REF, decides; a push
+ * leaves GITHUB_BASE_REF empty and names its branch in GITHUB_REF. Only
+ * staging selects the staging channel; main, every other branch, and a run
+ * with no branch at all keep the release channel.
+ */
+export function standaloneChannel(env = process.env, argv = process.argv) {
+  const index = argv.indexOf("--channel");
+  if (index !== -1) {
+    const named = argv[index + 1];
+    assert.ok(Object.hasOwn(CHANNEL_TAGS, named), `--channel takes ${Object.keys(CHANNEL_TAGS).join(" or ")}, not ${named}`);
+    return { channel: named, reason: `--channel ${named}` };
   }
+  if (env.GITHUB_BASE_REF) {
+    return {
+      channel: env.GITHUB_BASE_REF === "staging" ? "staging" : "release",
+      reason: `GITHUB_BASE_REF=${env.GITHUB_BASE_REF}`,
+    };
+  }
+  const ref = env.GITHUB_REF ?? "";
+  return {
+    channel: ref === "refs/heads/staging" ? "staging" : "release",
+    reason: ref ? `GITHUB_REF=${ref}` : "no branch named",
+  };
 }
-const checked = linkCheckOnly ? cookbooks.filter((name) => !selfProving(name)) : cookbooks;
+
+const STAGING_BUILD = /^\d+\.\d+\.\d+-staging\.\d+$/u;
+
+/**
+ * Why an installed Relay package does not belong to the channel, or null.
+ * `tagged` is the version npm's dist-tag for the channel names; it binds
+ * only a folder without a lockfile, which installs the newest build.
+ */
+export function installedMismatch({ channel, dependency, installed, locked, tagged }) {
+  const { name, range } = dependency;
+  if (channel === "release") {
+    if (/-/u.test(installed)) return `installed ${name}@${installed}, a prerelease, from range ${range}`;
+    if (!locked && installed !== tagged) return `installed ${name}@${installed}; npm latest is ${tagged}`;
+    return null;
+  }
+  assert.equal(channel, "staging");
+  if (locked) {
+    return /-/u.test(installed) && !STAGING_BUILD.test(installed)
+      ? `installed ${name}@${installed}, a prerelease that is not a staging build, from range ${range}`
+      : null;
+  }
+  if (!STAGING_BUILD.test(installed)) return `installed ${name}@${installed}, not a staging build, from the staging dist-tag`;
+  if (installed !== tagged) return `installed ${name}@${installed}; npm staging is ${tagged}`;
+  return null;
+}
 
 // Every dependency field npm installs from.
 const DEPENDENCY_FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
@@ -157,13 +212,14 @@ function run(command, args, cwd) {
 
 const EXCLUDED = new Set([".artifacts", ".dev.vars", ".git", ".wrangler", "coverage", "dist", "node_modules"]);
 
-function latestRelease(packageName) {
-  const out = execFileSync(npm, ["view", packageName, "dist-tags.latest", "--json", "--registry", "https://registry.npmjs.org/"], { encoding: "utf8" });
+function distTag(packageName, tag) {
+  const out = execFileSync(npm, ["view", packageName, `dist-tags.${tag}`, "--json", "--registry", "https://registry.npmjs.org/"], { encoding: "utf8" });
   const parsed = JSON.parse(out);
   return Array.isArray(parsed) ? parsed[0] : parsed;
 }
 
-function standaloneCheck(name, latestByName) {
+function standaloneCheck(name, channel, taggedByName) {
+  const tag = CHANNEL_TAGS[channel];
   const source = join(cookbookRoot, name);
   const temporary = mkdtempSync(join(tmpdir(), `relay-cookbook-standalone-${name}-`));
   const copy = join(temporary, name);
@@ -178,25 +234,25 @@ function standaloneCheck(name, latestByName) {
     });
     const hasLock = existsSync(join(copy, "package-lock.json"));
     say(`  copied to ${copy}${hasLock ? " (with its own lockfile)" : ""}`);
-    run(npm, ["install", "--no-audit", "--no-fund", "--ignore-scripts"], copy);
     const manifest = readJson(join(copy, "package.json"));
-    for (const dependency of relayDependencies(manifest)) {
+    const dependencies = relayDependencies(manifest);
+    if (channel === "staging" && !hasLock) {
+      // What a developer on the staging channel runs: the newest staging
+      // build of each Relay package, by its dist-tag. Only the copy changes.
+      for (const { field, name: dependency } of dependencies) manifest[field][dependency] = tag;
+      writeFileSync(join(copy, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+    }
+    run(npm, ["install", "--no-audit", "--no-fund", "--ignore-scripts"], copy);
+    for (const dependency of dependencies) {
       const installed = readJson(join(copy, "node_modules", ...dependency.name.split("/"), "package.json")).version;
-      assert.doesNotMatch(
-        installed,
-        /-/u,
-        `${name} installed ${dependency.name}@${installed}, a prerelease, from range ${dependency.range}`,
-      );
+      let tagged;
       if (!hasLock) {
-        const latest = latestByName.get(dependency.name) ?? latestRelease(dependency.name);
-        latestByName.set(dependency.name, latest);
-        assert.equal(
-          installed,
-          latest,
-          `${name} installed ${dependency.name}@${installed}; npm latest is ${latest}`,
-        );
+        tagged = taggedByName.get(dependency.name) ?? distTag(dependency.name, tag);
+        taggedByName.set(dependency.name, tagged);
       }
-      say(`  ${name}: ${dependency.name}@${dependency.range} -> registry ${installed}`);
+      const mismatch = installedMismatch({ channel, dependency, installed, locked: hasLock, tagged });
+      assert.equal(mismatch, null, `${name} ${mismatch}`);
+      say(`  ${name}: ${dependency.name}@${dependency.range}${channel === "staging" && !hasLock ? ` (as ${tag})` : ""} -> registry ${installed}`);
     }
     // --no-install: tsc must come from the folder's own devDependencies.
     run(npx, ["--no-install", "tsc", "--noEmit", "-p", "tsconfig.json"], copy);
@@ -207,19 +263,44 @@ function standaloneCheck(name, latestByName) {
   }
 }
 
-say(`cookbook ${linkCheckOnly ? "link check" : "standalone check"}: ${checked.join(", ")}`);
-if (linkCheckOnly) {
-  for (const name of checked) linkCheck(name);
-  say(`validated ${checked.length} cookbooks resolve the workspace Relay packages and stay inside their folders`);
-} else {
-  // npm 10.9's arborist crashes in #loadPeerSet on these folders (measured
-  // 2026-09-07 on 10.9.8); CI installs npm@11.19.1 first, so name the npm
-  // that ran before any install can fail for that reason.
-  say(`  npm ${execFileSync(npm, ["--version"], { encoding: "utf8" }).trim()}`);
-  const latestByName = new Map();
-  for (const name of checked) {
-    say(`\n=== ${name} ===`);
-    standaloneCheck(name, latestByName);
+function main(argv) {
+  const linkCheckOnly = argv.includes("--link-check");
+  const onlyIndex = argv.indexOf("--only");
+  const only = onlyIndex === -1 ? null : argv[onlyIndex + 1];
+  const cookbooks = readdirSync(cookbookRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) => existsSync(join(cookbookRoot, name, "package.json")))
+    .filter((name) => only === null || name === only)
+    .sort();
+  assert.ok(cookbooks.length > 0, `no cookbook matches ${only ?? "*"}`);
+  if (linkCheckOnly) {
+    for (const name of cookbooks.filter(selfProving)) {
+      say(`  ${name}: link check skipped; its lockfile pins published builds and test:installed proves it under validate:cookbook`);
+    }
   }
-  say(`\nvalidated ${checked.length} cookbooks install from npm and type-check outside the workspace`);
+  const checked = linkCheckOnly ? cookbooks.filter((name) => !selfProving(name)) : cookbooks;
+
+  say(`cookbook ${linkCheckOnly ? "link check" : "standalone check"}: ${checked.join(", ")}`);
+  if (linkCheckOnly) {
+    for (const name of checked) linkCheck(name);
+    say(`validated ${checked.length} cookbooks resolve the workspace Relay packages and stay inside their folders`);
+  } else {
+    // npm 10.9's arborist crashes in #loadPeerSet on these folders (measured
+    // 2026-09-07 on 10.9.8); CI installs npm@11.19.1 first, so name the npm
+    // that ran before any install can fail for that reason.
+    say(`  npm ${execFileSync(npm, ["--version"], { encoding: "utf8" }).trim()}`);
+    const { channel, reason } = standaloneChannel(process.env, argv);
+    say(`  channel ${channel} (${reason}): npm dist-tag ${CHANNEL_TAGS[channel]}`);
+    const taggedByName = new Map();
+    for (const name of checked) {
+      say(`\n=== ${name} ===`);
+      standaloneCheck(name, channel, taggedByName);
+    }
+    say(`\nvalidated ${checked.length} cookbooks install from npm (${channel} channel) and type-check outside the workspace`);
+  }
+}
+
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  main(process.argv);
 }
