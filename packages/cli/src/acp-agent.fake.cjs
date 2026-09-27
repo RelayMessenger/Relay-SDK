@@ -32,6 +32,13 @@
  *   permission   `{toolCall, options}`: each turn first sends
  *                `session/request_permission` with these and waits for the
  *                client's answer, recorded as `permissionResponse`
+ *   checkFile    a path the turn reads before it asks `permission`, the way
+ *                Gemini CLI's file write checks the existing file first. As
+ *                Gemini CLI's AcpFileSystemService does, it asks the client
+ *                with `fs/read_text_file` only when the client advertised
+ *                `fs.readTextFile`, and reads the file itself otherwise; an
+ *                answer with no file text fails the check, recorded as
+ *                `checkFailed`, and the turn ends without asking permission
  */
 const fs = require("node:fs");
 
@@ -69,6 +76,8 @@ const active = new Map();
 let sessions = readStore().size;
 let turnCount = 0;
 let signedIn = false;
+/** What the client said it can do, in `initialize`. */
+let clientCapabilities = {};
 
 const answerFor = (index) => {
   const answers = settings.answers ?? ["ok"];
@@ -91,7 +100,47 @@ const completePrompt = (sessionId, stopReason) => {
 };
 
 const pendingPermission = new Map();
+const pendingRead = new Map();
+
+const askPermission = (sessionId) => {
+  const request = { id: `permission-${turnCount}`, method: "session/request_permission", params: { sessionId, ...settings.permission } };
+  pendingPermission.set(request.id, sessionId);
+  record({ out: request.method, id: request.id, params: request.params });
+  write(request);
+};
+
+/**
+ * Gemini CLI 0.61.0, bundle AcpFileSystemService.readTextFile: the client is
+ * asked only when `capabilities.readTextFile` is set; its answer must carry
+ * `content` as a string, or the read throws and the write reports "Error
+ * checking existing file".
+ */
+const checkThenAsk = (sessionId) => {
+  if (clientCapabilities?.fs?.readTextFile === true) {
+    const request = { id: `read-${turnCount}`, method: "fs/read_text_file", params: { sessionId, path: settings.checkFile } };
+    pendingRead.set(request.id, sessionId);
+    record({ out: request.method, id: request.id, params: request.params });
+    write(request);
+    return;
+  }
+  record({ ownRead: settings.checkFile, exists: fs.existsSync(settings.checkFile) });
+  askPermission(sessionId);
+};
+
 const handle = (message) => {
+  if (message.method === undefined && pendingRead.has(message.id)) {
+    const sessionId = pendingRead.get(message.id);
+    pendingRead.delete(message.id);
+    if (typeof message.result?.content !== "string") {
+      record({ checkFailed: message.error ?? message.result ?? null, id: message.id });
+      const turn = active.get(sessionId);
+      if (turn) turn.answer = "Error checking existing file";
+      completePrompt(sessionId, "end_turn");
+      return;
+    }
+    askPermission(sessionId);
+    return;
+  }
   if (message.method === undefined && pendingPermission.has(message.id)) {
     // The client's answer to the permission request: the turn goes on.
     const sessionId = pendingPermission.get(message.id);
@@ -104,6 +153,7 @@ const handle = (message) => {
   record({ in: message.method, params: message.params, argv: process.argv.slice(2), tokenEnv: process.env.RELAY_AGENT_TOKEN ?? null });
   const answer = (result) => { write({ id: message.id, result }); };
   if (message.method === "initialize") {
+    clientCapabilities = message.params.clientCapabilities ?? {};
     answer({
       protocolVersion: message.params.protocolVersion,
       agentCapabilities: {
@@ -160,10 +210,8 @@ const handle = (message) => {
     if (settings.permission) {
       const turn = { id: message.id, answer: answerFor(turnCount - 1), timer: undefined };
       active.set(sessionId, turn);
-      const request = { id: `permission-${turnCount}`, method: "session/request_permission", params: { sessionId, ...settings.permission } };
-      pendingPermission.set(request.id, sessionId);
-      record({ out: request.method, id: request.id, params: request.params });
-      write(request);
+      if (settings.checkFile) checkThenAsk(sessionId);
+      else askPermission(sessionId);
       return;
     }
     const turn = {
