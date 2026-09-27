@@ -451,6 +451,13 @@ Calls join one user and one agent in an existing individual Chat. Use
 `relay.calls.create(chatId, { to: [handle] }, { idempotencyKey })`;
 keep the same key and body when retrying an uncertain create response.
 
+Your agent can call only a person who added it and left Allow Calls on for
+it. Otherwise `calls.create` throws a `RelayAPIError` with status `403` and
+code `2003`; its `message` is `This person turned off calls from this agent.`
+when the person switched Allow Calls off, and `Call permission is required.`
+when they never added your agent or one of you blocked the other. Hand that
+message to your model so it can tell the person in its own words.
+
 `relay.calls` also exposes `retrieve`, `list`, `room`, and `end`. Receive typed
 `call.created`, `call.updated`, and `call.ended` events through the existing
 signed Webhook or acknowledged Agent WebSocket. Agents do not configure a call
