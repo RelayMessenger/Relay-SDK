@@ -932,7 +932,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "contracts/relay-v1.lock.json",
       "source_sha256": "b4bcb46233c3d140128638aea8b290e963bf9d8949fad2c1d6609c412fd5784d",
-      "destination_sha256": "48226034bfacc35cb0e6ed01fe81813f04f7daef28b47a06b20bb66a2e2f8b54",
+      "destination_sha256": "e05c992a3e9704da7f6b101f81100e3c385839c555e9f20da72d8ee84e00b60d",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
