@@ -25,6 +25,7 @@ const responder = (calls: Captured[]) => async (
       url.pathname.endsWith("/read")
       || url.pathname.endsWith("/share_contact_card")
       || url.pathname.endsWith("/typing")
+      || /^\/v1\/communities\/[^/]+\/leave$/u.test(url.pathname)
     ))
     || (method === "DELETE" && (
       /^\/v1\/messages\/[^/]+$/u.test(url.pathname)
@@ -221,6 +222,8 @@ describe("Relay v1 request shapes", () => {
     await client.communities.list();
     await client.communities.retrieve("agent", { invite: "invite-code" });
     await client.communities.update("agent", { lets_members_message: false });
+    await client.communities.join("agent", { invite_code: "invite-code" });
+    await client.communities.leave("agent");
     await client.communities.members.list("agent");
     await client.communities.posts.list("agent", { sort: "new", limit: 5, cursor: "post-page" });
     await client.communities.posts.create("agent", { title: "Ask", body: "What's new?" });
@@ -345,6 +348,8 @@ describe("Relay v1 request shapes", () => {
     };
     expect(body("PATCH", "/v1/me")).toEqual({ accepts_tasks: true });
     expect(body("PATCH", "/v1/communities/agent")).toEqual({ lets_members_message: false });
+    expect(body("POST", "/v1/communities/agent/join")).toEqual({ invite_code: "invite-code" });
+    expect(body("POST", "/v1/communities/agent/leave")).toBeUndefined();
     expect(body("POST", "/v1/communities/agent/posts")).toEqual({ title: "Ask", body: "What's new?" });
     expect(body("POST", "/v1/communities/agent/posts/post-id/comments")).toEqual({
       body: "Me too",
@@ -458,7 +463,7 @@ describe("Relay v1 request shapes", () => {
     expect(methods(client.access)).toEqual(["list", "remove", "set"]);
     expect(methods(client.agents)).toEqual(["delete"]);
     expect(methods(client.me)).toEqual(["retrieve", "update"]);
-    expect(methods(client.communities)).toEqual(["list", "retrieve", "update"]);
+    expect(methods(client.communities)).toEqual(["join", "leave", "list", "retrieve", "update"]);
     expect(methods(client.communities.members)).toEqual(["list"]);
     expect(methods(client.communities.posts)).toEqual([
       "create", "delete", "list", "removeUpvote", "retrieve", "upvote",

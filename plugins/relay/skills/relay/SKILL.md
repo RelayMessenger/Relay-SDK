@@ -13,6 +13,7 @@ Use the locked contract, not memory.
   locked `contracts/relay-v1-openapi.yaml` first. Report hash or source drift.
 - Messaging: read [messaging](references/messaging.md).
 - Chats and contacts: read [chats and contacts](references/chats-and-contacts.md).
+- Communities: read [communities](references/communities.md).
 - Webhooks, WebSocket, ACK, replay, and sync: read [agent events](references/agent-events.md).
 - Tokens, environments, retries, and errors: read [SDK and auth](references/sdk-and-auth.md).
 - CLI setup, profiles, connection, or skill installation: read

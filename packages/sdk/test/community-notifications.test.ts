@@ -28,6 +28,8 @@ const membership: CommunityMembership = {
   member_count: 3,
   lets_members_message: true,
   notifications: false,
+  rules: [],
+  links: [],
 };
 
 const post: CommunityPost = {

@@ -153,6 +153,7 @@ async def test_communities_list_members_and_the_public_read(server: _Server) -> 
     summary = {
         "handle": "chess", "name": "Chess", "description": "", "image_url": None,
         "type": "public", "member_count": 2, "lets_members_message": True, "notifications": False,
+        "rules": [], "links": [],
     }
     server.replies += [
         (200, {"communities": [summary]}),
@@ -180,6 +181,7 @@ async def test_communities_update_sends_only_the_switches_it_is_given(server: _S
     summary = {
         "handle": "chess", "name": "Chess", "description": "", "image_url": None,
         "type": "public", "member_count": 2, "lets_members_message": True, "notifications": True,
+        "rules": [], "links": [],
     }
     server.replies += [(200, {"community": summary})] * 3
     relay = Relay("tok", base_url=server.base_url)
@@ -201,10 +203,43 @@ async def test_communities_update_with_no_switch_sends_nothing(server: _Server) 
     assert server.seen == []
 
 
+async def test_communities_join_posts_the_invite_code_and_leave_posts_nothing(server: _Server) -> None:
+    # Relay-Server 6645d5f8 (PR 407): POST /v1/communities/{handle}/join with
+    # an optional invite_code answers 200 {community}; POST .../leave answers 204.
+    community = {
+        "handle": "chess", "name": "Chess", "description": "", "image_url": None,
+        "type": "private", "member_count": 3, "lets_members_message": True, "notifications": False,
+        "rules": [{"title": "No spam", "description": "One post per day."}],
+        "links": [{"label": "FIDE laws", "url": "https://www.fide.com/laws"}],
+    }
+    server.replies += [(200, {"community": community}), (200, {"community": community}), (204, None)]
+    relay = Relay("tok", base_url=server.base_url)
+    joined = await relay.communities.join("chess/club", invite_code="k3y")
+    assert joined["community"]["rules"][0]["title"] == "No spam"
+    await relay.communities.join("chess")
+    assert await relay.communities.leave("chess/club") is None
+    assert [(m, p, b) for m, p, _, b in server.seen] == [
+        ("POST", "/v1/communities/chess%2Fclub/join", {"invite_code": "k3y"}),
+        ("POST", "/v1/communities/chess/join", {}),
+        ("POST", "/v1/communities/chess%2Fclub/leave", None),
+    ]
+
+
+async def test_communities_join_with_a_wrong_code_is_not_found(server: _Server) -> None:
+    from relaymessenger import RelayAPIError
+
+    server.replies.append((404, {"error": {"status": 404, "code": 2040, "message": "Community was not found."}}))
+    relay = Relay("tok", base_url=server.base_url)
+    with pytest.raises(RelayAPIError) as refused:
+        await relay.communities.join("chess", invite_code="wrong")
+    assert (refused.value.status, refused.value.code) == (404, 2040)
+
+
 def test_a_communitys_membership_has_every_field_the_contract_requires() -> None:
     from relaymessenger.client import CommunityMembership
 
     assert "notifications" in _contract_required("CommunityMembership")
+    assert {"rules", "links"} <= set(_contract_required("CommunityMembership"))
     assert sorted(CommunityMembership.__required_keys__) == sorted(_contract_required("CommunityMembership"))
 
 

@@ -231,6 +231,16 @@ export const RELAY_V1_OPERATIONS = [
     "operationId": "updateCommunityMembership"
   },
   {
+    "method": "POST",
+    "path": "/v1/communities/{handle}/join",
+    "operationId": "joinCommunity"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/communities/{handle}/leave",
+    "operationId": "leaveCommunity"
+  },
+  {
     "method": "GET",
     "path": "/v1/communities/{handle}/members",
     "operationId": "listCommunityMembers"
