@@ -24349,7 +24349,7 @@ var RelayStateStore = class {
 };
 
 // server.ts
-var VERSION = true ? "0.3.9-staging.39" : createRequire(import.meta.url)("./package.json").version;
+var VERSION = true ? "0.3.9-staging.40" : createRequire(import.meta.url)("./package.json").version;
 if (process.argv.includes("--version")) {
   process.stdout.write(`${VERSION}
 `);
