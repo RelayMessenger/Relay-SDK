@@ -1,6 +1,7 @@
 """Relay for Python, the twin of the npm package ``@relaymessenger/sdk``.
 
-``relaymessenger.Relay`` is Relay's REST API; ``relaymessenger.a2ui`` builds
+``relaymessenger.Relay`` is Relay's REST API and, as ``relay.websocket``, the
+Agent WebSocket that delivers the agent's events; ``relaymessenger.a2ui`` builds
 A2UI cards, sends them and reads their taps; ``relaymessenger.selection`` builds
 and sends selection prompts; ``relaymessenger.tasks`` types the A2A 1.0 Tasks
 between agents and their events. All four use only the standard library.
@@ -14,7 +15,30 @@ the ``calls`` extra (``pip install 'relaymessenger[calls]'``). Importing
 ``relaymessenger`` alone loads no media dependency.
 """
 
-from . import a2ui, selection, tasks
+from . import a2ui, selection, tasks, websocket
 from .client import DEFAULT_BASE_URL, Relay, RelayAPIError, ReplyTo, SendMessageResponse
+from .errors import RelayUnknownEventTypeError, RelayWebhookConfiguredError
+from .websocket import (
+    WebSocketEventContext,
+    WebSocketFullSyncContext,
+    WebSocketProtocolError,
+    WebSocketStoppedError,
+)
 
-__all__ = ["DEFAULT_BASE_URL", "Relay", "RelayAPIError", "ReplyTo", "SendMessageResponse", "a2ui", "selection", "tasks"]
+__all__ = [
+    "DEFAULT_BASE_URL",
+    "Relay",
+    "RelayAPIError",
+    "RelayUnknownEventTypeError",
+    "RelayWebhookConfiguredError",
+    "ReplyTo",
+    "SendMessageResponse",
+    "WebSocketEventContext",
+    "WebSocketFullSyncContext",
+    "WebSocketProtocolError",
+    "WebSocketStoppedError",
+    "a2ui",
+    "selection",
+    "tasks",
+    "websocket",
+]
