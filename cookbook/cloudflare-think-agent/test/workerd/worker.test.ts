@@ -370,6 +370,71 @@ describe("Relay Think messenger", () => {
   });
 });
 
+describe("a person's swipe-reply reaches the model", () => {
+  const TARGET_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec90";
+  const thread = {
+    channel: { name: undefined },
+    channelId: `relay:${DIRECT_CHAT_ID}`,
+    id: `relay:${DIRECT_CHAT_ID}`,
+    isDM: true,
+  };
+
+  /** The person's reply as the Relay adapter parses it, with its target. */
+  function reply(target: boolean) {
+    const adapter = createRelayAdapterFor(bindings());
+    const raw = (messageId: string, message: Record<string, unknown>) =>
+      adapter.parseMessage({ chatId: DIRECT_CHAT_ID, message } as never);
+    const message = raw(DIRECT_MESSAGE_ID, {
+      chat: { id: DIRECT_CHAT_ID, is_group: false },
+      direction: "inbound",
+      id: DIRECT_MESSAGE_ID,
+      parts: [{ type: "text", value: "what did you mean by this?" }],
+      reply_to: { message_id: TARGET_ID, part_index: 1 },
+      sender_handle: handle(USER_ID, "relay_user"),
+    });
+    if (target) {
+      message.replyTo = raw(TARGET_ID, {
+        chat_id: DIRECT_CHAT_ID,
+        created_at: "2026-09-27T11:00:00.000Z",
+        from_handle: { ...handle(AGENT_ID, "starter_test"), kind: "agent" },
+        id: TARGET_ID,
+        is_from_me: true,
+        is_system_message: false,
+        parts: [{ type: "text", value: "Take the long way round the lake." }],
+        updated_at: "2026-09-27T11:00:00.000Z",
+      });
+    }
+    return message;
+  }
+
+  function modelText(target: boolean): string {
+    const messenger = createRelayMessenger(bindings(), createRelayAdapterFor(bindings()));
+    const event = messenger.toEvent({
+      eventKind: "direct-message",
+      message: reply(target),
+      thread,
+    } as never) as { message?: { text: string } };
+    return event.message!.text;
+  }
+
+  it("names the Message it answers, who sent it and what it says", () => {
+    const [text, line] = modelText(true).split("\n\n");
+    expect(text).toBe("what did you mean by this?");
+    expect(JSON.parse(line!.slice(line!.indexOf("{")))).toEqual({
+      reply_to: {
+        id: TARGET_ID,
+        from: "you",
+        part_index: 1,
+        text: "Take the long way round the lake.",
+      },
+    });
+  });
+
+  it("names the target by id when the adapter could not read it", () => {
+    expect(modelText(false)).toContain(`{"reply_to":{"id":"${TARGET_ID}","unavailable":true}}`);
+  });
+});
+
 describe("canonical Relay delivery", () => {
   it("stamps read and cancels a superseded turn on receipt", () => {
     const adapter = createRelayAdapterFor(bindings());

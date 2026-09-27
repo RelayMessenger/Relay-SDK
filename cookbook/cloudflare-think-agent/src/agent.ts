@@ -6,6 +6,8 @@ import {
 } from "@cloudflare/think";
 import {
   chatSdkMessenger,
+  defaultChatSdkEvent,
+  normalizeMessengers,
   ThinkMessengerStateAgent,
   type ThinkMessengers,
 } from "@cloudflare/think/messengers";
@@ -24,6 +26,7 @@ import {
   requireRelayWebhookSecret,
 } from "./env";
 import { starterModel } from "./model";
+import { replyTargetLine } from "./reply-target";
 import {
   createReplyAction,
   RELAY_PAYMENT_NOT_CREATED,
@@ -94,7 +97,7 @@ export function createRelayMessenger(
   adapter: RelayAdapter,
 ) {
   const handle = requireRelayAgentHandle(env);
-  return chatSdkMessenger({
+  const relay = chatSdkMessenger({
     adapter,
     adapterName: "relay",
     capabilities: {
@@ -126,6 +129,22 @@ export function createRelayMessenger(
     verifyWebhook: false,
     userName: handle,
   });
+  // Think's own event, with the Message a swipe-reply answers added to the
+  // text the model reads (src/reply-target.ts). `toEvent` is Think's hook for
+  // this; the default comes from Think's own normalizer.
+  const [normalized] = normalizeMessengers({ relay });
+  return {
+    ...relay,
+    toEvent: (input: Parameters<NonNullable<typeof relay.toEvent>>[0]) => {
+      const event = defaultChatSdkEvent(normalized!, input);
+      const line = input.message
+        && replyTargetLine(input.message as Parameters<typeof replyTargetLine>[0]);
+      if (event.message && line) {
+        event.message.text = [event.message.text, line].filter(Boolean).join("\n\n");
+      }
+      return event;
+    },
+  };
 }
 
 export class RelayChatAgent extends Think<Bindings> {

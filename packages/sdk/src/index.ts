@@ -124,6 +124,11 @@ export {
   type SplitSelection,
 } from "./selection.js";
 export {
+  REPLY_TARGET_TEXT_MAX_LENGTH,
+  replyTargetContext,
+  replyTargetParts,
+} from "./reply-target.js";
+export {
   A2UI_BASIC_CATALOG_ID,
   A2UI_MEDIA_TYPE,
   A2UI_VERSION,

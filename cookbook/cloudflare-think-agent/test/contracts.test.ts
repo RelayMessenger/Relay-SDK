@@ -12,11 +12,11 @@ const RELAY_SERVER_SHA =
   "65c4473526e4bbd3fedcd747ab09d218d00920ce";
 // Relay-SDK commit whose staging release published the adapter below.
 const RELAY_CHAT_SDK_SHA =
-  "1b3a3f488575990a745322e3eb4945ced36f1ad9";
+  "62b320548d5ba5edf2a9445efdab32122f0257b7";
 const RELAY_OPENAPI_SHA256 =
   "44d3202de07206707c8914c37029abc365c144be4245e677574210d2a1cf6f41";
 const RELAY_ADAPTER_INTEGRITY =
-  "sha512-R0F0GubtTg50oUbAUfxKVSql6GorzA5Wl+YL9aU+5bbKLKuXMHnqTVbKQaSs/e6wwa17wmnnJrW3OF8Xwuyy6w==";
+  "sha512-Z96oZQDJwhprwaG95kLloA0TWdTBtlaWL1HTJiz7CdZGeAJxr1oOQbvKFyS6F1I1ef+eiK7q/zgvj5kr79Ygsg==";
 
 function packageVersion(name: string): string {
   let directory = process.cwd();
@@ -65,7 +65,7 @@ describe("locked runtime contracts", () => {
       await verifyThinkCandidates();
     } else {
       expect(packageVersion("@relaymessenger/chat-sdk-adapter"))
-        .toBe("0.3.7-staging.29");
+        .toBe("0.3.7-staging.30");
       expect(packageVersion("@relaymessenger/sdk")).toBe("0.3.6-staging.46");
     }
   });
@@ -90,8 +90,8 @@ describe("locked runtime contracts", () => {
     expect(adapter).toMatchObject({
       integrity: RELAY_ADAPTER_INTEGRITY,
       resolved:
-        "https://registry.npmjs.org/@relaymessenger/chat-sdk-adapter/-/chat-sdk-adapter-0.3.7-staging.29.tgz",
-      version: "0.3.7-staging.29",
+        "https://registry.npmjs.org/@relaymessenger/chat-sdk-adapter/-/chat-sdk-adapter-0.3.7-staging.30.tgz",
+      version: "0.3.7-staging.30",
     });
   });
 
