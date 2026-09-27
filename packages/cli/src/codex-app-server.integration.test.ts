@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { CODEX_APPROVAL_POLICY, CODEX_SANDBOX, CLIENT_NAME, codexCommand, runTurn, startAppServer } from "./codex-bridge.js";
+import { CLIENT_NAME, codexCommand, runTurn, startAppServer } from "./codex-bridge.js";
 import { findExecutable } from "./runtime-sniff.js";
 
 /**
@@ -31,9 +31,7 @@ describe.skipIf(!installed || !enabled)("the codex on this computer", () => {
       expect(hello.codexHome).toEqual(expect.any(String));
       server.notify("initialized", {});
 
-      const thread = await server.request("thread/start", {
-        cwd: folder, sandbox: CODEX_SANDBOX, approvalPolicy: CODEX_APPROVAL_POLICY,
-      });
+      const thread = await server.request("thread/start", { cwd: folder });
       const threadId = (thread.thread as { id?: unknown }).id;
       expect(threadId).toEqual(expect.any(String));
 
