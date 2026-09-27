@@ -1,4 +1,4 @@
-import { BUTTONS_GUIDANCE, BUTTONS_BLOCK_INSTRUCTION, PAYMENT_BLOCK_INSTRUCTION, PAYMENT_GUIDANCE, LINK_LINE_INSTRUCTION, SELECTION_GUIDANCE, SELECTION_BLOCK_INSTRUCTION, replyTargetParts, selectionReplyContext } from "@relaymessenger/sdk";
+import { BUTTONS_GUIDANCE, BUTTONS_BLOCK_INSTRUCTION, PAYMENT_BLOCK_INSTRUCTION, PAYMENT_GUIDANCE, LINK_LINE_INSTRUCTION, SELECTION_GUIDANCE, SELECTION_BLOCK_INSTRUCTION, selectionReplyContext } from "@relaymessenger/sdk";
 import type {
   Message,
   Relay,
@@ -114,18 +114,23 @@ async function readReplyTarget(params: {
  * OpenClaw's own reply context, `supplemental.quote`, which it renders to the
  * model as "Reply target of current user message" (id, sender, body), as its
  * Telegram channel fills it from Telegram's `reply_to_message`. A reply names
- * one bubble: the SDK's `replyTargetParts` narrows a multipart target to the
- * swiped part, the rule Relay's iOS app uses to draw the quote.
+ * one bubble: a multipart target is narrowed to the swiped part, the rule
+ * Relay's iOS app uses to draw the quote (the SDK's `replyTargetParts`); a
+ * tap or a selection answer names a part with no words, so it keeps the
+ * whole Message.
  */
 export function relayReplyQuote(
   facts: Pick<RelayInboundFacts, "chatId" | "replyToPartIndex">,
   target: Message | undefined,
 ) {
   if (!target || target.chat_id !== facts.chatId) return undefined;
-  const body = renderRelayMessageParts(replyTargetParts(
-    target,
-    facts.replyToPartIndex === undefined ? {} : { part_index: facts.replyToPartIndex },
-  ));
+  const parts = target.parts ?? [];
+  const swiped = parts.length > 1 && facts.replyToPartIndex !== undefined
+    ? parts[facts.replyToPartIndex]
+    : undefined;
+  const body = renderRelayMessageParts(
+    swiped && swiped.type !== "buttons" && swiped.type !== "selection" ? [swiped] : parts,
+  );
   const sender = target.from_handle?.display_name?.trim()
     || target.from_handle?.handle
     || target.from
