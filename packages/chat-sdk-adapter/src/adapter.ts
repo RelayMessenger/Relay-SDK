@@ -1193,6 +1193,52 @@ export class RelayAdapter
     }
   }
 
+  /**
+   * The Message a person's swipe-reply names, as Chat SDK's own
+   * `Message.replyTo`, so a model sees what the reply answers.
+   *
+   * Relay's wire carries a reply as a bare pointer, `reply_to: { message_id,
+   * part_index }`, so the target is read once through GET /v1/messages/{id}.
+   * Telegram's Chat SDK adapter fills `replyTo` the same way from the quoted
+   * `reply_to_message` its webhook embeds.
+   *
+   * A reply names one bubble. When the target has more than one part, only
+   * the named part is kept, the rule Relay's iOS app uses to draw the quote
+   * (Relay-iOS `MessageReply.targetsExactPart`).
+   *
+   * A target that is gone, or a read that fails, never blocks the delivery:
+   * the Message is dispatched without `replyTo`, the policy the adapter keeps
+   * for its other reads around a delivery (`readOnReceipt`).
+   */
+  private async replyTarget(
+    threadId: string,
+    replyTo: NonNullable<RelayWebhookMessageEvent["reply_to"]>,
+  ): Promise<Message<RelayRawMessage> | undefined> {
+    const { chatId } = this.decodeThreadId(threadId);
+    try {
+      const target = await this.client.getMessage(replyTo.message_id);
+      if (target.chat_id !== chatId) return undefined;
+      const parts = target.parts ?? [];
+      const part =
+        parts.length > 1 && replyTo.part_index !== undefined
+          ? parts[replyTo.part_index]
+          : undefined;
+      return this.parseMessage({
+        chatId,
+        message: part ? { ...target, parts: [part] } : target,
+      });
+    } catch (error) {
+      if (!(error instanceof ResourceNotFoundError)) {
+        this.warn("relay_reply_target_failed", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+          messageId: replyTo.message_id,
+        });
+      }
+      return undefined;
+    }
+  }
+
   private initializedChat(): ChatInstance {
     if (!this.chat) {
       throw new Error(
@@ -1245,10 +1291,15 @@ export class RelayAdapter
         if (this.markReadOnReceipt) {
           await this.readOnReceipt(data.chat.id);
         }
+        const message = this.parseMessage(raw);
+        if (data.reply_to) {
+          const replyTo = await this.replyTarget(threadId, data.reply_to);
+          if (replyTo) message.replyTo = replyTo;
+        }
         await this.initializedChat().processMessage(
           this,
           threadId,
-          this.parseMessage(raw),
+          message,
           options,
         );
         return;

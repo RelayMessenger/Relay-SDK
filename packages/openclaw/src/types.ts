@@ -77,6 +77,8 @@ export type RelayInboundFacts = {
   mentionHandles: string[];
   ownerHandle?: ChatHandle;
   replyToId?: string;
+  /** The part of the replied-to Message the person swiped (`reply_to.part_index`). */
+  replyToPartIndex?: number;
   /**
    * The Message an outbound reply should quote when the person's Message
    * was itself a reply: the person's Message. A tap's reply_to names the

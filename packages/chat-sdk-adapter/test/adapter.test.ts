@@ -5,6 +5,7 @@ import {
 } from "@chat-adapter/tests";
 import {
   Chat,
+  Message,
   NotImplementedError,
   type Adapter,
   type Attachment,
@@ -2090,4 +2091,124 @@ it("reaches the payment request routes through the adapter's own client, outside
     `https://api.relayapp.im/v1/payment_requests/${PAYMENT_REQUEST_ID}/cancel`,
     expect.objectContaining({ body: "{}", method: "POST" }),
   );
+});
+
+describe("a swipe-reply's target", () => {
+  const TARGET = IDS.reply;
+
+  function replyHarness(target: Response | (() => Response)) {
+    const reads: string[] = [];
+    const adapter = createRelayAdapter({
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if ((init?.method ?? "GET") === "GET" && url.includes(`/v1/messages/${TARGET}`)) {
+          reads.push(url);
+          return typeof target === "function" ? target() : target;
+        }
+        return new Response(null, { status: 204 });
+      }) as typeof fetch,
+      token: "agent-token",
+      webhookSecret: WEBHOOK_SECRET,
+    });
+    const chat = createMockChatInstance();
+    return { adapter, chat, reads };
+  }
+
+  function agentMessage(parts: Array<{ type: "text"; value: string }>) {
+    return {
+      chat_id: IDS.chat,
+      created_at: "2026-08-30T11:00:00.000Z",
+      delivery_status: "read",
+      from: AGENT_HANDLE.handle,
+      from_handle: AGENT_HANDLE,
+      id: TARGET,
+      is_from_me: true,
+      is_system_message: false,
+      parts: parts.map((part) => ({ reactions: null, ...part })),
+      reply_to: null,
+      updated_at: "2026-08-30T11:00:00.000Z",
+    };
+  }
+
+  async function deliverReply(
+    adapter: ReturnType<typeof createRelayAdapter>,
+    chat: ReturnType<typeof createMockChatInstance>,
+    replyTo: { message_id: string; part_index?: number },
+  ) {
+    await adapter.initialize(chat);
+    const response = await adapter.handleWebhook(
+      await signedRequest(
+        envelope(
+          "message.received",
+          webhookMessage({
+            parts: [{ type: "text", value: "what did you mean by this?" }],
+            reply_to: replyTo,
+          }) as unknown as Record<string, unknown>,
+        ),
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(chat.processMessage).toHaveBeenCalledOnce();
+    return vi.mocked(chat.processMessage).mock.calls[0]![2] as Message;
+  }
+
+  it("is Chat SDK's replyTo: the bubble the person swiped, from the agent", async () => {
+    const { adapter, chat, reads } = replyHarness(
+      jsonResponse(agentMessage([
+        { type: "text", value: "First, book the flight." },
+        { type: "text", value: "Then the hotel near the venue." },
+      ])),
+    );
+    const message = await deliverReply(adapter, chat, {
+      message_id: TARGET,
+      part_index: 1,
+    });
+    expect(reads).toHaveLength(1);
+    expect(message.text).toBe("what did you mean by this?");
+    expect(message.replyTo).toMatchObject({
+      author: { isMe: true, userName: AGENT_HANDLE.handle },
+      id: TARGET,
+      text: "Then the hotel near the venue.",
+    });
+  });
+
+  it("keeps the whole Message when it has one part", async () => {
+    const { adapter, chat } = replyHarness(
+      jsonResponse(agentMessage([{ type: "text", value: "The hotel is booked." }])),
+    );
+    const message = await deliverReply(adapter, chat, {
+      message_id: TARGET,
+      part_index: 0,
+    });
+    expect(message.replyTo?.text).toBe("The hotel is booked.");
+  });
+
+  it("dispatches without replyTo when the target is gone", async () => {
+    const { adapter, chat } = replyHarness(
+      jsonResponse({ error: { code: 1004, message: "Not found" } }, 404),
+    );
+    const message = await deliverReply(adapter, chat, { message_id: TARGET });
+    expect(message.replyTo).toBeUndefined();
+  });
+
+  it("dispatches without replyTo and warns when the read fails", async () => {
+    const { adapter, chat } = replyHarness(
+      () => jsonResponse({ error: { code: 5000, message: "down" } }, 500),
+    );
+    const message = await deliverReply(adapter, chat, { message_id: TARGET });
+    expect(message.replyTo).toBeUndefined();
+    expect(vi.mocked(chat.getLogger("relay").warn)).toHaveBeenCalledWith(
+      "relay_reply_target_failed",
+      expect.objectContaining({ messageId: TARGET }),
+    );
+  });
+
+  it("reads nothing for a Message that is not a reply", async () => {
+    const { adapter, chat, reads } = replyHarness(jsonResponse({}));
+    await adapter.initialize(chat);
+    await adapter.handleWebhook(await signedRequest(envelope()));
+    expect(reads).toHaveLength(0);
+    expect((vi.mocked(chat.processMessage).mock.calls[0]![2] as Message).replyTo)
+      .toBeUndefined();
+  });
 });

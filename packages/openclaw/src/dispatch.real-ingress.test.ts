@@ -24,6 +24,8 @@ type EventOptions = {
   messageId?: string;
   lifecycle?: Partial<RelayIngressLifecycle>;
   parts?: unknown[];
+  replyTo?: { message_id: string; part_index?: number };
+  retrieve?: ReturnType<typeof vi.fn>;
 };
 async function dispatch(allowFrom: string[], contactId = approvedId, handle = "review_sender", options: EventOptions = {}) {
   const invoke = options.invoke ?? vi.fn(async () => undefined);
@@ -45,6 +47,7 @@ async function dispatch(allowFrom: string[], contactId = approvedId, handle = "r
       sender_handle: { id: contactId, handle, kind: options.senderKind ?? "user", display_name: "Review Sender", joined_at: "2026-09-08T00:00:00.000Z", image_url: null, subtitle: null, verified: false, is_contact: true },
       parts: options.parts ?? [{ type: "text", value: "@relay owned offline ingress test", ...(options.mention ? { mention: options.mention } : {}) }],
       ...(options.replyToAgent === undefined ? {} : { reply_to: { message_id: "00000000-0000-7000-8000-000000000010" } }),
+      ...(options.replyTo ? { reply_to: options.replyTo } : {}),
     },
   } as RelayWebhookEvent;
   if (options.selection && event.event_type === "message.received") {
@@ -57,7 +60,7 @@ async function dispatch(allowFrom: string[], contactId = approvedId, handle = "r
     cfg: {},
     relay: {
       chats: { markAsRead, startTyping, stopTyping } as never,
-      messages: { retrieve: vi.fn(async () => ({
+      messages: { retrieve: options.retrieve ?? vi.fn(async () => ({
         chat_id: options.replyChatId ?? "00000000-0000-7000-8000-000000000004",
         is_from_me: options.replyToAgent === true,
       })) } as never,
@@ -261,5 +264,56 @@ describe("Relay answers each of another agent's overlapping Messages, naming it"
     const [call] = result.invoke.mock.calls[0] as unknown as [{ delivery: { durable: { replyToId: string | null }; preparePayload: (payload: object) => object } }];
     expect(call.delivery.durable.replyToId).toBeNull();
     expect(call.delivery.preparePayload({ text: "answer", replyToId: first })).toEqual({ text: "answer" });
+  });
+});
+
+describe("a person's swipe-reply reaches the OpenClaw turn", () => {
+  const targetId = "00000000-0000-7000-8000-000000000010";
+  const agentMessage = () => ({
+    id: targetId,
+    chat_id: "00000000-0000-7000-8000-000000000004",
+    from: "relay",
+    from_handle: { id: "00000000-0000-7000-8000-000000000001", handle: "relay", kind: "agent", display_name: "Relay" },
+    is_from_me: true,
+    is_system_message: false,
+    parts: [
+      { type: "text", value: "The flight lands at 6.", reactions: null },
+      { type: "text", value: "Take the long way round the lake.", reactions: null },
+    ],
+  });
+
+  it("gives OpenClaw's reply target the bubble the person swiped and who sent it", async () => {
+    const retrieve = vi.fn(async () => agentMessage());
+    const result = await dispatch([approvedId], approvedId, "review_sender", {
+      replyTo: { message_id: targetId, part_index: 1 },
+      retrieve,
+    });
+    expect(retrieve).toHaveBeenCalledOnce();
+    expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+      ctxPayload: expect.objectContaining({
+        ReplyToBody: "Take the long way round the lake.",
+        ReplyToSender: "Relay",
+      }),
+    }));
+  });
+
+  it("runs the turn without a reply target when the read fails, and says so", async () => {
+    const retrieve = vi.fn(async () => { throw new Error("Relay is down"); });
+    const result = await dispatch([approvedId], approvedId, "review_sender", {
+      replyTo: { message_id: targetId, part_index: 0 },
+      retrieve,
+    });
+    expect(result.invoke).toHaveBeenCalledOnce();
+    const [call] = result.invoke.mock.calls[0] as unknown as [{ ctxPayload: Record<string, unknown> }];
+    expect(call.ctxPayload.ReplyToBody).toBeUndefined();
+    expect(result.warn).toHaveBeenCalledWith(expect.stringContaining("Relay is down"));
+  });
+
+  it("reads nothing for a Message that is not a reply", async () => {
+    const retrieve = vi.fn(async () => agentMessage());
+    const result = await dispatch([approvedId], approvedId, "review_sender", { retrieve });
+    expect(retrieve).not.toHaveBeenCalled();
+    const [call] = result.invoke.mock.calls[0] as unknown as [{ ctxPayload: Record<string, unknown> }];
+    expect(call.ctxPayload.ReplyToBody).toBeUndefined();
   });
 });
