@@ -162,6 +162,14 @@ relay auth status
 relay doctor
 ```
 
+`relay auth token` prints the Agent Token the CLI would use, and nothing else,
+the way `gh auth token` does. Use it to give the token to the SDK:
+
+```sh
+export RELAY_AGENT_TOKEN=$(relay auth token)
+relay auth token --profile staging
+```
+
 Profiles live in `${XDG_CONFIG_HOME:-~/.config}/relay/config.json`. The
 directory is mode `0700` and the file is mode `0600` on POSIX systems.
 

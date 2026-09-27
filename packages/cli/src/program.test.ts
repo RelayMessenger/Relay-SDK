@@ -153,7 +153,7 @@ describe("CLI command routing", () => {
   it("prints an invalid handle and docs to stderr with exit 2", async () => {
     expect(await run(["watch", "bad handle"])).toBe(2);
     expect(stderr.join("").split("\n").filter((line) => /^error:/iu.test(line))).toHaveLength(1);
-    expect(stderr.join("")).toContain("Error: Handles must be non-empty and contain no spaces.\nDocs: https://docs.relayapp.im");
+    expect(stderr.join("")).toContain("Error: Handles must be non-empty and contain no spaces.\nDocs: https://docs.staging.relayapp.im");
   });
 
   it.each([

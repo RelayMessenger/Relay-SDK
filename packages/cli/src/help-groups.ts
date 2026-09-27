@@ -1,4 +1,5 @@
 import type { Command, Help } from "commander";
+import { DEFAULT_API_URL, STAGING_API_URL, isStagingBuild, packageVersion } from "./config.js";
 import { relayHelpHeading } from "./relay-brand.js";
 
 /**
@@ -16,7 +17,28 @@ export const HELP_GROUPS = {
 } as const;
 
 export const DOCS_URL = "https://docs.relayapp.im";
+export const STAGING_DOCS_URL = "https://docs.staging.relayapp.im";
 export const ISSUES_URL = "https://github.com/RelayMessenger/Relay-SDK/issues";
+
+/**
+ * The docs for the Relay this CLI talks to. `RELAY_API_URL` names the
+ * environment when it points at a Relay host, the way it overrides the API
+ * (config.ts `resolveAuth`); otherwise a `-staging` build means staging, the
+ * rule `defaultCreationApiURL` and the hosted MCP address already follow.
+ */
+export const docsURL = (
+  env: NodeJS.ProcessEnv = process.env,
+  version: string = packageVersion(),
+): string => {
+  const configured = env.RELAY_API_URL?.trim();
+  if (configured) {
+    let host: string | undefined;
+    try { host = new URL(configured).hostname; } catch { host = undefined; }
+    if (host === new URL(STAGING_API_URL).hostname) return STAGING_DOCS_URL;
+    if (host === new URL(DEFAULT_API_URL).hostname) return DOCS_URL;
+  }
+  return isStagingBuild(version) ? STAGING_DOCS_URL : DOCS_URL;
+};
 
 /**
  * The last line of every help screen: where to read more and where to report
@@ -24,8 +46,10 @@ export const ISSUES_URL = "https://github.com/RelayMessenger/Relay-SDK/issues";
  * https://cli.github.com/manual", ledger captures/tools/gh.help.plain:68-71;
  * ledger rows P06, P07, P37). The text is the decision page's last block.
  */
-export const DOCS_LINE = `Docs: ${DOCS_URL}`;
-export const HELP_FOOTER = `${DOCS_LINE}\nReport a problem: ${ISSUES_URL}`;
+export const docsLine = (
+  env: NodeJS.ProcessEnv = process.env,
+  version: string = packageVersion(),
+): string => `Docs: ${docsURL(env, version)}`;
 
 /** clig.dev "Lead with examples"; gh, flyctl and codex do (ledger row P08). Three, from the decision page. */
 export const EXAMPLES = [
@@ -160,4 +184,8 @@ export const formatRelayHelp = (cmd: Command, helper: Help, heading?: string): s
 };
 
 /** What follows the built-in help on every screen; the root also states the environment rule first. */
-export const helpFooter = (_root: boolean): string => HELP_FOOTER;
+export const helpFooter = (
+  _root: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+  version: string = packageVersion(),
+): string => `${docsLine(env, version)}\nReport a problem: ${ISSUES_URL}`;
