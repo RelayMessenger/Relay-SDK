@@ -6,6 +6,7 @@
 //   node scripts/validate-cookbook-standalone.mjs --link-check  workspace-side checks only
 //   ... --only webhook-receiver                                  one folder
 //   ... --channel staging|release                                name the channel outside CI
+//   ... --tarball <path.tgz> (repeatable)                        release builds npm does not have yet
 //
 // Two properties, checked from two sides:
 //
@@ -35,6 +36,22 @@
 //    monorepo's own CI validates the cookbooks against the tree, not against
 //    whatever the registry has. Every tsconfig stays inside its folder, and
 //    the tools its scripts run are its own devDependencies.
+//
+// 3. The release (scripts/release-run.mjs) rewrites every cookbook's Relay
+//    staging pins to the versions it publishes (rewriteCookbooks in
+//    release-derive.mjs) and then runs this check on the release channel.
+//    Before the publish, in the dry run, those versions exist only as the
+//    tarballs it packed: `--tarball` adds each one to a private npm cache and
+//    every install prefers that cache, so the lockfile's registry URL and
+//    integrity resolve to the exact bytes the release will publish.
+//
+//    On the release channel, a folder that pins a Relay package to an exact
+//    staging build (X.Y.Z-staging.N) cannot install a release until the
+//    release job has run: that pin is what the release rewrites. Without
+//    `--tarball`, this check names such a folder and leaves it to the
+//    release, which proves it in `release-dry-run` (ci.yml, the same run,
+//    from the packed tarballs) before the merge and in release.yml after the
+//    publish, both through `--tarball` or npm itself.
 //
 // A semver prerelease range covers only its own X.Y.Z tuple. The automatic
 // bump can move to the next tuple before its plain release exists. Root
@@ -118,6 +135,30 @@ export function standaloneChannel(env = process.env, argv = process.argv) {
 }
 
 const STAGING_BUILD = /^\d+\.\d+\.\d+-staging\.\d+$/u;
+
+/**
+ * On the release channel, the Relay dependencies a folder pins to an exact
+ * staging build. Only the release can turn those into installable releases
+ * (scripts/release-run.mjs), so the check leaves such a folder to it unless
+ * the release's own tarballs were handed in.
+ */
+export function releaseDeferredPins({ channel, dependencies, tarballs }) {
+  if (channel !== "release" || tarballs.length > 0) return [];
+  return dependencies.filter(({ range }) => STAGING_BUILD.test(range));
+}
+
+/** Every `--tarball <path>` argument, resolved. */
+export function tarballArguments(argv) {
+  const found = [];
+  argv.forEach((value, index) => {
+    if (value === "--tarball") {
+      const path = argv[index + 1];
+      assert.ok(path && path.endsWith(".tgz"), `--tarball takes a .tgz path, not ${path}`);
+      found.push(resolve(path));
+    }
+  });
+  return found;
+}
 
 /**
  * Why an installed Relay package does not belong to the channel, or null.
@@ -204,6 +245,24 @@ function linkCheck(name) {
   }
 }
 
+/**
+ * A private npm cache holding the release tarballs npm does not have yet.
+ * npm reads a locked dependency's tarball from the cache by its integrity, so
+ * `--prefer-offline` installs these bytes without asking the registry for them
+ * (measured 2026-09-27 on npm 12.0.2: the Think starter locked to an
+ * unpublished sdk 0.3.6 installs from the seeded cache and fails E404 without
+ * it).
+ */
+function seededCache(tarballs) {
+  if (tarballs.length === 0) return null;
+  const cache = mkdtempSync(join(tmpdir(), "relay-cookbook-release-cache-"));
+  for (const tarball of tarballs) {
+    assert.ok(existsSync(tarball), `--tarball ${tarball} does not exist`);
+    run(npm, ["cache", "add", tarball, "--cache", cache], root);
+  }
+  return cache;
+}
+
 function run(command, args, cwd) {
   say(`  $ ${args.length ? `${command} ${args.join(" ")}` : command}`);
   const result = spawnSync(command, args, { cwd, encoding: "utf8", stdio: ["ignore", "inherit", "inherit"], env: { ...process.env, CI: "1" } });
@@ -218,7 +277,7 @@ function distTag(packageName, tag) {
   return Array.isArray(parsed) ? parsed[0] : parsed;
 }
 
-function standaloneCheck(name, channel, taggedByName) {
+function standaloneCheck(name, channel, taggedByName, { tarballs = [], cache = null } = {}) {
   const tag = CHANNEL_TAGS[channel];
   const source = join(cookbookRoot, name);
   const temporary = mkdtempSync(join(tmpdir(), `relay-cookbook-standalone-${name}-`));
@@ -236,13 +295,20 @@ function standaloneCheck(name, channel, taggedByName) {
     say(`  copied to ${copy}${hasLock ? " (with its own lockfile)" : ""}`);
     const manifest = readJson(join(copy, "package.json"));
     const dependencies = relayDependencies(manifest);
+    const deferred = releaseDeferredPins({ channel, dependencies, tarballs });
+    if (deferred.length > 0) {
+      say(`  ${name}: pins ${deferred.map(({ name: dependency, range }) => `${dependency}@${range}`).join(", ")}, a staging build; `
+        + "the release rewrites it to the version it publishes and proves this folder then "
+        + "(release-dry-run in ci.yml from the packed tarballs, release.yml after the publish)");
+      return false;
+    }
     if (channel === "staging" && !hasLock) {
       // What a developer on the staging channel runs: the newest staging
       // build of each Relay package, by its dist-tag. Only the copy changes.
       for (const { field, name: dependency } of dependencies) manifest[field][dependency] = tag;
       writeFileSync(join(copy, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
     }
-    run(npm, ["install", "--no-audit", "--no-fund", "--ignore-scripts"], copy);
+    run(npm, ["install", "--no-audit", "--no-fund", "--ignore-scripts", ...(cache ? ["--cache", cache, "--prefer-offline"] : [])], copy);
     for (const dependency of dependencies) {
       const installed = readJson(join(copy, "node_modules", ...dependency.name.split("/"), "package.json")).version;
       let tagged;
@@ -257,6 +323,7 @@ function standaloneCheck(name, channel, taggedByName) {
     // --no-install: tsc must come from the folder's own devDependencies.
     run(npx, ["--no-install", "tsc", "--noEmit", "-p", "tsconfig.json"], copy);
     say(`  ${name}: standalone ok`);
+    return true;
   } finally {
     if (process.env.RELAY_KEEP_STANDALONE === "1") say(`  kept ${copy}`);
     else rmSync(temporary, { recursive: true, force: true });
@@ -293,11 +360,21 @@ function main(argv) {
     const { channel, reason } = standaloneChannel(process.env, argv);
     say(`  channel ${channel} (${reason}): npm dist-tag ${CHANNEL_TAGS[channel]}`);
     const taggedByName = new Map();
-    for (const name of checked) {
-      say(`\n=== ${name} ===`);
-      standaloneCheck(name, channel, taggedByName);
+    const tarballs = tarballArguments(argv);
+    const cache = seededCache(tarballs);
+    if (cache) say(`  ${tarballs.length} release tarballs seeded into ${cache}`);
+    const proven = [];
+    const left = [];
+    try {
+      for (const name of checked) {
+        say(`\n=== ${name} ===`);
+        (standaloneCheck(name, channel, taggedByName, { tarballs, cache }) ? proven : left).push(name);
+      }
+    } finally {
+      if (cache) rmSync(cache, { recursive: true, force: true });
     }
-    say(`\nvalidated ${checked.length} cookbooks install from npm (${channel} channel) and type-check outside the workspace`);
+    say(`\nvalidated ${proven.length} cookbooks install from npm (${channel} channel) and type-check outside the workspace`);
+    if (left.length > 0) say(`left to the release, which rewrites their staging pins: ${left.join(", ")}`);
   }
 }
 

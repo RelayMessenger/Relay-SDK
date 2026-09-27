@@ -3,10 +3,13 @@
 // everywhere else. These are the environments GitHub Actions gives ci.yml.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { resolve } from "node:path";
 import {
   CHANNEL_TAGS,
   installedMismatch,
+  releaseDeferredPins,
   standaloneChannel,
+  tarballArguments,
 } from "./validate-cookbook-standalone.mjs";
 
 const sdk = { field: "dependencies", name: "@relaymessenger/sdk", range: "^0.3.0-staging.0" };
@@ -67,4 +70,24 @@ test("staging: a locked folder installs what it pins, a release or a staging bui
   assert.equal(installedMismatch({ ...locked, installed: "0.3.6-staging.46" }), null);
   assert.equal(installedMismatch({ ...locked, installed: "0.3.5" }), null);
   assert.match(installedMismatch({ ...locked, installed: "0.3.6-rc.1" }), /not a staging build/u);
+});
+
+test("release: an exact staging pin is left to the release, unless the release hands in its tarballs", () => {
+  const exact = { field: "dependencies", name: "@relaymessenger/sdk", range: "0.3.6-staging.46" };
+  const released = { field: "dependencies", name: "@relaymessenger/chat-sdk-adapter", range: "0.3.6" };
+  assert.deepEqual(releaseDeferredPins({ channel: "release", dependencies: [exact, released, sdk], tarballs: [] }), [exact]);
+  // A staging range installs a release and is proven here as before.
+  assert.deepEqual(releaseDeferredPins({ channel: "release", dependencies: [sdk, released], tarballs: [] }), []);
+  // The release's own run proves every folder from its packed tarballs.
+  assert.deepEqual(releaseDeferredPins({ channel: "release", dependencies: [exact], tarballs: ["/r/sdk.tgz"] }), []);
+  // The staging channel installs staging builds; nothing is deferred there.
+  assert.deepEqual(releaseDeferredPins({ channel: "staging", dependencies: [exact], tarballs: [] }), []);
+});
+
+test("--tarball is repeatable and takes only .tgz paths", () => {
+  assert.deepEqual(tarballArguments(["node", "x", "--tarball", "a/sdk-0.3.6.tgz", "--channel", "release", "--tarball", "/b/adapter-0.3.7.tgz"]),
+    [resolve("a/sdk-0.3.6.tgz"), "/b/adapter-0.3.7.tgz"]);
+  assert.deepEqual(tarballArguments(["node", "x"]), []);
+  assert.throws(() => tarballArguments(["node", "x", "--tarball"]), /--tarball takes a .tgz path/u);
+  assert.throws(() => tarballArguments(["node", "x", "--tarball", "sdk.tar"]), /--tarball takes a .tgz path/u);
 });

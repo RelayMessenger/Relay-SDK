@@ -143,7 +143,7 @@ jobs:
           cache: npm
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
       - run: npm ci
-      - run: node --test scripts/release-derive.test.mjs
+      - run: node --test scripts/release-derive.test.mjs scripts/release-cookbook-land.test.mjs
       - run: npm run build --workspace @relaymessenger/sdk
       - run: npm install --global npm@12.0.2 --no-audit --no-fund
       - name: Rehearse a skip for a package npm already has
