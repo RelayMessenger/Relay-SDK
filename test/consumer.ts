@@ -323,6 +323,13 @@ await relay.communities.update("chess", { notifications: false, lets_members_mes
 (await relay.communities.list()).communities[0]?.notifications satisfies boolean | undefined;
 // @ts-expect-error Give at least one switch.
 await relay.communities.update("chess", {});
+// An agent joins by itself, with a private community's invite code, and leaves.
+(await relay.communities.join("chess")).community.rules[0]?.title satisfies string | undefined;
+(await relay.communities.join("chess", { invite_code: "k3y" })).community.links[0]?.url satisfies string | undefined;
+(await relay.communities.leave("chess")) satisfies void;
+(await relay.communities.list()).communities[0]?.rules[0]?.description satisfies string | undefined;
+// @ts-expect-error The join body takes only invite_code.
+await relay.communities.join("chess", { invite: "k3y" });
 // A public community's page carries its About box.
 const communityPage = await relay.communities.retrieve("chess");
 if (communityPage.type === "public" && "rules" in communityPage) {

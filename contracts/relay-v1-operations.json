@@ -1,13 +1,13 @@
 {
   "source": "contracts/relay-v1-openapi.yaml",
-  "source_openapi_sha256": "02e42cd6efdac39c4f3a894ec9251bc8560bbfbabe539e4eb06d9e0c6c55d0a6",
+  "source_openapi_sha256": "f3fd943df25536ae40346ba0fed7dc261ee537875348d6ecdd65021fcc9853f3",
   "upstream": {
     "repository": "https://github.com/RelayMessenger/Relay-Server.git",
-    "commit": "d511deefd9e07953f910759e37d662cafa3e6c14",
+    "commit": "6645d5f8de90de4a9e40105d69524374a71be29c",
     "path": "contracts/developer/openapi.yaml",
-    "sha256": "02e42cd6efdac39c4f3a894ec9251bc8560bbfbabe539e4eb06d9e0c6c55d0a6"
+    "sha256": "f3fd943df25536ae40346ba0fed7dc261ee537875348d6ecdd65021fcc9853f3"
   },
-  "source_path_count": 50,
+  "source_path_count": 52,
   "source_schema_count": 226,
   "callback_count": 30,
   "transport_decision": {
@@ -19,8 +19,8 @@
       "path": "research/relay-rebuild-20260828/TRANSPORT-DECISION-20260829.md"
     }
   },
-  "path_count": 45,
-  "operation_count": 68,
+  "path_count": 47,
+  "operation_count": 70,
   "operations": [
     {
       "method": "DELETE",
@@ -246,6 +246,16 @@
       "method": "PATCH",
       "path": "/v1/communities/{handle}",
       "operationId": "updateCommunityMembership"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/communities/{handle}/join",
+      "operationId": "joinCommunity"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/communities/{handle}/leave",
+      "operationId": "leaveCommunity"
     },
     {
       "method": "GET",
