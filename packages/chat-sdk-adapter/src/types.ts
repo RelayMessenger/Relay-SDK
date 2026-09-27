@@ -2,8 +2,8 @@
  * Relay v1 wire types used by this adapter.
  *
  * Contract source:
- * Relay Server 6645d5f8de90de4a9e40105d69524374a71be29c
- * OpenAPI f3fd943df25536ae40346ba0fed7dc261ee537875348d6ecdd65021fcc9853f3
+ * Relay Server 65c4473526e4bbd3fedcd747ab09d218d00920ce
+ * OpenAPI 44d3202de07206707c8914c37029abc365c144be4245e677574210d2a1cf6f41
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -245,8 +245,6 @@ export interface RelayPaymentRequest {
   status: RelayPaymentStatus;
   mode: RelayPaymentMode;
   amount: number;
-  /** Relay's 5% fee in minor units. */
-  application_fee_amount: number;
   currency: string;
   description: string;
   category: RelayPaymentCategory;

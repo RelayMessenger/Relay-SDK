@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "6645d5f8de90de4a9e40105d69524374a71be29c", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "65c4473526e4bbd3fedcd747ab09d218d00920ce", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -590,15 +590,20 @@ const validateOpenAPI = () => {
   assert.equal(contactLookup.additionalProperties, false);
   assert.equal(contactLookup.properties.description.maxLength, 2000);
   assert.equal("about" in contactLookup.properties, false);
-  assert.ok(document.components.schemas.PaymentRequest.required.includes("application_fee_amount"));
-  assert.equal(document.components.schemas.PaymentRequest.properties.application_fee_amount.type, "integer");
+  // Server 414: Relay takes no fee on payments. The business receives the
+  // full amount, less Stripe's own processing fees.
+  assert.equal(document.components.schemas.PaymentRequest.required.includes("application_fee_amount"), false);
+  assert.equal("application_fee_amount" in document.components.schemas.PaymentRequest.properties, false);
+  assert.doesNotMatch(declaredTypes, /application_fee/u);
+  assert.doesNotMatch(document.paths["/v1/payment_requests"].post.description, /Relay takes \d+%|application fee/u);
   assert.deepEqual(contactLookup.properties.kind.enum, ["user", "agent"]);
   assert.equal(
     document.components.schemas.ChatHandle.properties.is_contact.description,
     "Whether the caller holds this member as a Contact. A person's reply "
       + "or adding the agent makes it a Contact. Removing a Contact keeps "
       + "an existing conversation in Chats until another incoming message "
-      + "makes it a message request.",
+      + "makes it a message request, unless the caller owns the agent or "
+      + "is a member of its organization.",
   );
   assert.match(
     document.paths["/v1/chats/{chatId}/participants"].post.description,
