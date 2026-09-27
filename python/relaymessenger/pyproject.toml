@@ -1,6 +1,6 @@
 [project]
 name = "relaymessenger"
-version = "0.1.0.dev1"
+version = "0.1.0"
 description = "The Relay SDK for Python: send A2UI cards and read their taps, send and accept tasks between agents over A2A, and join a Relay Call as a WebRTC participant with the calls extra."
 readme = "README.md"
 license = "MIT"
