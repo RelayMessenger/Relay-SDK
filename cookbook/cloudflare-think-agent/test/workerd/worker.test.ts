@@ -6,16 +6,30 @@ import {
   it,
   vi,
 } from "vitest";
+import {
+  paymentRequestFields,
+  type PaymentRequestCreateParams,
+} from "@relaymessenger/sdk";
 
 import {
   createRelayAdapterFor,
   createRelayMessenger,
   type RelayChatAgent,
+  stopUnlessPaymentNotCreated,
 } from "../../src/agent";
 import type { Bindings } from "../../src/env";
 import { starterModel } from "../../src/model";
-import { sendRelayReply } from "../../src/reply";
-import { TEST_REPLY_TEXT } from "./harness";
+import {
+  RELAY_PAYMENT_NOT_CREATED,
+  relayPaymentIdempotencyKey,
+  sendRelayReply,
+} from "../../src/reply";
+import {
+  TEST_AFTER_REFUSAL_PREFIX,
+  TEST_PAYMENT,
+  TEST_PAYMENT_TRIGGER,
+  TEST_REPLY_TEXT,
+} from "./harness";
 
 const WEBHOOK_SECRET = "test-secret";
 const EVENT_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec11";
@@ -39,6 +53,17 @@ const RECOVERY_CHAT_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec50";
 const RECOVERY_MESSAGE_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec51";
 const RECOVERY_EVENT_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec52";
 const RECOVERY_REPLY_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec53";
+const PAY_CHAT_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec60";
+const PAY_MESSAGE_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec61";
+const PAY_EVENT_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec62";
+const PAY_REPLY_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec63";
+const PAY_REQUEST_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec64";
+const REFUSED_CHAT_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec70";
+const REFUSED_MESSAGE_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec71";
+const REFUSED_EVENT_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec72";
+const REFUSED_REPLY_ID = "01993d50-ef7b-7b37-886b-23fd80c7ec73";
+const CHECKOUT_URL = "https://checkout.stripe.com/c/pay/cs_test_starter";
+const STRIPE_NOT_CONNECTED = "Connect Stripe in Relay Console before asking anyone to pay";
 
 function base64(bytes: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(bytes)));
@@ -115,6 +140,7 @@ function messageEnvelope(input: {
   isGroup: boolean;
   mentioned: boolean;
   messageId: string;
+  text?: string;
 }): Record<string, unknown> {
   const parts = input.mentioned
     ? [{
@@ -123,7 +149,7 @@ function messageEnvelope(input: {
         type: "text",
         value: "@starter_test please reply",
       }]
-    : [{ type: "text", value: "please reply" }];
+    : [{ type: "text", value: input.text ?? "please reply" }];
   return envelope(input.eventId, "message.received", {
     chat: {
       id: input.chatId,
@@ -156,8 +182,8 @@ interface CommittedRelayMessage {
  * The adapter derives every inbound send key from the Relay event that caused
  * it, so a redelivery replays under the same key instead of double-posting.
  */
-function relaySendKey(eventId: string): string {
-  return `relay-chat-sdk:${eventId}:0`;
+function relaySendKey(eventId: string, ordinal = 0): string {
+  return `relay-chat-sdk:${eventId}:${ordinal}`;
 }
 
 function expectedReplyBody(_eventId: string) {
@@ -172,6 +198,8 @@ function expectedReplyBody(_eventId: string) {
 
 function installRelayBackend(input: {
   chatId: string;
+  /** What POST /v1/payment_requests answers. */
+  paymentRequest?: { body: unknown; status: number };
   precommitted?: {
     body: ReturnType<typeof expectedReplyBody>;
     key: string;
@@ -208,6 +236,15 @@ function installRelayBackend(input: {
       && request.method === "POST"
     ) {
       return new Response(null, { status: 204 });
+    }
+    if (
+      pathname === "/v1/payment_requests"
+      && request.method === "POST"
+      && input.paymentRequest
+    ) {
+      return Response.json(input.paymentRequest.body, {
+        status: input.paymentRequest.status,
+      });
     }
     if (
       pathname === `/v1/chats/${input.chatId}/messages`
@@ -481,6 +518,141 @@ describe("signed messenger turns", () => {
         status: "settled",
       }],
     });
+  });
+});
+
+describe("payments", () => {
+  it("creates the request, then sends the words and the card with the returned checkout_url", async () => {
+    const relay = installRelayBackend({
+      chatId: PAY_CHAT_ID,
+      paymentRequest: {
+        body: {
+          checkout_url: CHECKOUT_URL,
+          id: PAY_REQUEST_ID,
+          object: "payment_request",
+          status: "requested",
+        },
+        status: 201,
+      },
+      replyId: PAY_REPLY_ID,
+    });
+    const response = await SELF.fetch(
+      await signedRequest(messageEnvelope({
+        chatId: PAY_CHAT_ID,
+        eventId: PAY_EVENT_ID,
+        isGroup: false,
+        mentioned: false,
+        messageId: PAY_MESSAGE_ID,
+        text: `please ${TEST_PAYMENT_TRIGGER}`,
+      })),
+    );
+    expect(response.status).toBe(202);
+    await waitForRelayCalls(relay, 4);
+
+    expect(relay.calls.map(({ method, pathname }) => [method, pathname])).toEqual([
+      ["POST", `/v1/chats/${PAY_CHAT_ID}/read`],
+      ["POST", "/v1/payment_requests"],
+      ["POST", `/v1/chats/${PAY_CHAT_ID}/messages`],
+      ["POST", `/v1/chats/${PAY_CHAT_ID}/messages`],
+    ]);
+    const [, create, words, card] = relay.calls;
+    // The fields the model gave, keyed by the inbound Message that caused them.
+    expect(JSON.parse(create!.body)).toEqual(TEST_PAYMENT);
+    expect(create!.headers.get("idempotency-key")).toBe(
+      await relayPaymentIdempotencyKey(
+        PAY_MESSAGE_ID,
+        paymentRequestFields(TEST_PAYMENT) as PaymentRequestCreateParams,
+      ),
+    );
+    expect(create!.headers.get("idempotency-key"))
+      .toMatch(new RegExp(`^relay-agent-starter:${PAY_MESSAGE_ID}:payment:[0-9a-f]{64}$`, "u"));
+    expect(JSON.parse(words!.body)).toEqual(expectedReplyBody(PAY_EVENT_ID));
+    expect(words!.headers.get("idempotency-key")).toBe(relaySendKey(PAY_EVENT_ID, 0));
+    // The card is its own Message, the returned url alone, after the words.
+    expect(JSON.parse(card!.body)).toEqual({
+      message: { parts: [{ checkout_url: CHECKOUT_URL, type: "payment" }] },
+    });
+    expect(card!.headers.get("idempotency-key")).toBe(relaySendKey(PAY_EVENT_ID, 1));
+    expect(relay.newCommits()).toBe(2);
+  });
+
+  it("returns a refused create to the model, sends nothing for it, and sends the model's next answer", async () => {
+    const relay = installRelayBackend({
+      chatId: REFUSED_CHAT_ID,
+      paymentRequest: {
+        body: {
+          error: {
+            code: "stripe_not_connected",
+            message: STRIPE_NOT_CONNECTED,
+          },
+        },
+        status: 403,
+      },
+      replyId: REFUSED_REPLY_ID,
+    });
+    const response = await SELF.fetch(
+      await signedRequest(messageEnvelope({
+        chatId: REFUSED_CHAT_ID,
+        eventId: REFUSED_EVENT_ID,
+        isGroup: false,
+        mentioned: false,
+        messageId: REFUSED_MESSAGE_ID,
+        text: `please ${TEST_PAYMENT_TRIGGER}`,
+      })),
+    );
+    expect(response.status).toBe(202);
+    await waitForRelayCalls(relay, 3);
+    await scheduler.wait(1_000);
+
+    expect(relay.calls.map(({ method, pathname }) => [method, pathname])).toEqual([
+      ["POST", `/v1/chats/${REFUSED_CHAT_ID}/read`],
+      ["POST", "/v1/payment_requests"],
+      ["POST", `/v1/chats/${REFUSED_CHAT_ID}/messages`],
+    ]);
+    const sent = JSON.parse(relay.calls[2]!.body) as {
+      message: { parts: Array<{ type: string; value: string }> };
+    };
+    expect(sent.message.parts).toHaveLength(1);
+    const words = sent.message.parts[0]!;
+    expect(words.type).toBe("text");
+    // The model's second answer quotes the reply result it read: the refusal,
+    // Relay's own words, and that nothing was sent.
+    expect(words.value.startsWith(TEST_AFTER_REFUSAL_PREFIX)).toBe(true);
+    expect(words.value).toContain(RELAY_PAYMENT_NOT_CREATED);
+    expect(words.value).toContain(STRIPE_NOT_CONNECTED);
+    expect(words.value).toContain("Nothing was sent");
+    expect(relay.calls[2]!.headers.get("idempotency-key"))
+      .toBe(relaySendKey(REFUSED_EVENT_ID, 0));
+    expect(relay.newCommits()).toBe(1);
+  });
+
+  it("refuses fields the SDK rejects before any Relay call", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("An invalid payment reached the network");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(sendRelayReply(
+      createRelayAdapterFor(bindings()),
+      { chatId: CHAT_ID, messageId: MESSAGE_ID },
+      { payment: { ...TEST_PAYMENT, metadata: { order: "1" } }, text: "pay" },
+    )).rejects.toMatchObject({
+      message: expect.stringContaining("payment has unknown field metadata"),
+      name: RELAY_PAYMENT_NOT_CREATED,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("gives the model a second step only when its payment was not created", () => {
+    const step = (output: unknown) => ({
+      steps: [{ toolResults: [{ output, toolName: "reply" }] }],
+    }) as unknown as Parameters<typeof stopUnlessPaymentNotCreated>[0];
+    expect(stopUnlessPaymentNotCreated(step({ messageId: REPLY_ID, status: "sent" }))).toBe(true);
+    expect(stopUnlessPaymentNotCreated(step({
+      error: { message: "network", name: "Error" },
+    }))).toBe(true);
+    expect(stopUnlessPaymentNotCreated(step({
+      error: { message: "refused", name: RELAY_PAYMENT_NOT_CREATED },
+    }))).toBe(false);
   });
 });
 

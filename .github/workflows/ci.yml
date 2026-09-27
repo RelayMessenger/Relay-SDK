@@ -104,9 +104,12 @@ jobs:
   # and runs `npm install && npm start` with only an Agent Token. This job
   # never installs the workspace: each folder is copied outside the checkout,
   # installed from the real registry, and type-checked from its own
-  # devDependencies (scripts/validate-cookbook-standalone.mjs). The
-  # workspace-side half of that proof, that the same folders resolve the
-  # workspace sdk inside the monorepo, runs under `npm run validate` above.
+  # devDependencies (scripts/validate-cookbook-standalone.mjs). The branch
+  # picks the npm channel: staging (a push to it, or a pull request into it)
+  # installs the `staging` dist-tag's builds, every other branch the `latest`
+  # releases. The workspace-side half of that proof, that the same folders
+  # resolve the workspace sdk inside the monorepo, runs under
+  # `npm run validate` above.
   cookbook-standalone:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 30
@@ -118,6 +121,7 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
+      - run: node --test scripts/validate-cookbook-standalone.test.mjs
       - run: node scripts/validate-cookbook-standalone.mjs
 
   # The production release proves itself before it can run: the same
