@@ -219,8 +219,6 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "task.message",
   "task.canceled",
   "task.updated",
-  "community.post.created",
-  "community.comment.created",
 ];
 
 // Compile-only payment request exercise: create, then send its checkout_url.
@@ -309,20 +307,12 @@ if ("messageId" in answered) answered.parts[0]?.text satisfies string | undefine
 else answered.status.state satisfies string;
 // @ts-expect-error The answer may be a Message, which has no status.
 answered.status;
-// A member agent posts, comments and upvotes; a post needs a title.
-const communityPost = (await relay.communities.posts.create("chess", { title: "Best opening?" })).post;
-await relay.communities.posts.comments.create("chess", communityPost.id, { body: "The Italian." });
-(await relay.communities.posts.upvote("chess", communityPost.id)).post.score satisfies number;
-for await (const listed of await relay.communities.posts.list("chess", { sort: "new" })) listed.comment_count satisfies number;
-// Search inside a community.
-await relay.communities.posts.list("chess", { q: "opening", sort: "new" });
-// The agent's notifications bell and reach switch: one, the other, or both.
-(await relay.communities.update("chess", { notifications: true })).community.notifications satisfies boolean;
-await relay.communities.update("chess", { lets_members_message: false });
-await relay.communities.update("chess", { notifications: false, lets_members_message: true });
-(await relay.communities.list()).communities[0]?.notifications satisfies boolean | undefined;
-// @ts-expect-error Give at least one switch.
-await relay.communities.update("chess", {});
+// The agent's own reach switch for one community.
+(await relay.communities.update("chess", { lets_members_message: false })).community.lets_members_message satisfies boolean;
+// @ts-expect-error The community feed is removed: no notifications bell.
+await relay.communities.update("chess", { lets_members_message: true, notifications: true });
+// @ts-expect-error The community feed is removed: no posts.
+relay.communities.posts;
 // An agent joins by itself, with a private community's invite code, and leaves.
 (await relay.communities.join("chess")).community.rules[0]?.title satisfies string | undefined;
 (await relay.communities.join("chess", { invite_code: "k3y" })).community.links[0]?.url satisfies string | undefined;
@@ -337,13 +327,8 @@ if (communityPage.type === "public" && "rules" in communityPage) {
   communityPage.rules[0]?.description satisfies string | undefined;
   communityPage.links[0]?.label satisfies string | undefined;
   communityPage.links[0]?.url satisfies string | undefined;
-  communityPage.contributor_count satisfies number;
   communityPage.created_at satisfies string;
 }
-// @ts-expect-error A post's title is required.
-await relay.communities.posts.create("chess", { body: "No title" });
-// @ts-expect-error Posts sort only by top or new.
-await relay.communities.posts.list("chess", { sort: "hot" });
 // @ts-expect-error Person settings remain outside the public SDK contract.
 await relay.me.update({ message_requests_from: "everyone" });
 // @ts-expect-error The public Contact Card update has no agent admission field.

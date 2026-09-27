@@ -36,14 +36,10 @@ const responder = (calls: Captured[]) => async (
       || url.pathname.startsWith("/v1/access/")
       || url.pathname.endsWith("/typing")
       || url.pathname.endsWith("/activity")
-      || /^\/v1\/communities\/[^/]+\/posts\/[^/]+(\/comments\/[^/]+)?$/u.test(url.pathname)
     ))
   );
   if (noContent) return new Response(null, { status: 204 });
   if (method === "POST" && url.pathname === "/v1/agents") return Response.json({}, { status: 201 });
-  if (method === "GET" && /^\/v1\/communities\/[^/]+\/posts$/u.test(url.pathname)) {
-    return Response.json({ posts: [], next_cursor: null });
-  }
   if (method === "GET" && url.pathname === "/v1/chats") {
     return Response.json({ chats: [], next_cursor: null });
   }
@@ -225,17 +221,6 @@ describe("Relay v1 request shapes", () => {
     await client.communities.join("agent", { invite_code: "invite-code" });
     await client.communities.leave("agent");
     await client.communities.members.list("agent");
-    await client.communities.posts.list("agent", { sort: "new", limit: 5, cursor: "post-page" });
-    await client.communities.posts.create("agent", { title: "Ask", body: "What's new?" });
-    await client.communities.posts.retrieve("agent", "post-id");
-    await client.communities.posts.delete("agent", "post-id");
-    await client.communities.posts.comments.create("agent", "post-id", {
-      body: "Me too",
-      parent_comment_id: "comment-parent",
-    });
-    await client.communities.posts.comments.delete("agent", "post-id", "comment-id");
-    await client.communities.posts.upvote("agent", "post-id");
-    await client.communities.posts.removeUpvote("agent", "post-id");
     await client.webhookEvents.list();
     await client.webhookSubscriptions.create({
       target_url: "https://receiver.test/webhook",
@@ -269,8 +254,6 @@ describe("Relay v1 request shapes", () => {
         operation.method,
         operation.path
           .replace("{handle}", "agent")
-          .replace("{postId}", "post-id")
-          .replace("{commentId}", "comment-id")
           .replace("{taskId}", "task-id")
           .replace("{chatId}", "chat-id")
           .replace("{messageId}", "message-id")
@@ -350,23 +333,6 @@ describe("Relay v1 request shapes", () => {
     expect(body("PATCH", "/v1/communities/agent")).toEqual({ lets_members_message: false });
     expect(body("POST", "/v1/communities/agent/join")).toEqual({ invite_code: "invite-code" });
     expect(body("POST", "/v1/communities/agent/leave")).toBeUndefined();
-    expect(body("POST", "/v1/communities/agent/posts")).toEqual({ title: "Ask", body: "What's new?" });
-    expect(body("POST", "/v1/communities/agent/posts/post-id/comments")).toEqual({
-      body: "Me too",
-      parent_comment_id: "comment-parent",
-    });
-    const listPosts = calls.find((call) => call.method === "GET" && call.url.pathname === "/v1/communities/agent/posts")!;
-    expect(Object.fromEntries(listPosts.url.searchParams)).toEqual({ sort: "new", limit: "5", cursor: "post-page" });
-    for (const [method, path] of [
-      ["GET", "/v1/communities/agent/posts"],
-      ["GET", "/v1/communities/agent/posts/post-id"],
-      ["DELETE", "/v1/communities/agent/posts/post-id"],
-      ["DELETE", "/v1/communities/agent/posts/post-id/comments/comment-id"],
-      ["PUT", "/v1/communities/agent/posts/post-id/vote"],
-      ["DELETE", "/v1/communities/agent/posts/post-id/vote"],
-    ] as const) {
-      expect(body(method, path)).toBeUndefined();
-    }
     expect(body("POST", "/v1/tasks/task-id/status")).toEqual({
       state: "TASK_STATE_COMPLETED",
       message: { messageId: "status-1", role: "ROLE_AGENT", parts: [{ text: "Done" }] },
@@ -465,10 +431,7 @@ describe("Relay v1 request shapes", () => {
     expect(methods(client.me)).toEqual(["retrieve", "update"]);
     expect(methods(client.communities)).toEqual(["join", "leave", "list", "retrieve", "update"]);
     expect(methods(client.communities.members)).toEqual(["list"]);
-    expect(methods(client.communities.posts)).toEqual([
-      "create", "delete", "list", "removeUpvote", "retrieve", "upvote",
-    ]);
-    expect(methods(client.communities.posts.comments)).toEqual(["create", "delete"]);
+    expect(Object.keys(client.communities)).not.toContain("posts");
     expect(methods(client.tasks)).toEqual([
       "addArtifact",
       "cancel",
