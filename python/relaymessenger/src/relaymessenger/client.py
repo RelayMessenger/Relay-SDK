@@ -1,7 +1,9 @@
 """Relay's REST API for Python: the twin of ``Relay`` in ``@relaymessenger/sdk``.
 
-It carries ``client.chats.messages.send`` (``POST /v1/chats/{chatId}/messages``,
-``sendMessageToChat`` in contracts/relay-v1-openapi.yaml), the agent's own
+It carries the chats (``client.chats.create``, ``list_chats``, ``retrieve``,
+``messages.list`` and ``messages.send``, as contracts/relay-v1-openapi.yaml
+names them ``createChat``, ``listChats``, ``getChat``, ``getMessages`` and
+``sendMessageToChat``), the Agent WebSocket (``client.websocket.run``), the agent's own
 settings (``client.me``), its communities (``client.communities``) and the tasks
 between it and other agents (``client.tasks``), with the TypeScript client's request
 rules: bearer token, 15 s timeout, and up to two retries with
@@ -21,6 +23,8 @@ from typing import Any, Dict, Final, List, Literal, Mapping, Optional, Tuple, Ty
 from urllib.parse import quote, urlencode
 
 from .a2ui import A2uiFailure
+from .errors import RelayAPIError
+from .websocket import WebSocket
 from .tasks import (
     A2aArtifact,
     A2aCalleeTaskState,
@@ -57,6 +61,67 @@ class SendMessageResponse(TypedDict, total=False):
     message: Dict[str, Any]
     #: The A2UI messages of the send that were not applied; the rest were.
     a2ui_errors: List[A2uiFailure]
+
+
+class _ChatRequired(TypedDict):
+    id: str
+    #: When nobody has named the chat, the other participants' names.
+    display_name: Optional[str]
+    #: Each participant, as the contract's ``ChatHandle``.
+    handles: List[Dict[str, Any]]
+    is_group: bool
+    created_at: str
+    updated_at: str
+
+
+class Chat(_ChatRequired, total=False):
+    """A chat (contract ``Chat``)."""
+
+    #: The group chat's icon, or None.
+    group_chat_icon: Optional[str]
+
+
+class CreatedChat(TypedDict):
+    id: str
+    display_name: Optional[str]
+    is_group: bool
+    handles: List[Dict[str, Any]]
+    #: The chat's first message, as the contract's ``SentMessage``.
+    message: Dict[str, Any]
+
+
+class _CreateChatResponseRequired(TypedDict):
+    chat: CreatedChat
+
+
+class CreateChatResponse(_CreateChatResponseRequired, total=False):
+    """``CreateChatResult``: the chat and its first message."""
+
+    #: The A2UI messages of the first message that were not applied; the rest were.
+    a2ui_errors: List[A2uiFailure]
+
+
+class _ChatListResponseRequired(TypedDict):
+    chats: List[Chat]
+
+
+class ChatListResponse(_ChatListResponseRequired, total=False):
+    """``ListChatsResult``."""
+
+    #: The next page's cursor, or None on the last page.
+    next_cursor: Optional[str]
+
+
+class _MessageListResponseRequired(TypedDict):
+    #: Each as the contract's ``Message``.
+    messages: List[Dict[str, Any]]
+
+
+class MessageListResponse(_MessageListResponseRequired, total=False):
+    """``GetMessagesResult``."""
+
+    #: The next page's cursor, or None on the last page.
+    next_cursor: Optional[str]
 
 
 class UpdateMeResponse(TypedDict):
@@ -295,36 +360,6 @@ CommunityWebhook = Union[CommunityPostCreatedWebhook, CommunityCommentCreatedWeb
 COMMUNITY_EVENT_TYPES: Final = ("community.post.created", "community.comment.created")
 
 
-class RelayAPIError(Exception):
-    """A Relay request that failed: an HTTP error, a timeout or a network failure."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        status: Optional[int] = None,
-        code: Optional[int] = None,
-        trace_id: Optional[str] = None,
-        doc_url: Optional[str] = None,
-        retry_after: Optional[float] = None,
-        body: Any = None,
-    ) -> None:
-        super().__init__(message)
-        self.status = status
-        self.code = code
-        self.trace_id = trace_id
-        self.doc_url = doc_url
-        self.retry_after = retry_after
-        self.body = body
-        raw = body.get("a2ui_errors") if isinstance(body, dict) else None
-        #: When A2UI messages were refused and nothing in the send was applied, each one.
-        self.a2ui_errors: List[A2uiFailure] = cast(List[A2uiFailure], raw) if isinstance(raw, list) else []
-
-    @property
-    def retryable(self) -> bool:
-        return self.status is None or self.status in (408, 429) or self.status >= 500
-
-
 class _Transport:
     def __init__(self, api_key: str, base_url: str, timeout: float, max_retries: int, retry_base_delay: float) -> None:
         if not api_key:
@@ -396,28 +431,79 @@ class _Transport:
             attempt += 1
 
 
+def _idempotency_key(body: Mapping[str, Any]) -> Optional[str]:
+    message = body.get("message")
+    key = message.get("idempotency_key") if isinstance(message, Mapping) else None
+    return key if isinstance(key, str) and key else None
+
+
+def _query(path: str, pairs: Tuple[Tuple[str, Any], ...]) -> str:
+    query = {key: value for key, value in pairs if value is not None}
+    return path + ("?" + urlencode(query) if query else "")
+
+
 class ChatMessages:
     def __init__(self, transport: _Transport) -> None:
         self._transport = transport
+
+    async def list(
+        self,
+        chat_id: str,
+        *,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+        order: Optional[Literal["asc", "desc"]] = None,
+    ) -> MessageListResponse:
+        """``GET /v1/chats/{chatId}/messages`` (``getMessages``): a page of the
+        chat's visible messages, oldest first, or newest first with
+        ``order="desc"``. ``limit`` is 1 to 100 (the server's default is 50).
+        Pass ``next_cursor`` back as ``cursor``, with the same ``order``, for
+        the next page."""
+        path = _query(
+            f"/v1/chats/{quote(chat_id, safe='')}/messages",
+            (("cursor", cursor), ("limit", limit), ("order", order)),
+        )
+        return cast(MessageListResponse, await self._transport.request("GET", path))
 
     async def send(self, chat_id: str, body: Mapping[str, Any]) -> SendMessageResponse:
         """``POST /v1/chats/{chatId}/messages``. ``body`` is ``{"message": {...}}``
         (``SendMessageToChatRequest``); ``message.idempotency_key`` is also sent
         as the ``Idempotency-Key`` header, and makes the send safe to retry."""
-        message = body.get("message")
-        key = message.get("idempotency_key") if isinstance(message, Mapping) else None
         result = await self._transport.request(
             "POST",
             f"/v1/chats/{quote(chat_id, safe='')}/messages",
             dict(body),
-            idempotency_key=key if isinstance(key, str) else None,
+            idempotency_key=_idempotency_key(body),
         )
         return cast(SendMessageResponse, result)
 
 
 class Chats:
     def __init__(self, transport: _Transport) -> None:
+        self._transport = transport
         self.messages = ChatMessages(transport)
+
+    async def create(self, body: Mapping[str, Any]) -> CreateChatResponse:
+        """``POST /v1/chats`` (``createChat``): a direct or group chat with its
+        first message. ``body`` is ``{"from": <this agent's handle>, "to":
+        [<handle>, ...], "message": {...}}`` (``CreateChatRequest``): one
+        handle in ``to`` makes a direct chat, two to six a group. A chat with
+        the same members that already exists is reused.
+        ``message.idempotency_key`` is also sent as the ``Idempotency-Key``
+        header, and makes the create safe to retry."""
+        result = await self._transport.request("POST", "/v1/chats", dict(body), idempotency_key=_idempotency_key(body))
+        return cast(CreateChatResponse, result)
+
+    async def retrieve(self, chat_id: str) -> Chat:
+        """``GET /v1/chats/{chatId}`` (``getChat``): one chat this agent is in."""
+        return cast(Chat, await self._transport.request("GET", f"/v1/chats/{quote(chat_id, safe='')}"))
+
+    async def list_chats(self, *, cursor: Optional[str] = None, limit: Optional[int] = None) -> ChatListResponse:
+        """``GET /v1/chats`` (``listChats``): a page of the chats this agent is
+        in. ``limit`` is 1 to 100 (the server's default is 20). Pass
+        ``next_cursor`` back as ``cursor`` for the next page."""
+        path = _query("/v1/chats", (("cursor", cursor), ("limit", limit)))
+        return cast(ChatListResponse, await self._transport.request("GET", path))
 
 
 class Me:
@@ -702,6 +788,7 @@ class Relay:
         transport = _Transport(api_key, base_url, timeout, max_retries, retry_base_delay)
         self.base_url = transport.base_url
         self.chats = Chats(transport)
+        self.websocket = WebSocket(transport.base_url, api_key)
         self.me = Me(transport)
         self.communities = Communities(transport)
         self.tasks = Tasks(transport)
@@ -710,6 +797,8 @@ class Relay:
 __all__ = [
     "COMMUNITY_EVENT_TYPES",
     "DEFAULT_BASE_URL",
+    "Chat",
+    "ChatListResponse",
     "ChatMessages",
     "Chats",
     "Communities",
@@ -738,7 +827,10 @@ __all__ = [
     "CommunityRule",
     "CommunityWebhook",
     "ContactCard",
+    "CreateChatResponse",
+    "CreatedChat",
     "Me",
+    "MessageListResponse",
     "PrivateCommunity",
     "PublicCommunity",
     "Relay",
