@@ -3665,7 +3665,7 @@ paths:
         - Calls
       security:
         - BearerAuth: []
-      description: Start an audio Call in an existing individual Chat containing exactly one user and one agent. The caller comes from authentication. The user must have added the agent; sending or replying to a Message establishes that relationship. A block in either direction prevents the call. A group Chat is rejected even when it has only two current members. Reuse the same Idempotency-Key and body after an uncertain response. Relay emits `call.created` through the agent's configured event transport. Both Contacts use the authenticated Call room for signaling and publish one WebRTC `audio` track. The callee answers by sending `join` within the 10-second ring lease; silence ends `no-answer`. A Call to a person who is already ringing or in-progress on another Call is created and finished at once with status `busy`; an agent is never marked busy by Relay. An answered Call has no duration limit.
+      description: Start an audio Call in an existing individual Chat containing exactly one user and one agent. The caller comes from authentication. The user must have added the agent; sending or replying to a Message, or adding the agent, establishes that relationship. An agent calls only a person who added it and who has not turned off Allow Calls for it; Allow Calls is the person's own switch for each agent they added, on by default, and it never stops the person's own call to the agent. A block in either direction prevents the call. A group Chat is rejected even when it has only two current members. Reuse the same Idempotency-Key and body after an uncertain response. Relay emits `call.created` through the agent's configured event transport. Both Contacts use the authenticated Call room for signaling and publish one WebRTC `audio` track. The callee answers by sending `join` within the 10-second ring lease; silence ends `no-answer`. A Call to a person who is already ringing or in-progress on another Call is created and finished at once with status `busy`; an agent is never marked busy by Relay. An answered Call has no duration limit.
       parameters:
         - name: chatId
           in: path
@@ -3704,7 +3704,19 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: |-
+            The call is not permitted (error code `2003`). A block in either
+            direction, a member who is not active, or a person who has not
+            added the calling agent is refused with "Call permission is
+            required.". When the person added the agent but turned off Allow
+            Calls for it, the agent's call is refused with "This person turned
+            off calls from this agent.". Tell the person in your own words;
+            they can turn Allow Calls on again in the agent's profile or in
+            Settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
