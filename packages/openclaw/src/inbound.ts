@@ -111,6 +111,9 @@ export function buildRelayInboundFacts(
     ...(event.data.reply_to?.message_id
       ? {
         replyToId: event.data.reply_to.message_id,
+        ...(event.data.reply_to.part_index === undefined
+          ? {}
+          : { replyToPartIndex: event.data.reply_to.part_index }),
         // The answer quotes the person's message, the one it answers (a bot's
         // reply_to in Telegram and Discord names the person's message). A
         // tap's reply_to names the agent's buttons part, which no reply may

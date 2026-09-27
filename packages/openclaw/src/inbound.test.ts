@@ -97,6 +97,7 @@ describe("Relay inbound Message mapping", () => {
         is_contact: true,
       },
       replyToId: "00000000-0000-7000-8000-000000000006",
+      replyToPartIndex: 0,
       replyAnchorId: "00000000-0000-7000-8000-000000000005",
       fromAgent: false,
       timestamp: Date.parse("2026-09-01T00:00:01.000Z"),

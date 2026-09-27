@@ -217,6 +217,7 @@ reproducible contract tests and is excluded from the npm package.
 | outbound public-URL media | Message `media` part |
 | outbound bytes/files | `POST /v1/attachments` allocate, upload, then a Message `media` part |
 | inbound media | Chat SDK `Attachment` with `fetchData()` |
+| inbound reply (`reply_to`) | Chat SDK `message.replyTo`, read with `GET /v1/messages/{messageId}` |
 | `addReaction`, `removeReaction` | `POST /v1/messages/{messageId}/reactions` |
 | `startTyping`, `endTyping` | `POST`/`DELETE /v1/chats/{chatId}/typing` |
 | `markAsRead` | `POST /v1/chats/{chatId}/read` |
@@ -224,6 +225,29 @@ reproducible contract tests and is excluded from the npm package.
 | `fetchMessages({ direction: "forward" })` | One `GET /v1/chats/{chatId}/messages` |
 | `fetchMessage` | `GET /v1/messages/{messageId}` |
 | `fetchThread`, `fetchChannelInfo` | `GET /v1/chats/{chatId}` |
+
+### Inbound replies
+
+When a person swipe-replies to a Message, the webhook carries only a pointer,
+`reply_to: { message_id, part_index }`. The adapter reads that Message once
+with `GET /v1/messages/{messageId}` and sets Chat SDK's own `message.replyTo`
+to it, the way Chat SDK's Telegram adapter fills it from Telegram's
+`reply_to_message`. When the target has more than one part, `replyTo` holds
+only the part the person swiped. `replyTo.author.isMe` is `true` when the
+person replied to your agent's own Message.
+
+```ts
+chat.onDirectMessage(async (thread, message) => {
+  const target = message.replyTo; // the Message this one answers, or undefined
+});
+```
+
+Chat SDK's `toAiMessages` does not render `replyTo`, and neither does Think.
+Put it in the text your model reads for that turn, for example the way Hermes
+Agent does: `[Replying to your previous message: "…"]` above the person's
+text. A target that was deleted, or a read that fails, leaves `replyTo`
+unset; a failed read is logged as `relay_reply_target_failed` and never
+blocks the delivery.
 
 ### Inbound attachments
 

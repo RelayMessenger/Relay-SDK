@@ -12,7 +12,7 @@ import { resolveStableChannelMessageIngress } from "openclaw/plugin-sdk/channel-
 import { bindIngressLifecycleToReplyOptions } from "openclaw/plugin-sdk/channel-outbound";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-payload";
-import { buildRelayInboundFacts } from "./inbound.js";
+import { buildRelayInboundFacts, renderRelayMessageParts } from "./inbound.js";
 import type { RelayIngressLifecycle } from "./ingress.js";
 import type { PluginRuntime } from "./runtime.js";
 import { type RelayChatTurns, waitForIdleChat } from "./turns.js";
@@ -55,6 +55,8 @@ function isReplyToAgentMessage(
 export async function resolveRelayTurnActivation(params: {
   facts: RelayInboundFacts;
   relay: RelayReplyLookup;
+  /** The replied-to Message when the caller already read it. */
+  replyTarget?: Message;
 }): Promise<RelayTurnActivation | null> {
   if (params.facts.chatType === "direct") {
     return {
@@ -77,14 +79,63 @@ export async function resolveRelayTurnActivation(params: {
   }
 
   if (!params.facts.replyToId) return null;
-  const replyTarget = await params.relay.messages.retrieve(
-    params.facts.replyToId,
-  );
+  const replyTarget = params.replyTarget
+    ?? await params.relay.messages.retrieve(params.facts.replyToId);
   if (!isReplyToAgentMessage(replyTarget, params.facts.chatId)) return null;
   return {
     kind: "reply",
     wasMentioned: false,
     implicitMentionKinds: ["reply_to_bot"],
+  };
+}
+
+/**
+ * The Message a swipe-reply answers, read once for the quote and for group
+ * activation. A failed read is logged and the turn runs without the quote;
+ * group activation then reads it itself and fails the delivery as before.
+ */
+async function readReplyTarget(params: {
+  facts: RelayInboundFacts;
+  relay: RelayReplyLookup;
+  warn: ((message: string) => void) | undefined;
+}): Promise<Message | undefined> {
+  if (!params.facts.replyToId) return undefined;
+  try {
+    return await params.relay.messages.retrieve(params.facts.replyToId);
+  } catch (error) {
+    params.warn?.(
+      `relay: could not read the Message ${params.facts.replyToId} that ${params.facts.messageId} replies to: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return undefined;
+  }
+}
+
+/**
+ * OpenClaw's own reply context, `supplemental.quote`, which it renders to the
+ * model as "Reply target of current user message" (id, sender, body), as its
+ * Telegram channel fills it from Telegram's `reply_to_message`. A reply names
+ * one bubble: when the target has more than one part, only the swiped part is
+ * quoted, the rule Relay's iOS app uses to draw the quote.
+ */
+export function relayReplyQuote(
+  facts: Pick<RelayInboundFacts, "chatId" | "replyToPartIndex">,
+  target: Message | undefined,
+) {
+  if (!target || target.chat_id !== facts.chatId) return undefined;
+  const parts = target.parts ?? [];
+  const swiped = parts.length > 1 && facts.replyToPartIndex !== undefined
+    ? parts[facts.replyToPartIndex]
+    : undefined;
+  const body = renderRelayMessageParts(swiped ? [swiped] : parts);
+  const sender = target.from_handle?.display_name?.trim()
+    || target.from_handle?.handle
+    || target.from
+    || undefined;
+  return {
+    id: target.id,
+    ...(body ? { body } : {}),
+    ...(sender ? { sender } : {}),
+    senderAllowed: true,
   };
 }
 
@@ -124,9 +175,15 @@ export async function dispatchRelayEvent(params: {
     return;
   }
 
+  const repliedTo = await readReplyTarget({
+    facts,
+    relay: params.relay,
+    warn: params.warn,
+  });
   const activation = await resolveRelayTurnActivation({
     facts,
     relay: params.relay,
+    ...(repliedTo ? { replyTarget: repliedTo } : {}),
   });
   if (!activation) {
     params.warn?.(
@@ -235,6 +292,7 @@ export async function dispatchRelayEvent(params: {
     ...(facts.timestamp ? { timestamp: facts.timestamp } : {}),
     body: facts.text,
   });
+  const quote = relayReplyQuote(facts, repliedTo);
   const ctxPayload = buildChannelInboundEventContext({
     channel: "relay",
     accountId: route.accountId ?? params.account.accountId,
@@ -274,6 +332,7 @@ export async function dispatchRelayEvent(params: {
       rawBody: facts.text,
       commandBody: facts.text,
     },
+    ...(quote ? { supplemental: { quote } } : {}),
     channelIngress: access,
     access: {
       commands: {
