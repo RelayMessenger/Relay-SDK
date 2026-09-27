@@ -231,3 +231,55 @@ describe("the person's own extension dialogs", () => {
     expect(spawned).toEqual([]);
   });
 });
+
+describe("a person's swipe-reply reaches pi", () => {
+  const TARGET = "01993d50-ef7b-7b37-886b-23fd80c7ec90";
+  const target = {
+    id: TARGET, chat_id: "chat", is_from_me: true, is_system_message: false,
+    from_handle: { handle: "relay", display_name: "Relay" },
+    parts: [
+      { type: "text", value: "The flight lands at 6.", reactions: null },
+      { type: "text", value: "Take the long way round the lake.", reactions: null },
+    ],
+  };
+  const prompted = async (retrieve: ReturnType<typeof vi.fn>, replyTo?: { message_id: string; part_index?: number }) => {
+    const event = makeEvent("reply", "chat", "user");
+    if (event.event_type !== "message.received") throw new Error("fixture");
+    event.data.parts = [{ type: "text", value: "what did you mean by this?", reactions: null }];
+    if (replyTo) event.data.reply_to = replyTo;
+    const { relay } = relayFor([event]);
+    (relay as unknown as { messages: unknown }).messages = { retrieve };
+    const process = fakePi(records("It means the scenic route."));
+    await new PiChannel({ agentToken: "test", relay, spawnPi: () => process }).run();
+    const prompt = vi.mocked(process.stdin.write).mock.calls.map(([line]) => JSON.parse(String(line)))
+      .find((command) => command.type === "prompt");
+    return String(prompt.message);
+  };
+  const replyData = (message: string) => {
+    const line = message.split("\n\n")[1]!;
+    expect(line.startsWith("This message is a reply.")).toBe(true);
+    return JSON.parse(line.slice(line.indexOf("{")));
+  };
+
+  it("names the bubble swiped, who sent it and what it says", async () => {
+    const retrieve = vi.fn().mockResolvedValue(target);
+    const message = await prompted(retrieve, { message_id: TARGET, part_index: 1 });
+    expect(retrieve).toHaveBeenCalledWith(TARGET);
+    expect(message.startsWith("what did you mean by this?\n\n")).toBe(true);
+    expect(replyData(message)).toEqual({
+      reply_to: { id: TARGET, from: "you", part_index: 1, text: "Take the long way round the lake." },
+    });
+  });
+
+  it("names the target by id when it cannot be read", async () => {
+    const message = await prompted(vi.fn().mockRejectedValue(new Error("down")), { message_id: TARGET, part_index: 0 });
+    expect(replyData(message)).toEqual({ reply_to: { id: TARGET, unavailable: true } });
+  });
+
+  it("reads nothing for a Message that is not a reply", async () => {
+    const retrieve = vi.fn().mockResolvedValue(target);
+    const message = await prompted(retrieve);
+    expect(retrieve).not.toHaveBeenCalled();
+    expect(message).not.toContain("This message is a reply.");
+  });
+});

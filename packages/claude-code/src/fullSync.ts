@@ -4,6 +4,7 @@ import type {
   Relay,
   WebSocketFullSyncContext,
 } from "@relaymessenger/sdk";
+import { replyTargetContext } from "@relaymessenger/sdk";
 import { deliveryFromSnapshotMessage } from "./bridge.ts";
 import type { AllowedSenders } from "./config.ts";
 import type { Redactor } from "./redaction.ts";
@@ -69,7 +70,23 @@ export function reconcileFullSyncDeliveries(params: {
         allowedSenders: params.allowedSenders,
         redactor: params.redactor,
       });
-      if (delivery) deliveries.push(delivery);
+      if (!delivery) continue;
+      // A reply names the Message it answers; FULL sync already holds the
+      // Chat's Messages, so the target is read from the snapshot.
+      const replyTo = message.reply_to?.message_id ? message.reply_to : undefined;
+      deliveries.push(replyTo
+        ? {
+          ...delivery,
+          content: [
+            delivery.content,
+            params.redactor.text(replyTargetContext(
+              replyTo,
+              messages.find((candidate) => candidate.id === replyTo.message_id),
+            )),
+          ].filter(Boolean).join("\n\n"),
+          meta: { reply_to: JSON.stringify(replyTo), ...delivery.meta },
+        }
+        : delivery);
     }
   }
   deliveries.sort((left, right) =>

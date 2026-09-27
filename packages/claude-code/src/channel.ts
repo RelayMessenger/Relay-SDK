@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { RelayAPIError, buttonsPart, createPaymentPart, indexedIdempotencyKey, paymentRequestFields, selectionPart, standaloneLink } from "@relaymessenger/sdk";
+import { RelayAPIError, buttonsPart, createPaymentPart, indexedIdempotencyKey, paymentRequestFields, replyTargetContext, selectionPart, standaloneLink } from "@relaymessenger/sdk";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import Relay, { type RelayWebhookEvent } from "@relaymessenger/sdk";
+import Relay, { type Message, type RelayWebhookEvent, type ReplyTo } from "@relaymessenger/sdk";
 import {
   buildReplyMessages,
   classifyRelayEvent,
@@ -177,31 +177,41 @@ export class RelayChannel {
           this.#state.completeIngress(event.event_id);
           continue;
         }
+        // A swipe-reply names the Message it answers, as Telegram hands a
+        // bot `reply_to_message`. Relay sends only the pointer, so the target
+        // is read once: for the group gate, and for Claude to read.
+        const replyTo = replyPointer(event);
+        let target: Message | undefined;
+        if (replyTo) {
+          try {
+            target = await this.relay.messages.retrieve(replyTo.message_id);
+          } catch (error) {
+            // The group gate cannot decide without the target; the ingress
+            // stays pending and is retried, as before.
+            if (action.groupGate === "reply") throw error;
+            this.#log(`could not read the Message a reply names; Claude sees its id: ${this.#redactor.text(error)}`);
+          }
+        }
         if (
           action.groupGate === "reply"
-          && (
-            !action.replyToMessageId
-            || !await this.#replyTargetsAgent(
-              action.delivery.chatId,
-              action.replyToMessageId,
-            )
-          )
+          && (!target || !targetsAgent(target, action.delivery.chatId, replyTo!.message_id))
         ) {
           this.#state.completeIngress(event.event_id);
           continue;
         }
-        this.#state.recordDelivery(action.delivery);
+        this.#state.recordDelivery(replyTo
+          ? {
+            ...action.delivery,
+            content: [
+              action.delivery.content,
+              this.#redactor.text(replyTargetContext(replyTo, target)),
+            ].filter(Boolean).join("\n\n"),
+            meta: { reply_to: JSON.stringify(replyTo), ...action.delivery.meta },
+          }
+          : action.delivery);
       }
       if (pending.length < 100) return;
     }
-  }
-
-  async #replyTargetsAgent(chatId: string, messageId: string): Promise<boolean> {
-    const target = await this.relay.messages.retrieve(messageId);
-    return target.id === messageId
-      && target.chat_id === chatId
-      && target.is_from_me
-      && !target.is_system_message;
   }
 
   async beginProcessing(argumentsValue: unknown): Promise<ToolResult> {
@@ -381,4 +391,19 @@ export class RelayChannel {
       );
     }
   }
+}
+
+/** The `reply_to` pointer of an inbound Message, when it is a reply. */
+function replyPointer(event: RelayWebhookEvent): ReplyTo | undefined {
+  if (event.event_type !== "message.received") return undefined;
+  const replyTo = (event.data as { reply_to?: ReplyTo | null }).reply_to;
+  return typeof replyTo?.message_id === "string" ? replyTo : undefined;
+}
+
+/** Whether a group reply answers this agent's own Message in the same Chat. */
+function targetsAgent(target: Message, chatId: string, messageId: string): boolean {
+  return target.id === messageId
+    && target.chat_id === chatId
+    && target.is_from_me
+    && !target.is_system_message;
 }

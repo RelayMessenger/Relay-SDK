@@ -5,6 +5,7 @@ import Relay, {
   BUTTONS_GUIDANCE,
   PAYMENT_BLOCK_INSTRUCTION,
   PAYMENT_GUIDANCE,
+  replyTargetContext,
   selectionReply,
   selectionReplyContext,
   SELECTION_GUIDANCE,
@@ -261,7 +262,14 @@ export class PiChannel {
     let session = this.#sessions.get(data.chat.id);
     if (!session) { session = new ChatSession(this.#spawnPi(this.#options.piCommand ?? "pi", ["--mode", "rpc", ...(this.#options.piArgs ?? [])], data.chat.id), this.#options.approvals); this.#sessions.set(data.chat.id, session); }
     const timeout = this.#options.rpcTimeoutMs ?? 60_000;
-    await session.command("prompt", { message: piPrompt(message) }, timeout, signal);
+    // A swipe-reply names the Message it answers, as Telegram hands a bot
+    // `reply_to_message`; Relay sends only the pointer, so it is read once. A
+    // read that fails names the target by id instead.
+    const replied = data.reply_to?.message_id ? data.reply_to : undefined;
+    const replyLine = replied
+      ? replyTargetContext(replied, await (async () => this.#relay.messages.retrieve(replied.message_id))().catch(() => undefined))
+      : "";
+    await session.command("prompt", { message: piPrompt([message, replyLine].filter(Boolean).join("\n\n")) }, timeout, signal);
     if (!session.settled) { while (!session.settled) await session.read(timeout, signal); }
     const response = await session.command("get_last_assistant_text", {}, timeout, signal);
     const answer = response.data?.text?.trim();

@@ -10,6 +10,12 @@ export interface BridgeTurn {
   selection?: SelectionReply;
   richMessage?: { parts: MessagePartResponse[]; reply_to?: ReplyTo | null };
   /**
+   * The Message this one replies to, when the person swiped one: Relay's
+   * `reply_to` pointer. The prompt names that Message's sender and words
+   * (inbound-media.ts), as Telegram hands a bot `reply_to_message`.
+   */
+  replying?: ReplyTo;
+  /**
    * Whether another agent sent it. An agent's messages wait their turn; a
    * person's newer message replaces the answer still being written.
    */
@@ -71,6 +77,7 @@ export const bridgeTurn = (event: RelayWebhookEvent): BridgeTurn | undefined => 
     : undefined;
   return { eventId: event.event_id, chatId, sender, text, media, fromAgent,
     ...(selection ? { selection } : {}), ...(richMessage ? { richMessage } : {}),
+    ...(data.reply_to?.message_id ? { replying: data.reply_to } : {}),
     ...(replyTo ? { replyTo } : {}) };
 };
 

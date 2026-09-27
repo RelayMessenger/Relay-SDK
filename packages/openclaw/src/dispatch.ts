@@ -1,4 +1,4 @@
-import { BUTTONS_GUIDANCE, BUTTONS_BLOCK_INSTRUCTION, PAYMENT_BLOCK_INSTRUCTION, PAYMENT_GUIDANCE, LINK_LINE_INSTRUCTION, SELECTION_GUIDANCE, SELECTION_BLOCK_INSTRUCTION, selectionReplyContext } from "@relaymessenger/sdk";
+import { BUTTONS_GUIDANCE, BUTTONS_BLOCK_INSTRUCTION, PAYMENT_BLOCK_INSTRUCTION, PAYMENT_GUIDANCE, LINK_LINE_INSTRUCTION, SELECTION_GUIDANCE, SELECTION_BLOCK_INSTRUCTION, replyTargetParts, selectionReplyContext } from "@relaymessenger/sdk";
 import type {
   Message,
   Relay,
@@ -114,19 +114,18 @@ async function readReplyTarget(params: {
  * OpenClaw's own reply context, `supplemental.quote`, which it renders to the
  * model as "Reply target of current user message" (id, sender, body), as its
  * Telegram channel fills it from Telegram's `reply_to_message`. A reply names
- * one bubble: when the target has more than one part, only the swiped part is
- * quoted, the rule Relay's iOS app uses to draw the quote.
+ * one bubble: the SDK's `replyTargetParts` narrows a multipart target to the
+ * swiped part, the rule Relay's iOS app uses to draw the quote.
  */
 export function relayReplyQuote(
   facts: Pick<RelayInboundFacts, "chatId" | "replyToPartIndex">,
   target: Message | undefined,
 ) {
   if (!target || target.chat_id !== facts.chatId) return undefined;
-  const parts = target.parts ?? [];
-  const swiped = parts.length > 1 && facts.replyToPartIndex !== undefined
-    ? parts[facts.replyToPartIndex]
-    : undefined;
-  const body = renderRelayMessageParts(swiped ? [swiped] : parts);
+  const body = renderRelayMessageParts(replyTargetParts(
+    target,
+    facts.replyToPartIndex === undefined ? {} : { part_index: facts.replyToPartIndex },
+  ));
   const sender = target.from_handle?.display_name?.trim()
     || target.from_handle?.handle
     || target.from
@@ -137,6 +136,17 @@ export function relayReplyQuote(
     ...(sender ? { sender } : {}),
     senderAllowed: true,
   };
+}
+
+/**
+ * Whether the part a reply names may itself be replied to. A tap names the
+ * agent's buttons part and a selection answer its selection part; no reply may
+ * point at those (Relay v1 ReplyTo.part_index), so a person's tap keeps its
+ * own Message as the reply target.
+ */
+function repliable(target: Message | undefined, partIndex: number | undefined): boolean {
+  const part = target?.parts?.[partIndex ?? 0];
+  return part !== undefined && part.type !== "buttons" && part.type !== "selection";
 }
 
 /**
@@ -281,18 +291,23 @@ export async function dispatchRelayEvent(params: {
     return;
   }
 
-  // An agent's reply target is only its own Message (agentReplyLink); a
-  // person's is the Message they replied from, as before.
+  // An agent's reply target is only its own Message (agentReplyLink). A
+  // person's is the Message they replied to, OpenClaw's ReplyToId, as its
+  // Telegram channel sets `reply.replyToId` to Telegram's reply_to_message:
+  // the prompt names it beside the quote. A tap or a selection answer names a
+  // part no reply may target, so it keeps the person's own Message.
+  const quote = relayReplyQuote(facts, repliedTo);
   const replyTarget = facts.fromAgent
     ? facts.agentReplyLink
-    : facts.replyAnchorId ?? facts.replyToId;
+    : quote && repliable(repliedTo, facts.replyToPartIndex)
+      ? quote.id
+      : facts.replyAnchorId ?? facts.replyToId;
   const body = buildEnvelope({
     channel: "Relay",
     from: `${facts.displayName} (@${facts.handle})`,
     ...(facts.timestamp ? { timestamp: facts.timestamp } : {}),
     body: facts.text,
   });
-  const quote = relayReplyQuote(facts, repliedTo);
   const ctxPayload = buildChannelInboundEventContext({
     channel: "relay",
     accountId: route.accountId ?? params.account.accountId,

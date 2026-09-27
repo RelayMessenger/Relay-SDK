@@ -291,8 +291,30 @@ describe("a person's swipe-reply reaches the OpenClaw turn", () => {
     expect(retrieve).toHaveBeenCalledOnce();
     expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
       ctxPayload: expect.objectContaining({
+        ReplyToId: targetId,
         ReplyToBody: "Take the long way round the lake.",
         ReplyToSender: "Relay",
+      }),
+    }));
+  });
+
+  it("keeps a tap's own Message as the reply target: no reply may name a buttons part", async () => {
+    const retrieve = vi.fn(async () => ({
+      ...agentMessage(),
+      parts: [
+        { type: "text", value: "Ready to book?", reactions: null },
+        { type: "buttons", items: [{ label: "Yes" }] },
+      ],
+    }));
+    const result = await dispatch([approvedId], approvedId, "review_sender", {
+      replyTo: { message_id: targetId, part_index: 1 },
+      retrieve,
+      messageId: "00000000-0000-7000-8000-000000000033",
+    });
+    expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+      ctxPayload: expect.objectContaining({
+        ReplyToId: "00000000-0000-7000-8000-000000000033",
+        ReplyToBody: "Ready to book?",
       }),
     }));
   });
