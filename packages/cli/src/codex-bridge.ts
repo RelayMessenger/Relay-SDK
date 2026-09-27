@@ -23,7 +23,7 @@ import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
 import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, RELAY_WRITE_TOOLS, codexMcpServer } from "./hosted-mcp.js";
-import { inputDetail, inputSummary, type ApprovalChoice, type ApprovalOutcome, type ApprovalRequest, type OwnerApprovals } from "./approvals.js";
+import { beyond, inputDetail, inputSummary, type ApprovalChoice, type ApprovalOutcome, type ApprovalRequest, type OwnerApprovals } from "./approvals.js";
 
 /**
  * What `relay connect codex` leaves running so Codex answers by itself.
@@ -99,20 +99,22 @@ export const codexApprovalRequest = (
   method: string,
   params: Record<string, unknown>,
   files: CodexFileChanges = new Map(),
-): Pick<ApprovalRequest, "tool" | "title" | "summary" | "detail"> => {
+): Pick<ApprovalRequest, "tool" | "title" | "summary" | "detail" | "extra"> => {
   const reason = typeof params.reason === "string" && params.reason.trim() ? params.reason.trim() : "";
   const { threadId: _thread, turnId: _turn, itemId: _item, startedAtMs: _started, ...shown } = params;
   const detail = inputDetail(shown);
   if (method === "item/commandExecution/requestApproval") {
     const command = typeof params.command === "string" ? params.command : "";
-    return { tool: "shell", title: "Codex asks to run a command.", summary: command || reason || "a command", detail };
+    return { tool: "shell", title: "Codex asks to run a command.", summary: command || reason || "a command", detail, extra: beyond(shown, command ? ["command"] : ["reason"]) };
   }
   if (method === "item/fileChange/requestApproval") {
     const paths = files.get(String(params.itemId)) ?? [];
     const root = typeof params.grantRoot === "string" ? params.grantRoot : "";
-    return { tool: "apply_patch", title: "Codex asks to change files.", summary: paths.join(", ") || root || reason || "file changes", detail: inputDetail({ ...shown, ...(paths.length ? { files: paths } : {}) }) };
+    const summarized = paths.length ? "files" : root ? "grantRoot" : "reason";
+    const all = { ...shown, ...(paths.length ? { files: paths } : {}) };
+    return { tool: "apply_patch", title: "Codex asks to change files.", summary: paths.join(", ") || root || reason || "file changes", detail: inputDetail(all), extra: beyond(all, [summarized]) };
   }
-  return { tool: "request_permissions", title: "Codex asks for more permissions.", summary: reason || inputSummary(asRecord(params.permissions)), detail };
+  return { tool: "request_permissions", title: "Codex asks for more permissions.", summary: reason || inputSummary(asRecord(params.permissions)), detail, extra: beyond(shown, reason ? ["reason"] : []) };
 };
 
 /**

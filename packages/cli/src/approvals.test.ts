@@ -1,13 +1,18 @@
 import type { A2uiComponent, RelayWebhookEvent } from "@relaymessenger/sdk";
 import { describe, expect, it } from "vitest";
+import { acpPermission } from "./acp-bridge.js";
 import {
   ANSWER_EVENT,
   OwnerApprovals,
   SEE_MORE_EVENT,
   approvalComponents,
   codeSpan,
+  inputCard,
+  inputDetail,
   noOwnerLine,
   piApprovals,
+  seeMore,
+  settledComponents,
   type ApprovalClient,
   type ApprovalRequest,
 } from "./approvals.js";
@@ -45,7 +50,8 @@ const REQUEST: ApprovalRequest = {
   tool: "uname -a",
   title: "Gemini CLI asks to run a command.",
   summary: "uname -a",
-  detail: "{\n  \"command\": \"uname -a\"\n}",
+  detail: "command: uname -a",
+  extra: false,
   choices: [
     { id: "proceed_once", label: "Allow once", decision: "allow_once" },
     { id: "proceed_always", label: "Allow for this session", decision: "allow_session" },
@@ -103,7 +109,7 @@ describe("owner approvals", () => {
     const outcome = updates(relay.sent);
     expect(outcome.map((update) => update.chatId)).toEqual(["chat-with-ada", "chat-with-grace"]);
     expect(outcome[0]?.components).toEqual([
-      { id: "body", component: "Column", children: ["title", "summary", "more", "outcome"] },
+      { id: "body", component: "Column", children: ["title", "summary", "outcome"] },
       { id: "outcome", component: "Text", text: "@grace allowed this for this session.", variant: "caption" },
     ]);
   });
@@ -167,6 +173,80 @@ describe("owner approvals", () => {
   it("draws the command as code, whatever backticks it holds", () => {
     expect(codeSpan("rm -rf *_old")).toBe("`rm -rf *_old`");
     expect(codeSpan("echo `date`")).toBe("`` echo `date` ``");
+  });
+});
+
+const CLAUDE = { harness: "Claude Code", choices: REQUEST.choices };
+/** A Claude Code prompt as `claudePermission` asks it. */
+const claude = (tool: string, input: Record<string, unknown>): ApprovalRequest => ({ ...CLAUDE, tool, ...inputCard(input) });
+const ids = (components: A2uiComponent[]): string[] => components.map((component) => component.id);
+const MORE = ["more", "more_button", "more_label", "more_sheet", "more_title", "more_text"];
+
+describe("See more, only when the sheet shows what the card does not", () => {
+  it("leaves a short command alone: no See more before or after the answer", () => {
+    const request = claude("Bash", { command: "npm test -- --watch=false" });
+    expect(seeMore(request)).toBe(false);
+    expect(approvalComponents(request).filter((component) => MORE.includes(component.id))).toEqual([]);
+    expect(approvalComponents(request).find((component) => component.id === "body")).toEqual({ id: "body", component: "Column", children: ["title", "summary", "answers"] });
+    expect(settledComponents(request, { reason: "timeout" })[0]).toEqual({ id: "body", component: "Column", children: ["title", "summary", "outcome"] });
+  });
+
+  it("shows Bash's own description as a plain line under the command, with no See more", () => {
+    const request = claude("Bash", { command: "npm test", description: "Run the tests" });
+    expect(seeMore(request)).toBe(false);
+    const components = approvalComponents(request);
+    expect(ids(components)).not.toContain("more");
+    expect(components.find((component) => component.id === "body")?.children).toEqual(["title", "summary", "note", "answers"]);
+    expect(components.find((component) => component.id === "note")).toEqual({ id: "note", component: "Text", text: "Run the tests" });
+  });
+
+  it("offers See more when the command was cut, before and after the answer", () => {
+    const long = claude("Bash", { command: `echo ${"a".repeat(495)}` });
+    expect(seeMore(long)).toBe(true);
+    expect(ids(approvalComponents(long))).toEqual(expect.arrayContaining(MORE));
+    expect(settledComponents(long, { reason: "timeout" })[0]?.children).toEqual(["title", "summary", "more", "outcome"]);
+    expect(seeMore(claude("Bash", { command: "cd app &&\nnpm test" }))).toBe(true);
+  });
+
+  it("offers See more for an Edit and for a Write, whose content the card does not show", () => {
+    expect(seeMore(claude("Edit", { file_path: "src/auth.ts", old_string: "const ttl = 3600;", new_string: "const ttl = 86400;" }))).toBe(true);
+    expect(seeMore(claude("Write", { file_path: "notes.md", content: "line\n".repeat(200) }))).toBe(true);
+    expect(seeMore(claude("Read", { file_path: "notes.md" }))).toBe(false);
+  });
+
+  it("leaves an ACP request with only a title alone, and offers See more once it carries its input", async () => {
+    const asked: ApprovalRequest[] = [];
+    const ask = acpPermission("Cursor", { ask: async (request) => { asked.push(request); return { reason: "timeout" }; } });
+    const options = [{ optionId: "allow", name: "Allow once", kind: "allow_once" as const }, { optionId: "reject", name: "Reject", kind: "reject_once" as const }];
+    await ask({ sessionId: "s", toolCall: { toolCallId: "call-1", title: "uname -a", kind: "execute" }, options });
+    await ask({ sessionId: "s", toolCall: { toolCallId: "call-2", title: "Edit src/auth.ts", kind: "edit", rawInput: { file_path: "src/auth.ts", old_string: "a", new_string: "b" } }, options });
+    expect(asked.map(seeMore)).toEqual([false, true]);
+    expect(asked[0]?.detail).toBe("title: uname -a\nkind: execute");
+    expect(asked[1]?.detail).toBe("title: Edit src/auth.ts\nkind: edit\nsrc/auth.ts\n- a\n+ b");
+  });
+});
+
+describe("the See more sheet reads as text, not JSON", () => {
+  it("draws an Edit as its file and a diff, a MultiEdit as a diff per edit", () => {
+    expect(inputDetail({ file_path: "src/auth.ts", old_string: "const ttl = 3600;\nlog(id);", new_string: "const ttl = 86400;" }))
+      .toBe("src/auth.ts\n- const ttl = 3600;\n- log(id);\n+ const ttl = 86400;");
+    expect(inputDetail({ file_path: "a.ts", edits: [{ old_string: "x", new_string: "y" }, { old_string: "p", new_string: "q", replace_all: true }] }))
+      .toBe("a.ts\n- x\n+ y\n- p\n+ q\nreplace_all: true");
+  });
+
+  it("draws a Write as its file then the content, and anything else as one name: value line per field", () => {
+    expect(inputDetail({ file_path: "notes.md", content: "# Notes\n\nfirst" })).toBe("notes.md\n# Notes\n\nfirst");
+    expect(inputDetail({ command: "cd app &&\nnpm test", description: "Run the tests", timeout: 60000 }))
+      .toBe("command: cd app &&\nnpm test\ndescription: Run the tests\ntimeout: 60000");
+    expect(inputDetail({ url: "https://relayapp.im", headers: { accept: "text/html" }, tags: ["a", "b"] }))
+      .toBe("url: https://relayapp.im\nheaders:\n  accept: text/html\ntags: a, b");
+    expect(inputDetail({ command: "x" })).not.toContain("{");
+  });
+
+  it("shows every character of the sheet and the note, not read as Markdown", () => {
+    const components = approvalComponents(claude("Edit", { file_path: "a.ts", old_string: "a * b", new_string: "**x_y** `z` [l] <b> & C:\\d ~s~" }));
+    expect(components.find((component) => component.id === "more_text")?.text).toBe("a.ts\n- a \\* b\n+ \\*\\*x\\_y\\*\\* \\`z\\` \\[l\\] \\<b\\> \\& C:\\\\d \\~s\\~");
+    expect(approvalComponents(claude("Bash", { command: "npm test", description: "Run __tests__" })).find((component) => component.id === "note")?.text).toBe("Run \\_\\_tests\\_\\_");
   });
 });
 
