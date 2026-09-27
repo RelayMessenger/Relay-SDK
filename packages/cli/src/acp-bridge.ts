@@ -5,6 +5,7 @@ import {
   PROTOCOL_VERSION,
   ndJsonStream,
   type Client,
+  type ClientCapabilities,
   type PermissionOption,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
@@ -331,6 +332,28 @@ export interface AcpAgent {
   gone(): boolean;
 }
 
+/**
+ * What Relay tells the agent it can do for it, in `initialize`: nothing.
+ *
+ * Relay is a messaging client, not an editor. It serves no files and no
+ * terminals, so it advertises neither, and the agent reads, writes and runs
+ * commands itself, asking `session/request_permission` first. ACP spec, File
+ * System: "If `readTextFile` or `writeTextFile` is `false` or not present, the
+ * Agent **MUST NOT** attempt to call the corresponding filesystem method." ACP
+ * spec, Terminals: "If `terminal` is `false` or not present, the Agent **MUST
+ * NOT** attempt to call any terminal methods." (agentclientprotocol.com
+ * protocol/v1 file-system and terminals.) These values are the schema's
+ * defaults (`ClientCapabilities` in @agentclientprotocol/sdk schema.json), sent
+ * explicitly the way Cursor's own ACP client example sends them
+ * (cursor.com/docs/cli/acp). Advertising `true` with no handler broke Gemini
+ * CLI's file writes: it sent `fs/read_text_file` to this client instead of
+ * reading the file itself, and got no file back.
+ */
+const RELAY_CLIENT_CAPABILITIES: ClientCapabilities = {
+  fs: { readTextFile: false, writeTextFile: false },
+  terminal: false,
+};
+
 /** Starts the agent's ACP command and drives it over the official SDK. */
 export const startAcpAgent = (
   acp: AcpCommand,
@@ -521,11 +544,10 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
       });
       // `initialize` negotiates the protocol version and reads back whether the
       // agent can take an old session back with `session/load` (ACP spec,
-      // Initialization). The reference client sends the same capabilities
-      // (openclaw/src/acp/client.ts).
+      // Initialization).
       const info = await started.client.initialize({
         protocolVersion: PROTOCOL_VERSION,
-        clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
+        clientCapabilities: RELAY_CLIENT_CAPABILITIES,
         clientInfo: { name: CLIENT_NAME, title: "Relay", version: packageVersion() },
       });
       started.canLoad = info.agentCapabilities?.loadSession === true;

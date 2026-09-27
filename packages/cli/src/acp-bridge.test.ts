@@ -45,6 +45,10 @@ interface FakeLine {
   /** RELAY_AGENT_TOKEN as the agent's own environment held it; null when absent. */
   tokenEnv?: string | null;
   permissionResponse?: unknown;
+  /** The client's answer to `fs/read_text_file` that carried no file text. */
+  checkFailed?: unknown;
+  /** The file the agent read itself, because the client serves none. */
+  ownRead?: string;
 }
 
 /** Relay's hosted MCP server as connect hands it over: the staging server and the agent's token. */
@@ -67,6 +71,7 @@ const fakeAcpAgent = async (settings: {
   replayAfterLoad?: string;
   resumable?: string[];
   permission?: { toolCall: Record<string, unknown>; options: { optionId: string; name: string; kind: string }[] };
+  checkFile?: string;
 } = {}): Promise<{ acp: AcpCommand; cwd: string; log(): Promise<FakeLine[]> }> => {
   const folder = await scratch("fake-acp");
   const record = join(folder, "messages.jsonl");
@@ -215,7 +220,9 @@ describe("the ACP agent the bridge starts", () => {
     expect(log[0]!.argv?.at(-1)).toBe("acp");
     expect(log[0]!.params).toEqual({
       protocolVersion: 1,
-      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
+      // Relay serves no files and no terminals, so it says so, and the agent
+      // uses its own (ACP spec, File System and Terminals).
+      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       clientInfo: { name: "relaymessenger", title: "Relay", version: expect.any(String) },
     });
   });
@@ -366,6 +373,32 @@ describe("what the bridge sends back", () => {
       { id: "proceed_always", label: "Allow for this session", decision: "allow_session" },
       { id: "cancel", label: "Reject", decision: "deny" },
     ]);
+  });
+
+  it("asks the owners before a file write, because the agent checks the file itself and never asks this client for it", async () => {
+    const options = [
+      { optionId: "proceed_once", name: "Allow once", kind: "allow_once" as const },
+      { optionId: "cancel", name: "Reject", kind: "reject_once" as const },
+    ];
+    const cwd = await scratch("write-check");
+    const target = join(cwd, "notes.txt");
+    await writeFile(target, "old notes", "utf8");
+    const acp = await fakeAcpAgent({
+      checkFile: target,
+      permission: { toolCall: { toolCallId: "write_file-1-1", title: "Writing to notes.txt", kind: "edit" }, options },
+    });
+    const asked: ApprovalRequest[] = [];
+    await runBridge({ ...acp, events: [received("event-1", "chat-1", "add a line to notes.txt")], approvals: {
+      ask: async (request) => { asked.push(request); return { reason: "answered", choice: request.choices[0]!, by: "owner" }; },
+      take: async () => false,
+    } });
+    const log = await acp.log();
+    expect(traffic(log)).not.toContain("out fs/read_text_file");
+    expect(log.some((line) => "checkFailed" in line)).toBe(false);
+    expect(log.find((line) => "ownRead" in line)?.ownRead).toBe(target);
+    expect(asked).toHaveLength(1);
+    expect(log.find((line) => "permissionResponse" in line)?.permissionResponse)
+      .toEqual({ outcome: { outcome: "selected", optionId: "proceed_once" } });
   });
 
   it("rejects with the agent's own reject option when nobody answers, and runs Relay's own tools without asking", async () => {
