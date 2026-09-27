@@ -29,12 +29,14 @@ import type { PiApprovals } from "@relaymessenger/pi";
  * `_handle_server_request`).
  *
  * Only an owner answers. The official Telegram plugin sends the prompt only to
- * allowlisted DMs and answers anyone else who taps "Not authorized."
- * (claude-plugins-official-telegram-server.ts.txt); the iMessage plugin sends
- * it to the owner's own chat because "that authority is the owner's alone"
- * (claude-plugins-official-imessage-server.ts.txt). Relay names the owners
- * itself: `GET /v1/me` returns `owner_people` for the calling Agent Token
- * (Relay-Server server/src/me.ts, `app.get("/me")`).
+ * allowlisted DMs (claude-plugins-official-telegram-server.ts.txt); the
+ * iMessage plugin sends it to the owner's own chat because "that authority is
+ * the owner's alone" (claude-plugins-official-imessage-server.ts.txt). Relay
+ * names the owners itself: `GET /v1/me` returns `owner_people` for the calling
+ * Agent Token (Relay-Server server/src/me.ts, `app.get("/me")`).
+ *
+ * A tap from anyone else is not registered: nothing is sent into the chat,
+ * and the card stays open for an owner to answer.
  */
 
 /**
@@ -95,9 +97,6 @@ export const APPROVAL_TIMEOUT_MS = 600_000;
 export const ANSWER_EVENT = "approval_answer";
 /** The Modal trigger's event: it opens "See more" on the phone and asks nothing. */
 export const SEE_MORE_EVENT = "approval_see_more";
-
-/** The line an owner who taps someone else's card reads (the Telegram plugin's words). */
-export const NOT_AUTHORIZED = "Not authorized.";
 
 /** The one line the terminal shows when nobody can be asked. */
 export const noOwnerLine = (request: Pick<ApprovalRequest, "harness" | "tool">): string =>
@@ -290,14 +289,8 @@ export class OwnerApprovals {
     if (!pending) return false;
     if (tap.action.name !== ANSWER_EVENT) return true;
     const sender = event.data.sender_handle;
-    const chatId = event.data.chat.id;
-    if (sender.kind !== "user" || !pending.owners.has(sender.handle)) {
-      try {
-        await this.#client.chats.messages.send(chatId, { message: { parts: [{ type: "text", value: NOT_AUTHORIZED }] } });
-      } catch { /* Refusing is what matters; the note is a courtesy. */ }
-      this.#say(`@${sender.handle} is not an owner of this agent, so their answer to ${pending.request.tool} was ignored.`);
-      return true;
-    }
+    // Anyone but an owner is not registered: no message, and the card stays open.
+    if (sender.kind !== "user" || !pending.owners.has(sender.handle)) return true;
     const choice = pending.request.choices.find((option) => option.id === tap.action.context.choice);
     if (!choice) return true;
     pending.settle({ reason: "answered", choice, by: sender.handle });
