@@ -5686,9 +5686,21 @@ components:
           an `updateDataModel` when the component is accepted and again when
           the request settles. The payer's receipt replies to the data part
           that created the surface holding the request.
+        - `Browser` (Relay's catalog only; see `A2uiBrowserComponent`) shows
+          your agent's live browser: `status` 1 to 80 characters, `state` one
+          of `working`, `needs_you`, `done`, `failed`, an https `watchUrl`,
+          and optionally an https `controlUrl` and `imageUrl`. A URL that is
+          not https, or a `status` outside 1 to 80 characters, fails with 422
+          `VALIDATION_FAILED`. A property bound to the data model names an
+          absolute JSON Pointer, and the bound value is checked by the same
+          rules whenever the component or the data model changes; the error's
+          `path` then points at the component's property in an
+          `updateComponents`, or at `/value` in an `updateDataModel`. Relay
+          delivers the URLs exactly as sent and never loads them.
         - Image, Video and AudioPlayer `url`s are delivered exactly as sent.
         - With no `text` part, the chat list and notification show the text of
-          the first `Text` component, in tree order from `root`.
+          the first `Text` component, or a `Browser`'s `status`, in tree order
+          from `root`.
 
         **action, error** (from a person or an agent) travel in the message
         itself, and reach only the sender and the agent that created the
@@ -5697,7 +5709,9 @@ components:
         part leaves them out, and a message that holds nothing else is not
         delivered to other agents at all. Each names a live surface in the
         chat. An `action`'s `sourceComponentId` must be a Button there and its
-        `name` that Button's `action.event.name`. A text part and `reply_to`
+        `name` that Button's `action.event.name`, or a `Browser` there and its
+        `name` one of `A2uiBrowserActionName` (`browser.takeControl` and
+        `browser.returnControl` only when the Browser has a `controlUrl`). A text part and `reply_to`
         are optional, and a text part reaches every member. When the surface
         set `sendDataModel`, the message must carry
         `metadata.a2uiClientDataModel`.
@@ -5746,6 +5760,94 @@ components:
           description: Reactions on this message part
           items:
             $ref: "#/components/schemas/Reaction"
+    A2uiBrowserComponent:
+      type: object
+      additionalProperties: false
+      description: |
+        A component of Relay's A2UI catalog (`https://relayapp.im/a2ui/catalog/v1`)
+        that shows your agent's live browser in the chat. The app draws it as
+        Relay's Browser card: a globe, the title "Browser" (the card has no
+        title property), the `status` line, the still in `imageUrl` when there
+        is one, and an "Open browser" button that opens `watchUrl`, read-only,
+        in a window over the chat. With a `controlUrl` the window also offers
+        "Take control of the browser", which opens `controlUrl` so the person
+        can click and type, and "Finish up", which hands control back; "Stop
+        the task" ends the task. `state` `needs_you` turns the card orange;
+        say why in your own message beside it. `done` and `failed` shrink the
+        card to one row.
+
+        Each tap reaches only the agent that created the surface, as an A2UI
+        `action` whose `sourceComponentId` is this component's `id`, whose
+        `name` is one of `A2uiBrowserActionName`, and whose `context` is
+        empty. Pause your browser work from `browser.takeControl` until
+        `browser.returnControl`, and end the task on `browser.stop`. Change
+        the card with `updateComponents` or `updateDataModel` as the task goes.
+
+        Every URL is https. Relay delivers the URLs exactly as sent and never
+        loads them; only the app's web view opens the page, so the person's
+        sign-ins stay in your browser. `status`, `watchUrl`, `controlUrl` and
+        `imageUrl` are each a literal or a binding `{"path": "/absolute/pointer"}`
+        into the surface's data model; a bound value follows the literal's rule.
+      required: [id, component, status, state, watchUrl]
+      properties:
+        id:
+          type: string
+          description: The component's id; `root` when the Browser is the whole card.
+        component:
+          type: string
+          enum: [Browser]
+        status:
+          description: The card's one status line in your own words, for example "Working · united.com". With `state` `done` or `failed` the card shows it after "Completed ·" or "Failed ·".
+          oneOf:
+            - type: string
+              minLength: 1
+              maxLength: 80
+            - $ref: "#/components/schemas/A2uiAbsoluteBinding"
+        state:
+          type: string
+          enum: [working, needs_you, done, failed]
+        watchUrl:
+          description: >-
+            The read-only live view of your browser, for example Cloudflare
+            Browser Run's Live View URL made with `guardrails` `{"mode": "readonly"}`.
+          oneOf:
+            - type: string
+              format: uri
+              pattern: "^https://[^\\s/?#]+([/?#]\\S*)?$"
+            - $ref: "#/components/schemas/A2uiAbsoluteBinding"
+        controlUrl:
+          description: The interactive live view of the same browser. Without it the card offers no "Take control of the browser".
+          oneOf:
+            - type: string
+              format: uri
+              pattern: "^https://[^\\s/?#]+([/?#]\\S*)?$"
+            - $ref: "#/components/schemas/A2uiAbsoluteBinding"
+        imageUrl:
+          description: A still picture of the page for the card.
+          oneOf:
+            - type: string
+              format: uri
+              pattern: "^https://[^\\s/?#]+([/?#]\\S*)?$"
+            - $ref: "#/components/schemas/A2uiAbsoluteBinding"
+        accessibility:
+          type: object
+          description: A2UI's accessibility attributes (`label`, `description`), as on every component.
+        weight:
+          type: number
+          description: A2UI's flex weight inside a Row or Column, as on every component.
+    A2uiAbsoluteBinding:
+      type: object
+      additionalProperties: false
+      description: An A2UI data binding whose `path` is an absolute JSON Pointer into the surface's data model.
+      required: [path]
+      properties:
+        path:
+          type: string
+          pattern: "^/"
+    A2uiBrowserActionName:
+      type: string
+      description: The `name` of an A2UI `action` a `Browser` card sends. `browser.takeControl` when the person taps "Take control of the browser", `browser.returnControl` when they tap "Finish up", `browser.stop` when they tap "Stop the task".
+      enum: [browser.takeControl, browser.returnControl, browser.stop]
     A2uiFailure:
       type: object
       description: One A2UI message Relay did not apply, where it sits in the request, and A2UI's own `error` message for it.
@@ -6884,7 +6986,8 @@ components:
         the A2UI catalogs Relay's app draws, in order of preference. Pick the
         first catalog your agent can write for a card's `createSurface.catalogId`.
         - `https://relayapp.im/a2ui/catalog/v1`, Relay's catalog: every basic
-          catalog component and function, plus `PaymentRequest` (see `DataPart`).
+          catalog component and function, plus `PaymentRequest` (see
+          `DataPart`) and `Browser` (see `A2uiBrowserComponent`).
         - `https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json`,
           the A2UI v0.9.1 basic catalog.
 
