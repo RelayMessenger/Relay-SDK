@@ -4,14 +4,20 @@ import { describe, expect, it } from "vitest";
 import { Webhook } from "standardwebhooks";
 import Relay, {
   A2UI_BASIC_CATALOG_ID,
+  A2UI_BROWSER_ACTIONS,
   A2UI_MEDIA_TYPE,
   RELAY_A2UI_CATALOG_ID,
   RelayAPIError,
+  a2uiBrowserCardMessages,
+  a2uiBrowserCardUpdate,
+  a2uiBrowserComponent,
   a2uiPart,
   deleteA2uiSurface,
+  isA2uiBrowserAction,
   readA2uiAction,
   sendA2uiSurface,
   updateA2uiSurface,
+  type A2uiBrowserCard,
   type A2uiComponent,
   type MessageSendResponse,
   type RelayWebhookEvent,
@@ -273,5 +279,66 @@ describe("readA2uiAction", () => {
         reactions: null,
       }],
     })).toBeNull();
+  });
+});
+
+// Relay Server's Browser card and taps (Relay-Server PR 418,
+// server/test/a2ui.test.ts: browser(), browserCard, browserTap).
+const WATCH = "https://live.browser.run/ui/view?mode=tab&wss=live.browser.run/api/devtools/browser/s/page/p?jwt=watch";
+const CONTROL = "https://live.browser.run/ui/view?mode=tab&wss=live.browser.run/api/devtools/browser/s/page/p?jwt=control";
+const working: A2uiBrowserCard = { status: "Working · united.com", state: "working", watchUrl: WATCH, controlUrl: CONTROL };
+
+const contract = readFileSync(new URL("../../../contracts/relay-v1-openapi.yaml", import.meta.url), "utf8");
+/** The text of one components.schemas entry in the carried contract. */
+const schema = (name: string): string => {
+  const start = contract.indexOf(`\n    ${name}:\n`);
+  expect(start).toBeGreaterThan(0);
+  const rest = contract.slice(start + 1);
+  const next = rest.slice(1).search(/\n    [A-Za-z0-9]+:\n/u);
+  return rest.slice(0, next + 1);
+};
+
+describe("Browser card", () => {
+  it("builds createSurface in Relay's catalog, then the Browser as root, exactly as Relay Server's test sends it", () => {
+    expect(a2uiBrowserCardMessages("browser-ok", working)).toEqual([
+      { version: V, createSurface: { surfaceId: "browser-ok", catalogId: "https://relayapp.im/a2ui/catalog/v1" } },
+      { version: V, updateComponents: { surfaceId: "browser-ok", components: [
+        { id: "root", component: "Browser", status: "Working · united.com", state: "working", watchUrl: WATCH, controlUrl: CONTROL },
+      ] } },
+    ]);
+  });
+
+  it("adds the whole data model when properties are bound, and changes the card in place with one updateComponents", () => {
+    const bound: A2uiBrowserCard = { status: { path: "/browser/status" }, state: "working", watchUrl: { path: "/browser/watch" } };
+    const model = { browser: { status: "Selecting seats...", watch: WATCH } };
+    expect(a2uiBrowserCardMessages("browser-bound", bound, model).at(-1))
+      .toEqual({ version: V, updateDataModel: { surfaceId: "browser-bound", value: model } });
+    expect(a2uiBrowserCardUpdate("browser-ok", { ...working, state: "needs_you", status: "Blocked · Waiting for confirmation" }))
+      .toEqual({ version: V, updateComponents: { surfaceId: "browser-ok", components: [{
+        id: "root", component: "Browser", status: "Blocked · Waiting for confirmation", state: "needs_you", watchUrl: WATCH, controlUrl: CONTROL,
+      }] } });
+    expect(a2uiBrowserComponent(working, "live").id).toBe("live");
+  });
+
+  it("names the three taps the contract's A2uiBrowserActionName lists, and reads them back from message.received", () => {
+    expect(Object.values(A2UI_BROWSER_ACTIONS)).toEqual(["browser.takeControl", "browser.returnControl", "browser.stop"]);
+    expect(schema("A2uiBrowserActionName")).toContain(`enum: [${Object.values(A2UI_BROWSER_ACTIONS).join(", ")}]`);
+    for (const name of Object.values(A2UI_BROWSER_ACTIONS)) expect(isA2uiBrowserAction(name)).toBe(true);
+    expect(isA2uiBrowserAction("place_bet")).toBe(false);
+    const event = fixture();
+    const tap = { name: A2UI_BROWSER_ACTIONS.takeControl, surfaceId: "browser-taps", sourceComponentId: "root", timestamp: "2026-09-27T20:00:00Z", context: {} };
+    const data = { ...(event as { data: object }).data, parts: [{ type: "data", media_type: A2UI_MEDIA_TYPE, data: [{ version: V, action: tap }] }] };
+    expect(readA2uiAction({ ...event, data } as RelayWebhookEvent)).toEqual({ action: tap });
+  });
+
+  it("types every property the contract's A2uiBrowserComponent defines, with its required ones and states", () => {
+    const component = schema("A2uiBrowserComponent");
+    expect(component).toContain("required: [id, component, status, state, watchUrl]");
+    expect(component).toContain("enum: [working, needs_you, done, failed]");
+    const properties = [...component.slice(component.indexOf("      properties:\n")).matchAll(/^        ([A-Za-z]+):$/gmu)].map((match) => match[1]);
+    const typed: Record<keyof ReturnType<typeof a2uiBrowserComponent>, true> = {
+      id: true, component: true, status: true, state: true, watchUrl: true, controlUrl: true, imageUrl: true, accessibility: true, weight: true,
+    };
+    expect(properties.sort()).toEqual(Object.keys(typed).sort());
   });
 });

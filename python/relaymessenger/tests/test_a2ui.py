@@ -390,3 +390,83 @@ def test_the_readme_card_is_valid_a2ui() -> None:
         tap.name,
         tap.context,
     )
+
+
+# Relay's Browser card (Relay-Server PR 418, server/test/a2ui.test.ts: browser(),
+# browserCard, browserTap) ------------------------------------------------------
+
+WATCH = "https://live.browser.run/ui/view?mode=tab&wss=live.browser.run/api/devtools/browser/s/page/p?jwt=watch"
+CONTROL = "https://live.browser.run/ui/view?mode=tab&wss=live.browser.run/api/devtools/browser/s/page/p?jwt=control"
+CONTRACT = Path(__file__).resolve().parents[3] / "contracts" / "relay-v1-openapi.yaml"
+
+
+def _contract_schema(name: str) -> str:
+    """The text of one ``components.schemas`` entry in the carried contract."""
+    text = CONTRACT.read_text()
+    start = text.index(f"\n    {name}:\n") + 1
+    import re
+
+    following = re.search(r"\n    [A-Za-z0-9]+:\n", text[start + 1 :])
+    return text[start : start + 1 + following.start() + 1] if following else text[start:]
+
+
+def test_a_browser_card_is_relay_servers_browser_card() -> None:
+    from relaymessenger.a2ui import browser_card_messages, browser_component
+
+    card = browser_component(status="Working · united.com", state="working", watch_url=WATCH, control_url=CONTROL)
+    assert browser_card_messages("browser-ok", card) == [
+        {"version": "v0.9.1", "createSurface": {"surfaceId": "browser-ok", "catalogId": RELAY_A2UI_CATALOG_ID}},
+        {
+            "version": "v0.9.1",
+            "updateComponents": {
+                "surfaceId": "browser-ok",
+                "components": [
+                    {
+                        "id": "root",
+                        "component": "Browser",
+                        "status": "Working · united.com",
+                        "state": "working",
+                        "watchUrl": WATCH,
+                        "controlUrl": CONTROL,
+                    }
+                ],
+            },
+        },
+    ]
+    assert "controlUrl" not in browser_component(status="Working", state="working", watch_url=WATCH)
+
+
+def test_a_browser_card_binds_to_its_data_model_and_changes_in_place() -> None:
+    from relaymessenger.a2ui import browser_card_messages, browser_card_update, browser_component
+
+    bound = browser_component(status={"path": "/browser/status"}, state="working", watch_url={"path": "/browser/watch"})
+    model = {"browser": {"status": "Selecting seats...", "watch": WATCH}}
+    assert browser_card_messages("browser-bound", bound, data_model=model)[-1] == update_data_model("browser-bound", model)
+    blocked = browser_component(status="Blocked · Waiting for confirmation", state="needs_you", watch_url=WATCH, control_url=CONTROL)
+    assert browser_card_update("browser-ok", blocked) == update_components("browser-ok", [dict(blocked)])
+
+
+def test_the_browser_taps_are_the_contracts_and_read_back() -> None:
+    from relaymessenger.a2ui import BROWSER_ACTIONS, BROWSER_STOP, BROWSER_TAKE_CONTROL, is_browser_action
+
+    assert BROWSER_ACTIONS == ("browser.takeControl", "browser.returnControl", "browser.stop")
+    assert f"enum: [{', '.join(BROWSER_ACTIONS)}]" in _contract_schema("A2uiBrowserActionName")
+    assert all(is_browser_action(name) for name in BROWSER_ACTIONS) and not is_browser_action("place_bet")
+    event = json.loads(RECEIVED.read_text())
+    tap = {"name": BROWSER_TAKE_CONTROL, "surfaceId": "browser-taps", "sourceComponentId": "root", "timestamp": "2026-09-27T20:00:00Z", "context": {}}
+    event["data"]["parts"] = [{"type": "data", "media_type": A2UI_MEDIA_TYPE, "data": [{"version": "v0.9.1", "action": tap}]}]
+    read = read_a2ui_action(event)
+    assert read is not None and read.action == tap and read.action["name"] != BROWSER_STOP
+
+
+def test_the_browser_component_types_what_the_contract_defines() -> None:
+    import re
+
+    from relaymessenger.a2ui import A2uiBrowserComponent
+
+    schema = _contract_schema("A2uiBrowserComponent")
+    assert "required: [id, component, status, state, watchUrl]" in schema
+    assert "enum: [working, needs_you, done, failed]" in schema
+    properties = re.findall(r"^        ([A-Za-z]+):$", schema[schema.index("      properties:\n") :], re.M)
+    assert sorted(properties) == sorted(A2uiBrowserComponent.__annotations__)
+    assert sorted(A2uiBrowserComponent.__required_keys__) == ["component", "id", "state", "status", "watchUrl"]

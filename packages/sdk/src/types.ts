@@ -675,6 +675,37 @@ export interface A2uiComponent {
   [property: string]: unknown;
 }
 
+/** An A2UI data binding whose `path` is an absolute JSON Pointer into the surface's data model. */
+export type A2uiAbsoluteBinding = {
+  path: `/${string}`;
+};
+
+/** A Browser card's state: `needs_you` turns it orange; `done` and `failed` shrink it to one row. */
+export type A2uiBrowserState = "working" | "needs_you" | "done" | "failed";
+
+/**
+ * Relay's `Browser` component (`A2uiBrowserComponent` in the contract), in
+ * Relay's catalog only: your agent's live browser, drawn as Relay's Browser
+ * card with the title "Browser", the `status` line, the still in `imageUrl`,
+ * and "Open browser", which opens `watchUrl` read-only. With `controlUrl` the
+ * person can take control. Every URL is https; `status` is 1 to 80
+ * characters. Each may instead be bound to the data model.
+ */
+export type A2uiBrowserComponent = {
+  id: string;
+  component: "Browser";
+  status: string | A2uiAbsoluteBinding;
+  state: A2uiBrowserState;
+  watchUrl: string | A2uiAbsoluteBinding;
+  controlUrl?: string | A2uiAbsoluteBinding;
+  imageUrl?: string | A2uiAbsoluteBinding;
+  accessibility?: { label?: unknown; description?: unknown };
+  weight?: number;
+};
+
+/** The `name` of a tap on a Browser card (`A2uiBrowserActionName` in the contract). */
+export type A2uiBrowserActionName = "browser.takeControl" | "browser.returnControl" | "browser.stop";
+
 /** A2UI `createSurface`: starts a surface drawn by the Message that carries it. */
 export interface A2uiCreateSurfaceMessage {
   version: A2uiVersion;
@@ -727,12 +758,12 @@ export type A2uiServerToClientMessage =
   | A2uiUpdateDataModelMessage
   | A2uiDeleteSurfaceMessage;
 
-/** The body of an A2UI `action` message: a tap on a Button. */
+/** The body of an A2UI `action` message: a tap on a Button, or on a Browser card. */
 export interface A2uiAction {
-  /** The Button's `action.event.name`. */
+  /** The Button's `action.event.name`, or one of `A2uiBrowserActionName`. */
   name: string;
   surfaceId: string;
-  /** The `id` of the Button that was tapped. */
+  /** The `id` of the Button or Browser that was tapped. */
   sourceComponentId: string;
   /** ISO 8601 time of the tap. */
   timestamp: string;
