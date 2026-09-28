@@ -88,6 +88,7 @@ class RelayCallbacks(BaseModel):
     """Callback handlers for Relay Call events."""
 
     on_connected: Callable[[], Awaitable[None]]
+    on_media_failed: Callable[[BaseException], Awaitable[None]]
     on_disconnected: Callable[[], Awaitable[None]]
     on_participant_connected: Callable[[str], Awaitable[None]]
     on_participant_disconnected: Callable[[str, str], Awaitable[None]]
@@ -122,6 +123,8 @@ class RelayTransportClient:
         self._callbacks = callbacks
         self._transport_name = transport_name
         self._call: Optional[RelayCallTransport] = None
+        # The call's connect(), still bringing media up after the join returned.
+        self._media: Optional["asyncio.Task[None]"] = None
         self._lock = asyncio.Lock()
         self._connected = False
         self._disconnect_counter = 0
@@ -157,7 +160,16 @@ class RelayTransportClient:
         self._in_sample_rate = self._params.audio_in_sample_rate or setup.audio_in_sample_rate
 
     async def connect(self) -> None:
-        """Join the Call's room as the agent (answering a ringing Call) and publish."""
+        """Join the Call's room as the agent (answering a ringing Call) and publish.
+
+        Returns once the room is open and the agent's audio can be written,
+        not once media connects: the pipeline starts, and the agent can start
+        speaking, while ICE and DTLS finish. The call holds that audio and plays
+        it from its first packet once the person receives it
+        (`RelayCallTransport.write_audio`, PROTOCOL.md section 6b), so nothing
+        is lost. ``on_connected`` still fires when media connects; if it never
+        does, the output reports a permanent error.
+        """
         async with self._lock:
             if self._connected:
                 self._disconnect_counter += 1
@@ -184,14 +196,24 @@ class RelayTransportClient:
                     self._video_source = VideoSource(self._params.video_out_width, self._params.video_out_height)
                     self._video_track = LocalVideoTrack.create_video_track("pipecat-video", self._video_source)
                     await call.publish_track(self._video_track)
-                await call.connect()
+                media: asyncio.Task[None] = asyncio.ensure_future(call.connect())
+                joined: asyncio.Task[None] = asyncio.ensure_future(call.wait_for_join())
+                try:
+                    await asyncio.wait({media, joined}, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    joined.cancel()
+                if media.done() and not media.cancelled() and media.exception() is not None:
+                    raise media.exception()  # type: ignore[misc]
             except BaseException:
+                if "media" in locals():
+                    media.cancel()
                 await self._close_call()
                 raise
+            self._media = media
             self._connected = True
             self._disconnect_counter += 1
             logger.info(f"Joined Relay Call {self._call_id}")
-            await self._callbacks.on_connected()
+            media.add_done_callback(self._media_settled)
 
     async def disconnect(self) -> None:
         """Leave the room; the second caller (input and output both connect) closes the Call locally."""
@@ -246,6 +268,16 @@ class RelayTransportClient:
         self._video_source.capture_frame(frame)
         return True
 
+    def _media_settled(self, media: "asyncio.Task[None]") -> None:
+        if media.cancelled() or not self._connected:
+            return
+        error = media.exception()
+        if error is None:
+            self._spawn(self._callbacks.on_connected())
+        else:
+            logger.warning(f"{self._transport_name} Relay Call media did not connect: {error}")
+            self._spawn(self._callbacks.on_media_failed(error))
+
     # ---- Relay call events ----------------------------------------------------------
 
     def _attach(self, call: RelayCallTransport) -> None:
@@ -295,6 +327,9 @@ class RelayTransportClient:
         task.add_done_callback(self._background.discard)
 
     async def _close_call(self) -> None:
+        if self._media is not None:
+            self._media.cancel()
+            self._media = None
         if self._video_source is not None:
             await self._video_source.aclose()
             self._video_source = None
@@ -480,7 +515,9 @@ class RelayTransport(BaseTransport):
 
     Event handlers available:
 
-    - on_connected: The agent joined and its media is connected.
+    - on_connected: The agent's media is connected. The pipeline starts
+      earlier, once the agent has joined the room: audio written before this
+      is held and plays from its start once the person receives it.
     - on_disconnected: The agent left the Call.
     - on_first_participant_joined: The person is in the Call and their audio
       reached the agent. Args: (participant_id: str)
@@ -551,6 +588,7 @@ class RelayTransport(BaseTransport):
             params=self._params,
             callbacks=RelayCallbacks(
                 on_connected=self._on_connected,
+                on_media_failed=self._on_media_failed,
                 on_disconnected=self._on_disconnected,
                 on_participant_connected=self._on_participant_connected,
                 on_participant_disconnected=self._on_participant_disconnected,
@@ -601,6 +639,16 @@ class RelayTransport(BaseTransport):
         await self._call_event_handler("on_connected")
         if self._input:
             await self._input.push_frame(BotConnectedFrame())
+
+    async def _on_media_failed(self, error: BaseException) -> None:
+        # The output cannot send without media: the worker's ProcessorUnusablePolicy decides.
+        processor = self._output or self._input
+        if processor is not None:
+            await processor.push_error(
+                f"Relay Call media did not connect: {error}",
+                exception=error if isinstance(error, Exception) else None,
+                force_treat_as_permanent=True,
+            )
 
     async def _on_disconnected(self) -> None:
         await self._call_event_handler("on_disconnected")

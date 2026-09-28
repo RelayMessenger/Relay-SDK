@@ -348,6 +348,8 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         self._ice_remote: list[tuple[str, int]] = []
         self._transitions: list[RelayCallTransition] = []
         self._source: Optional[RelayAudioSource] = None
+        #: Set once the room is open and the audio source exists (`wait_for_join`).
+        self._joined = asyncio.Event()
         self._peer: Any = None
         self._peer_generation = 0
         self._peer_connected = False
@@ -424,6 +426,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         self._record("signaling", "room open")
         # Application audio leaves only while the person receives it (PROTOCOL.md section 6b).
         self._source = RelayAudioSource(playing=lambda: self.subscribed)
+        self._joined.set()
         if self._video is not None and self._video.enabled:
             # Published before connect(): the camera rides the first offer.
             self.room.user_update(muted=self._muted, video=True)
@@ -433,6 +436,18 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         except BaseException:
             self.close()
             raise
+
+    async def wait_for_join(self) -> None:
+        """Return once the room is open and this participant's audio source exists.
+
+        From here `write_audio` is accepted while `connect()` is still bringing
+        media up: the audio is held, silence goes out, and it plays from its
+        first packet once the person receives it (PROTOCOL.md section 6b), as
+        LiveKit's room output accepts audio before the subscription and waits
+        for it. Waits for `connect()`, which is what opens the room; to stop
+        waiting when `connect()` fails, wait on both.
+        """
+        await self._joined.wait()
 
     async def reconnect(self) -> None:
         """Replace only the room signaling socket and replay the identical publication."""
