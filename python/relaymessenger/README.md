@@ -306,7 +306,9 @@ async def answer(call_id: str) -> RelayCallTransport:
 ```
 
 `connect()` rebuilds the media peer on a new session when one dies, and raises
-only when the Call ends or the room closes. Pass `ice_servers` a list, or a
+only when the Call ends or the room closes. `wait_for_join()` returns earlier,
+once the room is open: from then `write_audio` is accepted while media
+connects. Pass `ice_servers` a list, or a
 function that returns one per attempt, to use your own TURN credentials.
 
 ## Exchange audio

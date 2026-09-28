@@ -19,7 +19,7 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.tests.utils import QueuedFrameProcessor
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.workers.runner import WorkerRunner
@@ -47,6 +47,9 @@ class FakeCall(EventEmitter[str]):
 
     async def connect(self) -> None:
         self.connects += 1
+
+    async def wait_for_join(self) -> None:
+        return None
 
     async def publish_track(self, track: Any) -> None:
         self.published.append(track)
@@ -412,3 +415,98 @@ async def test_the_bots_audio_is_held_until_the_person_receives_it_then_plays_fr
 
     await run(worker, during)
     await connecting
+
+
+async def test_the_pipeline_starts_once_the_agent_joins_and_audio_written_before_media_connects_plays_whole(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A greeting started while ICE is still connecting is held, then plays
+    from its first packet once media connects and the person receives it."""
+    from relaymessenger.calls import RelayCallTransport
+
+    FakePeer.instances = []
+    monkeypatch.setattr(
+        transport_module, "RelayCallTransport", lambda **kwargs: RelayCallTransport(**kwargs, _peer_factory=FakePeer)
+    )
+    room = FakeRoom()
+    transport = RelayTransport(
+        call_id="call-1",
+        room=room,  # type: ignore[arg-type]
+        params=RelayParams(audio_out_enabled=True, audio_out_end_silence_secs=0),
+    )
+    connected: list[str] = []
+
+    @transport.event_handler("on_connected")
+    async def on_connected(_transport: Any) -> None:
+        connected.append("media")
+
+    worker = PipelineWorker(
+        Pipeline([transport.input(), transport.output()]),
+        params=PipelineParams(audio_out_sample_rate=48_000),
+        cancel_on_idle_timeout=False,
+    )
+    greeting = np.full(48_000 // 10, 1000, dtype=np.int16)  # 100 ms, five Opus packets
+
+    async def during() -> None:
+        # The pipeline is running and the peer has not connected: nothing has answered the offer.
+        peer = FakePeer.instances[0]
+        assert peer.connectionState == "new" and connected == []
+        call = transport._client.call
+        assert call is not None and call._source is not None
+        source = call._source
+        track = peer.transceivers[0].sender.track
+        await worker.queue_frame(OutputAudioRawFrame(audio=greeting.tobytes(), sample_rate=48_000, num_channels=1))
+        for _ in range(200):
+            if len(source._packets) >= 4:
+                break
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)
+        queued = list(source._packets)
+        assert len(queued) >= 4
+        assert [bytes(await track.recv()) for _ in range(3)] == [source._silence] * 3
+        # Media connects: the SFU answers and ICE completes.
+        room.emit("answer", {"type": "answer", "session_description": {"type": "answer", "sdp": "v=0\r\n"}})
+        while peer.signalingState != "stable":
+            await asyncio.sleep(0.005)
+        await asyncio.sleep(0.01)
+        peer.set_state("connected")
+        for _ in range(100):
+            if connected:
+                break
+            await asyncio.sleep(0.01)
+        assert connected == ["media"]
+        assert list(source._packets) == queued
+        room.emit("room_state", receiving(["audio"]))
+        assert [bytes(await track.recv()) for _ in range(len(queued))] == queued
+        assert call.diagnostics().outbound.rtp_packets == len(queued)
+
+    await run(worker, during)
+
+
+async def test_media_that_never_connects_after_the_join_ends_the_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+    failure = RuntimeError("Relay Call room closed before media connected (1006).")
+
+    class NeverConnects(FakeCall):
+        async def connect(self) -> None:
+            self.connects += 1
+            await asyncio.sleep(0.05)
+            raise failure
+
+    monkeypatch.setattr(transport_module, "RelayCallTransport", NeverConnects)
+    transport = RelayTransport(api_key="agent-token", call_id="call-1", params=RelayParams(audio_out_enabled=True))
+    worker = PipelineWorker(
+        Pipeline([transport.input(), transport.output()]),
+        cancel_on_idle_timeout=False,
+        processor_unusable_policy=ProcessorUnusablePolicy.END,
+    )
+    errors: list[Any] = []
+
+    @worker.event_handler("on_pipeline_error")
+    async def on_error(_worker: Any, frame: Any) -> None:
+        errors.append(frame)
+
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+    # No EndFrame is queued: the failed media alone ends the pipeline.
+    await asyncio.wait_for(runner.run(), 10)
+    assert errors and "media did not connect" in errors[0].error

@@ -51,10 +51,13 @@ async def answer(call_id: str) -> None:
 ```
 
 Joining answers a ringing Call, so start the pipeline within the Call's
-ten-second ring. `on_first_participant_joined` fires once the caller's audio
-reaches the agent, and the bot's audio is held until the caller is receiving
-it, so a greeting is heard from its first word. `transport.end()` ends the Call for
-both sides.
+ten-second ring. The pipeline starts once the agent has joined the Call's
+room, while its media is still connecting, so the bot can start its greeting
+on `on_call_state_updated` with `in-progress`; `on_connected` fires when
+media connects. The bot's audio is held until the caller is receiving it,
+so a greeting is heard from its first word. `on_first_participant_joined`
+fires once the caller's audio reaches the agent. `transport.end()` ends the
+Call for both sides.
 
 ## Send and receive video
 
