@@ -41,6 +41,7 @@ class FakeCall(EventEmitter[str]):
         self.closes = 0
         self.cleared = 0
         self.queued = 0.0
+        self.subscribed = True
         self.written: list[RelayAudioFrame] = []
         self.published: list[Any] = []
         FakeCall.instances.append(self)
@@ -246,6 +247,26 @@ async def test_audio_writes_wait_while_the_call_queue_is_over_its_size() -> None
     assert not write.done()
     call.queued = 150
     assert await asyncio.wait_for(write, 1) is True
+
+
+async def test_audio_writes_do_not_wait_while_media_connects_or_restarts() -> None:
+    # The call holds its queue until the person receives the agent's audio; a write that waited
+    # for that would outlast Pipecat's 10 s audio_out_write_timeout_secs and end the pipeline.
+    transport = RelayTransport(api_key="agent-token", call_id="call-1", params=RelayParams(audio_out_queue_size_ms=200))
+    client = transport._client
+    call = FakeCall()
+    client._call, client._connected = call, True  # type: ignore[assignment]
+    call.subscribed = False
+    call.queued = 5_000
+    assert await asyncio.wait_for(client.write_audio(b"\0\0" * 240, 24_000, 1), 0.5) is True
+    # A restart that begins while a write waits releases it.
+    call.subscribed = True
+    write = asyncio.ensure_future(client.write_audio(b"\0\0" * 240, 24_000, 1))
+    await asyncio.sleep(0.1)
+    assert not write.done()
+    call.subscribed = False
+    assert await asyncio.wait_for(write, 0.5) is True
+    assert len(call.written) == 2
 
 
 async def test_output_rejects_unknown_formats_and_short_images() -> None:

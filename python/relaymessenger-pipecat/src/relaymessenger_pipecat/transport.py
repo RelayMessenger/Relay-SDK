@@ -253,8 +253,12 @@ class RelayTransportClient:
         samples = np.frombuffer(audio, dtype=np.int16)
         await call.write_audio(RelayAudioFrame(samples=samples, sample_rate=sample_rate, channel_count=num_channels))
         # Wait while the queue is over its size, as LiveKit's AudioSource.capture_frame does,
-        # so the output's bot-speaking state follows the wire.
-        while self._connected and call.queued_audio_ms() > self._params.audio_out_queue_size_ms:
+        # so the output's bot-speaking state follows the wire. Only while the wire is live:
+        # while media connects or restarts the call holds its queue (PROTOCOL.md section 6b),
+        # and a write that waited out the hold would hit Pipecat's audio_out_write_timeout_secs
+        # (10 s), which ends the pipeline. Staging call 01a0e9ee-fe9a (2026-09-28 21:32Z) died so
+        # 12 s into two media restarts. A media session that never connects fails `connect()`.
+        while self._connected and call.subscribed and call.queued_audio_ms() > self._params.audio_out_queue_size_ms:
             await asyncio.sleep(AUDIO_SLICE_MS / 1000)
         return True
 
