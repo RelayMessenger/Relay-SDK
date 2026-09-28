@@ -88,7 +88,7 @@ A card is an A2UI v0.9.1 surface in a message part,
 `{"type": "data", "media_type": "application/a2ui+json", "data": [...]}`.
 `send_a2ui_surface` creates the surface, sends its components and, when you
 give one, its data model. Components come from Relay's catalog
-(`RELAY_A2UI_CATALOG_ID`, the A2UI basic catalog plus `PaymentRequest`) unless
+(`RELAY_A2UI_CATALOG_ID`, the A2UI basic catalog plus `PaymentRequest` and `Browser`) unless
 you pass `catalog_id`; one must have the id `root`:
 
 ```python

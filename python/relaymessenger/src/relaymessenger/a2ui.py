@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 A2UI_MEDIA_TYPE: Final = "application/a2ui+json"
 #: The A2UI version every message this module builds carries.
 A2UI_VERSION: Final = "v0.9.1"
-#: Relay's catalog: every basic catalog component and function, plus ``PaymentRequest``.
+#: Relay's catalog: every basic catalog component and function, plus ``PaymentRequest`` and ``Browser``.
 RELAY_A2UI_CATALOG_ID: Final = "https://relayapp.im/a2ui/catalog/v1"
 #: A2UI v0.9.1's basic catalog.
 A2UI_BASIC_CATALOG_ID: Final = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
@@ -253,6 +253,97 @@ def surface_messages(
     if data_model is not _OMIT:
         messages.append(update_data_model(surface_id, data_model))
     return messages
+
+
+# Relay's Browser card (``A2uiBrowserComponent`` in the contract) -------------
+
+#: The taps a Browser card sends to the agent that created it, as an A2UI
+#: ``action`` whose ``sourceComponentId`` is the Browser's id and whose
+#: ``context`` is empty ("Take control of the browser", "Finish up", "Stop the
+#: task"; ``A2uiBrowserActionName`` in the contract). Pause your browser work
+#: from ``BROWSER_TAKE_CONTROL`` until ``BROWSER_RETURN_CONTROL``; end the task
+#: on ``BROWSER_STOP``.
+BROWSER_TAKE_CONTROL: Final = "browser.takeControl"
+BROWSER_RETURN_CONTROL: Final = "browser.returnControl"
+BROWSER_STOP: Final = "browser.stop"
+BROWSER_ACTIONS: Final = (BROWSER_TAKE_CONTROL, BROWSER_RETURN_CONTROL, BROWSER_STOP)
+
+#: ``needs_you`` turns the card orange; ``done`` and ``failed`` shrink it to one row.
+A2uiBrowserState = Literal["working", "needs_you", "done", "failed"]
+
+
+class A2uiBinding(TypedDict):
+    #: An absolute JSON Pointer into the surface's data model, for example ``/browser/status``.
+    path: str
+
+
+class _A2uiBrowserComponentRequired(TypedDict):
+    id: str
+    component: Literal["Browser"]
+    #: The card's one status line, 1 to 80 characters, in your own words.
+    status: Union[str, A2uiBinding]
+    state: A2uiBrowserState
+    #: The read-only live view of your browser; https.
+    watchUrl: Union[str, A2uiBinding]
+
+
+class A2uiBrowserComponent(_A2uiBrowserComponentRequired, total=False):
+    #: The interactive live view; https. Without it the card offers no control.
+    controlUrl: Union[str, A2uiBinding]
+    #: A still picture of the page; https.
+    imageUrl: Union[str, A2uiBinding]
+    accessibility: Dict[str, Any]
+    weight: float
+
+
+def is_browser_action(name: str) -> bool:
+    """Whether a tap's ``name`` is one of a Browser card's taps."""
+    return name in BROWSER_ACTIONS
+
+
+def browser_component(
+    *,
+    status: Union[str, A2uiBinding],
+    state: A2uiBrowserState,
+    watch_url: Union[str, A2uiBinding],
+    control_url: Optional[Union[str, A2uiBinding]] = None,
+    image_url: Optional[Union[str, A2uiBinding]] = None,
+    id: str = "root",
+) -> A2uiBrowserComponent:
+    """Relay's ``Browser`` component: your agent's live browser, drawn as
+    Relay's Browser card titled "Browser". Every URL is https; ``status`` is
+    1 to 80 characters; each may instead be a binding into the data model."""
+    component: A2uiBrowserComponent = {
+        "id": id,
+        "component": "Browser",
+        "status": status,
+        "state": state,
+        "watchUrl": watch_url,
+    }
+    if control_url is not None:
+        component["controlUrl"] = control_url
+    if image_url is not None:
+        component["imageUrl"] = image_url
+    return component
+
+
+def browser_card_messages(
+    surface_id: str,
+    component: A2uiBrowserComponent,
+    *,
+    data_model: Any = _OMIT,
+) -> List[A2uiServerMessage]:
+    """A new Browser card in Relay's catalog: ``createSurface``, the Browser in
+    ``updateComponents`` and, when ``data_model`` is given (for bound
+    properties), an ``updateDataModel`` for the whole model."""
+    return surface_messages(surface_id, [cast(A2uiComponent, component)], data_model=data_model)
+
+
+def browser_card_update(surface_id: str, component: A2uiBrowserComponent) -> A2uiUpdateComponentsMessage:
+    """Changes a Browser card in place. ``updateComponents`` replaces the
+    whole component by id, so ``component`` is the card as it should now be
+    drawn. A bound property changes with ``update_data_model`` instead."""
+    return update_components(surface_id, [cast(A2uiComponent, component)])
 
 
 def a2ui_part(messages: Sequence[A2uiMessage]) -> A2uiDataPart:
@@ -486,11 +577,18 @@ def client_capabilities(payload: Union[Mapping[str, Any], str, bytes]) -> List[s
 
 __all__ = [
     "A2UI_MEDIA_TYPE",
+    "BROWSER_ACTIONS",
+    "BROWSER_RETURN_CONTROL",
+    "BROWSER_STOP",
+    "BROWSER_TAKE_CONTROL",
     "A2UI_VERSION",
     "A2UI_BASIC_CATALOG_ID",
     "RELAY_A2UI_CATALOG_ID",
     "A2uiAction",
     "A2uiActionMessage",
+    "A2uiBinding",
+    "A2uiBrowserComponent",
+    "A2uiBrowserState",
     "A2uiCatalogs",
     "A2uiClientCapabilities",
     "A2uiClientDataModel",
@@ -514,6 +612,10 @@ __all__ = [
     "A2uiVersion",
     "a2ui_messages",
     "a2ui_part",
+    "browser_card_messages",
+    "browser_card_update",
+    "browser_component",
+    "is_browser_action",
     "surface_messages",
     "client_capabilities",
     "create_surface",

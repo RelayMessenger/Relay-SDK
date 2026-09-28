@@ -1,6 +1,8 @@
 import type { Relay } from "./client.js";
 import type {
   A2uiAction,
+  A2uiBrowserActionName,
+  A2uiBrowserComponent,
   A2uiComponent,
   A2uiCreateSurfaceMessage,
   A2uiMessage,
@@ -23,8 +25,60 @@ export const A2UI_VERSION = "v0.9.1";
 /** A2UI v0.9.1's basic catalog, by the `catalogId` its catalog file declares. */
 export const A2UI_BASIC_CATALOG_ID = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json";
 
-/** Relay's catalog: every basic catalog component and function, plus `PaymentRequest`. */
+/** Relay's catalog: every basic catalog component and function, plus `PaymentRequest` and `Browser`. */
 export const RELAY_A2UI_CATALOG_ID = "https://relayapp.im/a2ui/catalog/v1";
+
+/**
+ * The taps a Browser card sends to the agent that created it, as an A2UI
+ * `action` whose `sourceComponentId` is the Browser's id and whose `context`
+ * is empty: "Take control of the browser", "Finish up" and "Stop the task".
+ * Pause your browser work from `takeControl` until `returnControl`; end the
+ * task on `stop`.
+ */
+export const A2UI_BROWSER_ACTIONS = {
+  takeControl: "browser.takeControl",
+  returnControl: "browser.returnControl",
+  stop: "browser.stop",
+} as const satisfies Record<string, A2uiBrowserActionName>;
+
+/** Whether a tap's `name` is one of a Browser card's taps. */
+export const isA2uiBrowserAction = (name: string): name is A2uiBrowserActionName =>
+  (Object.values(A2UI_BROWSER_ACTIONS) as string[]).includes(name);
+
+/** A Browser card's properties: everything but `id` and `component`. */
+export type A2uiBrowserCard = Omit<A2uiBrowserComponent, "id" | "component">;
+
+/** The Browser component a card draws, with the id `root` unless another is given. */
+export const a2uiBrowserComponent = (card: A2uiBrowserCard, id = "root"): A2uiBrowserComponent =>
+  ({ id, component: "Browser", ...card });
+
+/**
+ * The A2UI message that changes a Browser card in place: `updateComponents`
+ * replaces the whole component by id, so `card` is the card as it should now
+ * be drawn, for example `{ ...card, state: "needs_you", status: "Blocked ·
+ * Waiting for confirmation" }`. A bound property changes with
+ * `updateA2uiSurface`'s `dataModel` instead.
+ */
+export const a2uiBrowserCardUpdate = (surfaceId: string, card: A2uiBrowserCard): A2uiServerToClientMessage =>
+  ({ version: A2UI_VERSION, updateComponents: { surfaceId, components: [a2uiBrowserComponent(card)] } });
+
+/**
+ * The A2UI messages of a new Browser card in Relay's catalog: `createSurface`,
+ * then `updateComponents` with the Browser as `root`, then, when `dataModel`
+ * is given (for bound properties), `updateDataModel` for the whole model.
+ */
+export const a2uiBrowserCardMessages = (
+  surfaceId: string,
+  card: A2uiBrowserCard,
+  dataModel?: Record<string, unknown>,
+): A2uiServerToClientMessage[] => {
+  const messages: A2uiServerToClientMessage[] = [
+    { version: A2UI_VERSION, createSurface: { surfaceId, catalogId: RELAY_A2UI_CATALOG_ID } },
+    a2uiBrowserCardUpdate(surfaceId, card),
+  ];
+  if (dataModel !== undefined) messages.push({ version: A2UI_VERSION, updateDataModel: { surfaceId, value: dataModel } });
+  return messages;
+};
 
 /** A card: the surface to create, its components, and, optionally, its first data model. */
 export interface A2uiSurface {

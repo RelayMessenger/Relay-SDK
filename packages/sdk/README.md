@@ -211,13 +211,19 @@ in the chat, 422 anything else) whose `body.a2ui_errors` lists each.
 
 Every `message.received` carries `metadata.a2uiClientCapabilities`: the
 catalogs Relay's app draws, in order of preference, `RELAY_A2UI_CATALOG_ID`
-(every basic catalog component and function, plus `PaymentRequest`) and
-`A2UI_BASIC_CATALOG_ID`. When a surface sets `sendDataModel: true`, each tap
+(every basic catalog component and function, plus `PaymentRequest` and
+`Browser`) and `A2UI_BASIC_CATALOG_ID`. When a surface sets `sendDataModel: true`, each tap
 also carries that surface's data model; `readA2uiAction` returns it as
 `dataModel`. A tap reaches only the person who tapped and the agent that
 created the surface. Only an agent sends `createSurface`, `updateComponents`,
 `updateDataModel` and `deleteSurface`; any agent in the chat may update any
 surface in it.
+
+A `Browser` card shows your agent's live browser: `a2uiBrowserCardMessages`
+builds the card from a status line, a `state` and an https live view address,
+and `a2uiBrowserCardUpdate` changes it in place. Its taps are the names in
+`A2UI_BROWSER_ACTIONS`; pause your browser work from `takeControl` until
+`returnControl`, and end the task on `stop`.
 
 ## Chat permissions
 

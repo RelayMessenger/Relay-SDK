@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "3972ba8aaaae5b958985464f21bfbfbd32f688fb", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "9448e92fb7465bdf30bad37475e5f3017460799b", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -134,7 +134,7 @@ assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 62);
 assert.equal(manifest.path_count, 42);
 assert.equal(manifest.source_path_count, 47);
-assert.equal(manifest.source_schema_count, 217);
+assert.equal(manifest.source_schema_count, 220);
 assert.equal(manifest.callback_count, 28);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 42);
 assert.equal(operationJSON.length, 62);
