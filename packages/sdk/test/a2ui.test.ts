@@ -331,14 +331,12 @@ describe("Browser card", () => {
     expect(readA2uiAction({ ...event, data } as RelayWebhookEvent)).toEqual({ action: tap });
   });
 
-  it("types every property the contract's A2uiBrowserComponent defines, with its required ones and states", () => {
+  it("reads the contract's A2uiBrowserComponent: its properties, the required ones and the states", () => {
     const component = schema("A2uiBrowserComponent");
     expect(component).toContain("required: [id, component, status, state, watchUrl]");
     expect(component).toContain("enum: [working, needs_you, done, failed]");
     const properties = [...component.slice(component.indexOf("      properties:\n")).matchAll(/^        ([A-Za-z]+):$/gmu)].map((match) => match[1]);
-    const typed: Record<keyof ReturnType<typeof a2uiBrowserComponent>, true> = {
-      id: true, component: true, status: true, state: true, watchUrl: true, controlUrl: true, imageUrl: true, accessibility: true, weight: true,
-    };
-    expect(properties.sort()).toEqual(Object.keys(typed).sort());
+    // test/consumer.ts (npm run consumer:types) holds A2uiBrowserComponent to exactly these names.
+    expect(properties.sort()).toEqual(["accessibility", "component", "controlUrl", "id", "imageUrl", "state", "status", "watchUrl", "weight"]);
   });
 });
