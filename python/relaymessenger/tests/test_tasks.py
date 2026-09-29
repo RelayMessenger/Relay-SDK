@@ -309,8 +309,10 @@ async def test_a_task_goes_to_the_agents_address_with_the_token_and_a2a_version(
     from relaymessenger.a2a import agent_address, connect_agent
 
     # Each agent is its own origin under the agent domain; "_" is written "-".
-    assert agent_address("@Translator", a2a_origin="https://staging.relayagent.im/") == "https://translator.staging.relayagent.im"
+    assert agent_address("@translator", a2a_origin="https://staging.relayagent.im/") == "https://translator.staging.relayagent.im"
     assert agent_address("two_words") == "https://two-words.relayagent.im"
+    # "__" is refused only as the 3rd and 4th characters (RFC 5891 4.2.3.1).
+    assert agent_address("abc__d") == "https://abc--d.relayagent.im"
     # A local Relay Server serves agents under its own /a2a.
     assert agent_address("two_words", a2a_origin="http://localhost:8790/a2a/") == "http://localhost:8790/a2a/two_words"
     server.card = relay_card(f"{server.base_url}/a2a/translator")
@@ -335,6 +337,66 @@ async def test_a_task_goes_to_the_agents_address_with_the_token_and_a2a_version(
     assert send[3]["params"]["message"]["role"] == "ROLE_USER"
     assert send[3]["params"]["message"]["parts"] == [{"text": "Translate hello"}]
     assert (get[3]["method"], get[3]["params"]) == ("GetTask", {"id": TASK["id"]})
+
+
+# Everything that is not exactly Relay-Server a2a.ts HANDLE, /^[a-z][a-z0-9_]{2,31}$/.
+HOSTILE_HANDLES = [
+    "attacker.example/",  # the review's leak: the address became https://attacker.example
+    "attacker.example",
+    "evil/../translator",
+    "..",
+    "user@attacker.example",
+    "attacker:8443",
+    "translator#x",
+    "translator?x",
+    "trаnslator",  # Cyrillic "а"
+    "\u212aelvin",  # KELVIN SIGN, which str.lower() turns into ASCII "k"
+    "Translator",
+    " translator",
+    "translator\n",
+    "two-words",
+    "tr",
+    "t" * 33,
+    "xn__abc",  # host label xn--abc, an invalid A-label (RFC 5891 4.2.3.1)
+    "ab__c",
+    "abc_",  # host label abc-, ends with a hyphen
+    "",
+    "@",
+]
+
+
+@pytest.mark.parametrize("handle", HOSTILE_HANDLES)
+async def test_a_handle_outside_the_servers_grammar_is_refused_before_any_request(server: _Server, handle: str) -> None:
+    from relaymessenger.a2a import agent_address, connect_agent
+
+    with pytest.raises(ValueError, match="is not a Relay handle"):
+        agent_address(handle)
+    with pytest.raises(ValueError, match="is not a Relay handle"):
+        agent_address(handle, a2a_origin=f"{server.base_url}/a2a")
+    with pytest.raises(ValueError, match="is not a Relay handle"):
+        await connect_agent("rly_tok", handle, a2a_origin=f"{server.base_url}/a2a")
+    assert server.seen == []
+
+
+@pytest.mark.parametrize(
+    "interface",
+    [
+        "https://attacker.example/",
+        "http://127.0.0.1:1/a2a/translator",  # same host, another port
+        "https://127.0.0.1/a2a/translator",  # same host, another scheme
+    ],
+)
+async def test_a_card_naming_an_interface_off_the_addresss_origin_gets_no_token(server: _Server, interface: str) -> None:
+    from relaymessenger.a2a import connect_agent
+
+    card = relay_card(f"{server.base_url}/a2a/translator")
+    card["supportedInterfaces"].append({"url": interface, "protocolBinding": "JSONRPC", "protocolVersion": "1.0"})
+    server.card = card
+    with pytest.raises(ValueError, match="not on the agent's own origin"):
+        await connect_agent("rly_tok", "translator", a2a_origin=f"{server.base_url}/a2a")
+    # Only the card was fetched, and without the token.
+    assert [(method, path) for method, path, _, _ in server.seen] == [("GET", "/a2a/translator/.well-known/agent-card.json")]
+    assert "authorization" not in server.seen[0][2]
 
 
 REPLY: A2aMessage = {

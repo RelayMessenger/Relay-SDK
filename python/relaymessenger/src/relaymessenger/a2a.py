@@ -27,12 +27,21 @@ reply, and the reply's ``context_id`` is that chat's id.
 
 from __future__ import annotations
 
+import re
 from typing import Final, Optional
 
 # The A2A SDK is the ``a2a`` extra; the guard is the one ``relaymessenger.calls`` uses.
 try:
     import httpx
-    from a2a.client import AuthInterceptor, Client, ClientCallContext, ClientConfig, ClientFactory, CredentialService
+    from a2a.client import (
+        AuthInterceptor,
+        Client,
+        ClientCallContext,
+        ClientConfig,
+        ClientFactory,
+        CredentialService,
+    )
+    from a2a.types import AgentCard
 except ImportError as e:
     raise ImportError(
         "relaymessenger.a2a needs a2a-sdk, which is not installed.\n"
@@ -45,6 +54,15 @@ from .client import USER_AGENT
 DEFAULT_A2A_ORIGIN: Final = "https://relayagent.im"
 #: Where an agent's AgentCard sits under its address: A2A's well-known path.
 AGENT_CARD_PATH: Final = "/.well-known/agent-card.json"
+
+#: A Relay handle, exactly as Relay Server ``a2a.ts`` ``HANDLE`` accepts it:
+#: ``^[a-z][a-z0-9_]{2,31}$``, less the handles whose host label (each "_"
+#: written "-") breaks RFC 5891 section 4.2.3.1: "MUST NOT contain "--" in
+#: the third and fourth character positions and MUST NOT start or end with a
+#: "-"" (``xn__abc`` would be the invalid A-label ``xn--abc``). A handle
+#: becomes a DNS label or a path segment of the address the token is sent to,
+#: so nothing else is let through: no case folding, no trimming.
+_HANDLE: Final = re.compile(r"(?!.{2}__)[a-z][a-z0-9_]{1,30}[a-z0-9]")
 
 # A blocking SendMessage is answered within 60 s (agent-tasks.ts
 # BLOCKING_WAIT_MS), and a stream sends a keepalive every 15 s (KEEPALIVE_MS);
@@ -73,7 +91,9 @@ def agent_address(handle: str, *, a2a_origin: str = DEFAULT_A2A_ORIGIN) -> str:
     certificate. A URL with a path is a local Relay Server's ``<origin>/a2a``,
     and the address is ``<a2a_origin>/<handle>``.
     """
-    name = handle.lstrip("@").strip().lower()
+    name = handle[1:] if handle.startswith("@") else handle
+    if not _HANDLE.fullmatch(name):
+        raise ValueError(f"{handle!r} is not a Relay handle: 3 to 32 of a-z, 0-9 and _, starting with a letter, not ending with _, and without __ as its 3rd and 4th characters.")
     origin = httpx.URL(a2a_origin)
     if origin.path.strip("/"):
         return f"{a2a_origin.rstrip('/')}/{name}"
@@ -96,13 +116,43 @@ async def connect_agent(
     SDK. Close the client with ``await client.close()``.
     """
     token = RelayAgentToken(api_key)
+    address = agent_address(handle, a2a_origin=a2a_origin)
     if config is None:
         config = ClientConfig(httpx_client=httpx.AsyncClient(headers={"user-agent": USER_AGENT}, timeout=_TIMEOUT))
+    # The card is fetched without the token. The A2A SDK runs the card
+    # verifier before it builds the client, so the token goes only to an
+    # interface on the address's own origin (see _require_same_origin).
     return await ClientFactory(config).create_from_url(
-        agent_address(handle, a2a_origin=a2a_origin),
+        address,
         interceptors=[AuthInterceptor(token)],
         relative_card_path=AGENT_CARD_PATH,
+        signature_verifier=lambda card: _require_same_origin(card, address),
     )
+
+
+def _origin(url: str) -> tuple[str, str, int]:
+    parsed = httpx.URL(url)
+    port = parsed.port or {"http": 80, "https": 443}.get(parsed.scheme, 0)
+    return (parsed.scheme, parsed.host, port)
+
+
+def _require_same_origin(card: AgentCard, address: str) -> None:
+    """Refuse a card that names an interface off the address's origin.
+
+    Relay's cards are unsigned, and A2A trusts an unsigned card only as far as
+    the server that served it: a client verifies the server by its TLS
+    certificate (A2A 1.0 section 7.2) and "SHOULD verify at least one
+    signature before trusting an Agent Card" (section 8.4.3). What the card
+    can vouch for is therefore its own origin, the one discovery fetched it
+    from (section 8.2, RFC 8615), and the Relay token is sent nowhere else.
+    """
+    expected = _origin(address)
+    for interface in card.supported_interfaces:
+        if _origin(interface.url) != expected:
+            raise ValueError(
+                f"The agent card at {address} names the interface {interface.url!r}, "
+                "which is not on the agent's own origin; the Relay token is not sent there."
+            )
 
 
 __all__ = ["AGENT_CARD_PATH", "DEFAULT_A2A_ORIGIN", "RelayAgentToken", "agent_address", "connect_agent"]
