@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import Relay, {
+  RELAY_WEBHOOK_EVENT_TYPES,
   RelayUnknownEventTypeError,
   RelayWebhookConfiguredError,
   runWebSocket,
@@ -12,6 +13,9 @@ import Relay, {
   type RelayWebhookEvent,
   type WebSocketLike,
 } from "../src/index.js";
+
+/** Every event type this release knows, named once each (GET /v1/websocket subscribed_events). */
+const SUBSCRIBED = RELAY_WEBHOOK_EVENT_TYPES.map((type) => `subscribed_events=${type}`).join("&");
 
 class FakeWebSocket implements WebSocketLike {
   static readonly instances: FakeWebSocket[] = [];
@@ -221,7 +225,13 @@ it("derives /v1/websocket and sends the Agent Token header with no protocol", as
   await waitFor(() => FakeWebSocket.instances.length === 1);
 
   const socket = FakeWebSocket.latest;
-  expect(socket.url).toBe("wss://relay.test/v1/websocket");
+  expect(socket.url).toBe(`wss://relay.test/v1/websocket?${SUBSCRIBED}`);
+  // Relay sends a connection that names no types only the 16 of SDK 0.3.5;
+  // this release names every type it knows, and so receives them.
+  expect(new URL(socket.url).searchParams.getAll("subscribed_events"))
+    .toEqual([...RELAY_WEBHOOK_EVENT_TYPES]);
+  expect(new URL(socket.url).searchParams.getAll("subscribed_events"))
+    .toContain("location.sharing.started");
   expect(socket.options).toEqual({
     headers: { Authorization: "Bearer relay-agent-token" },
   });
@@ -236,7 +246,7 @@ it("derives /v1/websocket and sends the Agent Token header with no protocol", as
 it("uses ws for an HTTP Relay baseURL", async () => {
   const { controller, running } = run(client("http://127.0.0.1:8790"));
   await waitFor(() => FakeWebSocket.instances.length === 1);
-  expect(FakeWebSocket.latest.url).toBe("ws://127.0.0.1:8790/v1/websocket");
+  expect(FakeWebSocket.latest.url).toBe(`ws://127.0.0.1:8790/v1/websocket?${SUBSCRIBED}`);
   controller.abort();
   await running;
 });
@@ -666,7 +676,7 @@ it.each([1011, 1012, 4408])(
     first.emit("close", { code, reason: "transient" });
     await waitFor(() => FakeWebSocket.instances.length === 2);
 
-    expect(FakeWebSocket.latest.url).toBe("wss://relay.test/v1/websocket");
+    expect(FakeWebSocket.latest.url).toBe(`wss://relay.test/v1/websocket?${SUBSCRIBED}`);
     expect(FakeWebSocket.latest.options?.headers?.Authorization)
       .toBe("Bearer relay-agent-token");
 
@@ -1132,7 +1142,7 @@ it("observes retained sequence gaps with authenticated query, pong, and no ACK",
   const run = client().websocket.run({ observe: true, signal: abort.signal,
     WebSocket: FakeWebSocket, onEvent, onReady, onObservationGap, onFullSync: vi.fn() });
   const socket = FakeWebSocket.latest;
-  expect(socket.url).toBe("wss://relay.test/v1/websocket?observe=true");
+  expect(socket.url).toBe(`wss://relay.test/v1/websocket?observe=true&${SUBSCRIBED}`);
   expect(socket.options?.headers?.Authorization).toBe("Bearer relay-agent-token");
   emitFrame(socket, { ...ready("4"), observational: true });
   emitFrame(socket, { type: "ping", sent_at: "2026-09-08T00:00:00.000Z" });

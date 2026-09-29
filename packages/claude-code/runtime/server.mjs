@@ -21129,6 +21129,9 @@ var deriveWebSocketURL = (baseURL, observe = false) => {
   url.search = "";
   if (observe)
     url.searchParams.set("observe", "true");
+  for (const type of RELAY_WEBHOOK_EVENT_TYPES) {
+    url.searchParams.append("subscribed_events", type);
+  }
   url.hash = "";
   return url.toString();
 };

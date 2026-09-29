@@ -208,7 +208,7 @@ async function startRelayMock(params: {
   });
   const wss = new WebSocketServer({ noServer: true });
   server.on("upgrade", (req, socket, head) => {
-    if (req.url !== "/v1/websocket" || req.headers.authorization !== `Bearer ${TOKEN}`) {
+    if (new URL(req.url ?? "", "http://relay.test").pathname !== "/v1/websocket" || req.headers.authorization !== `Bearer ${TOKEN}`) {
       socket.destroy();
       return;
     }

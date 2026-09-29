@@ -291,12 +291,20 @@ def _upgrade_error(status: int, reason_phrase: str, text: str) -> Exception:
 
 
 def websocket_url(base_url: str, observe: bool = False) -> str:
-    """``wss://<host>/v1/websocket`` for an ``https://`` base URL (``ws://`` for ``http://``)."""
+    """``wss://<host>/v1/websocket`` for an ``https://`` base URL (``ws://`` for ``http://``).
+
+    Relay sends a connection only the event types it names in
+    ``subscribed_events``, and the 16 original ones when it names none
+    (Telegram's ``allowed_updates`` default), so a release that does not know a
+    newer type is never sent it. This names every type this release knows.
+    """
     parts = urlsplit(base_url)
     if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password:
         raise TypeError("Relay base_url must be an absolute HTTP(S) URL.")
     scheme = "wss" if parts.scheme == "https" else "ws"
-    return urlunsplit((scheme, parts.netloc, "/v1/websocket", urlencode({"observe": "true"}) if observe else "", ""))
+    query = [("observe", "true")] if observe else []
+    query += [("subscribed_events", event_type) for event_type in RELAY_WEBHOOK_EVENT_TYPES]
+    return urlunsplit((scheme, parts.netloc, "/v1/websocket", urlencode(query), ""))
 
 
 async def _settle(result: Optional[Awaitable[None]]) -> None:

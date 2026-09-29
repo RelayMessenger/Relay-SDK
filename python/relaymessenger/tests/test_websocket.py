@@ -12,6 +12,7 @@ import json
 import re
 from http import HTTPStatus
 from pathlib import Path
+from urllib.parse import parse_qsl
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import pytest
@@ -166,7 +167,10 @@ async def test_it_connects_with_the_token_and_acks_only_after_the_handler_return
     assert finished.result() == {"type": "ack", "through_sequence": "5"}
     assert handled == [("message.received", "5")]
     request = relay_server.requests[0]
-    assert request.path == "/v1/websocket"
+    path, _, query = request.path.partition("?")
+    assert path == "/v1/websocket"
+    # Relay sends a connection that names no types only the 16 of SDK 0.3.5.
+    assert [value for name, value in parse_qsl(query) if name == "subscribed_events"] == list(RELAY_WEBHOOK_EVENT_TYPES)
     assert request.headers["Authorization"] == "Bearer agent-token"
     assert request.headers["User-Agent"] == USER_AGENT
 
@@ -367,7 +371,8 @@ def test_the_known_event_types_are_the_typescript_sdks() -> None:
 
 
 def test_the_websocket_url_follows_the_base_url() -> None:
-    assert websocket_url("https://api.staging.relayapp.im") == "wss://api.staging.relayapp.im/v1/websocket"
-    assert websocket_url("http://127.0.0.1:8787/x?y=1", observe=True) == "ws://127.0.0.1:8787/v1/websocket?observe=true"
+    subscribed = "&".join(f"subscribed_events={event_type}" for event_type in RELAY_WEBHOOK_EVENT_TYPES)
+    assert websocket_url("https://api.staging.relayapp.im") == f"wss://api.staging.relayapp.im/v1/websocket?{subscribed}"
+    assert websocket_url("http://127.0.0.1:8787/x?y=1", observe=True) == f"ws://127.0.0.1:8787/v1/websocket?observe=true&{subscribed}"
     with pytest.raises(TypeError):
         websocket_url("https://user:pw@api.relayapp.im")
