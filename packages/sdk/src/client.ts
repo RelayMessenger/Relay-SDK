@@ -1144,6 +1144,7 @@ export class Me {
    * every Handle of the agent names it, and `owner_people`, the people who
    * administer it. For an agent a person owns, that person; for an
    * organization's agent, the person who issued the calling Agent Token.
+   * `calls_enabled` says whether this server takes Calls.
    */
   retrieve(options?: RequestOptions): Promise<AgentMe> {
     return this.transport.request({

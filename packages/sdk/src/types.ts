@@ -1925,6 +1925,12 @@ export interface AgentMe {
    * Relay app account yet.
    */
   owner_people: OwnerPerson[];
+  /**
+   * Whether this server takes Calls. When false, `calls.create` is refused
+   * with 503 (error code 3006) and nothing is written, so do not start or
+   * offer a Call.
+   */
+  calls_enabled: boolean;
 }
 
 /** `PATCH /v1/me`: whether the authenticated agent accepts tasks from other agents. */
