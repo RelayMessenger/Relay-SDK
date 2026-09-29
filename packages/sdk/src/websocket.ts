@@ -462,10 +462,9 @@ const deriveWebSocketURL = (baseURL: string, observe = false): string => {
   url.pathname = "/v1/websocket";
   url.search = "";
   if (observe) url.searchParams.set("observe", "true");
-  // Relay sends a connection only the event types it names, and the 16
-  // original ones when it names none (Telegram's allowed_updates default), so
-  // a release that does not know a newer type is never sent it. Name every
-  // type this release knows.
+  // Relay sends a connection only the event types it names, and every type,
+  // including ones added later, when it names none. Naming every type this
+  // release knows keeps a newer type it cannot decode from being sent to it.
   for (const type of RELAY_WEBHOOK_EVENT_TYPES) {
     url.searchParams.append("subscribed_events", type);
   }

@@ -169,7 +169,7 @@ async def test_it_connects_with_the_token_and_acks_only_after_the_handler_return
     request = relay_server.requests[0]
     path, _, query = request.path.partition("?")
     assert path == "/v1/websocket"
-    # Relay sends a connection that names no types only the 16 of SDK 0.3.5.
+    # Relay sends a connection that names no types every type; this release names the ones it knows.
     assert [value for name, value in parse_qsl(query) if name == "subscribed_events"] == list(RELAY_WEBHOOK_EVENT_TYPES)
     assert request.headers["Authorization"] == "Bearer agent-token"
     assert request.headers["User-Agent"] == USER_AGENT
