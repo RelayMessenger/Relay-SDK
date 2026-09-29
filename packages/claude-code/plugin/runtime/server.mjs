@@ -21076,9 +21076,11 @@ var WebSocketStoppedError = class extends Error {
   }
 };
 var DurableApplicationError = class extends Error {
+  sequence;
   closeCode = CLIENT_CLOSE_DURABLE_ACCEPTANCE;
-  constructor(operation, cause) {
+  constructor(operation, cause, sequence) {
     super(`Relay WebSocket durable ${operation} application failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.sequence = sequence;
   }
 };
 var RetryableWebSocketError = class extends Error {
@@ -21135,7 +21137,21 @@ var deriveWebSocketURL = (baseURL, observe = false) => {
   url.hash = "";
   return url.toString();
 };
-var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEvent) => new Promise((resolve2, reject) => {
+var isHeartbeatAnswer = (data) => {
+  const raw = typeof data === "string" ? data : data instanceof ArrayBuffer || ArrayBuffer.isView(data) ? new TextDecoder().decode(data) : void 0;
+  if (raw === void 0)
+    return false;
+  try {
+    const frame = JSON.parse(raw);
+    if (!isRecord2(frame) || frame.type !== "pong")
+      return false;
+    parsePong(frame);
+    return true;
+  } catch {
+    return false;
+  }
+};
+var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEvent, onAcknowledged) => new Promise((resolve2, reject) => {
   const socket = new Constructor(url, {
     headers: {
       Authorization: `Bearer ${agentToken}`
@@ -21148,7 +21164,8 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
   let fullSyncThrough;
   let heartbeatTimer;
   let lastPongAt = 0;
-  const finish = (error2) => {
+  let dropped;
+  const finish = (error2 = dropped) => {
     if (settled)
       return;
     settled = true;
@@ -21177,10 +21194,14 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
   };
   const closeForRetry = (error2) => {
     stopReceiving();
+    if (heartbeatTimer !== void 0)
+      clearInterval(heartbeatTimer);
+    heartbeatTimer = void 0;
+    dropped ??= error2;
     try {
       socket.close(error2.closeCode, "Relay requested reconnect");
     } finally {
-      finish(error2);
+      void chain.then(() => finish(error2), () => finish(error2));
     }
   };
   const startHeartbeat = (intervalMs) => {
@@ -21218,6 +21239,10 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
     });
   };
   const onMessage = (message) => {
+    if (isHeartbeatAnswer(message.data)) {
+      lastPongAt = Date.now();
+      return;
+    }
     chain = chain.then(async () => {
       if (settled || options.signal?.aborted)
         return;
@@ -21297,7 +21322,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
         } catch (cause) {
           throw new DurableApplicationError("FULL sync", cause);
         }
-        if (options.signal?.aborted)
+        if (options.signal?.aborted || dropped)
           return;
         send({
           type: "full_sync_complete",
@@ -21305,6 +21330,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
         });
         acceptedThrough = fullSyncThrough;
         fullSyncThrough = null;
+        onAcknowledged();
         return;
       }
       if (fullSyncThrough !== null) {
@@ -21328,7 +21354,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
         try {
           await options.onEvent(event.event, { sequence: event.sequence });
         } catch (cause) {
-          throw new DurableApplicationError("event", cause);
+          throw new DurableApplicationError("event", cause, event.sequence);
         }
       } else {
         onUnknownEvent(event.event.event_type, event.sequence);
@@ -21341,15 +21367,16 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
       if (sequence === acceptedThrough + 1n) {
         acceptedThrough = sequence;
       }
-      if (options.signal?.aborted)
+      if (options.signal?.aborted || dropped)
         return;
       send({
         type: "ack",
         through_sequence: acceptedThrough.toString()
       });
+      onAcknowledged();
     }).catch((error2) => {
       stopReceiving();
-      socket.close(error2 instanceof WebSocketStoppedError ? error2.closeCode : error2 instanceof WebSocketProtocolError ? error2.closeCode : error2 instanceof RetryableWebSocketError ? error2.closeCode : CLIENT_CLOSE_DURABLE_ACCEPTANCE, error2 instanceof WebSocketStoppedError ? "Relay stopped this consumer" : error2 instanceof WebSocketProtocolError ? "protocol error" : error2 instanceof RetryableWebSocketError ? "Relay requested reconnect" : "durable application failed");
+      socket.close(error2 instanceof WebSocketStoppedError ? error2.closeCode : error2 instanceof WebSocketProtocolError ? error2.closeCode : error2 instanceof RetryableWebSocketError ? error2.closeCode : CLIENT_CLOSE_DURABLE_ACCEPTANCE, error2 instanceof WebSocketStoppedError ? "Relay stopped this consumer" : error2 instanceof WebSocketProtocolError ? "protocol error" : error2 instanceof RetryableWebSocketError ? "Relay requested reconnect" : error2 instanceof DurableApplicationError && error2.sequence !== void 0 ? `durable application failed at sequence ${error2.sequence}` : "durable application failed");
       finish(error2);
     });
   };
@@ -21422,26 +21449,36 @@ var runWebSocket = async (baseURL, agentToken, options) => {
   }
   const url = deriveWebSocketURL(baseURL, options.observe === true);
   const random = options.random ?? Math.random;
+  const report = options.onError ?? ((error2) => {
+    console.error("[relay] WebSocket:", error2);
+  });
   let attempt = 0;
+  let failing = false;
   const reportedUnknown = /* @__PURE__ */ new Set();
   const onUnknownEvent = (eventType, sequence) => {
     if (reportedUnknown.has(eventType))
       return;
     reportedUnknown.add(eventType);
-    options.onError?.(new RelayUnknownEventTypeError(eventType, sequence));
+    report(new RelayUnknownEventTypeError(eventType, sequence));
   };
   while (!options.signal?.aborted) {
     options.onConnectionState?.("connecting");
     try {
       await runConnection(url, agentToken, options, Constructor, (frame) => {
-        attempt = 0;
+        if (!failing)
+          attempt = 0;
         options.onConnectionState?.("ready");
         options.onReady?.(frame);
-      }, onUnknownEvent);
+      }, onUnknownEvent, () => {
+        failing = false;
+        attempt = 0;
+      });
     } catch (error2) {
       if (options.signal?.aborted)
         return;
-      options.onError?.(error2);
+      report(error2);
+      if (error2 instanceof DurableApplicationError)
+        failing = true;
       if (error2 instanceof WebSocketStoppedError || error2 instanceof WebSocketProtocolError || error2 instanceof RelayWebhookConfiguredError)
         throw error2;
       attempt += 1;
