@@ -51,23 +51,26 @@ export interface AgentPaths {
 }
 
 /**
- * How Relay reaches the agent once its token is saved on this computer.
+ * How Relay reaches the agent once its token is saved on this computer. Every
+ * MCP entry is Relay's hosted server with the agent's token (hosted-mcp.ts).
  * - `claude-bridge`: Relay drives Claude Code through the Agent SDK, without config files.
  * - `mcp-command`: the agent's own `mcp add` writes its config.
  * - `codex-project`: Relay writes `[mcp_servers.relay]` into the folder's own
  *   `.codex/config.toml`, Codex's project layer (codex-rs/core/src/config.rs,
  *   `project_config`), loaded when the folder is trusted.
  * - `mcp-file`: Relay adds one entry to the agent's MCP config file.
- * - `acp-bridge`: Relay writes no config; it hands the Relay MCP server to the
- *   agent's ACP session and drives the agent's turns (acp-bridge.ts).
+ * - `acp-bridge`: Relay hands the hosted MCP server to the agent's ACP session
+ *   and drives the agent's turns (acp-bridge.ts). An agent that ignores the
+ *   servers a session hands it names `mcpSettings`, the MCP settings file it
+ *   reads instead, and Relay adds its server there.
  * - `hermes-plugin`, `openclaw-plugin`: our plugins, as Relay-Docs describe.
  */
 export type ConnectMethod =
   | { kind: "claude-bridge" }
   | { kind: "mcp-command"; file: (paths: AgentPaths) => string }
   | { kind: "codex-project"; file: (paths: AgentPaths) => string }
-  | { kind: "mcp-file"; file: (paths: AgentPaths) => string; shape: "mcpServers" | "vscode" | "opencode" }
-  | { kind: "acp-bridge" }
+  | { kind: "mcp-file"; file: (paths: AgentPaths) => string; shape: "vscode" }
+  | { kind: "acp-bridge"; mcpSettings?: (paths: AgentPaths) => string }
   | { kind: "pi-channel" }
   | { kind: "hermes-plugin" }
   | { kind: "openclaw-plugin" };

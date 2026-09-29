@@ -14,10 +14,6 @@
       "repository": "https://github.com/RelayMessenger/Relay-CLI",
       "commit": "7ef8183aed2cf98aca1cad83841c6d59fae1bf18"
     },
-    "packages/mcp": {
-      "repository": "https://github.com/RelayMessenger/Relay-MCP",
-      "commit": "2a19441e881e6c5641f224d5100cd1d1d4ea9914"
-    },
     "packages/openclaw": {
       "repository": "https://github.com/RelayMessenger/Relay-OpenClaw",
       "commit": "ff013f2247adb9360ece63799874024c216d040c"

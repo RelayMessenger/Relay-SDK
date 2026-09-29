@@ -8,6 +8,7 @@ import {
   dispatchRelayEvent,
   resolveRelayTurnActivation,
 } from "./dispatch.js";
+import { createRelayChatTurns } from "./turns.js";
 import type {
   RelayInboundFacts,
   ResolvedRelayAccount,
@@ -21,7 +22,7 @@ const ownerHandle: ChatHandle = {
   joined_at: "2026-09-01T00:00:00.000Z",
   display_name: "Relay Agent",
   image_url: null,
-  about: null,
+  subtitle: null,
   verified: false,
   is_contact: true,
 };
@@ -40,6 +41,7 @@ function facts(
     text: "Hello",
     mentionHandles: [],
     ownerHandle,
+    fromAgent: false,
     ...overrides,
   };
 }
@@ -81,7 +83,7 @@ function unmentionedGroupEvent(): RelayWebhookEvent {
         joined_at: "2026-09-01T00:00:00.000Z",
         display_name: "Alice",
         image_url: null,
-        about: null,
+        subtitle: null,
         verified: false,
         is_contact: true,
       },
@@ -205,6 +207,7 @@ describe("Relay turn activation", () => {
       runtime: {
         channel: { inbound: { dispatch } },
       } as never,
+      turns: createRelayChatTurns(),
       warn,
     });
     expect(dispatch).not.toHaveBeenCalled();

@@ -46,6 +46,41 @@ export const releasePackages = {
           default: true,
         },
       ],
+      // `/calls` needs the optional peer dependencies (werift, @evan/opus,
+      // rtp-packet), which a bare install of the SDK does not bring; the
+      // `livekit` smoke below imports it next to `@relaymessenger/livekit`,
+      // whose dependencies install them.
+    },
+  },
+  livekit: {
+    directory: "packages/livekit",
+    workspace: "@relaymessenger/livekit",
+    validate: "validate:livekit",
+    tagPrefix: "livekit-v",
+    smoke: {
+      imports: [
+        {
+          specifier: "@relaymessenger/livekit",
+          named: [
+            "LIVEKIT_ROOM_INPUT_AUDIO",
+            "RelayAudioInput",
+            "RelayAudioOutput",
+            "RelayLiveKitCall",
+            "createRelayLiveKitAudio",
+          ],
+        },
+        {
+          specifier: "@relaymessenger/sdk/calls",
+          named: [
+            "RelayCallTransport",
+            "RelayCallTransportError",
+            "VideoFrame",
+            "VideoSource",
+            "VideoStream",
+            "createWeriftWebRTCFactory",
+          ],
+        },
+      ],
     },
   },
   "chat-sdk-adapter": {
@@ -98,23 +133,6 @@ export const releasePackages = {
         args: ["--help"],
         expect: "Message the agent on your computer from your phone",
       },
-    },
-  },
-  mcp: {
-    directory: "packages/mcp",
-    workspace: "@relaymessenger/mcp",
-    validate: "validate:mcp",
-    tagPrefix: "mcp-v",
-    smoke: {
-      files: ["dist/cli.js"],
-      parse: ["dist/cli.js"],
-      imports: [
-        { specifier: "@relaymessenger/mcp", named: ["createRelayMcpServer"] },
-        {
-          specifier: "@relaymessenger/mcp/auth",
-          named: ["DEFAULT_API_URL", "resolveAgentAuth", "validateApiURL"],
-        },
-      ],
     },
   },
   openclaw: {

@@ -46,7 +46,7 @@ export interface CreateAgentInput {
   apiURL?: string;
   handle?: string;
   firstName?: string;
-  about?: string;
+  subtitle?: string; description?: string;
   imageURL?: string;
   imageRecipe?: AgentImageRecipe;
   /** Save the new profile as the last connected agent, in the same config write. */
@@ -113,7 +113,8 @@ export async function createAgent(input: CreateAgentInput, deps: AgentDependenci
   if (input.imageRecipe !== undefined && input.imageURL === undefined) throw new Error("An image recipe also needs the finished picture. Pass --image or --image-url with it; this command does not draw pictures.");
   const body: ConsoleAgentCreateInput = {
     ...(firstName === undefined ? {} : { displayName: firstName }),
-    ...(input.about === undefined ? {} : { about: input.about.trim() }),
+    ...(input.subtitle === undefined ? {} : { subtitle: input.subtitle.trim() }),
+    ...(input.description === undefined ? {} : { description: input.description.trim() }),
     ...(input.handle === undefined ? {} : { handle: input.handle }),
   };
   if (Buffer.byteLength(JSON.stringify(body), "utf8") > 8192) throw new Error("These agent details are too long. Shorten the name, the handle or the picture address.");

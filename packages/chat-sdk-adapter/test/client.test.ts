@@ -380,3 +380,61 @@ describe("RelayClient error mapping", () => {
     expect((error as RelayApiError).relayCode).toBe("teapot");
   });
 });
+
+it("sends a typed native selection without losing the existing idempotency identity", async () => {
+  const requests: RequestInit[] = [];
+  const client = new RelayClient({ token: "test", fetch: async (_, init) => {
+    requests.push(init!);
+    return Response.json({ chat_id: IDS.chat, message: { id: IDS.message } }, { status: 202 });
+  } });
+  await client.sendMessage({ chatId: IDS.chat, idempotencyKey: "selection-operation", parts: [
+    { type: "text", value: "Topics?" }, { type: "selection", title: "Topics", options: [{ value: "research", label: "Research" }] },
+  ] });
+  expect(new Headers(requests[0]?.headers).get("idempotency-key")).toBe("selection-operation");
+  expect(JSON.parse(String(requests[0]?.body)).message.parts[1]).toEqual({ type: "selection", title: "Topics", options: [{ value: "research", label: "Research" }] });
+});
+
+const PAYMENT = { type: "payment" as const, checkout_url: "https://pay.relayapp.im/pr_token_123" };
+const PAYMENT_REQUEST_ID = "0199a000-0000-7000-8000-00000000c0de";
+
+it("sends a typed payment as the only part, unchanged", async () => {
+  const requests: RequestInit[] = [];
+  const client = new RelayClient({ token: "test", fetch: async (_, init) => {
+    requests.push(init!);
+    return Response.json({ chat_id: IDS.chat, message: { id: IDS.message } }, { status: 202 });
+  } });
+  await client.sendMessage({ chatId: IDS.chat, idempotencyKey: "payment-operation", parts: [PAYMENT] });
+  expect(new Headers(requests[0]?.headers).get("idempotency-key")).toBe("payment-operation");
+  expect(JSON.parse(String(requests[0]?.body)).message.parts).toEqual([PAYMENT]);
+});
+
+it("creates, lists, reads and cancels payment requests on the contract's routes", async () => {
+  const request = { id: PAYMENT_REQUEST_ID, object: "payment_request", checkout_url: PAYMENT.checkout_url };
+  const { calls, fetchMock } = harness(() => jsonResponse(request));
+  const client = new RelayClient({ token: "test", fetch: fetchMock as typeof fetch });
+  const body = { amount: 2400, currency: "usd", description: "House blend, 250 g", category: "physical_goods" as const };
+  await expect(client.createPaymentRequest(body, { idempotencyKey: "order-42" })).resolves.toEqual(request);
+  await client.listPaymentRequests({ status: "requested", limit: 10 });
+  await client.getPaymentRequest(PAYMENT_REQUEST_ID);
+  await client.cancelPaymentRequest(PAYMENT_REQUEST_ID);
+  expect(calls.map(call => [call.method, call.url])).toEqual([
+    ["POST", "https://api.relayapp.im/v1/payment_requests"],
+    ["GET", "https://api.relayapp.im/v1/payment_requests?limit=10&status=requested"],
+    ["GET", `https://api.relayapp.im/v1/payment_requests/${PAYMENT_REQUEST_ID}`],
+    ["POST", `https://api.relayapp.im/v1/payment_requests/${PAYMENT_REQUEST_ID}/cancel`],
+  ]);
+  expect(calls[0]).toMatchObject({ body });
+  expect(calls[0]?.headers.get("idempotency-key")).toBe("order-42");
+  expect(calls[0]?.headers.get("authorization")).toBe("Bearer test");
+});
+
+it("rejects a non-UUID payment request id before calling Relay, and maps an unconnected organization's 403", async () => {
+  const { fetchMock } = harness(() => jsonResponse({ error: { code: "2003", message: "Connect Stripe first." } }, 403));
+  const client = new RelayClient({ token: "test", fetch: fetchMock as typeof fetch });
+  await expect(client.cancelPaymentRequest("not-a-uuid")).rejects.toBeInstanceOf(ValidationError);
+  expect(fetchMock).not.toHaveBeenCalled();
+  const error = await client.createPaymentRequest({ amount: 100, currency: "usd", description: "Tip", category: "digital_goods" })
+    .catch((thrown: unknown) => thrown);
+  expect(error).toBeInstanceOf(PermissionError);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});

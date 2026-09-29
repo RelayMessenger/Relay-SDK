@@ -1,8 +1,11 @@
-import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { expect, it } from "vitest";
-import { inspectPrivateFile, preparePrivateDestination, writePrivateDestination } from "./private-file.js";
+import { inspectPrivateFile, preparePrivateDestination, writePrivateDestination, writePrivateFile } from "./private-file.js";
+import { inspectWindowsAcl, privateWindowsAcl } from "./runtime-connect/windows-acl.js";
 
 /**
  * Owner-only, judged the way the host platform judges it. POSIX has mode bits,
@@ -47,10 +50,83 @@ it("reports a file that is not there as absent and safe", async () => {
   expect(await inspectPrivateFile(join(await scratch(), "absent"))).toEqual({ exists: false, secure: true });
 });
 
-it.runIf(process.platform !== "win32")("refuses to write over a file other people can read", async () => {
+it.runIf(process.platform !== "win32")("tightens a file of yours that other people can only read, then writes it", async () => {
   const directory = await scratch();
   const path = join(directory, "secret.txt");
   await writeFile(path, "old\n", { mode: 0o644 });
-  await expect(preparePrivateDestination(path, "test")).rejects.toThrow("Other people on this computer can read the test file");
-  expect(await inspectPrivateFile(path)).toMatchObject({ exists: true, secure: false });
+  await writePrivateDestination(await preparePrivateDestination(path, "test"), ".test", "new\n");
+  expect(await readFile(path, "utf8")).toBe("new\n");
+  await expectOwnerOnly(path, directory);
+});
+
+it.runIf(process.platform !== "win32")("refuses, and changes nothing, when other accounts can write the file", async () => {
+  const directory = await scratch();
+  const path = join(directory, "secret.txt");
+  await writeFile(path, "old\n", { mode: 0o600 });
+  await chmod(path, 0o664);
+  await expect(preparePrivateDestination(path, "test")).rejects.toThrow("Other accounts on this computer can write the test file");
+  expect((await stat(path)).mode & 0o777).toBe(0o664);
+  expect(await readFile(path, "utf8")).toBe("old\n");
+});
+
+it.runIf(process.platform !== "win32")("refuses, and changes nothing, when other accounts can write the folder", async () => {
+  const directory = await scratch();
+  await chmod(directory, 0o775);
+  const path = join(directory, "secret.txt");
+  await writeFile(path, "old\n", { mode: 0o600 });
+  await expect(preparePrivateDestination(path, "test")).rejects.toThrow("Other accounts on this computer can write in the test folder");
+  expect((await stat(directory)).mode & 0o777).toBe(0o775);
+  expect(await readFile(path, "utf8")).toBe("old\n");
+});
+
+/** BUILTIN\\Users, the group every local account is in. */
+const WINDOWS_USERS = "S-1-5-32-545";
+
+it("writePrivateFile makes an agent's config owner-only in a folder other people can read", async () => {
+  const directory = join(await scratch(), "Code", "User");
+  await mkdir(directory, { recursive: true });
+  if (process.platform === "win32") {
+    // The folder lets every local account read, and new files inherit that.
+    await promisify(execFile)("icacls", [directory, "/grant", `*${WINDOWS_USERS}:(OI)(CI)(R)`], { windowsHide: true });
+    const plain = join(directory, "plain.json");
+    await writeFile(plain, "{}\n", { mode: 0o600 });
+    // A POSIX mode proves nothing here: the file is readable by Users.
+    expect(privateWindowsAcl(await inspectWindowsAcl(plain))).toBe(false);
+  } else await chmod(directory, 0o755);
+  const path = join(directory, "mcp.json");
+  await writePrivateFile(path, "VS Code MCP", '{"servers":{}}\n');
+  expect(await readFile(path, "utf8")).toBe('{"servers":{}}\n');
+  await expectOwnerOnly(path, directory);
+  if (process.platform === "win32") {
+    const acl = await inspectWindowsAcl(path);
+    expect(acl.rules.map((rule) => rule.sid)).not.toContain(WINDOWS_USERS);
+  }
+  expect((await readdir(directory)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+});
+
+it("writePrivateFile tightens the agent's own config that other people can read, as VS Code leaves mcp.json", async () => {
+  const directory = await scratch();
+  const path = join(directory, "mcp.json");
+  await writeFile(path, "{}\n", { mode: 0o644 });
+  if (process.platform === "win32") {
+    await promisify(execFile)("icacls", [path, "/grant", `*${WINDOWS_USERS}:(R)`], { windowsHide: true });
+    expect(privateWindowsAcl(await inspectWindowsAcl(path))).toBe(false);
+  }
+  await writePrivateFile(path, "VS Code MCP", "token\n");
+  expect(await readFile(path, "utf8")).toBe("token\n");
+  await expectOwnerOnly(path, directory);
+});
+
+it("writePrivateFile refuses, and changes nothing, when other people can write the file", async () => {
+  const directory = await scratch();
+  const path = join(directory, "mcp.json");
+  await writeFile(path, "{}\n", { mode: 0o600 });
+  if (process.platform === "win32") {
+    await promisify(execFile)("icacls", [path, "/grant", `*${WINDOWS_USERS}:(M)`], { windowsHide: true });
+    await expect(writePrivateFile(path, "VS Code MCP", "token\n")).rejects.toThrow("Other Windows accounts own the VS Code MCP file or can write it");
+  } else {
+    await chmod(path, 0o666);
+    await expect(writePrivateFile(path, "VS Code MCP", "token\n")).rejects.toThrow("Other accounts on this computer can write the VS Code MCP file");
+  }
+  expect(await readFile(path, "utf8")).toBe("{}\n");
 });

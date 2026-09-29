@@ -95,23 +95,50 @@ try {
     "is_me",
     "display_name",
     "image_url",
-    "about",
+    "subtitle",
     "verified",
     "is_contact",
+    "activity_version",
+    "activity",
   ]);
   assert.deepEqual(interfaceFields("UserChatHandle"), [
     "kind",
   ]);
   assert.deepEqual(interfaceFields("AgentChatHandle"), [
     "kind",
+    "owner",
   ]);
+  assert.deepEqual(interfaceFields("ChatActivity"), [
+    "id", "text", "emoji", "updated_at", "expires_at",
+  ]);
+  assert.deepEqual(interfaceFields("ChatActivityResponse"), [
+    "chat_id", "agent_id", "version", "activity",
+  ]);
+  assert.deepEqual(interfaceFields("ChatSetActivityParams"), [
+    "text", "emoji", "activity_id",
+  ]);
+  assert.deepEqual(interfaceFields("ChatClearActivityParams"), ["activity_id"]);
   assert.doesNotMatch(packedTypes, /\bavatar_url\b/u);
   assert.doesNotMatch(packedTypes, /\btagline\b/u);
+  assert.doesNotMatch(packedTypes, /\b(?:is_request|request_expires_at|request_sender_id)\??:/u);
+  assert.deepEqual(interfaceFields("ContactLookup"), [
+    "id", "handle", "display_name", "kind", "image_url", "image_color", "verified",
+    "name", "subtitle", "description", "category", "skills", "visibility", "creator",
+    "can_message",
+  ]);
+  for (const name of ["ContactCardItem", "ContactCardUpdateParams", "ContactCardCreateParams"]) {
+    assert.equal(interfaceFields(name).includes("message_requests_from"), false);
+  }
+  for (const name of ["ContactCardItem", "ContactCardUpdateParams"]) {
+    assert.ok(interfaceFields(name).includes("description"));
+  }
+  assert.doesNotMatch(packedTypes, /\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/u);
   assert.doesNotMatch(packedTypes, /AgentCreate(?:ProfileParams|Params|Response)/);
   assert.doesNotMatch(packedTypes, /\bContactRequestCreate(?:Params|Response)\b/u);
   assert.deepEqual(interfaceFields("MessageContent"), [
     "parts",
     "reply_to",
+    "metadata",
     "idempotency_key",
     "silent",
   ]);
@@ -132,8 +159,8 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 34);
-      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 16);
+      assert.equal(RELAY_V1_OPERATIONS.length, 62);
+      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
       const allowedOperations = new Set([
         "POST /v1/chats",
         "GET /v1/chats",
@@ -142,6 +169,11 @@ try {
         "POST /v1/chats/{chatId}/participants",
         "DELETE /v1/chats/{chatId}/participants",
         "POST /v1/chats/{chatId}/leave",
+        "GET /v1/chats/{chatId}/activity",
+        "PUT /v1/chats/{chatId}/activity",
+        "DELETE /v1/chats/{chatId}/activity",
+        "POST /v1/chats/{chatId}/location/request",
+        "GET /v1/chats/{chatId}/location",
         "POST /v1/chats/{chatId}/typing",
         "DELETE /v1/chats/{chatId}/typing",
         "POST /v1/chats/{chatId}/read",
@@ -153,22 +185,45 @@ try {
         "POST /v1/chats/{chatId}/voicememo",
         "GET /v1/messages/{messageId}",
         "POST /v1/messages/{messageId}/reactions",
+        "POST /v1/payment_requests",
+        "GET /v1/payment_requests",
+        "GET /v1/payment_requests/{paymentRequestId}",
+        "POST /v1/payment_requests/{paymentRequestId}/cancel",
         "POST /v1/attachments",
         "GET /v1/attachments/{attachmentId}",
         "DELETE /v1/attachments/{attachmentId}",
         "GET /v1/blocked_handles",
         "POST /v1/blocked_handles",
         "DELETE /v1/blocked_handles",
+        "GET /v1/me",
+        "PATCH /v1/me",
+        "GET /v1/tasks",
+        "POST /v1/tasks/{taskId}/status",
+        "POST /v1/tasks/{taskId}/artifacts",
+        "GET /v1/access",
+        "PUT /v1/access/{handle}",
+        "DELETE /v1/access/{handle}",
+        "GET /v1/communities",
+        "GET /v1/communities/{handle}",
+        "PATCH /v1/communities/{handle}",
+        "POST /v1/communities/{handle}/join",
+        "POST /v1/communities/{handle}/leave",
+        "GET /v1/communities/{handle}/members",
         "GET /v1/webhook-events",
         "POST /v1/webhook-subscriptions",
         "GET /v1/webhook-subscriptions",
         "GET /v1/webhook-subscriptions/{subscriptionId}",
         "PUT /v1/webhook-subscriptions/{subscriptionId}",
         "DELETE /v1/webhook-subscriptions/{subscriptionId}",
+        "POST /v1/contacts/lookup",
         "GET /v1/contact_card",
         "POST /v1/contact_card",
         "PATCH /v1/contact_card",
         "DELETE /v1/agents/{handle}",
+        "POST /v1/chats/{chatId}/calls",
+        "GET /v1/chats/{chatId}/calls",
+        "GET /v1/calls/{callId}",
+        "POST /v1/calls/{callId}/end",
       ]);
       assert.deepEqual(
         new Set(RELAY_V1_OPERATIONS.map(
@@ -204,14 +259,26 @@ try {
           .filter((name) => name !== "constructor")
           .sort();
       assert.equal("createAgent" in Relay, false);
+      assert.deepEqual(methods(client.access), ["list", "remove", "set"]);
       assert.deepEqual(methods(client.agents), ["delete"]);
+      assert.deepEqual(methods(client.me), ["retrieve", "update"]);
+      assert.deepEqual(methods(client.communities), ["join", "leave", "list", "retrieve", "update"]);
+      assert.deepEqual(methods(client.communities.members), ["list"]);
+      assert.equal("posts" in client.communities, false);
+      assert.deepEqual(methods(client.tasks), [
+        "addArtifact", "cancel", "get", "list", "send", "updateStatus",
+      ]);
+      assert.deepEqual(methods(client.contacts), ["lookup"]);
       assert.deepEqual(methods(client.chats), [
+        "clearActivity",
         "create",
+        "getActivity",
         "leaveChat",
         "listChats",
         "markAsRead",
         "retrieve",
         "sendVoicememo",
+        "setActivity",
         "shareContactCard",
         "startTyping",
         "stopTyping",
@@ -224,6 +291,13 @@ try {
         "retrieve",
       ]);
       assert.deepEqual(methods(client.chats.messages), ["list", "send"]);
+      assert.deepEqual(methods(client.chats.location), ["request", "retrieve"]);
+      assert.deepEqual(methods(client.paymentRequests), [
+        "cancel",
+        "create",
+        "list",
+        "retrieve",
+      ]);
       assert.deepEqual(
         methods(client.chats.participants),
         ["add", "remove"],
@@ -254,6 +328,75 @@ try {
       ]);
       assert.deepEqual(methods(client.websocket), ["run"]);
       assert.deepEqual(methods(client.webhooks), ["unwrap", "verify"]);
+      const activityRequests = [];
+      const activityState = {
+        chat_id: "chat", agent_id: "agent", version: "9007199254740993",
+        activity: { id: "task", text: "Generating image", emoji: "🖼️",
+          updated_at: "2026-09-20T12:00:00Z", expires_at: "2026-09-20T12:01:30Z" },
+      };
+      const activityClient = new Relay({
+        apiKey: "consumer-test",
+        fetch: async (url, init) => {
+          activityRequests.push({ url: String(url), init });
+          return init.method === "DELETE"
+            ? new Response(null, { status: 204 })
+            : Response.json(activityState);
+        },
+      });
+      const started = await activityClient.chats.setActivity("chat/one", {
+        text: "Generating image", emoji: "🖼️",
+      });
+      assert.deepEqual(started, activityState);
+      assert.deepEqual(await activityClient.chats.getActivity("chat/one"), activityState);
+      await activityClient.chats.clearActivity("chat/one", { activity_id: started.activity.id });
+      assert.deepEqual(activityRequests.map(({ init }) => init.method), ["PUT", "GET", "DELETE"]);
+      assert.equal(new URL(activityRequests[0].url).pathname, "/v1/chats/chat%2Fone/activity");
+      assert.equal(new URL(activityRequests[2].url).searchParams.get("activity_id"), "task");
+      assert.equal(activityRequests[2].init.body, undefined);
+      assert.equal(RELAY_WEBHOOK_EVENT_TYPES.includes("chat.activity.updated"), false);
+    `,
+  ], { cwd: consumer, stdio: "inherit" });
+
+  // `@relaymessenger/sdk/calls`: the WebRTC packages are optional peer
+  // dependencies (ws's bufferutil/utf-8-validate pattern), so the install
+  // above brought none of them and the root entry loaded without them. The
+  // subpath loads once the consumer installs them.
+  const callsPeers = Object.keys(packageManifest.peerDependenciesMeta ?? {});
+  for (const peer of ["werift", "@evan/opus", "rtp-packet"]) {
+    assert.equal(callsPeers.includes(peer), true, `${peer} is not an optional peer`);
+    assert.throws(
+      () => readFileSync(resolve(consumer, "node_modules", ...peer.split("/"), "package.json")),
+      `${peer} was installed without being asked for`,
+    );
+  }
+  runNpm([
+    "install",
+    "--ignore-scripts",
+    "--no-audit",
+    "--no-fund",
+    ...["werift", "@evan/opus", "rtp-packet"].map(
+      (peer) => `${peer}@${packageManifest.peerDependencies[peer]}`,
+    ),
+  ], { cwd: consumer, stdio: "ignore" });
+  execFileSync(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    `
+      import assert from "node:assert/strict";
+      import {
+        RelayCallTransport,
+        RelayCallTransportError,
+        VideoFrame,
+        VideoSource,
+        VideoStream,
+        createWeriftWebRTCFactory,
+      } from "@relaymessenger/sdk/calls";
+      for (const value of [RelayCallTransport, RelayCallTransportError, VideoFrame, VideoSource, VideoStream]) {
+        assert.equal(typeof value, "function");
+      }
+      const factory = createWeriftWebRTCFactory();
+      assert.equal(typeof factory.createPeerConnection, "function");
+      assert.equal(typeof factory.createVideoSender, "function");
     `,
   ], { cwd: consumer, stdio: "inherit" });
   console.log(JSON.stringify({

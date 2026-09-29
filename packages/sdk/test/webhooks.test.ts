@@ -140,7 +140,7 @@ const senderHandle = {
   kind: "agent" as const,
   display_name: "Echo",
   image_url: null,
-  about: null,
+  subtitle: null,
   verified: true,
   is_contact: true,
 };

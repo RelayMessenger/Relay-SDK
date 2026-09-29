@@ -329,6 +329,10 @@ export const relayChannelPlugin: ChannelPlugin<ResolvedRelayAccount> =
               deliveryQueueId: ctx.deliveryQueueId,
               deliveryPartIndex: ctx.deliveryPartIndex,
             }),
+            onButtonsError: (error) =>
+              (ctx as { log?: { warn?: (message: string) => void } }).log?.warn?.(
+                `relay: component block left as text: ${error}`,
+              ),
             ...(ctx.onPlatformSendDispatch
               ? { onPlatformSendDispatch: ctx.onPlatformSendDispatch }
               : {}),

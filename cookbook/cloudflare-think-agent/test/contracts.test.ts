@@ -4,17 +4,19 @@ import {
   readFileSync,
   readdirSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { thinkCandidateMode, verifyThinkCandidates } from "./candidate-contract.js";
 
 const RELAY_SERVER_SHA =
-  "35023fe4f52497f2c27fb9172a5f0b27a7be8bf1";
+  "9448e92fb7465bdf30bad37475e5f3017460799b";
+// Relay-SDK commit whose staging release published the adapter below.
 const RELAY_CHAT_SDK_SHA =
-  "eecf94a4d38bc021917e54dfed57e268657c17af";
+  "62b320548d5ba5edf2a9445efdab32122f0257b7";
 const RELAY_OPENAPI_SHA256 =
-  "42e8039ee94377aa047f70593102bed980d00c3597f6850a0628cbd0fdf6bc81";
+  "61bd07d26328a493fa3aca1ceef9bf1c43321d31fb3ba3c6e10f7d353b48218b";
 const RELAY_ADAPTER_INTEGRITY =
-  "sha512-aslkL6r5pj/frh/3QgJ0sqPoxHK2wTSmZ2OeFsfEBfyJGsWiljlhjzTjW+rAcGmy2vy0oE4x94agvnuaMZ/PzA==";
+  "sha512-Z96oZQDJwhprwaG95kLloA0TWdTBtlaWL1HTJiz7CdZGeAJxr1oOQbvKFyS6F1I1ef+eiK7q/zgvj5kr79Ygsg==";
 
 function packageVersion(name: string): string {
   let directory = process.cwd();
@@ -36,31 +38,46 @@ function packageVersion(name: string): string {
 }
 
 describe("locked runtime contracts", () => {
-  it(`uses the exact OpenAPI from Relay Server ${RELAY_SERVER_SHA.slice(0, 12)}`, () => {
+  it(`uses the exact candidate OpenAPI from local Relay Server ${RELAY_SERVER_SHA.slice(0, 12)}`, () => {
     const openapi = readFileSync("contracts/relay-openapi.yaml");
     const openapiText = openapi.toString("utf8");
     expect(createHash("sha256").update(openapi).digest("hex"))
       .toBe(RELAY_OPENAPI_SHA256);
     expect(openapiText).not.toMatch(/^  \/v1\/agents:$/mu);
     expect(openapiText).not.toContain("operationId: createAgent");
+    expect(openapiText).toContain("    SelectionPart:\n");
+    expect(openapiText).toContain("    SelectionResponsePart:\n");
+    expect(openapiText).toContain("      required: [type, selected_values]\n");
+    expect(openapiText).toContain("          uniqueItems: true\n");
+    expect(openapiText).toContain('selection: "#/components/schemas/SelectionPart"');
     expect(openapiText).toContain("\n        - image_url\n");
-    expect(openapiText).toContain("\n        - about\n");
+    // Relay Server 56f31c1 renamed ChatHandle.about to subtitle.
+    expect(openapiText).toContain("\n        - subtitle\n");
     expect(openapiText).toContain("\n        image_url:\n");
-    expect(openapiText).toContain("\n        about:\n");
+    expect(openapiText).toContain("\n        subtitle:\n");
     expect(openapiText).not.toMatch(/\bavatar_url\b/u);
     expect(openapiText).not.toMatch(/\btagline\b/u);
   });
 
-  it("pins the coordinated Think and Relay packages", () => {
-    expect(packageVersion("@cloudflare/think")).toBe("0.17.0");
-    expect(packageVersion("@relaymessenger/chat-sdk-adapter"))
-      .toBe("0.3.0");
-    expect(packageVersion("@relaymessenger/sdk")).toBe("0.3.0");
+  it("pins the coordinated Think and Relay packages or proves explicit local candidate archives", async () => {
+    expect(packageVersion("@cloudflare/think")).toBe("0.19.0");
+    if (thinkCandidateMode()) {
+      await verifyThinkCandidates();
+    } else {
+      expect(packageVersion("@relaymessenger/chat-sdk-adapter"))
+        .toBe("0.3.7-staging.30");
+      expect(packageVersion("@relaymessenger/sdk")).toBe("0.3.6-staging.46");
+    }
   });
 
   it(`locks the adapter tarball built from Relay Chat SDK ${RELAY_CHAT_SDK_SHA.slice(0, 7)}`, () => {
+    // Candidate installs have a separate receipt; keep testing the original
+    // locked-registry contract as well, never reinterpret it as a candidate.
+    const lockedFile = thinkCandidateMode() && process.env.RELAY_THINK_LOCKED_LOCKFILE
+      ? process.env.RELAY_THINK_LOCKED_LOCKFILE : resolve("package-lock.json");
+    expect(isAbsolute(lockedFile)).toBe(true);
     const lock = JSON.parse(
-      readFileSync("package-lock.json", "utf8"),
+      readFileSync(lockedFile, "utf8"),
     ) as {
       packages?: Record<string, {
         integrity?: string;
@@ -73,8 +90,8 @@ describe("locked runtime contracts", () => {
     expect(adapter).toMatchObject({
       integrity: RELAY_ADAPTER_INTEGRITY,
       resolved:
-        "https://registry.npmjs.org/@relaymessenger/chat-sdk-adapter/-/chat-sdk-adapter-0.3.0.tgz",
-      version: "0.3.0",
+        "https://registry.npmjs.org/@relaymessenger/chat-sdk-adapter/-/chat-sdk-adapter-0.3.7-staging.30.tgz",
+      version: "0.3.7-staging.30",
     });
   });
 

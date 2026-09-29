@@ -1,5 +1,8 @@
 import type {
   Chat,
+  SelectionReply,
+  MessagePartResponse,
+  ReplyTo,
   ChatHandle,
   MessageWebhookData,
   Message,
@@ -61,6 +64,8 @@ export type RelayMessageReceivedEvent = RelayWebhookEnvelope<
 >;
 
 export type RelayInboundFacts = {
+  selection?: SelectionReply;
+  richMessage?: { parts: MessagePartResponse[]; reply_to?: ReplyTo | null };
   eventId: string;
   messageId: string;
   chatId: string;
@@ -72,5 +77,20 @@ export type RelayInboundFacts = {
   mentionHandles: string[];
   ownerHandle?: ChatHandle;
   replyToId?: string;
+  /** The part of the replied-to Message the person swiped (`reply_to.part_index`). */
+  replyToPartIndex?: number;
+  /**
+   * The Message an outbound reply should quote when the person's Message
+   * was itself a reply: the person's Message. A tap's reply_to names the
+   * agent's buttons part, which no reply may target.
+   */
+  replyAnchorId?: string;
+  /** Whether another agent sent the Message. */
+  fromAgent: boolean;
+  /**
+   * The Message every answer names when another agent sent it: this one,
+   * unless it opens with buttons or a selection, which no reply may target.
+   */
+  agentReplyLink?: string;
   timestamp?: number;
 };

@@ -46,6 +46,24 @@ const CHANGE = inboundEvent({
   text: "@tripplanner redo it for those two days",
 });
 
+describe("answering another agent's buttons", () => {
+  it("does not quote a Message that opens with buttons, which an agent may not reply to", async () => {
+    const store = new TripStore(":memory:", "test-scope");
+    const { relay, send } = relayDouble();
+    const event = inboundEvent({
+      eventId: "01993d50-ef7b-7b37-886b-23fd80c7ed04",
+      isGroup: false,
+      messageId: "01993d50-ef7b-7b37-886b-23fd80c7ed14",
+      sender: CALENDAR_AGENT,
+      text: "Which dates?",
+    });
+    event.data.parts = [{ type: "buttons", items: [{ label: "12-13 June" }], reactions: null } as never, ...event.data.parts];
+    await processAcceptedEvent({ memory: store, planner: { plan: vi.fn().mockResolvedValue(PLAN) }, relay }, event);
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0]![1].message).not.toHaveProperty("reply_to");
+  });
+});
+
 describe("planning a trip in a group Chat", () => {
   let store: TripStore;
 

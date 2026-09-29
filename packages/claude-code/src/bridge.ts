@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
+import { SELECTION_CONTEXT_MAX_LENGTH, componentParts, indexedIdempotencyKey, partsWithButtons, partsWithSelection, selectionReply, type SelectionPart, type ButtonsPart, type PaymentPart } from "@relaymessenger/sdk";
 import type {
   Chat,
   Message,
+  MessagePart,
   MessagePartResponse,
   MessageSendParams,
   RelayWebhookEvent,
@@ -11,6 +13,31 @@ import type { Redactor } from "./redaction.ts";
 import type { DeliveryCandidate } from "./types.ts";
 
 const MAX_RELAY_TEXT = 10_000;
+
+function selectionMeta(parts: readonly MessagePartResponse[], replyTo: Message["reply_to"], redactor: Redactor): Record<string, string> {
+  const selection = selectionReply(parts, replyTo);
+  // Words, links and media are already in `content`; only the parts the
+  // channel cannot show as text ride along, and never past the text cap.
+  const components = componentParts(parts);
+  const rich = components.length ? JSON.stringify(components) : "";
+  return {
+    ...(rich ? {
+      relay_parts: redactor.text(rich.length > SELECTION_CONTEXT_MAX_LENGTH
+        ? `${rich.slice(0, SELECTION_CONTEXT_MAX_LENGTH)}… [truncated]` : rich),
+      ...(replyTo ? { reply_to: JSON.stringify(replyTo) } : {}),
+    } : {}),
+    ...(selection ? {
+      selection_response: redactor.text(JSON.stringify({ selected_values: selection.selected_values })),
+      reply_to: JSON.stringify(selection.reply_to),
+    } : {}),
+  };
+}
+
+/** See `DeliveryCandidate.linksReply`. */
+function linksReply(senderKind: string, parts: readonly MessagePartResponse[]): boolean {
+  const opening = parts[0]?.type;
+  return senderKind === "agent" && opening !== "buttons" && opening !== "selection";
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -156,6 +183,7 @@ export function classifyRelayEvent(params: {
     senderHandle,
     content,
     meta: {
+      ...selectionMeta(parts, data.reply_to, params.redactor),
       chat_id: chatId,
       message_id: messageId,
       sender_id: senderId,
@@ -164,6 +192,7 @@ export function classifyRelayEvent(params: {
       source_sequence: params.sequence,
       sent_at: typeof data.sent_at === "string" ? data.sent_at : event.created_at,
     },
+    ...(linksReply(senderKind, parts) ? { linksReply: true } : {}),
     createdAt: event.created_at,
   };
   return {
@@ -212,6 +241,7 @@ export function deliveryFromSnapshotMessage(params: {
     senderHandle: sender.handle,
     content: messageContent(parts, params.redactor),
     meta: {
+      ...selectionMeta(parts, message.reply_to, params.redactor),
       chat_id: message.chat_id,
       message_id: message.id,
       sender_id: sender.id,
@@ -221,21 +251,64 @@ export function deliveryFromSnapshotMessage(params: {
       sent_at: message.sent_at ?? message.created_at,
       full_sync: "true",
     },
+    ...(linksReply(sender.kind, parts) ? { linksReply: true } : {}),
     createdAt: message.created_at,
   };
 }
 
-export function buildReply(text: string, idempotencyKey: string, replyTo?: string): MessageSendParams {
-  if (!text || text.length > MAX_RELAY_TEXT) {
+export function buildReply(
+  text: string,
+  idempotencyKey: string,
+  replyTo?: string,
+  buttons?: ButtonsPart,
+  selection?: SelectionPart,
+): MessageSendParams {
+  if (selection && buttons) throw new Error("selection and buttons do not go together");
+  if (text.length > MAX_RELAY_TEXT || (!text && !buttons && !selection)) {
     throw new Error(`text must be 1-${MAX_RELAY_TEXT} UTF-16 code units`);
   }
   return {
     message: {
-      parts: [{ type: "text", value: text }],
+      parts: selection ? partsWithSelection(text, selection) : partsWithButtons(text, buttons),
       idempotency_key: idempotencyKey,
       ...(replyTo ? { reply_to: { message_id: replyTo } } : {}),
     },
   };
+}
+
+/**
+ * The Messages one reply becomes: the words (with any buttons) first, then
+ * the link as its own Message, which the server requires and the app draws
+ * as a card, then any payment, which must also be the only part of its
+ * Message. A reply that is only a link or only a payment is one Message.
+ * Each Message past the first carries its index in the key.
+ */
+export function buildReplyMessages(
+  text: string,
+  idempotencyKey: string,
+  replyTo?: string,
+  buttons?: ButtonsPart,
+  link?: string,
+  selection?: SelectionPart,
+  payment?: PaymentPart,
+): MessageSendParams[] {
+  if (selection && (buttons || link)) throw new Error("selection cannot be combined with buttons or link");
+  if (payment && (buttons || selection)) throw new Error("a payment cannot be combined with buttons or selection");
+  if (!link && !payment) return [buildReply(text, idempotencyKey, replyTo, buttons, selection)];
+  const messages: MessageSendParams[] = [];
+  if (text || buttons) messages.push(buildReply(text, idempotencyKey, replyTo, buttons));
+  const solo = (part: MessagePart): void => {
+    messages.push({
+      message: {
+        parts: [part],
+        idempotency_key: indexedIdempotencyKey(idempotencyKey, messages.length),
+        ...(messages.length === 0 && replyTo ? { reply_to: { message_id: replyTo } } : {}),
+      },
+    });
+  };
+  if (link) solo({ type: "link", value: link });
+  if (payment) solo(payment);
+  return messages;
 }
 
 export function stableHash(value: unknown): string {

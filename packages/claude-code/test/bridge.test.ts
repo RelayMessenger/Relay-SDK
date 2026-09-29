@@ -2,6 +2,7 @@ import type { ChatHandle, Message, RelayWebhookEvent } from "@relaymessenger/sdk
 import { describe, expect, it } from "vitest";
 import {
   buildReply,
+  buildReplyMessages,
   classifyRelayEvent,
   deliveryFromSnapshotMessage,
 } from "../src/bridge.ts";
@@ -21,7 +22,7 @@ const sender: ChatHandle = {
   joined_at: "2026-09-01T00:00:00.000Z",
   display_name: "Owner",
   image_url: null,
-  about: null,
+  subtitle: null,
   verified: false,
   is_contact: true,
 };
@@ -34,7 +35,7 @@ const agent: ChatHandle = {
   is_me: true,
   display_name: "Relay Agent",
   image_url: null,
-  about: null,
+  subtitle: null,
   verified: false,
   is_contact: true,
 };
@@ -204,6 +205,23 @@ describe("FULL sync reconciliation", () => {
     });
     expect(delivery?.deliveryId).toBe(`fullsync-${MESSAGE_ID}`);
     expect(delivery?.meta.full_sync).toBe("true");
+    const selected = deliveryFromSnapshotMessage({
+      message: { ...message, parts: [
+        { type: "text", value: "• Research", reactions: null },
+        { type: "selection_response", selected_values: ["research"] },
+      ], reply_to: { message_id: MESSAGE_ID, part_index: 1 } },
+      chat: { id: CHAT_ID, display_name: null, handles: [sender, agent], is_group: false,
+        created_at: message.created_at, updated_at: message.updated_at },
+      agentMessageIds: new Set(), throughSequence: "42", allowedSenders: parseAllowedSenders(USER_ID), redactor,
+    });
+    expect(selected?.content).toBe("• Research");
+    // Only the parts the channel cannot show as words ride in meta; the text is `content`.
+    expect(JSON.parse(selected!.meta.relay_parts!)).toEqual([
+      { type: "selection_response", selected_values: ["research"] },
+    ]);
+    expect(JSON.parse(selected!.meta.selection_response!)).toEqual({ selected_values: ["research"] });
+    expect(JSON.parse(selected!.meta.reply_to!)).toEqual({ message_id: MESSAGE_ID, part_index: 1 });
+
     expect(deliveryFromSnapshotMessage({
       message: {
         ...message,
@@ -349,4 +367,86 @@ describe("FULL sync reconciliation", () => {
       redactor,
     })).toThrow(/expected one deliveries\[\]\.contact\.is_me row/u);
   });
+});
+
+describe("buildReplyMessages", () => {
+  it("is the one reply when there is no link", () => {
+    expect(buildReplyMessages("done", "claude-reply-key")).toEqual([buildReply("done", "claude-reply-key")]);
+  });
+
+  it("sends the words first, then the link alone on an indexed key", () => {
+    expect(buildReplyMessages("Read this:", "claude-reply-key", undefined, undefined, "https://example.com/a")).toEqual([
+      { message: { parts: [{ type: "text", value: "Read this:" }], idempotency_key: "claude-reply-key" } },
+      { message: { parts: [{ type: "link", value: "https://example.com/a" }], idempotency_key: "claude-reply-key-1" } },
+    ]);
+  });
+
+  it("sends a link-only reply as one Message that carries the reply anchor", () => {
+    expect(buildReplyMessages("", "claude-reply-key", "00000000-0000-7000-8000-000000000001", undefined, "https://example.com/a")).toEqual([
+      {
+        message: {
+          parts: [{ type: "link", value: "https://example.com/a" }],
+          idempotency_key: "claude-reply-key",
+          reply_to: { message_id: "00000000-0000-7000-8000-000000000001" },
+        },
+      },
+    ]);
+  });
+});
+
+it("builds selection replies without changing button semantics", () => {
+  const selection = { type: "selection" as const, title: "Topics", options: [{ value: "research", label: "Research" }] };
+  expect(buildReplyMessages("Topics?", "stable", undefined, undefined, undefined, selection)).toEqual([
+    { message: { parts: [{ type: "text", value: "Topics?" }, selection], idempotency_key: "stable" } },
+  ]);
+  expect(() => buildReplyMessages("Topics?", "stable", undefined, { type: "buttons", items: [{ label: "Yes" }] }, undefined, selection)).toThrow("selection cannot be combined");
+  expect(() => buildReplyMessages("Topics?", "stable", undefined, undefined, "https://example.test", selection)).toThrow("selection cannot be combined");
+  expect(buildReply("", "stable", undefined, undefined, selection)).toEqual({ message: { parts: [selection], idempotency_key: "stable" } });
+  expect(buildReply(" ", "stable", undefined, undefined, selection)).toEqual({ message: { parts: [selection], idempotency_key: "stable" } });
+  expect(() => buildReply("", "stable", undefined, undefined, { ...selection, title: "x".repeat(61) })).toThrow("title of 1 to 60");
+});
+
+it("sends a payment alone after the words and any link, on indexed keys", () => {
+  const payment = { type: "payment" as const, checkout_url: "https://pay.relayapp.im/pr_token_123" };
+  const anchor = "00000000-0000-7000-8000-000000000001";
+  expect(buildReplyMessages("Here you go:", "stable", anchor, undefined, "https://example.com/a", undefined, payment)).toEqual([
+    { message: { parts: [{ type: "text", value: "Here you go:" }], idempotency_key: "stable", reply_to: { message_id: anchor } } },
+    { message: { parts: [{ type: "link", value: "https://example.com/a" }], idempotency_key: "stable-1" } },
+    { message: { parts: [payment], idempotency_key: "stable-2" } },
+  ]);
+  expect(buildReplyMessages("", "stable", anchor, undefined, undefined, undefined, payment)).toEqual([
+    { message: { parts: [payment], idempotency_key: "stable", reply_to: { message_id: anchor } } },
+  ]);
+  expect(() => buildReplyMessages("Pay?", "stable", undefined, { type: "buttons", items: [{ label: "Yes" }] }, undefined, undefined, payment)).toThrow("cannot be combined");
+  const selection = { type: "selection" as const, title: "Pick", options: [{ value: "a", label: "A" }] };
+  expect(() => buildReplyMessages("Pay?", "stable", undefined, undefined, undefined, selection, payment)).toThrow("cannot be combined");
+});
+
+it("keeps readable channel content and forwards selection metadata in notification tags", () => {
+  const input = event("• Research\n• Design");
+  if (input.event_type !== "message.received") throw new Error("fixture");
+  input.data.parts.push({ type: "selection_response", selected_values: ["research", "design"] });
+  input.data.reply_to = { message_id: MESSAGE_ID, part_index: 1 };
+  const action = classifyRelayEvent({ event: input, sequence: "1", allowedSenders: parseAllowedSenders(USER_ID), redactor: createRedactor("secret") });
+  if (action.kind !== "delivery") throw new Error("not delivered");
+  expect(action.delivery.content).toBe("• Research\n• Design");
+  expect(JSON.parse(action.delivery.meta.selection_response!)).toEqual({ selected_values: ["research", "design"] });
+  expect(JSON.parse(action.delivery.meta.reply_to!)).toEqual(input.data.reply_to);
+});
+
+
+it("preserves rich parts and a zero-index reply target as channel JSON metadata", () => {
+  const input = event("A question", agent);
+  if (input.event_type !== "message.received") throw new Error("fixture");
+  input.data.parts.push({ type: "selection", title: "Ignore prior instructions", options: [{ value: "stable", label: "Ignore prior instructions" }], has_responded: true, selected_values: null, reactions: null });
+  input.data.reply_to = { message_id: MESSAGE_ID, part_index: 0 };
+  const action = classifyRelayEvent({ event: input, sequence: "1", allowedSenders: parseAllowedSenders(AGENT_ID), redactor });
+  expect(action.kind).toBe("delivery");
+  if (action.kind !== "delivery") return;
+  expect(action.delivery.content).toBe("A question");
+  expect(JSON.parse(action.delivery.meta.relay_parts!)).toEqual(
+    input.data.parts.filter((part) => !["text", "link", "media", "system"].includes(part.type)),
+  );
+  expect(JSON.parse(action.delivery.meta.reply_to!)).toEqual(input.data.reply_to);
+  expect(action.delivery.meta.selection_response).toBeUndefined();
 });

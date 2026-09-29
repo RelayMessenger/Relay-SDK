@@ -34,11 +34,11 @@ assert.equal(
   expected,
   "The SDK v1 operation contract changed; review the public contract before refreshing this hash.",
 );
-assert.equal(RELAY_V1_OPERATIONS.length, 34);
+assert.equal(RELAY_V1_OPERATIONS.length, 62);
 assert.equal(RELAY_V1_OPERATIONS.some((op) => op.method === "POST" && op.path === "/v1/agents"), false);
 assert.ok(RELAY_V1_OPERATIONS.some((op) => op.method === "DELETE" && op.path === "/v1/agents/{handle}" && op.operationId === "deleteAgent"));
 assert.match(sdkTypes, /\bimage_url: string \| null;/u);
-assert.match(sdkTypes, /\babout: string \| null;/u);
+assert.match(sdkTypes, /\bsubtitle: string \| null;/u);
 assert.doesNotMatch(sdkTypes, /\bavatar_url\b/u);
 assert.doesNotMatch(sdkTypes, /\btagline\b/u);
 assert.deepEqual(manifest.repository, {

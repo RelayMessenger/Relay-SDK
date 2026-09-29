@@ -6,6 +6,7 @@ import {
   RELAY_FALLBACK_CONTENT_TYPE,
   RELAY_MAX_CONTENT_TYPE_LENGTH,
   textParts,
+  buildRelayParts,
 } from "../src/content.js";
 import { RELAY_MAX_TEXT_PART_LENGTH } from "../src/index.js";
 
@@ -72,5 +73,17 @@ describe("Relay message content", () => {
         ValidationError,
       );
     }
+  });
+});
+
+describe("a message that is only a URL", () => {
+  it("goes out as a link part so the reader sees a card", async () => {
+    const upload = async () => { throw new Error("no upload expected"); };
+    expect(await buildRelayParts({ markdown: "https://example.com/story" }, upload as never)).toEqual([
+      { type: "link", value: "https://example.com/story" },
+    ]);
+    expect(await buildRelayParts({ markdown: "Read https://example.com/story today" }, upload as never)).toEqual([
+      { type: "text", value: "Read https://example.com/story today" },
+    ]);
   });
 });

@@ -11,6 +11,35 @@ The channel is rebuilt for Relay v1. It uses
 to `/v1/websocket`; it does not use the removed Events polling, Conversation,
 or private Agent identity APIs.
 
+## Selection
+
+The `reply` tool accepts a `selection` of a `title` (the question, 1 to 60
+characters) and its `options`, never together with `buttons` or `link`. Its
+`text` is optional and shows as a normal message above the card. Inbound `relay_parts`,
+`selection_response`, and `reply_to` tags preserve untrusted JSON data, including
+history restored during FULL sync.
+
+New human reply text is literal `• ` + each selected source label joined with
+`\n`, followed by `selection_response` metadata in source-option order. Dispatch
+with `selected_values` and the explicit source target, never label parsing.
+Exact legacy comma-joined text remains a server compatibility input. The person
+checks any number of options and submits them once; checking sends nothing, and
+a person answers a given selection once. iOS may draw a checkmark in place of
+each bullet and repeat the prompt's title, as presentation only.
+
+## Payment
+
+The `reply` tool's `payment` argument asks the person to pay: `description`,
+`category` (`physical_goods`, `digital_goods` or `donation`), and `amount` in
+minor units with a `currency`, or `mode: "subscription"` with a `price_id` and
+optional `quantity`, plus an optional `image_url`. The channel creates the
+payment request with its own Relay token before anything is sent, on the key
+the card will carry, then sends the card as its own Message after the text and
+any link; never together with `buttons` or `selection`. A refusal (Stripe not
+connected, Stripe's own 400) comes back as the tool result with nothing sent.
+A paid request adds a `payment_receipt` message from the payer, which arrives
+like any message.
+
 ## Requirements
 
 - Node.js 22.22.3 or newer
@@ -158,14 +187,20 @@ Sends plain text through `chats.messages.send` with:
 
 - `chat_id` copied from an allowlisted channel event;
 - `text` of at most 10,000 UTF-16 code units;
-- a caller-selected stable `send_id`; and
+- a caller-selected stable `send_id`;
+- optional `buttons`, `link`, `selection`, or `payment`; and
 - optional `reply_to_message_id`.
 
 The mapping from `send_id` to request hash and Relay idempotency key is persisted
 before the REST request. An unknown-outcome retry must reuse the same arguments
 and `send_id`; changed content is refused. A deliberate second Message uses a
 new `send_id`. The tool refuses a Chat other than the authenticated origin of
-the active turn, and any `reply_to_message_id` must be that turn's Message. A
+the active turn, and any `reply_to_message_id` must be that turn's Message.
+When that Message came from another agent, the reply names it even if the
+model passes nothing, so a caller waiting on Relay's A2A door gets the answer
+to its own message; a Message that opens with buttons or a selection is not
+named, since an agent may not reply to those parts. A person's Message is named
+only when the model passes it. A
 confirmed send completes and clears the turn automatically. A byte-identical
 retry of an already-confirmed `send_id` remains an idempotent success without
 reopening its turn.

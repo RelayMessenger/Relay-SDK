@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import Relay, {
+  RelayUnknownEventTypeError,
   RelayWebhookConfiguredError,
   runWebSocket,
   type ContactAddedWebhookEvent,
@@ -115,7 +116,7 @@ const envelope = (
       kind: "user",
       display_name: "Advait",
       image_url: null,
-      about: null,
+      subtitle: null,
       verified: false,
       is_contact: true,
     },
@@ -182,6 +183,38 @@ const run = (
     }),
   };
 };
+
+it("delivers selection response metadata and reply target to the default callback before ACK", async () => {
+  const event = envelope();
+  if (event.event_type !== "message.received") throw new Error("wrong fixture");
+  event.data.parts = [
+    { type: "text", value: "• Research\n• Design", reactions: null },
+    { type: "selection_response", selected_values: ["research", "design"] },
+  ];
+  event.data.reply_to = { message_id: "source-message", part_index: 1 };
+  let received = false;
+  const { controller, running } = run(client(), {
+    onEvent: async (incoming) => {
+      if (incoming.event_type !== "message.received") throw new Error("wrong event");
+      expect(incoming.data.parts.find((part) => part.type === "selection_response")?.selected_values)
+        .toEqual(["research", "design"]);
+      expect(incoming.data.reply_to).toEqual(event.data.reply_to);
+      expect(FakeWebSocket.latest.sent).toEqual([]);
+      received = true;
+    },
+  });
+  try {
+    await waitFor(() => FakeWebSocket.instances.length === 1);
+    const socket = FakeWebSocket.latest;
+    emitFrame(socket, ready());
+    emitFrame(socket, eventFrame("1", event));
+    await waitFor(() => received && socket.sent.length > 0);
+    expect(socket.sent.map(JSON.parse)).toEqual([{ type: "ack", through_sequence: "1" }]);
+  } finally {
+    controller.abort();
+    await running;
+  }
+});
 
 it("derives /v1/websocket and sends the Agent Token header with no protocol", async () => {
   const { controller, running } = run(client());
@@ -373,6 +406,68 @@ it.each([
   await expect(running).rejects.toThrow("invalid event frame");
   expect(callbacks).toBe(0);
   expect(socket.sent).toEqual([]);
+});
+
+it("skips and ACKs an event type this release does not know, reports it once, and delivers the next event", async () => {
+  const received: string[] = [];
+  const errors: unknown[] = [];
+  const { controller, running } = run(client(), {
+    onEvent: async (_event, context) => {
+      received.push(context.sequence);
+    },
+    onError: (error) => {
+      errors.push(error);
+    },
+  });
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  const socket = FakeWebSocket.latest;
+  emitFrame(socket, ready());
+  const future = { ...envelope(), event_type: "future.event", data: { anything: true } };
+  emitFrame(socket, { type: "event", sequence: "1", event: future });
+  emitFrame(socket, { type: "event", sequence: "2", event: future });
+  emitFrame(socket, eventFrame("3"));
+  await waitFor(() => socket.sent.length === 3);
+
+  expect(received).toEqual(["3"]);
+  expect(socket.sent.map(JSON.parse)).toEqual([
+    { type: "ack", through_sequence: "1" },
+    { type: "ack", through_sequence: "2" },
+    { type: "ack", through_sequence: "3" },
+  ]);
+  expect(socket.closeCalls).toEqual([]);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(RelayUnknownEventTypeError);
+  expect(errors[0]).toMatchObject({ eventType: "future.event", sequence: "1" });
+
+  controller.abort();
+  await running;
+});
+
+it.each([
+  ["a missing event_type", { event_type: undefined }],
+  ["a numeric event_type", { event_type: 7 }],
+  ["an empty event_type", { event_type: "" }],
+  ["an unknown event_type with no event_id", { event_type: "future.event", event_id: "nope" }],
+])("still stops on an event frame with %s", async (_name, override) => {
+  let callbacks = 0;
+  const { running } = run(client(), {
+    onEvent: async () => {
+      callbacks += 1;
+    },
+  });
+  await waitFor(() => FakeWebSocket.instances.length === 1);
+  const socket = FakeWebSocket.latest;
+  emitFrame(socket, ready());
+  emitFrame(socket, {
+    type: "event",
+    sequence: "1",
+    event: { ...envelope(), ...override },
+  });
+
+  await expect(running).rejects.toThrow("invalid event frame");
+  expect(callbacks).toBe(0);
+  expect(socket.sent).toEqual([]);
+  expect(socket.closeCalls.at(-1)?.code).toBe(4002);
 });
 
 it("delivers typed contact.added and contact.removed events before cumulative ACKs", async () => {
@@ -727,16 +822,48 @@ it("answers each Relay JSON ping with a JSON pong", async () => {
   await running;
 });
 
-it("pings after 30 seconds and reconnects after 60 seconds without a pong", async () => {
+it("sends the exact text ping frame on the ready frame's heartbeat interval", async () => {
   vi.useFakeTimers();
   try {
-    class HeartbeatWebSocket extends FakeWebSocket {
-      pingCalls = 0;
+    const controller = new AbortController();
+    const running = runWebSocket(
+      "https://relay.test",
+      "agent-token",
+      {
+        signal: controller.signal,
+        WebSocket: FakeWebSocket,
+        onEvent: async () => {},
+        onFullSync: async () => {},
+      },
+    );
 
-      ping(): void {
-        this.pingCalls += 1;
-      }
-    }
+    await vi.advanceTimersByTimeAsync(0);
+    const socket = FakeWebSocket.latest;
+    emitFrame(socket, { ...ready(), heartbeat_interval_ms: 1_000 });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(socket.sent).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    // Byte-identical to the frame Relay answers at the edge.
+    expect(socket.sent).toEqual(["{\"type\":\"ping\"}"]);
+    emitFrame(socket, { type: "pong" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(socket.sent).toEqual([
+      "{\"type\":\"ping\"}",
+      "{\"type\":\"ping\"}",
+    ]);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    controller.abort();
+    await vi.runAllTimersAsync();
+    await running;
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("takes a pong text frame as the heartbeat answer and stays connected", async () => {
+  vi.useFakeTimers();
+  try {
     const errors: unknown[] = [];
     const controller = new AbortController();
     const running = runWebSocket(
@@ -744,7 +871,7 @@ it("pings after 30 seconds and reconnects after 60 seconds without a pong", asyn
       "agent-token",
       {
         signal: controller.signal,
-        WebSocket: HeartbeatWebSocket,
+        WebSocket: FakeWebSocket,
         minReconnectDelayMs: 0,
         maxReconnectDelayMs: 0,
         onEvent: async () => {},
@@ -756,18 +883,20 @@ it("pings after 30 seconds and reconnects after 60 seconds without a pong", asyn
     );
 
     await vi.advanceTimersByTimeAsync(0);
-    const first = FakeWebSocket.latest as HeartbeatWebSocket;
-    emitFrame(first, ready());
-    await vi.advanceTimersByTimeAsync(29_999);
-    expect(first.pingCalls).toBe(0);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(first.pingCalls).toBe(1);
-    await vi.advanceTimersByTimeAsync(29_999);
+    const socket = FakeWebSocket.latest;
+    emitFrame(socket, ready());
+    // Three heartbeat rounds cover 90 seconds: without the pong frames the
+    // 60-second timeout would fire on the second one.
+    for (let round = 1; round <= 3; round += 1) {
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(socket.sent).toHaveLength(round);
+      emitFrame(socket, { type: "pong" });
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(socket.sent.every((frame) => frame === "{\"type\":\"ping\"}")).toBe(true);
     expect(FakeWebSocket.instances).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(1);
-    await vi.advanceTimersToNextTimerAsync();
-    expect(FakeWebSocket.instances).toHaveLength(2);
-    expect(String(errors[0])).toContain("pong within 60 seconds");
+    expect(socket.closeCalls).toEqual([]);
+    expect(errors).toEqual([]);
 
     controller.abort();
     await vi.runAllTimersAsync();
@@ -777,37 +906,108 @@ it("pings after 30 seconds and reconnects after 60 seconds without a pong", asyn
   }
 });
 
-it("keeps the 30-second heartbeat alive when pong frames arrive", async () => {
+it("reconnects after 60 seconds with no pong frame", async () => {
   vi.useFakeTimers();
   try {
-    class HeartbeatWebSocket extends FakeWebSocket {
-      pingCalls = 0;
-
-      ping(): void {
-        this.pingCalls += 1;
-      }
-    }
+    const errors: unknown[] = [];
     const controller = new AbortController();
     const running = runWebSocket(
       "https://relay.test",
       "agent-token",
       {
         signal: controller.signal,
-        WebSocket: HeartbeatWebSocket,
+        WebSocket: FakeWebSocket,
+        minReconnectDelayMs: 0,
+        maxReconnectDelayMs: 0,
+        onEvent: async () => {},
+        onFullSync: async () => {},
+        onError(error) {
+          errors.push(error);
+        },
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    const first = FakeWebSocket.latest;
+    emitFrame(first, ready());
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(first.sent).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(first.sent).toEqual(["{\"type\":\"ping\"}"]);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersToNextTimerAsync();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(String(errors[0])).toContain(
+      "Relay WebSocket did not receive a pong within 60 seconds.",
+    );
+
+    controller.abort();
+    await vi.runAllTimersAsync();
+    await running;
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("runs the heartbeat on a socket with no protocol ping method", async () => {
+  vi.useFakeTimers();
+  try {
+    // The shape a browser and Node's built-in WebSocket give: no ping(),
+    // no on()/off().
+    class BrowserWebSocket implements WebSocketLike {
+      static latest: BrowserWebSocket | undefined;
+
+      readonly listeners = new Map<string, Set<(event: any) => void>>();
+      readonly sent: string[] = [];
+
+      constructor(readonly url: string) {
+        BrowserWebSocket.latest = this;
+      }
+
+      addEventListener(type: string, listener: (event: any) => void): void {
+        const listeners = this.listeners.get(type) ?? new Set();
+        listeners.add(listener);
+        this.listeners.set(type, listeners);
+      }
+
+      removeEventListener(type: string, listener: (event: any) => void): void {
+        this.listeners.get(type)?.delete(listener);
+      }
+
+      send(data: string): void {
+        this.sent.push(data);
+      }
+
+      close(code?: number, reason?: string): void {
+        queueMicrotask(() => this.emit("close", { code, reason }));
+      }
+
+      emit(type: string, event: any): void {
+        for (const listener of this.listeners.get(type) ?? []) listener(event);
+      }
+    }
+
+    const controller = new AbortController();
+    const running = runWebSocket(
+      "https://relay.test",
+      "agent-token",
+      {
+        signal: controller.signal,
+        WebSocket: BrowserWebSocket,
         onEvent: async () => {},
         onFullSync: async () => {},
       },
     );
 
     await vi.advanceTimersByTimeAsync(0);
-    const socket = FakeWebSocket.latest as HeartbeatWebSocket;
-    emitFrame(socket, ready());
+    const socket = BrowserWebSocket.latest!;
+    expect((socket as { ping?: unknown }).ping).toBeUndefined();
+    expect((socket as { on?: unknown }).on).toBeUndefined();
+    socket.emit("message", { data: JSON.stringify(ready()) });
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(socket.pingCalls).toBe(1);
-    socket.emit("pong", {});
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(socket.pingCalls).toBe(2);
-    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(socket.sent).toEqual(["{\"type\":\"ping\"}"]);
 
     controller.abort();
     await vi.runAllTimersAsync();

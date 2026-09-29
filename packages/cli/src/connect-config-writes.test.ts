@@ -37,7 +37,7 @@ async function connect(agent: "codex" | "opencode", args: string[], executable: 
   const configContext = { env: { RELAY_CONFIG_PATH: join(home, "config.json"), PATH: "" }, home, platform: "win32" as const };
   const console = consoleFixture(configContext, card);
   if (args.includes("--new")) { await console.login(); vi.mocked(inspectWindowsAcl).mockClear(); }
-  const code = await runCLI(["connect", agent, ...args, "--yes", "--no-skill", "--json"], {
+  const code = await runCLI(["connect", agent, "--subtitle", "Helps with tasks", ...args, "--yes", "--no-skill", "--json"], {
     configContext, consoleLogin: async () => console.session, cwd: home, isInteractive: false,
     stdout: () => undefined, stderr: (value) => stderr.push(value),
     fetch: console.wrap(vi.fn(async (_input: string | URL | Request, init?: RequestInit) => init?.method === "POST"

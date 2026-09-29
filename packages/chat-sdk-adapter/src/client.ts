@@ -18,8 +18,12 @@ import type {
   RelayAttachmentAllocation,
   RelayChat,
   RelayGetMessagesResult,
+  RelayCreatePaymentRequest,
   RelayMessage,
   RelayOutgoingPart,
+  RelayPaymentRequest,
+  RelayPaymentRequestList,
+  RelayPaymentStatus,
   RelayReactionType,
   RelaySendMessageResponse,
 } from "./types.js";
@@ -323,6 +327,63 @@ export class RelayClient {
             ? { part_index: options.partIndex }
             : {}),
         }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      },
+    );
+  }
+
+  /**
+   * Create a payment request on the organization's connected Stripe account.
+   * Send the returned `checkout_url` as a `payment` part.
+   */
+  async createPaymentRequest(
+    body: RelayCreatePaymentRequest,
+    options: { idempotencyKey?: string } = {},
+  ): Promise<RelayPaymentRequest> {
+    return this.request<RelayPaymentRequest>("/v1/payment_requests", {
+      body: JSON.stringify(body),
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.idempotencyKey
+          ? { "Idempotency-Key": options.idempotencyKey }
+          : {}),
+      },
+      method: "POST",
+    });
+  }
+
+  async listPaymentRequests(options: {
+    cursor?: string;
+    limit?: number;
+    status?: RelayPaymentStatus;
+  } = {}): Promise<RelayPaymentRequestList> {
+    const query = new URLSearchParams();
+    if (options.cursor) query.set("cursor", options.cursor);
+    if (options.limit !== undefined) query.set("limit", String(options.limit));
+    if (options.status) query.set("status", options.status);
+    const suffix = query.size ? `?${query.toString()}` : "";
+    return this.request<RelayPaymentRequestList>(
+      `/v1/payment_requests${suffix}`,
+      { method: "GET" },
+    );
+  }
+
+  async getPaymentRequest(paymentRequestId: string): Promise<RelayPaymentRequest> {
+    assertRelayUuid(paymentRequestId, "paymentRequestId");
+    return this.request<RelayPaymentRequest>(
+      `/v1/payment_requests/${encodeURIComponent(paymentRequestId)}`,
+      { method: "GET" },
+    );
+  }
+
+  /** Cancel a request that has not been paid; the card changes in place. */
+  async cancelPaymentRequest(paymentRequestId: string): Promise<RelayPaymentRequest> {
+    assertRelayUuid(paymentRequestId, "paymentRequestId");
+    return this.request<RelayPaymentRequest>(
+      `/v1/payment_requests/${encodeURIComponent(paymentRequestId)}/cancel`,
+      {
+        body: "{}",
         headers: { "Content-Type": "application/json" },
         method: "POST",
       },

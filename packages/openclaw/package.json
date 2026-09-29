@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/openclaw-plugin",
-  "version": "0.4.6-staging.0",
+  "version": "0.4.7-staging.44",
   "description": "Native Relay channel plugin for OpenClaw",
   "license": "MIT",
   "type": "module",
@@ -33,15 +33,15 @@
     "contract:verify": "node scripts/verify-contract-provenance.mjs",
     "contract:test": "node --test test/*.test.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",
-    "gateway:harness": "node scripts/gateway-harness.mjs",
+    "gateway:harness": "node scripts/gateway-harness.mjs && node scripts/gateway-harness.mjs --overlap",
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@relaymessenger/sdk": "0.3.5-staging.0"
+    "@relaymessenger/sdk": "0.3.6-staging.51"
   },
   "devDependencies": {
-    "@types/node": "^26.0.0",
-    "openclaw": "2026.8.1",
+    "@types/node": "^26.6.2",
+    "openclaw": "2026.9.5",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },
@@ -164,7 +164,7 @@
       "pluginApi": ">=2026.8.1 <2026.10.0"
     },
     "build": {
-      "openclawVersion": "2026.8.1"
+      "openclawVersion": "2026.9.5"
     }
   }
 }

@@ -1,9 +1,9 @@
 # Relay API contract lock
 
 `relay-openapi.yaml` is a byte-exact snapshot from the Relay Server commit
-`8247505bd5f8dffccf8047b91317a68a91632068`.
+`da4e6a4deff09c4c986289b96367300c5c9b361c`.
 
 SHA-256:
-`f1d3f19b12e068ad68b95b41650b62af6f921ec263e37dd2d24f59a72903ce30`
+`d692e233f1a31ac20bf4ade552037c9fef1cb1d8c5051e4d25c9844f7cecc63a`
 
 The snapshot is test input only. Runtime code uses the official Relay packages.

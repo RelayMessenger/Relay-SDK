@@ -38,9 +38,17 @@ assert.deepEqual(packageJSON.publishConfig, {
   provenance: true,
 });
 assert.deepEqual(runtime, packagedRuntime, "root and marketplace runtimes differ");
+assert.ok(runtime.includes(Buffer.from("portable text remains bullets")), "rebuild runtime from canonical selection guidance");
+assert.ok(runtime.includes(Buffer.from("checking sends nothing and only the submit does")));
+assert.ok(runtime.includes(Buffer.from("draw a checkmark in place of each bullet")));
+assert.ok(!runtime.includes(Buffer.from("light-blue")), "stale selection UX in runtime");
 assert.ok(
   runtime.includes(Buffer.from(JSON.stringify(packageJSON.version))),
   "generated runtime does not embed the package version",
+);
+assert.ok(
+  !runtime.includes(Buffer.from("@a2a-js/sdk/dist/")),
+  "generated runtime bundles the A2A client; keep @a2a-js/sdk external (scripts/build.mjs)",
 );
 assert.doesNotMatch(
   runtime.toString("utf8"),

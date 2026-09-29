@@ -1,12 +1,29 @@
 import { inboundMediaPrompt, type InboundMediaOptions } from "./inbound-media.js";
-import type Relay from "@relaymessenger/sdk";
-import { bridgeTurn, type BridgeTurn } from "./bridge-turn.js";
+import {
+  BUTTONS_BLOCK_INSTRUCTION,
+  BUTTONS_GUIDANCE,
+  PAYMENT_BLOCK_INSTRUCTION,
+  PAYMENT_GUIDANCE,
+  SELECTION_GUIDANCE,
+  SELECTION_BLOCK_INSTRUCTION,
+  LINK_LINE_INSTRUCTION,
+  answerMessages as splitAnswer,
+  createPaymentPart,
+  indexedIdempotencyKey,
+  RelayAPIError,
+  type MessagePart,
+  type PaymentRequestCreateParams,
+  type Relay,
+} from "@relaymessenger/sdk";
+import { bridgeTurn, replacesLiveTurn, type BridgeTurn } from "./bridge-turn.js";
 export { bridgeTurn, type BridgeTurn } from "./bridge-turn.js";
 import type { CodexThreadStore } from "./codex-threads.js";
 import { isAbsolute } from "node:path";
 import { findExecutable } from "./runtime-sniff.js";
 import { packageVersion } from "./config.js";
 import { spawnCommand } from "./spawn-command.js";
+import { AGENT_TOKEN_ENV, MCP_SERVER_NAME, RELAY_WRITE_TOOLS, codexMcpServer } from "./hosted-mcp.js";
+import { beyond, inputDetail, inputSummary, type ApprovalChoice, type ApprovalOutcome, type ApprovalRequest, type OwnerApprovals } from "./approvals.js";
 
 /**
  * What `relay connect codex` leaves running so Codex answers by itself.
@@ -22,8 +39,9 @@ import { spawnCommand } from "./spawn-command.js";
  * extension speak: newline-delimited JSON-RPC on stdin and stdout. One process
  * holds many threads, takes a thread back by id after a restart, and stops a
  * turn that is already running. It runs the `codex` already on this computer,
- * so the person's own sign-in, settings and Relay MCP tools
- * (`~/.codex/config.toml`, written by connect) are the ones Codex uses.
+ * so the person's own sign-in and settings are the ones Codex uses. Relay's
+ * hosted MCP server travels with every thread (`codexThreadConfig`), so Codex
+ * has Relay's tools whether or not the folder is trusted.
  */
 
 /** Relay takes 1 to 255 characters for an idempotency key (contracts/relay-v1-openapi.yaml). */
@@ -33,24 +51,199 @@ export const replyKey = (eventId: string): string => `codex-bridge-${eventId}`;
 export const MAX_RELAY_TEXT = 10_000;
 
 /**
- * `SandboxMode` (codex-app-server-protocol-0.154.0, v2/ThreadStartParams.json,
- * `definitions.SandboxMode`): Codex may write files in the folder it was
- * started in, and nowhere else.
+ * What the bridge sends on `thread/start` and `thread/resume`: the folder and
+ * Relay's thread config (`codexThreadConfig`), and no `sandbox` and no
+ * `approvalPolicy`. Relay is the integration, not the harness, so Codex's own
+ * settings decide what Codex may do.
+ *
+ * Both fields are optional in the app-server protocol (`approval_policy:
+ * Option<AskForApproval>` and `sandbox: Option<SandboxMode>`, codex-rs
+ * app-server-protocol/src/protocol/v2/thread.rs:88,94, saved at
+ * _sources/codex/). A value sent there wins over the person's own: "Explicitly
+ * setting on-request overrides the project-derived policy"
+ * (developers.openai.com/codex/agent-approvals-security, saved at
+ * _sources/unattended-agent-permissions-20260926/
+ * codex-agent-approvals-security.txt:32-33). Left out, Codex uses the person's
+ * `config.toml`, the project's policy, or its default, the Auto preset: "no
+ * flags needed or --sandbox workspace-write --ask-for-approval on-request"
+ * (same file, :266-268).
+ *
+ * When Codex asks, the request still reaches this process as a server request
+ * (`CODEX_APPROVAL_METHODS`) and goes to the agent's owners in Relay as a
+ * card (`codexApprovalRequest`). Relay's own write tools stay approved on
+ * its one server (`codexThreadConfig`). This is the Claude Code bridge's rule
+ * too: there only `mcp__relay__*` is allowed without asking, and the
+ * person's settings and Claude Code's defaults decide the rest (Relay-SDK
+ * PR 380, `claude-bridge.ts`).
  */
-export const CODEX_SANDBOX = "workspace-write";
+export const codexThreadSettings = (cwd: string, mcpURL: string): { cwd: string; config: ReturnType<typeof codexThreadConfig> } => ({
+  cwd,
+  config: codexThreadConfig(mcpURL),
+});
+
+/** The three answers, in Codex's decisions: `accept`, `acceptForSession`, `decline` (v2/CommandExecutionApprovalDecision.ts). */
+export const CODEX_CHOICES: readonly ApprovalChoice[] = [
+  { id: "accept", label: "Allow once", decision: "allow_once" },
+  { id: "acceptForSession", label: "Allow for this session", decision: "allow_session" },
+  { id: "decline", label: "Deny", decision: "deny" },
+];
 
 /**
- * `AskForApproval` (same file, `definitions.AskForApproval`): nobody is at the
- * keyboard to answer a question, so Codex is never asked one. Passing a
- * person's approvals through the chat is its own piece of work.
+ * The approval requests app-server sends a client (v2 ServerRequest.ts,
+ * "Approvals" in the app-server docs,
+ * _sources/approvals-inkbox-20260926/codex-app-server-docs.txt): a command,
+ * a file change, and the built-in `request_permissions` tool. The same three
+ * Inkbox's plugin formats (inkbox-codex-plugin-escalation.py.txt,
+ * `format_codex_approval_request`).
  */
-export const CODEX_APPROVAL_POLICY = "never";
+export const CODEX_APPROVAL_METHODS = [
+  "item/commandExecution/requestApproval",
+  "item/fileChange/requestApproval",
+  "item/permissions/requestApproval",
+] as const;
+
+/** A file change app-server announced, by item id, so its card can name the files. */
+export type CodexFileChanges = ReadonlyMap<string, readonly string[]>;
+
+/**
+ * One approval request as the card shows it, in Codex's own tool names
+ * (`shell`, `apply_patch`, `request_permissions`).
+ */
+export const codexApprovalRequest = (
+  method: string,
+  params: Record<string, unknown>,
+  files: CodexFileChanges = new Map(),
+): Pick<ApprovalRequest, "tool" | "title" | "summary" | "detail" | "extra"> => {
+  const reason = typeof params.reason === "string" && params.reason.trim() ? params.reason.trim() : "";
+  const { threadId: _thread, turnId: _turn, itemId: _item, startedAtMs: _started, ...shown } = params;
+  const detail = inputDetail(shown);
+  if (method === "item/commandExecution/requestApproval") {
+    const command = typeof params.command === "string" ? params.command : "";
+    return { tool: "shell", title: "Codex asks to run a command.", summary: command || reason || "a command", detail, extra: beyond(shown, command ? ["command"] : ["reason"]) };
+  }
+  if (method === "item/fileChange/requestApproval") {
+    const paths = files.get(String(params.itemId)) ?? [];
+    const root = typeof params.grantRoot === "string" ? params.grantRoot : "";
+    const summarized = paths.length ? "files" : root ? "grantRoot" : "reason";
+    const all = { ...shown, ...(paths.length ? { files: paths } : {}) };
+    return { tool: "apply_patch", title: "Codex asks to change files.", summary: paths.join(", ") || root || reason || "file changes", detail: inputDetail(all), extra: beyond(all, [summarized]) };
+  }
+  return { tool: "request_permissions", title: "Codex asks for more permissions.", summary: reason || inputSummary(asRecord(params.permissions)), detail, extra: beyond(shown, reason ? ["reason"] : []) };
+};
+
+/**
+ * Codex's answer to one approval request (the `*RequestApprovalResponse`
+ * types in v2). A command or a file change takes the decision itself; a
+ * permissions request takes the permissions granted and their scope, and an
+ * empty grant is a refusal ("Respond with permissions containing only the
+ * granted subset", app-server docs, "Permission requests").
+ */
+export const codexApprovalResponse = (
+  method: string,
+  params: Record<string, unknown>,
+  outcome: ApprovalOutcome,
+): Record<string, unknown> => {
+  const decision = outcome.choice?.decision;
+  if (method === "item/permissions/requestApproval") {
+    if (decision !== "allow_once" && decision !== "allow_session") return { permissions: {}, scope: "turn" };
+    const requested = asRecord(params.permissions);
+    const permissions = Object.fromEntries(Object.entries(requested).filter(([, value]) => value !== null && value !== undefined));
+    return { permissions, scope: decision === "allow_session" ? "session" : "turn" };
+  }
+  if (decision === "allow_once") return { decision: "accept" };
+  if (decision === "allow_session") return { decision: "acceptForSession" };
+  return { decision: "decline" };
+};
+
+/**
+ * The harness's own wait, when it names one: `autoResolutionMs`, "an integer
+ * millisecond timeout or null" after which "host clients can resolve the
+ * prompt automatically" (app-server docs, `tool/requestUserInput`). The
+ * 0.154.0 schema carries it on `ToolRequestUserInputParams` only, so an
+ * approval request without it waits `APPROVAL_TIMEOUT_MS`.
+ */
+export const codexTimeout = (params: Record<string, unknown>): number | undefined =>
+  typeof params.autoResolutionMs === "number" && params.autoResolutionMs > 0 ? params.autoResolutionMs : undefined;
+
+/**
+ * Relay's hosted MCP server as a per-thread config override. `thread/start`
+ * and `thread/resume` take `config`, a map of config keys applied over the
+ * loaded layers (codex-rs app-server-protocol/src/protocol/v2/thread.rs:100,
+ * :401). Codex disables a folder's own `.codex/config.toml` until the folder
+ * is trusted, so the project file connect writes gives this process nothing
+ * in a new folder (the Daytona run of 2026-09-26, `mcp_server_count=0`). The
+ * override is the path OpenClaw's Codex harness uses for the same job: it
+ * projects MCP servers into `config.mcp_servers` on thread start and resume
+ * (openclaw extensions/codex/src/app-server/attempt-startup.ts:215-219,
+ * thread-lifecycle-io.ts:151). The token stays in `RELAY_AGENT_TOKEN`.
+ *
+ * Relay's own write tools are approved on that one server, so they run
+ * without a card, as Inkbox's own tools do (inkbox-claude-code-plugin-
+ * sessions.py.txt:1171-1173). Without it Codex stops them: "MCP tool call
+ * requires approval, but approval policy is never" (the Mac run of
+ * 2026-09-26, on the community feed's post tool, since removed). The person
+ * connected this agent so it acts through Relay, so `send_message`,
+ * `send_task` and `update_task` carry Codex's per-tool setting `tools.<tool>.approval_mode =
+ * "approve"` ("Per-tool approval behavior override",
+ * learn.chatgpt.com/docs/extend/mcp?surface=cli; saved at
+ * _sources/mcp-hosted-docs-20260926/codex-extend-mcp-cli.txt:1010-1011,
+ * 1318-1319). No other server changes.
+ *
+ * The agent's token is kept out of every shell command the model runs.
+ * app-server gets `RELAY_AGENT_TOKEN` in its own environment so the relay
+ * entry can read it (`bearer_token_env_var`), and by default Codex hands that
+ * environment to model-run commands too; its shell snapshots saved the token
+ * (the Mac run of 2026-09-26). Codex's `shell_environment_policy.filters`
+ * is "Canonical case-insensitive environment-variable pattern filters"
+ * (map<string, include | exclude>; learn.chatgpt.com/docs/config-file/
+ * config-reference, saved at
+ * _sources/mcp-hosted-docs-20260926/codex-config-reference.txt:4301-4312),
+ * so the token's one name is excluded there. The MCP client is not a shell
+ * command and still reads it. Every other variable is left as it was.
+ *
+ * The filter alone does not hold: Codex's shell snapshot, "Snapshot shell
+ * environment to speed up repeated commands (stable; on by default)"
+ * (`features.shell_snapshot`, same page, codex-config-reference.txt:1276),
+ * records the environment app-server started with and restores it into
+ * every command. Measured on this Mac with codex-cli 0.155.1 and a stand-in
+ * value: filter only, `echo ${#RELAY_AGENT_TOKEN}` printed 15; filter with
+ * snapshots off, 0; and the bridge's snapshot file held the real token. So
+ * bridge threads run without shell snapshots, which also keeps the token out
+ * of `CODEX_HOME/shell_snapshots`. The commands' environment is otherwise
+ * the same; only the speed-up is gone.
+ */
+export const codexThreadConfig = (mcpURL: string): {
+  mcp_servers: Record<string, ReturnType<typeof codexMcpServer> & { tools: Record<string, { approval_mode: "approve" }> }>;
+  shell_environment_policy: { filters: Record<string, "exclude"> };
+  features: { shell_snapshot: false };
+} => ({
+  mcp_servers: {
+    [MCP_SERVER_NAME]: {
+      ...codexMcpServer(mcpURL),
+      tools: Object.fromEntries(RELAY_WRITE_TOOLS.map((tool) => [tool, { approval_mode: "approve" as const }])),
+    },
+  },
+  shell_environment_policy: { filters: { [AGENT_TOKEN_ENV]: "exclude" } },
+  features: { shell_snapshot: false },
+});
 
 /** The one sub-command, over stdin and stdout, which is where it listens by default. */
 export const APP_SERVER_ARGS = ["app-server"] as const;
 
 /** What app-server is told this client is (`ClientInfo`, ClientRequest.json). */
 export const CLIENT_NAME = "relaymessenger";
+
+/** Who answers the person: this process sends the final message. */
+export const ANSWER_INSTRUCTION =
+  "Write your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself. "
+  + "Write chat text. Inline Markdown draws: bold, italic, strikethrough, code, links. Headings, lists and code fences show as written.";
+
+/**
+ * How the answer carries buttons and links, and when it should: the SDK's one
+ * text for every runtime, so the same person gets buttons and link cards
+ * under the same conditions whichever agent answers.
+ */
+export const BUTTONS_INSTRUCTION = `${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE} ${PAYMENT_BLOCK_INSTRUCTION} ${PAYMENT_GUIDANCE}`;
 
 /**
  * One message, as the prompt Codex is given. Codex keeps its Relay tools during
@@ -60,10 +253,74 @@ export const CLIENT_NAME = "relaymessenger";
 export const codexPrompt = (sender: string, text: string): string => [
   `@${sender} sent you this message on Relay:`,
   "",
-  text.slice(0, MAX_RELAY_TEXT),
+  // Visible text is bounded before metadata is appended by inboundMediaPrompt.
+  text,
   "",
-  "Write your answer as your final message. Relay sends that answer to the chat for you, so do not send it yourself.",
+  ANSWER_INSTRUCTION,
+  "",
+  BUTTONS_INSTRUCTION,
 ].join("\n");
+
+/**
+ * The messages an answer becomes: its words as text, each link written alone
+ * on a line as its own message, and the buttons its fenced block asked for
+ * under the last words, plus any payment request its fenced block described,
+ * which is created and sent after them. A block the SDK cannot read stays in
+ * the words, so the person still gets the answer, and the terminal says why.
+ */
+export const answerMessages = (
+  answer: string,
+  sender: string,
+  say: (line: string) => void,
+): { messages: MessagePart[][]; payment?: PaymentRequestCreateParams } => {
+  const { messages, payment, error } = splitAnswer(answer);
+  if (error) say(`The component block in the answer to @${sender} was left as text: ${error}.`);
+  return {
+    messages: messages.map((parts) => parts.map((part) => (
+      part.type === "text" ? { ...part, value: part.value.slice(0, MAX_RELAY_TEXT) } : part
+    ))),
+    ...(payment ? { payment } : {}),
+  };
+};
+
+/**
+ * Sends an answer, one message at a time in order. The message that arrived
+ * is the key, so a retry after a dropped connection cannot answer the same
+ * person twice; each message past the first carries its index. The first
+ * message replies to the one that arrived (`turn.replyTo`), so a caller
+ * waiting on that message gets this answer even while another of its
+ * messages is open. A payment request is created with the card's own key
+ * after the words go out; when Relay refuses it (Stripe not connected,
+ * Stripe's own 400) the terminal says why and no card is sent.
+ */
+export const sendAnswer = async (
+  client: Pick<Relay, "chats" | "paymentRequests">,
+  turn: Pick<BridgeTurn, "chatId" | "eventId" | "sender" | "replyTo">,
+  answer: string,
+  say: (line: string) => void,
+  key: string = replyKey(turn.eventId),
+): Promise<void> => {
+  const { messages, payment } = answerMessages(answer, turn.sender, say);
+  const replyTo = (index: number) => (index === 0 && turn.replyTo ? { reply_to: turn.replyTo } : {});
+  for (const [index, parts] of messages.entries()) {
+    await client.chats.messages.send(turn.chatId, {
+      message: { parts, idempotency_key: indexedIdempotencyKey(key, index), ...replyTo(index) },
+    });
+  }
+  if (!payment) return;
+  const cardKey = indexedIdempotencyKey(key, messages.length);
+  let card: MessagePart;
+  try {
+    card = await createPaymentPart(client, payment, cardKey);
+  } catch (error) {
+    if (!(error instanceof RelayAPIError) || error.retryable) throw error;
+    say(`The payment in the answer to @${turn.sender} was not sent: ${error.message.replace(/\.$/u, "")}.`);
+    return;
+  }
+  await client.chats.messages.send(turn.chatId, {
+    message: { parts: [card], idempotency_key: cardKey, ...replyTo(messages.length) },
+  });
+};
 
 /**
  * The protocol, as far as this bridge needs it. Every shape here is written by
@@ -138,12 +395,19 @@ export const startAppServer = (
   codex: CodexCommand,
   cwd: string,
   signal: AbortSignal,
+  env?: Readonly<Record<string, string>>,
+  /**
+   * Answers one server request, or returns undefined to refuse it. The
+   * promise's value is the JSON-RPC `result`.
+   */
+  onRequest?: (method: string, params: Record<string, unknown>, id: number | string) => Promise<Record<string, unknown>> | undefined,
 ): CodexAppServer => {
   // Started the way every other command this CLI runs is started, so the `.cmd`
   // shim npm installs on Windows runs too (spawn-command.ts). Nothing a person
   // wrote travels on this command line: messages go down stdin as JSON.
   const child = spawnCommand(codex.command, [...codex.args ?? [], ...APP_SERVER_ARGS], {
     cwd, stdio: ["pipe", "pipe", "pipe"], signal,
+    ...(env ? { env: { ...process.env, ...env } } : {}),
   });
   const pending = new Map<number, { resolve(value: Record<string, unknown>): void; reject(error: Error): void }>();
   const watchers = new Set<(note: AppServerNotification) => void>();
@@ -178,10 +442,19 @@ export const startAppServer = (
     }
     if (message.id !== undefined && message.method !== undefined) {
       // app-server asks a client to approve what its settings do not allow it
-      // to do by itself. This bridge approves nothing, and a request left
-      // unanswered would hold the turn open, so it is refused in JSON-RPC's
-      // own words.
-      write({ id: message.id, error: { code: -32601, message: "This Relay bridge answers no app-server requests." } });
+      // to do by itself. An approval goes to `onRequest`; anything else, and
+      // every request when there is no handler, is refused in JSON-RPC's own
+      // words, because a request left unanswered would hold the turn open.
+      const id = message.id;
+      const handled = onRequest?.(message.method, asRecord(message.params), id);
+      if (!handled) {
+        write({ id, error: { code: -32601, message: "This Relay bridge answers no such app-server request." } });
+        return;
+      }
+      void handled.then(
+        (result) => { if (!dead) write({ id, result }); },
+        (error: unknown) => { if (!dead) write({ id, error: { code: -32000, message: error instanceof Error ? error.message : String(error) } }); },
+      );
       return;
     }
     if (message.method === undefined) return;
@@ -238,6 +511,17 @@ export interface TurnOutcome {
   /** `completed`, `interrupted`, `failed` or `inProgress`. */
   status: string;
   answer: string;
+  /** Why a `failed` turn failed (`Turn.error.message`, v2/TurnCompletedNotification.json). */
+  error?: string;
+  /**
+   * The first call to one of Relay's own tools that Codex could not make, as
+   * `<tool>: <message>`. An `mcpToolCall` item that ends `failed` with an
+   * `error` never reached the server or never came back from it; a tool that
+   * answered, even with an error of its own, ends with a `result` instead
+   * (v2/ItemCompletedNotification.json, `McpToolCallError`; codex-rs
+   * app-server-protocol thread_history.rs, `handle_mcp_tool_call_end`).
+   */
+  toolFailure?: string;
 }
 
 /**
@@ -274,6 +558,7 @@ export const runTurn = async (
 ): Promise<TurnOutcome> => {
   const answers: string[] = [];
   const deltas: string[] = [];
+  let toolFailure: string | undefined;
   let turnId: string | undefined;
   const early: AppServerNotification[] = [];
   let settle!: (outcome: TurnOutcome) => void;
@@ -290,13 +575,20 @@ export const runTurn = async (
       if (item.type === "agentMessage" && typeof item.text === "string" && isFinalMessage(item.phase)) {
         answers.push(item.text);
       }
+      const failed = asRecord(item.error).message;
+      if (item.type === "mcpToolCall" && item.server === MCP_SERVER_NAME && item.status === "failed" && typeof failed === "string") {
+        toolFailure ??= `${String(item.tool)}: ${failed.trim()}`;
+      }
       return;
     }
     if (note.method === "turn/completed") {
       const turn = asRecord(note.params.turn);
+      const error = asRecord(turn.error).message;
       settle({
         status: typeof turn.status === "string" ? turn.status : "",
         answer: answers.at(-1) ?? deltas.join(""),
+        ...(typeof error === "string" && error.trim() ? { error: error.trim() } : {}),
+        ...(toolFailure !== undefined ? { toolFailure } : {}),
       });
     }
   };
@@ -306,9 +598,9 @@ export const runTurn = async (
   const unwatch = server.watch((note) => { if (turnId === undefined) early.push(note); else take(note); });
   try {
     // `turn/start` (v2/TurnStartParams.json): `threadId` and `input` are the
-    // required two, and `TextUserInput` is `{type: "text", text}`. The folder,
-    // the sandbox and the approval policy belong to the thread and are set
-    // there, so they are not repeated on every turn.
+    // required two, and `TextUserInput` is `{type: "text", text}`. The folder and
+    // the thread config belong to the thread and are set there, so they are
+    // not repeated on every turn.
     const started = await server.request("turn/start", {
       threadId: input.threadId,
       input: [{ type: "text", text: input.prompt }, ...input.images.map((path) => ({ type: "localImage", path }))],
@@ -326,13 +618,23 @@ export const runTurn = async (
 };
 
 export interface CodexBridgeInput {
-  client: Pick<Relay, "chats" | "websocket">;
+  client: Pick<Relay, "chats" | "paymentRequests" | "websocket">;
   media?: Omit<InboundMediaOptions, "chatId">;
   /** The `codex` to run, and the folder to run it in. */
   codex: CodexCommand;
   cwd: string;
   /** Which Codex thread belongs to which chat, across restarts. */
   threads: CodexThreadStore;
+  /**
+   * This agent's token. The folder's `.codex/config.toml` reads the hosted MCP
+   * server's token from `RELAY_AGENT_TOKEN` (hosted-mcp.ts, `codexMcpServer`),
+   * so `codex app-server` starts with it there.
+   */
+  agentToken: string;
+  /** Relay's hosted MCP server, handed to every thread (`codexThreadConfig`). */
+  mcpURL: string;
+  /** Asks the agent's owners, in Relay, whatever Codex would ask at its terminal. */
+  approvals: Pick<OwnerApprovals, "ask" | "take">;
   signal: AbortSignal;
   /** One line to the terminal the person is watching. */
   say(line: string): void;
@@ -347,15 +649,18 @@ interface ChatLane {
   /** Turns in one chat run one after another, in the order the messages arrived. */
   chain: Promise<void>;
   live?: LiveTurn | undefined;
+  /** Whether the live turn answers another agent (`replacesLiveTurn`). */
+  liveFromAgent?: boolean | undefined;
 }
 
 /**
  * Answers every message that arrives until the signal stops it.
  *
  * Turns run one at a time inside a chat and at the same time across chats,
- * which is what one app-server with one thread per chat allows. A message for a
- * chat whose turn is still running stops that turn (`turn/interrupt`) and takes
- * its place; the stopped turn sends nothing.
+ * which is what one app-server with one thread per chat allows. A person's
+ * message for a chat whose turn for a person is still running stops that turn
+ * (`turn/interrupt`) and takes its place; the stopped turn sends nothing. An
+ * agent's message waits for the running turn instead (`replacesLiveTurn`).
  */
 export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => {
   const answered = new Set<string>();
@@ -369,7 +674,39 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
     if (session && !sessionGone) return session;
     opened = new Map();
     session = (async () => {
-      const started = startAppServer(input.codex, input.cwd, input.signal);
+      // The files each announced change touches, so its card can name them;
+      // and each open approval's stop, for when app-server clears it.
+      const files = new Map<string, string[]>();
+      const waiting = new Map<string, AbortController>();
+      const approve = (method: string, params: Record<string, unknown>, id: number | string): Promise<Record<string, unknown>> | undefined => {
+        if (!(CODEX_APPROVAL_METHODS as readonly string[]).includes(method)) return undefined;
+        const stop = new AbortController();
+        const onAbort = (): void => stop.abort();
+        input.signal.addEventListener("abort", onAbort, { once: true });
+        waiting.set(String(id), stop);
+        const timeoutMs = codexTimeout(params);
+        return input.approvals.ask({
+          harness: "Codex",
+          ...codexApprovalRequest(method, params, files),
+          choices: CODEX_CHOICES,
+          ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+          signal: stop.signal,
+        }).then((outcome) => codexApprovalResponse(method, params, outcome)).finally(() => {
+          waiting.delete(String(id));
+          input.signal.removeEventListener("abort", onAbort);
+        });
+      };
+      const started = startAppServer(input.codex, input.cwd, input.signal, { [AGENT_TOKEN_ENV]: input.agentToken }, approve);
+      started.watch((note) => {
+        // "serverRequest/resolved confirms that the pending request has been
+        // answered or cleared" (app-server docs, "Approvals"); a cleared one
+        // stops waiting, as Inkbox's client cancels it (codex_client.py.txt:618-622).
+        if (note.method === "serverRequest/resolved") waiting.get(String(note.params.requestId))?.abort();
+        const item = asRecord(note.params.item);
+        if (note.method === "item/started" && item.type === "fileChange" && typeof item.id === "string" && Array.isArray(item.changes)) {
+          files.set(item.id, item.changes.flatMap((change) => typeof asRecord(change).path === "string" ? [String(asRecord(change).path)] : []));
+        }
+      });
       // A stop the person asked for, with Control-C, is not news.
       void started.stopped.then((line) => {
         sessionGone = true;
@@ -398,11 +735,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
    * read from codex-cli 0.154.0 on 2026-09-11).
    */
   const openThread = async (server: CodexAppServer, chatId: string): Promise<string> => {
-    const settings = {
-      cwd: input.cwd,
-      sandbox: CODEX_SANDBOX,
-      approvalPolicy: CODEX_APPROVAL_POLICY,
-    };
+    const settings = codexThreadSettings(input.cwd, input.mcpURL);
     // This app-server already has the thread open; it is taken back by id once
     // per run of the process, not once per message.
     const open = opened.get(chatId);
@@ -440,19 +773,32 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
     };
     let mine: LiveTurn | undefined;
     let outcome: TurnOutcome | undefined;
+    let failure: unknown;
     try {
       const server = await appServer();
       const threadId = await openThread(server, turn.chatId);
       const media = await inboundMediaPrompt(turn, input.media);
       outcome = await runTurn(server, {
         threadId, prompt: codexPrompt(turn.sender, media.text), images: media.images,
-        onStarted: (live) => { mine = live; lane.live = live; started(); },
+        onStarted: (live) => { mine = live; lane.live = live; lane.liveFromAgent = turn.fromAgent; started(); },
       });
-    } catch { /* Named below, with everything else Codex can fail at. */ }
-    if (lane.live === mine) lane.live = undefined;
+    } catch (error) { failure = error; }
+    if (lane.live === mine) { lane.live = undefined; lane.liveFromAgent = undefined; }
     if (mine?.dropped === true || outcome?.status === "interrupted") {
       await stopTyping();
       input.say(`A newer message came in, so the answer to @${turn.sender} was dropped.`);
+      return;
+    }
+    // A thread or turn Codex refused is named, so the person sees why: a
+    // config Codex cannot load reads "failed to load configuration: ...".
+    if (outcome?.status === "failed" && !outcome.answer.trim()) failure ??= new Error(outcome.error ?? "the turn failed");
+    // Codex could not make a call to one of Relay's tools, so whatever it
+    // answered is about that failure, not an answer to the person.
+    if (outcome?.toolFailure !== undefined) failure ??= new Error(`Relay's ${outcome.toolFailure}`);
+    if (failure !== undefined && !input.signal.aborted) {
+      await stopTyping();
+      const why = (failure instanceof Error ? failure.message : String(failure)).trim().replace(/\s+/gu, " ");
+      input.say(`Codex could not answer @${turn.sender}: ${why}. Nothing was sent.`);
       return;
     }
     const answer = (outcome?.answer ?? "").trim();
@@ -462,14 +808,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
       return;
     }
     try {
-      await input.client.chats.messages.send(turn.chatId, {
-        message: {
-          parts: [{ type: "text", value: answer.slice(0, MAX_RELAY_TEXT) }],
-          // The message that arrived is the key, so a retry after a dropped
-          // connection cannot answer the same person twice.
-          idempotency_key: replyKey(turn.eventId),
-        },
-      });
+      await sendAnswer(input.client, turn, answer, input.say);
       input.say(`Sent the answer to @${turn.sender}.`);
     } catch {
       input.say(`The answer to @${turn.sender} did not reach Relay.`);
@@ -481,6 +820,8 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
   await input.client.websocket.run({
     signal: input.signal,
     onEvent: async (event) => {
+      // A tap on an approval card answers a prompt; it is not a message to answer.
+      if (await input.approvals.take(event)) return;
       const turn = bridgeTurn(event);
       if (!turn || answered.has(turn.eventId)) return;
       answered.add(turn.eventId);
@@ -488,7 +829,8 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
       const lane = lanes.get(turn.chatId) ?? { chain: Promise.resolve() };
       lanes.set(turn.chatId, lane);
       const live = lane.live;
-      if (live !== undefined) {
+      const replacing = live !== undefined && replacesLiveTurn(turn, { fromAgent: lane.liveFromAgent === true });
+      if (live !== undefined && replacing) {
         live.dropped = true;
         try { await (await appServer()).request("turn/interrupt", { threadId: live.threadId, turnId: live.turnId }); }
         catch { /* The turn ended by itself, which is the same outcome. */ }
@@ -498,6 +840,9 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
       // Nothing may be thrown here: a failure would close the connection, and
       // Codex failing to answer one message is not a reason to stop.
       lane.chain = lane.chain.then(() => answerOne(turn, lane, ready)).catch(() => undefined).finally(() => { ready(); });
+      // A message that waits behind the live turn is taken now, so the turn
+      // it waits for does not hold this connection for every other chat.
+      if (live !== undefined && !replacing) ready();
       // Relay is told the message is handled once Codex is working on it. The
       // rest of the turn does not hold this connection, because every other
       // chat's messages, and the next message in this one, arrive down it.
@@ -505,6 +850,9 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
     },
     onFullSync: async () => {
       // This process keeps no copy of any chat, so there is nothing to rebuild.
+      // Throwing here would not stop the bridge: the SDK closes the socket and
+      // reconnects, Relay re-issues the same FULL sync, and no message is ever
+      // answered again. Acknowledge it and answer the new ones.
       input.say("Codex was away longer than Relay keeps its messages. It answers the new ones from now on.");
     },
   });

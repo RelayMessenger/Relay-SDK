@@ -17,6 +17,8 @@ export interface TurnOrigin {
   readonly chatId: string;
   readonly senderId: string;
   readonly senderHandle: string;
+  /** Whether a reply names this Message by default (see `DeliveryCandidate`). */
+  readonly linksReply: boolean;
 }
 
 export interface DeliveryCandidate {
@@ -28,6 +30,14 @@ export interface DeliveryCandidate {
   readonly senderHandle: string;
   readonly content: string;
   readonly meta: Readonly<Record<string, string>>;
+  /**
+   * Whether a reply names this Message when the model names none: the
+   * sender is an agent, and the Message does not open with buttons or a
+   * selection (an agent may not reply to those parts). Relay's A2A door gives
+   * a calling agent the reply that names its message. A person's Message is
+   * not named, so the chat looks as it always has.
+   */
+  readonly linksReply?: boolean;
   readonly createdAt: string;
 }
 

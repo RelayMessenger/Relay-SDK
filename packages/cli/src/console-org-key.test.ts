@@ -130,7 +130,7 @@ it("key reuse sends the actual key, retains the org identity, and redacts respon
   expect(fetch).toHaveBeenCalledTimes(2);
 });
 
-it.each([["login"], ["whoami"], ["agents", "create", "--name", "Rejected"]])(
+it.each([["login"], ["whoami"], ["agents", "create", "--subtitle", "Helps with tasks", "--name", "Rejected"]])(
   "revoked key command %j fails without device login or mutation",
   async (...args) => {
     const f = await fixture();
@@ -160,7 +160,7 @@ it.each([["login", "--with-token"], ["whoami"]])("non-JSON HTTP 401 exits 4 for 
   expect(fetch).toHaveBeenCalledOnce();
 });
 
-it.each([["login", "--with-token"], ["login"], ["whoami"], ["agents", "create"]])(
+it.each([["login", "--with-token"], ["login"], ["whoami"], ["agents", "create", "--subtitle", "Helps with tasks"]])(
   "network failure stays exit 1 for %j and retains credentials without OAuth",
   async (...args) => {
     const f = await fixture();
@@ -305,7 +305,7 @@ it.each(["cli_test", `cli_${"n".repeat(28)}`])("headless key create → local li
     if (url.endsWith("/v1/contact_card")) return Response.json({ contact_cards: [card] });
     throw new Error(`unexpected fixture request ${method} ${url}`);
   });
-  expect(await runCLI(["--json", "--no-input", "agents", "create", "--name", "CLI Test", "--handle", handle], { ...f.cli, fetch }), f.err.join("")).toBe(0);
+  expect(await runCLI(["--json", "--no-input", "agents", "create", "--subtitle", "Helps with tasks", "--name", "CLI Test", "--handle", handle], { ...f.cli, fetch }), f.err.join("")).toBe(0);
   const created = JSON.parse(f.out.pop()!);
   expect(created).toMatchObject({ handle, display_name: "CLI Test", image_url: null, organization_id: "org_fixture", token: "stored" });
   expect(created.profile.length).toBeLessThanOrEqual(64);
@@ -335,7 +335,7 @@ it.each([undefined, "requested"])("Console create preserves profile naming and c
     init?.method === "POST"
       ? Response.json({ agent: { handle, displayName: "CLI Test", avatarUrl: null }, token: "created-token" })
       : Response.json({ org: { id: "org_fixture" } }));
-  const args = ["--json", "--no-input", ...(requested ? ["--profile", requested] : []), "agents", "create"];
+  const args = ["--json", "--no-input", ...(requested ? ["--profile", requested] : []), "agents", "create", "--subtitle", "Helps with tasks"];
   expect(await runCLI(args, { ...f.cli, fetch })).toBe(0);
   const saved = await readConfig(f.context);
   expect(saved.profiles[handle]?.agent_token).toBe("unrelated-token");

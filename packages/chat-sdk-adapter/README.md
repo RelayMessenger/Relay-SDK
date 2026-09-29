@@ -17,6 +17,40 @@ record, and its `canonical` field names `Relay-SDK` -- the same repository
 Relay Chats map one-to-one to Chat SDK threads. Provider thread IDs are stable
 `relay:<chat UUID>` values; provider message IDs are bare Relay Message UUIDs.
 
+## Selection
+
+Send native text/selection parts through `postMessageParts` using the existing
+idempotency strategy. A selection carries its question in `title` (1 to 60
+characters); a text part is optional and shows as a normal message above the
+card. `message.text` retains the readable reply;
+`message.raw.message.parts` and `message.raw.message.reply_to` retain metadata
+through webhook ingress and history.
+
+New human reply text is literal `• ` + each selected source label joined with
+`\n`, followed by `selection_response` metadata in source-option order. Dispatch
+with `selected_values` and the explicit source target, never label parsing.
+Exact legacy comma-joined text remains a server compatibility input. The person
+checks any number of options and submits them once; checking sends nothing, and
+a person answers a given selection once. iOS may draw a checkmark in place of
+each bullet and repeat the prompt's title, as presentation only.
+
+## Payment
+
+An agent asks someone to pay in two steps. First create a payment request on
+your organization's connected Stripe account with
+`adapter.client.createPaymentRequest({ amount, currency, description, category })`
+(`category` is `physical_goods`, `digital_goods` or `donation`). Then send its
+`checkout_url` unchanged as a `payment` part through `postMessageParts`, on the
+same idempotency lane as other posts. The payment must be the only part of its
+Message, so send any words first with `postMessage`. A read-back payment
+carries the request's fields and its `status` in `message.raw.message.parts`.
+The status moves only on Stripe's word or your own
+`adapter.client.cancelPaymentRequest(id)`; your agent gets
+`payment.succeeded`, `payment.canceled` or `payment.expired`, and a paid
+request adds a `payment_receipt` message from the payer. Both parts reach
+`message.text` as one line, for example `Paid $24.00 for House blend, 250 g`
+or `Payment request: $24.00 for House blend, 250 g (requested)`.
+
 ## Install
 
 ```sh
@@ -183,6 +217,7 @@ reproducible contract tests and is excluded from the npm package.
 | outbound public-URL media | Message `media` part |
 | outbound bytes/files | `POST /v1/attachments` allocate, upload, then a Message `media` part |
 | inbound media | Chat SDK `Attachment` with `fetchData()` |
+| inbound reply (`reply_to`) | Chat SDK `message.replyTo`, read with `GET /v1/messages/{messageId}` |
 | `addReaction`, `removeReaction` | `POST /v1/messages/{messageId}/reactions` |
 | `startTyping`, `endTyping` | `POST`/`DELETE /v1/chats/{chatId}/typing` |
 | `markAsRead` | `POST /v1/chats/{chatId}/read` |
@@ -190,6 +225,29 @@ reproducible contract tests and is excluded from the npm package.
 | `fetchMessages({ direction: "forward" })` | One `GET /v1/chats/{chatId}/messages` |
 | `fetchMessage` | `GET /v1/messages/{messageId}` |
 | `fetchThread`, `fetchChannelInfo` | `GET /v1/chats/{chatId}` |
+
+### Inbound replies
+
+When a person swipe-replies to a Message, the webhook carries only a pointer,
+`reply_to: { message_id, part_index }`. The adapter reads that Message once
+with `GET /v1/messages/{messageId}` and sets Chat SDK's own `message.replyTo`
+to it, the way Chat SDK's Telegram adapter fills it from Telegram's
+`reply_to_message`. When the target has more than one part, `replyTo` holds
+only the part the person swiped. `replyTo.author.isMe` is `true` when the
+person replied to your agent's own Message.
+
+```ts
+chat.onDirectMessage(async (thread, message) => {
+  const target = message.replyTo; // the Message this one answers, or undefined
+});
+```
+
+Chat SDK's `toAiMessages` does not render `replyTo`, and neither does Think.
+Put it in the text your model reads for that turn, for example the way Hermes
+Agent does: `[Replying to your previous message: "…"]` above the person's
+text. A target that was deleted, or a read that fails, leaves `replyTo`
+unset; a failed read is logged as `relay_reply_target_failed` and never
+blocks the delivery.
 
 ### Inbound attachments
 

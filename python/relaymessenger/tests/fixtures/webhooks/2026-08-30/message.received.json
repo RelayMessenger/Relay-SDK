@@ -1,0 +1,100 @@
+{
+  "api_version": "v1",
+  "webhook_version": "2026-08-30",
+  "event_type": "message.received",
+  "event_id": "00000000-0000-7000-8000-000000000020",
+  "created_at": "2026-09-24T20:00:01.000Z",
+  "trace_id": "0123456789abcdef0123456789abcdef",
+  "agent_id": "00000000-0000-7000-8000-000000000021",
+  "data": {
+    "id": "00000000-0000-7000-8000-000000000022",
+    "chat": {
+      "id": "00000000-0000-7000-8000-000000000023",
+      "is_group": false,
+      "owner_handle": {
+        "id": "00000000-0000-7000-8000-000000000021",
+        "handle": "bets",
+        "display_name": "Bets",
+        "kind": "agent",
+        "is_me": true,
+        "is_contact": false,
+        "verified": false,
+        "subtitle": null,
+        "image_url": null,
+        "image_color": null,
+        "status": "active",
+        "joined_at": "2026-09-24T19:59:00.000Z",
+        "left_at": null
+      }
+    },
+    "direction": "inbound",
+    "sender_handle": {
+      "id": "00000000-0000-7000-8000-000000000024",
+      "handle": "advait",
+      "display_name": "Advait",
+      "kind": "user",
+      "is_me": false,
+      "verified": false,
+      "subtitle": null,
+      "image_url": null,
+      "image_color": null,
+      "status": "active",
+      "joined_at": "2026-09-24T19:59:00.000Z",
+      "left_at": null
+    },
+    "parts": [
+      {
+        "type": "text",
+        "value": "Bet $50",
+        "text_decorations": null,
+        "mentions": null,
+        "mention": null,
+        "mention_range": null,
+        "reactions": null
+      },
+      {
+        "type": "data",
+        "media_type": "application/a2ui+json",
+        "data": [
+          {
+            "version": "v0.9.1",
+            "action": {
+              "name": "place_bet",
+              "surfaceId": "bet-lakers",
+              "sourceComponentId": "bet",
+              "timestamp": "2026-09-24T20:00:00Z",
+              "context": {
+                "side": "yes",
+                "stake": 50
+              }
+            }
+          }
+        ],
+        "reactions": null
+      }
+    ],
+    "reply_to": {
+      "message_id": "00000000-0000-7000-8000-000000000025",
+      "part_index": 1
+    },
+    "thread": {
+      "originator_message_id": "00000000-0000-7000-8000-000000000025",
+      "originator_part_index": 1
+    },
+    "silent": false,
+    "sent_at": "2026-09-24T20:00:01.000Z",
+    "delivered_at": "2026-09-24T20:00:01.000Z",
+    "read_at": null,
+    "idempotency_key": null,
+    "metadata": {
+      "a2uiClientCapabilities": {
+        "v0.9": {
+          "supportedCatalogIds": [
+            "https://relayapp.im/a2ui/catalog/v1",
+            "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
+          ]
+        }
+      }
+    }
+  }
+}

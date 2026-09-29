@@ -43,6 +43,24 @@ export const platformCommand = (
   ? { file: escapeForCmd(file), args: args.map(escapeForCmd), shell: true }
   : { file, args: [...args], shell: false };
 
+/**
+ * What `spawn` receives. A shim runs as `cmd.exe /d /s /c "<line>"` with the
+ * arguments passed verbatim: the command line Node itself builds for
+ * `shell: true` (lib/child_process.js, `normalizeSpawnArguments`) and the one
+ * cross-spawn builds (7.0.6, lib/parse.js). Node deprecates an `args` array
+ * with `shell: true` (DEP0190, runtime since v24.0.0) and documents spawning
+ * `cmd.exe` with the shim as its argument instead (doc/api/child_process.md,
+ * "Spawning .bat and .cmd files on Windows"); both saved at
+ * _sources/node-dep0190-20260926/.
+ */
+export const spawnArguments = (
+  line: PlatformCommand,
+  options: SpawnOptions = {},
+  comspec: string = process.env.comspec || "cmd.exe",
+): { file: string; args: string[]; options: SpawnOptions } => line.shell
+  ? { file: comspec, args: ["/d", "/s", "/c", `"${[line.file, ...line.args].join(" ")}"`], options: { ...options, shell: false, windowsVerbatimArguments: true, windowsHide: true } }
+  : { file: line.file, args: line.args, options: { ...options, shell: false, windowsHide: true } };
+
 /** Starts that program, and hands the caller the process it started. */
 export const spawnCommand = (
   file: string,
@@ -50,6 +68,6 @@ export const spawnCommand = (
   options: SpawnOptions = {},
   platform: NodeJS.Platform = process.platform,
 ): ChildProcess => {
-  const line = platformCommand(file, args, platform);
-  return spawn(line.file, line.args, { ...options, shell: line.shell, windowsHide: true });
+  const call = spawnArguments(platformCommand(file, args, platform), options);
+  return spawn(call.file, call.args, call.options);
 };

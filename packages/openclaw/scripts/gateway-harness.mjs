@@ -1,21 +1,39 @@
+import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
+import {
+  candidateTarball,
+  candidateConsumerManifest,
+  assertInstalledCandidate,
+} from "../../sdk/scripts/candidate-tarball.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const temp = mkdtempSync(join(tmpdir(), "relay-openclaw-gateway-"));
+const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+const candidate = candidateTarball({
+  name: "@relaymessenger/sdk",
+  version: packageJson.dependencies["@relaymessenger/sdk"],
+  variable: "RELAY_SDK_CANDIDATE_TARBALL",
+});
+// realpathSync.native expands Windows 8.3 short names (C:\Users\RUNNER~1), as
+// OpenClaw does when it matches the installed package to its install record;
+// the JavaScript realpathSync keeps the short name and the install fails with
+// "has no authoritative runtime child list".
+const temp = realpathSync.native(mkdtempSync(join(tmpdir(), "relay-openclaw-gateway-")));
 const home = join(temp, "home");
 const pack = join(temp, "pack");
 const require = createRequire(import.meta.url);
@@ -39,7 +57,61 @@ const openclaw = openClawRoot;
 if (openclaw === dirname(openclaw) || !existsSync(openclaw)) {
   throw new Error("could not locate the OpenClaw CLI entry");
 }
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+// npm's JS entry point, run with this Node: Node refuses to spawn npm.cmd on
+// Windows without a shell (EINVAL, CVE-2024-27980), the same reason
+// scripts/agent-cli-platforms.mjs runs npm this way.
+function runNpm(args, options) {
+  return process.env.npm_execpath
+    ? execFileSync(process.execPath, [process.env.npm_execpath, ...args], options)
+    : execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", args, {
+      ...options,
+      shell: process.platform === "win32",
+    });
+}
+// --overlap: another agent sends two Messages in one Chat, the second while
+// the model still answers the first, as two overlapping A2A calls do. Relay's
+// A2A door gives each caller only the answer whose reply_to names its Message.
+const overlap = process.argv.includes("--overlap");
+
+function ownedPath(path, owner) {
+  assert.ok(typeof path === "string" && isAbsolute(path), "expected an absolute managed path");
+  const actual = realpathSync(path);
+  const within = relative(realpathSync(owner), actual);
+  assert.ok(
+    within && within !== ".." && !within.startsWith(`..${sep}`) && !isAbsolute(within),
+    `managed path escapes the harness-owned directory: ${path}`,
+  );
+  return actual;
+}
+
+function managedCandidateProject(install, stateDir) {
+  assert.equal(install?.source, "npm", "candidate requires a managed npm install");
+  assert.equal(install?.artifactKind, "npm-pack", "candidate requires the packed plugin");
+  // Resolve the installer receipt, never guess an extensions/ or npm/projects/ path.
+  const owner = ownedPath(stateDir, temp);
+  const installed = ownedPath(install.installPath, owner);
+  const installedManifest = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
+  assert.equal(installedManifest.name, packageJson.name);
+  assert.equal(installedManifest.version, packageJson.version);
+  for (let project = dirname(installed); project !== owner; project = dirname(project)) {
+    ownedPath(project, owner);
+    const manifestPath = join(project, "package.json");
+    const lockPath = join(project, "package-lock.json");
+    if (!existsSync(manifestPath) || !existsSync(lockPath)) continue;
+    for (const path of [manifestPath, lockPath]) {
+      ownedPath(path, project);
+      assert.ok(lstatSync(path).isFile(), "managed manifest and lock must be regular files");
+    }
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+    const key = relative(project, installed).split(sep).join("/");
+    assert.equal(key, `node_modules/${packageJson.name}`, "plugin must belong to the managed project");
+    assert.ok(manifest.dependencies?.[packageJson.name], "managed project must depend on the plugin");
+    assert.equal(lock.packages?.[key]?.version, packageJson.version, "managed lock must contain the plugin");
+    return { project, installed, manifestPath, manifest };
+  }
+  throw new Error("could not locate the managed plugin's package.json + package-lock.json project");
+}
 
 async function freePort() {
   return await new Promise((resolvePort, reject) => {
@@ -71,7 +143,7 @@ let gateway;
 try {
   mkdirSync(home, { recursive: true });
   mkdirSync(pack, { recursive: true });
-  execFileSync(npm, ["pack", ".", "--pack-destination", pack], {
+  runNpm(["pack", ".", "--pack-destination", pack], {
     cwd: root,
     stdio: "pipe",
     env: {
@@ -129,6 +201,39 @@ try {
   }
   if (!existsSync(join(inspection.install.installPath, "dist", "index.js"))) {
     throw new Error("OpenClaw inspected install is missing dist/index.js");
+  }
+  if (candidate) {
+    // Inspect returns the effective install record; recent OpenClaw versions do
+    // not persist plugins.installs in openclaw.json. Keep its npm/archive proof.
+    const { project, installed, manifestPath, manifest } =
+      managedCandidateProject(inspection.install, stateDir);
+    const pluginManifest = readFileSync(join(installed, "package.json"), "utf8");
+    // Change only the disposable project, not the packed/installed plugin manifest.
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify(candidateConsumerManifest(manifest, [candidate]), null, 2)}\n`,
+    );
+    runNpm([
+      "install",
+      "--prefix", project,
+      "--ignore-scripts",
+      "--omit=optional",
+      "--legacy-peer-deps",
+      "--package-lock=true",
+      "--no-audit",
+      "--no-fund",
+    ], { cwd: project, env, stdio: "inherit" });
+    assert.equal(readFileSync(join(installed, "package.json"), "utf8"), pluginManifest);
+    const importer = join(installed, "dist", "index.js");
+    ownedPath(createRequire(importer).resolve("@relaymessenger/sdk/package.json"), project);
+    assertInstalledCandidate(project, importer, candidate);
+    console.log(JSON.stringify({
+      validationMode: "local-candidate-not-registry",
+      proof: "managed plugin resolves retained SDK archive",
+      installPath: installed,
+      project,
+      integrity: candidate.integrity,
+    }));
   }
 
   const relayPort = await freePort();
@@ -210,7 +315,11 @@ try {
   let gatewayOutput = "";
   mock = spawn(process.execPath, [join(root, "harness", "mock-relay-server.mjs")], {
     cwd: temp,
-    env: { ...env, MOCK_RELAY_PORT: String(relayPort) },
+    env: {
+      ...env,
+      MOCK_RELAY_PORT: String(relayPort),
+      ...(overlap ? { RELAY_OPENCLAW_HARNESS_OVERLAP: "1", RELAY_OPENCLAW_HARNESS_SENDER_KIND: "agent" } : {}),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   mock.stdout.on("data", (chunk) => {
@@ -248,10 +357,10 @@ try {
     gatewayOutput += chunk.toString();
   });
 
-  const deadline = Date.now() + 60_000;
+  const deadline = Date.now() + (overlap ? 90_000 : 60_000);
   while (
     !/cumulative ACK 1 durable=\w+ count=2/u.test(mockOutput) ||
-    !mockOutput.includes("Message send count=1")
+    !mockOutput.includes(overlap ? "Message send count=2" : "Message send count=1")
   ) {
     if (gateway.exitCode !== null) {
       throw new Error(
@@ -271,6 +380,18 @@ try {
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
 
+  if (overlap) {
+    // Let a late third send or turn show itself before judging.
+    await new Promise((resolveWait) => setTimeout(resolveWait, 5_000));
+    const sends = [...mockOutput.matchAll(/Message send count=\d+ key=\S+ replayed=false reply_to=(\S+)/gu)].map((match) => match[1]);
+    console.log(mockOutput.split("\n").filter((line) => /Message send|completion request|second Message/u.test(line)).join("\n"));
+    assert.deepEqual(
+      [...sends].sort(),
+      ["00000000-0000-7000-8000-000000000012", "00000000-0000-7000-8000-000000000016"],
+      `each overlapping Message needs its own answer naming it\n${mockOutput}`,
+    );
+    console.log("Relay OpenClaw overlap harness passed: two overlapping agent Messages, two answers, each naming its own Message.");
+  } else {
   for (const proof of [
     "GET /v1/webhook-subscriptions",
     "UPGRADE /v1/websocket",
@@ -284,6 +405,12 @@ try {
       throw new Error(`missing gateway proof "${proof}"\n${mockOutput}`);
     }
   }
+  // The answer replies to the message it answers, as a bot's reply names the
+  // message it answers (Telegram reply_parameters.message_id): Relay's A2A door gives
+  // a caller only the reply that names its message.
+  if (!mockOutput.includes("Message send count=1 key=") || !/Message send count=1 key=\S+ replayed=false reply_to=00000000-0000-7000-8000-000000000012\b/u.test(mockOutput)) {
+    throw new Error(`the answer does not reply to the message it answers\n${mockOutput}`);
+  }
   if (
     mockOutput.includes("completion request count=2") ||
     mockOutput.includes("Message send count=2")
@@ -296,12 +423,14 @@ try {
     }
   }
 
+  console.log(mockOutput.split("\n").filter((line) => line.includes("Message send")).join("\n"));
   console.log(
-    "Relay OpenClaw installed npm-pack inspect + WebSocket gateway harness passed.",
+    `Relay OpenClaw installed npm-pack inspect + WebSocket gateway harness passed (${candidate ? "local candidate; NOT registry/release validation" : "registry dependencies"}).`,
   );
   console.log(
     "Proof: durable cumulative ACK, replay suppression, heartbeat, one model turn, one idempotent Chat Message.",
   );
+  }
 } finally {
   await Promise.all([stop(gateway), stop(mock)]);
   rmSync(temp, { recursive: true, force: true, maxRetries: 10 });

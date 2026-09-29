@@ -204,5 +204,5 @@ test("writes the version into package.json and every claude-code carrier", () =>
     "0.9.1-staging.0",
   );
   // Siblings keep their version.
-  assert.equal(readJson(join(temp, "packages/mcp/package.json")).version, "0.9.0-staging.3");
+  assert.equal(readJson(join(temp, "packages/openclaw/package.json")).version, "0.9.0-staging.3");
 });

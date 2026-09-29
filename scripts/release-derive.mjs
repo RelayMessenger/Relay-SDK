@@ -8,7 +8,7 @@
 // This file is the pure part: derivation, order, plan, and the manifest
 // rewrite. scripts/release-run.mjs drives npm, git, and GitHub around it.
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { releaseKeys, releasePackages } from "./release-packages.mjs";
 
@@ -191,4 +191,142 @@ export function filesCarryingVersion(directory, version) {
 /** Derive even skipped workspaces before resolving dependents against them. */
 export function rewriteReleaseWorkspace(root, plan, options = {}) {
   return plan.flatMap((row) => rewritePackage(root, row.key, plan, options));
+}
+
+// A Relay pin in a cookbook that names a staging build: an exact
+// `X.Y.Z-staging.N`, or a `^`/`~` range whose lower bound is one.
+const COOKBOOK_PRERELEASE_PIN = /^([\^~]?)(\d+\.\d+\.\d+-staging\.\d+)$/u;
+// What a copied cookbook never carries (validate-cookbook-standalone.mjs).
+const COOKBOOK_SKIP = new Set([".artifacts", ".dev.vars", ".git", ".wrangler", "coverage", "dist", "node_modules"]);
+
+function cookbookFiles(directory) {
+  const found = [];
+  const walk = (current) => {
+    for (const name of readdirSync(current)) {
+      if (COOKBOOK_SKIP.has(name)) continue;
+      const path = join(current, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else found.push(path);
+    }
+  };
+  walk(directory);
+  return found.sort();
+}
+
+/** Every cookbook folder under `root` that has a package.json. */
+export function cookbookDirectories(root) {
+  const cookbookRoot = join(root, "cookbook");
+  return readdirSync(cookbookRoot)
+    .map((name) => join(cookbookRoot, name))
+    .filter((path) => statSync(path).isDirectory() && existsSync(join(path, "package.json")))
+    .sort();
+}
+
+/** The Relay pins in a cookbook manifest that still name a staging build. */
+export function cookbookPrereleasePins(manifest, plan) {
+  const names = new Set(plan.map((row) => row.name));
+  const found = [];
+  for (const field of DEPENDENCY_FIELDS) {
+    for (const [name, range] of Object.entries(manifest[field] ?? {})) {
+      if (names.has(name) && /-staging\./u.test(range)) found.push({ field, name, range });
+    }
+  }
+  return found;
+}
+
+/**
+ * Rewrites one cookbook's Relay prerelease pins to the versions the release
+ * publishes, the same derivation rewritePackage applies to the packages. The
+ * cookbook-standalone check on main installs a copied folder from npm's
+ * `latest` and rejects any prerelease (validate-cookbook-standalone.mjs), so
+ * a staging pin such as the Think starter's `0.3.6-staging.46` has to become
+ * the plain `0.3.6` the release publishes.
+ *
+ * An exact pin becomes the plan's version; every other file in the folder
+ * that carries the pinned staging version (its package-lock.json entry and
+ * tarball URL, a contract test, the README) follows, and a lockfile's
+ * integrity for that package becomes `integrityByName.get(name)`, the
+ * integrity of the tarball the release publishes. A `^`/`~` range keeps its
+ * operator and loses only the prerelease. Fails closed when a staging version
+ * survives anywhere in the folder. Returns the paths written.
+ */
+export function rewriteCookbook(directory, plan, { integrityByName = new Map() } = {}) {
+  const manifestPath = join(directory, "package.json");
+  const manifest = readJson(manifestPath);
+  const pins = cookbookPrereleasePins(manifest, plan);
+  if (pins.length === 0) return [];
+  const lockPath = join(directory, "package-lock.json");
+  const lock = existsSync(lockPath) ? readJson(lockPath) : null;
+  const replacements = [];
+  for (const { field, name, range } of pins) {
+    const match = COOKBOOK_PRERELEASE_PIN.exec(range);
+    assert.ok(match, `${directory} pins ${name}@${range}; only X.Y.Z-staging.N, ^X.Y.Z-staging.N or ~X.Y.Z-staging.N derive`);
+    const [, operator, staging] = match;
+    const row = plan.find((entry) => entry.name === name);
+    if (operator) {
+      assert.equal(lock?.packages?.[`node_modules/${name}`], undefined,
+        `${directory} locks ${name} under the range ${range}; pin it exactly so the release can rewrite the lock`);
+      manifest[field][name] = `${operator}${deriveVersion(staging)}`;
+      continue;
+    }
+    manifest[field][name] = row.version;
+    replacements.push([staging, row.version]);
+    const locked = lock?.packages?.[`node_modules/${name}`];
+    if (locked?.integrity) {
+      assert.equal(locked.version, staging, `${directory} locks ${name}@${locked.version} but pins ${staging}`);
+      const integrity = integrityByName.get(name);
+      assert.ok(integrity, `${directory} locks ${name}; the release has no integrity for ${name}@${row.version}`);
+      replacements.push([locked.integrity, integrity]);
+    }
+  }
+  const staleVersions = pins.map(({ range }) => COOKBOOK_PRERELEASE_PIN.exec(range)[2]);
+  const counts = new Map(staleVersions.map((version) => [version, 0]));
+  for (const version of staleVersions) counts.set(version, counts.get(version) + 1);
+  for (const [version, count] of counts) {
+    assert.equal(count, 1, `${directory} pins two Relay packages at ${version}; the rewrite cannot tell them apart`);
+  }
+  writeJson(manifestPath, manifest);
+  const written = new Set([manifestPath]);
+  for (const path of cookbookFiles(directory)) {
+    const before = readFileSync(path);
+    if (before.includes(0)) continue;
+    let text = before.toString("utf8");
+    for (const [from, to] of replacements) text = text.split(from).join(to);
+    if (path === lockPath && lock) {
+      // The lock's root entry repeats the manifest's ranges; keep them equal.
+      const rewritten = JSON.parse(text);
+      for (const field of DEPENDENCY_FIELDS) {
+        for (const [name, range] of Object.entries(manifest[field] ?? {})) {
+          if (rewritten.packages?.[""]?.[field]?.[name] !== undefined) rewritten.packages[""][field][name] = range;
+        }
+      }
+      text = `${JSON.stringify(rewritten, null, 2)}\n`;
+    }
+    if (text !== before.toString("utf8")) {
+      writeFileSync(path, text);
+      written.add(path);
+    }
+  }
+  if (lock) {
+    // Any Relay package the lockfile still resolves to a staging build, at
+    // any depth, is one the release did not derive.
+    const names = new Set(plan.map((row) => row.name));
+    for (const [key, entry] of Object.entries(readJson(lockPath).packages ?? {})) {
+      const name = key.split("node_modules/").pop();
+      assert.ok(!(names.has(name) && /-staging\./u.test(entry.version ?? "")),
+        `${lockPath} still resolves ${key} to ${entry.version} after the release rewrite`);
+    }
+  }
+  for (const path of cookbookFiles(directory)) {
+    const bytes = readFileSync(path);
+    for (const version of staleVersions) {
+      assert.ok(!bytes.includes(Buffer.from(version)), `${path} still carries ${version} after the release rewrite`);
+    }
+  }
+  return [...written].sort();
+}
+
+/** rewriteCookbook over every cookbook folder. Returns the paths written. */
+export function rewriteCookbooks(root, plan, options = {}) {
+  return cookbookDirectories(root).flatMap((directory) => rewriteCookbook(directory, plan, options));
 }

@@ -74,7 +74,7 @@ writeFileSync(
       type: "module",
       dependencies: {
         "@relaymessenger/chat-sdk-adapter": `file:${tarball}`,
-        chat: "4.39.0",
+        chat: manifest.devDependencies.chat,
         typescript: "7.0.2",
       },
     },

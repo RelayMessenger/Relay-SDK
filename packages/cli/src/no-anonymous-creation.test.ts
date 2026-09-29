@@ -6,8 +6,8 @@ import { runCLI } from "./program.js";
 import { readConfig } from "./config.js";
 
 it.each([
-  ["agents", "create"],
-  ["connect", "codex", "--new", "--yes", "--no-start", "--no-skill", "--allow", "fixture"],
+  ["agents", "create", "--subtitle", "Helps with tasks"],
+  ["connect", "codex", "--subtitle", "Helps with tasks", "--new", "--yes", "--no-start", "--no-skill", "--allow", "fixture"],
 ])("requires Console auth instead of anonymous creation: %j", async (...args) => {
   const home = await mkdtemp(join(tmpdir(), "relay-no-anonymous-"));
   try {

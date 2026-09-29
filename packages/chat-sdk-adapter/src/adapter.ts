@@ -54,6 +54,9 @@ import type {
   RelayChatHandle,
   RelayMessage,
   RelayMessagePartResponse,
+  RelayOutgoingPart,
+  RelayPaymentPartResponse,
+  RelayPaymentReceiptPartResponse,
   RelayRawMessage,
   RelaySentMessage,
   RelayThreadId,
@@ -68,6 +71,7 @@ import {
 import {
   assertExhaustiveEvent,
   parseReactionEvent,
+  isKnownWebhookEventType,
   parseWebhookEnvelope,
   parseWebhookMessageEvent,
   readWebhookBody,
@@ -185,6 +189,30 @@ function messageParts(
   return (message.parts ?? []) as RelayMessagePartResponse[];
 }
 
+/** An amount in the currency's minor units, written the way a person reads it. */
+function money(amount: number, currency: string): string {
+  const format = new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase() });
+  return format.format(amount / 10 ** (format.resolvedOptions().maximumFractionDigits ?? 2));
+}
+
+function renewal(part: { mode: string; recurring?: { interval: string; interval_count: number } }): string {
+  if (part.mode !== "subscription" || !part.recurring) return "";
+  const { interval, interval_count: count } = part.recurring;
+  return count === 1 ? `, renewing every ${interval}` : `, renewing every ${count} ${interval}s`;
+}
+
+/**
+ * A payment card and the payer's receipt carry no text of their own, so the
+ * model reads one short factual line built from the part's fields; the part
+ * itself stays intact in `raw`.
+ */
+function paymentLine(part: RelayPaymentPartResponse | RelayPaymentReceiptPartResponse): string {
+  const what = `${money(part.amount, part.currency)} for ${part.description}${renewal(part)}`;
+  return part.type === "payment_receipt"
+    ? `Paid ${what}`
+    : `Payment request: ${what} (${part.status})`;
+}
+
 function textAndLinks(parts: RelayMessagePartResponse[]): {
   links: LinkPreview[];
   value: string;
@@ -200,6 +228,8 @@ function textAndLinks(parts: RelayMessagePartResponse[]): {
     } else if (part.type === "link") {
       pieces.push(part.value);
       links.push({ url: part.value });
+    } else if (part.type === "payment" || part.type === "payment_receipt") {
+      pieces.push(paymentLine(part));
     }
   }
   return { links, value: pieces.join("\n\n") };
@@ -334,6 +364,19 @@ export class RelayAdapter
    * through the console before that, so a warning is never lost to whichever
    * side of `initialize` it happens on.
    */
+  private readonly unknownEventTypes = new Set<string>();
+
+  private reportUnknownEventType(envelope: RelayWebhookEnvelope): void {
+    const eventType: string = envelope.event_type;
+    if (this.unknownEventTypes.has(eventType)) return;
+    this.unknownEventTypes.add(eventType);
+    this.warn("relay_unknown_event_type", {
+      eventType,
+      eventId: envelope.event_id,
+      message: "This adapter release does not know this event type; it was skipped and acknowledged.",
+    });
+  }
+
   private warn(event: string, fields: Record<string, unknown>): void {
     const logger = this.chat?.getLogger("relay");
     if (logger) logger.warn(event, fields);
@@ -533,20 +576,21 @@ export class RelayAdapter
     threadId: string,
     message: AdapterPostableMessage,
     replyToMessageId?: string,
+    nativeParts?: readonly RelayOutgoingPart[],
   ): Promise<RawMessage<RelayRawMessage>> {
     const { chatId } = this.decodeThreadId(threadId);
     const turn = this.turns.active();
     if (
       !turn &&
       !this.idempotencyKeyResolver &&
-      hasPostableContent(message)
+      (nativeParts ? nativeParts.length > 0 : hasPostableContent(message))
     ) {
       throw new ValidationError(
         "relay",
         "Relay posts outside an inbound webhook require idempotencyKeyResolver",
       );
     }
-    const parts = await buildRelayParts(message, (upload) =>
+    const parts = nativeParts ? [...nativeParts] : await buildRelayParts(message, (upload) =>
       this.client.uploadAttachment(upload),
     );
     if (parts.length === 0) {
@@ -719,6 +763,17 @@ export class RelayAdapter
     message: AdapterPostableMessage,
   ): Promise<RawMessage<RelayRawMessage>> {
     return this.send(threadId, message);
+  }
+
+  /** Native Relay components use the same webhook-turn ordering, idempotency
+   * and external key requirement as ordinary Chat SDK posts. */
+  async postMessageParts(
+    threadId: string,
+    parts: readonly RelayOutgoingPart[],
+    replyToMessageId?: string,
+  ): Promise<RawMessage<RelayRawMessage>> {
+    if (replyToMessageId) assertRelayUuid(replyToMessageId, "messageId");
+    return this.send(threadId, { raw: "" }, replyToMessageId, parts);
   }
 
   async postChannelMessage(
@@ -1073,6 +1128,16 @@ export class RelayAdapter
     let envelope: RelayWebhookEnvelope;
     try {
       envelope = parseWebhookEnvelope(decoded);
+      if (!isKnownWebhookEventType(envelope.event_type)) {
+        // Skipped and acknowledged, so Relay does not redeliver it; reported
+        // once per event type for this adapter.
+        this.reportUnknownEventType(envelope);
+        return json(200, {
+          acknowledged: true,
+          event_id: envelope.event_id,
+          event_type: envelope.event_type,
+        });
+      }
       await this.turns.run(envelope.event_id, () =>
         this.dispatch(envelope, options),
       );
@@ -1128,6 +1193,52 @@ export class RelayAdapter
     }
   }
 
+  /**
+   * The Message a person's swipe-reply names, as Chat SDK's own
+   * `Message.replyTo`, so a model sees what the reply answers.
+   *
+   * Relay's wire carries a reply as a bare pointer, `reply_to: { message_id,
+   * part_index }`, so the target is read once through GET /v1/messages/{id}.
+   * Telegram's Chat SDK adapter fills `replyTo` the same way from the quoted
+   * `reply_to_message` its webhook embeds.
+   *
+   * A reply names one bubble. When the target has more than one part, only
+   * the named part is kept, the rule Relay's iOS app uses to draw the quote
+   * (Relay-iOS `MessageReply.targetsExactPart`).
+   *
+   * A target that is gone, or a read that fails, never blocks the delivery:
+   * the Message is dispatched without `replyTo`, the policy the adapter keeps
+   * for its other reads around a delivery (`readOnReceipt`).
+   */
+  private async replyTarget(
+    threadId: string,
+    replyTo: NonNullable<RelayWebhookMessageEvent["reply_to"]>,
+  ): Promise<Message<RelayRawMessage> | undefined> {
+    const { chatId } = this.decodeThreadId(threadId);
+    try {
+      const target = await this.client.getMessage(replyTo.message_id);
+      if (target.chat_id !== chatId) return undefined;
+      const parts = target.parts ?? [];
+      const part =
+        parts.length > 1 && replyTo.part_index !== undefined
+          ? parts[replyTo.part_index]
+          : undefined;
+      return this.parseMessage({
+        chatId,
+        message: part ? { ...target, parts: [part] } : target,
+      });
+    } catch (error) {
+      if (!(error instanceof ResourceNotFoundError)) {
+        this.warn("relay_reply_target_failed", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+          messageId: replyTo.message_id,
+        });
+      }
+      return undefined;
+    }
+  }
+
   private initializedChat(): ChatInstance {
     if (!this.chat) {
       throw new Error(
@@ -1180,10 +1291,15 @@ export class RelayAdapter
         if (this.markReadOnReceipt) {
           await this.readOnReceipt(data.chat.id);
         }
+        const message = this.parseMessage(raw);
+        if (data.reply_to) {
+          const replyTo = await this.replyTarget(threadId, data.reply_to);
+          if (replyTo) message.replyTo = replyTo;
+        }
         await this.initializedChat().processMessage(
           this,
           threadId,
-          this.parseMessage(raw),
+          message,
           options,
         );
         return;
@@ -1243,6 +1359,30 @@ export class RelayAdapter
       case "chat.typing_indicator.stopped":
       case "contact.added":
       case "contact.removed":
+        return;
+      // The Chat SDK has no call primitive, so a Call's lifecycle is not
+      // recorded or dispatched either.
+      case "call.created":
+      case "call.updated":
+      case "call.ended":
+        return;
+      // The Chat SDK has no payment primitive either; the payer's receipt
+      // still arrives as an ordinary `message.received`.
+      case "payment.succeeded":
+      case "payment.canceled":
+      case "payment.expired":
+        return;
+      // Nor a location primitive; read the position with
+      // GET /v1/chats/{chatId}/location through the SDK client.
+      case "location.sharing.started":
+      case "location.sharing.stopped":
+        return;
+      // Tasks between agents are A2A Tasks, not chat messages; the Chat SDK
+      // has no primitive for them.
+      case "task.created":
+      case "task.message":
+      case "task.canceled":
+      case "task.updated":
         return;
       default:
         return assertExhaustiveEvent(envelope.event_type);

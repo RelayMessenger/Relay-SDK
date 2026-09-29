@@ -1,3 +1,4 @@
+import { requireSubtitle } from "./agent-create.js";
 import { openSavedAgentSession, savedAgentShareURL, type AgentSessionInput, type AgentSessionDependencies } from "./agent-session.js";
 import { prepareAgentImage } from "./local-image.js";
 import { uploadAgentImage } from "./agent-image-upload.js";
@@ -9,9 +10,10 @@ import { codexCommand, runCodexBridge } from "./codex-bridge.js";
 import { claudeCommand, runClaudeBridge } from "./claude-bridge.js";
 import { openClaudeThreads } from "./claude-threads.js";
 import { openCodexThreads } from "./codex-threads.js";
-import { acpCommand, relayMcpServer, runAcpBridge } from "./acp-bridge.js";
+import { acpCommand, runAcpBridge } from "./acp-bridge.js";
 import { openAcpSessions } from "./acp-threads.js";
 import { runPiChannel } from "@relaymessenger/pi";
+import { OwnerApprovals, piApprovals } from "./approvals.js";
 import { sdkTerminalObserver, terminalEventLine } from "./terminal-watch.js";
 import { dim, link } from "./ui-colour.js";
 import { installRelaySkill, relaySkillGlobalArgs, relaySkillPresent } from "./skill-offer.js";
@@ -25,6 +27,7 @@ import Relay, {
   type AgentImageRecipe,
   type ChatCreateParams,
   type ChatSendVoicememoParams,
+  type ChatSetActivityParams,
   type ChatUpdateParams,
   type ContactCardCreateParams,
   type ContactCardUpdateParams,
@@ -61,7 +64,7 @@ import {
   writeConfig,
 } from "./config.js";
 import { runDoctor } from "./doctor.js";
-import { DOCS_LINE, formatRelayHelp, HELP_GROUPS, helpFooter } from "./help-groups.js";
+import { docsLine, formatRelayHelp, HELP_GROUPS, helpFooter } from "./help-groups.js";
 import { AGENT_MODES, CLAUDE_CODE_HINT, DOCS_LLMS_URL, agentDetectedLines, agentMode, docsSection, docsSections, readDocs, resolveDrivingAgent, skillTargets } from "./agent-driver.js";
 import { supportedAgentsLine } from "./coding-agents.js";
 import { errorText, jsonText, safeMetadata } from "./output.js";
@@ -72,6 +75,9 @@ import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
 import { verboseFetch } from "./verbose.js";
 import { relayHelpHeading, writeRelayHelpHeading } from "./relay-brand.js";
 import { consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, consoleSignOut, deleteConsoleAgent } from "./console-auth.js";
+import { AGENTS_CAN_MESSAGE, peopleSwitch, removeAccess, setAccess, showAccess, updateReach, type AgentsCanMessage } from "./agent-access.js";
+import { setReachPreset } from "./agent-access.js";
+import { linkPhone, phoneLinkSentence } from "./phone-link.js";
 
 // The shipped version is the manifest's; the release job derives it, so no
 // source file may carry its own copy.
@@ -127,10 +133,15 @@ const agentModeValue = (value: string): string => {
   return value;
 };
 
-// Console about text and the retained Contact Card update contract: trim, 1–60.
-const aboutText = (value: string): string => {
+const subtitleText = (value: string): string => {
   const text = value.trim();
-  if (!text || [...text].length > 60) throw new InvalidArgumentError("About must be 1 to 60 characters.");
+  if (!text || [...text].length > 60) throw new InvalidArgumentError("Subtitle must be 1 to 60 characters.");
+  return text;
+};
+
+const descriptionText = (value: string): string => {
+  const text = value.trim();
+  if (!text || [...text].length > 2000) throw new InvalidArgumentError("Description must be 1 to 2000 characters.");
   return text;
 };
 
@@ -248,7 +259,7 @@ export const createProgram = (
   // protocol-error class obeys the same format as every other error; ledger
   // rows P05 and P49, captures/relay/exit-usage-badflag-json.txt).
   const usageError = (message: string, write: (value: string) => void): void => {
-    if (!dependencies.json) write(`${message.replace(/(?:rly_|rel_org_)[A-Za-z0-9_-]+/gu, "[REDACTED]")}${DOCS_LINE}\n`);
+    if (!dependencies.json) write(`${message.replace(/(?:rly_|rel_org_)[A-Za-z0-9_-]+/gu, "[REDACTED]")}${docsLine(configContext.env ?? process.env)}\n`);
   };
   program.configureOutput({
     writeOut: stdout,
@@ -261,7 +272,7 @@ export const createProgram = (
     minWidthToWrap: Number.POSITIVE_INFINITY,
   });
   // Every help screen ends the same way (GNU 4.8.2; gh's LEARN MORE block).
-  program.addHelpText("afterAll", (context) => helpFooter(context.command === program));
+  program.addHelpText("afterAll", (context) => helpFooter(context.command === program, configContext.env ?? process.env));
 
   const agentDeps = dependencies.agents ?? agentDependencies(configContext, dependencies.fetch);
   const readStdinText = dependencies.readStdin ?? (async () => {
@@ -301,7 +312,8 @@ export const createProgram = (
     .option("--new", "a new agent")
     .option("--handle <handle>", "the agent's handle")
     .option("--name <name>", "the display name")
-    .option("--about <text>", "the line above the first message", aboutText)
+    .option("--subtitle <text>", "the line under the agent's name, 60 characters", subtitleText)
+    .option("--description <text>", "what it can do, 2000 characters", descriptionText)
     .option("--image <path-or-url>", "a picture file or https:// address")
     .option("--avatar <file>", "a local PNG or JPEG picture")
     // gh's `auth login --with-token` (ledger row P25): the token comes down a
@@ -351,7 +363,11 @@ export const createProgram = (
           const control = new AbortController();
           const stop = (): void => control.abort();
           process.once("SIGINT", stop);
+          process.once("SIGTERM", stop);
           const relayClient = () => new Relay({ apiKey: input.token, baseURL: input.apiURL, ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}) });
+          // What the coding agent would ask at its own terminal goes to the
+          // agent's owners in Relay, as a card; only an owner's tap answers.
+          const approvals = new OwnerApprovals({ client: relayClient(), say: input.say });
           try {
             if (input.kind === "pi") {
               await runPiChannel({
@@ -359,6 +375,7 @@ export const createProgram = (
                 baseURL: input.apiURL,
                 piCommand: input.command,
                 relay: relayClient(),
+                approvals: piApprovals(approvals),
               }, control.signal);
             } else if (input.kind === "claude") {
               await runClaudeBridge({
@@ -367,7 +384,8 @@ export const createProgram = (
                 claude: await claudeCommand(input.command, env),
                 cwd: input.cwd,
                 threads: await openClaudeThreads({ apiURL: input.apiURL, handle: input.handle }, configContext),
-                mcpServer: input.mcpServer,
+                mcp: { url: input.mcpURL, token: input.token },
+                approvals,
                 signal: control.signal,
                 say: input.say,
               });
@@ -378,8 +396,9 @@ export const createProgram = (
                 acp: await acpCommand(input.command, input.acpArgs ?? [], env),
                 cwd: input.cwd,
                 // Relay's own tools travel through the agent's session.
-                mcpServers: [relayMcpServer(input.mcpServer)],
+                mcp: { url: input.mcpURL, token: input.token },
                 label: input.label,
+                approvals,
                 // The chat's ACP session outlives this run, so a restart picks
                 // every chat up where it stopped (acp-threads.ts).
                 sessions: await openAcpSessions({ apiURL: input.apiURL, handle: input.handle }, configContext),
@@ -395,12 +414,18 @@ export const createProgram = (
                 // The chat's Codex thread outlives this run, so a restart picks
                 // every chat up where it stopped (codex-threads.ts).
                 threads: await openCodexThreads({ apiURL: input.apiURL, handle: input.handle }, configContext),
+                // Every thread gets Relay's hosted MCP server, which reads
+                // its token from RELAY_AGENT_TOKEN (codex-bridge.ts).
+                agentToken: input.token,
+                mcpURL: input.mcpURL,
+                approvals,
                 signal: control.signal,
                 say: input.say,
               });
             }
           } finally {
             process.off("SIGINT", stop);
+            process.off("SIGTERM", stop);
           }
         },
         ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
@@ -485,19 +510,20 @@ export const createProgram = (
     });
 
   const agents = program.command("agents")
-    .description("create, list and delete saved agents")
+    .description("create, update, list and delete saved agents")
     .helpGroup(HELP_GROUPS.everyDay);
   agents.command("create")
     .description("create an agent and save its token privately")
     .addOption(new Option("--api-url <url>", "the Relay API address to use").argParser(validateApiURL).hideHelp())
     .option("--handle <handle>", "the agent's handle")
     .option("--name <name>", "the display name")
-    .option("--about <text>", "the line above the first message", aboutText)
+    .option("--subtitle <text>", "the line under the agent's name, 60 characters", subtitleText)
+    .option("--description <text>", "what it can do, 2000 characters", descriptionText)
     .option("--image <path-or-url>", "a picture file or https:// address")
     .option("--image-url <url>", "a picture at an https:// address")
     .option("--image-recipe <json-file>", "a Relay picture recipe accompanying the picture")
     .option("--json", "JSON output")
-    .action(async (options: { apiUrl?: string; json?: boolean; handle?: string; name?: string; about?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
+    .action(async (options: { apiUrl?: string; json?: boolean; handle?: string; name?: string; subtitle?: string; description?: string; image?: string; imageUrl?: string; imageRecipe?: string }, command: Command) => {
       if (options.handle !== undefined) validateHandle(options.handle);
       if (options.name !== undefined) validateFirstName(options.name);
       if (options.image !== undefined && options.imageUrl !== undefined) throw new Error("Choose --image or --image-url, not both.");
@@ -511,6 +537,10 @@ export const createProgram = (
           throw new Error("Profile already exists; choose a new profile name.");
         }
       }
+      options.subtitle = await requireSubtitle(options.subtitle, {
+        prompts: dependencies.prompts,
+        nonInteractive: globals(command).nonInteractive === true || options.json === true || globals(command).json === true || dependencies.isInteractive === false,
+      });
       const session = await (dependencies.consoleLogin?.() ?? consoleLoginOrReuse({
         context: configContext,
         apiURL: options.apiUrl ?? defaultCreationApiURL(),
@@ -525,7 +555,8 @@ export const createProgram = (
         apiURL: options.apiUrl ?? defaultCreationApiURL(),
         ...(options.handle === undefined ? {} : { handle: options.handle }),
         ...(options.name === undefined ? {} : { firstName: options.name }),
-        ...(options.about === undefined ? {} : { about: options.about }),
+        ...(options.subtitle === undefined ? {} : { subtitle: options.subtitle }),
+        ...(options.description === undefined ? {} : { description: options.description }),
         ...(options.image === undefined ? {} : { image: options.image }),
         ...(options.imageUrl === undefined ? {} : { imageURL: options.imageUrl }),
         ...(imageRecipe === undefined ? {} : { imageRecipe }),
@@ -536,7 +567,7 @@ export const createProgram = (
       const imageUpdate = created.image;
       if (globals(command).json) output({ ...result, ...(imageUpdate ? { image: imageUpdate } : {}) });
       else {
-        stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\n`);
+        stdout(`${result.display_name} (@${result.handle})\nProfile: ${result.profile}\n${result.share_url}\nToken saved in ${configPath(configContext)}\nPrint it with \`relay auth token --profile ${result.profile}\`.\n`);
         const liveViewFollows = imageUpdate?.status !== "incomplete" && willShowSavedAgent(command);
         if (!liveViewFollows) {
           try { stdout(renderTerminalQRForOutput(result.share_url)); }
@@ -569,6 +600,24 @@ export const createProgram = (
       // the standard stderr envelope and classified command exit.
       if (firstFailure) throw firstFailure;
     });
+  agents.command("update").argument("<handle>", "agent handle", handle)
+    .description("update an agent's name or subtitle")
+    .option("--name <name>", "the display name")
+    .option("--subtitle <text>", "the line under the agent's name, 60 characters", subtitleText)
+    .option("--description <text>", "what it can do, 2000 characters", descriptionText)
+    .option("--json", "JSON output")
+    .action(async (agentHandle: string, options: { name?: string; subtitle?: string; description?: string }, command: Command) => {
+      const body = {
+        handle: agentHandle,
+        ...(options.name === undefined ? {} : { first_name: validateFirstName(options.name) }),
+        ...(options.subtitle === undefined ? {} : { subtitle: options.subtitle }),
+        ...(options.description === undefined ? {} : { description: options.description }),
+      };
+      if (Object.keys(body).length === 1) throw new Error("Choose --name, --subtitle or --description.");
+      const auth = await selectAgentAuth(agentHandle, globals(command).profile, agentDeps);
+      await agentDeps.client(auth.token, auth.apiURL).contactCard.update(body, { maxRetries: 0 });
+      output(safeMetadata({ ok: true, handle: agentHandle, profile: auth.profile, token: "unchanged" }, [auth.token]));
+    });
   agents.command("delete").argument("<handle>", "agent handle", handle)
     .description("delete an agent and remove its saved token")
     .option("--json", "JSON output")
@@ -581,6 +630,115 @@ export const createProgram = (
           ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
         }, handle, agentToken),
       }));
+    });
+
+  // Who may start a chat with an agent: Relay Console's "Available to" field
+  // and its Always Allow and Never Allow lists, through the Console's own routes.
+  const accessRequest = <T>(path: string, init?: RequestInit): Promise<T> =>
+    dependencies.consoleRequest?.<T>(path, init) ?? consoleRequest<T>({
+      context: configContext,
+      apiURL: defaultCreationApiURL(),
+      ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+    }, path, init);
+  const ACCESS_HELP = `
+People in your organization can always message the agent, whatever these
+settings say. Private turns people off and sets other agents to nobody, so
+only your organization and the handles on Always Allow can start a chat.
+Open turns both back on; agents are open by default. Ongoing conversations
+continue whatever you choose.
+
+Examples:
+  relay agents access show weather
+  relay agents access private weather
+  relay agents access open weather
+  relay agents access update weather --people off --agents nobody
+  relay agents access allow weather alice
+  relay agents access deny weather spam_bot
+  relay agents access remove weather alice
+`;
+  const access = agents.command("access")
+    .description("show and change who can message an agent");
+  access.addHelpText("after", ACCESS_HELP);
+  access.command("show").argument("<handle>", "agent handle", handle)
+    .description("show who can start a chat with an agent")
+    .option("--json", "JSON output")
+    .action(async (agentHandle: string) => {
+      output(await showAccess(accessRequest, agentHandle));
+    });
+  access.command("update").argument("<handle>", "agent handle", handle)
+    .description("change who can start a chat with an agent")
+    .addOption(new Option("--people <on|off>", "People in the Relay app").argParser(peopleSwitch))
+    .addOption(new Option("--agents <who>", "Other agents").choices(AGENTS_CAN_MESSAGE))
+    .option("--json", "JSON output")
+    .addHelpText("after", ACCESS_HELP)
+    .action(async (agentHandle: string, options: { people?: boolean; agents?: AgentsCanMessage }) => {
+      output(await updateReach(accessRequest, agentHandle, {
+        ...(options.people === undefined ? {} : { people: options.people }),
+        ...(options.agents === undefined ? {} : { agents: options.agents }),
+      }));
+    });
+  access.command("private").argument("<handle>", "agent handle", handle)
+    .description("let only your organization and Always Allow message it")
+    .option("--json", "JSON output")
+    .addHelpText("after", ACCESS_HELP)
+    .action(async (agentHandle: string) => {
+      output(await setReachPreset(accessRequest, agentHandle, "private"));
+    });
+  access.command("open").argument("<handle>", "agent handle", handle)
+    .description("let people and other agents message it")
+    .option("--json", "JSON output")
+    .addHelpText("after", ACCESS_HELP)
+    .action(async (agentHandle: string) => {
+      output(await setReachPreset(accessRequest, agentHandle, "open"));
+    });
+  access.command("allow").argument("<handle>", "agent handle", handle).argument("<contact>", "person's or agent's handle")
+    .description("put a person or agent on Always Allow")
+    .option("--json", "JSON output")
+    .action(async (agentHandle: string, contact: string) => {
+      output(await setAccess(accessRequest, agentHandle, contact, "allow"));
+    });
+  access.command("deny").argument("<handle>", "agent handle", handle).argument("<contact>", "person's or agent's handle")
+    .description("put a person or agent on Never Allow")
+    .option("--json", "JSON output")
+    .action(async (agentHandle: string, contact: string) => {
+      output(await setAccess(accessRequest, agentHandle, contact, "deny"));
+    });
+  access.command("remove").argument("<handle>", "agent handle", handle).argument("<contact>", "person's or agent's handle")
+    .description("take a person or agent off both lists")
+    .option("--json", "JSON output")
+    .action(async (agentHandle: string, contact: string) => {
+      output(await removeAccess(accessRequest, agentHandle, contact));
+    });
+
+  // Optional: link a phone so this account is also the Relay app account.
+  const phone = program.command("phone")
+    .description("link your phone to your Relay account")
+    .helpGroup(HELP_GROUPS.everythingElse);
+  phone.command("link")
+    .description("text a code to your phone and link it")
+    .option("--number <number>", "your number, with its country code")
+    .option("--code <code>", "the code from the text message")
+    .option("--json", "JSON output")
+    .addHelpText("after", `
+Linking is optional. Once linked, the Relay app signs in to this same
+account with your phone, and tool approvals from your connected agents
+reach you there.
+
+Without a terminal, run it twice: once with --number to get the code, then
+again with --number and --code.
+`)
+    .action(async (options: { number?: string; code?: string }, command: Command) => {
+      const interactive = !globals(command).nonInteractive && !globals(command).json && dependencies.isInteractive === true;
+      const result = await linkPhone(options, {
+        context: configContext,
+        apiURL: defaultCreationApiURL(),
+        ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+        ...(interactive && dependencies.prompts ? { prompts: dependencies.prompts } : {}),
+        stderr,
+      });
+      output(result);
+      const sentence = phoneLinkSentence(result);
+      if (sentence && !globals(command).json) stderr(`${sentence}\n`);
     });
 
   const authCommands = program.command("auth", { hidden: true }).description("manage the token this computer signs in with").helpGroup(HELP_GROUPS.everythingElse);
@@ -635,6 +793,20 @@ export const createProgram = (
         await showSavedAgent(command, { profile: resolved.profile, apiURL: resolved.apiURL });
       }
   };
+  // gh's `gh auth token`: `gh auth --help` lists it as "Print the
+  // authentication token gh uses for a hostname and account", and its manual
+  // page (cli.github.com/manual/gh_auth_token, saved 2026-09-27 in
+  // _sources/gh-auth-token-20260927) says "This command outputs the
+  // authentication token for an account on a given GitHub host." gh writes the
+  // token and a newline to stdout and nothing else (pkg/cmd/auth/token/token.go,
+  // `fmt.Fprintf(opts.IO.Out, "%s\n", val)`). This is the one command that
+  // prints an Agent Token, and only on stdout, so a script can run
+  // `export RELAY_AGENT_TOKEN=$(relay auth token)`. It resolves the token the
+  // way `auth status` reports it, and fails with the same no_token error.
+  const authToken = async (_options: object, command: Command): Promise<void> => {
+    const resolved = await resolveAuth(globals(command).profile, configContext);
+    stdout(`${resolved.token}\n`);
+  };
   const authLogout = async (_options: object, command: Command, clearConsole = false): Promise<void> => {
       if (!globals(command).nonInteractive && !globals(command).json && dependencies.confirmLogout && !await dependencies.confirmLogout()) throw new InteractiveCancelled();
       const config = await readConfig(configContext);
@@ -682,6 +854,9 @@ export const createProgram = (
   const authStatusCommand = authCommands.command("status")
     .description("show the token source without revealing the token");
   addAuthStatus(authStatusCommand);
+  authCommands.command("token")
+    .description("print the token, for a script")
+    .action(authToken);
   const authLogoutCommand = authCommands.command("logout")
     .description("remove the selected profile's stored token");
   addAuthLogout(authLogoutCommand);
@@ -1008,6 +1183,54 @@ export const createProgram = (
     .argument("<chat-id>", "the chat ID")
     .action(async (chatID: string, _options: object, command: Command) => {
       await (await clientFor(command)).chats.stopTyping(chatID);
+      output(voidResult);
+    });
+
+  const activity = chats.command("activity").description("get, set or clear this agent's task activity");
+  activity
+    .command("get")
+    .description("get this agent's activity in a chat")
+    .argument("<chat-id>", "the chat ID")
+    .action(async (chatID: string, _options: object, command: Command) =>
+      output(await (await clientFor(command)).chats.getActivity(chatID)));
+  activity
+    .command("set")
+    .description("start a task activity or refresh its current id")
+    .argument("<chat-id>", "the chat ID")
+    .requiredOption("--text <text>", "1–21 visible characters, at most 1024 bytes")
+    .option("--emoji <emoji>", "one Unicode emoji")
+    .option("--clear-emoji", "send a null emoji")
+    .option("--activity-id <uuid>", "refresh this task instead of replacing it")
+    .action(async (
+      chatID: string,
+      options: { text: string; emoji?: string; clearEmoji?: boolean; activityId?: string },
+      command: Command,
+    ) => {
+      if (options.emoji !== undefined && options.clearEmoji) {
+        throw new Error("Choose --emoji or --clear-emoji, not both.");
+      }
+      const body = {
+        text: options.text,
+        ...(options.emoji === undefined ? {} : { emoji: options.emoji }),
+        ...(options.clearEmoji ? { emoji: null } : {}),
+        ...(options.activityId === undefined ? {} : { activity_id: options.activityId }),
+      } satisfies ChatSetActivityParams;
+      output(await (await clientFor(command)).chats.setActivity(chatID, body));
+    });
+  activity
+    .command("clear")
+    .description("clear this agent's activity, optionally matching a task")
+    .argument("<chat-id>", "the chat ID")
+    .option("--activity-id <uuid>", "clear only this task")
+    .action(async (
+      chatID: string,
+      options: { activityId?: string },
+      command: Command,
+    ) => {
+      await (await clientFor(command)).chats.clearActivity(
+        chatID,
+        options.activityId === undefined ? {} : { activity_id: options.activityId },
+      );
       output(voidResult);
     });
 
@@ -1522,7 +1745,7 @@ export const createProgram = (
     .action(async (
       options: {
         handle?: string;
-        name?: string; about?: string;
+        name?: string; subtitle?: string; description?: string;
         firstName?: string;
         lastName?: string;
         imageUrl?: string;
@@ -1545,7 +1768,8 @@ export const createProgram = (
     .description("change this agent's name or picture")
     .option("--handle <handle>", "the agent's handle", handle)
     .option("--name <name>", "the display name")
-    .option("--about <text>", "the line above the first message", aboutText)
+    .option("--subtitle <text>", "the line under the agent's name, 60 characters", subtitleText)
+    .option("--description <text>", "what it can do, 2000 characters", descriptionText)
     .addOption(new Option("--first-name <name>", "the display name").hideHelp())
     .option("--last-name <name>", "an optional second name")
     .option("--clear-last-name", "no second name")
@@ -1557,7 +1781,7 @@ export const createProgram = (
     .action(async (
       options: {
         handle?: string;
-        name?: string; about?: string;
+        name?: string; subtitle?: string; description?: string;
         firstName?: string;
         lastName?: string;
         clearLastName?: boolean;
@@ -1583,7 +1807,8 @@ export const createProgram = (
       const client = selected.client;
       const body = {
         handle: await contactCardHandle(client, options.handle),
-        ...(options.about === undefined ? {} : { about: options.about }),
+        ...(options.subtitle === undefined ? {} : { subtitle: options.subtitle }),
+        ...(options.description === undefined ? {} : { description: options.description }),
         ...((options.name ?? options.firstName) ? { first_name: (options.name ?? options.firstName)! } : {}),
         ...(options.lastName
           ? { last_name: options.lastName }
@@ -1794,7 +2019,7 @@ export const runCLI = async (
         "commander.optionMissingArgument", "commander.missingMandatoryOptionValue",
         "commander.excessArguments", "commander.invalidArgument",
       ].includes(error.code);
-      if (error.message && !alreadyReported) stderr(`Error: ${failure.error}\n${DOCS_LINE}\n`);
+      if (error.message && !alreadyReported) stderr(`Error: ${failure.error}\n${docsLine(env)}\n`);
       return failure.exit;
     }
     if (error instanceof HeadlessPrompt) {

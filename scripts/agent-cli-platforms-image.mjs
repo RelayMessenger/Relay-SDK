@@ -61,7 +61,7 @@ const deps = {
 const consoleAuth = await installedConsoleFixture(consumer, deps.configContext, card);
 deps.consoleLogin = consoleAuth.login;
 deps.fetch = consoleAuth.wrap(deps.fetch);
-assert.equal(await runCLI(['agents', 'create', '--image', image, '--json'], deps), 0);
+assert.equal(await runCLI(['agents', 'create', '--subtitle', 'Helps with tasks', '--image', image, '--json'], deps), 0, output.join(''));
 assert.deepEqual(calls, ['POST /api/orgs/org_fixture/agents', 'GET /v1/contact_card', 'POST /v1/attachments', 'PUT /fixture/upload', `GET /v1/attachments/${attachment}`, 'PATCH /v1/contact_card']);
 assert.equal(JSON.parse(output[0]).image_url, promoted.image_url);
 assert.equal(JSON.parse(output[0]).image.status, 'updated');

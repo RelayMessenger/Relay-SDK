@@ -16,8 +16,18 @@
  *   answers     what to answer, in order; each entry is a list of agent
  *               messages `{text, phase}`, or an empty list for no answer
  *   turnMs      how long a turn takes before it completes
+ *   toolCalls   `mcpToolCall` items each turn completes before its answer,
+ *               e.g. one Codex stopped: `{status: "failed", error: {message}}`
+ *   turnError   when set, every turn ends `failed` with this error message,
+ *               the way the real one ends a turn its model refused (401)
+ *   threadError the error `thread/start` answers with, when set, the way the
+ *               real one refuses a config it cannot load
  *   resumable   the thread ids `thread/resume` accepts; anything else is an
  *               error, as the real one answers for a thread it has lost
+ *   approval    `{method, params}`: each turn first sends this server request
+ *               (with the turn's threadId, turnId and itemId) and waits for
+ *               the client's answer, which it records as `approvalResponse`,
+ *               the way the real one asks when its own approval policy says to
  */
 const fs = require("node:fs");
 
@@ -60,7 +70,13 @@ const completeTurn = (turnId, status) => {
   if (!turn) return;
   turns.delete(turnId);
   clearTimeout(turn.timer);
-  if (status === "completed") {
+  if (status === "completed" && !settings.turnError) {
+    for (const [index, call] of (settings.toolCalls ?? []).entries()) {
+      notify("item/completed", {
+        threadId: turn.threadId, turnId, completedAtMs: 0,
+        item: { type: "mcpToolCall", id: `${turnId}-tool-${index}`, arguments: {}, ...call },
+      });
+    }
     for (const message of turn.answers) {
       notify("item/agentMessage/delta", {
         threadId: turn.threadId, turnId, itemId: `${turnId}-item`, delta: message.text,
@@ -78,11 +94,28 @@ const completeTurn = (turnId, status) => {
       });
     }
   }
-  notify("turn/completed", { threadId: turn.threadId, turn: { id: turnId, status } });
+  const failed = status === "completed" && settings.turnError;
+  notify("turn/completed", {
+    threadId: turn.threadId,
+    turn: { id: turnId, status: failed ? "failed" : status, ...(failed ? { error: { message: settings.turnError } } : {}) },
+  });
 };
 
 const handle = (message) => {
-  record({ in: message.method, params: message.params, argv: process.argv.slice(2) });
+  if (message.method === undefined && typeof message.id === "string" && message.id.startsWith("approval-")) {
+    // The client's answer to the approval request: the turn goes on.
+    record({ approvalResponse: message.result ?? null, approvalError: message.error ?? null, id: message.id });
+    const turnId = message.id.slice("approval-".length);
+    const turn = turns.get(turnId);
+    if (turn) turn.timer = setTimeout(() => { completeTurn(turnId, "completed"); }, settings.turnMs ?? 5);
+    return;
+  }
+  record({
+    in: message.method, params: message.params, argv: process.argv.slice(2),
+    // The variable the folder's .codex/config.toml reads the hosted MCP
+    // server's token from (hosted-mcp.ts), as this process received it.
+    ...(message.method === "initialize" ? { tokenEnv: process.env.RELAY_AGENT_TOKEN ?? null } : {}),
+  });
   const answer = (result) => { write({ id: message.id, result }); };
   if (message.method === "initialize") {
     answer({ userAgent: "fake/0.154.0", codexHome: "/fake", platformFamily: "unix", platformOs: "macos" });
@@ -90,6 +123,10 @@ const handle = (message) => {
   }
   if (message.method === "initialized") return;
   if (message.method === "thread/start") {
+    if (settings.threadError) {
+      write({ id: message.id, error: { code: -32600, message: settings.threadError } });
+      return;
+    }
     threads += 1;
     const id = `thread-${threads}`;
     keepRollout(id);
@@ -112,6 +149,18 @@ const handle = (message) => {
     const answers = (settings.answers ?? [])[answerCount - 1]
       ?? (settings.answers ?? []).at(-1)
       ?? [{ text: "ok", phase: "final_answer" }];
+    if (settings.approval) {
+      turns.set(turnId, { threadId: message.params.threadId, answers, timer: undefined });
+      answer({ turn: { id: turnId, status: "inProgress" } });
+      const request = {
+        id: `approval-${turnId}`,
+        method: settings.approval.method,
+        params: { threadId: message.params.threadId, turnId, itemId: `${turnId}-item`, startedAtMs: 0, ...settings.approval.params },
+      };
+      record({ out: request.method, id: request.id, params: request.params });
+      write(request);
+      return;
+    }
     const timer = setTimeout(() => { completeTurn(turnId, "completed"); }, settings.turnMs ?? 5);
     turns.set(turnId, { threadId: message.params.threadId, answers, timer });
     answer({ turn: { id: turnId, status: "inProgress" } });

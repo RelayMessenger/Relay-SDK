@@ -1,5 +1,8 @@
 import NodeWebSocket from "ws";
-import { RelayWebhookConfiguredError } from "./errors.js";
+import {
+  RelayUnknownEventTypeError,
+  RelayWebhookConfiguredError,
+} from "./errors.js";
 import type {
   RelayWebhookEvent,
   WebSocketDisconnectFrame,
@@ -7,6 +10,7 @@ import type {
   WebSocketEventFrame,
   WebSocketFullSyncFrame,
   WebSocketPingFrame,
+  WebSocketPongFrame,
   WebSocketReadyFrame,
 } from "./types.js";
 import { RELAY_WEBHOOK_EVENT_TYPES } from "./operations.js";
@@ -22,16 +26,15 @@ export interface WebSocketFullSyncContext {
 
 export interface WebSocketLike {
   addEventListener(
-    type: "message" | "close" | "error",
+    type: "open" | "message" | "close" | "error",
     listener: (event: any) => void,
   ): void;
   removeEventListener(
-    type: "message" | "close" | "error",
+    type: "open" | "message" | "close" | "error",
     listener: (event: any) => void,
   ): void;
   send(data: string): void;
   close(code?: number, reason?: string): void;
-  ping?(): void;
   on?(
     type: string,
     listener: (...args: any[]) => void,
@@ -81,6 +84,12 @@ export interface WebSocketRunOptions {
    * Resolve only after that snapshot is durably committed.
    */
   onFullSync(context: WebSocketFullSyncContext): Promise<void>;
+  /**
+   * Connection failures before each reconnect, and a
+   * `RelayUnknownEventTypeError` the first time an event type this release
+   * does not know arrives. Such events are skipped and acknowledged; upgrade
+   * the SDK to receive them.
+   */
   onError?(error: unknown): void;
 }
 
@@ -150,8 +159,13 @@ const WEBSOCKET_ERROR_CODES = new Set([
   "full_sync_required",
   "full_sync_mismatch",
 ]);
-const HEARTBEAT_PING_INTERVAL_MS = 30_000;
 const HEARTBEAT_PONG_TIMEOUT_MS = 60_000;
+/**
+ * The exact text frame Relay answers without waking the Agent's Durable
+ * Object. It must stay byte-identical to the server's configured
+ * auto-response request, so it is serialized once here.
+ */
+const HEARTBEAT_PING_FRAME = JSON.stringify({ type: "ping" });
 const CLIENT_CLOSE_DURABLE_ACCEPTANCE = 4001;
 const CLIENT_CLOSE_PROTOCOL_ERROR = 4002;
 const CLIENT_CLOSE_RECONNECT = 4003;
@@ -203,7 +217,18 @@ const parseReady = (value: unknown): WebSocketReadyFrame & { observational?: tru
   return value as unknown as WebSocketReadyFrame & { observational?: true };
 };
 
-const parseEvent = (value: unknown): WebSocketEventFrame => {
+/**
+ * A well-formed event frame. `known` is false when its `event_type` is one
+ * this SDK release does not carry yet: Relay adds event types, and a new type
+ * reaches a running agent before the agent upgrades, so such an event is
+ * skipped and acknowledged, never fatal. Every other malformation still is.
+ */
+interface ParsedEventFrame {
+  frame: WebSocketEventFrame;
+  known: boolean;
+}
+
+const parseEvent = (value: unknown): ParsedEventFrame => {
   if (
     !isRecord(value)
     || !hasExactKeys(value, ["type", "sequence", "event"])
@@ -212,7 +237,8 @@ const parseEvent = (value: unknown): WebSocketEventFrame => {
     || !isRecord(value.event)
     || value.event.api_version !== "v1"
     || value.event.webhook_version !== "2026-08-30"
-    || !WEBHOOK_EVENT_TYPES.has(String(value.event.event_type))
+    || typeof value.event.event_type !== "string"
+    || value.event.event_type.length === 0
     || !validUUID(value.event.event_id)
     || typeof value.event.created_at !== "string"
     || typeof value.event.trace_id !== "string"
@@ -223,7 +249,10 @@ const parseEvent = (value: unknown): WebSocketEventFrame => {
       "Relay WebSocket received an invalid event frame.",
     );
   }
-  return value as unknown as WebSocketEventFrame;
+  return {
+    frame: value as unknown as WebSocketEventFrame,
+    known: WEBHOOK_EVENT_TYPES.has(value.event.event_type as string),
+  };
 };
 
 const parseFullSync = (value: unknown): WebSocketFullSyncFrame => {
@@ -254,6 +283,19 @@ const parsePing = (value: unknown): WebSocketPingFrame => {
     );
   }
   return value as unknown as WebSocketPingFrame;
+};
+
+const parsePong = (value: unknown): WebSocketPongFrame => {
+  if (
+    !isRecord(value)
+    || !hasExactKeys(value, ["type"])
+    || value.type !== "pong"
+  ) {
+    throw new WebSocketProtocolError(
+      "Relay WebSocket received an invalid pong frame.",
+    );
+  }
+  return value as unknown as WebSocketPongFrame;
 };
 
 const parseError = (value: unknown): WebSocketErrorFrame => {
@@ -406,6 +448,7 @@ const runConnection = (
   options: WebSocketRunOptions,
   Constructor: WebSocketConstructor,
   onReady: (frame: WebSocketReadyFrame & { observational?: true }) => void,
+  onUnknownEvent: (eventType: string, sequence: string) => void,
 ): Promise<void> =>
   new Promise((resolve, reject) => {
     const socket = new Constructor(url, {
@@ -429,7 +472,6 @@ const runConnection = (
       socket.removeEventListener("message", onMessage);
       socket.removeEventListener("close", onClose);
       socket.removeEventListener("error", onSocketError);
-      socket.off?.("pong", onPong);
       socket.off?.("unexpected-response", onUnexpectedResponse);
       options.signal?.removeEventListener("abort", onAbort);
       if (error === undefined) resolve();
@@ -457,19 +499,14 @@ const runConnection = (
         finish(error);
       }
     };
-    const onPong = (): void => {
+    /**
+     * The heartbeat is a text frame, not a protocol ping, so it runs on every
+     * WebSocket implementation — the browser's, Node's built-in, and `ws`.
+     * Relay answers the frame from the edge without waking the Agent.
+     */
+    const startHeartbeat = (intervalMs: number): void => {
+      if (heartbeatTimer !== undefined) return;
       lastPongAt = Date.now();
-    };
-    const startHeartbeat = (): void => {
-      if (
-        heartbeatTimer !== undefined
-        || socket.ping === undefined
-        || socket.on === undefined
-      ) {
-        return;
-      }
-      lastPongAt = Date.now();
-      socket.on("pong", onPong);
       heartbeatTimer = setInterval(() => {
         if (Date.now() - lastPongAt >= HEARTBEAT_PONG_TIMEOUT_MS) {
           closeForRetry(new RetryableWebSocketError(
@@ -478,7 +515,7 @@ const runConnection = (
           return;
         }
         try {
-          socket.ping?.();
+          socket.send(HEARTBEAT_PING_FRAME);
         } catch (cause) {
           closeForRetry(new RetryableWebSocketError(
             `Relay WebSocket ping failed: ${
@@ -486,7 +523,7 @@ const runConnection = (
             }`,
           ));
         }
-      }, HEARTBEAT_PING_INTERVAL_MS);
+      }, intervalMs);
     };
     const onUnexpectedResponse = (
       _request: unknown,
@@ -550,7 +587,7 @@ const runConnection = (
           fullSyncThrough = parsed.full_sync_required
             ? BigInt(parsed.full_sync_through!)
             : null;
-          startHeartbeat();
+          startHeartbeat(parsed.heartbeat_interval_ms);
           onReady(parsed);
           return;
         }
@@ -585,6 +622,13 @@ const runConnection = (
           }
           parsePing(frame);
           send({ type: "pong" });
+          return;
+        }
+        // The answer to this client's own text ping. Relay sends it from the
+        // edge, so it can arrive while the Agent is asleep.
+        if (isRecord(frame) && frame.type === "pong") {
+          parsePong(frame);
+          lastPongAt = Date.now();
           return;
         }
         if (isRecord(frame) && frame.type === "error") {
@@ -636,7 +680,7 @@ const runConnection = (
             "Relay WebSocket received an event while FULL sync was pending.",
           );
         }
-        const event = parseEvent(frame);
+        const { frame: event, known } = parseEvent(frame);
         const sequence = BigInt(event.sequence);
         if (options.observe === true && sequence <= acceptedThrough) {
           throw new WebSocketProtocolError("Observer event sequences must increase on each connection.");
@@ -651,10 +695,15 @@ const runConnection = (
             expectedSequence: (acceptedThrough + 1n).toString(), receivedSequence: event.sequence,
           });
         }
-        try {
-          await options.onEvent(event.event, { sequence: event.sequence });
-        } catch (cause) {
-          throw new DurableApplicationError("event", cause);
+        if (known) {
+          try {
+            await options.onEvent(event.event, { sequence: event.sequence });
+          } catch (cause) {
+            throw new DurableApplicationError("event", cause);
+          }
+        } else {
+          // Skipped, then acknowledged below exactly like a handled event.
+          onUnknownEvent(event.event.event_type, event.sequence);
         }
         if (options.observe === true) {
           // Local observation progress is NOT the server's cumulative checkpoint.
@@ -789,6 +838,14 @@ export const runWebSocket = async (
   const url = deriveWebSocketURL(baseURL, options.observe === true);
   const random = options.random ?? Math.random;
   let attempt = 0;
+  // Each event type this release does not know is reported once per run,
+  // however many events of it arrive, so onError is not flooded.
+  const reportedUnknown = new Set<string>();
+  const onUnknownEvent = (eventType: string, sequence: string): void => {
+    if (reportedUnknown.has(eventType)) return;
+    reportedUnknown.add(eventType);
+    options.onError?.(new RelayUnknownEventTypeError(eventType, sequence));
+  };
 
   while (!options.signal?.aborted) {
     options.onConnectionState?.("connecting");
@@ -803,6 +860,7 @@ export const runWebSocket = async (
           options.onConnectionState?.("ready");
           options.onReady?.(frame);
         },
+        onUnknownEvent,
       );
     } catch (error) {
       if (options.signal?.aborted) return;

@@ -21,9 +21,9 @@ including the sender (`to` accepts at most 6 recipient Handles).
 ```text
 packages/
   sdk/                    @relaymessenger/sdk
+  livekit/                @relaymessenger/livekit
   chat-sdk-adapter/       @relaymessenger/chat-sdk-adapter
   cli/                    relaymessenger
-  mcp/                    @relaymessenger/mcp
   openclaw/               @relaymessenger/openclaw-plugin
   claude-code/            relay-claude-channel
 
@@ -129,8 +129,10 @@ Nothing is published by hand. Two npm channels, kept apart:
   `X.Y.(Z+1)-staging.0` once `X.Y.Z` is on npm (a prerelease ranks below its
   base, so the base must move for main to publish again). Dependents are
   pinned to the versions decided in the same run. The workflow commits that
-  bump to `staging` as `github-actions[bot]` and publishes each changed
-  package from that commit, in the order below.
+  bump as `github-actions[bot]` and publishes each changed package from that
+  commit, in the order below; the commit reaches `staging` only after every
+  package another package pins is on npm, so `staging` never names a
+  dependency version npm lacks.
 - Production publishes plain `X.Y.Z` versions under the `latest` dist-tag.
   The one deliberate act is merging `staging` into `main`; the push to `main`
   runs [`release.yml`](.github/workflows/release.yml), which:
@@ -144,18 +146,24 @@ Nothing is published by hand. Two npm channels, kept apart:
      --no-provenance` on Blacksmith with the `npm-release` credential;
   5. creates the git tag `<prefix><version>` after each successful publish, as
      the record, never as the trigger;
-  6. installs each published version clean from the registry and exercises it.
+  6. installs each published version clean from the registry and exercises it;
+  7. rewrites every cookbook's Relay staging pins to the versions it published
+     (lockfile, tarball URL and integrity with them), proves each folder on the
+     release channel the way `cookbook-standalone` does on `main`, and lands
+     that one commit on `staging` so the next promotion carries release pins.
+     The dry run proves the same folders from the tarballs it packed.
 
 Order and record tags, from [`scripts/release-packages.mjs`](scripts/release-packages.mjs):
 
 | Order | Package | Record tag |
 | --- | --- | --- |
 | 1 | `@relaymessenger/sdk` | `sdk-v<version>` |
-| 2 | `@relaymessenger/chat-sdk-adapter` | `chat-sdk-v<version>` |
-| 3 | `relaymessenger` | `relaymessenger-v<version>` |
-| 4 | `@relaymessenger/mcp` | `mcp-v<version>` |
-| 5 | `@relaymessenger/openclaw-plugin` | `openclaw-v<version>` |
-| 6 | `relay-claude-channel` | `claude-channel-v<version>` |
+| 2 | `@relaymessenger/livekit` | `livekit-v<version>` |
+| 3 | `@relaymessenger/chat-sdk-adapter` | `chat-sdk-v<version>` |
+| 4 | `@relaymessenger/pi` | `pi-v<version>` |
+| 5 | `relaymessenger` | `relaymessenger-v<version>` |
+| 6 | `@relaymessenger/openclaw-plugin` | `openclaw-v<version>` |
+| 7 | `relay-claude-channel` | `claude-channel-v<version>` |
 
 Dry run first: `workflow_dispatch` on `release.yml` derives every version,
 prints the skip-or-publish decision, packs, and runs `npm publish --dry-run`,

@@ -1,21 +1,34 @@
+import { existsSync, realpathSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { RelayWebhookEvent } from "@relaymessenger/sdk";
+import { PAYMENT_BLOCK_INSTRUCTION, PAYMENT_GUIDANCE, type RelayWebhookEvent } from "@relaymessenger/sdk";
 import { dispatchRelayEvent } from "./dispatch.js";
+import type { RelayIngressLifecycle } from "./ingress.js";
+import { createRelayChatTurns, type RelayChatTurns } from "./turns.js";
 
 // Deliberately use the installed OpenClaw resolver, route builder and identity
 // authentication gates. Mocking admission concealed the stable-ID collision.
 const approvedId = "01a07f76-4e51-70e1-8b12-a269a5b1774b";
 const otherId = "00000000-0000-7000-8000-000000000099";
 type EventOptions = {
+  selection?: boolean;
   senderKind?: "user" | "agent";
   group?: boolean;
   mention?: string;
   replyToAgent?: boolean;
   replyChatId?: string;
   direction?: "inbound" | "outbound";
+  turns?: RelayChatTurns;
+  invoke?: ReturnType<typeof vi.fn>;
+  messageId?: string;
+  lifecycle?: Partial<RelayIngressLifecycle>;
+  parts?: unknown[];
+  replyTo?: { message_id: string; part_index?: number };
+  retrieve?: ReturnType<typeof vi.fn>;
 };
 async function dispatch(allowFrom: string[], contactId = approvedId, handle = "review_sender", options: EventOptions = {}) {
-  const invoke = vi.fn(async () => undefined);
+  const invoke = options.invoke ?? vi.fn(async () => undefined);
   const markAsRead = vi.fn(async () => undefined);
   const startTyping = vi.fn(async () => undefined);
   const stopTyping = vi.fn(async () => undefined);
@@ -25,34 +38,50 @@ async function dispatch(allowFrom: string[], contactId = approvedId, handle = "r
     event_id: "00000000-0000-7000-8000-000000000002", created_at: "2026-09-08T00:00:00.000Z",
     trace_id: "offline-ingress-regression", agent_id: "00000000-0000-7000-8000-000000000001",
     data: {
-      id: "00000000-0000-7000-8000-000000000003",
+      id: options.messageId ?? "00000000-0000-7000-8000-000000000003",
       chat: {
         id: "00000000-0000-7000-8000-000000000004", is_group: options.group ?? false,
         owner_handle: { id: "00000000-0000-7000-8000-000000000001", handle: "relay", kind: "agent", is_me: true },
       },
       direction: options.direction ?? "inbound",
-      sender_handle: { id: contactId, handle, kind: options.senderKind ?? "user", display_name: "Review Sender", joined_at: "2026-09-08T00:00:00.000Z", image_url: null, about: null, verified: false, is_contact: true },
-      parts: [{ type: "text", value: "@relay owned offline ingress test", ...(options.mention ? { mention: options.mention } : {}) }],
+      sender_handle: { id: contactId, handle, kind: options.senderKind ?? "user", display_name: "Review Sender", joined_at: "2026-09-08T00:00:00.000Z", image_url: null, subtitle: null, verified: false, is_contact: true },
+      parts: options.parts ?? [{ type: "text", value: "@relay owned offline ingress test", ...(options.mention ? { mention: options.mention } : {}) }],
       ...(options.replyToAgent === undefined ? {} : { reply_to: { message_id: "00000000-0000-7000-8000-000000000010" } }),
+      ...(options.replyTo ? { reply_to: options.replyTo } : {}),
     },
   } as RelayWebhookEvent;
+  if (options.selection && event.event_type === "message.received") {
+    event.data.parts = [{ type: "text", value: "• Research", reactions: null }, { type: "selection_response", selected_values: ["research"] }];
+    event.data.reply_to = { message_id: "00000000-0000-7000-8000-000000000010", part_index: 1 };
+  }
   await dispatchRelayEvent({
-    event, lifecycle: {} as never,
+    event, lifecycle: (options.lifecycle ?? {}) as never,
     account: { accountId: "work", enabled: true, configured: true, token: "synthetic-unused", baseUrl: "https://api.staging.relayapp.im", allowFrom, config: {} },
     cfg: {},
     relay: {
       chats: { markAsRead, startTyping, stopTyping } as never,
-      messages: { retrieve: vi.fn(async () => ({
+      messages: { retrieve: options.retrieve ?? vi.fn(async () => ({
         chat_id: options.replyChatId ?? "00000000-0000-7000-8000-000000000004",
         is_from_me: options.replyToAgent === true,
       })) } as never,
     },
     runtime: { channel: { inbound: { dispatch: invoke } } } as never, warn,
+    turns: options.turns ?? createRelayChatTurns(),
   });
   return { invoke, markAsRead, startTyping, stopTyping, warn };
 }
 
 describe("Relay dispatch through real OpenClaw ingress", () => {
+  it("keeps OpenClaw's databases in the throwaway state directory, never the real HOME", async () => {
+    // test/isolated-home.ts: the real ingress path opens OpenClaw's state and
+    // agent databases, which must never be the owner's ~/.openclaw.
+    const stateDir = process.env.OPENCLAW_STATE_DIR ?? "";
+    expect(stateDir.startsWith(tmpdir()) || stateDir.startsWith(realpathSync(tmpdir()))).toBe(true);
+    expect(homedir()).toBe(dirname(stateDir));
+    await dispatch([approvedId]);
+    expect(existsSync(join(stateDir, "state", "openclaw.sqlite"))).toBe(true);
+  });
+
   it("admits the explicitly allowed stable Contact ID despite the dangerous username alias", async () => {
     const result = await dispatch([approvedId]);
     expect(result.invoke).toHaveBeenCalledOnce();
@@ -133,5 +162,180 @@ describe("Relay dispatch through real OpenClaw ingress", () => {
   it("never invokes on an outbound agent self echo", async () => {
     const result = await dispatch([approvedId], approvedId, "peer_agent", { senderKind: "agent", direction: "outbound" });
     expect(result.invoke).not.toHaveBeenCalled();
+  });
+});
+
+
+it("forwards selection data and native authoring guidance to the admitted OpenClaw turn", async () => {
+  const result = await dispatch([approvedId], approvedId, "review_sender", { selection: true });
+  expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+    ctxPayload: expect.objectContaining({
+      BodyForAgent: expect.stringContaining('"selected_values":["research"]'),
+      RawBody: "• Research",
+    }),
+  }));
+  expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+    ctxPayload: expect.objectContaining({ BodyForAgent: expect.stringContaining("portable text remains bullets") }),
+  }));
+});
+
+it("teaches the admitted OpenClaw turn how and when to send a payment", async () => {
+  const result = await dispatch([approvedId], approvedId, "review_sender");
+  expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+    ctxPayload: expect.objectContaining({ BodyForAgent: expect.stringContaining(PAYMENT_BLOCK_INSTRUCTION) }),
+  }));
+  expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+    ctxPayload: expect.objectContaining({ BodyForAgent: expect.stringContaining(PAYMENT_GUIDANCE) }),
+  }));
+});
+
+
+it("keeps ordered rich parts in model context, not executable command input", async () => {
+  const result = await dispatch([approvedId], approvedId, "review_sender", { selection: true });
+  expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+    ctxPayload: expect.objectContaining({
+      BodyForAgent: expect.stringContaining('"type":"selection_response"'),
+      CommandBody: "• Research",
+      RawBody: "• Research",
+    }),
+  }));
+});
+
+describe("Relay answers each of another agent's overlapping Messages, naming it", () => {
+  const first = "00000000-0000-7000-8000-000000000031";
+  const second = "00000000-0000-7000-8000-000000000032";
+
+  function heldTurns() {
+    const releases: Array<() => void> = [];
+    const invoke = vi.fn(() => new Promise<void>((resolve) => { releases.push(resolve); }));
+    return { invoke, releases };
+  }
+
+  it("holds a second agent Message until the running turn ends, then gives it its own turn", async () => {
+    // OpenClaw steers a mid-turn Message into the running turn by default
+    // (docs/concepts/queue.md), whose answer names the first Message only.
+    const turns = createRelayChatTurns();
+    const { invoke, releases } = heldTurns();
+    const onDeferred = vi.fn();
+    const one = dispatch([approvedId], approvedId, "peer_agent", { senderKind: "agent", turns, invoke, messageId: first });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+    const two = dispatch([approvedId], approvedId, "peer_agent", { senderKind: "agent", turns, invoke, messageId: second, lifecycle: { onDeferred } });
+    await vi.waitFor(() => expect(onDeferred).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(invoke).toHaveBeenCalledTimes(1);
+    releases[0]!();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    releases[1]!();
+    await Promise.all([one, two]);
+    const calls = invoke.mock.calls as unknown as Array<[{ ctxPayload: { MessageSid?: string }; delivery: { durable: { replyToId: string | null } } }]>;
+    expect(calls.map(([call]) => call.delivery.durable.replyToId)).toEqual([first, second]);
+  });
+
+  it("leaves a person's Message to OpenClaw's own queue", async () => {
+    const turns = createRelayChatTurns();
+    const { invoke, releases } = heldTurns();
+    const one = dispatch([approvedId], approvedId, "review_sender", { turns, invoke, messageId: first });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+    const two = dispatch([approvedId], approvedId, "review_sender", { turns, invoke, messageId: second });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    releases.forEach((release) => release());
+    await Promise.all([one, two]);
+  });
+
+  it("names the agent's Message in every answer, and never a person's", async () => {
+    const agent = await dispatch([approvedId], approvedId, "peer_agent", { senderKind: "agent", messageId: first });
+    const [agentCall] = agent.invoke.mock.calls[0] as unknown as [{ delivery: { durable: { replyToId: string | null }; preparePayload?: (payload: object) => { replyToId?: string } } }];
+    expect(agentCall.delivery.durable.replyToId).toBe(first);
+    expect(agentCall.delivery.preparePayload?.({ text: "answer" })).toEqual({ text: "answer", replyToId: first });
+    // A reply target the model chose itself stands.
+    expect(agentCall.delivery.preparePayload?.({ text: "answer", replyToId: "chosen" })).toEqual({ text: "answer", replyToId: "chosen" });
+    const person = await dispatch([approvedId], approvedId, "review_sender", { messageId: first });
+    const [personCall] = person.invoke.mock.calls[0] as unknown as [{ delivery: { durable: { replyToId: string | null }; preparePayload?: unknown } }];
+    expect(personCall.delivery.durable.replyToId).toBeNull();
+    expect(personCall.delivery.preparePayload).toBeUndefined();
+  });
+
+  it("removes OpenClaw's implicit reply to an agent Message that opens with buttons", async () => {
+    const result = await dispatch([approvedId], approvedId, "peer_agent", {
+      senderKind: "agent",
+      messageId: first,
+      parts: [{ type: "buttons", items: [{ label: "Yes" }], reactions: null }, { type: "text", value: "Go?", reactions: null }],
+    });
+    const [call] = result.invoke.mock.calls[0] as unknown as [{ delivery: { durable: { replyToId: string | null }; preparePayload: (payload: object) => object } }];
+    expect(call.delivery.durable.replyToId).toBeNull();
+    expect(call.delivery.preparePayload({ text: "answer", replyToId: first })).toEqual({ text: "answer" });
+  });
+});
+
+describe("a person's swipe-reply reaches the OpenClaw turn", () => {
+  const targetId = "00000000-0000-7000-8000-000000000010";
+  const agentMessage = () => ({
+    id: targetId,
+    chat_id: "00000000-0000-7000-8000-000000000004",
+    from: "relay",
+    from_handle: { id: "00000000-0000-7000-8000-000000000001", handle: "relay", kind: "agent", display_name: "Relay" },
+    is_from_me: true,
+    is_system_message: false,
+    parts: [
+      { type: "text", value: "The flight lands at 6.", reactions: null },
+      { type: "text", value: "Take the long way round the lake.", reactions: null },
+    ],
+  });
+
+  it("gives OpenClaw's reply target the bubble the person swiped and who sent it", async () => {
+    const retrieve = vi.fn(async () => agentMessage());
+    const result = await dispatch([approvedId], approvedId, "review_sender", {
+      replyTo: { message_id: targetId, part_index: 1 },
+      retrieve,
+    });
+    expect(retrieve).toHaveBeenCalledOnce();
+    expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+      ctxPayload: expect.objectContaining({
+        ReplyToId: targetId,
+        ReplyToBody: "Take the long way round the lake.",
+        ReplyToSender: "Relay",
+      }),
+    }));
+  });
+
+  it("keeps a tap's own Message as the reply target: no reply may name a buttons part", async () => {
+    const retrieve = vi.fn(async () => ({
+      ...agentMessage(),
+      parts: [
+        { type: "text", value: "Ready to book?", reactions: null },
+        { type: "buttons", items: [{ label: "Yes" }] },
+      ],
+    }));
+    const result = await dispatch([approvedId], approvedId, "review_sender", {
+      replyTo: { message_id: targetId, part_index: 1 },
+      retrieve,
+      messageId: "00000000-0000-7000-8000-000000000033",
+    });
+    expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+      ctxPayload: expect.objectContaining({
+        ReplyToId: "00000000-0000-7000-8000-000000000033",
+        ReplyToBody: "Ready to book?",
+      }),
+    }));
+  });
+
+  it("runs the turn without a reply target when the read fails, and says so", async () => {
+    const retrieve = vi.fn(async () => { throw new Error("Relay is down"); });
+    const result = await dispatch([approvedId], approvedId, "review_sender", {
+      replyTo: { message_id: targetId, part_index: 0 },
+      retrieve,
+    });
+    expect(result.invoke).toHaveBeenCalledOnce();
+    const [call] = result.invoke.mock.calls[0] as unknown as [{ ctxPayload: Record<string, unknown> }];
+    expect(call.ctxPayload.ReplyToBody).toBeUndefined();
+    expect(result.warn).toHaveBeenCalledWith(expect.stringContaining("Relay is down"));
+  });
+
+  it("reads nothing for a Message that is not a reply", async () => {
+    const retrieve = vi.fn(async () => agentMessage());
+    const result = await dispatch([approvedId], approvedId, "review_sender", { retrieve });
+    expect(retrieve).not.toHaveBeenCalled();
+    const [call] = result.invoke.mock.calls[0] as unknown as [{ ctxPayload: Record<string, unknown> }];
+    expect(call.ctxPayload.ReplyToBody).toBeUndefined();
   });
 });

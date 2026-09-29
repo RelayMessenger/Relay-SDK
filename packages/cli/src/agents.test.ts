@@ -127,8 +127,8 @@ describe("agent CLI program", () => {
     const { deps } = setup();
     const stdout: string[] = []; const stderr: string[] = []; const pictures: Array<{ handle: string | null; image_url: unknown }> = [];
     const options = { consoleLogin: async () => ({ type: "organization_key" as const, organization_key: "rel_org_test", organization_id: "org_fixture", console_api_url: "https://console.staging.relayapp.im/api" }), agents: deps, configContext: privateContext, stdout: (s: string) => stdout.push(s), stderr: (s: string) => stderr.push(s), fetch: withBirdManifest(undefined, pictures) };
-    expect(await runCLI(["--profile", "new-profile", "agents", "create", "--json"], options)).toBe(0);
-    expect(deps.provision).toHaveBeenCalledWith({}, { apiURL: creationOrigin });
+    expect(await runCLI(["--profile", "new-profile", "agents", "create", "--subtitle", "Helps with tasks", "--json"], options)).toBe(0);
+    expect(deps.provision).toHaveBeenCalledWith({ subtitle: "Helps with tasks" }, { apiURL: creationOrigin });
     expect(JSON.parse(stdout[0]!)).toMatchObject({ handle: card.handle, display_name: card.first_name, profile: "new-profile" });
     // The server owns the default name and picture.
     expect(pictures).toEqual([]);
@@ -140,7 +140,7 @@ describe("agent CLI program", () => {
   });
   it("prints the public link and QR code, and never the token, in human mode", async () => {
     const { deps } = setup(); const stdout: string[] = [];
-    expect(await runCLI(["agents", "create"], { consoleLogin: async () => ({ type: "organization_key" as const, organization_key: "rel_org_test", organization_id: "org_fixture", console_api_url: "https://console.staging.relayapp.im/api" }), agents: deps, configContext: privateContext, stdout: (s) => stdout.push(s), fetch: withBirdManifest() })).toBe(0);
+    expect(await runCLI(["agents", "create", "--subtitle", "Helps with tasks"], { consoleLogin: async () => ({ type: "organization_key" as const, organization_key: "rel_org_test", organization_id: "org_fixture", console_api_url: "https://console.staging.relayapp.im/api" }), agents: deps, configContext: privateContext, stdout: (s) => stdout.push(s), fetch: withBirdManifest() })).toBe(0);
     expect(stdout.join("")).toContain(response.share_url);
     expect(stdout.join("")).not.toContain(secret);
     expect(stdout.length).toBeGreaterThan(1);

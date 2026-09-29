@@ -61,8 +61,20 @@ it("reports actual insecure or unavailable ACLs as not secure", async () => {
 it("rejects a broad existing credential ACL without altering the file or directory", async () => {
   const ctx = await context(); const bytes = JSON.stringify(emptyConfig()); await writeFile(configPath(ctx), bytes);
   vi.mocked(inspectWindowsAcl).mockImplementation(async (path) => path === ctx.home ? acl() : unsafe);
-  await expect(writeConfig(emptyConfig(), ctx)).rejects.toThrow("let other accounts read or write it");
+  await expect(writeConfig(emptyConfig(), ctx)).rejects.toThrow("Other Windows accounts own the Relay config file or can write it");
   expect(await readFile(configPath(ctx), "utf8")).toBe(bytes); expect(protectWindowsPath).not.toHaveBeenCalled();
+});
+
+it("tightens an existing config of yours that other accounts can only read, then writes it", async () => {
+  const ctx = await context(); await writeFile(configPath(ctx), JSON.stringify(emptyConfig()));
+  // Everyone may read and execute (ReadAndExecute, 1179817); nobody else may write.
+  const readable = { ...acl("readable"), rules: [...acl().rules, { sid: "S-1-1-0", rights: 1179817, type: "Allow" }] };
+  vi.mocked(inspectWindowsAcl).mockImplementation(async (path) => path === configPath(ctx) && vi.mocked(protectWindowsPath).mock.calls.length === 0 ? readable : acl());
+  vi.mocked(protectWindowsPath).mockResolvedValue(acl());
+  const config = emptyConfig(); config.profiles.default!.agent_token = "private-fixture-token";
+  await writeConfig(config, ctx);
+  expect(vi.mocked(protectWindowsPath).mock.calls[0]).toEqual([configPath(ctx), false]);
+  expect(await readFile(configPath(ctx), "utf8")).toContain("private-fixture-token");
 });
 
 it("blocks bootstrap on an insecure existing Windows config before any POST", async () => {

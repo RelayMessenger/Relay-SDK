@@ -138,10 +138,16 @@ export async function processAcceptedEvent(
     memory.savePlannedTurn(event.event_id, chatId, plan);
   }
 
+  // The plan quotes the Message it answers, which also gives an agent waiting
+  // on Relay's A2A door its own answer. An agent may not reply to buttons or a
+  // selection, and a reply names part 0, so such a Message is not quoted.
+  // Read as a string: this example's pinned SDK types predate buttons and
+  // selection parts, which Relay sends all the same.
+  const opening: string | undefined = data.parts[0]?.type;
   await relay.chats.messages.send(chatId, {
     message: {
       parts: renderPlanParts(plan),
-      reply_to: { message_id: data.id },
+      ...(opening !== "buttons" && opening !== "selection" ? { reply_to: { message_id: data.id } } : {}),
       idempotency_key: `relay-example:trip-planner:${event.event_id}`,
     },
   });

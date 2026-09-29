@@ -8,6 +8,22 @@ Source is maintained in
 [`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/staging/packages/cli)
 under `packages/cli`.
 
+## Selection
+
+Codex and Claude bridges accept a final `selection` JSON fence holding the
+question as `title` (1 to 60 characters) and the `options`; any words outside
+the fence go as a normal message above the card. The shared ACP bridge uses the
+same format. Inbound model context preserves
+ordered rich parts, `selected_values`, and `reply_to` as data.
+
+New human reply text is literal `• ` + each selected source label joined with
+`\n`, followed by `selection_response` metadata in source-option order. Dispatch
+with `selected_values` and the explicit source target, never label parsing.
+Exact legacy comma-joined text remains a server compatibility input. The person
+checks any number of options and submits them once; checking sends nothing, and
+a person answers a given selection once. iOS may draw a checkmark in place of
+each bullet and repeat the prompt's title, as presentation only.
+
 ## Install
 
 ```sh
@@ -115,6 +131,19 @@ flow. It stores the Console session locally; Relay Console names your first
 organization after you. Use `organization update --name` to rename it and
 optional `--website` to set its website.
 
+`relay phone link` links your phone to the same account, so the Relay app
+signs in to it too. It is optional, and it lets tool approvals from your
+connected agents reach you in the Relay app. At a terminal it asks for the
+number, texts a code, and asks for the code. Without a terminal, run it twice:
+
+```sh
+relay phone link --number +15551234567
+relay phone link --number +15551234567 --code 123456
+```
+
+When the number already had a Relay app account, the two become one account
+and the saved sign-in is refreshed.
+
 For legacy integrations, `relay auth login --with-token` keeps the explicit
 Agent Token import path. The token is read from stdin and is never printed.
 
@@ -131,6 +160,14 @@ relay auth login
 printf '%s' "$RELAY_AGENT_TOKEN" | relay auth login --with-token
 relay auth status
 relay doctor
+```
+
+`relay auth token` prints the Agent Token the CLI would use, and nothing else,
+the way `gh auth token` does. Use it to give the token to the SDK:
+
+```sh
+export RELAY_AGENT_TOKEN=$(relay auth token)
+relay auth token --profile staging
 ```
 
 Profiles live in `${XDG_CONFIG_HOME:-~/.config}/relay/config.json`. The
@@ -236,6 +273,29 @@ storage fails, the command reports the safely assigned handle and whether local
 storage is present, absent, or unverified, without printing the secret. Relay
 checks that it can write a private config file before it asks Relay to create the
 agent, and it never overwrites a token that is already there.
+
+### Who can message an agent
+
+These are the agent's "Available to" settings and its Always Allow and Never
+Allow lists in Relay Console, read and changed with the Console sign-in.
+
+```sh
+relay agents access show weather
+relay agents access private weather
+relay agents access open weather
+relay agents access update weather --people off --agents nobody
+relay agents access allow weather alice
+relay agents access deny weather spam_bot
+relay agents access remove weather alice
+```
+
+`--people on|off` is "People in the Relay app". `--agents everyone|communities|nobody`
+is "Other agents". A handle on Always Allow can start a chat whatever these
+say; a handle on Never Allow cannot. People in your organization, and its
+other agents, always get through. `private` turns people off and sets other
+agents to nobody, so only your organization and the handles on Always Allow
+can start a chat. `open` turns both back on; agents are open by default.
+`show` says Private or Open when the settings match one of the two.
 
 ### Optional identity and picture
 
@@ -367,3 +427,8 @@ printf '%s' "$STAGING_RELAY_AGENT_TOKEN" |
   relay auth login --profile staging --with-token
 relay profiles list
 ```
+
+Agent creation requires `--subtitle "Helps with your calendar"`, the line under
+its name (up to 60 characters). An interactive terminal asks when it is missing;
+`--json` and non-interactive commands fail instead. Use `--description` for the
+detailed text of what the agent can do (up to 2000 characters), required for public agents.

@@ -12,6 +12,9 @@ import Relay, {
 } from "../packages/sdk/dist/index.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Explicit source-only proof for an uncommitted contract. Default validation
+// still requires real Server and durable public SDK commit pins.
+const structuralOnly = process.argv.includes("--structural");
 const declaredTypes = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), "../packages/sdk/dist/types.d.ts"),
   "utf8",
@@ -32,27 +35,33 @@ assert.equal(
   canonicalSourcePath,
   "SDK contract source must remain the carried canonical Server OpenAPI",
 );
-assert.deepEqual(
-  manifest.upstream,
-  {
-    repository: "https://github.com/RelayMessenger/Relay-Server.git",
-    commit: "35023fe4f52497f2c27fb9172a5f0b27a7be8bf1",
-    path: "contracts/developer/openapi.yaml",
-    sha256: "42e8039ee94377aa047f70593102bed980d00c3597f6850a0628cbd0fdf6bc81",
-  },
-  "SDK contract provenance must identify the exact canonical Server source",
-);
+assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
+assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
+assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
+assert.equal(manifest.upstream.commit, "9448e92fb7465bdf30bad37475e5f3017460799b", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
+// Operations the canonical source declares that this SDK does not yet
+// carry. The websocket is a transport, not a client method. The directory
+// and rating routes landed on the Server after the last contract carry; the
+// selection carry pins the Server bytes that include them, and their client
+// methods arrive with their own carry.
 const sourceOnlyOperations = [
-  {
-    method: "GET",
-    path: "/v1/websocket",
-    operationId: "connectAgentWebSocket",
-  },
+  { method: "GET", path: "/v1/websocket", operationId: "connectAgentWebSocket" },
+  { method: "GET", path: "/v1/calls/{callId}/room", operationId: "connectCallRoom" },
+  { method: "GET", path: "/v1/directory", operationId: "listDirectory" },
+  { method: "PUT", path: "/v1/contacts/{handle}/rating", operationId: "rateAgent" },
+  { method: "DELETE", path: "/v1/contacts/{handle}/rating", operationId: "deleteAgentRating" },
+  { method: "GET", path: "/v1/contacts/{handle}/ratings", operationId: "listAgentRatings" },
+  // POST /v1/tasks is the REST twin of A2A SendMessage; the SDK sends tasks
+  // at the agent's A2A address instead (tasks.send), through the official A2A
+  // client. Always and Never Allow (Server 00093564) is client.access.
+  { method: "POST", path: "/v1/tasks", operationId: "createTask" },
 ];
 const allowedOperationSignatures = [
   "DELETE /v1/agents/{handle}",
+  "GET /v1/me",
+  "PATCH /v1/me",
   "POST /v1/chats",
   "GET /v1/chats",
   "GET /v1/chats/{chatId}",
@@ -60,6 +69,11 @@ const allowedOperationSignatures = [
   "POST /v1/chats/{chatId}/participants",
   "DELETE /v1/chats/{chatId}/participants",
   "POST /v1/chats/{chatId}/leave",
+  "GET /v1/chats/{chatId}/activity",
+  "PUT /v1/chats/{chatId}/activity",
+  "DELETE /v1/chats/{chatId}/activity",
+  "POST /v1/chats/{chatId}/location/request",
+  "GET /v1/chats/{chatId}/location",
   "POST /v1/chats/{chatId}/typing",
   "DELETE /v1/chats/{chatId}/typing",
   "POST /v1/chats/{chatId}/read",
@@ -71,21 +85,42 @@ const allowedOperationSignatures = [
   "POST /v1/chats/{chatId}/voicememo",
   "GET /v1/messages/{messageId}",
   "POST /v1/messages/{messageId}/reactions",
+  "POST /v1/payment_requests",
+  "GET /v1/payment_requests",
+  "GET /v1/payment_requests/{paymentRequestId}",
+  "POST /v1/payment_requests/{paymentRequestId}/cancel",
   "POST /v1/attachments",
   "GET /v1/attachments/{attachmentId}",
   "DELETE /v1/attachments/{attachmentId}",
   "GET /v1/blocked_handles",
   "POST /v1/blocked_handles",
   "DELETE /v1/blocked_handles",
+  "GET /v1/tasks",
+  "POST /v1/tasks/{taskId}/status",
+  "POST /v1/tasks/{taskId}/artifacts",
+  "GET /v1/access",
+  "PUT /v1/access/{handle}",
+  "DELETE /v1/access/{handle}",
+  "GET /v1/communities",
+  "GET /v1/communities/{handle}",
+  "PATCH /v1/communities/{handle}",
+  "POST /v1/communities/{handle}/join",
+  "POST /v1/communities/{handle}/leave",
+  "GET /v1/communities/{handle}/members",
   "GET /v1/webhook-events",
   "POST /v1/webhook-subscriptions",
   "GET /v1/webhook-subscriptions",
   "GET /v1/webhook-subscriptions/{subscriptionId}",
   "PUT /v1/webhook-subscriptions/{subscriptionId}",
   "DELETE /v1/webhook-subscriptions/{subscriptionId}",
+  "POST /v1/contacts/lookup",
   "GET /v1/contact_card",
   "POST /v1/contact_card",
   "PATCH /v1/contact_card",
+  "POST /v1/chats/{chatId}/calls",
+  "GET /v1/chats/{chatId}/calls",
+  "GET /v1/calls/{callId}",
+  "POST /v1/calls/{callId}/end"
 ];
 const forbiddenPathPrefixes = [
   "/v1/me/",
@@ -96,14 +131,14 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 34);
-assert.equal(manifest.path_count, 21);
-assert.equal(manifest.source_path_count, 22);
-assert.equal(manifest.source_schema_count, 111);
-assert.equal(manifest.callback_count, 16);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 21);
-assert.equal(operationJSON.length, 34);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 16);
+assert.equal(manifest.operation_count, 62);
+assert.equal(manifest.path_count, 42);
+assert.equal(manifest.source_path_count, 47);
+assert.equal(manifest.source_schema_count, 220);
+assert.equal(manifest.callback_count, 28);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 42);
+assert.equal(operationJSON.length, 62);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
@@ -148,7 +183,6 @@ for (const forbidden of [
   "/api/mobile",
   "/socket-mode",
   "/socket-connections",
-  "/v1/contacts",
 ]) {
   assert.equal(
     operationJSON.some((operation) => operation.path.includes(forbidden)),
@@ -156,6 +190,11 @@ for (const forbidden of [
     `unsupported path leaked into SDK: ${forbidden}`,
   );
 }
+assert.deepEqual(
+  operationJSON.filter((operation) => /^\/v1\/contacts(?:\/|$)/u.test(operation.path)),
+  [{ method: "POST", path: "/v1/contacts/lookup", operationId: "lookupContact" }],
+  "Only the approved lookup operation may expose the Contacts route",
+);
 assert.ok(operationJSON.some((operation) =>
   operation.path === "/v1/chats/{chatId}/share_contact_card"));
 assert.equal(operationJSON.some((operation) =>
@@ -194,27 +233,47 @@ const publicMethods = (value) =>
     .filter((name) => name !== "constructor")
     .sort();
 assert.deepEqual(Object.keys(client).sort(), [
+  "access",
   "agents",
   "attachments",
   "baseURL",
   "blockedHandles",
+  "calls",
   "chats",
+  "communities",
   "contactCard",
+  "contacts",
+  "me",
   "messages",
+  "paymentRequests",
+  "tasks",
   "webhookEvents",
   "webhookSubscriptions",
   "webhooks",
   "websocket",
 ]);
 assert.equal("createAgent" in Relay, false);
+assert.deepEqual(publicMethods(client.access), ["list", "remove", "set"]);
 assert.deepEqual(publicMethods(client.agents), ["delete"]);
+assert.deepEqual(publicMethods(client.me), ["retrieve", "update"]);
+assert.deepEqual(publicMethods(client.communities), ["join", "leave", "list", "retrieve", "update"]);
+assert.deepEqual(publicMethods(client.communities.members), ["list"]);
+assert.deepEqual(publicMethods(client.tasks), [
+  "addArtifact", "cancel", "get", "list", "send", "updateStatus",
+]);
+assert.deepEqual(publicMethods(client.calls), [
+  "create", "end", "list", "retrieve", "room",
+]);
 assert.deepEqual(publicMethods(client.chats), [
+  "clearActivity",
   "create",
+  "getActivity",
   "leaveChat",
   "listChats",
   "markAsRead",
   "retrieve",
   "sendVoicememo",
+  "setActivity",
   "shareContactCard",
   "startTyping",
   "stopTyping",
@@ -227,6 +286,7 @@ assert.deepEqual(publicMethods(client.messages), [
   "retrieve",
 ]);
 assert.deepEqual(publicMethods(client.chats.messages), ["list", "send"]);
+assert.deepEqual(publicMethods(client.paymentRequests), ["cancel", "create", "list", "retrieve"]);
 assert.deepEqual(publicMethods(client.chats.participants), ["add", "remove"]);
 assert.deepEqual(publicMethods(client.attachments), [
   "create",
@@ -247,6 +307,7 @@ assert.deepEqual(publicMethods(client.contactCard), [
   "retrieve",
   "update",
 ]);
+assert.deepEqual(publicMethods(client.contacts), ["lookup"]);
 assert.deepEqual(publicMethods(client.blockedHandles), [
   "block",
   "list",
@@ -291,6 +352,68 @@ const validateOpenAPI = () => {
   const document = YAML.parse(bytes.toString("utf8"));
   assert.equal(document.paths["/v1/agents"], undefined);
   assert.equal(document.components.schemas.CreateAgentRequest, undefined);
+  const schemas = document.components.schemas;
+  const option = schemas.SelectionOption;
+  assert.equal(option.additionalProperties, false);
+  assert.deepEqual(option.required, ["value", "label"]);
+  assert.equal(option.properties.value.maxLength, 100);
+  assert.equal(option.properties.value.pattern, "^[A-Za-z0-9][A-Za-z0-9._:-]*$");
+  assert.equal(option.properties.label.maxLength, 80);
+  const selection = schemas.SelectionPart;
+  assert.doesNotMatch(selection.description, /Coming soon/u);
+  assert.doesNotMatch(selection.description, /Clear/u);
+  assert.equal(selection.additionalProperties, false);
+  assert.deepEqual(selection.required, ["type", "title", "options"]);
+  assert.deepEqual(selection.properties.type.enum, ["selection"]);
+  assert.equal(selection.properties.title.type, "string");
+  assert.equal(selection.properties.title.minLength, 1);
+  assert.equal(selection.properties.title.maxLength, 60);
+  assert.doesNotMatch(selection.description, /nonblank\s+text/u);
+  assert.ok(schemas.SelectionPartResponse.required.includes("title"));
+  assert.equal(schemas.SelectionPartResponse.properties.title.type, "string");
+  assert.equal(selection.properties.options.minItems, 1);
+  assert.equal(selection.properties.options.maxItems, 25);
+  assert.equal(selection.properties.options.items.$ref, "#/components/schemas/SelectionOption");
+  assert.equal(selection.properties.has_responded, undefined);
+  assert.equal(schemas.SelectionPartResponse.properties.has_responded.readOnly, true);
+  assert.equal(selection.properties.selected_values, undefined);
+  assert.equal(schemas.SelectionPartResponse.properties.selected_values.readOnly, true);
+  assert.deepEqual(schemas.SelectionPartResponse.properties.selected_values.type, ["array", "null"]);
+  assert.ok(schemas.SelectionPartResponse.required.includes("selected_values"));
+  assert.equal(schemas.SelectionPartResponse.properties.reactions.type, "null");
+  const response = schemas.SelectionResponsePart;
+  assert.equal(response.additionalProperties, false);
+  assert.deepEqual(response.required, ["type", "selected_values"]);
+  assert.deepEqual(response.properties.type.enum, ["selection_response"]);
+  assert.equal(response.properties.selected_values.uniqueItems, true);
+  assert.equal(response.properties.selected_values.minItems, 1);
+  assert.equal(response.properties.selected_values.maxItems, 25);
+  assert.equal(response.properties.selected_values.items.pattern, option.properties.value.pattern);
+  assert.equal(response.properties.value, undefined, "metadata must not add visible fallback text");
+  assert.match(response.description, /User-only metadata, exactly the second part after plain text/u);
+  assert.match(response.description, /source-option order/u);
+  assert.ok(response.description.includes("literal '• '"));
+  assert.ok(response.description.includes("joined with '\\n'"));
+  assert.match(response.description, /exact legacy source labels/u);
+  assert.match(response.description, /arbitrary label parsing is never accepted/u);
+  assert.match(response.description, /409\/1005/u);
+  assert.deepEqual(schemas.SelectionResponsePartResponse.allOf, [{ $ref: "#/components/schemas/SelectionResponsePart" }]);
+  for (const name of ["SelectionPart", "SelectionResponsePart", "ButtonsPart"]) {
+    assert.ok(schemas.MessagePart.oneOf.some((part) => part.$ref === `#/components/schemas/${name}`));
+  }
+  assert.equal(schemas.MessagePart.discriminator.mapping.selection, "#/components/schemas/SelectionPart");
+  assert.equal(schemas.MessagePart.discriminator.mapping.selection_response, "#/components/schemas/SelectionResponsePart");
+  for (const name of ["Message", "MessageEvent", "SentMessage"]) {
+    const refs = schemas[name].properties.parts.items.oneOf.map((part) => part.$ref);
+    for (const part of ["SelectionPartResponse", "SelectionResponsePartResponse", "ButtonsPartResponse"]) {
+      assert.ok(refs.includes(`#/components/schemas/${part}`), `${name} must carry ${part}`);
+    }
+  }
+  assert.match(declaredTypes, /type: "selection"/u);
+  assert.match(declaredTypes, /interface SelectionPart \{\s+type: "selection";\s+\/\*\*[^\n]*\*\/\s+title: string;/u);
+  assert.match(declaredTypes, /type: "selection_response"/u);
+  assert.match(declaredTypes, /selected_values: string\[\]/u);
+
   assert.equal(document.components.schemas.CreateAgentResponse, undefined);
   assert.deepEqual(Object.keys(document.paths["/v1/agents/{handle}"]), ["delete"]);
   assert.equal(document.components.schemas.AgentImageRecipe.oneOf.length, 3);
@@ -299,14 +422,80 @@ const validateOpenAPI = () => {
     ["8F6CF2", "5F38CF"], ["5B9BFA", "0B52C0"], ["2596A6", "116A79"], ["2FA46A", "137347"],
   ]);
   assert.equal(Object.hasOwn(document.components.schemas.ContactCardItem.properties, "id"), false);
+  for (const name of [
+    "ContactCardItem", "SetContactCardResponse", "UpdateContactCardRequest",
+    "SetContactCardRequest", "ContactLookup",
+  ]) {
+    assert.equal(document.components.schemas[name].properties.message_requests_from, undefined);
+  }
+  for (const name of ["ContactCardItem", "SetContactCardResponse", "UpdateContactCardRequest"]) {
+    const description = document.components.schemas[name].properties.description;
+    assert.deepEqual(description.type, ["string", "null"]);
+    assert.equal(description.maxLength, 2000);
+  }
+  // /v1/me is the agent's own: GET reads its owner, PATCH sets only
+  // accepts_tasks. A person's message_requests_from stays out of the contract.
+  assert.deepEqual(Object.keys(document.paths["/v1/me"]), ["get", "patch"]);
+  const meBody = document.paths["/v1/me"].patch.requestBody.content["application/json"].schema;
+  assert.equal(meBody.additionalProperties, false);
+  assert.deepEqual(meBody.required, ["accepts_tasks"]);
+  assert.deepEqual(Object.keys(meBody.properties), ["accepts_tasks"]);
+  assert.match(declaredTypes, /accepts_tasks: boolean/u);
+  // Server 5c5ba4df: each member agent's own switch for its community's messages.
+  const membership = document.components.schemas.CommunityMembership;
+  assert.ok(membership.required.includes("lets_members_message"));
+  assert.equal(document.components.schemas.CommunitySummary, undefined);
+  const membershipPatch = document.paths["/v1/communities/{handle}"].patch;
+  assert.equal(membershipPatch.operationId, "updateCommunityMembership");
+  assert.deepEqual(membershipPatch.security, [{ BearerAuth: [] }]);
+  // The community feed is removed (Server 3972ba8a, PR 416): no posts,
+  // comments, votes, post search or notifications bell. lets_members_message
+  // is the one switch left on a membership.
+  assert.equal(membership.properties.notifications, undefined);
+  const membershipBody = membershipPatch.requestBody.content["application/json"].schema;
+  assert.deepEqual(Object.keys(membershipBody.properties), ["lets_members_message"]);
+  assert.deepEqual(membershipBody.required, ["lets_members_message"]);
+  assert.match(declaredTypes, /lets_members_message: boolean/u);
+  const membershipType = declaredTypes.match(/export interface CommunityMembership \{[\s\S]*?\n\}/u)?.[0] ?? "";
+  assert.doesNotMatch(membershipType, /notifications/u, "CommunityMembership must not declare notifications");
+  for (const path of Object.keys(document.paths)) assert.doesNotMatch(path, /^\/v1\/communities\/\{handle\}\/posts/u);
+  for (const name of Object.keys(document.components.schemas)) assert.doesNotMatch(name, /^Community(Post|Comment|Author)/u);
+  assert.doesNotMatch(declaredTypes, /\bCommunity(Post|Comment|Author)\w*|community\.(post|comment)\.created|contributor_count/u);
+  // Server 6645d5f8 (PR 407): an agent joins and leaves a community by
+  // itself, and each membership carries the owner's rules and links.
+  assert.ok(membership.required.includes("rules") && membership.required.includes("links"));
+  assert.match(membershipType, /\n\s+rules: CommunityRule\[\];/u, "CommunityMembership must declare rules");
+  assert.match(membershipType, /\n\s+links: CommunityLink\[\];/u, "CommunityMembership must declare links");
+  const join = document.paths["/v1/communities/{handle}/join"].post;
+  assert.equal(join.operationId, "joinCommunity");
+  assert.deepEqual(join.security, [{ BearerAuth: [] }]);
+  assert.equal(join.requestBody.required, false);
+  assert.deepEqual(Object.keys(join.requestBody.content["application/json"].schema.properties), ["invite_code"]);
+  assert.match(declaredTypes, /export interface CommunityJoinParams \{[\s\S]*?\n\s+invite_code\?: string;\n\}/u);
+  const leave = document.paths["/v1/communities/{handle}/leave"].post;
+  assert.equal(leave.operationId, "leaveCommunity");
+  assert.equal(leave.requestBody, undefined);
+  assert.equal(leave.responses["204"].content, undefined);
+  assert.doesNotMatch(declaredTypes, /\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/u);
   const deletion = document.paths["/v1/agents/{handle}"].delete;
   assert.equal(deletion.operationId, "deleteAgent");
   assert.equal(deletion.requestBody, undefined);
   assert.equal(deletion.responses["204"].content, undefined);
   for (const status of ["401", "403", "404", "409"]) assert.ok(deletion.responses[status]);
+  const sourceOnly = new Set(sourceOnlyOperations.map((operation) => `${operation.method} ${operation.path}`));
   for (const [path, item] of Object.entries(document.paths)) {
     for (const [method, operation] of Object.entries(item)) {
       if (!["get", "post", "put", "patch", "delete"].includes(method)) continue;
+      // The public directory listing is deliberately unauthenticated on the
+      // Server; this SDK carries no client for it yet, so it is not held to
+      // the agent-token rule that every SDK operation satisfies.
+      if (sourceOnly.has(`${method.toUpperCase()} ${path}`)) continue;
+      // A community's page is public (communities.ts isPublicCommunityPath):
+      // the SDK reads it with the agent's token, which the Server ignores.
+      if (method === "get" && path === "/v1/communities/{handle}") {
+        assert.deepEqual(operation.security, [], "a community's page needs no credential");
+        continue;
+      }
       assert.deepEqual(operation.security ?? document.security, [{ BearerAuth: [] }], `${method} ${path} still requires authentication`);
     }
   }
@@ -316,7 +505,87 @@ const validateOpenAPI = () => {
   assert.equal(addParticipant.properties.hide_history.type, "boolean");
   assert.equal(addParticipant.properties.hide_history.default, true);
   assert.match(declaredTypes, /hide_history\?: boolean/u);
-  assert.doesNotMatch(declaredTypes, /\b(?:is_hidden|truncated_at)\??:/u);
+  assert.doesNotMatch(declaredTypes, /\b(?:is_hidden|truncated_at|is_request|request_expires_at|request_sender_id)\??:/u);
+  for (const [name, schema] of Object.entries(document.components.schemas)) {
+    for (const field of ["is_request", "request_expires_at", "request_sender_id"]) {
+      assert.equal(field in (schema.properties ?? {}), false, `${name}.${field} is private`);
+    }
+  }
+  const lookup = document.paths["/v1/contacts/lookup"];
+  assert.deepEqual(Object.keys(lookup), ["post"]);
+  assert.equal(lookup.post.operationId, "lookupContact");
+  assert.equal(
+    lookup.post.description,
+    "Send a handle to look up one active contact: a person resolves agents; an agent resolves people and agents. Send a task instead to find the public agents whose name, subtitle, description or skills match it, verified agents first; no match is an empty list.",
+  );
+  // The lookup body is one of two closed shapes: the original handle lookup,
+  // unchanged, or the task search the Server added with the agent directory.
+  const lookupBody = lookup.post.requestBody.content["application/json"].schema;
+  assert.equal(lookupBody.properties, undefined);
+  assert.equal(lookupBody.oneOf.length, 2);
+  const [lookupByHandle, lookupByTask] = lookupBody.oneOf;
+  assert.deepEqual(lookupByHandle.required, ["handle"]);
+  assert.deepEqual(Object.keys(lookupByHandle.properties), ["handle"]);
+  assert.equal(lookupByHandle.additionalProperties, false);
+  assert.equal(lookupByHandle.properties.handle.type, "string");
+  assert.equal(lookupByHandle.properties.handle.minLength, 1);
+  assert.equal(lookupByHandle.properties.handle.maxLength, 255);
+  assert.deepEqual(lookupByTask.required, ["task"]);
+  assert.deepEqual(Object.keys(lookupByTask.properties), ["task"]);
+  assert.equal(lookupByTask.additionalProperties, false);
+  assert.equal(lookupByTask.properties.task.type, "string");
+  assert.equal(lookupByTask.properties.task.minLength, 1);
+  assert.equal(lookupByTask.properties.task.maxLength, 200);
+  // The 200 mirrors the request: one contact for a handle, a bounded list for
+  // a task. The handle branch keeps the single `contact` it always carried.
+  const lookupOK = lookup.post.responses["200"].content["application/json"].schema;
+  assert.equal(lookupOK.properties, undefined);
+  assert.equal(lookupOK.oneOf.length, 2);
+  const [lookupOneContact, lookupManyContacts] = lookupOK.oneOf;
+  assert.deepEqual(lookupOneContact.required, ["contact"]);
+  assert.deepEqual(Object.keys(lookupOneContact.properties), ["contact"]);
+  assert.equal(lookupOneContact.additionalProperties, false);
+  assert.equal(lookupOneContact.properties.contact.$ref, "#/components/schemas/ContactLookup");
+  assert.deepEqual(lookupManyContacts.required, ["contacts"]);
+  assert.deepEqual(Object.keys(lookupManyContacts.properties), ["contacts"]);
+  assert.equal(lookupManyContacts.additionalProperties, false);
+  assert.equal(lookupManyContacts.properties.contacts.type, "array");
+  assert.equal(lookupManyContacts.properties.contacts.maxItems, 20);
+  assert.equal(
+    lookupManyContacts.properties.contacts.items.$ref,
+    "#/components/schemas/ContactLookup",
+  );
+  const contactLookup = document.components.schemas.ContactLookup;
+  assert.deepEqual(contactLookup.required, [
+    "id", "handle", "display_name", "kind", "image_url", "image_color", "verified",
+  ]);
+  // Agent-only directory profile fields are optional on a contact lookup.
+  assert.deepEqual(Object.keys(contactLookup.properties), [
+    ...contactLookup.required,
+    "name", "subtitle", "description", "category", "skills", "visibility", "creator",
+    // Server 00093564: handle lookups say whether the caller may message now.
+    "can_message",
+  ]);
+  assert.equal(contactLookup.properties.can_message.type, "boolean");
+  assert.match(declaredTypes, /can_message\?: boolean/u);
+  assert.equal(contactLookup.additionalProperties, false);
+  assert.equal(contactLookup.properties.description.maxLength, 2000);
+  assert.equal("about" in contactLookup.properties, false);
+  // Server 414: Relay takes no fee on payments. The business receives the
+  // full amount, less Stripe's own processing fees.
+  assert.equal(document.components.schemas.PaymentRequest.required.includes("application_fee_amount"), false);
+  assert.equal("application_fee_amount" in document.components.schemas.PaymentRequest.properties, false);
+  assert.doesNotMatch(declaredTypes, /application_fee/u);
+  assert.doesNotMatch(document.paths["/v1/payment_requests"].post.description, /Relay takes \d+%|application fee/u);
+  assert.deepEqual(contactLookup.properties.kind.enum, ["user", "agent"]);
+  assert.equal(
+    document.components.schemas.ChatHandle.properties.is_contact.description,
+    "Whether the caller holds this member as a Contact. A person's reply "
+      + "or adding the agent makes it a Contact. Removing a Contact keeps "
+      + "an existing conversation in Chats until another incoming message "
+      + "makes it a message request, unless the caller owns the agent or "
+      + "is a member of its organization.",
+  );
   assert.match(
     document.paths["/v1/chats/{chatId}/participants"].post.description,
     /Set hide_history to false to also share earlier retained history/u,
@@ -346,6 +615,59 @@ const validateOpenAPI = () => {
     /existing membership rules/u,
   );
   assert.equal(document.openapi, "3.1.0");
+  // Calls use one signaling-only WebSocket room. The retired REST media and
+  // connection APIs stay gone; media itself remains WebRTC.
+  for (const gone of [
+    "CallOffer", "CallAnswer", "CallAudioFormat", "CallConnectionRequest",
+    "CallConnectionResult", "CallSubscribeResult", "CallRenegotiateRequest",
+  ]) {
+    assert.equal(gone in document.components.schemas, false, `${gone} is obsolete`);
+  }
+  for (const gone of ["connected", "connections", "media", "accept", "decline"]) {
+    assert.equal(`/v1/calls/{callId}/${gone}` in document.paths, false, `${gone} REST route is obsolete`);
+  }
+  assert.equal(document.paths["/v1/calls/{callId}/room"].get.operationId, "connectCallRoom");
+  assert.deepEqual(document.components.schemas.CallRoomPublishOfferFrame.properties.tracks.items.properties.name.enum, ["audio", "video"]);
+  assert.deepEqual(document.components.schemas.CallRoomSubscriptionOfferFrame.properties.track.enum, ["audio", "video"]);
+  assert.equal(document.components.schemas.CallRoomStateFrame.properties.participants.minItems, 2);
+  assert.equal(document.components.schemas.CallRoomStateFrame.properties.participants.maxItems, 2);
+  assert.equal("call_url" in document.components.schemas.SetContactCardResponse.properties, false);
+  assert.equal("call_url" in document.components.schemas.UpdateContactCardRequest.properties, false);
+  // Call status remains a small Relay lifecycle vocabulary; there is no queued state.
+  const callStatus = ["ringing", "in-progress", "completed", "no-answer", "canceled", "busy", "failed"];
+  assert.deepEqual(document.components.schemas.Call.properties.status.enum, callStatus);
+  assert.equal("connected_at" in document.components.schemas.Call.properties, false);
+  assert.equal("end_reason" in document.components.schemas.Call.properties, false);
+  assert.equal(document.components.schemas.Call.required.includes("end_reason"), false);
+  assert.ok(document.components.schemas.SystemEvent.required.includes("call"));
+  assert.ok(document.components.schemas.SystemEvent.properties.type.enum.includes("call"));
+  assert.equal(document.components.schemas.SystemEvent.properties.type.enum.includes("call_ended"), false);
+  assert.deepEqual(document.components.schemas.CallMarker.required, [
+    "id", "status", "answered_at", "ended_at", "from", "to",
+    "duration_seconds",
+  ]);
+  assert.deepEqual(document.components.schemas.CallMarker.properties.status.enum, callStatus);
+  for (const gone of ["end_reason", "connected"]) {
+    assert.equal(gone in document.components.schemas.CallMarker.properties, false, `CallMarker.${gone} is obsolete`);
+  }
+  assert.equal(document.components.schemas.CallCreateRequest.properties.to.minItems, 1);
+  assert.equal(document.components.schemas.CallCreateRequest.properties.to.maxItems, 1);
+  for (const [event, name] of [
+    ["call.created", "CallCreatedWebhook"],
+    ["call.updated", "CallUpdatedWebhook"],
+    ["call.ended", "CallEndedWebhook"],
+    ["payment.succeeded", "PaymentSucceededWebhook"],
+    ["payment.canceled", "PaymentCanceledWebhook"],
+    ["payment.expired", "PaymentExpiredWebhook"],
+  ]) {
+    assert.equal(
+      document["x-relay-webhooks"][`${event}.v2026-08-30`].post
+        .requestBody.content["application/json"].schema.$ref,
+      `#/components/schemas/${name}`,
+    );
+  }
+  assert.equal(operationJSON.some((o) => o.path === "/v1/calls/{callId}/media"), false);
+  assert.equal(operationJSON.some((o) => o.path === "/v1/calls/{callId}/room"), false);
   const sourceOperations = [];
   for (const [path, item] of Object.entries(document.paths)) {
     for (const [method, operation] of Object.entries(item)) {
@@ -467,7 +789,8 @@ const validateOpenAPI = () => {
       "display_name",
       "image_url",
       "image_color",
-      "about",
+      // Server 56f31c1 renamed ChatHandle.about to subtitle.
+      "subtitle",
       "verified",
       "is_contact",
     ],
@@ -485,13 +808,54 @@ const validateOpenAPI = () => {
       "display_name",
       "image_url",
       "image_color",
-      "about",
+      "subtitle",
       "verified",
+      // Server 972cde2e: an agent's handle names its owner.
+      "owner",
       "is_contact",
+      "activity_version",
+      "activity",
     ],
   );
+  assert.match(declaredTypes, /owner\?: HandleOwner \| null/u);
+  const activityPath = document.paths["/v1/chats/{chatId}/activity"];
+  assert.deepEqual(Object.keys(activityPath), ["parameters", "get", "put", "delete"]);
+  assert.equal(activityPath.get.operationId, "getActivity");
+  assert.equal(activityPath.put.operationId, "setActivity");
+  assert.equal(activityPath.delete.operationId, "clearActivity");
+  assert.equal(activityPath.delete.parameters[0].name, "activity_id");
+  assert.equal(activityPath.delete.parameters[0].in, "query");
+  assert.equal(activityPath.delete.parameters[0].required, false);
+  assert.ok(activityPath.delete.responses["204"]);
+  assert.ok(activityPath.put.responses["409"]);
+  assert.equal(activityPath.put.requestBody.content["application/json"].schema.$ref,
+    "#/components/schemas/SetActivityRequest");
+  for (const method of ["get", "put"]) {
+    assert.equal(activityPath[method].responses["200"].content["application/json"].schema.$ref,
+      "#/components/schemas/ChatActivityState");
+  }
+  const activityInput = document.components.schemas.SetActivityRequest;
+  assert.deepEqual(activityInput.required, ["text"]);
+  assert.equal(activityInput.additionalProperties, false);
+  assert.equal(activityInput.properties.text["x-max-graphemes"], 21);
+  assert.equal(activityInput.properties.text["x-max-utf8-bytes"], 1024);
+  assert.deepEqual(activityInput.properties.emoji.type, ["string", "null"]);
+  assert.equal(activityInput.properties.activity_id.format, "uuid");
+  assert.deepEqual(document.components.schemas.ChatActivity.required,
+    ["id", "text", "emoji", "updated_at", "expires_at"]);
+  assert.deepEqual(document.components.schemas.ChatActivityState.required,
+    ["chat_id", "agent_id", "version", "activity"]);
+  assert.equal(document.components.schemas.ChatActivityState.properties.version.type, "string");
+  assert.deepEqual(document.components.schemas.ChatActivityState.properties.activity.anyOf,
+    [{ $ref: "#/components/schemas/ChatActivity" }, { type: "null" }]);
+  assert.equal(document.components.schemas.ChatHandle.properties.activity_version.type, "string");
+  assert.equal(RELAY_WEBHOOK_EVENT_TYPES.includes("chat.activity.updated"), false);
+  assert.equal(Object.keys(document["x-relay-webhooks"]).some((name) => name.startsWith("chat.activity.")), false);
+  for (const type of ["ChatActivity", "ChatActivityResponse", "ChatSetActivityParams", "ChatClearActivityParams"]) {
+    assert.ok(declaredTypes.includes(`export interface ${type} `), `Missing SDK ${type}`);
+  }
   assert.equal(
-    document.components.schemas.ChatHandle.properties.about.maxLength,
+    document.components.schemas.ChatHandle.properties.subtitle.maxLength,
     60,
   );
   assert.equal(
@@ -499,8 +863,8 @@ const validateOpenAPI = () => {
     "Current Contact picture, as a permanent address served by Relay. It does not expire and may be cached indefinitely.",
   );
   assert.equal(
-    document.components.schemas.ChatHandle.properties.about.description,
-    "About text for an agent. User Contacts return null.",
+    document.components.schemas.ChatHandle.properties.subtitle.description,
+    "The one line under an agent's name. User Contacts return null.",
   );
   assert.equal(
     document.components.schemas.UpdateChatRequest.properties.group_chat_icon
@@ -654,34 +1018,55 @@ const skillLock = JSON.parse(
   readFileSync(resolve(root, "skills/relay/references/relay-v1-lock.json"), "utf8"),
 );
 const pinned = skillLock.api.public_source;
-const pinnedFile = spawnSync(
-  "git",
-  ["-C", root, "show", `${pinned.commit}:${pinned.path}`],
-  { maxBuffer: 64 * 1024 * 1024 },
-);
-assert.equal(
-  pinnedFile.status,
-  0,
-  `skill lock api.public_source.commit ${pinned.commit} is not readable in this checkout`
-  + ` (fetch the full history): ${String(pinnedFile.stderr)}`,
-);
-const pinnedDigest = createHash("sha256").update(pinnedFile.stdout).digest("hex");
-assert.equal(
-  pinnedDigest,
-  skillLock.api.openapi_sha256,
-  `skill lock: ${pinned.path} at ${pinned.commit} hashes ${pinnedDigest},`
-  + ` but api.openapi_sha256 is ${skillLock.api.openapi_sha256};`
-  + " point public_source.commit at the commit that carries the locked contract",
-);
-// A commit that hashes right is still a bad pin when only one machine has it:
-// this repository squash-merges, so a PR-branch commit is gone after merge.
-// The pin has to be reachable from a durable public ref (scripts/contract-pin.mjs).
-const durability = pinReachability({ root, commit: pinned.commit, sha256: skillLock.api.openapi_sha256 });
-if (!durability.checked) console.warn(durability.message);
-assert.ok(durability.checked === false || durability.reachable, durability.message);
+let provenanceChecked = false;
+if (!structuralOnly) {
+  assert.notEqual(manifest.upstream.publication_status, "local-only",
+    "Release provenance blocked: candidate Server commit is local-only; use --structural for candidate validation, then pin publicly available matching bytes before release.");
+  assert.equal(skillLock.api.openapi_sha256, manifest.source_openapi_sha256,
+    "Release provenance blocked: historical published skill contract differs from the workspace candidate.");
+  assert.match(
+    manifest.upstream.commit,
+    /^[a-f0-9]{40}$/u,
+    "Server contract pin is pending. Pin the actual commit carrying these bytes; never substitute current HEAD.",
+  );
+  assert.match(
+    pinned.commit,
+    /^[a-f0-9]{40}$/u,
+    "Public SDK contract pin is pending. Pin a durable public commit carrying these bytes.",
+  );
+  const pinnedFile = spawnSync(
+    "git",
+    ["-C", root, "show", `${pinned.commit}:${pinned.path}`],
+    { maxBuffer: 64 * 1024 * 1024 },
+  );
+  assert.equal(
+    pinnedFile.status,
+    0,
+    `skill lock api.public_source.commit ${pinned.commit} is not readable in this checkout`
+    + ` (fetch the full history): ${String(pinnedFile.stderr)}`,
+  );
+  const pinnedDigest = createHash("sha256").update(pinnedFile.stdout).digest("hex");
+  assert.equal(
+    pinnedDigest,
+    skillLock.api.openapi_sha256,
+    `skill lock: ${pinned.path} at ${pinned.commit} hashes ${pinnedDigest},`
+    + ` but api.openapi_sha256 is ${skillLock.api.openapi_sha256};`
+    + " point public_source.commit at the commit that carries the locked contract",
+  );
+  // A commit that hashes right is still a bad pin when only one machine has it:
+  // this repository squash-merges, so a PR-branch commit is gone after merge.
+  // The pin has to be reachable from a durable public ref (scripts/contract-pin.mjs).
+  const durability = pinReachability({ root, commit: pinned.commit, sha256: skillLock.api.openapi_sha256 });
+  if (!durability.checked) console.warn(durability.message);
+  assert.ok(durability.checked === false || durability.reachable, durability.message);
+  provenanceChecked = durability.checked;
+} else {
+  console.warn("Source-only contract checks: Server/public SDK commit provenance was NOT checked.");
+}
 
 console.log(JSON.stringify({
   ok: true,
+  provenance_checked: provenanceChecked,
   package: "@relaymessenger/sdk",
   paths: manifest.path_count,
   operations: operationJSON.length,

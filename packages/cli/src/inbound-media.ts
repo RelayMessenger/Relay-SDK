@@ -1,4 +1,5 @@
-import type { MediaPartResponse } from "@relaymessenger/sdk";
+import { replyTargetContext, selectionReplyContext } from "@relaymessenger/sdk";
+import type { MediaPartResponse, Message, ReplyTo } from "@relaymessenger/sdk";
 import { lstat, rename } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { configPath, type ConfigContext } from "./config.js";
@@ -60,11 +61,34 @@ export const downloadInboundMedia = async (
   return files;
 };
 
+/**
+ * The Message a reply names, read once with GET /v1/messages/{id}. A read that
+ * fails leaves the target unread, and the prompt names it by id instead.
+ */
+const readReplyTarget = async (
+  replyTo: ReplyTo, options: Omit<InboundMediaOptions, "chatId"> | undefined,
+): Promise<Message | undefined> => {
+  if (!options) return undefined;
+  try {
+    const url = new URL(`/v1/messages/${encodeURIComponent(replyTo.message_id)}`, options.apiURL);
+    const response = await (options.fetch ?? globalThis.fetch)(url, {
+      headers: { authorization: `Bearer ${options.token}` },
+      signal: AbortSignal.timeout(30_000),
+    });
+    return response.ok ? await response.json() as Message : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 /** A failed attachment is named in the turn; it never consumes the message. */
 export const inboundMediaPrompt = async (
   turn: BridgeTurn, options?: Omit<InboundMediaOptions, "chatId">,
 ): Promise<{ text: string; images: string[] }> => {
-  const lines = turn.text ? [turn.text] : [];
+  const lines = turn.text ? [turn.text.slice(0, 10_000)] : [];
+  if (turn.replying) lines.push(replyTargetContext(turn.replying, await readReplyTarget(turn.replying, options)));
+  const context = selectionReplyContext(turn.selection, turn.richMessage);
+  if (context) lines.push(context);
   const images: string[] = [];
   const files = options
     ? await downloadInboundMedia(turn.media, { ...options, chatId: turn.chatId })

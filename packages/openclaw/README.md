@@ -1,7 +1,7 @@
 # Relay for OpenClaw
 
 `@relaymessenger/openclaw-plugin` is the native Relay channel for OpenClaw
-`2026.8.1`.
+`2026.8.1` through `2026.9.6`, the versions its gateway harness runs against.
 
 Source is maintained in
 [`RelayMessenger/Relay-SDK`](https://github.com/RelayMessenger/Relay-SDK/tree/main/packages/openclaw)
@@ -12,10 +12,43 @@ delivers events over its v1 WebSocket, and the plugin sends replies through
 the Relay v1 REST Message API. The plugin imports `@relaymessenger/sdk`; it
 does not contain a copied Relay client or protocol implementation.
 
+## Selection
+
+End the final answer with a `selection` JSON fence holding the question as
+`title` (1 to 60 characters) and the `options`; any words outside the fence go
+as a normal message above the card.
+`BodyForAgent` carries structured response and rich-message JSON; `RawBody` and
+`CommandBody` retain readable text. Stable values are not executable commands.
+
+New human reply text is literal `• ` + each selected source label joined with
+`\n`, followed by `selection_response` metadata in source-option order. Dispatch
+with `selected_values` and the explicit source target, never label parsing.
+Exact legacy comma-joined text remains a server compatibility input. The person
+checks any number of options and submits them once; checking sends nothing, and
+a person answers a given selection once. iOS may draw a checkmark in place of
+each bullet and repeat the prompt's title, as presentation only.
+
+## Payment
+
+The agent ends the final answer with a `payment` JSON fence holding the
+payment request's fields (`description`, `category`, and `amount` with
+`currency`, or `mode: "subscription"` with `price_id`). The plugin creates the
+request with its own Relay token, on the card's own idempotency key; the words
+go first and the payment card follows as its own Message.
+
 ## Install
 
 ```bash
 openclaw plugins install @relaymessenger/openclaw-plugin
+```
+
+OpenClaw asks two questions for a plugin from npm: whether you trust a source
+outside ClawHub, and whether to accept the capabilities the plugin declares.
+This plugin declares one capability, the `relay` channel. Where no terminal
+can answer, pass both answers:
+
+```bash
+openclaw plugins install @relaymessenger/openclaw-plugin --force --accept-capabilities
 ```
 
 Configure the default account:
@@ -106,6 +139,16 @@ Without `allowFrom`, any user or agent Contact whose Message Relay delivers
 to this agent can start a direct turn, while the group activation rules above
 still apply.
 
+## Messages from another agent
+
+Another agent's call reaches this agent as a Message, and Relay gives the
+caller the answer whose `reply_to` names its Message. So every answer to
+another agent names the Message it answers. When the same agent sends a second
+Message while a turn is still running in that Chat, the plugin holds it until
+the turn ends, then gives it a turn of its own. OpenClaw would otherwise steer
+it into the running turn, and the second caller would get no answer. A
+person's Messages keep OpenClaw's own queue and reply behavior.
+
 ## Durable delivery
 
 For every WebSocket event, the plugin:
@@ -153,10 +196,12 @@ exact SHA selected from the `staging` branch, the matching
 validated tarball and publishes that same digest with npm provenance; its
 publish job is also bound to the `staging` GitHub environment.
 
-`gateway:harness` packs the plugin, installs the tarball with OpenClaw
-`2026.8.1`, inspects the managed installation, starts a real OpenClaw gateway,
-connects to a loopback Relay WebSocket, receives one Message, and proves the
-durable ACK and idempotent REST reply.
+`gateway:harness` packs the plugin, installs the tarball with the OpenClaw
+version in `devDependencies`, inspects the managed installation, starts a real
+OpenClaw gateway, connects to a loopback Relay WebSocket, receives one Message,
+and proves the durable ACK and idempotent REST reply. Its `--overlap` run sends
+two Messages from one agent, the second while the model still answers the
+first, and requires two answers, each naming its own Message.
 
 ## Contract lock
 

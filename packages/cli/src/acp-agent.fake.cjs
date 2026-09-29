@@ -18,8 +18,27 @@
  *                the last one is reused for any further turns
  *   turnMs       how long a turn takes before it completes
  *   loadSession  whether the agent advertises `session/load` (default true)
+ *   mcpHttp      whether the agent advertises `mcpCapabilities.http` (default false)
+ *   authMethods  the sign-in methods `initialize` advertises (default none)
+ *   newSessionError  the error `session/new` answers with, when set
+ *   replayAfterLoad  after answering `session/load`, stream this text back as
+ *                an old `agent_message_chunk`, the way Gemini CLI replays a
+ *                loaded conversation after its answer instead of before
+ *   loadNeedsAuth  `session/load` answers auth_required (-32000) until
+ *                `authenticate` names an advertised method, as Gemini CLI does
+ *                when its settings name no sign-in method
  *   resumable    the session ids `session/load` accepts; anything else errors,
  *                as a real agent answers for a session it has lost
+ *   permission   `{toolCall, options}`: each turn first sends
+ *                `session/request_permission` with these and waits for the
+ *                client's answer, recorded as `permissionResponse`
+ *   checkFile    a path the turn reads before it asks `permission`, the way
+ *                Gemini CLI's file write checks the existing file first. As
+ *                Gemini CLI's AcpFileSystemService does, it asks the client
+ *                with `fs/read_text_file` only when the client advertised
+ *                `fs.readTextFile`, and reads the file itself otherwise; an
+ *                answer with no file text fails the check, recorded as
+ *                `checkFailed`, and the turn ends without asking permission
  */
 const fs = require("node:fs");
 
@@ -56,6 +75,9 @@ const keep = (id) => {
 const active = new Map();
 let sessions = readStore().size;
 let turnCount = 0;
+let signedIn = false;
+/** What the client said it can do, in `initialize`. */
+let clientCapabilities = {};
 
 const answerFor = (index) => {
   const answers = settings.answers ?? ["ok"];
@@ -77,18 +99,86 @@ const completePrompt = (sessionId, stopReason) => {
   write({ id: turn.id, result: { stopReason } });
 };
 
+const pendingPermission = new Map();
+const pendingRead = new Map();
+
+const askPermission = (sessionId) => {
+  const request = { id: `permission-${turnCount}`, method: "session/request_permission", params: { sessionId, ...settings.permission } };
+  pendingPermission.set(request.id, sessionId);
+  record({ out: request.method, id: request.id, params: request.params });
+  write(request);
+};
+
+/**
+ * Gemini CLI 0.61.0, bundle AcpFileSystemService.readTextFile: the client is
+ * asked only when `capabilities.readTextFile` is set; its answer must carry
+ * `content` as a string, or the read throws and the write reports "Error
+ * checking existing file".
+ */
+const checkThenAsk = (sessionId) => {
+  if (clientCapabilities?.fs?.readTextFile === true) {
+    const request = { id: `read-${turnCount}`, method: "fs/read_text_file", params: { sessionId, path: settings.checkFile } };
+    pendingRead.set(request.id, sessionId);
+    record({ out: request.method, id: request.id, params: request.params });
+    write(request);
+    return;
+  }
+  record({ ownRead: settings.checkFile, exists: fs.existsSync(settings.checkFile) });
+  askPermission(sessionId);
+};
+
 const handle = (message) => {
-  record({ in: message.method, params: message.params, argv: process.argv.slice(2) });
+  if (message.method === undefined && pendingRead.has(message.id)) {
+    const sessionId = pendingRead.get(message.id);
+    pendingRead.delete(message.id);
+    if (typeof message.result?.content !== "string") {
+      record({ checkFailed: message.error ?? message.result ?? null, id: message.id });
+      const turn = active.get(sessionId);
+      if (turn) turn.answer = "Error checking existing file";
+      completePrompt(sessionId, "end_turn");
+      return;
+    }
+    askPermission(sessionId);
+    return;
+  }
+  if (message.method === undefined && pendingPermission.has(message.id)) {
+    // The client's answer to the permission request: the turn goes on.
+    const sessionId = pendingPermission.get(message.id);
+    pendingPermission.delete(message.id);
+    record({ permissionResponse: message.result ?? null, permissionError: message.error ?? null, id: message.id });
+    const turn = active.get(sessionId);
+    if (turn) turn.timer = setTimeout(() => { completePrompt(sessionId, "end_turn"); }, settings.turnMs ?? 5);
+    return;
+  }
+  record({ in: message.method, params: message.params, argv: process.argv.slice(2), tokenEnv: process.env.RELAY_AGENT_TOKEN ?? null });
   const answer = (result) => { write({ id: message.id, result }); };
   if (message.method === "initialize") {
+    clientCapabilities = message.params.clientCapabilities ?? {};
     answer({
       protocolVersion: message.params.protocolVersion,
-      agentCapabilities: { loadSession: settings.loadSession !== false },
+      agentCapabilities: {
+        loadSession: settings.loadSession !== false,
+        ...(settings.mcpHttp === true ? { mcpCapabilities: { http: true } } : {}),
+      },
       agentInfo: { name: "fake-acp", version: "0.0.0" },
+      ...(settings.authMethods ? { authMethods: settings.authMethods } : {}),
     });
     return;
   }
+  if (message.method === "authenticate") {
+    if (!(settings.authMethods ?? []).some((method) => method.id === message.params.methodId)) {
+      write({ id: message.id, error: { code: -32602, message: `no auth method ${message.params.methodId}` } });
+      return;
+    }
+    signedIn = true;
+    answer({});
+    return;
+  }
   if (message.method === "session/new") {
+    if (settings.newSessionError) {
+      write({ id: message.id, error: settings.newSessionError });
+      return;
+    }
     sessions += 1;
     const sessionId = `session-${sessions}`;
     keep(sessionId);
@@ -96,16 +186,34 @@ const handle = (message) => {
     return;
   }
   if (message.method === "session/load") {
+    if (settings.loadNeedsAuth === true && !signedIn) {
+      write({ id: message.id, error: { code: -32000, message: "Authentication required" } });
+      return;
+    }
     if (!readStore().has(message.params.sessionId)) {
       write({ id: message.id, error: { code: -32602, message: `no session ${message.params.sessionId}` } });
       return;
     }
     answer({});
+    if (settings.replayAfterLoad) {
+      const sessionId = message.params.sessionId;
+      setTimeout(() => {
+        notify("session/update", { sessionId, update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: "old question" } } });
+        notify("session/update", { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: settings.replayAfterLoad } } });
+      }, 30);
+    }
     return;
   }
   if (message.method === "session/prompt") {
     turnCount += 1;
     const sessionId = message.params.sessionId;
+    if (settings.permission) {
+      const turn = { id: message.id, answer: answerFor(turnCount - 1), timer: undefined };
+      active.set(sessionId, turn);
+      if (settings.checkFile) checkThenAsk(sessionId);
+      else askPermission(sessionId);
+      return;
+    }
     const turn = {
       id: message.id,
       answer: answerFor(turnCount - 1),

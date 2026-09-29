@@ -67,6 +67,15 @@ assert.equal(claudeMarketplace.plugins.length, 1);
 claudeMarketplace.plugins[0].source = "./packages/claude-code/plugin";
 await addJson(".claude-plugin/marketplace.json", claudeMarketplace);
 
+// The marketplace channel's documentation and contract are mirrors too.
+// Keep them source-driven alongside the portable skill discovery artifacts.
+for (const path of ["README.md", "contracts/relay-v1.lock.json"]) {
+  await addFile(
+    `packages/claude-code/plugin/${path}`,
+    join(root, "packages", "claude-code", path),
+  );
+}
+
 await addFile(
   "plugins/relay/plugin.json",
   join(distributionRoot, "plugin.json"),

@@ -4,6 +4,7 @@ import type {
   RelayWebhookEvent,
 } from "@relaymessenger/sdk";
 import { describe, expect, it } from "vitest";
+import type { RelayMessageReceivedEvent } from "./types.js";
 import {
   buildRelayInboundFacts,
   renderRelayMessageParts,
@@ -16,7 +17,7 @@ const sender: ChatHandle = {
   joined_at: "2026-09-01T00:00:00.000Z",
   display_name: "Alice",
   image_url: null,
-  about: null,
+  subtitle: null,
   verified: false,
   is_contact: true,
 };
@@ -44,7 +45,7 @@ function event(
           joined_at: "2026-09-01T00:00:00.000Z",
           display_name: "Relay Agent",
           image_url: null,
-          about: null,
+          subtitle: null,
           verified: false,
           is_contact: true,
         },
@@ -91,11 +92,14 @@ describe("Relay inbound Message mapping", () => {
         joined_at: "2026-09-01T00:00:00.000Z",
         display_name: "Relay Agent",
         image_url: null,
-        about: null,
+        subtitle: null,
         verified: false,
         is_contact: true,
       },
       replyToId: "00000000-0000-7000-8000-000000000006",
+      replyToPartIndex: 0,
+      replyAnchorId: "00000000-0000-7000-8000-000000000005",
+      fromAgent: false,
       timestamp: Date.parse("2026-09-01T00:00:01.000Z"),
     });
   });
@@ -120,13 +124,69 @@ describe("Relay inbound Message mapping", () => {
     );
   });
 
+  it("reads a tap as the text it is and anchors the answer to the tap, not the buttons", () => {
+    const base = event();
+    const data = base.data as RelayMessageReceivedEvent["data"];
+    const input = {
+      ...base,
+      data: {
+        ...data,
+        parts: [{ type: "text", value: "Yes, 7pm works", reactions: null }],
+        reply_to: { message_id: "00000000-0000-7000-8000-000000000006", part_index: 1 },
+      },
+    } as RelayWebhookEvent;
+    const facts = buildRelayInboundFacts(input);
+    expect(facts?.text).toBe("Yes, 7pm works");
+    expect(facts?.replyToId).toBe("00000000-0000-7000-8000-000000000006");
+    expect(facts?.replyAnchorId).toBe("00000000-0000-7000-8000-000000000005");
+    expect(renderRelayMessageParts([
+      { type: "buttons", items: [{ label: "Yes" }], reactions: null },
+    ])).toBe("");
+  });
+
   it("maps agent-authored Messages for the same downstream authorization and activation", () => {
     const agentSender = { ...sender, kind: "agent" as const };
     const input = event();
     (input.data as { sender_handle: ChatHandle }).sender_handle = agentSender;
-    expect(buildRelayInboundFacts(input)).toEqual(
-      buildRelayInboundFacts(event()),
-    );
+    const { replyAnchorId: _personAnchor, ...personFacts } = buildRelayInboundFacts(event())!;
+    expect(buildRelayInboundFacts(input)).toEqual({
+      ...personFacts,
+      fromAgent: true,
+      agentReplyLink: "00000000-0000-7000-8000-000000000005",
+    });
+  });
+
+  it("names another agent's own Message as the answer's target, never a person's", () => {
+    // Relay's A2A door gives a calling agent only the answer whose reply_to
+    // names its Message (Relay-Server a2a.ts replyTo; CLI bridges, PR 366).
+    const input = event();
+    const data = input.data as RelayMessageReceivedEvent["data"];
+    data.sender_handle = { ...sender, kind: "agent" };
+    data.reply_to = null;
+    expect(buildRelayInboundFacts(input)).toMatchObject({
+      fromAgent: true,
+      agentReplyLink: "00000000-0000-7000-8000-000000000005",
+    });
+    data.sender_handle = sender;
+    const person = buildRelayInboundFacts(input);
+    expect(person?.fromAgent).toBe(false);
+    expect(person).not.toHaveProperty("agentReplyLink");
+  });
+
+  it("does not name another agent's Message that opens with buttons or a selection", () => {
+    // An agent may not reply to those parts, and a reply names part 0.
+    for (const opening of [
+      { type: "buttons", items: [{ label: "Yes" }], reactions: null },
+      { type: "selection", title: "Pick", options: [{ value: "a", label: "A" }], reactions: null },
+    ]) {
+      const input = event();
+      const data = input.data as RelayMessageReceivedEvent["data"];
+      data.sender_handle = { ...sender, kind: "agent" };
+      data.parts = [opening, { type: "text", value: "Which one?", mention: "relay", reactions: null }] as never;
+      const facts = buildRelayInboundFacts(input);
+      expect(facts?.fromAgent).toBe(true);
+      expect(facts).not.toHaveProperty("agentReplyLink");
+    }
   });
 
   it("does not map outbound/self echoes from either Contact kind", () => {
@@ -158,4 +218,26 @@ describe("Relay inbound Message mapping", () => {
     (input.data as { parts: MessagePartResponse[] }).parts = [];
     expect(buildRelayInboundFacts(input)).toBeNull();
   });
+});
+
+it("retains stable selection values and explicit source separately from visible text", () => {
+  const input = event();
+  if (input.event_type !== "message.received") throw new Error("fixture");
+  input.data.parts = [
+    { type: "text", value: "• Research\n• Design", reactions: null },
+    { type: "selection_response", selected_values: ["research", "design"] },
+  ];
+  input.data.reply_to = { message_id: "source", part_index: 1 };
+  const facts = buildRelayInboundFacts(input);
+  expect(facts?.text).toBe("• Research\n• Design");
+  expect(facts?.selection).toEqual({ selected_values: ["research", "design"], reply_to: { message_id: "source", part_index: 1 } });
+  expect(renderRelayMessageParts([input.data.parts[1]!])).toBe("");
+});
+
+it("keeps full component context, including another agent's component-only message", () => {
+  const input = event() as RelayMessageReceivedEvent;
+  input.data.parts = [{ type: "buttons", items: [{ label: "Do not execute this label" }], reactions: null }];
+  const facts = buildRelayInboundFacts(input);
+  expect(facts?.text).toBe("");
+  expect(facts?.richMessage).toEqual({ parts: input.data.parts, reply_to: input.data.reply_to });
 });

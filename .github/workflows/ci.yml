@@ -34,13 +34,82 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npm audit signatures
 
+  # relaymessenger, the Python SDK (its calls extra is the call core under the
+  # LiveKit and Pipecat packages): types and unit tests on Linux from the
+  # locked environment, then a wheel and sdist build. Nothing is published.
+  python-sdk:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: python/relaymessenger
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: 0.12.8
+          enable-cache: false
+      - run: uv sync --locked --python 3.12
+      - run: uv run --locked mypy
+      - run: uv run --locked pytest -q
+      - run: uv build
+
+  # relaymessenger-pipecat, the Pipecat transport for Relay Calls: types and
+  # unit tests on Linux from the locked environment, then a wheel and sdist
+  # build. Nothing is published.
+  python-pipecat:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: python/relaymessenger-pipecat
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: 0.12.8
+          enable-cache: false
+      - run: uv sync --locked --python 3.12
+      - run: uv run --locked mypy
+      - run: uv run --locked pytest -q
+      - run: uv build
+
+  # relaymessenger-livekit, the Python twin of @relaymessenger/livekit: types
+  # and unit tests on Linux from the locked environment, then a wheel and sdist
+  # build. Nothing is published.
+  python-livekit:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: python/relaymessenger-livekit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: 0.12.8
+          enable-cache: false
+      - run: uv sync --locked --python 3.12
+      - run: uv run --locked mypy
+      - run: uv run --locked pytest -q
+      - run: uv build
+
   # Every cookbook folder must work when a developer copies it out of GitHub
   # and runs `npm install && npm start` with only an Agent Token. This job
   # never installs the workspace: each folder is copied outside the checkout,
   # installed from the real registry, and type-checked from its own
-  # devDependencies (scripts/validate-cookbook-standalone.mjs). The
-  # workspace-side half of that proof, that the same folders resolve the
-  # workspace sdk inside the monorepo, runs under `npm run validate` above.
+  # devDependencies (scripts/validate-cookbook-standalone.mjs). The branch
+  # picks the npm channel: staging (a push to it, or a pull request into it)
+  # installs the `staging` dist-tag's builds, every other branch the `latest`
+  # releases. The workspace-side half of that proof, that the same folders
+  # resolve the workspace sdk inside the monorepo, runs under
+  # `npm run validate` above.
   cookbook-standalone:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 30
@@ -52,6 +121,7 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
+      - run: node --test scripts/validate-cookbook-standalone.test.mjs
       - run: node scripts/validate-cookbook-standalone.mjs
 
   # The production release proves itself before it can run: the same
@@ -73,7 +143,7 @@ jobs:
           cache: npm
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
       - run: npm ci
-      - run: node --test scripts/release-derive.test.mjs
+      - run: node --test scripts/release-derive.test.mjs scripts/release-cookbook-land.test.mjs
       - run: npm run build --workspace @relaymessenger/sdk
       - run: npm install --global npm@12.0.2 --no-audit --no-fund
       - name: Rehearse a skip for a package npm already has

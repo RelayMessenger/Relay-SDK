@@ -1,0 +1,89 @@
+name: Release relaymessenger to PyPI
+
+# Publishes the Python SDK, python/relaymessenger, to PyPI as `relaymessenger`
+# with PyPI Trusted Publishing: GitHub's OIDC token, no stored PyPI token.
+# The shape is the Python Packaging User Guide's, copied as written
+# (packaging.python.org, "Publishing package distribution releases using
+# GitHub Actions CI/CD workflows"): one job builds the dists and uploads them
+# as an artifact, and a separate job in the `pypi` environment, holding only
+# `id-token: write`, downloads them and runs pypa/gh-action-pypi-publish.
+# Building in the publishing job is unsupported by that guide.
+#
+# PyPI accepts the upload only from this file name, in this repository, in
+# the `pypi` environment, as registered on pypi.org (Your account ->
+# Publishing -> pending publisher). Renaming this file breaks publishing.
+#
+# Two ways in, and only one of them can publish:
+#   pull_request touching the SDK or this file -> test, build, twine check, stop
+#   workflow_dispatch on main                  -> test, build, check, publish
+# Tags record a release and never start one (scripts/validate-workflows.mjs),
+# so there is no tag trigger.
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release-python.yml
+      - python/relaymessenger/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-release-pypi-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Test and build relaymessenger
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: python/relaymessenger
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: 0.12.8
+          enable-cache: false
+      # The same checks as ci.yml's python-sdk job, on the commit being released.
+      - run: uv sync --locked --python 3.12
+      - run: uv run --locked mypy
+      - run: uv run --locked pytest -q
+      - name: Build the sdist and wheel
+        run: uv run --isolated --no-project --python 3.12 --with build==1.6.1 python -m build
+      - name: Check the dists as PyPI will render them
+        run: uv run --isolated --no-project --python 3.12 --with twine==7.0.0 python -m twine check --strict dist/*
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        name: Store the distribution packages
+        with:
+          name: python-package-distributions
+          path: python/relaymessenger/dist/
+          if-no-files-found: error
+
+  publish-to-pypi:
+    name: Publish relaymessenger to PyPI
+    if: >-
+      github.repository == 'RelayMessenger/Relay-SDK' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main'
+    needs:
+      - build
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/relaymessenger
+    permissions:
+      id-token: write # mandatory for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        name: Download all the dists
+        with:
+          name: python-package-distributions
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1 (v1.14.2)
+        name: Publish the distribution packages to PyPI

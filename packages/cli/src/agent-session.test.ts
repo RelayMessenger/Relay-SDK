@@ -39,20 +39,26 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
   it("waits in the post-create session using the actual saved identity, never unrelated ENV", async () => {
     const f = await fixture(); f.configContext.env.RELAY_AGENT_TOKEN = "unrelated-env-token";
     let close: (() => void) | undefined;
+    let opened!: () => void;
+    const sessionOpened = new Promise<void>((resolve) => { opened = resolve; });
     f.terminalSession.mockImplementation(async (options) => {
       expect((await readConfig(f.configContext)).profiles[card.handle]?.agent_token).toBe(token);
       expect(options.agent).toEqual({ handle: card.handle, name: card.first_name, profile: card.handle, shareUrl: savedAgentShareURL(base, card.handle) });
       expect(options.runtime).toEqual({ ownership: "none", connection: "not-started" });
       expect(options.observer?.semantics).toBe("observational-no-ack");
       expect(options.secrets).toEqual([token]);
-      await new Promise<void>((resolve) => { close = resolve; });
+      await new Promise<void>((resolve) => { close = resolve; opened(); });
       return exited;
     });
     let finished = false;
-    const pending = runCLI(["agents", "create"], f.deps).then((code) => { finished = true; return code; });
-    // Native Windows config protection launches PowerShell before opening the session.
-    // The suite timeout does not extend vi.waitFor's separate one-second default.
-    await vi.waitFor(() => expect(close).toBeDefined(), { timeout: process.platform === "win32" ? 90_000 : 1_000 }); expect(finished).toBe(false);
+    const pending = runCLI(["agents", "create", "--subtitle", "Helps with tasks"], f.deps).then((code) => { finished = true; return code; });
+    // Synchronize with the actual session callback, not a separate one-second
+    // polling deadline. The enclosing suite still bounds a missing callback.
+    await Promise.race([
+      sessionOpened,
+      pending.then(() => { throw new Error("Command ended before opening the saved session"); }),
+    ]);
+    expect(close).toBeDefined(); expect(finished).toBe(false);
     close!(); expect(await pending).toBe(0);
     expect(f.calls.filter((call) => call === "POST /api/orgs/org_fixture/agents")).toHaveLength(1);
     expect(f.output.join("")).not.toMatch(/unrelated-env-token|(?:rel|rly)_live_[A-Za-z0-9]{43}/u);
@@ -65,18 +71,18 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
     const qr = new RegExp(QR_DARK.replace("[", "\\["), "u");
     const live = await fixture();
     live.terminalSession.mockImplementation(async () => exited);
-    expect(await runCLI(["agents", "create"], live.deps)).toBe(0);
+    expect(await runCLI(["agents", "create", "--subtitle", "Helps with tasks"], live.deps)).toBe(0);
     expect(live.terminalSession).toHaveBeenCalledTimes(1);
     expect(live.output.join("")).not.toMatch(qr);
     const plain = await fixture();
-    expect(await runCLI(["--non-interactive", "agents", "create"], plain.deps)).toBe(0);
+    expect(await runCLI(["--non-interactive", "agents", "create", "--subtitle", "Helps with tasks"], plain.deps)).toBe(0);
     expect(plain.terminalSession).not.toHaveBeenCalled();
     expect(plain.output.join("")).toMatch(qr);
   });
   it.each([["--json"], ["--non-interactive"], []])("never opens a persistent session for scripted/JSON or nonTTY create %j", async (...flags) => {
     const f = await fixture();
     const args = flags as string[];
-    expect(await runCLI([...args, "agents", "create"], { ...f.deps, isInteractive: args.length > 0 })).toBe(0);
+    expect(await runCLI([...args, "agents", "create", "--subtitle", "Helps with tasks"], { ...f.deps, isInteractive: args.length > 0 })).toBe(0);
     expect(f.terminalSession).not.toHaveBeenCalled();
   });
   it("reopens a saved identity through interactive auth status without bootstrapping", async () => {
@@ -97,7 +103,7 @@ describe("persistent session command wiring", { timeout: 120_000 }, () => {
   });
   it("retains created credentials if only terminal presentation fails", async () => {
     const f = await fixture(); f.terminalSession.mockRejectedValueOnce(new Error(token));
-    expect(await runCLI(["agents", "create"], f.deps)).toBe(0);
+    expect(await runCLI(["agents", "create", "--subtitle", "Helps with tasks"], f.deps)).toBe(0);
     expect((await readConfig(f.configContext)).profiles[card.handle]?.agent_token).toBe(token);
     expect(f.output.join("")).not.toContain(token); expect(f.output.join("")).toContain("The agent and its token are unchanged");
   });

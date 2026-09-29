@@ -1,0 +1,63 @@
+[project]
+name = "relaymessenger"
+version = "0.1.0"
+description = "The Relay SDK for Python: send A2UI cards and read their taps, send and accept tasks between agents over A2A, and join a Relay Call as a WebRTC participant with the calls extra."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Companion Inc." }]
+keywords = ["relay", "a2ui", "a2a", "webrtc", "voice", "video", "agents"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+dependencies = [
+  "websockets>=14",
+]
+
+# Optional features as install extras, as livekit-agents does
+# (`livekit-agents[codecs,images]`): `pip install 'relaymessenger[calls]'`.
+[project.optional-dependencies]
+calls = [
+  "aiortc>=1.15,<2",
+  "av>=14",
+  "numpy>=1.26",
+]
+# Send another agent a task or a message at its A2A address with the official A2A SDK
+# (github.com/a2aproject/a2a-python), whose 1.x speaks A2A 1.0.
+a2a = [
+  "a2a-sdk>=1.1.5,<2",
+  "httpx>=0.28.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/RelayMessenger/Relay-SDK/tree/main/python/relaymessenger#readme"
+Repository = "https://github.com/RelayMessenger/Relay-SDK"
+
+[dependency-groups]
+# The tests exercise the calls and a2a extras, and check A2UI messages against
+# A2UI's own v0.9.1 schemas (tests/fixtures/a2ui) with jsonschema.
+dev = ["relaymessenger[calls,a2a]", "pytest>=8", "pytest-asyncio>=0.24", "mypy>=1.13", "jsonschema>=4.23"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/relaymessenger"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+files = ["src/relaymessenger", "examples"]

@@ -1,3 +1,4 @@
+import { BUTTONS_GUIDANCE, BUTTONS_BLOCK_INSTRUCTION, PAYMENT_BLOCK_INSTRUCTION, PAYMENT_GUIDANCE, LINK_LINE_INSTRUCTION, SELECTION_GUIDANCE, SELECTION_BLOCK_INSTRUCTION, selectionReplyContext } from "@relaymessenger/sdk";
 import type {
   Message,
   Relay,
@@ -10,9 +11,11 @@ import {
 import { resolveStableChannelMessageIngress } from "openclaw/plugin-sdk/channel-ingress-runtime";
 import { bindIngressLifecycleToReplyOptions } from "openclaw/plugin-sdk/channel-outbound";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import { buildRelayInboundFacts } from "./inbound.js";
+import type { ReplyPayload } from "openclaw/plugin-sdk/reply-payload";
+import { buildRelayInboundFacts, renderRelayMessageParts } from "./inbound.js";
 import type { RelayIngressLifecycle } from "./ingress.js";
 import type { PluginRuntime } from "./runtime.js";
+import { type RelayChatTurns, waitForIdleChat } from "./turns.js";
 import type {
   RelayCoreConfig,
   RelayInboundFacts,
@@ -52,6 +55,8 @@ function isReplyToAgentMessage(
 export async function resolveRelayTurnActivation(params: {
   facts: RelayInboundFacts;
   relay: RelayReplyLookup;
+  /** The replied-to Message when the caller already read it. */
+  replyTarget?: Message;
 }): Promise<RelayTurnActivation | null> {
   if (params.facts.chatType === "direct") {
     return {
@@ -74,15 +79,97 @@ export async function resolveRelayTurnActivation(params: {
   }
 
   if (!params.facts.replyToId) return null;
-  const replyTarget = await params.relay.messages.retrieve(
-    params.facts.replyToId,
-  );
+  const replyTarget = params.replyTarget
+    ?? await params.relay.messages.retrieve(params.facts.replyToId);
   if (!isReplyToAgentMessage(replyTarget, params.facts.chatId)) return null;
   return {
     kind: "reply",
     wasMentioned: false,
     implicitMentionKinds: ["reply_to_bot"],
   };
+}
+
+/**
+ * The Message a swipe-reply answers, read once for the quote and for group
+ * activation. A failed read is logged and the turn runs without the quote;
+ * group activation then reads it itself and fails the delivery as before.
+ */
+async function readReplyTarget(params: {
+  facts: RelayInboundFacts;
+  relay: RelayReplyLookup;
+  warn: ((message: string) => void) | undefined;
+}): Promise<Message | undefined> {
+  if (!params.facts.replyToId) return undefined;
+  try {
+    return await params.relay.messages.retrieve(params.facts.replyToId);
+  } catch (error) {
+    params.warn?.(
+      `relay: could not read the Message ${params.facts.replyToId} that ${params.facts.messageId} replies to: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return undefined;
+  }
+}
+
+/**
+ * OpenClaw's own reply context, `supplemental.quote`, which it renders to the
+ * model as "Reply target of current user message" (id, sender, body), as its
+ * Telegram channel fills it from Telegram's `reply_to_message`. A reply names
+ * one bubble: a multipart target is narrowed to the swiped part, the rule
+ * Relay's iOS app uses to draw the quote (the SDK's `replyTargetParts`); a
+ * tap or a selection answer names a part with no words, so it keeps the
+ * whole Message.
+ */
+export function relayReplyQuote(
+  facts: Pick<RelayInboundFacts, "chatId" | "replyToPartIndex">,
+  target: Message | undefined,
+) {
+  if (!target || target.chat_id !== facts.chatId) return undefined;
+  const parts = target.parts ?? [];
+  const swiped = parts.length > 1 && facts.replyToPartIndex !== undefined
+    ? parts[facts.replyToPartIndex]
+    : undefined;
+  const body = renderRelayMessageParts(
+    swiped && swiped.type !== "buttons" && swiped.type !== "selection" ? [swiped] : parts,
+  );
+  const sender = target.from_handle?.display_name?.trim()
+    || target.from_handle?.handle
+    || target.from
+    || undefined;
+  return {
+    id: target.id,
+    ...(body ? { body } : {}),
+    ...(sender ? { sender } : {}),
+    senderAllowed: true,
+  };
+}
+
+/**
+ * Whether the part a reply names may itself be replied to. A tap names the
+ * agent's buttons part and a selection answer its selection part; no reply may
+ * point at those (Relay v1 ReplyTo.part_index), so a person's tap keeps its
+ * own Message as the reply target.
+ */
+function repliable(target: Message | undefined, partIndex: number | undefined): boolean {
+  const part = target?.parts?.[partIndex ?? 0];
+  return part !== undefined && part.type !== "buttons" && part.type !== "selection";
+}
+
+/**
+ * The answer to another agent names the Message it answers: the model's own
+ * reply target when it chose one, else the agent's Message. Where no reply may
+ * point (a Message opening with buttons or a selection), OpenClaw's implicit
+ * current-message reply is removed.
+ */
+export function agentReplyPayload(
+  payload: ReplyPayload,
+  facts: Pick<RelayInboundFacts, "messageId" | "agentReplyLink">,
+): ReplyPayload {
+  if (facts.agentReplyLink) {
+    return { ...payload, replyToId: payload.replyToId ?? facts.agentReplyLink };
+  }
+  if (payload.replyToId !== facts.messageId) return payload;
+  const { replyToId: _unlinked, ...rest } = payload;
+  return rest;
 }
 
 export async function dispatchRelayEvent(params: {
@@ -92,6 +179,7 @@ export async function dispatchRelayEvent(params: {
   cfg: RelayCoreConfig;
   relay: Pick<Relay, "chats" | "messages">;
   runtime: PluginRuntime;
+  turns: RelayChatTurns;
   warn?: (message: string) => void;
 }): Promise<void> {
   const facts = buildRelayInboundFacts(params.event);
@@ -102,9 +190,15 @@ export async function dispatchRelayEvent(params: {
     return;
   }
 
+  const repliedTo = await readReplyTarget({
+    facts,
+    relay: params.relay,
+    warn: params.warn,
+  });
   const activation = await resolveRelayTurnActivation({
     facts,
     relay: params.relay,
+    ...(repliedTo ? { replyTarget: repliedTo } : {}),
   });
   if (!activation) {
     params.warn?.(
@@ -202,6 +296,17 @@ export async function dispatchRelayEvent(params: {
     return;
   }
 
+  // An agent's reply target is only its own Message (agentReplyLink). A
+  // person's is the Message they replied to, OpenClaw's ReplyToId, as its
+  // Telegram channel sets `reply.replyToId` to Telegram's reply_to_message:
+  // the prompt names it beside the quote. A tap or a selection answer names a
+  // part no reply may target, so it keeps the person's own Message.
+  const quote = relayReplyQuote(facts, repliedTo);
+  const replyTarget = facts.fromAgent
+    ? facts.agentReplyLink
+    : quote && repliable(repliedTo, facts.replyToPartIndex)
+      ? quote.id
+      : facts.replyAnchorId ?? facts.replyToId;
   const body = buildEnvelope({
     channel: "Relay",
     from: `${facts.displayName} (@${facts.handle})`,
@@ -236,15 +341,18 @@ export async function dispatchRelayEvent(params: {
     reply: {
       to: facts.chatId,
       originatingTo: facts.chatId,
-      ...(facts.replyToId ? { replyToId: facts.replyToId } : {}),
+      ...(replyTarget ? { replyToId: replyTarget } : {}),
     },
     message: {
       inboundEventKind: "user_request",
       body,
-      bodyForAgent: facts.text,
+      bodyForAgent: [facts.text, selectionReplyContext(facts.selection, facts.richMessage),
+        `${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INSTRUCTION} ${BUTTONS_GUIDANCE} ${SELECTION_BLOCK_INSTRUCTION} ${SELECTION_GUIDANCE} ${PAYMENT_BLOCK_INSTRUCTION} ${PAYMENT_GUIDANCE}`,
+      ].filter(Boolean).join("\n\n"),
       rawBody: facts.text,
       commandBody: facts.text,
     },
+    ...(quote ? { supplemental: { quote } } : {}),
     channelIngress: access,
     access: {
       commands: {
@@ -262,6 +370,16 @@ export async function dispatchRelayEvent(params: {
     },
   });
 
+  // Another agent's Message waits for the turn running in its Chat, so it
+  // gets a turn and an answer of its own (turns.ts).
+  if (facts.fromAgent) {
+    await waitForIdleChat({
+      turns: params.turns,
+      chatId: facts.chatId,
+      lifecycle: params.lifecycle,
+    });
+  }
+
   await Promise.allSettled([
     params.relay.chats.markAsRead(facts.chatId),
     params.relay.chats.startTyping(facts.chatId),
@@ -275,7 +393,7 @@ export async function dispatchRelayEvent(params: {
 
   let deliveryError: unknown;
   try {
-    await params.runtime.channel.inbound.dispatch({
+    await params.turns.track(facts.chatId, () => params.runtime.channel.inbound.dispatch({
       cfg: params.cfg as OpenClawConfig,
       channel: "relay",
       accountId: params.account.accountId,
@@ -288,9 +406,18 @@ export async function dispatchRelayEvent(params: {
       delivery: {
         durable: {
           to: facts.chatId,
-          replyToId: null,
+          replyToId: facts.fromAgent ? facts.agentReplyLink ?? null : null,
           requiredCapabilities: { reconcileUnknownSend: true },
         },
+        // Every answer to another agent names its Message, whatever
+        // `replyToMode` the operator chose; OpenClaw's own implicit
+        // current-message reply is dropped where no reply may point.
+        ...(facts.fromAgent
+          ? {
+              preparePayload: (payload: ReplyPayload) =>
+                agentReplyPayload(payload, facts),
+            }
+          : {}),
         deliver: async (_payload, info) => {
           if (info.kind === "final") {
             throw new Error(
@@ -315,7 +442,7 @@ export async function dispatchRelayEvent(params: {
             : new Error(`relay: session record failed: ${String(error)}`);
         },
       },
-    });
+    }));
     if (deliveryError) {
       throw deliveryError instanceof Error
         ? deliveryError

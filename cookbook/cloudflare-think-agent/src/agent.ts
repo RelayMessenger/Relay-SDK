@@ -6,6 +6,8 @@ import {
 } from "@cloudflare/think";
 import {
   chatSdkMessenger,
+  defaultChatSdkEvent,
+  normalizeMessengers,
   ThinkMessengerStateAgent,
   type ThinkMessengers,
 } from "@cloudflare/think/messengers";
@@ -14,6 +16,8 @@ import {
   decodeRelayThreadId,
   type RelayAdapter,
 } from "@relaymessenger/chat-sdk-adapter";
+import { PAYMENT_GUIDANCE } from "@relaymessenger/sdk";
+import type { StopCondition, ToolSet } from "ai";
 
 import type { Bindings } from "./env";
 import {
@@ -22,8 +26,10 @@ import {
   requireRelayWebhookSecret,
 } from "./env";
 import { starterModel } from "./model";
+import { replyTargetLine } from "./reply-target";
 import {
   createReplyAction,
+  RELAY_PAYMENT_NOT_CREATED,
   type RelayTurnIdentity,
 } from "./reply";
 
@@ -34,6 +40,21 @@ const RELAY_WEBHOOK_PATH = "/webhooks/relay";
 const ACTION_RETRY_LEASE_MS = 0;
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+// One step answers. A second exists only for a payment Relay did not create:
+// nothing was sent, so the model reads why and calls reply again.
+const MAX_STEPS = 2;
+
+function paymentNotCreated(output: unknown): boolean {
+  if (typeof output !== "object" || output === null) return false;
+  const error = (output as { error?: unknown }).error;
+  return typeof error === "object" && error !== null
+    && (error as { name?: unknown }).name === RELAY_PAYMENT_NOT_CREATED;
+}
+
+/** Stop after every step except one whose reply created no payment. */
+export const stopUnlessPaymentNotCreated: StopCondition<ToolSet> = ({ steps }) =>
+  !(steps.at(-1)?.toolResults ?? []).some((result) =>
+    result.toolName === "reply" && paymentNotCreated(result.output));
 
 /**
  * The Worker's single Relay client.
@@ -76,7 +97,7 @@ export function createRelayMessenger(
   adapter: RelayAdapter,
 ) {
   const handle = requireRelayAgentHandle(env);
-  return chatSdkMessenger({
+  const relay = chatSdkMessenger({
     adapter,
     adapterName: "relay",
     capabilities: {
@@ -108,6 +129,22 @@ export function createRelayMessenger(
     verifyWebhook: false,
     userName: handle,
   });
+  // Think's own event, with the Message a swipe-reply answers added to the
+  // text the model reads (src/reply-target.ts). `toEvent` is Think's hook for
+  // this; the default comes from Think's own normalizer.
+  const [normalized] = normalizeMessengers({ relay });
+  return {
+    ...relay,
+    toEvent: (input: Parameters<NonNullable<typeof relay.toEvent>>[0]) => {
+      const event = defaultChatSdkEvent(normalized!, input);
+      const line = input.message
+        && replyTargetLine(input.message as Parameters<typeof replyTargetLine>[0]);
+      if (event.message && line) {
+        event.message.text = [event.message.text, line].filter(Boolean).join("\n\n");
+      }
+      return event;
+    },
+  };
 }
 
 export class RelayChatAgent extends Think<Bindings> {
@@ -119,7 +156,7 @@ export class RelayChatAgent extends Think<Bindings> {
     terminalMessage: "",
   };
   override includeMcpTools = false;
-  override maxSteps = 1;
+  override maxSteps = MAX_STEPS;
   override sendReasoning = false;
   override workspaceBash = false;
 
@@ -132,6 +169,7 @@ export class RelayChatAgent extends Think<Bindings> {
       "You are a helpful agent in Relay Messenger.",
       "Answer naturally and call reply exactly once with the complete response.",
       "Do not emit a second answer after the reply Action.",
+      `reply can ask the person to pay through its payment argument. ${PAYMENT_GUIDANCE}`,
     ].join(" ");
   }
 
@@ -160,8 +198,9 @@ export class RelayChatAgent extends Think<Bindings> {
     // this turn was ever scheduled. Nothing to do here but shape the turn.
     return {
       activeTools: _context.tools.reply ? ["reply"] : [],
-      maxSteps: 1,
+      maxSteps: MAX_STEPS,
       sendReasoning: false,
+      stopWhen: stopUnlessPaymentNotCreated,
       toolChoice: "required",
     };
   }

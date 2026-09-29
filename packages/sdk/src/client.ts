@@ -1,26 +1,56 @@
 import { RelayAPIError, isAbortError } from "./errors.js";
 import { ChatsPage, MessagesPage } from "./pagination.js";
+import { CallRoom, type CallRoomOptions } from "./calls/call-room.js";
 import type {
+  A2aMessage,
+  A2aSendMessageResult,
+  A2aTask,
   AcceptedResponse,
+  AgentMe,
+  AgentMeUpdateParams,
+  AgentMeUpdateResponse,
+  AgentAccessEntry,
+  AgentAccessLists,
+  AgentAccessSetParams,
   Attachment,
   AttachmentCreateParams,
   AttachmentCreateResponse,
   BlockedHandleListResponse,
   BlockHandleParams,
   BlockHandleResponse,
+  CallCreateOptions,
+  CallCreateParams,
+  CallListParams,
+  CallListResponse,
+  CallResponse,
   Chat,
+  ChatActivityResponse,
+  ChatClearActivityParams,
   ChatCreateParams,
   ChatCreateResponse,
   ChatListChatsParams,
   ChatSendVoicememoParams,
   ChatSendVoicememoResponse,
+  ChatSetActivityParams,
   ChatUpdateParams,
   ChatUpdateResponse,
+  CommunityJoinParams,
+  CommunityJoinResponse,
+  CommunityListResponse,
+  CommunityMemberListResponse,
+  CommunityMembershipUpdateParams,
+  CommunityMembershipUpdateResponse,
+  CommunityRetrieveParams,
+  CommunityRetrieveResponse,
   ContactCardItem,
   ContactCardCreateParams,
   ContactCardRetrieveParams,
   ContactCardRetrieveResponse,
   ContactCardUpdateParams,
+  ContactLookupParams,
+  ContactLookupResponse,
+  GetChatLocationResponse,
+  LocationRequestResponse,
   Message,
   MessageAddReactionParams,
   MessageAddReactionResponse,
@@ -32,7 +62,20 @@ import type {
   MessageThreadParams,
   ParticipantAddParams,
   ParticipantRemoveParams,
+  PaymentRequest,
+  PaymentRequestCreateOptions,
+  PaymentRequestCreateParams,
+  PaymentRequestListParams,
+  PaymentRequestListResponse,
   RequestOptions,
+  TaskArtifactCreateParams,
+  TaskCancelParams,
+  TaskGetParams,
+  TaskListParams,
+  TaskListResponse,
+  TaskResponse,
+  TaskSendParams,
+  TaskStatusUpdateParams,
   UnblockHandleParams,
   WebhookEventListResponse,
   WebhookSubscription,
@@ -55,6 +98,14 @@ type FetchLike = (
 export interface RelayOptions {
   apiKey: string;
   baseURL?: string;
+  /**
+   * Where other agents' A2A addresses live, `<a2aBaseURL>/<handle>`. By
+   * default it follows `baseURL` as Relay serves it: https://relayagent.im
+   * for api.relayapp.im, https://staging.relayagent.im for
+   * api.staging.relayapp.im, and `<baseURL origin>/a2a` for any other host
+   * (a local Relay Server).
+   */
+  a2aBaseURL?: string;
   webhookSecret?: string | null;
   maxRetries?: number;
   timeout?: number;
@@ -97,8 +148,27 @@ const delay = async (milliseconds: number, signal?: AbortSignal): Promise<void> 
 
 const pathID = (value: string): string => encodeURIComponent(value);
 
+/**
+ * Relay-Server's A2A_ORIGIN for each API host (wrangler.jsonc env.staging:
+ * PUBLIC_ORIGIN api.staging.relayapp.im, A2A_ORIGIN staging.relayagent.im;
+ * production drops the "staging" label, scripts/production-config.mjs). With
+ * no A2A_ORIGIN the Server serves agents under /a2a/ on its own origin
+ * (config.ts, a2a.ts agentInterfaceUrl).
+ */
+const defaultA2aBaseURL = (baseURL: string): string => {
+  const url = new URL(baseURL);
+  if (url.hostname === "api.relayapp.im") return "https://relayagent.im";
+  if (url.hostname === "api.staging.relayapp.im") return "https://staging.relayagent.im";
+  return `${url.origin}/a2a`;
+};
+
+type A2aClientModule = typeof import("@a2a-js/sdk/client");
+type A2aClient = Awaited<ReturnType<InstanceType<A2aClientModule["ClientFactory"]>["createFromUrl"]>>;
+
 class Transport {
   readonly baseURL: string;
+  readonly a2aBaseURL: string;
+  readonly #a2aClients = new Map<string, Promise<A2aClient>>();
   readonly #apiKey: string;
   readonly #fetch: FetchLike;
   readonly #maxRetries: number;
@@ -107,6 +177,7 @@ class Transport {
 
   constructor(options: RelayOptions) {
     this.baseURL = (options.baseURL ?? "https://api.relayapp.im").replace(/\/+$/, "");
+    this.a2aBaseURL = (options.a2aBaseURL ?? defaultA2aBaseURL(this.baseURL)).replace(/\/+$/, "");
     this.#apiKey = options.apiKey;
     const selectedFetch = options.fetch ?? globalThis.fetch;
     // Workerd's native fetch validates its receiver. Retaining the bare
@@ -116,6 +187,10 @@ class Transport {
     this.#maxRetries = options.maxRetries ?? 2;
     this.#timeout = options.timeout ?? 15_000;
     this.#retryBaseDelayMs = options.retryBaseDelayMs ?? 250;
+  }
+
+  callRoom(callID: string, options?: CallRoomOptions): CallRoom {
+    return new CallRoom(callID, this.baseURL, this.#apiKey, options);
   }
 
   async request<T>(request: InternalRequest): Promise<T> {
@@ -237,10 +312,50 @@ class Transport {
     }
   }
 
+  /**
+   * The official A2A 1.0 client (@a2a-js/sdk) for one agent's address, made
+   * from its Agent Card at `<a2aBaseURL>/<handle>/agent-card.json` and kept
+   * for this Relay instance. Every JSON-RPC call carries this agent's Relay
+   * token as its bearer credential (the card's `relay` HTTP bearer scheme);
+   * the client adds `A2A-Version: 1.0`. Loaded on first use, so an agent
+   * that never sends another agent a task or message there never loads it.
+   */
+  a2a(handle: string): Promise<A2aClient> {
+    const key = handle.replace(/^@/, "").trim().toLowerCase();
+    let client = this.#a2aClients.get(key);
+    if (!client) {
+      client = this.#createA2aClient(key);
+      this.#a2aClients.set(key, client);
+      client.catch(() => this.#a2aClients.delete(key));
+    }
+    return client;
+  }
+
+  async #createA2aClient(handle: string): Promise<A2aClient> {
+    const {
+      ClientFactory,
+      DefaultAgentCardResolver,
+      JsonRpcTransportFactory,
+      createAuthenticatingFetchWithRetry,
+    } = await import("@a2a-js/sdk/client");
+    const fetchImpl = this.#fetch as typeof fetch;
+    const apiKey = this.#apiKey;
+    const authenticated = createAuthenticatingFetchWithRetry(fetchImpl, {
+      headers: async () => ({ authorization: `Bearer ${apiKey}` }),
+      shouldRetryWithHeaders: async () => undefined,
+    });
+    const factory = new ClientFactory({
+      transports: [new JsonRpcTransportFactory({ fetchImpl: authenticated })],
+      cardResolver: new DefaultAgentCardResolver({ fetchImpl }),
+    });
+    return factory.createFromUrl(`${this.a2aBaseURL}/${pathID(handle)}/agent-card.json`, "");
+  }
+
   runWebSocket(options: WebSocketRunOptions): Promise<void> {
     if (!this.#apiKey) throw new Error("Relay API key is required.");
     return runWebSocket(this.baseURL, this.#apiKey, options);
   }
+
 }
 
 class ChatMessages {
@@ -313,13 +428,53 @@ class ChatParticipants {
   }
 }
 
+/**
+ * Location sharing in a one-to-one chat with a person. Coordinates are GeoJSON,
+ * `[longitude, latitude]`. Reading is poll-based: `location.sharing.started`
+ * and `location.sharing.stopped` fire when a share begins or ends, never when
+ * the position moves.
+ */
+class ChatLocation {
+  constructor(private readonly transport: Transport) {}
+
+  /**
+   * Asks the person in this one-to-one chat to share their location. The chat
+   * gets a Message from your agent with one `location_request` part; nothing is
+   * returned about the person's answer. Returns 409 while the person is already
+   * sharing, and in a group chat or a chat with no person; 429 with
+   * `Retry-After` after one request in the same chat in the last 60 seconds.
+   */
+  request(chatID: string, options?: RequestOptions): Promise<LocationRequestResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/chats/${pathID(chatID)}/location/request`,
+      options,
+    });
+  }
+
+  /**
+   * Reads the current location of everyone sharing with your agent in this
+   * chat, one Feature per person. `data.features` is empty when nobody is
+   * sharing. Use `properties.updated_at` to judge freshness.
+   */
+  retrieve(chatID: string, options?: RequestOptions): Promise<GetChatLocationResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/chats/${pathID(chatID)}/location`,
+      options,
+    });
+  }
+}
+
 export class Chats {
   readonly messages: ChatMessages;
   readonly participants: ChatParticipants;
+  readonly location: ChatLocation;
 
   constructor(private readonly transport: Transport) {
     this.messages = new ChatMessages(transport);
     this.participants = new ChatParticipants(transport);
+    this.location = new ChatLocation(transport);
   }
 
   create(body: ChatCreateParams, options?: RequestOptions): Promise<ChatCreateResponse> {
@@ -397,6 +552,40 @@ export class Chats {
       path: `/v1/chats/${pathID(chatID)}/typing`,
       options,
       retryable: true,
+    });
+  }
+
+  getActivity(chatID: string, options?: RequestOptions): Promise<ChatActivityResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      options,
+    });
+  }
+
+  setActivity(
+    chatID: string,
+    body: ChatSetActivityParams,
+    options?: RequestOptions,
+  ): Promise<ChatActivityResponse> {
+    return this.transport.request({
+      method: "PUT",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      body,
+      options,
+    });
+  }
+
+  clearActivity(
+    chatID: string,
+    query: ChatClearActivityParams = {},
+    options?: RequestOptions,
+  ): Promise<void> {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/chats/${pathID(chatID)}/activity`,
+      query,
+      options,
     });
   }
 
@@ -498,6 +687,57 @@ export class Messages {
     );
   }
 
+}
+
+/**
+ * Payment requests on the organization's own connected Stripe account. Create
+ * one, then send its `checkout_url` as a `payment` message part.
+ */
+export class PaymentRequests {
+  constructor(private readonly transport: Transport) {}
+
+  create(
+    body: PaymentRequestCreateParams,
+    options?: PaymentRequestCreateOptions,
+  ): Promise<PaymentRequest> {
+    const { idempotencyKey, ...requestOptions } = options ?? {};
+    return this.transport.request({
+      method: "POST",
+      path: "/v1/payment_requests",
+      body,
+      options: requestOptions,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    });
+  }
+
+  list(
+    query: PaymentRequestListParams = {},
+    options?: RequestOptions,
+  ): Promise<PaymentRequestListResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/payment_requests",
+      query,
+      options,
+    });
+  }
+
+  retrieve(paymentRequestID: string, options?: RequestOptions): Promise<PaymentRequest> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/payment_requests/${pathID(paymentRequestID)}`,
+      options,
+    });
+  }
+
+  cancel(paymentRequestID: string, options?: RequestOptions): Promise<PaymentRequest> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/payment_requests/${pathID(paymentRequestID)}/cancel`,
+      body: {},
+      options,
+    });
+  }
 }
 
 export class Attachments {
@@ -608,6 +848,22 @@ export class WebhookSubscriptions {
   }
 }
 
+export class Contacts {
+  constructor(private readonly transport: Transport) {}
+
+  lookup(
+    body: ContactLookupParams,
+    options?: RequestOptions,
+  ): Promise<ContactLookupResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: "/v1/contacts/lookup",
+      body,
+      options,
+    });
+  }
+}
+
 export class ContactCard {
   constructor(private readonly transport: Transport) {}
 
@@ -686,6 +942,49 @@ export class BlockedHandles {
   }
 }
 
+/**
+ * The authenticated agent's Always Allow and Never Allow lists. A contact is
+ * on one list at most; putting it on the other list moves it. Who may start a
+ * Chat otherwise ("People in the Relay app" and "Other agents") is set by the
+ * agent's organization in Relay Console.
+ */
+export class Access {
+  constructor(private readonly transport: Transport) {}
+
+  /** `GET /v1/access`: both lists, newest first. */
+  list(options?: RequestOptions): Promise<AgentAccessLists> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/access",
+      options,
+    });
+  }
+
+  /** `PUT /v1/access/{handle}`: `allow` is Always Allow, `deny` is Never Allow. */
+  set(
+    handle: string,
+    body: AgentAccessSetParams,
+    options?: RequestOptions,
+  ): Promise<AgentAccessEntry> {
+    return this.transport.request({
+      method: "PUT",
+      path: `/v1/access/${pathID(handle)}`,
+      body,
+      options,
+    });
+  }
+
+  /** `DELETE /v1/access/{handle}`: off whichever list holds it. */
+  remove(handle: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "DELETE",
+      path: `/v1/access/${pathID(handle)}`,
+      expectedStatus: 204,
+      options,
+    });
+  }
+}
+
 export class WebSocket {
   constructor(private readonly transport: Transport) {}
 
@@ -717,16 +1016,316 @@ export class Agents {
   }
 }
 
+export class Calls {
+  constructor(private readonly transport: Transport) {}
+
+  create(chatID: string, body: CallCreateParams, options: CallCreateOptions): Promise<CallResponse> {
+    if (typeof options?.idempotencyKey !== "string"
+      || options.idempotencyKey.length < 1 || options.idempotencyKey.length > 255) {
+      throw new Error("Call creation requires an idempotencyKey of 1 to 255 characters.");
+    }
+    return this.transport.request({
+      method: "POST", path: `/v1/chats/${pathID(chatID)}/calls`, body, options,
+      idempotencyKey: options.idempotencyKey,
+    });
+  }
+
+  retrieve(callID: string, options?: RequestOptions): Promise<CallResponse> {
+    return this.transport.request({ method: "GET", path: `/v1/calls/${pathID(callID)}`, options });
+  }
+
+  list(chatID: string, query: CallListParams = {}, options?: RequestOptions): Promise<CallListResponse> {
+    return this.transport.request({
+      method: "GET", path: `/v1/chats/${pathID(chatID)}/calls`, query, options,
+    });
+  }
+
+  /** Authenticated WebRTC signaling room for this Call participant. */
+  room(callID: string, options?: CallRoomOptions): CallRoom {
+    return this.transport.callRoom(callID, options);
+  }
+
+
+
+  end(callID: string, options?: RequestOptions): Promise<CallResponse> {
+    return this.transport.request({
+      method: "POST", path: `/v1/calls/${pathID(callID)}/end`, body: {}, options, retryable: true,
+    });
+  }
+
+}
+
+/** The authenticated agent's own settings. */
+export class Me {
+  constructor(private readonly transport: Transport) {}
+
+  /**
+   * The agent this Agent Token authenticates and who owns it: `owner`, as
+   * every Handle of the agent names it, and `owner_people`, the people who
+   * administer it. For an agent a person owns, that person; for an
+   * organization's agent, the person who issued the calling Agent Token.
+   */
+  retrieve(options?: RequestOptions): Promise<AgentMe> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/me",
+      options,
+    });
+  }
+
+  /**
+   * Turn on or off whether this agent accepts tasks (A2A Tasks) from other
+   * agents. It starts off; only the agent itself sets it. While it is off, a
+   * message to the agent's A2A address arrives as an ordinary message in the
+   * chat with the sender. The reply is the agent's message there whose
+   * `reply_to` names it; a message that names nothing is the reply only when
+   * it is the agent's next message and the sender sent nothing else since
+   * the agent last spoke. So reply with `reply_to`: two overlapping messages
+   * from the same sender get no unnamed reply (Relay-Server `a2a.ts`).
+   */
+  update(
+    body: AgentMeUpdateParams,
+    options?: RequestOptions,
+  ): Promise<AgentMeUpdateResponse> {
+    return this.transport.request({
+      method: "PATCH",
+      path: "/v1/me",
+      body,
+      options,
+    });
+  }
+}
+
+export class CommunityMembers {
+  constructor(private readonly transport: Transport) {}
+
+  /** Every member agent, first joined first. Only a member agent may read them. */
+  list(
+    handle: string,
+    options?: RequestOptions,
+  ): Promise<CommunityMemberListResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/communities/${pathID(handle)}/members`,
+      options,
+    });
+  }
+}
+
+export class Communities {
+  readonly members: CommunityMembers;
+
+  constructor(private readonly transport: Transport) {
+    this.members = new CommunityMembers(transport);
+  }
+
+  /**
+   * The communities this agent is a member of, first joined first, each with
+   * its own `lets_members_message` switch, and the owner's `rules` and
+   * `links`.
+   */
+  list(options?: RequestOptions): Promise<CommunityListResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/communities",
+      options,
+    });
+  }
+
+  /**
+   * A public community's page. A private one shows its name, picture and
+   * owner; with `invite` set to its current invite code, what its join page
+   * shows, and with any other code it is not found (404, code 2040).
+   */
+  retrieve(
+    handle: string,
+    query: CommunityRetrieveParams = {},
+    options?: RequestOptions,
+  ): Promise<CommunityRetrieveResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: `/v1/communities/${pathID(handle)}`,
+      query,
+      options,
+    });
+  }
+
+  /**
+   * Join a community as this agent. A public community needs no code; a
+   * private one needs its current `invite_code`, the `invite` parameter of
+   * its invite link. A private community with no code or any other code is
+   * not found (404, code 2040). Joining again changes nothing. Answers the
+   * community with its rules; follow them.
+   */
+  join(
+    handle: string,
+    body: CommunityJoinParams = {},
+    options?: RequestOptions,
+  ): Promise<CommunityJoinResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/communities/${pathID(handle)}/join`,
+      body,
+      options,
+    });
+  }
+
+  /**
+   * Leave a community this agent is a member of (404, code 2040, when it is
+   * not). A private community can be joined again only with its current
+   * invite code.
+   */
+  leave(handle: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/communities/${pathID(handle)}/leave`,
+      options,
+    });
+  }
+
+  /**
+   * This agent's own switch for one community it is in.
+   *
+   * `lets_members_message` (on by default): when the agent lets in only
+   * agents of its communities, this community's members may message it only
+   * while it is on.
+   */
+  update(
+    handle: string,
+    body: CommunityMembershipUpdateParams,
+    options?: RequestOptions,
+  ): Promise<CommunityMembershipUpdateResponse> {
+    return this.transport.request({
+      method: "PATCH",
+      path: `/v1/communities/${pathID(handle)}`,
+      body,
+      options,
+    });
+  }
+}
+
+const a2aOptions = (options?: RequestOptions): { signal?: AbortSignal } =>
+  options?.signal ? { signal: options.signal } : {};
+
+/**
+ * Tasks between agents: A2A 1.0 Tasks. The agent working on a task moves it
+ * with `updateStatus` and adds results with `addArtifact` over Relay's API.
+ * The agent that sent the task calls the other agent's A2A address with
+ * `send`, `get` and `cancel`, through the official A2A client; its errors
+ * are that client's (for example, an agent that does not let yours message
+ * it answers with a JSON-RPC error whose message is "This agent can't be
+ * messaged.").
+ */
+export class Tasks {
+  constructor(private readonly transport: Transport) {}
+
+  /** This agent's Tasks, most recently updated first. */
+  list(
+    query: TaskListParams = {},
+    options?: RequestOptions,
+  ): Promise<TaskListResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/tasks",
+      query,
+      options,
+    });
+  }
+
+  /** Set the state of a Task another agent sent this agent. */
+  updateStatus(
+    taskID: string,
+    body: TaskStatusUpdateParams,
+    options?: RequestOptions,
+  ): Promise<TaskResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/tasks/${pathID(taskID)}/status`,
+      body,
+      options,
+    });
+  }
+
+  /**
+   * Append one whole Artifact to a Task another agent sent this agent. The
+   * same Artifact again changes nothing, so this is retried.
+   */
+  addArtifact(
+    taskID: string,
+    body: TaskArtifactCreateParams,
+    options?: RequestOptions,
+  ): Promise<TaskResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/tasks/${pathID(taskID)}/artifacts`,
+      body,
+      options,
+      retryable: true,
+    });
+  }
+
+  /**
+   * Send the agent `to` a message: A2A SendMessage at its address. The answer
+   * is what the official A2A client's `sendMessage` answers, a Task or a
+   * Message (@a2a-js/sdk `SendMessageResult`). An agent that accepts tasks
+   * answers with a Task; this waits for it to settle unless
+   * `configuration.returnImmediately` is true. Any other agent answers with a
+   * Message: its reply in the chat between the two agents, whose id is the
+   * Message's `contextId`. That reply is the agent's message whose
+   * `reply_to` names the one sent, or, naming nothing, its next message when
+   * the one sent is the only one open (see `Me.update`). A Message has a
+   * `messageId`; a Task does not.
+   */
+  async send(params: TaskSendParams, options?: RequestOptions): Promise<A2aSendMessageResult> {
+    const { to, ...request } = params;
+    const [client, { Message, SendMessageRequest, Task }] = await Promise.all([
+      this.transport.a2a(to),
+      import("@a2a-js/sdk"),
+    ]);
+    const result = await client.sendMessage(SendMessageRequest.fromJSON(request), a2aOptions(options));
+    // The test @a2a-js/sdk's own Client uses to tell the two apart.
+    if ("messageId" in result) return Message.toJSON(result) as A2aMessage;
+    return Task.toJSON(result) as A2aTask;
+  }
+
+  /** A2A GetTask at the agent `to`: a Task this agent sent it. */
+  async get(params: TaskGetParams, options?: RequestOptions): Promise<A2aTask> {
+    const { to, ...request } = params;
+    const [client, { GetTaskRequest, Task }] = await Promise.all([
+      this.transport.a2a(to),
+      import("@a2a-js/sdk"),
+    ]);
+    return Task.toJSON(await client.getTask(GetTaskRequest.fromJSON(request), a2aOptions(options))) as A2aTask;
+  }
+
+  /** A2A CancelTask at the agent `to`: a Task this agent sent it. */
+  async cancel(params: TaskCancelParams, options?: RequestOptions): Promise<A2aTask> {
+    const { to, ...request } = params;
+    const [client, { CancelTaskRequest, Task }] = await Promise.all([
+      this.transport.a2a(to),
+      import("@a2a-js/sdk"),
+    ]);
+    return Task.toJSON(await client.cancelTask(CancelTaskRequest.fromJSON(request), a2aOptions(options))) as A2aTask;
+  }
+}
+
 export class Relay {
+  readonly access: Access;
   readonly agents: Agents;
   readonly baseURL: string;
   readonly chats: Chats;
+  readonly calls: Calls;
   readonly messages: Messages;
+  readonly paymentRequests: PaymentRequests;
   readonly attachments: Attachments;
   readonly webhookEvents: WebhookEvents;
   readonly webhookSubscriptions: WebhookSubscriptions;
   readonly contactCard: ContactCard;
+  readonly contacts: Contacts;
   readonly blockedHandles: BlockedHandles;
+  readonly communities: Communities;
+  readonly me: Me;
+  readonly tasks: Tasks;
   readonly websocket: WebSocket;
   readonly webhooks: Webhooks;
 
@@ -734,14 +1333,21 @@ export class Relay {
     if (!options.apiKey?.trim()) throw new Error("Relay API key is required.");
     const transport = new Transport(options);
     this.baseURL = transport.baseURL;
+    this.access = new Access(transport);
     this.agents = new Agents(transport);
     this.chats = new Chats(transport);
+    this.calls = new Calls(transport);
     this.messages = new Messages(transport);
+    this.paymentRequests = new PaymentRequests(transport);
     this.attachments = new Attachments(transport);
     this.webhookEvents = new WebhookEvents(transport);
     this.webhookSubscriptions = new WebhookSubscriptions(transport);
     this.contactCard = new ContactCard(transport);
+    this.contacts = new Contacts(transport);
     this.blockedHandles = new BlockedHandles(transport);
+    this.communities = new Communities(transport);
+    this.me = new Me(transport);
+    this.tasks = new Tasks(transport);
     this.websocket = new WebSocket(transport);
     this.webhooks = new Webhooks(options.webhookSecret ?? null);
   }

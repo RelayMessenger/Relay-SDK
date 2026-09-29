@@ -153,7 +153,7 @@ const installedTypes = readFileSync(
   "utf8",
 );
 assert.match(installedTypes, /\bimage_url: string \| null;/u);
-assert.match(installedTypes, /\babout: string \| null;/u);
+assert.match(installedTypes, /\bsubtitle: string \| null;/u);
 assert.doesNotMatch(installedTypes, /\bavatar_url\b/u);
 assert.doesNotMatch(installedTypes, /\btagline\b/u);
 

@@ -25,6 +25,7 @@ const responder = (calls: Captured[]) => async (
       url.pathname.endsWith("/read")
       || url.pathname.endsWith("/share_contact_card")
       || url.pathname.endsWith("/typing")
+      || /^\/v1\/communities\/[^/]+\/leave$/u.test(url.pathname)
     ))
     || (method === "DELETE" && (
       /^\/v1\/messages\/[^/]+$/u.test(url.pathname)
@@ -32,7 +33,9 @@ const responder = (calls: Captured[]) => async (
       || url.pathname.startsWith("/v1/attachments/")
       || url.pathname.startsWith("/v1/webhook-subscriptions/")
       || url.pathname === "/v1/blocked_handles"
+      || url.pathname.startsWith("/v1/access/")
       || url.pathname.endsWith("/typing")
+      || url.pathname.endsWith("/activity")
     ))
   );
   if (noContent) return new Response(null, { status: 204 });
@@ -142,6 +145,11 @@ describe("Relay v1 request shapes", () => {
     await client.chats.participants.add("chat-id", { handle: "research" });
     await client.chats.participants.remove("chat-id", { handle: "research" });
     await client.chats.leaveChat("chat-id");
+    await client.chats.getActivity("chat-id");
+    await client.chats.setActivity("chat-id", { text: "Working" });
+    await client.chats.clearActivity("chat-id");
+    await client.chats.location.request("chat-id");
+    await client.chats.location.retrieve("chat-id");
     await client.chats.startTyping("chat-id");
     await client.chats.stopTyping("chat-id");
     await client.chats.markAsRead("chat-id");
@@ -175,6 +183,15 @@ describe("Relay v1 request shapes", () => {
       type: "love",
       part_index: 0,
     });
+    await client.paymentRequests.create({
+      amount: 2_400,
+      currency: "usd",
+      description: "House blend, 250 g",
+      category: "physical_goods",
+    }, { idempotencyKey: "payment-request-key" });
+    await client.paymentRequests.list({ status: "requested", limit: 10 });
+    await client.paymentRequests.retrieve("payment-request-id");
+    await client.paymentRequests.cancel("payment-request-id");
     await client.attachments.create({
       filename: "photo.png",
       content_type: "image/png",
@@ -187,6 +204,23 @@ describe("Relay v1 request shapes", () => {
     await client.blockedHandles.list();
     await client.blockedHandles.block({ handle: "carol", reason: "spam" });
     await client.blockedHandles.unblock({ handle: "carol" });
+    await client.tasks.list({ role: "requester", state: "TASK_STATE_WORKING", page_size: 10, page_token: "task-page" });
+    await client.tasks.updateStatus("task-id", {
+      state: "TASK_STATE_COMPLETED",
+      message: { messageId: "status-1", role: "ROLE_AGENT", parts: [{ text: "Done" }] },
+    });
+    await client.tasks.addArtifact("task-id", {
+      artifact: { artifactId: "result", parts: [{ text: "42" }] },
+    });
+    await client.access.list();
+    await client.access.set("agent", { rule: "allow" });
+    await client.access.remove("agent");
+    await client.communities.list();
+    await client.communities.retrieve("agent", { invite: "invite-code" });
+    await client.communities.update("agent", { lets_members_message: false });
+    await client.communities.join("agent", { invite_code: "invite-code" });
+    await client.communities.leave("agent");
+    await client.communities.members.list("agent");
     await client.webhookEvents.list();
     await client.webhookSubscriptions.create({
       target_url: "https://receiver.test/webhook",
@@ -198,23 +232,35 @@ describe("Relay v1 request shapes", () => {
       is_active: false,
     });
     await client.webhookSubscriptions.delete("subscription-id");
+    await client.contacts.lookup({ handle: "alice" });
     await client.contactCard.retrieve({ handle: "echo" });
     await client.contactCard.create({ handle: "echo", first_name: "Echo" });
     await client.contactCard.update({
       handle: "echo",
       first_name: "New Echo",
     });
+    await client.calls.create("chat-id", { to: ["bob"] }, {
+      idempotencyKey: "call-create-key",
+    });
+    await client.calls.list("chat-id");
+    await client.calls.retrieve("call-id");
+    await client.calls.end("call-id");
     await client.agents.delete("agent");
+    await client.me.retrieve();
+    await client.me.update({ accepts_tasks: true });
 
-    expect([...calls.slice(-1), ...calls.slice(0, -1)].map((call) => [call.method, call.url.pathname])).toEqual(
+    expect([...calls.slice(-3), ...calls.slice(0, -3)].map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
         operation.method,
         operation.path
           .replace("{handle}", "agent")
+          .replace("{taskId}", "task-id")
           .replace("{chatId}", "chat-id")
           .replace("{messageId}", "message-id")
           .replace("{attachmentId}", "attachment-id")
-          .replace("{subscriptionId}", "subscription-id"),
+          .replace("{subscriptionId}", "subscription-id")
+          .replace("{callId}", "call-id")
+          .replace("{paymentRequestId}", "payment-request-id"),
       ]),
     );
     expect(calls.every((call) =>
@@ -231,17 +277,34 @@ describe("Relay v1 request shapes", () => {
       },
     });
 
-    const sharedContactCard = calls[10]!;
+    const createPayment = calls.find((call) =>
+      call.method === "POST" && call.url.pathname === "/v1/payment_requests")!;
+    expect(createPayment.headers.get("idempotency-key")).toBe("payment-request-key");
+    expect(JSON.parse(String(createPayment.body))).toEqual({
+      amount: 2_400,
+      currency: "usd",
+      description: "House blend, 250 g",
+      category: "physical_goods",
+    });
+    const listPayments = calls.find((call) =>
+      call.method === "GET" && call.url.pathname === "/v1/payment_requests")!;
+    expect(listPayments.url.searchParams.get("status")).toBe("requested");
+    expect(listPayments.url.searchParams.get("limit")).toBe("10");
+
+    const sharedContactCard = calls.find((call) =>
+      call.url.pathname.endsWith("/share_contact_card"))!;
     expect(sharedContactCard.body).toBeUndefined();
 
-    const createMessage = calls[11]!;
+    const createMessage = calls.find((call) =>
+      call.method === "POST" && call.url.pathname === "/v1/messages")!;
     expect(createMessage.headers.get("idempotency-key")).toBe("message-key");
     expect(JSON.parse(String(createMessage.body))).toEqual({
       to: ["bob"],
       message: { parts: [{ type: "text", value: "hello" }] },
     });
 
-    const chatMessage = calls[12]!;
+    const chatMessage = calls.find((call) =>
+      call.method === "POST" && call.url.pathname === "/v1/chats/chat-id/messages")!;
     expect(chatMessage.headers.get("idempotency-key")).toBe("chat-message-key");
     expect(JSON.parse(String(chatMessage.body))).toEqual({
       message: {
@@ -261,6 +324,32 @@ describe("Relay v1 request shapes", () => {
     expect(JSON.parse(String(contactUpdate.body))).toEqual({
       first_name: "New Echo",
     });
+
+    const body = (method: string, path: string): unknown => {
+      const call = calls.find((item) => item.method === method && item.url.pathname === path)!;
+      return call.body === undefined ? undefined : JSON.parse(String(call.body));
+    };
+    expect(body("PATCH", "/v1/me")).toEqual({ accepts_tasks: true });
+    expect(body("PATCH", "/v1/communities/agent")).toEqual({ lets_members_message: false });
+    expect(body("POST", "/v1/communities/agent/join")).toEqual({ invite_code: "invite-code" });
+    expect(body("POST", "/v1/communities/agent/leave")).toBeUndefined();
+    expect(body("POST", "/v1/tasks/task-id/status")).toEqual({
+      state: "TASK_STATE_COMPLETED",
+      message: { messageId: "status-1", role: "ROLE_AGENT", parts: [{ text: "Done" }] },
+    });
+    expect(body("POST", "/v1/tasks/task-id/artifacts")).toEqual({
+      artifact: { artifactId: "result", parts: [{ text: "42" }] },
+    });
+    const listTasks = calls.find((call) => call.method === "GET" && call.url.pathname === "/v1/tasks")!;
+    expect(Object.fromEntries(listTasks.url.searchParams)).toEqual({
+      role: "requester", state: "TASK_STATE_WORKING", page_size: "10", page_token: "task-page",
+    });
+    expect(listTasks.body).toBeUndefined();
+    const readCommunity = calls.find((call) => call.url.pathname === "/v1/communities/agent")!;
+    expect(Object.fromEntries(readCommunity.url.searchParams)).toEqual({ invite: "invite-code" });
+    for (const path of ["/v1/communities", "/v1/communities/agent", "/v1/communities/agent/members"]) {
+      expect(body("GET", path)).toBeUndefined();
+    }
 
     // Editing and unsending are retired from the developer API, so the client
     // has no way to reach either verb on a Message.
@@ -318,26 +407,49 @@ describe("Relay v1 request shapes", () => {
         .sort();
 
     expect(Object.keys(client).sort()).toEqual([
+      "access",
       "agents",
       "attachments",
       "baseURL",
       "blockedHandles",
+      "calls",
       "chats",
+      "communities",
       "contactCard",
+      "contacts",
+      "me",
       "messages",
+      "paymentRequests",
+      "tasks",
       "webhookEvents",
       "webhookSubscriptions",
       "webhooks",
       "websocket",
     ]);
+    expect(methods(client.access)).toEqual(["list", "remove", "set"]);
     expect(methods(client.agents)).toEqual(["delete"]);
+    expect(methods(client.me)).toEqual(["retrieve", "update"]);
+    expect(methods(client.communities)).toEqual(["join", "leave", "list", "retrieve", "update"]);
+    expect(methods(client.communities.members)).toEqual(["list"]);
+    expect(Object.keys(client.communities)).not.toContain("posts");
+    expect(methods(client.tasks)).toEqual([
+      "addArtifact",
+      "cancel",
+      "get",
+      "list",
+      "send",
+      "updateStatus",
+    ]);
     expect(methods(client.chats)).toEqual([
+      "clearActivity",
       "create",
+      "getActivity",
       "leaveChat",
       "listChats",
       "markAsRead",
       "retrieve",
       "sendVoicememo",
+      "setActivity",
       "shareContactCard",
       "startTyping",
       "stopTyping",
@@ -350,7 +462,20 @@ describe("Relay v1 request shapes", () => {
       "retrieve",
     ]);
     expect(methods(client.chats.messages)).toEqual(["list", "send"]);
+    expect(methods(client.paymentRequests)).toEqual([
+      "cancel",
+      "create",
+      "list",
+      "retrieve",
+    ]);
     expect(methods(client.chats.participants)).toEqual(["add", "remove"]);
+    expect(methods(client.calls)).toEqual([
+      "create",
+      "end",
+      "list",
+      "retrieve",
+      "room",
+    ]);
     expect(methods(client.attachments)).toEqual([
       "create",
       "delete",
@@ -370,6 +495,7 @@ describe("Relay v1 request shapes", () => {
       "retrieve",
       "update",
     ]);
+    expect(methods(client.contacts)).toEqual(["lookup"]);
     expect(methods(client.blockedHandles)).toEqual([
       "block",
       "list",
