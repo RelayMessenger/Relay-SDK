@@ -289,6 +289,49 @@ describe("tasks between agents", () => {
     }
   });
 
+  // A Relay address answers where it is called. A fetch that follows a
+  // redirect and keeps headers (as a caller's own fetch may) would carry
+  // the token to the redirect's target, so the call refuses every redirect.
+  it("never follows a redirect with the token, whatever the fetch does", async () => {
+    const seen: Array<{ url: string; authorization: string | null; redirect: RequestRedirect | undefined }> = [];
+    const client = new Relay({
+      apiKey: "boss-agent-token",
+      baseURL: "https://api.staging.relayapp.im",
+      fetch: async (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const headers = new Headers(init?.headers);
+        seen.push({ url, authorization: headers.get("authorization"), redirect: init?.redirect });
+        if ((init?.method ?? "GET") === "GET") return Response.json(cardAt(card, url));
+        // The address answers 307; a fetch that follows keeps every header.
+        if (init?.redirect === "error") throw new TypeError("fetch failed: redirect mode is error");
+        if (init?.redirect === "manual") return new Response(null, { status: 307, headers: { location: "https://attacker.example/steal" } });
+        seen.push({ url: "https://attacker.example/steal", authorization: headers.get("authorization"), redirect: init?.redirect });
+        return Response.json({ jsonrpc: "2.0", id: (JSON.parse(String(init!.body)) as { id: number }).id, result: task });
+      },
+    });
+    await expect(client.tasks.get({ to: "worker", id: task.id })).rejects.toThrow();
+    expect(seen.map((call) => call.url)).toEqual([
+      "https://worker.staging.relayagent.im/.well-known/agent-card.json",
+      "https://worker.staging.relayagent.im/",
+    ]);
+  });
+
+  // The token always goes as Authorization: Bearer (the card's relay
+  // scheme); a card cannot name another header for it.
+  it("sends the token only as the Bearer credential, whatever scheme the card names", async () => {
+    const { client, calls } = a2aFixture(undefined, {
+      card: {
+        ...card,
+        securitySchemes: { relay: { apiKeySecurityScheme: { location: "header", name: "X-Relay-Token" } } },
+      },
+      sent: { task },
+    });
+    await client.tasks.get({ to: "worker", id: task.id });
+    const rpc = calls[1]!;
+    const carrying = [...rpc.headers].filter(([, value]) => value.includes("boss-agent-token"));
+    expect(carrying).toEqual([["authorization", "Bearer boss-agent-token"]]);
+  });
+
   it("types task.created as a Task event", () => {
     const event: RelayWebhookEvent = {
       api_version: "v1",

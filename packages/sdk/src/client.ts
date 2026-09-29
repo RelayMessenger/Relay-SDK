@@ -410,7 +410,13 @@ class Transport {
     } = await import("@a2a-js/sdk/client");
     const fetchImpl = this.#fetch as typeof fetch;
     const apiKey = this.#apiKey;
-    const authenticated = createAuthenticatingFetchWithRetry(fetchImpl, {
+    // A Relay address answers where it is called and never redirects. Fetch
+    // drops Authorization on a cross-origin redirect, but a caller's own
+    // fetch may not, so a call carrying the token refuses every redirect.
+    const noRedirect: typeof fetch = (input, init) => fetchImpl(input, { ...init, redirect: "error" });
+    // The token is always Authorization: Bearer, the card's relay scheme; a
+    // card cannot name another header for it.
+    const authenticated = createAuthenticatingFetchWithRetry(noRedirect, {
       headers: async () => ({ authorization: `Bearer ${apiKey}` }),
       shouldRetryWithHeaders: async () => undefined,
     });

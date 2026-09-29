@@ -21691,7 +21691,8 @@ var Transport = class {
     const { ClientFactory, DefaultAgentCardResolver, JsonRpcTransportFactory, createAuthenticatingFetchWithRetry } = await import("@a2a-js/sdk/client");
     const fetchImpl = this.#fetch;
     const apiKey = this.#apiKey;
-    const authenticated = createAuthenticatingFetchWithRetry(fetchImpl, {
+    const noRedirect = (input, init) => fetchImpl(input, { ...init, redirect: "error" });
+    const authenticated = createAuthenticatingFetchWithRetry(noRedirect, {
       headers: async () => ({ authorization: `Bearer ${apiKey}` }),
       shouldRetryWithHeaders: async () => void 0
     });
