@@ -140,7 +140,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/src/websocket.ts",
       "source_sha256": "1dcbeeb485f277e5a96a54c87081f5fd371923ea26e66fdaf1c44c9ab6599834",
-      "destination_sha256": "f704e202873a2270e3528ac2c0cbff858be357770b0f579146931bd88c6ff368",
+      "destination_sha256": "e1843bfafa011682a9a5f3245fbe27f040ba5bd426fca4663155577190db32dc",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -217,7 +217,7 @@
       "commit": "8570546ce30ab39d702409893006dbccd351f2b4",
       "source": "packages/sdk/test/websocket.test.ts",
       "source_sha256": "a6277cb7a4ce043709c5540b61af06da9050b28bda7b6dd1e0090e32fbbc781e",
-      "destination_sha256": "74b4a25f8d4d4fc48a8b43d591b4451e4b4f7c5c46117c85e9a78c9752518e3b",
+      "destination_sha256": "2abca98e32102294cc8b569a645cdd5645534bf78965c1024c041141fffc7892",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
