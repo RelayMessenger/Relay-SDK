@@ -276,7 +276,7 @@ function messageIsMe(
 }
 
 /**
- * Relay adapter for `chat@4.39.0`, limited to the locked public v1 contract.
+ * Relay adapter for `chat@4.41.0`, limited to the locked public v1 contract.
  */
 export class RelayAdapter
   implements Adapter<RelayThreadId, RelayRawMessage>
