@@ -659,7 +659,7 @@ it("uses a private close code, sends no ACK, and reconnects after event durabili
   expect(first.sent).toEqual([]);
   expect(first.closeCalls[0]).toEqual({
     code: 4001,
-    reason: "durable application failed",
+    reason: "durable application failed at sequence 1",
   });
 
   controller.abort();
@@ -1227,5 +1227,196 @@ it("real WS fixture: fast writer ACK does not starve observer and observer abort
     for (const socket of wss.clients) socket.terminate();
     await new Promise<void>(resolve => wss.close(() => resolve()));
     await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+/**
+ * A stand-in for Relay's side of one Agent's stream: every connection gets
+ * `ready` at the last ACK and then every event after it, and the heartbeat
+ * ping is answered with a pong, as the runtime's auto-response does.
+ */
+const serverStream = (events: RelayWebhookEvent[]) => {
+  const state = { ackedThrough: 0 };
+  class StreamWebSocket extends FakeWebSocket {
+    constructor(url: string, options?: { headers?: Record<string, string> }) {
+      super(url, options);
+      queueMicrotask(() => {
+        emitFrame(this, ready(String(state.ackedThrough)));
+        events.slice(state.ackedThrough).forEach((event, index) => {
+          emitFrame(this, eventFrame(String(state.ackedThrough + index + 1), event));
+        });
+      });
+    }
+
+    override send(data: string): void {
+      super.send(data);
+      if (data === "{\"type\":\"ping\"}") {
+        queueMicrotask(() => emitFrame(this, { type: "pong" }));
+        return;
+      }
+      const frame = JSON.parse(data) as { type: string; through_sequence?: string };
+      if (frame.type === "ack") state.ackedThrough = Number(frame.through_sequence);
+    }
+  }
+  return { state, StreamWebSocket };
+};
+
+it("backs off exponentially while a handler keeps failing, logs the error, and names the failed sequence (REL-427)", async () => {
+  vi.useFakeTimers();
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const { StreamWebSocket } = serverStream([envelope()]);
+    let calls = 0;
+    const controller = new AbortController();
+    const running = runWebSocket("https://relay.test", "agent-token", {
+      signal: controller.signal,
+      WebSocket: StreamWebSocket,
+      random: () => 1,
+      // The defaults: 500 ms doubling to 30 s. No onError is given.
+      onEvent: async () => {
+        calls += 1;
+        throw new Error("handler bug");
+      },
+      onFullSync: async () => {},
+    });
+    await vi.advanceTimersByTimeAsync(64_000);
+    // 0, 0.5, 1.5, 3.5, 7.5, 15.5, 31.5, 61.5 s: eight deliveries, not 128.
+    expect(calls).toBe(8);
+    expect(FakeWebSocket.instances).toHaveLength(8);
+    expect(FakeWebSocket.instances[0]!.closeCalls[0]).toEqual({
+      code: 4001,
+      reason: "durable application failed at sequence 1",
+    });
+    expect(logged).toHaveBeenCalled();
+    expect(String(logged.mock.calls[0]!.join(" "))).toContain("handler bug");
+
+    controller.abort();
+    await vi.runAllTimersAsync();
+    await running;
+  } finally {
+    logged.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
+it("returns to the shortest delay once an event is acknowledged again (REL-427)", async () => {
+  vi.useFakeTimers();
+  try {
+    const { state, StreamWebSocket } = serverStream([envelope(), envelope("01993d50-ef7b-7b37-886b-23fd80c7ec21")]);
+    let failures = 3;
+    const controller = new AbortController();
+    const running = runWebSocket("https://relay.test", "agent-token", {
+      signal: controller.signal,
+      WebSocket: StreamWebSocket,
+      random: () => 1,
+      onEvent: async (_event, context) => {
+        if (context.sequence === "1" && failures > 0) {
+          failures -= 1;
+          throw new Error("transient");
+        }
+        if (context.sequence === "2") throw new Error("second event fails once");
+      },
+      onFullSync: async () => {},
+      onError() {},
+    });
+    // Three failures of event 1: 0.5 + 1 + 2 s, then it is acknowledged.
+    await vi.advanceTimersByTimeAsync(3_500);
+    expect(state.ackedThrough).toBe(1);
+    const connections = FakeWebSocket.instances.length;
+    // The new failure starts the schedule again: the next try comes 0.5 s later.
+    await vi.advanceTimersByTimeAsync(500);
+    expect(FakeWebSocket.instances.length).toBe(connections + 1);
+
+    controller.abort();
+    await vi.runAllTimersAsync();
+    await running;
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("keeps the connection through a 90-second handler and never runs one event twice at once (REL-428)", async () => {
+  vi.useFakeTimers();
+  try {
+    const { state, StreamWebSocket } = serverStream([envelope()]);
+    let running = 0;
+    let most = 0;
+    let calls = 0;
+    const errors: unknown[] = [];
+    const controller = new AbortController();
+    const run = runWebSocket("https://relay.test", "agent-token", {
+      signal: controller.signal,
+      WebSocket: StreamWebSocket,
+      random: () => 1,
+      onEvent: async () => {
+        calls += 1;
+        running += 1;
+        most = Math.max(most, running);
+        await new Promise((resolve) => setTimeout(resolve, 90_000));
+        running -= 1;
+      },
+      onFullSync: async () => {},
+      onError(error) {
+        errors.push(error);
+      },
+    });
+    await vi.advanceTimersByTimeAsync(95_000);
+    expect(most).toBe(1);
+    expect(calls).toBe(1);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(state.ackedThrough).toBe(1);
+    expect(errors).toEqual([]);
+
+    controller.abort();
+    await vi.runAllTimersAsync();
+    await run;
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("reconnects only after the running handler returns when the heartbeat does drop the connection (REL-428)", async () => {
+  vi.useFakeTimers();
+  try {
+    // A server that answers no heartbeat: the connection is dead after 60 s.
+    class SilentWebSocket extends FakeWebSocket {
+      constructor(url: string, options?: { headers?: Record<string, string> }) {
+        super(url, options);
+        queueMicrotask(() => {
+          emitFrame(this, ready());
+          emitFrame(this, eventFrame("1"));
+        });
+      }
+    }
+    let running = 0;
+    let most = 0;
+    const controller = new AbortController();
+    const run = runWebSocket("https://relay.test", "agent-token", {
+      signal: controller.signal,
+      WebSocket: SilentWebSocket,
+      minReconnectDelayMs: 0,
+      maxReconnectDelayMs: 0,
+      onEvent: async () => {
+        running += 1;
+        most = Math.max(most, running);
+        await new Promise((resolve) => setTimeout(resolve, 90_000));
+        running -= 1;
+      },
+      onFullSync: async () => {},
+      onError() {},
+    });
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(FakeWebSocket.instances[0]!.closeCalls).toHaveLength(1);
+    // Dropped, but the handler still runs: no second connection yet.
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(FakeWebSocket.instances.length).toBeGreaterThanOrEqual(2);
+    expect(most).toBe(1);
+
+    controller.abort();
+    await vi.runAllTimersAsync();
+    await run;
+  } finally {
+    vi.useRealTimers();
   }
 });

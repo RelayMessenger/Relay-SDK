@@ -376,3 +376,93 @@ def test_the_websocket_url_follows_the_base_url() -> None:
     assert websocket_url("http://127.0.0.1:8787/x?y=1", observe=True) == f"ws://127.0.0.1:8787/v1/websocket?observe=true&{subscribed}"
     with pytest.raises(TypeError):
         websocket_url("https://user:pw@api.relayapp.im")
+
+
+async def test_a_handler_that_keeps_failing_backs_off_logs_and_names_its_sequence(
+    relay_server: FakeRelay, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """REL-427: a new connection's ready frame no longer resets the backoff while the same handler keeps failing."""
+    delays: List[float] = []
+
+    async def record(delay: float) -> None:
+        delays.append(delay)
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(websocket, "_sleep", record)
+    reasons: List[str] = []
+    finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+
+    async def failing(connection: ServerConnection) -> None:
+        await connection.send(ready("0"))
+        await connection.send(event(1))
+        await closed(connection)
+        reasons.append(connection.close_reason or "")
+
+    async def last(connection: ServerConnection) -> None:
+        finished.set_result(None)
+        await connection.wait_closed()
+
+    def on_event(envelope: Dict[str, Any], context: Dict[str, str]) -> None:
+        raise RuntimeError("handler bug")
+
+    relay_server.scripts += [failing, failing, failing, failing, last]
+    # No on_error: the failure is logged.
+    await run_until(relay_server, finished, on_event=on_event, random=lambda: 1.0)
+    assert delays == [0.5, 1.0, 2.0, 4.0]
+    assert reasons == ["durable application failed at sequence 1"] * 4
+    assert any("handler bug" in record.getMessage() or "handler bug" in str(record.exc_info) for record in caplog.records)
+
+
+async def test_a_long_handler_keeps_its_connection_while_the_heartbeat_is_answered(
+    relay_server: FakeRelay, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REL-428: the pong is read while the handler runs, so the connection outlives the pong deadline."""
+    monkeypatch.setattr(websocket, "HEARTBEAT_PONG_TIMEOUT", 0.3)
+    finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+
+    async def script(connection: ServerConnection) -> None:
+        await connection.send(ready("0", interval_ms=50))
+        await connection.send(event(1))
+        while True:
+            frame = await recv(connection, timeout=5.0)
+            if frame == {"type": "ping"}:
+                await connection.send(json.dumps({"type": "pong"}))
+                continue
+            finished.set_result(frame)
+            return
+
+    async def on_event(envelope: Dict[str, Any], context: Dict[str, str]) -> None:
+        await asyncio.sleep(1.0)
+
+    relay_server.scripts.append(script)
+    await run_until(relay_server, finished, on_event=on_event)
+    assert finished.result() == {"type": "ack", "through_sequence": "1"}
+    assert len(relay_server.requests) == 1
+
+
+async def test_a_dropped_connection_reconnects_only_after_the_running_handler_returns(
+    relay_server: FakeRelay, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REL-428: Relay replays the unacknowledged event on the next connection, so it opens after the handler."""
+    monkeypatch.setattr(websocket, "HEARTBEAT_PONG_TIMEOUT", 0.2)
+    finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+    marks: List[str] = []
+
+    async def silent(connection: ServerConnection) -> None:
+        await connection.send(ready("0", interval_ms=50))
+        await connection.send(event(1))
+        await connection.wait_closed()
+
+    async def second(connection: ServerConnection) -> None:
+        marks.append("second connection")
+        finished.set_result(None)
+        await connection.wait_closed()
+
+    async def on_event(envelope: Dict[str, Any], context: Dict[str, str]) -> None:
+        marks.append("handler started")
+        await asyncio.sleep(0.8)
+        marks.append("handler returned")
+
+    relay_server.scripts += [silent, second]
+    await run_until(relay_server, finished, on_event=on_event, on_error=lambda error: None)
+    assert marks[:3] == ["handler started", "handler returned", "second connection"]
