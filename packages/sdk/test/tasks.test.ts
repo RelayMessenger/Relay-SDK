@@ -17,13 +17,14 @@ interface Captured {
 
 // Relay-Server server/src/a2a.ts `agentCard` for @worker on staging
 // (A2A_ORIGIN https://staging.relayagent.im): one JSON-RPC interface, 1.0 and
-// 0.3, at https://staging.relayagent.im/worker, HTTP bearer "relay".
+// 0.3, at the agent's own origin https://worker.staging.relayagent.im/, HTTP
+// bearer "relay".
 const card = {
   name: "Worker",
   description: "Does tasks",
   supportedInterfaces: [
-    { url: "https://staging.relayagent.im/worker", protocolBinding: "JSONRPC", protocolVersion: "1.0" },
-    { url: "https://staging.relayagent.im/worker", protocolBinding: "JSONRPC", protocolVersion: "0.3" },
+    { url: "https://worker.staging.relayagent.im/", protocolBinding: "JSONRPC", protocolVersion: "1.0" },
+    { url: "https://worker.staging.relayagent.im/", protocolBinding: "JSONRPC", protocolVersion: "0.3" },
   ],
   version: "1790000000000000",
   capabilities: { streaming: true, pushNotifications: false, extendedAgentCard: false },
@@ -62,6 +63,15 @@ const messageCard = {
   defaultOutputModes: ["text/plain", "application/json", "application/a2ui+json"],
 };
 
+/** The card as the Server serves it at `cardURL`: its interfaces are the address. */
+const cardAt = (base: object, cardURL: string): object => {
+  const address = cardURL.replace(/\.well-known\/agent-card\.json$/, "");
+  return {
+    ...base,
+    supportedInterfaces: (base as typeof card).supportedInterfaces.map((item) => ({ ...item, url: address })),
+  };
+};
+
 const a2aFixture = (
   baseURL = "https://api.staging.relayapp.im",
   answer: { card: object; sent: { task: A2aTask } | { message: A2aMessage } } = { card, sent: { task } },
@@ -75,7 +85,7 @@ const a2aFixture = (
       const method = init?.method ?? "GET";
       const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
       calls.push({ url, method, headers: new Headers(init?.headers), body });
-      if (method === "GET") return Response.json(answer.card);
+      if (method === "GET") return Response.json(cardAt(answer.card, url));
       const rpc = body as { id: number; method: string };
       const result = rpc.method === "SendMessage" ? answer.sent : task;
       return Response.json({ jsonrpc: "2.0", id: rpc.id, result });
@@ -88,7 +98,7 @@ describe("tasks between agents", () => {
   it("sends a task over A2A 1.0 with the agent's Relay token as bearer", async () => {
     const { client, calls } = a2aFixture();
     const sent = await client.tasks.send({
-      to: "@Worker",
+      to: "@worker",
       message: { messageId: "task-1", role: "ROLE_USER", parts: [{ text: "Add 40 and 2." }] },
       configuration: { returnImmediately: true },
       metadata: { priority: "high" },
@@ -96,8 +106,8 @@ describe("tasks between agents", () => {
 
     expect(sent).toEqual(task);
     expect(calls.map((call) => [call.method, call.url])).toEqual([
-      ["GET", "https://staging.relayagent.im/worker/agent-card.json"],
-      ["POST", "https://staging.relayagent.im/worker"],
+      ["GET", "https://worker.staging.relayagent.im/.well-known/agent-card.json"],
+      ["POST", "https://worker.staging.relayagent.im/"],
     ]);
     const rpc = calls[1]!;
     expect(rpc.headers.get("authorization")).toBe("Bearer boss-agent-token");
@@ -149,9 +159,9 @@ describe("tasks between agents", () => {
     expect(await client.tasks.cancel({ to: "worker", id: task.id })).toEqual(task);
 
     expect(calls.map((call) => [call.method, call.url])).toEqual([
-      ["GET", "https://staging.relayagent.im/worker/agent-card.json"],
-      ["POST", "https://staging.relayagent.im/worker"],
-      ["POST", "https://staging.relayagent.im/worker"],
+      ["GET", "https://worker.staging.relayagent.im/.well-known/agent-card.json"],
+      ["POST", "https://worker.staging.relayagent.im/"],
+      ["POST", "https://worker.staging.relayagent.im/"],
     ]);
     expect(calls.slice(1).map((call) => call.body)).toMatchObject([
       { method: "GetTask", params: { id: task.id, historyLength: 0 } },
@@ -163,14 +173,163 @@ describe("tasks between agents", () => {
     }
   });
 
+  // Each agent is its own origin under the agent domain, so its card is at
+  // the root well-known path (A2A discovery, RFC 8615); "_" is written "-".
   it.each([
-    ["https://api.relayapp.im", "https://relayagent.im/worker/agent-card.json"],
-    ["https://api.staging.relayapp.im/", "https://staging.relayagent.im/worker/agent-card.json"],
-    ["http://127.0.0.1:8788", "http://127.0.0.1:8788/a2a/worker/agent-card.json"],
-  ])("finds agents' A2A addresses for %s", async (baseURL, cardURL) => {
+    ["https://api.relayapp.im", "worker", "https://worker.relayagent.im/.well-known/agent-card.json"],
+    ["https://api.staging.relayapp.im/", "worker", "https://worker.staging.relayagent.im/.well-known/agent-card.json"],
+    ["https://api.relayapp.im", "@two_words", "https://two-words.relayagent.im/.well-known/agent-card.json"],
+    // "__" is refused only as the 3rd and 4th characters (RFC 5891 4.2.3.1).
+    ["https://api.relayapp.im", "abc__d", "https://abc--d.relayagent.im/.well-known/agent-card.json"],
+    ["http://127.0.0.1:8788", "worker", "http://127.0.0.1:8788/a2a/worker/.well-known/agent-card.json"],
+  ])("finds agents' A2A addresses for %s", async (baseURL, to, cardURL) => {
     const { client, calls } = a2aFixture(baseURL);
-    await client.tasks.get({ to: "worker", id: task.id });
+    await client.tasks.get({ to, id: task.id });
     expect(calls[0]!.url).toBe(cardURL);
+  });
+
+  it("takes an agent domain or a local Server's /a2a as a2aBaseURL", async () => {
+    for (const [a2aBaseURL, cardURL] of [
+      ["https://agents.example", "https://worker.agents.example/.well-known/agent-card.json"],
+      ["http://localhost:8790/a2a/", "http://localhost:8790/a2a/worker/.well-known/agent-card.json"],
+    ] as const) {
+      const calls: string[] = [];
+      const client = new Relay({
+        apiKey: "boss-agent-token",
+        a2aBaseURL,
+        fetch: async (input, init) => {
+          calls.push(input instanceof Request ? input.url : String(input));
+          if ((init?.method ?? "GET") === "GET") return Response.json(cardAt(card, calls[0]!));
+          return Response.json({ jsonrpc: "2.0", id: (JSON.parse(String(init!.body)) as { id: number }).id, result: task });
+        },
+      });
+      await client.tasks.get({ to: "worker", id: task.id });
+      expect(calls[0]).toBe(cardURL);
+    }
+  });
+
+  // Everything that is not exactly Relay-Server a2a.ts HANDLE.
+  it.each([
+    ["attacker.example/"], // the review's leak: the address became https://attacker.example
+    ["attacker.example"],
+    ["evil/../worker"],
+    [".."],
+    ["user@attacker.example"],
+    ["attacker:8443"],
+    ["worker#x"],
+    ["worker?x"],
+    ["wоrker"], // Cyrillic "о"
+    ["\u212Aelvin"], // KELVIN SIGN, which toLowerCase() turns into ASCII "k"
+    ["Worker"],
+    [" worker"],
+    ["worker\n"],
+    ["two-words"],
+    ["wo"],
+    ["w".repeat(33)],
+    ["xn__abc"], // host label xn--abc, an invalid A-label (RFC 5891 4.2.3.1)
+    ["ab__c"],
+    ["abc_"], // host label abc-, ends with a hyphen
+    [""],
+    ["@"],
+  ])("refuses %j before any request", async (to) => {
+    const { client, calls } = a2aFixture();
+    await expect(client.tasks.get({ to, id: task.id })).rejects.toThrow("is not a Relay handle");
+    await expect(client.tasks.send({
+      to,
+      message: { messageId: "m", role: "ROLE_USER", parts: [{ text: "hi" }] },
+    })).rejects.toThrow("is not a Relay handle");
+    expect(calls).toEqual([]);
+  });
+
+  it.each([
+    ["https://attacker.example/"],
+    ["https://worker.staging.relayagent.im:8443/"], // same host, another port
+    ["http://worker.staging.relayagent.im/"], // same host, another scheme
+    ["https://attacker.staging.relayagent.im/"], // another agent
+  ])("sends no token when the card names %s", async (interfaceURL) => {
+    for (const where of ["supportedInterfaces", "url", "additionalInterfaces"] as const) {
+      const calls: Captured[] = [];
+      const hostile = {
+        ...card,
+        ...(where === "supportedInterfaces"
+          ? { supportedInterfaces: [...card.supportedInterfaces, { url: interfaceURL, protocolBinding: "JSONRPC", protocolVersion: "1.0" }] }
+          : where === "url"
+            ? { supportedInterfaces: undefined, url: interfaceURL, preferredTransport: "JSONRPC", protocolVersion: "0.3.0" }
+            : {
+                // A 0.3 card: @a2a-js/sdk reads additionalInterfaces only from one.
+                supportedInterfaces: undefined,
+                url: "https://worker.staging.relayagent.im/",
+                preferredTransport: "JSONRPC",
+                protocolVersion: "0.3.0",
+                additionalInterfaces: [{ url: interfaceURL, transport: "JSONRPC" }],
+              }),
+      };
+      const client = new Relay({
+        apiKey: "boss-agent-token",
+        baseURL: "https://api.staging.relayapp.im",
+        fetch: async (input, init) => {
+          calls.push({
+            url: input instanceof Request ? input.url : String(input),
+            method: init?.method ?? "GET",
+            headers: new Headers(init?.headers),
+            body: undefined,
+          });
+          return Response.json(hostile);
+        },
+      });
+      // A 1.0 card is refused by name; a 0.3 card's interfaces never reach
+      // the A2A SDK's transport, which refuses the card.
+      await expect(client.tasks.get({ to: "worker", id: task.id })).rejects.toThrow(
+        where === "supportedInterfaces" ? "not on the agent's own origin" : "No compatible transport",
+      );
+      expect(calls.map((call) => [call.method, call.url])).toEqual([
+        ["GET", "https://worker.staging.relayagent.im/.well-known/agent-card.json"],
+      ]);
+      expect(calls[0]!.headers.get("authorization")).toBeNull();
+    }
+  });
+
+  // A Relay address answers where it is called. A fetch that follows a
+  // redirect and keeps headers (as a caller's own fetch may) would carry
+  // the token to the redirect's target, so the call refuses every redirect.
+  it("never follows a redirect with the token, whatever the fetch does", async () => {
+    const seen: Array<{ url: string; authorization: string | null; redirect: RequestRedirect | undefined }> = [];
+    const client = new Relay({
+      apiKey: "boss-agent-token",
+      baseURL: "https://api.staging.relayapp.im",
+      fetch: async (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const headers = new Headers(init?.headers);
+        seen.push({ url, authorization: headers.get("authorization"), redirect: init?.redirect });
+        if ((init?.method ?? "GET") === "GET") return Response.json(cardAt(card, url));
+        // The address answers 307; a fetch that follows keeps every header.
+        if (init?.redirect === "error") throw new TypeError("fetch failed: redirect mode is error");
+        if (init?.redirect === "manual") return new Response(null, { status: 307, headers: { location: "https://attacker.example/steal" } });
+        seen.push({ url: "https://attacker.example/steal", authorization: headers.get("authorization"), redirect: init?.redirect });
+        return Response.json({ jsonrpc: "2.0", id: (JSON.parse(String(init!.body)) as { id: number }).id, result: task });
+      },
+    });
+    await expect(client.tasks.get({ to: "worker", id: task.id })).rejects.toThrow();
+    expect(seen.map((call) => call.url)).toEqual([
+      "https://worker.staging.relayagent.im/.well-known/agent-card.json",
+      "https://worker.staging.relayagent.im/",
+    ]);
+  });
+
+  // The token always goes as Authorization: Bearer (the card's relay
+  // scheme); a card cannot name another header for it.
+  it("sends the token only as the Bearer credential, whatever scheme the card names", async () => {
+    const { client, calls } = a2aFixture(undefined, {
+      card: {
+        ...card,
+        securitySchemes: { relay: { apiKeySecurityScheme: { location: "header", name: "X-Relay-Token" } } },
+      },
+      sent: { task },
+    });
+    await client.tasks.get({ to: "worker", id: task.id });
+    const rpc = calls[1]!;
+    const carrying = [...rpc.headers].filter(([, value]) => value.includes("boss-agent-token"));
+    expect(carrying).toEqual([["authorization", "Bearer boss-agent-token"]]);
   });
 
   it("types task.created as a Task event", () => {

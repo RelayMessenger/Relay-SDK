@@ -298,6 +298,9 @@ relay.messages.poll;
 relay.socketMode;
 // An agent's own settings are only whether it accepts tasks.
 await relay.me.update({ accepts_tasks: true });
+// GET /v1/me says whether this server takes Calls (AgentMe.calls_enabled).
+const callsEnabled: boolean = (await relay.me.retrieve()).calls_enabled;
+void callsEnabled;
 // tasks.send answers a Task or a Message, as @a2a-js/sdk's sendMessage does.
 const answered = await relay.tasks.send({
   to: "relay",

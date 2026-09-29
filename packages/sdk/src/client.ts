@@ -99,11 +99,13 @@ export interface RelayOptions {
   apiKey: string;
   baseURL?: string;
   /**
-   * Where other agents' A2A addresses live, `<a2aBaseURL>/<handle>`. By
+   * Where other agents' A2A addresses live. An origin is the agent domain:
+   * each agent is its own origin under it, `https://<handle>.relayagent.im`
+   * (each "_" of the handle written "-"). A URL with a path is a local Relay
+   * Server's `<origin>/a2a`, and the address is `<a2aBaseURL>/<handle>`. By
    * default it follows `baseURL` as Relay serves it: https://relayagent.im
    * for api.relayapp.im, https://staging.relayagent.im for
-   * api.staging.relayapp.im, and `<baseURL origin>/a2a` for any other host
-   * (a local Relay Server).
+   * api.staging.relayapp.im, and `<baseURL origin>/a2a` for any other host.
    */
   a2aBaseURL?: string;
   webhookSecret?: string | null;
@@ -160,6 +162,69 @@ const defaultA2aBaseURL = (baseURL: string): string => {
   if (url.hostname === "api.relayapp.im") return "https://relayagent.im";
   if (url.hostname === "api.staging.relayapp.im") return "https://staging.relayagent.im";
   return `${url.origin}/a2a`;
+};
+
+/**
+ * An agent's A2A address (Relay-Server a2a.ts `agentInterfaceUrl`): its own
+ * origin under the agent domain, the handle's "_" written "-" because TLS
+ * clients refuse "_" in a name under the *.relayagent.im certificate; or,
+ * for a local Relay Server, `<origin>/a2a/<handle>`.
+ */
+/**
+ * A Relay handle, exactly as Relay-Server a2a.ts `HANDLE` accepts it:
+ * `^[a-z][a-z0-9_]{2,31}$`, less the handles whose host label (each "_"
+ * written "-") breaks RFC 5891 section 4.2.3.1: "MUST NOT contain "--" in the
+ * third and fourth character positions and MUST NOT start or end with a "-""
+ * (`xn__abc` would be the invalid A-label `xn--abc`). The handle becomes a DNS
+ * label or a path segment of the address the Relay token is sent to, so
+ * nothing else is let through: no case folding, no trimming.
+ */
+const HANDLE = /^(?!.{2}__)[a-z][a-z0-9_]{1,30}[a-z0-9]$/;
+
+const relayHandle = (to: string): string => {
+  const handle = to.startsWith("@") ? to.slice(1) : to;
+  if (!HANDLE.test(handle)) {
+    throw new TypeError(
+      `${JSON.stringify(to)} is not a Relay handle: 3 to 32 of a-z, 0-9 and _, starting with a letter, not ending with _, and without __ as its 3rd and 4th characters.`,
+    );
+  }
+  return handle;
+};
+
+/**
+ * Refuses a card that names an interface off the address's origin. Relay's
+ * cards are unsigned, and A2A trusts an unsigned card only as far as the
+ * server that served it: a client verifies the server by its TLS certificate
+ * (A2A 1.0 section 7.2) and "SHOULD verify at least one signature before
+ * trusting an Agent Card" (section 8.4.3). What the card can vouch for is
+ * therefore its own origin, the one discovery fetched it from (section 8.2,
+ * RFC 8615), and the Relay token is sent nowhere else. `supportedInterfaces`
+ * is every endpoint @a2a-js/sdk can pick: without `legacyCompat` its resolver
+ * drops a 0.3 card's `url` and `additionalInterfaces`, and the factory then
+ * refuses the card.
+ */
+const requireSameOrigin = (card: { supportedInterfaces?: Array<{ url: string }> }, address: string): void => {
+  const origin = new URL(address).origin;
+  for (const { url } of card.supportedInterfaces ?? []) {
+    let named: string | undefined;
+    try {
+      named = new URL(url).origin;
+    } catch {
+      named = undefined;
+    }
+    if (named !== origin) {
+      throw new TypeError(
+        `The agent card at ${address} names the interface ${JSON.stringify(url)}, which is not on the agent's own origin; the Relay token is not sent there.`,
+      );
+    }
+  }
+};
+
+const a2aAddress = (a2aBaseURL: string, handle: string): string => {
+  const base = new URL(a2aBaseURL);
+  return base.pathname === "/"
+    ? `${base.protocol}//${handle.replaceAll("_", "-")}.${base.host}`
+    : `${a2aBaseURL.replace(/\/+$/, "")}/${pathID(handle)}`;
 };
 
 type A2aClientModule = typeof import("@a2a-js/sdk/client");
@@ -314,14 +379,19 @@ class Transport {
 
   /**
    * The official A2A 1.0 client (@a2a-js/sdk) for one agent's address, made
-   * from its Agent Card at `<a2aBaseURL>/<handle>/agent-card.json` and kept
+   * from its Agent Card at `<address>/.well-known/agent-card.json` and kept
    * for this Relay instance. Every JSON-RPC call carries this agent's Relay
    * token as its bearer credential (the card's `relay` HTTP bearer scheme);
    * the client adds `A2A-Version: 1.0`. Loaded on first use, so an agent
    * that never sends another agent a task or message there never loads it.
    */
   a2a(handle: string): Promise<A2aClient> {
-    const key = handle.replace(/^@/, "").trim().toLowerCase();
+    let key: string;
+    try {
+      key = relayHandle(handle);
+    } catch (error) {
+      return Promise.reject(error);
+    }
     let client = this.#a2aClients.get(key);
     if (!client) {
       client = this.#createA2aClient(key);
@@ -340,15 +410,25 @@ class Transport {
     } = await import("@a2a-js/sdk/client");
     const fetchImpl = this.#fetch as typeof fetch;
     const apiKey = this.#apiKey;
-    const authenticated = createAuthenticatingFetchWithRetry(fetchImpl, {
+    // A Relay address answers where it is called and never redirects. Fetch
+    // drops Authorization on a cross-origin redirect, but a caller's own
+    // fetch may not, so a call carrying the token refuses every redirect.
+    const noRedirect: typeof fetch = (input, init) => fetchImpl(input, { ...init, redirect: "error" });
+    // The token is always Authorization: Bearer, the card's relay scheme; a
+    // card cannot name another header for it.
+    const authenticated = createAuthenticatingFetchWithRetry(noRedirect, {
       headers: async () => ({ authorization: `Bearer ${apiKey}` }),
       shouldRetryWithHeaders: async () => undefined,
     });
     const factory = new ClientFactory({
       transports: [new JsonRpcTransportFactory({ fetchImpl: authenticated })],
-      cardResolver: new DefaultAgentCardResolver({ fetchImpl }),
     });
-    return factory.createFromUrl(`${this.a2aBaseURL}/${pathID(handle)}/agent-card.json`, "");
+    // The card is fetched without the token; the token goes only to an
+    // interface on the address's own origin.
+    const address = a2aAddress(this.a2aBaseURL, handle);
+    const agentCard = await new DefaultAgentCardResolver({ fetchImpl }).resolve(`${address}/.well-known/agent-card.json`, "");
+    requireSameOrigin(agentCard, address);
+    return factory.createFromAgentCard(agentCard);
   }
 
   runWebSocket(options: WebSocketRunOptions): Promise<void> {
@@ -1064,6 +1144,7 @@ export class Me {
    * every Handle of the agent names it, and `owner_people`, the people who
    * administer it. For an agent a person owns, that person; for an
    * organization's agent, the person who issued the calling Agent Token.
+   * `calls_enabled` says whether this server takes Calls.
    */
   retrieve(options?: RequestOptions): Promise<AgentMe> {
     return this.transport.request({
