@@ -1,9 +1,11 @@
 """Send another Relay agent a task or a message over A2A 1.0, with the official A2A SDK.
 
-Every Relay agent has an A2A address, ``https://relayagent.im/<handle>``
-(Relay Server ``a2a.ts`` ``agentInterfaceUrl``; on staging,
-``https://staging.relayagent.im/<handle>``), and its AgentCard at
-``<address>/agent-card.json``. The card declares one security scheme, HTTP
+Every Relay agent has an A2A address, its own origin
+``https://<handle>.relayagent.im`` (Relay Server ``a2a.ts``
+``agentInterfaceUrl``; each "_" of the handle is written "-"; on staging,
+``https://<handle>.staging.relayagent.im``), and its AgentCard at
+``<address>/.well-known/agent-card.json``, where A2A discovery looks for it.
+The card declares one security scheme, HTTP
 Bearer, "Relay agent token": the calling agent's own Relay token. The address
 answers A2A's JSON-RPC binding: SendMessage, SendStreamingMessage, GetTask,
 ListTasks, CancelTask and SubscribeToTask.
@@ -41,8 +43,8 @@ from .client import USER_AGENT
 
 #: Production agents' A2A addresses (Relay Server ``config.ts`` ``A2A_ORIGIN``).
 DEFAULT_A2A_ORIGIN: Final = "https://relayagent.im"
-#: Where an agent's AgentCard sits under its address (``a2a.ts``).
-AGENT_CARD_PATH: Final = "agent-card.json"
+#: Where an agent's AgentCard sits under its address: A2A's well-known path.
+AGENT_CARD_PATH: Final = "/.well-known/agent-card.json"
 
 # A blocking SendMessage is answered within 60 s (agent-tasks.ts
 # BLOCKING_WAIT_MS), and a stream sends a keepalive every 15 s (KEEPALIVE_MS);
@@ -63,8 +65,20 @@ class RelayAgentToken(CredentialService):
 
 
 def agent_address(handle: str, *, a2a_origin: str = DEFAULT_A2A_ORIGIN) -> str:
-    """An agent's A2A address: ``<a2a_origin>/<handle>``."""
-    return f"{a2a_origin.rstrip('/')}/{handle.lstrip('@').strip().lower()}"
+    """An agent's A2A address.
+
+    ``a2a_origin`` is the agent domain, and each agent is its own origin under
+    it: ``https://<handle>.relayagent.im``, the handle's "_" written "-"
+    because TLS clients refuse "_" in a name under the ``*.relayagent.im``
+    certificate. A URL with a path is a local Relay Server's ``<origin>/a2a``,
+    and the address is ``<a2a_origin>/<handle>``.
+    """
+    name = handle.lstrip("@").strip().lower()
+    origin = httpx.URL(a2a_origin)
+    if origin.path.strip("/"):
+        return f"{a2a_origin.rstrip('/')}/{name}"
+    host = f"{origin.host}:{origin.port}" if origin.port else origin.host
+    return f"{origin.scheme}://{name.replace('_', '-')}.{host}"
 
 
 async def connect_agent(

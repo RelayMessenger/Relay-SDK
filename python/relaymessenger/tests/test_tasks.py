@@ -308,9 +308,13 @@ async def test_a_task_goes_to_the_agents_address_with_the_token_and_a2a_version(
 
     from relaymessenger.a2a import agent_address, connect_agent
 
-    assert agent_address("@Translator", a2a_origin="https://staging.relayagent.im/") == "https://staging.relayagent.im/translator"
-    server.card = relay_card(f"{server.base_url}/translator")
-    client = await connect_agent("rly_tok", "translator", a2a_origin=server.base_url)
+    # Each agent is its own origin under the agent domain; "_" is written "-".
+    assert agent_address("@Translator", a2a_origin="https://staging.relayagent.im/") == "https://translator.staging.relayagent.im"
+    assert agent_address("two_words") == "https://two-words.relayagent.im"
+    # A local Relay Server serves agents under its own /a2a.
+    assert agent_address("two_words", a2a_origin="http://localhost:8790/a2a/") == "http://localhost:8790/a2a/two_words"
+    server.card = relay_card(f"{server.base_url}/a2a/translator")
+    client = await connect_agent("rly_tok", "translator", a2a_origin=f"{server.base_url}/a2a")
     try:
         request = SendMessageRequest(message=new_text_message("Translate hello", role=Role.ROLE_USER))
         events = [event async for event in client.send_message(request)]
@@ -321,9 +325,9 @@ async def test_a_task_goes_to_the_agents_address_with_the_token_and_a2a_version(
     assert events[0].task.id == TASK["id"]
     assert task.status.state == TaskState.TASK_STATE_COMPLETED
     card_get, send, get = server.seen
-    assert (card_get[0], card_get[1]) == ("GET", "/translator/agent-card.json")
+    assert (card_get[0], card_get[1]) == ("GET", "/a2a/translator/.well-known/agent-card.json")
     for method, path, headers, body in (send, get):
-        assert (method, path) == ("POST", "/translator")
+        assert (method, path) == ("POST", "/a2a/translator")
         assert headers["authorization"] == "Bearer rly_tok"
         assert headers["a2a-version"] == "1.0"
         assert headers["user-agent"].startswith("relaymessenger-python/")
@@ -358,10 +362,10 @@ async def test_an_agent_that_does_not_accept_tasks_answers_with_one_message(serv
 
     from relaymessenger.a2a import connect_agent
 
-    server.card = message_card(f"{server.base_url}/relay")
+    server.card = message_card(f"{server.base_url}/a2a/relay")
     server.reply = REPLY
     config = None if streaming else ClientConfig(streaming=False)
-    client = await connect_agent("rly_tok", "relay", a2a_origin=server.base_url, config=config)
+    client = await connect_agent("rly_tok", "relay", a2a_origin=f"{server.base_url}/a2a", config=config)
     try:
         request = SendMessageRequest(message=new_text_message("What can you do?", role=Role.ROLE_USER))
         events = [event async for event in client.send_message(request)]

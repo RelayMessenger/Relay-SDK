@@ -17,13 +17,14 @@ interface Captured {
 
 // Relay-Server server/src/a2a.ts `agentCard` for @worker on staging
 // (A2A_ORIGIN https://staging.relayagent.im): one JSON-RPC interface, 1.0 and
-// 0.3, at https://staging.relayagent.im/worker, HTTP bearer "relay".
+// 0.3, at the agent's own origin https://worker.staging.relayagent.im/, HTTP
+// bearer "relay".
 const card = {
   name: "Worker",
   description: "Does tasks",
   supportedInterfaces: [
-    { url: "https://staging.relayagent.im/worker", protocolBinding: "JSONRPC", protocolVersion: "1.0" },
-    { url: "https://staging.relayagent.im/worker", protocolBinding: "JSONRPC", protocolVersion: "0.3" },
+    { url: "https://worker.staging.relayagent.im/", protocolBinding: "JSONRPC", protocolVersion: "1.0" },
+    { url: "https://worker.staging.relayagent.im/", protocolBinding: "JSONRPC", protocolVersion: "0.3" },
   ],
   version: "1790000000000000",
   capabilities: { streaming: true, pushNotifications: false, extendedAgentCard: false },
@@ -96,8 +97,8 @@ describe("tasks between agents", () => {
 
     expect(sent).toEqual(task);
     expect(calls.map((call) => [call.method, call.url])).toEqual([
-      ["GET", "https://staging.relayagent.im/worker/agent-card.json"],
-      ["POST", "https://staging.relayagent.im/worker"],
+      ["GET", "https://worker.staging.relayagent.im/.well-known/agent-card.json"],
+      ["POST", "https://worker.staging.relayagent.im/"],
     ]);
     const rpc = calls[1]!;
     expect(rpc.headers.get("authorization")).toBe("Bearer boss-agent-token");
@@ -149,9 +150,9 @@ describe("tasks between agents", () => {
     expect(await client.tasks.cancel({ to: "worker", id: task.id })).toEqual(task);
 
     expect(calls.map((call) => [call.method, call.url])).toEqual([
-      ["GET", "https://staging.relayagent.im/worker/agent-card.json"],
-      ["POST", "https://staging.relayagent.im/worker"],
-      ["POST", "https://staging.relayagent.im/worker"],
+      ["GET", "https://worker.staging.relayagent.im/.well-known/agent-card.json"],
+      ["POST", "https://worker.staging.relayagent.im/"],
+      ["POST", "https://worker.staging.relayagent.im/"],
     ]);
     expect(calls.slice(1).map((call) => call.body)).toMatchObject([
       { method: "GetTask", params: { id: task.id, historyLength: 0 } },
@@ -163,14 +164,37 @@ describe("tasks between agents", () => {
     }
   });
 
+  // Each agent is its own origin under the agent domain, so its card is at
+  // the root well-known path (A2A discovery, RFC 8615); "_" is written "-".
   it.each([
-    ["https://api.relayapp.im", "https://relayagent.im/worker/agent-card.json"],
-    ["https://api.staging.relayapp.im/", "https://staging.relayagent.im/worker/agent-card.json"],
-    ["http://127.0.0.1:8788", "http://127.0.0.1:8788/a2a/worker/agent-card.json"],
-  ])("finds agents' A2A addresses for %s", async (baseURL, cardURL) => {
+    ["https://api.relayapp.im", "worker", "https://worker.relayagent.im/.well-known/agent-card.json"],
+    ["https://api.staging.relayapp.im/", "worker", "https://worker.staging.relayagent.im/.well-known/agent-card.json"],
+    ["https://api.relayapp.im", "@Two_Words", "https://two-words.relayagent.im/.well-known/agent-card.json"],
+    ["http://127.0.0.1:8788", "worker", "http://127.0.0.1:8788/a2a/worker/.well-known/agent-card.json"],
+  ])("finds agents' A2A addresses for %s", async (baseURL, to, cardURL) => {
     const { client, calls } = a2aFixture(baseURL);
-    await client.tasks.get({ to: "worker", id: task.id });
+    await client.tasks.get({ to, id: task.id });
     expect(calls[0]!.url).toBe(cardURL);
+  });
+
+  it("takes an agent domain or a local Server's /a2a as a2aBaseURL", async () => {
+    for (const [a2aBaseURL, cardURL] of [
+      ["https://agents.example", "https://worker.agents.example/.well-known/agent-card.json"],
+      ["http://localhost:8790/a2a/", "http://localhost:8790/a2a/worker/.well-known/agent-card.json"],
+    ] as const) {
+      const calls: string[] = [];
+      const client = new Relay({
+        apiKey: "boss-agent-token",
+        a2aBaseURL,
+        fetch: async (input, init) => {
+          calls.push(input instanceof Request ? input.url : String(input));
+          if ((init?.method ?? "GET") === "GET") return Response.json(card);
+          return Response.json({ jsonrpc: "2.0", id: (JSON.parse(String(init!.body)) as { id: number }).id, result: task });
+        },
+      });
+      await client.tasks.get({ to: "worker", id: task.id });
+      expect(calls[0]).toBe(cardURL);
+    }
   });
 
   it("types task.created as a Task event", () => {
