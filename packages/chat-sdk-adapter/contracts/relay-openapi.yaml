@@ -842,7 +842,7 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalServerError"
-      description: Start or refresh the authenticated Contact's typing indicator.
+      description: Start or refresh the authenticated Contact's typing indicator. A block stops it the way it stops a Message. It never reaches a member who blocked you, nor, in a direct chat, a member you blocked, and the answer is the same either way.
     delete:
       operationId: stopTyping
       summary: Stop typing indicator
@@ -1115,7 +1115,8 @@ paths:
             The send is not permitted. A Chat whose member set has no agent in
             it is rejected with error code `2028`. Who may reach whom was
             decided when the Chat was created; every active member may write
-            to it.
+            to it. Every A2UI message failed and the first changed a surface
+            another agent created (error code `2003`, `a2ui_errors` lists each).
           content:
             application/json:
               schema:
@@ -1382,7 +1383,7 @@ paths:
     post:
       operationId: sendReaction
       summary: Add or remove a reaction to a message
-      description: Add or remove a reaction on one Message part. Targeting a `buttons`, `selection`, or `selection_response` part returns 422. Only a person can react to a `payment` part; an agent gets 403 (error code `2003`).
+      description: Add or remove a reaction on one Message part. Targeting a `buttons`, `selection`, or `selection_response` part returns 422. Only a person can react to a `payment` part; an agent gets 403 (error code `2003`). A block stops it the way it stops a Message. It never reaches a member who blocked you, nor, in a direct chat, a member you blocked, and the answer is the same either way.
       tags:
         - Messages
       security:
@@ -3156,23 +3157,19 @@ paths:
           description: >-
             The event types this connection receives, one parameter per type,
             for example subscribed_events=message.received&subscribed_events=call.created.
-            A connection that names none receives only message.sent,
-            message.received, message.read, message.delivered, message.failed,
-            reaction.added, reaction.removed, participant.added,
-            participant.removed, chat.created, chat.group_name_updated,
-            chat.group_icon_updated, chat.typing_indicator.started,
-            chat.typing_indicator.stopped, contact.added and contact.removed;
-            every newer type reaches it only when it is named here. That list
-            never changes. A name Relay does not know is ignored. Every
-            consuming connection of one Agent shares one sequence, so Relay
-            queues only the types that all of them name; while one of them
-            names none, the others receive only that list too. An event of a
-            type left out is not delivered later. When a new connection
-            leaves out a type that is already queued, Relay removes those
-            events, sends the rest again under new sequence numbers with the
-            same event_id values, and closes the other connections with a
-            restart disconnect so they reconnect from the new checkpoint. An
-            observer receives only the types it names, or that list.
+            A connection that names none receives every event type, including
+            types Relay adds later. A connection that names types receives
+            only those. A
+            name Relay does not know is ignored. Every consuming connection of
+            one Agent shares one sequence, so Relay queues only the types that
+            all of them accept; a connection that names none accepts every
+            type. An event of a type left out is not delivered later. When a
+            new connection leaves out a type that is already queued, Relay
+            removes those events, sends the rest again under new sequence
+            numbers with the same event_id values, and closes the other
+            connections with a restart disconnect so they reconnect from the
+            new checkpoint. An observer receives only the types it names, or
+            every type when it names none.
       responses:
         "101":
           description: WebSocket connection accepted
@@ -3201,7 +3198,7 @@ paths:
         - Calls
       security:
         - BearerAuth: []
-      description: Start an audio Call in an existing individual Chat containing exactly one user and one agent. The caller comes from authentication. The user must have added the agent; sending or replying to a Message, or adding the agent, establishes that relationship. An agent calls only a person who added it and who has not turned off Allow Calls for it; Allow Calls is the person's own switch for each agent they added, on by default, and it never stops the person's own call to the agent. A block in either direction prevents the call. A group Chat is rejected even when it has only two current members. Reuse the same Idempotency-Key and body after an uncertain response. Relay emits `call.created` through the agent's configured event transport. Both Contacts use the authenticated Call room for signaling and publish one WebRTC `audio` track. The callee answers by sending `join` within the 10-second ring lease; silence ends `no-answer`. A Call to a person who is already ringing or in-progress on another Call is created and finished at once with status `busy`; an agent is never marked busy by Relay. An answered Call has no duration limit. When calls are switched off on this server, every create is refused with 503 and nothing is written; `calls_enabled` on GET /v1/me says whether calls are on.
+      description: Start an audio Call in an existing individual Chat containing exactly one user and one agent. The caller comes from authentication. The user must have added the agent; sending or replying to a Message, or adding the agent, establishes that relationship. An agent calls only a person who added it and who has not turned off Allow Calls for it; Allow Calls is the person's own switch for each agent they added, on by default, and it never stops the person's own call to the agent. A block in either direction prevents the call. A group Chat is rejected even when it has only two current members. Reuse the same Idempotency-Key and body after an uncertain response. Relay emits `call.created` through the agent's configured event transport. Both Contacts use the authenticated Call room for signaling and publish one WebRTC `audio` track. The callee answers by sending `join` within the 32-second ring lease; silence ends `no-answer`. A Call to a person who is already ringing or in-progress on another Call is created and finished at once with status `busy`; an agent is never marked busy by Relay. An answered Call has no duration limit. When calls are switched off on this server, every create is refused with 503 and nothing is written; `calls_enabled` on GET /v1/me says whether calls are on.
       parameters:
         - name: chatId
           in: path
@@ -5692,7 +5689,7 @@ components:
         says a receiver must: each valid one is applied, and each that fails is
         returned in the response's `a2ui_errors` (see `A2uiFailure`), in A2UI's
         own error format. A send that applies nothing is refused with the first
-        failure's status (404, 409 or 422) and `a2ui_errors`. Relay checks each
+        failure's status (403, 404, 409 or 422) and `a2ui_errors`. Relay checks each
         message against A2UI v0.9.1's schemas, and each component and
         `createSurface` theme against the catalog its surface names: a
         component the catalog does not define, a property it does not define,
@@ -5706,8 +5703,10 @@ components:
           A `surfaceId` already live in the chat fails with 409; once deleted
           it may be created again. The surface's first `updateComponents` must
           hold the component with `id` `root`; later ones need not repeat it.
-        - Any agent in the chat may send the other three for any surface in
-          it. A surface made by an earlier message changes in place: its
+        - Only the agent that created a surface may send the other three for
+          it; another agent gets 403, error code `2003`, as Slack's
+          `chat.update` refuses a message the caller did not post. A surface
+          made by an earlier message changes in place: its
           message is re-projected to every member, and the send adds no
           message unless it carries other parts (a `text` part, for example,
           which becomes an ordinary message). An unknown or deleted
@@ -5751,7 +5750,17 @@ components:
         chat. An `action`'s `sourceComponentId` must be a Button there and its
         `name` that Button's `action.event.name`, or a `Browser` there and its
         `name` one of `A2uiBrowserActionName` (`browser.takeControl` and
-        `browser.returnControl` only when the Browser has a `controlUrl`). A text part and `reply_to`
+        `browser.returnControl` only when the Browser has a `controlUrl`).
+        The agent receives the `context` Relay builds from the Button it drew,
+        never the app's: each literal as the Button holds it, each value at a
+        path an input on the card writes (a component whose `value` is bound)
+        as the person entered it, and everything else from the surface's data
+        model as the agent last set it, including the rest of an object that
+        holds a typed field; a key the Button does not declare is dropped. A Button drawn once per item of a List template carries one
+        item's values; a `context` that matches no item fails with 422 at
+        `/context`. A Button's `action.event.context` holds literals and data
+        bindings; a function call there fails with 422. A `Browser` tap's
+        `context` is empty. A text part and `reply_to`
         are optional, and a text part reaches every member. When the surface
         set `sendDataModel`, the message must carry
         `metadata.a2uiClientDataModel`.

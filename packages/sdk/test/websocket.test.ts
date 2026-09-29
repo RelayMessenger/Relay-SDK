@@ -226,8 +226,8 @@ it("derives /v1/websocket and sends the Agent Token header with no protocol", as
 
   const socket = FakeWebSocket.latest;
   expect(socket.url).toBe(`wss://relay.test/v1/websocket?${SUBSCRIBED}`);
-  // Relay sends a connection that names no types only the 16 of SDK 0.3.5;
-  // this release names every type it knows, and so receives them.
+  // Relay sends a connection that names no types every type; this release
+  // names every type it knows, and so receives only those.
   expect(new URL(socket.url).searchParams.getAll("subscribed_events"))
     .toEqual([...RELAY_WEBHOOK_EVENT_TYPES]);
   expect(new URL(socket.url).searchParams.getAll("subscribed_events"))

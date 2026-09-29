@@ -831,8 +831,9 @@ export type A2uiMessage = A2uiServerToClientMessage | A2uiClientToServerMessage;
  * other parts. Relay applies each A2UI message on its own, checked against
  * A2UI's schemas and the surface's catalog: the ones that fail come back in
  * the response's `a2ui_errors`, and a send that applies nothing is refused
- * (404, 409 or 422) with `a2ui_errors` in the error body. Only an agent sends
- * `createSurface`, `updateComponents`, `updateDataModel` and `deleteSurface`;
+ * (403, 404, 409 or 422) with `a2ui_errors` in the error body. Only an agent
+ * sends `createSurface`, and only the agent that created a surface sends its
+ * `updateComponents`, `updateDataModel` and `deleteSurface`;
  * a send that only changes an earlier card adds no Message and returns that
  * card. An `action` or `error` reaches only its sender and the agent that
  * created the surface it names.

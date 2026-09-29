@@ -172,8 +172,9 @@ export const sendA2uiSurface = (
 
 /**
  * Changes a card already in the chat, in place, for every member. With no
- * `text`, the send adds no Message and returns the card's own Message. Any
- * agent in the chat may update any surface in it.
+ * `text`, the send adds no Message and returns the card's own Message. Only
+ * the agent that created the surface may update it; another agent gets 403
+ * (error code 2003).
  */
 export const updateA2uiSurface = (
   client: Pick<Relay, "chats">,

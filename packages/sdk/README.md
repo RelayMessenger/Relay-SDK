@@ -206,8 +206,9 @@ not define is refused. The messages it could not apply come back in the
 response's `a2ui_errors`: each gives `part_index` and `data_index` in your
 request and `a2ui_message`, A2UI's own `error` message, whose `path` points
 inside the failing message's body. A send that applies nothing throws a
-`RelayAPIError` (404 unknown or deleted surface, 409 a `surfaceId` already live
-in the chat, 422 anything else) whose `body.a2ui_errors` lists each.
+`RelayAPIError` (403 a surface another agent created, 404 unknown or deleted
+surface, 409 a `surfaceId` already live in the chat, 422 anything else) whose
+`body.a2ui_errors` lists each.
 
 Every `message.received` carries `metadata.a2uiClientCapabilities`: the
 catalogs Relay's app draws, in order of preference, `RELAY_A2UI_CATALOG_ID`
@@ -216,8 +217,8 @@ catalogs Relay's app draws, in order of preference, `RELAY_A2UI_CATALOG_ID`
 also carries that surface's data model; `readA2uiAction` returns it as
 `dataModel`. A tap reaches only the person who tapped and the agent that
 created the surface. Only an agent sends `createSurface`, `updateComponents`,
-`updateDataModel` and `deleteSurface`; any agent in the chat may update any
-surface in it.
+`updateDataModel` and `deleteSurface`; only the agent that created a surface
+may update or delete it, and another agent gets 403 (error code `2003`).
 
 A `Browser` card shows your agent's live browser: `a2uiBrowserCardMessages`
 builds the card from a status line, a `state` and an https live view address,
@@ -768,10 +769,10 @@ undelivered events across either change.
 The SDK derives `wss://<Relay host>/v1/websocket` from `baseURL` and sends the
 Agent Token in the WebSocket upgrade `Authorization` header. It names every
 event type in `RELAY_WEBHOOK_EVENT_TYPES` with `subscribed_events`: Relay sends
-a connection only the types it names, and the 16 original message, reaction,
-participant, chat and contact types when it names none. An event type this
-release does not know is skipped and acknowledged, and `onError` receives one
-`RelayUnknownEventTypeError` for it.
+a connection only the types it names, and every type, including types added
+later, when it names none. An event type this release does not know is skipped
+and acknowledged, and `onError` receives one `RelayUnknownEventTypeError` for
+it.
 
 The SDK validates the ready checkpoint, rejects sequence gaps, and routes
 replayed sequences through your durable deduplication handler. It sends a
