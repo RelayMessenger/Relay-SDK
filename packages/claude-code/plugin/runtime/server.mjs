@@ -21526,6 +21526,10 @@ var defaultA2aBaseURL = (baseURL) => {
     return "https://staging.relayagent.im";
   return `${url.origin}/a2a`;
 };
+var a2aAddress = (a2aBaseURL, handle) => {
+  const base = new URL(a2aBaseURL);
+  return base.pathname === "/" ? `${base.protocol}//${handle.replaceAll("_", "-")}.${base.host}` : `${a2aBaseURL.replace(/\/+$/, "")}/${pathID(handle)}`;
+};
 var Transport = class {
   baseURL;
   a2aBaseURL;
@@ -21640,7 +21644,7 @@ var Transport = class {
   }
   /**
    * The official A2A 1.0 client (@a2a-js/sdk) for one agent's address, made
-   * from its Agent Card at `<a2aBaseURL>/<handle>/agent-card.json` and kept
+   * from its Agent Card at `<address>/.well-known/agent-card.json` and kept
    * for this Relay instance. Every JSON-RPC call carries this agent's Relay
    * token as its bearer credential (the card's `relay` HTTP bearer scheme);
    * the client adds `A2A-Version: 1.0`. Loaded on first use, so an agent
@@ -21668,7 +21672,7 @@ var Transport = class {
       transports: [new JsonRpcTransportFactory({ fetchImpl: authenticated })],
       cardResolver: new DefaultAgentCardResolver({ fetchImpl })
     });
-    return factory.createFromUrl(`${this.a2aBaseURL}/${pathID(handle)}/agent-card.json`, "");
+    return factory.createFromUrl(`${a2aAddress(this.a2aBaseURL, handle)}/.well-known/agent-card.json`, "");
   }
   runWebSocket(options) {
     if (!this.#apiKey)
