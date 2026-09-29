@@ -327,7 +327,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "package.json",
       "source_sha256": "7096ce19bf4b960b3d1e15de735dd9b045d1e8a42495f25d1852fe69c4b29452",
-      "destination_sha256": "b4a32466cfdae026f326b0dae7f45ea474f9d7bd8e5ec6fa2efbcf33d56aaa22",
+      "destination_sha256": "5056e8733a4f3e553a0e06226e9240a775e7b4e8308da621ca6df4a568ab496e",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
