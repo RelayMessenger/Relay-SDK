@@ -8,9 +8,14 @@ did not finish is delivered again on the next connection. It sends the text
 heartbeat ``{"type":"ping"}`` every ``heartbeat_interval_ms`` and reconnects when
 no ``pong`` comes back within 60 seconds; it answers a ``ping`` from Relay with
 ``pong``. A dropped connection reconnects with full-jitter exponential backoff
-from 0.5 s to 30 s, reset by each ``ready`` frame; Relay replays every event after
-the acknowledged checkpoint. A revoked token, a protocol error, or a webhook
+from 0.5 s to 30 s, reset by an acknowledged event; Relay replays every event
+after the acknowledged checkpoint. A revoked token, a protocol error, or a webhook
 subscription on the agent stops ``run`` with an error instead.
+
+``on_event`` must be idempotent: deduplicate by ``event_id``. An event comes again
+after a failed handler or a dropped connection, and when a handler outlives its
+dropped connection by ``HANDLER_DRAIN_TIMEOUT`` (60 s) the next connection gets
+the event while that first call may still run; its result is never acknowledged.
 
 Stop it by cancelling the task that runs it.
 """
@@ -76,6 +81,12 @@ _WEBSOCKET_ERROR_CODES: Final = frozenset(
 _DISCONNECT_REASONS: Final = ("revoked", "heartbeat_timeout", "restart", "webhook_configured")
 #: Seconds without a ``pong`` before the connection is dropped and reopened.
 HEARTBEAT_PONG_TIMEOUT: float = 60.0
+#: Seconds a dropped connection waits for the handler still running on it
+#: before the next connection opens. Waiting keeps one event from running
+#: twice at once; the bound keeps a handler that never returns from stopping
+#: delivery for good. Past it, Relay sends the event again while the old call
+#: may still run, which handlers already dedupe by event id.
+HANDLER_DRAIN_TIMEOUT: float = 60.0
 #: The exact heartbeat text Relay answers at the edge without waking the agent.
 HEARTBEAT_PING_FRAME: Final = json.dumps({"type": "ping"}, separators=(",", ":"))
 _CLOSE_DURABLE_ACCEPTANCE: Final = 4001
@@ -143,6 +154,12 @@ class _DurableApplicationError(Exception):
 
 
 _logger = logging.getLogger("relaymessenger.websocket")
+
+
+def _discard_result(task: "asyncio.Future[None]") -> None:
+    """A handler that outlived its connection: its outcome is not delivered."""
+    if not task.cancelled():
+        task.exception()
 
 
 def _is_heartbeat_answer(raw: Union[str, bytes]) -> bool:
@@ -365,6 +382,8 @@ class _Connection:
         self.last_pong = 0.0
         #: Set by the heartbeat when it drops the connection.
         self.failure: Optional[Exception] = None
+        #: Set once the connection is gone, by the heartbeat or by the peer.
+        self._dropped = asyncio.Event()
         self.socket: Any = None
         #: Seconds between heartbeats, from the ready frame.
         self._interval = 30.0
@@ -410,6 +429,7 @@ class _Connection:
             except Exception as error:
                 frames.put_nowait(error)
             finally:
+                self._dropped.set()
                 frames.put_nowait(None)
 
         reader = asyncio.create_task(read())
@@ -421,7 +441,12 @@ class _Connection:
                         break
                     if isinstance(raw, BaseException):
                         raise raw
-                    await self._handle(raw)
+                    # A dropped connection runs none of the frames still
+                    # buffered on it: Relay sends them again on the next one.
+                    if self.failure is not None:
+                        break
+                    if await self._handle_within_drain(raw):
+                        break
                     if heartbeat is None and self.ready:
                         heartbeat = asyncio.create_task(self._heartbeat(self._interval))
             except ConnectionClosed:
@@ -468,6 +493,24 @@ class _Connection:
                 f"Relay WebSocket closed before ready ({code or 1006}): {reason or 'connection ended'}."
             )
 
+    async def _handle_within_drain(self, raw: Union[str, bytes]) -> bool:
+        """Handles one frame. Once the connection is gone, waits for the handler
+        at most HANDLER_DRAIN_TIMEOUT; True when it outlived that, and is left
+        running with its result never acknowledged (REL-428 review)."""
+        handling = asyncio.ensure_future(self._handle(raw))
+        dropped = asyncio.ensure_future(self._dropped.wait())
+        try:
+            await asyncio.wait({handling, dropped}, return_when=asyncio.FIRST_COMPLETED)
+            if not handling.done():
+                await asyncio.wait({handling}, timeout=HANDLER_DRAIN_TIMEOUT)
+            if not handling.done():
+                handling.add_done_callback(_discard_result)
+                return True
+        finally:
+            dropped.cancel()
+        handling.result()
+        return False
+
     async def _heartbeat(self, interval: float) -> None:
         # A text frame, not a protocol ping, which Relay answers from the edge
         # without waking the agent.
@@ -478,12 +521,14 @@ class _Connection:
                 self.failure = _RetryableWebSocketError(
                     f"Relay WebSocket did not receive a pong within {HEARTBEAT_PONG_TIMEOUT:g} seconds."
                 )
+                self._dropped.set()
                 await self.socket.close(_CLOSE_RECONNECT, "Relay requested reconnect")
                 return
             try:
                 await self.socket.send(HEARTBEAT_PING_FRAME)
             except Exception as error:
                 self.failure = _RetryableWebSocketError(f"Relay WebSocket ping failed: {error}")
+                self._dropped.set()
                 await self.socket.close(_CLOSE_RECONNECT, "Relay requested reconnect")
                 return
 
@@ -601,6 +646,9 @@ class _Connection:
             return
         if sequence == self.accepted_through + 1:
             self.accepted_through = sequence
+        if self._dropped.is_set():
+            # Too late for this connection; Relay sends the event again.
+            return
         await self._send({"type": "ack", "through_sequence": str(self.accepted_through)})
         self.on_acknowledged()
 

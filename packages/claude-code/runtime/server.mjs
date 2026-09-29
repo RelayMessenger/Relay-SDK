@@ -20994,6 +20994,7 @@ var WEBSOCKET_ERROR_CODES = /* @__PURE__ */ new Set([
   "full_sync_mismatch"
 ]);
 var HEARTBEAT_PONG_TIMEOUT_MS = 6e4;
+var HANDLER_DRAIN_TIMEOUT_MS = 6e4;
 var HEARTBEAT_PING_FRAME = JSON.stringify({ type: "ping" });
 var CLIENT_CLOSE_DURABLE_ACCEPTANCE = 4001;
 var CLIENT_CLOSE_PROTOCOL_ERROR = 4002;
@@ -21185,6 +21186,14 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
   const stopReceiving = () => {
     socket.removeEventListener("message", onMessage);
   };
+  const drained = () => new Promise((resolveDrain) => {
+    const timer = setTimeout(resolveDrain, HANDLER_DRAIN_TIMEOUT_MS);
+    const done = () => {
+      clearTimeout(timer);
+      resolveDrain();
+    };
+    chain.then(done, done);
+  });
   const send = (frame) => {
     try {
       socket.send(JSON.stringify(frame));
@@ -21201,7 +21210,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
     try {
       socket.close(error2.closeCode, "Relay requested reconnect");
     } finally {
-      void chain.then(() => finish(error2), () => finish(error2));
+      void drained().then(() => finish(error2));
     }
   };
   const startHeartbeat = (intervalMs) => {
@@ -21244,7 +21253,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
       return;
     }
     chain = chain.then(async () => {
-      if (settled || options.signal?.aborted)
+      if (settled || dropped || options.signal?.aborted)
         return;
       let frame;
       try {
@@ -21322,7 +21331,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
         } catch (cause) {
           throw new DurableApplicationError("FULL sync", cause);
         }
-        if (options.signal?.aborted || dropped)
+        if (options.signal?.aborted || dropped || settled)
           return;
         send({
           type: "full_sync_complete",
@@ -21367,7 +21376,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
       if (sequence === acceptedThrough + 1n) {
         acceptedThrough = sequence;
       }
-      if (options.signal?.aborted || dropped)
+      if (options.signal?.aborted || dropped || settled)
         return;
       send({
         type: "ack",
@@ -21375,6 +21384,8 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
       });
       onAcknowledged();
     }).catch((error2) => {
+      if (settled)
+        return;
       stopReceiving();
       socket.close(error2 instanceof WebSocketStoppedError ? error2.closeCode : error2 instanceof WebSocketProtocolError ? error2.closeCode : error2 instanceof RetryableWebSocketError ? error2.closeCode : CLIENT_CLOSE_DURABLE_ACCEPTANCE, error2 instanceof WebSocketStoppedError ? "Relay stopped this consumer" : error2 instanceof WebSocketProtocolError ? "protocol error" : error2 instanceof RetryableWebSocketError ? "Relay requested reconnect" : error2 instanceof DurableApplicationError && error2.sequence !== void 0 ? `durable application failed at sequence ${error2.sequence}` : "durable application failed");
       finish(error2);
@@ -21382,7 +21393,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
   };
   const onClose = (event) => {
     stopReceiving();
-    void chain.then(() => {
+    void drained().then(() => {
       if (options.signal?.aborted) {
         finish();
         return;
@@ -21406,16 +21417,16 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
         return;
       }
       finish();
-    }, finish);
+    });
   };
   const onSocketError = () => {
     stopReceiving();
     if (options.signal?.aborted) {
-      void chain.then(() => finish(), finish);
+      void drained().then(() => finish());
       return;
     }
     const error2 = new Error("Relay WebSocket connection failed.");
-    void chain.then(() => finish(error2), finish);
+    void drained().then(() => finish(error2));
   };
   const onAbort = () => {
     stopReceiving();

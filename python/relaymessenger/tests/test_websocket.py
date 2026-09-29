@@ -466,3 +466,72 @@ async def test_a_dropped_connection_reconnects_only_after_the_running_handler_re
     relay_server.scripts += [silent, second]
     await run_until(relay_server, finished, on_event=on_event, on_error=lambda error: None)
     assert marks[:3] == ["handler started", "handler returned", "second connection"]
+
+
+async def test_a_dropped_connection_runs_none_of_its_buffered_events(
+    relay_server: FakeRelay, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REL-428 review: after the heartbeat drops a connection, frames still buffered on it are not handled."""
+    monkeypatch.setattr(websocket, "HEARTBEAT_PONG_TIMEOUT", 0.2)
+    finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+    calls: List[Tuple[str, int]] = []
+
+    async def silent(connection: ServerConnection) -> None:
+        await connection.send(ready("0", interval_ms=50))
+        await connection.send(event(1))
+        await connection.send(event(2))
+        await connection.wait_closed()
+
+    async def second(connection: ServerConnection) -> None:
+        await asyncio.sleep(0.1)
+        finished.set_result(None)
+        await connection.wait_closed()
+
+    async def on_event(envelope: Dict[str, Any], context: Dict[str, str]) -> None:
+        calls.append((context["sequence"], len(relay_server.requests)))
+        if len(calls) == 1:
+            await asyncio.sleep(0.6)
+
+    relay_server.scripts += [silent, second]
+    await run_until(relay_server, finished, on_event=on_event, on_error=lambda error: None)
+    assert [call for call in calls if call == ("2", 1)] == []
+
+
+async def test_a_handler_that_never_returns_holds_recovery_only_for_the_drain_bound(
+    relay_server: FakeRelay, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """REL-428 review: a hung handler delays the next connection by at most HANDLER_DRAIN_TIMEOUT."""
+    monkeypatch.setattr(websocket, "HEARTBEAT_PONG_TIMEOUT", 0.2)
+    monkeypatch.setattr(websocket, "HANDLER_DRAIN_TIMEOUT", 0.3)
+    finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+    first_frames: List[Any] = []
+    hang = asyncio.Event()
+
+    async def silent(connection: ServerConnection) -> None:
+        await connection.send(ready("0", interval_ms=50))
+        await connection.send(event(1))
+        try:
+            async for raw in connection:
+                first_frames.append(json.loads(raw))
+        except Exception:
+            pass
+
+    async def second(connection: ServerConnection) -> None:
+        await connection.send(ready("0"))
+        await connection.send(event(1))
+        finished.set_result(await recv(connection, timeout=3.0))
+        await connection.wait_closed()
+
+    calls: List[str] = []
+
+    async def on_event(envelope: Dict[str, Any], context: Dict[str, str]) -> None:
+        calls.append(context["sequence"])
+        if len(calls) == 1:
+            await hang.wait()
+
+    relay_server.scripts += [silent, second]
+    await run_until(relay_server, finished, on_event=on_event, on_error=lambda error: None)
+    assert finished.result() == {"type": "ack", "through_sequence": "1"}
+    hang.set()
+    await asyncio.sleep(0.05)
+    assert [frame for frame in first_frames if frame.get("type") == "ack"] == []

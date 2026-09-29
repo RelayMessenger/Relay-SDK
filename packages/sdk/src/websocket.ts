@@ -71,6 +71,12 @@ export interface WebSocketRunOptions {
   maxReconnectDelayMs?: number;
   random?: () => number;
   /**
+   * Must be idempotent: deduplicate by `event_id`. Relay delivers an event
+   * again after a failed handler or a dropped connection, and when a handler
+   * outlives its dropped connection by 60 seconds the next connection gets
+   * the event while that first call may still run. Its result is then never
+   * acknowledged.
+   *
    * In default consuming mode, commit to a durable inbox before resolving.
    * Resolution advances only the transport checkpoint, not Delivered or Read.
    * With observe:true, this is a notification and never authorizes an ACK.
@@ -165,6 +171,14 @@ const WEBSOCKET_ERROR_CODES = new Set([
   "full_sync_mismatch",
 ]);
 const HEARTBEAT_PONG_TIMEOUT_MS = 60_000;
+/**
+ * How long a dropped connection waits for the handler still running on it
+ * before the next connection opens. Waiting keeps one event from running
+ * twice at once; the bound keeps a handler that never returns from stopping
+ * delivery for good. Past it, Relay sends the event again while the old call
+ * may still run, which handlers already dedupe by event id.
+ */
+const HANDLER_DRAIN_TIMEOUT_MS = 60_000;
 /**
  * The exact text frame Relay answers without waking the Agent's Durable
  * Object. It must stay byte-identical to the server's configured
@@ -525,6 +539,15 @@ const runConnection = (
     const stopReceiving = (): void => {
       socket.removeEventListener("message", onMessage);
     };
+    /** The running handler's end, or HANDLER_DRAIN_TIMEOUT_MS, whichever is first. */
+    const drained = (): Promise<void> => new Promise((resolveDrain) => {
+      const timer = setTimeout(resolveDrain, HANDLER_DRAIN_TIMEOUT_MS);
+      const done = (): void => {
+        clearTimeout(timer);
+        resolveDrain();
+      };
+      chain.then(done, done);
+    });
     const send = (frame: unknown): void => {
       try {
         socket.send(JSON.stringify(frame));
@@ -550,7 +573,7 @@ const runConnection = (
       try {
         socket.close(error.closeCode, "Relay requested reconnect");
       } finally {
-        void chain.then(() => finish(error), () => finish(error));
+        void drained().then(() => finish(error));
       }
     };
     /**
@@ -613,7 +636,9 @@ const runConnection = (
         return;
       }
       chain = chain.then(async () => {
-        if (settled || options.signal?.aborted) return;
+        // A dropped connection runs none of the events still buffered on it:
+        // Relay sends them again on the next one.
+        if (settled || dropped || options.signal?.aborted) return;
         let frame: unknown;
         try {
           frame = JSON.parse(await text(message.data)) as unknown;
@@ -724,7 +749,7 @@ const runConnection = (
           } catch (cause) {
             throw new DurableApplicationError("FULL sync", cause);
           }
-          if (options.signal?.aborted || dropped) return;
+          if (options.signal?.aborted || dropped || settled) return;
           send({
             type: "full_sync_complete",
             through_sequence: fullSync.through_sequence,
@@ -772,13 +797,15 @@ const runConnection = (
         if (sequence === acceptedThrough + 1n) {
           acceptedThrough = sequence;
         }
-        if (options.signal?.aborted || dropped) return;
+        if (options.signal?.aborted || dropped || settled) return;
         send({
           type: "ack",
           through_sequence: acceptedThrough.toString(),
         });
         onAcknowledged();
       }).catch((error) => {
+        // A handler that outlived its connection's drain: that run is over.
+        if (settled) return;
         stopReceiving();
         socket.close(
           error instanceof WebSocketStoppedError
@@ -803,7 +830,7 @@ const runConnection = (
     };
     const onClose = (event: { code?: number; reason?: string }): void => {
       stopReceiving();
-      void chain.then(() => {
+      void drained().then(() => {
         if (options.signal?.aborted) {
           finish();
           return;
@@ -844,16 +871,16 @@ const runConnection = (
           return;
         }
         finish();
-      }, finish);
+      });
     };
     const onSocketError = (): void => {
       stopReceiving();
       if (options.signal?.aborted) {
-        void chain.then(() => finish(), finish);
+        void drained().then(() => finish());
         return;
       }
       const error = new Error("Relay WebSocket connection failed.");
-      void chain.then(() => finish(error), finish);
+      void drained().then(() => finish(error));
     };
     const onAbort = (): void => {
       stopReceiving();
