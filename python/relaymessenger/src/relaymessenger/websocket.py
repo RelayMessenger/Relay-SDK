@@ -8,9 +8,14 @@ did not finish is delivered again on the next connection. It sends the text
 heartbeat ``{"type":"ping"}`` every ``heartbeat_interval_ms`` and reconnects when
 no ``pong`` comes back within 60 seconds; it answers a ``ping`` from Relay with
 ``pong``. A dropped connection reconnects with full-jitter exponential backoff
-from 0.5 s to 30 s, reset by each ``ready`` frame; Relay replays every event after
-the acknowledged checkpoint. A revoked token, a protocol error, or a webhook
+from 0.5 s to 30 s, reset by an acknowledged event; Relay replays every event
+after the acknowledged checkpoint. A revoked token, a protocol error, or a webhook
 subscription on the agent stops ``run`` with an error instead.
+
+``on_event`` must be idempotent: deduplicate by ``event_id``. An event comes again
+after a failed handler or a dropped connection, and when a handler outlives its
+dropped connection by ``HANDLER_DRAIN_TIMEOUT`` (60 s) the next connection gets
+the event while that first call may still run; its result is never acknowledged.
 
 Stop it by cancelling the task that runs it.
 """
@@ -20,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import random as _random
 import re
 from datetime import datetime
@@ -75,6 +81,12 @@ _WEBSOCKET_ERROR_CODES: Final = frozenset(
 _DISCONNECT_REASONS: Final = ("revoked", "heartbeat_timeout", "restart", "webhook_configured")
 #: Seconds without a ``pong`` before the connection is dropped and reopened.
 HEARTBEAT_PONG_TIMEOUT: float = 60.0
+#: Seconds a dropped connection waits for the handler still running on it
+#: before the next connection opens. Waiting keeps one event from running
+#: twice at once; the bound keeps a handler that never returns from stopping
+#: delivery for good. Past it, Relay sends the event again while the old call
+#: may still run, which handlers already dedupe by event id.
+HANDLER_DRAIN_TIMEOUT: float = 60.0
 #: The exact heartbeat text Relay answers at the edge without waking the agent.
 HEARTBEAT_PING_FRAME: Final = json.dumps({"type": "ping"}, separators=(",", ":"))
 _CLOSE_DURABLE_ACCEPTANCE: Final = 4001
@@ -135,8 +147,34 @@ class _RetryableWebSocketError(Exception):
 class _DurableApplicationError(Exception):
     close_code = _CLOSE_DURABLE_ACCEPTANCE
 
-    def __init__(self, operation: str, cause: BaseException) -> None:
+    def __init__(self, operation: str, cause: BaseException, sequence: Optional[str] = None) -> None:
         super().__init__(f"Relay WebSocket durable {operation} application failed: {cause}")
+        #: Named in the close reason so Relay records the failure against this event.
+        self.sequence = sequence
+
+
+_logger = logging.getLogger("relaymessenger.websocket")
+
+
+def _discard_result(task: "asyncio.Future[None]") -> None:
+    """A handler that outlived its connection: its outcome is not delivered."""
+    if not task.cancelled():
+        task.exception()
+
+
+def _is_heartbeat_answer(raw: Union[str, bytes]) -> bool:
+    """The answer to this client's own heartbeat, read as it arrives rather than
+    behind the event being handled: it proves the connection, not the handler,
+    so a long handler keeps its connection (the SQS visibility-timeout
+    extension; REL-428). Anything else goes to the ordered handler."""
+    try:
+        frame = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+        if not isinstance(frame, dict) or frame.get("type") != "pong":
+            return False
+        _parse_pong(frame)
+        return True
+    except (ValueError, UnicodeDecodeError, WebSocketProtocolError):
+        return False
 
 
 _STOPPING = (WebSocketStoppedError, WebSocketProtocolError, RelayWebhookConfiguredError)
@@ -326,6 +364,7 @@ class _Connection:
         on_ready: Callable[[Dict[str, Any]], None],
         on_unknown_event: Callable[[str, str], None],
         on_observation_gap: Optional[Callable[[WebSocketObservationGap], None]],
+        on_acknowledged: Callable[[], None] = lambda: None,
     ) -> None:
         self.url = url
         self.agent_token = agent_token
@@ -336,12 +375,15 @@ class _Connection:
         self.on_ready = on_ready
         self.on_unknown_event = on_unknown_event
         self.on_observation_gap = on_observation_gap
+        self.on_acknowledged = on_acknowledged
         self.ready = False
         self.accepted_through = 0
         self.full_sync_through: Optional[int] = None
         self.last_pong = 0.0
         #: Set by the heartbeat when it drops the connection.
         self.failure: Optional[Exception] = None
+        #: Set once the connection is gone, by the heartbeat or by the peer.
+        self._dropped = asyncio.Event()
         self.socket: Any = None
         #: Seconds between heartbeats, from the ready frame.
         self._interval = 30.0
@@ -368,10 +410,44 @@ class _Connection:
 
         socket = self.socket
         heartbeat: Optional[asyncio.Task[None]] = None
-        try:
+        # One reader takes every frame off the socket as it arrives; the
+        # handler takes the rest in order. When the connection drops, the
+        # handler still running finishes before this returns, so the next
+        # connection, which Relay sends every unacknowledged event again, never
+        # runs one event twice at the same time (REL-428).
+        frames: asyncio.Queue[Union[str, bytes, BaseException, None]] = asyncio.Queue()
+
+        async def read() -> None:
             try:
                 async for raw in socket:
-                    await self._handle(raw)
+                    if _is_heartbeat_answer(raw):
+                        self.last_pong = asyncio.get_running_loop().time()
+                        continue
+                    frames.put_nowait(raw)
+            except ConnectionClosed:
+                pass
+            except Exception as error:
+                frames.put_nowait(error)
+            finally:
+                self._dropped.set()
+                frames.put_nowait(None)
+
+        reader = asyncio.create_task(read())
+        try:
+            try:
+                while True:
+                    raw = await frames.get()
+                    if raw is None:
+                        break
+                    if isinstance(raw, BaseException):
+                        raise raw
+                    # A connection that is gone, however it ended (the heartbeat,
+                    # a peer close, an error), runs none of the frames still
+                    # buffered on it: Relay sends them again on the next one.
+                    if self.failure is not None or self._dropped.is_set():
+                        break
+                    if await self._handle_within_drain(raw):
+                        break
                     if heartbeat is None and self.ready:
                         heartbeat = asyncio.create_task(self._heartbeat(self._interval))
             except ConnectionClosed:
@@ -387,11 +463,14 @@ class _Connection:
                     if isinstance(error, WebSocketProtocolError)
                     else "Relay requested reconnect"
                     if isinstance(error, _RetryableWebSocketError)
+                    else f"durable application failed at sequence {error.sequence}"
+                    if isinstance(error, _DurableApplicationError) and error.sequence is not None
                     else "durable application failed"
                 )
                 await socket.close(code, reason)
                 raise
         finally:
+            reader.cancel()
             if heartbeat is not None:
                 heartbeat.cancel()
             await socket.close()
@@ -415,6 +494,24 @@ class _Connection:
                 f"Relay WebSocket closed before ready ({code or 1006}): {reason or 'connection ended'}."
             )
 
+    async def _handle_within_drain(self, raw: Union[str, bytes]) -> bool:
+        """Handles one frame. Once the connection is gone, waits for the handler
+        at most HANDLER_DRAIN_TIMEOUT; True when it outlived that, and is left
+        running with its result never acknowledged (REL-428 review)."""
+        handling = asyncio.ensure_future(self._handle(raw))
+        dropped = asyncio.ensure_future(self._dropped.wait())
+        try:
+            await asyncio.wait({handling, dropped}, return_when=asyncio.FIRST_COMPLETED)
+            if not handling.done():
+                await asyncio.wait({handling}, timeout=HANDLER_DRAIN_TIMEOUT)
+            if not handling.done():
+                handling.add_done_callback(_discard_result)
+                return True
+        finally:
+            dropped.cancel()
+        handling.result()
+        return False
+
     async def _heartbeat(self, interval: float) -> None:
         # A text frame, not a protocol ping, which Relay answers from the edge
         # without waking the agent.
@@ -425,12 +522,14 @@ class _Connection:
                 self.failure = _RetryableWebSocketError(
                     f"Relay WebSocket did not receive a pong within {HEARTBEAT_PONG_TIMEOUT:g} seconds."
                 )
+                self._dropped.set()
                 await self.socket.close(_CLOSE_RECONNECT, "Relay requested reconnect")
                 return
             try:
                 await self.socket.send(HEARTBEAT_PING_FRAME)
             except Exception as error:
                 self.failure = _RetryableWebSocketError(f"Relay WebSocket ping failed: {error}")
+                self._dropped.set()
                 await self.socket.close(_CLOSE_RECONNECT, "Relay requested reconnect")
                 return
 
@@ -515,6 +614,7 @@ class _Connection:
             await self._send({"type": "full_sync_complete", "through_sequence": full_sync["through_sequence"]})
             self.accepted_through = self.full_sync_through
             self.full_sync_through = None
+            self.on_acknowledged()
             return
         if self.full_sync_through is not None:
             raise WebSocketProtocolError("Relay WebSocket received an event while FULL sync was pending.")
@@ -536,7 +636,7 @@ class _Connection:
             try:
                 await _settle(self.on_event(event, {"sequence": sequence_text}))
             except Exception as cause:
-                raise _DurableApplicationError("event", cause) from cause
+                raise _DurableApplicationError("event", cause, sequence_text) from cause
         else:
             # Skipped, then acknowledged below exactly like a handled event.
             self.on_unknown_event(event["event_type"], sequence_text)
@@ -547,7 +647,11 @@ class _Connection:
             return
         if sequence == self.accepted_through + 1:
             self.accepted_through = sequence
+        if self._dropped.is_set():
+            # Too late for this connection; Relay sends the event again.
+            return
         await self._send({"type": "ack", "through_sequence": str(self.accepted_through)})
+        self.on_acknowledged()
 
 
 async def run_websocket(
@@ -581,7 +685,17 @@ async def run_websocket(
 
         user_agent = USER_AGENT
     url = websocket_url(base_url, observe)
+    # A failure nobody is told about is a failure nobody fixes: without
+    # on_error, log it (REL-427).
+    report: Callable[[Exception], None] = on_error or (
+        lambda error: _logger.error("Relay WebSocket: %s", error, exc_info=error)
+    )
     attempt = 0
+    # True from a handler failure until an event is acknowledged again. While
+    # it holds, a new connection's ready frame does not reset the backoff, so a
+    # handler that keeps failing is retried at 0.5, 1, 2 ... 30 s, not twice a
+    # second (REL-427).
+    failing = False
     # Each unknown event type is reported once per run, so on_error is not flooded.
     reported_unknown: Set[str] = set()
 
@@ -589,31 +703,45 @@ async def run_websocket(
         if event_type in reported_unknown:
             return
         reported_unknown.add(event_type)
-        if on_error is not None:
-            on_error(RelayUnknownEventTypeError(event_type, sequence))
+        report(RelayUnknownEventTypeError(event_type, sequence))
 
     def ready(frame: Dict[str, Any]) -> None:
         nonlocal attempt
-        attempt = 0
+        if not failing:
+            attempt = 0
         if on_connection_state is not None:
             on_connection_state("ready")
         if on_ready is not None:
             on_ready(frame)
+
+    def acknowledged() -> None:
+        nonlocal attempt, failing
+        failing = False
+        attempt = 0
 
     while True:
         if on_connection_state is not None:
             on_connection_state("connecting")
         try:
             await _Connection(
-                url, agent_token, user_agent, on_event, on_full_sync, observe, ready, unknown_event, on_observation_gap
+                url,
+                agent_token,
+                user_agent,
+                on_event,
+                on_full_sync,
+                observe,
+                ready,
+                unknown_event,
+                on_observation_gap,
+                acknowledged,
             ).run()
         except _STOPPING as error:
-            if on_error is not None:
-                on_error(error)
+            report(error)
             raise
         except Exception as error:
-            if on_error is not None:
-                on_error(error)
+            report(error)
+            if isinstance(error, _DurableApplicationError):
+                failing = True
             attempt += 1
         finally:
             if on_connection_state is not None:
@@ -659,7 +787,11 @@ class WebSocket:
 
         ``on_error`` gets each connection failure before its reconnect, and a
         :class:`RelayUnknownEventTypeError` the first time an event type this
-        release does not know arrives (it is skipped and acknowledged).
+        release does not know arrives (it is skipped and acknowledged). Without
+        ``on_error``, each is logged on the ``relaymessenger.websocket`` logger.
+        When ``on_event`` raises, the event comes back on the next connection,
+        after a delay that doubles from ``min_reconnect_delay`` to
+        ``max_reconnect_delay`` until an event is acknowledged again.
         ``run`` raises, and stops, on a :class:`WebSocketStoppedError`, a
         :class:`WebSocketProtocolError`, or a
         :class:`RelayWebhookConfiguredError` (the agent has a webhook
