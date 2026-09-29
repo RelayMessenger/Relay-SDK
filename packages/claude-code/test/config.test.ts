@@ -101,6 +101,9 @@ describe("Relay channel configuration", () => {
       { mode: 0o600 },
     );
     const config = loadConfig({
+      // A folder link (.relay/agent.json) above process.cwd() wins over
+      // .env, so pin the folder to this empty temporary directory.
+      PWD: dir,
       RELAY_CHANNEL_DIR: dir,
       RELAY_AGENT_TOKEN: "${user_config.agent_token}",
       RELAY_ALLOWED_SENDERS: "${user_config.allowed_senders}",

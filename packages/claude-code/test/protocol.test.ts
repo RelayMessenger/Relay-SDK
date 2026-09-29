@@ -251,6 +251,11 @@ function startMCP(channelDir: string, baseURL: string, entry = "server.ts"): MCP
     cwd: ROOT,
     env: {
       ...process.env,
+      // The channel resolves a folder link (.relay/agent.json) from PWD
+      // upward, and a link wins over RELAY_AGENT_TOKEN and RELAY_BASE_URL.
+      // Pin PWD to the temporary channel directory so a developer's own link
+      // never points this process at a real Relay with a real token.
+      PWD: channelDir,
       RELAY_CHANNEL_DIR: channelDir,
       RELAY_AGENT_TOKEN: TOKEN,
       RELAY_ALLOWED_SENDERS: USER_ID,
