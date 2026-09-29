@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/livekit",
-  "version": "0.1.0-staging.41",
+  "version": "0.1.1-staging.0",
   "description": "LiveKit Agents audio input and output for Relay Calls, over @relaymessenger/sdk/calls.",
   "type": "module",
   "sideEffects": false,
