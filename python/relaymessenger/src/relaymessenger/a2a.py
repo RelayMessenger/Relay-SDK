@@ -12,9 +12,10 @@ ListTasks, CancelTask and SubscribeToTask.
 
 :func:`connect_agent` returns the A2A SDK's own ``Client`` (``a2a-sdk``,
 github.com/a2aproject/a2a-python) for that address: the SDK reads the card,
-picks its 1.0 JSON-RPC interface, sends ``A2A-Version: 1.0``, and its
-``AuthInterceptor`` puts the token on every call as the card's Bearer
-credential. Needs the ``a2a`` extra: ``pip install 'relaymessenger[a2a]'``.
+picks its 1.0 JSON-RPC interface, and sends ``A2A-Version: 1.0``;
+:class:`RelayAgentToken` puts the token on every call as the card's
+``relay`` Bearer credential, in ``Authorization`` only. Needs the ``a2a``
+extra: ``pip install 'relaymessenger[a2a]'``.
 
 ``client.send_message`` answers as the A2A SDK does, with ``StreamResponse``
 events. An agent that accepts tasks answers with a Task (``event.task``): it
@@ -34,13 +35,13 @@ from typing import Final, Optional
 try:
     import httpx
     from a2a.client import (
-        AuthInterceptor,
         Client,
         ClientCallContext,
+        ClientCallInterceptor,
         ClientConfig,
         ClientFactory,
-        CredentialService,
     )
+    from a2a.client.interceptors import AfterArgs, BeforeArgs
     from a2a.types import AgentCard
 except ImportError as e:
     raise ImportError(
@@ -75,30 +76,41 @@ _TIMEOUT: Final = httpx.Timeout(15.0, read=75.0)
 RELAY_SCHEME: Final = "relay"
 
 
-class RelayAgentToken(CredentialService):
-    """The calling agent's Relay token, the credential for the card's Bearer scheme.
+class RelayAgentToken(ClientCallInterceptor):
+    """Puts the calling agent's Relay token on a call, only as ``Authorization: Bearer``.
 
-    It is given only for the card's ``relay`` scheme, and only once
-    :meth:`trust` has seen that the scheme is HTTP Bearer: the A2A SDK puts a
-    credential wherever the card's scheme says (an API-key header, a query
-    parameter), so a card that renamed where the token goes would otherwise
-    choose a header that survives a cross-origin redirect.
+    The A2A SDK's ``AuthInterceptor`` puts a credential wherever the card's
+    scheme says (an API-key header of any name), and the client's card can
+    change after it is built (``get_extended_agent_card`` replaces it). So
+    this interceptor reads the card the client holds for each call, and adds
+    the token only while that card requires the ``relay`` scheme as HTTP
+    Bearer, and never anywhere but ``Authorization``.
     """
 
     def __init__(self, api_key: str) -> None:
         if not api_key:
             raise ValueError("Relay API key is required.")
         self._api_key = api_key
-        self._bearer = False
 
-    def trust(self, card: AgentCard) -> None:
-        """Note whether ``card`` declares ``relay`` as HTTP Bearer."""
+    @staticmethod
+    def accepts(card: AgentCard) -> bool:
+        """Whether ``card`` requires the ``relay`` scheme and declares it HTTP Bearer."""
         scheme = card.security_schemes.get(RELAY_SCHEME)
         # An unset http_auth_security_scheme reads as scheme "".
-        self._bearer = scheme is not None and scheme.http_auth_security_scheme.scheme.lower() == "bearer"
+        bearer = scheme is not None and scheme.http_auth_security_scheme.scheme.lower() == "bearer"
+        return bearer and any(RELAY_SCHEME in requirement.schemes for requirement in card.security_requirements)
 
-    async def get_credentials(self, security_scheme_name: str, context: Optional[ClientCallContext]) -> Optional[str]:
-        return self._api_key if security_scheme_name == RELAY_SCHEME and self._bearer else None
+    async def before(self, args: BeforeArgs) -> None:
+        if not self.accepts(args.agent_card):
+            return
+        if args.context is None:
+            args.context = ClientCallContext()
+        if args.context.service_parameters is None:
+            args.context.service_parameters = {}
+        args.context.service_parameters["Authorization"] = f"Bearer {self._api_key}"
+
+    async def after(self, args: AfterArgs) -> None:
+        return None
 
 
 def agent_address(handle: str, *, a2a_origin: str = DEFAULT_A2A_ORIGIN) -> str:
@@ -143,7 +155,6 @@ async def connect_agent(
 
     def verify(card: AgentCard) -> None:
         _require_same_origin(card, address)
-        token.trust(card)
 
     # The card is fetched without the token. The A2A SDK runs the card
     # verifier before it builds the client, so the token goes only to an
@@ -151,7 +162,7 @@ async def connect_agent(
     # only as the card's relay Bearer credential (see RelayAgentToken).
     return await ClientFactory(config).create_from_url(
         address,
-        interceptors=[AuthInterceptor(token)],
+        interceptors=[token],
         relative_card_path=AGENT_CARD_PATH,
         signature_verifier=verify,
     )
@@ -164,6 +175,7 @@ def _refuse_redirects_with(client: httpx.AsyncClient, api_key: str) -> None:
     redirects. A caller's client may follow redirects, and httpx then strips
     only ``Authorization`` on a cross-origin hop; this response hook runs
     before httpx follows (``_send_handling_redirects``) and aborts instead.
+    It looks for the token in every header, not only ``Authorization``.
     """
     credential = f"Bearer {api_key}"
     hooks = client.event_hooks.get("response", [])
@@ -171,7 +183,7 @@ def _refuse_redirects_with(client: httpx.AsyncClient, api_key: str) -> None:
         return
 
     async def refuse(response: httpx.Response) -> None:
-        if response.has_redirect_location and response.request.headers.get("authorization") == credential:
+        if response.has_redirect_location and any(api_key in value for value in response.request.headers.values()):
             raise httpx.RemoteProtocolError(
                 f"{response.request.url} answered a redirect to {response.headers.get('location')!r}; "
                 "a call carrying the Relay token never follows a redirect.",

@@ -46,6 +46,8 @@ class _Server:
         self.reply: Optional[A2aMessage] = None
         #: When set, a JSON-RPC POST is answered 307 to this URL.
         self.redirect_to: Optional[str] = None
+        #: What GetExtendedAgentCard answers (a2a.ts has no extended card).
+        self.extended_card: Optional[Dict[str, Any]] = None
 
     @property
     def base_url(self) -> str:
@@ -80,6 +82,9 @@ class _Server:
                 # the Task first, then closes at a terminal state; GetTask and
                 # CancelTask answer the Task itself.
                 method = request["method"]
+                if method == "GetExtendedAgentCard" and server.extended_card is not None:
+                    self._json(200, {"jsonrpc": "2.0", "id": request["id"], "result": server.extended_card})
+                    return
                 if server.reply is not None and method in ("SendMessage", "SendStreamingMessage"):
                     self._message(request, method)
                     return
@@ -465,6 +470,69 @@ async def test_a_redirected_call_is_never_followed_even_when_the_callers_client_
                 await client.get_task(GetTaskRequest(id=TASK["id"]))
         finally:
             await client.close()
+        assert attacker.seen == []
+    finally:
+        agent.stop()
+        attacker.stop()
+
+
+async def test_a_card_swapped_by_an_extended_card_refresh_gets_no_token_even_through_a_redirect() -> None:
+    # The client's card can change after connect_agent vetted it:
+    # get_extended_agent_card replaces it. A replacement that moves the relay
+    # scheme into an API-key header must not get the token, not even when the
+    # next call is redirected by a client that follows redirects.
+    import httpx
+    from a2a.client import ClientConfig
+    from a2a.types import GetExtendedAgentCardRequest, GetTaskRequest
+
+    from relaymessenger.a2a import connect_agent
+
+    agent, attacker = _Server(), _Server()
+    agent.start()
+    attacker.start()
+    try:
+        card = relay_card(f"{agent.base_url}/a2a/translator")
+        card["capabilities"] = dict(card["capabilities"], extendedAgentCard=True)
+        agent.card = card
+        agent.extended_card = dict(
+            card, securitySchemes={"relay": {"apiKeySecurityScheme": {"location": "header", "name": "X-Relay-Token"}}}
+        )
+        config = ClientConfig(streaming=False, httpx_client=httpx.AsyncClient(follow_redirects=True))
+        client = await connect_agent("rly_tok", "translator", a2a_origin=f"{agent.base_url}/a2a", config=config)
+        try:
+            await client.get_extended_agent_card(GetExtendedAgentCardRequest())
+            agent.redirect_to = f"{attacker.base_url}/steal"
+            # It carries no token, so the caller's client may follow it.
+            await client.get_task(GetTaskRequest(id=TASK["id"]))
+        finally:
+            await client.close()
+        card_get, refresh, redirected = agent.seen
+        # The refresh went out under the vetted Bearer card, as Authorization.
+        assert refresh[3]["method"] == "GetExtendedAgentCard"
+        assert {name: value for name, value in refresh[2].items() if "rly_tok" in value} == {"authorization": "Bearer rly_tok"}
+        # After it, the token went nowhere: not to the agent, not to the attacker.
+        assert redirected[3]["method"] == "GetTask"
+        assert not any("rly_tok" in value for value in redirected[2].values()), redirected[2]
+        assert not any("rly_tok" in value for _, _, headers, _ in attacker.seen for value in headers.values()), attacker.seen
+    finally:
+        agent.stop()
+        attacker.stop()
+
+
+async def test_the_redirect_guard_finds_the_token_in_any_header() -> None:
+    import httpx
+
+    from relaymessenger.a2a import _refuse_redirects_with
+
+    agent, attacker = _Server(), _Server()
+    agent.start()
+    attacker.start()
+    try:
+        agent.redirect_to = f"{attacker.base_url}/steal"
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            _refuse_redirects_with(client, "rly_tok")
+            with pytest.raises(httpx.RemoteProtocolError, match="never follows a redirect"):
+                await client.post(f"{agent.base_url}/a2a/translator", json={"jsonrpc": "2.0", "id": 1, "method": "GetTask"}, headers={"X-Relay-Token": "rly_tok"})
         assert attacker.seen == []
     finally:
         agent.stop()
