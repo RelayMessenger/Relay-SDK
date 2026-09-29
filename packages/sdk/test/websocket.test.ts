@@ -1508,3 +1508,45 @@ it("reconnects within a bound when a handler never returns, and never ACKs its r
     vi.useRealTimers();
   }
 });
+
+it("runs no buffered event after the peer closes the connection (REL-428 review)", async () => {
+  vi.useFakeTimers();
+  try {
+    class ClosingWebSocket extends FakeWebSocket {
+      constructor(url: string, options?: { headers?: Record<string, string> }) {
+        super(url, options);
+        if (FakeWebSocket.instances.length > 1) return;
+        queueMicrotask(() => {
+          emitFrame(this, ready());
+          emitFrame(this, eventFrame("1"));
+          emitFrame(this, eventFrame("2", envelope("01993d50-ef7b-7b37-886b-23fd80c7ec22")));
+          // Relay goes away while event 1 is still being handled.
+          setTimeout(() => this.emit("close", { code: 1006, reason: "" }), 10);
+        });
+      }
+    }
+    const calls: Array<{ sequence: string; connection: number }> = [];
+    const controller = new AbortController();
+    const run = runWebSocket("https://relay.test", "agent-token", {
+      signal: controller.signal,
+      WebSocket: ClosingWebSocket,
+      minReconnectDelayMs: 0,
+      maxReconnectDelayMs: 0,
+      onEvent: async (_event, context) => {
+        calls.push({ sequence: context.sequence, connection: FakeWebSocket.instances.length });
+        if (calls.length === 1) await new Promise((resolve) => setTimeout(resolve, 1_000));
+      },
+      onFullSync: async () => {},
+      onError() {},
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(calls).toEqual([{ sequence: "1", connection: 1 }]);
+    expect(FakeWebSocket.instances[0]!.sent.filter((frame) => frame.includes("ack"))).toEqual([]);
+
+    controller.abort();
+    await vi.runAllTimersAsync();
+    await run;
+  } finally {
+    vi.useRealTimers();
+  }
+});

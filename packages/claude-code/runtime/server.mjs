@@ -21166,6 +21166,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
   let heartbeatTimer;
   let lastPongAt = 0;
   let dropped;
+  let gone = false;
   const finish = (error2 = dropped) => {
     if (settled)
       return;
@@ -21184,6 +21185,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
       reject(error2);
   };
   const stopReceiving = () => {
+    gone = true;
     socket.removeEventListener("message", onMessage);
   };
   const drained = () => new Promise((resolveDrain) => {
@@ -21253,7 +21255,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
       return;
     }
     chain = chain.then(async () => {
-      if (settled || dropped || options.signal?.aborted)
+      if (settled || gone || options.signal?.aborted)
         return;
       let frame;
       try {
@@ -21331,7 +21333,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
         } catch (cause) {
           throw new DurableApplicationError("FULL sync", cause);
         }
-        if (options.signal?.aborted || dropped || settled)
+        if (options.signal?.aborted || gone || settled)
           return;
         send({
           type: "full_sync_complete",
@@ -21376,7 +21378,7 @@ var runConnection = (url, agentToken, options, Constructor, onReady, onUnknownEv
       if (sequence === acceptedThrough + 1n) {
         acceptedThrough = sequence;
       }
-      if (options.signal?.aborted || dropped || settled)
+      if (options.signal?.aborted || gone || settled)
         return;
       send({
         type: "ack",

@@ -535,3 +535,31 @@ async def test_a_handler_that_never_returns_holds_recovery_only_for_the_drain_bo
     hang.set()
     await asyncio.sleep(0.05)
     assert [frame for frame in first_frames if frame.get("type") == "ack"] == []
+
+
+async def test_a_peer_close_runs_none_of_the_buffered_events(relay_server: FakeRelay) -> None:
+    """REL-428 review: Relay closes while event 1 runs; event 2, buffered, is not handled on that connection."""
+    finished: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+    calls: List[Tuple[str, int]] = []
+
+    async def closing(connection: ServerConnection) -> None:
+        await connection.send(ready("0"))
+        await connection.send(event(1))
+        await connection.send(event(2))
+        await asyncio.sleep(0.1)
+        await connection.close(1011, "going away")
+
+    async def second(connection: ServerConnection) -> None:
+        await asyncio.sleep(0.2)
+        finished.set_result(None)
+        await connection.wait_closed()
+
+    async def on_event(envelope: Dict[str, Any], context: Dict[str, str]) -> None:
+        calls.append((context["sequence"], len(relay_server.requests)))
+        if len(calls) == 1:
+            await asyncio.sleep(0.5)
+
+    relay_server.scripts += [closing, second]
+    await run_until(relay_server, finished, on_event=on_event, on_error=lambda error: None)
+    assert calls[0] == ("1", 1)
+    assert ("2", 1) not in calls

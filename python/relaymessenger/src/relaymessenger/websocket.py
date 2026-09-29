@@ -441,9 +441,10 @@ class _Connection:
                         break
                     if isinstance(raw, BaseException):
                         raise raw
-                    # A dropped connection runs none of the frames still
+                    # A connection that is gone, however it ended (the heartbeat,
+                    # a peer close, an error), runs none of the frames still
                     # buffered on it: Relay sends them again on the next one.
-                    if self.failure is not None:
+                    if self.failure is not None or self._dropped.is_set():
                         break
                     if await self._handle_within_drain(raw):
                         break

@@ -522,6 +522,9 @@ const runConnection = (
     // Set when this client drops the connection itself; the run ends with it
     // once the handler that is still running returns.
     let dropped: RetryableWebSocketError | undefined;
+    // Set on every way the connection ends: a peer close, a socket error, an
+    // abort, or this client's own drop. No buffered event runs after it.
+    let gone = false;
 
     const finish = (error: unknown = dropped): void => {
       if (settled) return;
@@ -537,6 +540,7 @@ const runConnection = (
       else reject(error);
     };
     const stopReceiving = (): void => {
+      gone = true;
       socket.removeEventListener("message", onMessage);
     };
     /** The running handler's end, or HANDLER_DRAIN_TIMEOUT_MS, whichever is first. */
@@ -638,7 +642,7 @@ const runConnection = (
       chain = chain.then(async () => {
         // A dropped connection runs none of the events still buffered on it:
         // Relay sends them again on the next one.
-        if (settled || dropped || options.signal?.aborted) return;
+        if (settled || gone || options.signal?.aborted) return;
         let frame: unknown;
         try {
           frame = JSON.parse(await text(message.data)) as unknown;
@@ -749,7 +753,7 @@ const runConnection = (
           } catch (cause) {
             throw new DurableApplicationError("FULL sync", cause);
           }
-          if (options.signal?.aborted || dropped || settled) return;
+          if (options.signal?.aborted || gone || settled) return;
           send({
             type: "full_sync_complete",
             through_sequence: fullSync.through_sequence,
@@ -797,7 +801,7 @@ const runConnection = (
         if (sequence === acceptedThrough + 1n) {
           acceptedThrough = sequence;
         }
-        if (options.signal?.aborted || dropped || settled) return;
+        if (options.signal?.aborted || gone || settled) return;
         send({
           type: "ack",
           through_sequence: acceptedThrough.toString(),
