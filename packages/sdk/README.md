@@ -766,7 +766,12 @@ last subscription makes the WebSocket path available again. Relay retains
 undelivered events across either change.
 
 The SDK derives `wss://<Relay host>/v1/websocket` from `baseURL` and sends the
-Agent Token in the WebSocket upgrade `Authorization` header.
+Agent Token in the WebSocket upgrade `Authorization` header. It names every
+event type in `RELAY_WEBHOOK_EVENT_TYPES` with `subscribed_events`: Relay sends
+a connection only the types it names, and the 16 original message, reaction,
+participant, chat and contact types when it names none. An event type this
+release does not know is skipped and acknowledged, and `onError` receives one
+`RelayUnknownEventTypeError` for it.
 
 The SDK validates the ready checkpoint, rejects sequence gaps, and routes
 replayed sequences through your durable deduplication handler. It sends a

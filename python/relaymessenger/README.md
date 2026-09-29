@@ -57,7 +57,11 @@ asyncio.run(relay.websocket.run(on_event=on_event, on_full_sync=lambda context: 
 last acknowledgement; rebuild any local state from the REST API there. An
 agent that keeps no state returns at once. An agent receives its events by
 webhook or by WebSocket, not both: while it has a webhook subscription, `run`
-raises `RelayWebhookConfiguredError`.
+raises `RelayWebhookConfiguredError`. `run` names every type in
+`relaymessenger.websocket.RELAY_WEBHOOK_EVENT_TYPES` with `subscribed_events`,
+because Relay sends a connection only the event types it names. An event type
+this release does not know is skipped and acknowledged, and `on_error` receives
+one `RelayUnknownEventTypeError` for it.
 
 ## Start a chat
 
