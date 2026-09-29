@@ -70,16 +70,35 @@ _HANDLE: Final = re.compile(r"(?!.{2}__)[a-z][a-z0-9_]{1,30}[a-z0-9]")
 _TIMEOUT: Final = httpx.Timeout(15.0, read=75.0)
 
 
+#: The one security scheme a Relay card publishes (Relay Server ``a2a.ts``
+#: ``agentCard``): HTTP Bearer, "Relay agent token".
+RELAY_SCHEME: Final = "relay"
+
+
 class RelayAgentToken(CredentialService):
-    """The calling agent's Relay token, the credential for the card's Bearer scheme."""
+    """The calling agent's Relay token, the credential for the card's Bearer scheme.
+
+    It is given only for the card's ``relay`` scheme, and only once
+    :meth:`trust` has seen that the scheme is HTTP Bearer: the A2A SDK puts a
+    credential wherever the card's scheme says (an API-key header, a query
+    parameter), so a card that renamed where the token goes would otherwise
+    choose a header that survives a cross-origin redirect.
+    """
 
     def __init__(self, api_key: str) -> None:
         if not api_key:
             raise ValueError("Relay API key is required.")
         self._api_key = api_key
+        self._bearer = False
+
+    def trust(self, card: AgentCard) -> None:
+        """Note whether ``card`` declares ``relay`` as HTTP Bearer."""
+        scheme = card.security_schemes.get(RELAY_SCHEME)
+        # An unset http_auth_security_scheme reads as scheme "".
+        self._bearer = scheme is not None and scheme.http_auth_security_scheme.scheme.lower() == "bearer"
 
     async def get_credentials(self, security_scheme_name: str, context: Optional[ClientCallContext]) -> Optional[str]:
-        return self._api_key
+        return self._api_key if security_scheme_name == RELAY_SCHEME and self._bearer else None
 
 
 def agent_address(handle: str, *, a2a_origin: str = DEFAULT_A2A_ORIGIN) -> str:
@@ -119,15 +138,48 @@ async def connect_agent(
     address = agent_address(handle, a2a_origin=a2a_origin)
     if config is None:
         config = ClientConfig(httpx_client=httpx.AsyncClient(headers={"user-agent": USER_AGENT}, timeout=_TIMEOUT))
+    if config.httpx_client is not None:
+        _refuse_redirects_with(config.httpx_client, api_key)
+
+    def verify(card: AgentCard) -> None:
+        _require_same_origin(card, address)
+        token.trust(card)
+
     # The card is fetched without the token. The A2A SDK runs the card
     # verifier before it builds the client, so the token goes only to an
-    # interface on the address's own origin (see _require_same_origin).
+    # interface on the address's own origin (see _require_same_origin), and
+    # only as the card's relay Bearer credential (see RelayAgentToken).
     return await ClientFactory(config).create_from_url(
         address,
         interceptors=[AuthInterceptor(token)],
         relative_card_path=AGENT_CARD_PATH,
-        signature_verifier=lambda card: _require_same_origin(card, address),
+        signature_verifier=verify,
     )
+
+
+def _refuse_redirects_with(client: httpx.AsyncClient, api_key: str) -> None:
+    """Stop a call that carries the Relay token from following any redirect.
+
+    A Relay address answers its binding where it is called and never
+    redirects. A caller's client may follow redirects, and httpx then strips
+    only ``Authorization`` on a cross-origin hop; this response hook runs
+    before httpx follows (``_send_handling_redirects``) and aborts instead.
+    """
+    credential = f"Bearer {api_key}"
+    hooks = client.event_hooks.get("response", [])
+    if any(getattr(hook, "_relay_credential", None) == credential for hook in hooks):
+        return
+
+    async def refuse(response: httpx.Response) -> None:
+        if response.has_redirect_location and response.request.headers.get("authorization") == credential:
+            raise httpx.RemoteProtocolError(
+                f"{response.request.url} answered a redirect to {response.headers.get('location')!r}; "
+                "a call carrying the Relay token never follows a redirect.",
+                request=response.request,
+            )
+
+    setattr(refuse, "_relay_credential", credential)
+    client.event_hooks = {**client.event_hooks, "response": [*hooks, refuse]}
 
 
 def _origin(url: str) -> tuple[str, str, int]:
@@ -155,4 +207,4 @@ def _require_same_origin(card: AgentCard, address: str) -> None:
             )
 
 
-__all__ = ["AGENT_CARD_PATH", "DEFAULT_A2A_ORIGIN", "RelayAgentToken", "agent_address", "connect_agent"]
+__all__ = ["AGENT_CARD_PATH", "DEFAULT_A2A_ORIGIN", "RELAY_SCHEME", "RelayAgentToken", "agent_address", "connect_agent"]
