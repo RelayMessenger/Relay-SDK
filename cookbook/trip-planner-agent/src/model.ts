@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 
 import type { PlanRequest, TripPlan, TripPlanner } from "./plan.js";
 
-export const MODEL_ID = "claude-sonnet-5";
+export const MODEL_ID = "claude-sonnet-5-5";
 
 const SYSTEM = [
   "You plan trips for a group chat. You read the whole conversation and keep",
