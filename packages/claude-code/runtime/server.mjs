@@ -21526,6 +21526,28 @@ var defaultA2aBaseURL = (baseURL) => {
     return "https://staging.relayagent.im";
   return `${url.origin}/a2a`;
 };
+var HANDLE = /^(?!.{2}__)[a-z][a-z0-9_]{1,30}[a-z0-9]$/;
+var relayHandle = (to) => {
+  const handle = to.startsWith("@") ? to.slice(1) : to;
+  if (!HANDLE.test(handle)) {
+    throw new TypeError(`${JSON.stringify(to)} is not a Relay handle: 3 to 32 of a-z, 0-9 and _, starting with a letter, not ending with _, and without __ as its 3rd and 4th characters.`);
+  }
+  return handle;
+};
+var requireSameOrigin = (card, address) => {
+  const origin = new URL(address).origin;
+  for (const { url } of card.supportedInterfaces ?? []) {
+    let named;
+    try {
+      named = new URL(url).origin;
+    } catch {
+      named = void 0;
+    }
+    if (named !== origin) {
+      throw new TypeError(`The agent card at ${address} names the interface ${JSON.stringify(url)}, which is not on the agent's own origin; the Relay token is not sent there.`);
+    }
+  }
+};
 var a2aAddress = (a2aBaseURL, handle) => {
   const base = new URL(a2aBaseURL);
   return base.pathname === "/" ? `${base.protocol}//${handle.replaceAll("_", "-")}.${base.host}` : `${a2aBaseURL.replace(/\/+$/, "")}/${pathID(handle)}`;
@@ -21651,7 +21673,12 @@ var Transport = class {
    * that never sends another agent a task or message there never loads it.
    */
   a2a(handle) {
-    const key = handle.replace(/^@/, "").trim().toLowerCase();
+    let key;
+    try {
+      key = relayHandle(handle);
+    } catch (error2) {
+      return Promise.reject(error2);
+    }
     let client = this.#a2aClients.get(key);
     if (!client) {
       client = this.#createA2aClient(key);
@@ -21669,10 +21696,12 @@ var Transport = class {
       shouldRetryWithHeaders: async () => void 0
     });
     const factory = new ClientFactory({
-      transports: [new JsonRpcTransportFactory({ fetchImpl: authenticated })],
-      cardResolver: new DefaultAgentCardResolver({ fetchImpl })
+      transports: [new JsonRpcTransportFactory({ fetchImpl: authenticated })]
     });
-    return factory.createFromUrl(`${a2aAddress(this.a2aBaseURL, handle)}/.well-known/agent-card.json`, "");
+    const address = a2aAddress(this.a2aBaseURL, handle);
+    const agentCard = await new DefaultAgentCardResolver({ fetchImpl }).resolve(`${address}/.well-known/agent-card.json`, "");
+    requireSameOrigin(agentCard, address);
+    return factory.createFromAgentCard(agentCard);
   }
   runWebSocket(options) {
     if (!this.#apiKey)
