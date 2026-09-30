@@ -51,7 +51,7 @@ async function dispatch(allowFrom: string[], contactId = approvedId, handle = "r
     },
   } as RelayWebhookEvent;
   if (options.selection && event.event_type === "message.received") {
-    event.data.parts = [{ type: "text", value: "• Research", reactions: null }, { type: "selection_response", selected_values: ["research"] }];
+    event.data.parts = [{ type: "text", value: "• Research", reactions: null }, { type: "selection_response", selected_values: ["research"], selected_ids: ["research"] }];
     event.data.reply_to = { message_id: "00000000-0000-7000-8000-000000000010", part_index: 1 };
   }
   await dispatchRelayEvent({

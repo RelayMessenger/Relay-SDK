@@ -190,9 +190,38 @@ await send_selection(
 ```
 
 `selection_part(title, options)` builds the part and raises `ValueError` for
-anything Relay would refuse. The answer arrives as a `message.received` whose
+invalid picker fields. The answer arrives as a `message.received` whose
 `selection_response` part holds the chosen `selected_values`, with `reply_to`
 naming the prompt; dispatch on those values, never on the labels.
+
+### List picker sections
+
+```python
+from relaymessenger.selection import send_selection, selection_reply
+
+await send_selection(
+    relay, chat_id, "Shipping", subtitle="Choose a service", multiple=False,
+    sections=[{"title": "Fast", "options": [{
+        "id": "priority", "label": "Priority", "subtitle": "Tomorrow",
+        "image_url": "https://example.com/priority.png",
+    }]}],
+    reply_message={"title": "Shipping saved", "subtitle": "Thank you"},
+)
+answer = selection_reply(event["data"]["parts"], event["data"].get("reply_to"))
+```
+
+Supply exactly one of `options` or `sections`, with 1–25 total rows and at most
+10 sections. Omitted `multiple` means true. ID rows allow 200-character IDs and
+24-character labels; legacy value-only rows keep 100-character tokens and
+80-character labels. If both aliases are supplied they must match. Row subtitles
+allow 72 characters; card subtitles and reply titles/subtitles allow 512.
+Images must be HTTPS URIs, at most 2048 characters; encode spaces and Unicode in URLs. Response models keep normalized
+aliases, flat options alongside sections, and viewer-scoped `selected_ids`.
+`selection_reply` reads IDs and source-owned reply text without parsing labels;
+legacy reply metadata remains valid. Reply input cannot contain `reply_message`.
+
+An optional subtitle that is blank after trimming is stored as absent.
+
 
 ## Answer a Call
 

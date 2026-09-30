@@ -55,15 +55,29 @@ Adjacent text parts are invalid. Replies use `reply_to.message_id` and optional
 ## Selection
 
 - Author one `selection` part with its question in `title` (trimmed, 1 to 60
-  characters, a few words such as "Pizza toppings") and 1 to 25 options. A
-  text part is optional; anything else you want to say goes there, and it
-  shows as a normal message above the card. Each option has an explicit unique case-sensitive ASCII token `value`
-  (1 to 100 characters, `^[A-Za-z0-9][A-Za-z0-9._:-]*$`) and trimmed readable
-  `label` (1 to 80 characters). Do not combine it with buttons.
-- The person opens the prompt, checks any number of options and submits them
-  once. Checking sends nothing and only the submit does. A person answers a
-  given selection once, and reopening it afterwards shows what they chose
-  without letting them change it.
+  characters, a few words such as "Pizza toppings"). A text part is optional;
+  anything else you want to say goes there, and it shows as a normal message
+  above the card. `subtitle` (0 to 512 characters) is the card's second line.
+  Do not combine it with buttons.
+- Give exactly one of `options` or `sections`, with 1 to 25 rows in total.
+  `sections` are 1 to 10 titled groups (title 1 to 24 characters). Each row
+  has an `id` (1 to 200 characters, unique across the picker, returned in
+  `selected_ids`) and a `label` of 1 to 24 characters, plus an optional
+  `subtitle` (0 to 72) and an optional HTTPS `image_url` (up to 2048).
+- Rows without `id` stay valid: `value` is then a case-sensitive ASCII token
+  (1 to 100 characters, `^[A-Za-z0-9][A-Za-z0-9._:-]*$`) and `label` is 1 to 80
+  characters. If a row has both `id` and `value` they must match. Every limit
+  counts the text as sent; a subtitle blank after trimming is stored as absent.
+- `multiple` defaults to true: the person checks any number of rows. With
+  `multiple: false` the person checks exactly one. App versions before the list
+  picker ignore `multiple: false` and can send several choices, which Relay
+  refuses, so prefer `multiple: true` unless one answer is required.
+  `reply_message` (title 1 to 512, subtitle 0 to 512) is what the answered
+  bubble shows.
+- The person opens the prompt, checks rows and submits them once. Checking
+  sends nothing and only the submit does. A person answers a given selection
+  once, and reopening it afterwards shows what they chose without letting them
+  change it.
 - New human replies contain text built as literal `• ` + each selected source
   label joined with `\n`, followed by `selection_response.selected_values` in
   source-option order and explicit `reply_to.message_id` / `part_index`.

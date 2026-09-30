@@ -8,6 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer, type WebSocket } from "ws";
+import { SELECTION_TOOL_SCHEMA } from "../src/selection-schema.ts";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const USER_ID = "00000000-0000-7000-8000-000000000001";
@@ -387,17 +388,10 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     mcp.send({ jsonrpc: "2.0", id: 101, method: "tools/list", params: {} });
     const listed = await mcp.take(message => message.id === 101, "selection reply schema");
     const tools = (listed.result as { tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }> }).tools;
-    expect(tools.find(tool => tool.name === "reply")?.inputSchema.properties.selection).toMatchObject({
-      type: "object", additionalProperties: false, required: ["title", "options"], properties: {
-        title: { type: "string", minLength: 1, maxLength: 60 },
-        options: {
-          type: "array", minItems: 1, maxItems: 25,
-          items: { additionalProperties: false, required: ["value", "label"], properties: {
-            value: { maxLength: 100, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$" }, label: { maxLength: 80 },
-          } },
-        },
-      },
-    });
+    // The list the model sees is the schema the channel ships, list picker fields included.
+    expect(tools.find(tool => tool.name === "reply")?.inputSchema.properties.selection).toEqual(
+      JSON.parse(JSON.stringify(SELECTION_TOOL_SCHEMA)),
+    );
     await acked;
     const notification = await mcp.take(
       (message) => message.method === "notifications/claude/channel",
