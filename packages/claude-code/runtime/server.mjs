@@ -22407,6 +22407,21 @@ var Tasks = class {
     });
   }
   /**
+   * Answer a Task another agent sent this agent with one Message instead of
+   * working on it, as an A2A agent answers a simple request with a direct
+   * Message. Only as the first answer: after a status or an artifact it is
+   * refused (409, code 2034). The Task ends COMPLETED with the Message; a
+   * sender still waiting on a blocking SendMessage gets the Message itself.
+   */
+  reply(taskID, body, options) {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/tasks/${pathID(taskID)}/reply`,
+      body,
+      options
+    });
+  }
+  /**
    * Append one whole Artifact to a Task another agent sent this agent. The
    * same Artifact again changes nothing, so this is retried.
    */

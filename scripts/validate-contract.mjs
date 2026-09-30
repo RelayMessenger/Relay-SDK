@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "246da2106f4566c299063f1241e21801744e2b73", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "61c53facb171d9abeb5e3e9b1f1ec9b6b0d1647a", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -97,6 +97,7 @@ const allowedOperationSignatures = [
   "DELETE /v1/blocked_handles",
   "GET /v1/tasks",
   "POST /v1/tasks/{taskId}/status",
+  "POST /v1/tasks/{taskId}/reply",
   "POST /v1/tasks/{taskId}/artifacts",
   "GET /v1/access",
   "PUT /v1/access/{handle}",
@@ -131,13 +132,13 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 62);
-assert.equal(manifest.path_count, 42);
-assert.equal(manifest.source_path_count, 47);
-assert.equal(manifest.source_schema_count, 220);
+assert.equal(manifest.operation_count, 63);
+assert.equal(manifest.path_count, 43);
+assert.equal(manifest.source_path_count, 48);
+assert.equal(manifest.source_schema_count, 221);
 assert.equal(manifest.callback_count, 28);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 42);
-assert.equal(operationJSON.length, 62);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 43);
+assert.equal(operationJSON.length, 63);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
@@ -259,7 +260,7 @@ assert.deepEqual(publicMethods(client.me), ["retrieve", "update"]);
 assert.deepEqual(publicMethods(client.communities), ["join", "leave", "list", "retrieve", "update"]);
 assert.deepEqual(publicMethods(client.communities.members), ["list"]);
 assert.deepEqual(publicMethods(client.tasks), [
-  "addArtifact", "cancel", "get", "list", "send", "updateStatus",
+  "addArtifact", "cancel", "get", "list", "reply", "send", "updateStatus",
 ]);
 assert.deepEqual(publicMethods(client.calls), [
   "create", "end", "list", "retrieve", "room",

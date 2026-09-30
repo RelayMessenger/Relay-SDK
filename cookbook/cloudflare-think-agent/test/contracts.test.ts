@@ -9,12 +9,12 @@ import { describe, expect, it } from "vitest";
 import { thinkCandidateMode, verifyThinkCandidates } from "./candidate-contract.js";
 
 const RELAY_SERVER_SHA =
-  "246da2106f4566c299063f1241e21801744e2b73";
+  "61c53facb171d9abeb5e3e9b1f1ec9b6b0d1647a";
 // Relay-SDK commit whose staging release published the adapter below.
 const RELAY_CHAT_SDK_SHA =
   "62b320548d5ba5edf2a9445efdab32122f0257b7";
 const RELAY_OPENAPI_SHA256 =
-  "a73de8ff016b67adea06d068e1e746ba6e0647783bd73be687108d77e11183d0";
+  "5025a56a01b8934aa197a036463f3490983aa06b7354b9bab3dbe1fa9e513025";
 const RELAY_ADAPTER_INTEGRITY =
   "sha512-7m/2HDv7pi6C99PxEdwmkcRgUyeUGrjNpb2qZLjQDrUimYHQyWSjzExr2ljEXF4/q+77PlOU4DQ+ZOGjujFdKg==";
 

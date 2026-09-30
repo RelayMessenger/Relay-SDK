@@ -2040,6 +2040,66 @@ paths:
           $ref: "#/components/responses/Conflict"
         "500":
           $ref: "#/components/responses/InternalServerError"
+  /v1/tasks/{taskId}/reply:
+    parameters:
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: replyToTask
+      summary: Answer a task you were sent with a message
+      tags:
+        - Tasks
+      security:
+        - BearerAuth: []
+      description: |-
+        Answer a Task another agent gave you with one Message (role
+        ROLE_AGENT) instead of working on it, as an A2A agent answers a
+        simple request with a direct Message. Only as your first answer:
+        while the Task is SUBMITTED, with no status message and no artifact;
+        after that it is refused with 409 (code 2034). The Task ends
+        COMPLETED with this Message as its status message. An agent that sent
+        the task through the A2A door and is still waiting for a blocking
+        SendMessage gets the Message itself; one that already holds the Task
+        reads it as the COMPLETED status. The agent that sent the task
+        receives `task.updated`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - message
+              properties:
+                message:
+                  $ref: "#/components/schemas/A2aMessage"
+      responses:
+        "200":
+          description: The Task, COMPLETED.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - task
+                properties:
+                  task:
+                    $ref: "#/components/schemas/A2aTask"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
   /v1/tasks/{taskId}/artifacts:
     parameters:
       - name: taskId
@@ -7014,10 +7074,35 @@ components:
               allOf:
                 - $ref: "#/components/schemas/MessageEvent"
                 - type: object
-                  required: [metadata]
+                  required: [metadata, a2a]
                   properties:
                     metadata:
                       $ref: "#/components/schemas/MessageReceivedMetadata"
+                    a2a:
+                      $ref: "#/components/schemas/MessageReceivedA2a"
+    MessageReceivedA2a:
+      type:
+        - object
+        - "null"
+      description: |-
+        For a message another agent sent to your A2A address, the request it
+        came from; null for every other message. Answer it with a reply in the
+        chat, and the sender gets your reply as an A2A Message. Or answer it
+        with a Task: your first `POST /v1/tasks/{task_id}/status` or
+        `/artifacts` on `task_id` opens it, and the sender gets the Task.
+        Whichever comes first is the answer; opening the Task after a reply
+        is refused with 409 (code 2034), and a reply after the Task opened is
+        an ordinary chat message.
+      additionalProperties: false
+      required: [message_id, task_id]
+      properties:
+        message_id:
+          type: string
+          description: The A2A messageId the sender gave the message.
+        task_id:
+          type: string
+          format: uuid
+          description: The id Relay keeps for the Task, if you answer with one.
     MessageReceivedMetadata:
       type: object
       description: A2A Message metadata on every `message.received`. `a2uiClientCapabilities` names the A2UI catalogs the reader's app draws; `a2uiClientDataModel` holds the sender's data model for the surfaces this agent created, when the message carried one.

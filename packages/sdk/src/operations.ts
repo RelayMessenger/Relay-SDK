@@ -197,6 +197,11 @@ export const RELAY_V1_OPERATIONS = [
   },
   {
     "method": "POST",
+    "path": "/v1/tasks/{taskId}/reply",
+    "operationId": "replyToTask"
+  },
+  {
+    "method": "POST",
     "path": "/v1/tasks/{taskId}/artifacts",
     "operationId": "addTaskArtifact"
   },
