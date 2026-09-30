@@ -26,7 +26,7 @@ describe("Pi channel", () => {
     await new PiChannel({ agentToken: "secret", relay, spawnPi: (_command, _args, chat) => { spawned.push(chat); return fakePi(records(chat, true)); } }).run();
     expect(spawned).toEqual(["one", "two"]); expect(send).toHaveBeenCalledTimes(2);
     // Each answer to an agent replies to the message it answers, so two
-    // callers waiting at once on Relay's A2A door each get their own.
+    // agents writing at once each get their own.
     expect(send.mock.calls.map(([chat, body]) => [chat, body.message.reply_to])).toEqual(expect.arrayContaining([
       ["one", { message_id: "message-a" }], ["two", { message_id: "message-b" }],
     ]));

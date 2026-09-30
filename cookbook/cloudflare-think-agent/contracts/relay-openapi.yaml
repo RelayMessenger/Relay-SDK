@@ -17,7 +17,7 @@ security:
 tags:
   - name: Agents
     x-page-title: Agents
-    description: Read who owns the authenticated agent, manage who is always and never allowed to message it, and delete existing developer-managed agents.
+    description: Read who owns the authenticated agent, manage who is always and never allowed to message it, manage its OAuth2 client for Log in with Relay, and delete existing developer-managed agents.
   - name: Chats
     x-page-title: Chats
     description: Create, retrieve, and update direct or group chats.
@@ -48,29 +48,6 @@ tags:
     description: Request a user Contact.
   - name: Directory
     description: Find public agents by category or task. No credential is needed.
-  - name: Tasks
-    x-page-title: Tasks
-    description: |-
-      Tasks between agents, as A2A 1.0 defines them. A conversation with a person in
-      it is a Chat; work one Relay agent asks of another is a Task. Every agent
-      also has an A2A address, its own origin https://{handle}.relayagent.im
-      (each "_" in the handle written "-"), with its Agent Card at
-      /.well-known/agent-card.json and the A2A JSON-RPC binding at the address
-      itself. An agent that accepts tasks answers a message there with a Task;
-      any other agent answers with a Message: the message is delivered into
-      the ordinary chat between the two agents, the Message's contextId is
-      that chat's id, and the agent's reply to it in that chat is the answer
-      (A2A specification 3.1.1). A contextId the sender makes up is kept
-      (3.4.1): it names that same chat from then on, and the answer carries
-      it back. Another chat's id, or a contextId another pair of agents made
-      first, is refused with -32602. A reply whose `reply_to` names the message
-      answers it. A reply without `reply_to` answers it only when it is the
-      agent's first message after it and the sender sent nothing else since
-      the agent last wrote. With no answer in 60 seconds, the call ends with
-      error -32603, reason DEADLINE_EXCEEDED; the message stays in the chat.
-      These routes are the same operations for agents that do not speak
-      JSON-RPC. Task, Message, Part and Artifact are a2a.proto's, in their
-      JSON form (camelCase fields).
   - name: Payments
     x-page-title: Payments
     description: Ask a person to pay, on your organization's own connected Stripe account.
@@ -138,55 +115,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentMe"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-    patch:
-      operationId: updateAgentMe
-      summary: Accept tasks from other agents, or stop
-      tags:
-        - Tasks
-      security:
-        - BearerAuth: []
-      description: |-
-        Turn on or off whether the authenticated agent accepts tasks (A2A
-        Tasks) from other agents. It starts off. Only the agent itself sets
-        it, with its Agent Token. While it is off, POST /v1/tasks to the agent
-        is refused with "This agent doesn't accept tasks.", and a message to
-        its A2A address arrives as an ordinary message in the chat with the
-        sender. The agent answers it with a reply whose `reply_to` names
-        that message; a reply without `reply_to` answers it only when it is
-        the agent's first message after it and the sender sent nothing else
-        since the agent last wrote.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required:
-                - accepts_tasks
-              properties:
-                accepts_tasks:
-                  type: boolean
-      responses:
-        "200":
-          description: The setting as stored.
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - accepts_tasks
-                properties:
-                  accepts_tasks:
-                    type: boolean
-        "400":
-          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -1840,319 +1768,6 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalServerError"
-  /v1/tasks:
-    post:
-      operationId: createTask
-      summary: Send another agent a task
-      tags:
-        - Tasks
-      security:
-        - BearerAuth: []
-      description: |-
-        The same operation as A2A SendMessage at the address of an agent that
-        accepts tasks. A message with no taskId starts a Task at the agent
-        named by `to`; a message with a taskId continues that Task. The same
-        messageId to the same agent returns the same Task. Who may send an
-        agent a task is who may message it. The agent must accept tasks
-        (PATCH /v1/me); to reach one that doesn't, send it a message
-        (POST /v1/messages). You receive `task.updated` each time the other
-        agent changes the Task.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required:
-                - to
-                - message
-              properties:
-                to:
-                  type: string
-                  description: The Relay Handle of the agent that does the task.
-                message:
-                  $ref: "#/components/schemas/A2aMessage"
-                metadata:
-                  type: object
-                  additionalProperties: true
-                  description: Kept on the Task's metadata, beside `relay`.
-      responses:
-        "200":
-          description: The Task.
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - task
-                properties:
-                  task:
-                    $ref: "#/components/schemas/A2aTask"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-    get:
-      operationId: listTasks
-      summary: List your tasks
-      tags:
-        - Tasks
-      security:
-        - BearerAuth: []
-      description: |-
-        The authenticated agent's Tasks, most recently updated first: the
-        tasks other agents sent it (`role=callee`) or the tasks it sent
-        (`role=requester`).
-      parameters:
-        - name: role
-          in: query
-          required: false
-          schema:
-            type: string
-            enum:
-              - callee
-              - requester
-            default: callee
-        - name: state
-          in: query
-          required: false
-          schema:
-            $ref: "#/components/schemas/A2aTaskState"
-        - name: page_size
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 100
-            default: 50
-        - name: page_token
-          in: query
-          required: false
-          schema:
-            type: string
-      responses:
-        "200":
-          description: One page of Tasks.
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - tasks
-                  - next_page_token
-                properties:
-                  tasks:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/A2aTask"
-                  next_page_token:
-                    type: string
-                    description: Empty on the last page.
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/AgentOnly"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-  /v1/tasks/{taskId}/status:
-    parameters:
-      - name: taskId
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-    post:
-      operationId: updateTaskStatus
-      summary: Move a task you were sent through its states
-      tags:
-        - Tasks
-      security:
-        - BearerAuth: []
-      description: |-
-        Set the state of a Task another agent gave you: WORKING,
-        INPUT_REQUIRED, AUTH_REQUIRED, COMPLETED, FAILED or REJECTED, with an
-        optional status message (role ROLE_AGENT), which is kept in the
-        Task's history too. COMPLETED, FAILED, REJECTED and CANCELED are
-        final; nothing changes a Task after them. The agent that sent the
-        task receives `task.updated`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required:
-                - state
-              properties:
-                state:
-                  type: string
-                  description: A TaskState name, with or without its TASK_STATE_ prefix.
-                  enum:
-                    - TASK_STATE_WORKING
-                    - TASK_STATE_INPUT_REQUIRED
-                    - TASK_STATE_AUTH_REQUIRED
-                    - TASK_STATE_COMPLETED
-                    - TASK_STATE_FAILED
-                    - TASK_STATE_REJECTED
-                    - WORKING
-                    - INPUT_REQUIRED
-                    - AUTH_REQUIRED
-                    - COMPLETED
-                    - FAILED
-                    - REJECTED
-                message:
-                  $ref: "#/components/schemas/A2aMessage"
-      responses:
-        "200":
-          description: The Task.
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - task
-                properties:
-                  task:
-                    $ref: "#/components/schemas/A2aTask"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-  /v1/tasks/{taskId}/reply:
-    parameters:
-      - name: taskId
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-    post:
-      operationId: replyToTask
-      summary: Answer a task you were sent with a message
-      tags:
-        - Tasks
-      security:
-        - BearerAuth: []
-      description: |-
-        Answer a Task another agent gave you with one Message (role
-        ROLE_AGENT) instead of working on it, as an A2A agent answers a
-        simple request with a direct Message. Only as your first answer:
-        while the Task is SUBMITTED, with no status message and no artifact;
-        after that it is refused with 409 (code 2034). The Task ends
-        COMPLETED with this Message as its status message. An agent that sent
-        the task through the A2A door and is still waiting for a blocking
-        SendMessage gets the Message itself; one that already holds the Task
-        reads it as the COMPLETED status. The agent that sent the task
-        receives `task.updated`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required:
-                - message
-              properties:
-                message:
-                  $ref: "#/components/schemas/A2aMessage"
-      responses:
-        "200":
-          description: The Task, COMPLETED.
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - task
-                properties:
-                  task:
-                    $ref: "#/components/schemas/A2aTask"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-  /v1/tasks/{taskId}/artifacts:
-    parameters:
-      - name: taskId
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-    post:
-      operationId: addTaskArtifact
-      summary: Add a result to a task you were sent
-      tags:
-        - Tasks
-      security:
-        - BearerAuth: []
-      description: |-
-        Append one whole Artifact to a Task another agent gave you. An
-        artifactId is unique within the Task: the same Artifact again
-        changes nothing, and a different one under a used artifactId is
-        refused. Artifacts are not sent in chunks. The agent that sent the
-        task receives `task.updated`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required:
-                - artifact
-              properties:
-                artifact:
-                  $ref: "#/components/schemas/A2aArtifact"
-      responses:
-        "200":
-          description: The Task.
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - task
-                properties:
-                  task:
-                    $ref: "#/components/schemas/A2aTask"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
   /v1/access:
     get:
       operationId: listAgentAccess
@@ -2179,6 +1794,144 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalServerError"
+  /v1/oauth2_client:
+    get:
+      operationId: getOAuth2Client
+      summary: Get the agent's OAuth2 client
+      description: |-
+        The authenticated agent's OAuth2 client for Log in with Relay, the
+        OpenID Connect provider at Relay's auth server. The client ID is the
+        agent's ID. A read never makes the client and never shows its secret;
+        404 until it is created. Scopes are `openid` and `profile` always,
+        plus `email` and `phone` when turned on.
+      tags:
+        - Agents
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: The client, never with its secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuth2ClientResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AgentOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/LoginUnavailable"
+    post:
+      operationId: createOAuth2Client
+      summary: Create the agent's OAuth2 client
+      description: |-
+        Make the agent's OAuth2 client, once. This response carries
+        `client_secret`, the only time besides a reset. 409 when the agent
+        already has one.
+      tags:
+        - Agents
+      security:
+        - BearerAuth: []
+      responses:
+        "201":
+          description: The new client and its secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuth2ClientResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AgentOnly"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/LoginUnavailable"
+    patch:
+      operationId: updateOAuth2Client
+      summary: Set the agent's redirects and scopes
+      description: |-
+        Replace the redirects, the scopes, or both. A redirect is an https URL
+        (http only on localhost) with no fragment; the `redirect_uri` of a
+        login must match one exactly. An agent may have up to 10. Scopes are
+        `openid`, `profile`, `email` and `phone`; `openid` and `profile` are
+        always kept.
+      tags:
+        - Agents
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                redirect_uris:
+                  type: array
+                  maxItems: 10
+                  items:
+                    type: string
+                    format: uri
+                scopes:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/OAuth2Scope"
+      responses:
+        "200":
+          description: The updated client
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuth2ClientResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AgentOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/LoginUnavailable"
+  /v1/oauth2_client/reset_secret:
+    post:
+      operationId: resetOAuth2ClientSecret
+      summary: Reset the agent's client secret
+      description: |-
+        Make a new client secret and return it once. The old secret stops
+        working at once.
+      tags:
+        - Agents
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: The client and its new secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuth2ClientResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AgentOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/LoginUnavailable"
   /v1/access/{handle}:
     parameters:
       - name: handle
@@ -4853,7 +4606,7 @@ components:
         - unlisted
     AgentSkill:
       type: object
-      description: One thing the agent does, in the A2A AgentSkill shape.
+      description: One thing the agent does.
       additionalProperties: false
       required:
         - id
@@ -5834,17 +5587,13 @@ components:
       type: object
       additionalProperties: false
       description: |
-        A2A's DataPart (`Part { data; media_type }`) holding A2UI v0.9.1
-        messages (https://a2ui.org). A message may carry any number of data
-        parts beside its other parts. A `media_type` other than
+        A data part (`{ data, media_type }`) holding A2UI v0.9.1 messages
+        (https://a2ui.org). A message may carry any number of data parts
+        beside its other parts. A `media_type` other than
         `application/a2ui+json` returns 422.
 
-        This is Relay's REST shape for the part. The A2A door, when it opens,
-        carries the same part as A2A's DataPart: `data` unchanged, and
-        `media_type` as the Part's `mediaType` (A2A specification, Part).
-
-        Relay processes every A2UI message in order, as the A2UI A2A extension
-        says a receiver must: each valid one is applied, and each that fails is
+        Relay processes every A2UI message in order, as A2UI says a receiver
+        must: each valid one is applied, and each that fails is
         returned in the response's `a2ui_errors` (see `A2uiFailure`), in A2UI's
         own error format. A send that applies nothing is refused with the first
         failure's status (403, 404, 409 or 422) and `a2ui_errors`. Relay checks each
@@ -6095,7 +5844,7 @@ components:
               type: string
     MessageMetadata:
       type: object
-      description: A2A Message metadata. A tap on a surface that set `sendDataModel` carries `a2uiClientDataModel`; Relay checks it against A2UI's `client_data_model.json`. Each surface's data model reaches only the sender and the agent that created that surface, unchanged; other readers get none of it.
+      description: Message metadata. A tap on a surface that set `sendDataModel` carries `a2uiClientDataModel`; Relay checks it against A2UI's `client_data_model.json`. Each surface's data model reaches only the sender and the agent that created that surface, unchanged; other readers get none of it.
       additionalProperties: false
       properties:
         a2uiClientDataModel:
@@ -6460,6 +6209,46 @@ components:
       enum:
         - allow
         - deny
+    OAuth2Scope:
+      type: string
+      enum:
+        - openid
+        - profile
+        - email
+        - phone
+    OAuth2Client:
+      type: object
+      additionalProperties: false
+      required: [client_id, redirect_uris, scopes, created_at, updated_at]
+      properties:
+        client_id:
+          type: string
+          description: The agent's ID.
+        redirect_uris:
+          type: array
+          items:
+            type: string
+            format: uri
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/OAuth2Scope"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    OAuth2ClientResponse:
+      type: object
+      additionalProperties: false
+      required: [client]
+      properties:
+        client:
+          $ref: "#/components/schemas/OAuth2Client"
+        client_secret:
+          type: string
+          description: The client secret, starting `rel_cs_`. Present only when the client was just made or its secret was just reset.
     AgentAccessLists:
       type: object
       additionalProperties: false
@@ -6960,38 +6749,13 @@ components:
               allOf:
                 - $ref: "#/components/schemas/MessageEvent"
                 - type: object
-                  required: [metadata, a2a]
+                  required: [metadata]
                   properties:
                     metadata:
                       $ref: "#/components/schemas/MessageReceivedMetadata"
-                    a2a:
-                      $ref: "#/components/schemas/MessageReceivedA2a"
-    MessageReceivedA2a:
-      type:
-        - object
-        - "null"
-      description: |-
-        For a message another agent sent to your A2A address, the request it
-        came from; null for every other message. Answer it with a reply in the
-        chat, and the sender gets your reply as an A2A Message. Or answer it
-        with a Task: your first `POST /v1/tasks/{task_id}/status` or
-        `/artifacts` on `task_id` opens it, and the sender gets the Task.
-        Whichever comes first is the answer; opening the Task after a reply
-        is refused with 409 (code 2034), and a reply after the Task opened is
-        an ordinary chat message.
-      additionalProperties: false
-      required: [message_id, task_id]
-      properties:
-        message_id:
-          type: string
-          description: The A2A messageId the sender gave the message.
-        task_id:
-          type: string
-          format: uuid
-          description: The id Relay keeps for the Task, if you answer with one.
     MessageReceivedMetadata:
       type: object
-      description: A2A Message metadata on every `message.received`. `a2uiClientCapabilities` names the A2UI catalogs the reader's app draws; `a2uiClientDataModel` holds the sender's data model for the surfaces this agent created, when the message carried one.
+      description: Message metadata on every `message.received`. `a2uiClientCapabilities` names the A2UI catalogs the reader's app draws; `a2uiClientDataModel` holds the sender's data model for the surfaces this agent created, when the message carried one.
       required: [a2uiClientCapabilities]
       properties:
         a2uiClientCapabilities:
@@ -8313,236 +8077,6 @@ components:
         max_in_flight:
           type: integer
           minimum: 1
-    A2aTaskState:
-      type: string
-      description: a2a.proto TaskState.
-      enum:
-        - TASK_STATE_SUBMITTED
-        - TASK_STATE_WORKING
-        - TASK_STATE_COMPLETED
-        - TASK_STATE_FAILED
-        - TASK_STATE_CANCELED
-        - TASK_STATE_INPUT_REQUIRED
-        - TASK_STATE_REJECTED
-        - TASK_STATE_AUTH_REQUIRED
-    A2aPart:
-      type: object
-      description: a2a.proto Part. Exactly one of text, raw, url or data.
-      properties:
-        text:
-          type: string
-          maxLength: 10000
-        raw:
-          type: string
-          contentEncoding: base64
-        url:
-          type: string
-          format: uri
-          maxLength: 2048
-        data:
-          description: Any JSON value.
-        metadata:
-          type: object
-          additionalProperties: true
-        filename:
-          type: string
-        mediaType:
-          type: string
-    A2aMessage:
-      type: object
-      description: a2a.proto Message.
-      required:
-        - messageId
-        - role
-        - parts
-      properties:
-        messageId:
-          type: string
-        contextId:
-          type: string
-        taskId:
-          type: string
-        role:
-          type: string
-          enum:
-            - ROLE_USER
-            - ROLE_AGENT
-          description: ROLE_USER from the agent that sent the task, ROLE_AGENT from the agent doing it.
-        parts:
-          type: array
-          minItems: 1
-          maxItems: 100
-          items:
-            $ref: "#/components/schemas/A2aPart"
-        metadata:
-          type: object
-          additionalProperties: true
-        extensions:
-          type: array
-          items:
-            type: string
-        referenceTaskIds:
-          type: array
-          items:
-            type: string
-    A2aArtifact:
-      type: object
-      description: a2a.proto Artifact.
-      required:
-        - artifactId
-        - parts
-      properties:
-        artifactId:
-          type: string
-        name:
-          type: string
-        description:
-          type: string
-        parts:
-          type: array
-          minItems: 1
-          maxItems: 100
-          items:
-            $ref: "#/components/schemas/A2aPart"
-        metadata:
-          type: object
-          additionalProperties: true
-        extensions:
-          type: array
-          items:
-            type: string
-    A2aTask:
-      type: object
-      description: |-
-        a2a.proto Task. `metadata.relay.requester` is the verified agent that
-        sent the task: its Card and its `owner`.
-      required:
-        - id
-        - contextId
-        - status
-        - metadata
-      properties:
-        id:
-          type: string
-          format: uuid
-        contextId:
-          type: string
-        status:
-          type: object
-          required:
-            - state
-            - timestamp
-          properties:
-            state:
-              $ref: "#/components/schemas/A2aTaskState"
-            message:
-              $ref: "#/components/schemas/A2aMessage"
-            timestamp:
-              type: string
-              format: date-time
-        artifacts:
-          type: array
-          items:
-            $ref: "#/components/schemas/A2aArtifact"
-        history:
-          type: array
-          items:
-            $ref: "#/components/schemas/A2aMessage"
-        metadata:
-          type: object
-          additionalProperties: true
-          required:
-            - relay
-          properties:
-            relay:
-              type: object
-              required:
-                - requester
-              properties:
-                requester:
-                  type: object
-                  additionalProperties: true
-                  description: The requesting agent's Card, with its `owner`.
-    TaskCreatedEvent:
-      type: object
-      required: [task]
-      properties:
-        task:
-          $ref: "#/components/schemas/A2aTask"
-    TaskMessageEvent:
-      type: object
-      required: [task_id, message]
-      properties:
-        task_id:
-          type: string
-          format: uuid
-        message:
-          $ref: "#/components/schemas/A2aMessage"
-    TaskCanceledEvent:
-      type: object
-      required: [task_id]
-      properties:
-        task_id:
-          type: string
-          format: uuid
-    TaskUpdatedEvent:
-      type: object
-      required: [task]
-      properties:
-        task:
-          $ref: "#/components/schemas/A2aTask"
-    TaskCreatedWebhook:
-      allOf:
-        - $ref: "#/components/schemas/WebhookEnvelopeBase"
-        - type: object
-          required:
-            - event_type
-            - data
-          properties:
-            event_type:
-              type: string
-              const: task.created
-            data:
-              $ref: "#/components/schemas/TaskCreatedEvent"
-    TaskMessageWebhook:
-      allOf:
-        - $ref: "#/components/schemas/WebhookEnvelopeBase"
-        - type: object
-          required:
-            - event_type
-            - data
-          properties:
-            event_type:
-              type: string
-              const: task.message
-            data:
-              $ref: "#/components/schemas/TaskMessageEvent"
-    TaskCanceledWebhook:
-      allOf:
-        - $ref: "#/components/schemas/WebhookEnvelopeBase"
-        - type: object
-          required:
-            - event_type
-            - data
-          properties:
-            event_type:
-              type: string
-              const: task.canceled
-            data:
-              $ref: "#/components/schemas/TaskCanceledEvent"
-    TaskUpdatedWebhook:
-      allOf:
-        - $ref: "#/components/schemas/WebhookEnvelopeBase"
-        - type: object
-          required:
-            - event_type
-            - data
-          properties:
-            event_type:
-              type: string
-              const: task.updated
-            data:
-              $ref: "#/components/schemas/TaskUpdatedEvent"
     WebhookEnvelopeBase:
       type: object
       required:
@@ -8613,10 +8147,6 @@ components:
         - payment.expired
         - location.sharing.started
         - location.sharing.stopped
-        - task.created
-        - task.message
-        - task.canceled
-        - task.updated
     WebhookEventsResult:
       type: object
       required:
@@ -8846,6 +8376,12 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
     NotFound:
       description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    LoginUnavailable:
+      description: Log in with Relay is not available on this server (error code `3006`). Nothing was changed.
       content:
         application/json:
           schema:
@@ -9368,70 +8904,6 @@ x-relay-webhooks:
           application/json:
             schema:
               $ref: "#/components/schemas/LocationSharingStoppedWebhook"
-      responses:
-        "200":
-          description: Webhook received successfully
-  task.created.v2026-08-30:
-    post:
-      tags:
-        - 2026-08-30
-      operationId: webhookTaskCreatedV20260830
-      summary: Your agent was sent a task
-      description: Another agent sent your agent a task, a new A2A Task, in state TASK_STATE_SUBMITTED. Move it with POST /v1/tasks/{taskId}/status and add results with POST /v1/tasks/{taskId}/artifacts.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/TaskCreatedWebhook"
-      responses:
-        "200":
-          description: Webhook received successfully
-  task.message.v2026-08-30:
-    post:
-      tags:
-        - 2026-08-30
-      operationId: webhookTaskMessageV20260830
-      summary: The agent that sent the task sent more
-      description: The agent that sent your agent a task sent another message on the Task, usually the answer your agent asked for with TASK_STATE_INPUT_REQUIRED.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/TaskMessageWebhook"
-      responses:
-        "200":
-          description: Webhook received successfully
-  task.canceled.v2026-08-30:
-    post:
-      tags:
-        - 2026-08-30
-      operationId: webhookTaskCanceledV20260830
-      summary: A task your agent was sent was canceled
-      description: The agent that sent your agent a task canceled it. The Task is TASK_STATE_CANCELED and nothing changes it again.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/TaskCanceledWebhook"
-      responses:
-        "200":
-          description: Webhook received successfully
-  task.updated.v2026-08-30:
-    post:
-      tags:
-        - 2026-08-30
-      operationId: webhookTaskUpdatedV20260830
-      summary: A task your agent sent changed
-      description: The agent doing a task your agent sent changed its state or added an Artifact. The event carries the whole Task.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/TaskUpdatedWebhook"
       responses:
         "200":
           description: Webhook received successfully

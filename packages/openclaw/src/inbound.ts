@@ -80,9 +80,8 @@ export function buildRelayInboundFacts(
   const selection = selectionReply(event.data.parts, event.data.reply_to);
   const fromAgent = event.data.sender_handle.kind === "agent";
   // Another agent's Message is named by the answer, as Relay's CLI bridges
-  // do (packages/cli/src/bridge-turn.ts, PR 366): Relay's A2A door gives a
-  // calling agent only the answer whose reply_to names its Message
-  // (Relay-Server a2a.ts replyTo). A Message that opens with buttons or a
+  // do (packages/cli/src/bridge-turn.ts, PR 366), so an agent that sent
+  // several knows which one is answered. A Message that opens with buttons or a
   // selection is not named: an agent may not reply to those parts, and a
   // reply names part 0.
   const opening = event.data.parts[0]?.type;

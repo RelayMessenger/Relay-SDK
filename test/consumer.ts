@@ -215,10 +215,6 @@ RELAY_WEBHOOK_EVENT_TYPES satisfies readonly [
   "payment.expired",
   "location.sharing.started",
   "location.sharing.stopped",
-  "task.created",
-  "task.message",
-  "task.canceled",
-  "task.updated",
 ];
 
 // Compile-only payment request exercise: create, then send its checkout_url.
@@ -304,22 +300,15 @@ relay.responding;
 relay.messages.poll;
 // @ts-expect-error Socket Mode is not Relay vocabulary.
 relay.socketMode;
-// An agent's own settings are only whether it accepts tasks.
-await relay.me.update({ accepts_tasks: true });
 // GET /v1/me says whether this server takes Calls (AgentMe.calls_enabled).
 const callsEnabled: boolean = (await relay.me.retrieve()).calls_enabled;
 void callsEnabled;
-// tasks.send answers a Task or a Message, as @a2a-js/sdk's sendMessage does.
-const answered = await relay.tasks.send({
-  to: "relay",
-  message: { messageId: "hello-relay-1", role: "ROLE_USER", parts: [{ text: "What can you do?" }] },
-});
-if ("messageId" in answered) answered.parts[0]?.text satisfies string | undefined;
-else answered.status.state satisfies string;
-// @ts-expect-error The answer may be a Message, which has no status.
-answered.status;
 // @ts-expect-error Communities were removed (2026-09-30).
 relay.communities;
+// @ts-expect-error A2A and tasks were removed (2026-09-30): agents message each other.
+relay.tasks;
+// @ts-expect-error An agent has no settings of its own to update.
+await relay.me.update({ accepts_tasks: true });
 // @ts-expect-error Person settings remain outside the public SDK contract.
 await relay.me.update({ message_requests_from: "everyone" });
 // @ts-expect-error The public Contact Card update has no agent admission field.
