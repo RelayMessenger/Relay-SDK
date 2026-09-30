@@ -1,14 +1,14 @@
 {
   "source": "contracts/relay-v1-openapi.yaml",
-  "source_openapi_sha256": "0711806487853a7962d5f85e35895244019411fb6b6436a37d250a604e05969c",
+  "source_openapi_sha256": "03401ad4100efb4d7ec26eddfa81097472afa6f8e4653ddc00c64bbd503182e1",
   "upstream": {
     "repository": "https://github.com/RelayMessenger/Relay-Server.git",
-    "commit": "b4478d218d71b1f0c2bdcc0a90de37503a03ea7c",
+    "commit": "fd609e3ec6a57216eb694c7bf091e880dafaade6",
     "path": "contracts/developer/openapi.yaml",
-    "sha256": "0711806487853a7962d5f85e35895244019411fb6b6436a37d250a604e05969c"
+    "sha256": "03401ad4100efb4d7ec26eddfa81097472afa6f8e4653ddc00c64bbd503182e1"
   },
-  "source_path_count": 44,
-  "source_schema_count": 223,
+  "source_path_count": 46,
+  "source_schema_count": 226,
   "callback_count": 28,
   "transport_decision": {
     "source": "contracts/agent-transport-decision.md",
@@ -19,8 +19,8 @@
       "path": "research/relay-rebuild-20260828/TRANSPORT-DECISION-20260829.md"
     }
   },
-  "path_count": 38,
-  "operation_count": 57,
+  "path_count": 40,
+  "operation_count": 61,
   "operations": [
     {
       "method": "DELETE",
@@ -226,6 +226,26 @@
       "method": "GET",
       "path": "/v1/access",
       "operationId": "listAgentAccess"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/oauth2_client",
+      "operationId": "getOAuth2Client"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/oauth2_client",
+      "operationId": "createOAuth2Client"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/oauth2_client",
+      "operationId": "updateOAuth2Client"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/oauth2_client/reset_secret",
+      "operationId": "resetOAuth2ClientSecret"
     },
     {
       "method": "PUT",
