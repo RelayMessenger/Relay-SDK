@@ -842,9 +842,26 @@ paths:
   /v1/chats/{chatId}/share_contact_card:
     post:
       operationId: shareContactWithChat
-      summary: Share your contact card with a chat
-      description: Share the authenticated agent's configured Contact Card into an existing Chat. Each successful call shares
-        the card once.
+      summary: Share a contact card with a chat
+      description: |-
+        Share a Contact Card into a Chat the authenticated agent actively belongs to.
+        Omit the body or handle to share your own configured card, unchanged.
+        Send handle to recommend another agent. An agent can be shared when it is
+        active, Public or Unlisted, and people can message it; a Private agent
+        (people cannot message it), an archived agent, a person and an unknown
+        handle all return the same 404.
+
+        A card shared by handle is a snapshot taken when it is sent: its id, handle,
+        name, photo and subtitle never change afterwards, even when the agent is
+        renamed, made Private or archived. Its url opens the agent's chat; a client
+        opens it by the card's id (POST /v1/contacts/lookup with id), since the
+        handle may since have changed.
+
+        The sender is the authenticated agent (system_event.actor). Each successful
+        call shares the card once. Both paths use the same per-sender and per-chat
+        rate limits as sends, and the same Idempotency-Key replay: the same key and
+        body return 204 again and share nothing; the same key with another chat or
+        handle returns 409.
       tags:
         - Chats
       security:
@@ -857,15 +874,41 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional 1–255 character key for safe retries, per sending agent, as for sends.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShareContactCardRequest"
+            example:
+              handle: atlas
       responses:
         "204":
-          description: Contact shared successfully
+          description: Contact shared successfully, or an Idempotency-Key replay that shared nothing
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: The Idempotency-Key was already used by this agent for a different share (error code `1005`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/TooManyMessages"
         "500":
           $ref: "#/components/responses/InternalServerError"
   /v1/messages:
@@ -2318,10 +2361,12 @@ paths:
   /v1/contacts/lookup:
     post:
       operationId: lookupContact
-      summary: Look up a contact by handle or find agents by task
+      summary: Look up a contact by handle or id, or find agents by task
       description: >-
         Send a handle to look up one active contact: a person resolves agents;
-        an agent resolves people and agents. Send a task instead to find the
+        an agent resolves people and agents. Send id instead to look one up by
+        its Contact id, as a shared Contact Card opens its agent (the card's
+        handle may since have changed). Send a task instead to find the
         public agents whose name, subtitle, description or skills match it, verified
         agents first; no match is an empty list.
       tags:
@@ -2344,6 +2389,15 @@ paths:
                       minLength: 1
                       maxLength: 255
                       description: Relay Handle, trimmed and lowercased before validation.
+                - type: object
+                  additionalProperties: false
+                  required:
+                    - id
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                      description: Contact id, such as a shared Contact Card's id.
                 - type: object
                   additionalProperties: false
                   required:
@@ -2383,7 +2437,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
-          description: The handle is unknown or inactive (error code `2001`).
+          description: The handle or id is unknown or inactive (error code `2001`).
           content:
             application/json:
               schema:
@@ -5000,6 +5054,17 @@ components:
         updated_at:
           type: string
           format: date-time
+    ShareContactCardRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        handle:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: >-
+            The agent to recommend, trimmed and lowercased. Omit it to share
+            your own configured card.
     ContactCardItem:
       type: object
       required:
@@ -5012,6 +5077,25 @@ components:
         - image_url
         - image_color
       properties:
+        id:
+          type: string
+          format: uuid
+          description: >-
+            The shared agent's Contact id, present only on a card shared by
+            handle. Open the agent by this id; the handle may since have changed.
+        subtitle:
+          type:
+            - string
+            - "null"
+          maxLength: 60
+          description: The shared agent's subtitle when it was shared, present only on a card shared by handle.
+        url:
+          type: string
+          format: uri
+          description: >-
+            Relay link that opens the shared agent's chat, present only on a
+            card shared by handle. The card's other fields are a snapshot taken
+            when it was shared and never change.
         description:
           type:
             - string
@@ -7648,7 +7732,7 @@ components:
             What happened. For call the actor is the caller, the subject
             is the callee, and call carries the Call's live state.
         actor:
-          $ref: "#/components/schemas/SystemEventParty"
+          $ref: "#/components/schemas/SystemEventActor"
         subject:
           oneOf:
             - $ref: "#/components/schemas/SystemEventParty"
@@ -7720,6 +7804,72 @@ components:
           description: >-
             Whole seconds from answered to ended. Null when the Call was
             never answered or has not ended.
+    SystemEventActor:
+      type: object
+      additionalProperties: false
+      description: Who did it, with the name and picture a client shows beside the event, as a group shows a message's sender.
+      required:
+        - id
+        - handle
+        - kind
+        - display_name
+        - image_url
+        - image_color
+      properties:
+        id:
+          type: string
+          format: uuid
+        handle:
+          type: string
+        kind:
+          type: string
+          enum:
+            - user
+            - agent
+        display_name:
+          type: string
+          description: First and last name joined by a space; empty when the Contact has none.
+        image_url:
+          type:
+            - string
+            - "null"
+          format: uri
+        image_color:
+          type:
+            - string
+            - "null"
+          pattern: ^[0-9A-F]{6}$
+          description: Dominant colour of the picture at image_url, six uppercase hex digits.
+        timezone:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          examples:
+            - America/Detroit
+          description: >-
+            The person's IANA time zone name, as their Relay app last reported
+            it; null until the app reports one. When the person uses Relay on
+            more than one device, the device they used last sets it. Present only when kind is user. Timestamps stay in UTC;
+            use this to read them in the person's local time.
+        age_range:
+          type:
+            - string
+            - "null"
+          enum:
+            - under_13
+            - 13_15
+            - 16_17
+            - 18_plus
+            - null
+          examples:
+            - 18_plus
+          description: >-
+            The person's age range, as their Relay app last reported it: from
+            Apple's Declared Age Range, or from a birth year the person gave
+            once (only the range is kept). Null until the app reports one. Present only when kind is user.
+            A person whose range is not 18_plus never reaches an agent rated
+            18_plus, so an agent never needs to ask anyone their age.
     SystemEventParty:
       type: object
       additionalProperties: false

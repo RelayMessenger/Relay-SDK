@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import type { RelayMediaStreamTrackLike, RelayPeerConnectionLike } from "../../src/calls/transport.js";
 import { createWeriftWebRTCFactory } from "../../src/calls/engine-werift.js";
+import { waitForConnected } from "./wait-for-connected.js";
 import { H264_ENCODER_CODEC, WeriftVideoSender } from "../../src/calls/engine-werift-video.js";
 import { defaultVideoEncoding } from "../../src/calls/video-presets.js";
 import {
@@ -128,16 +129,6 @@ const waitForIce = (peer: RelayPeerConnectionLike): Promise<void> =>
     peer.addEventListener("icegatheringstatechange", changed);
   });
 
-const waitForConnected = (peer: RelayPeerConnectionLike): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`peer stuck in ${peer.connectionState}`)), 10_000);
-    peer.onconnectionstatechange = () => {
-      if (peer.connectionState !== "connected") return;
-      clearTimeout(timer);
-      resolve();
-    };
-  });
-
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The H.264 SPS NAL units in one RTP payload: a single NAL unit or a STAP-A (RFC 6184 sections 5.6-5.7). */
@@ -168,7 +159,7 @@ it.runIf(VIDEO_BUILD)("sends 1920x1080 H.264 at level 4.0 over werift, offered a
   const remote = new Promise<{ track: RelayMediaStreamTrackLike; transceiver: unknown }>((resolve) => {
     b.ontrack = (event) => resolve({ track: event.track, transceiver: event.transceiver });
   });
-  const connected = Promise.all([waitForConnected(a), waitForConnected(b)]);
+  const watches = [waitForConnected(a), waitForConnected(b)];
   await a.setLocalDescription(await a.createOffer());
   await waitForIce(a);
   const offer = a.localDescription!.sdp;
@@ -176,7 +167,7 @@ it.runIf(VIDEO_BUILD)("sends 1920x1080 H.264 at level 4.0 over werift, offered a
   await b.setLocalDescription(await b.createAnswer());
   await waitForIce(b);
   await a.setRemoteDescription({ type: "answer", sdp: b.localDescription!.sdp });
-  await connected;
+  await Promise.all(watches.map((watch) => watch.within()));
 
   const pulled = await remote;
   const levels = new Set<string>();

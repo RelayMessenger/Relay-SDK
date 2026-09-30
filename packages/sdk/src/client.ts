@@ -29,6 +29,8 @@ import type {
   ChatSendVoicememoParams,
   ChatSendVoicememoResponse,
   ChatSetActivityParams,
+  ChatShareContactCardOptions,
+  ChatShareContactCardParams,
   ChatUpdateParams,
   ChatUpdateResponse,
   ContactCardItem,
@@ -38,6 +40,8 @@ import type {
   ContactCardUpdateParams,
   ContactLookupParams,
   ContactLookupResponse,
+  DirectorySearchParams,
+  DirectorySearchResponse,
   GetChatLocationResponse,
   LocationRequestResponse,
   Message,
@@ -516,11 +520,24 @@ export class Chats {
     });
   }
 
-  shareContactCard(chatID: string, options?: RequestOptions): Promise<void> {
+  // Preserve the original request-options second argument.
+  shareContactCard(chatID: string, options?: ChatShareContactCardOptions): Promise<void>;
+  shareContactCard(chatID: string, body?: ChatShareContactCardParams, options?: ChatShareContactCardOptions): Promise<void>;
+  shareContactCard(
+    chatID: string,
+    bodyOrOptions: ChatShareContactCardParams & ChatShareContactCardOptions = {},
+    options?: ChatShareContactCardOptions,
+  ): Promise<void> {
+    const { handle } = bodyOrOptions;
+    // The legacy form's object is passed through untouched: its options may be getters.
+    const requestOptions = options ?? (handle === undefined ? bodyOrOptions : undefined);
+    const idempotencyKey = requestOptions?.idempotencyKey;
     return this.transport.request({
       method: "POST",
       path: `/v1/chats/${pathID(chatID)}/share_contact_card`,
-      options,
+      ...(handle === undefined ? {} : { body: { handle } }),
+      options: requestOptions,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     });
   }
 
@@ -757,6 +774,19 @@ export class WebhookSubscriptions {
     return this.transport.request({
       method: "DELETE",
       path: `/v1/webhook-subscriptions/${pathID(subscriptionID)}`,
+      options,
+    });
+  }
+}
+
+export class Directory {
+  constructor(private readonly transport: Transport) {}
+
+  search(query: DirectorySearchParams = {}, options?: RequestOptions): Promise<DirectorySearchResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/directory",
+      query,
       options,
     });
   }
@@ -1038,6 +1068,7 @@ export class Relay {
   readonly webhookSubscriptions: WebhookSubscriptions;
   readonly contactCard: ContactCard;
   readonly contacts: Contacts;
+  readonly directory: Directory;
   readonly blockedHandles: BlockedHandles;
   readonly me: Me;
   readonly oauth2Client: OAuth2Client;
@@ -1060,6 +1091,7 @@ export class Relay {
     this.webhookSubscriptions = new WebhookSubscriptions(transport);
     this.contactCard = new ContactCard(transport);
     this.contacts = new Contacts(transport);
+    this.directory = new Directory(transport);
     this.blockedHandles = new BlockedHandles(transport);
     this.me = new Me(transport);
     this.websocket = new WebSocket(transport);

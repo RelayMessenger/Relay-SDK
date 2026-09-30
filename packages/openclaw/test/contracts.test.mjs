@@ -72,9 +72,9 @@ test("pins the requested OpenClaw and current Relay SDK contracts", () => {
 test("binds Server, OpenAPI, and the exact SDK tarball integrity", () => {
   assert.deepEqual(contractLock.relayServer, {
     repository: "RelayMessenger/Relay-Server",
-    commit: "11d8b5820c2640a9790f72c01b4d3690b90b8fa4",
+    commit: "bf085edc35814d4c991f94e6b430aab5df3fd686",
     openapiPath: "contracts/developer/openapi.yaml",
-    sha256: "88ceae13cabfbbb2150ee133f3f41c14744d3c5aaaccd1aeaa416d0bd9e95cc0",
+    sha256: "baf2839ae8df9d1478f7a8c8457e99f54f4a1563c8439fc7ff05bb2492a7e6f4",
   });
   assert.equal(
     contractLock.relaySdk.workspaceOpenapiSha256,

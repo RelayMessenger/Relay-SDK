@@ -125,6 +125,10 @@ try {
   assert.doesNotMatch(packedTypes, /\bavatar_url\b/u);
   assert.doesNotMatch(packedTypes, /\btagline\b/u);
   assert.doesNotMatch(packedTypes, /\b(?:is_request|request_expires_at|request_sender_id)\??:/u);
+  assert.deepEqual(interfaceFields("DirectorySearchParams"), ["q", "category", "limit", "sort"]);
+  assert.deepEqual(interfaceFields("DirectorySearchResponse"), ["agents"]);
+  assert.deepEqual(interfaceFields("ChatShareContactCardParams"), ["handle"]);
+  for (const field of ["id", "subtitle", "url"]) assert.ok(interfaceFields("ContactCardItem").includes(field));
   assert.deepEqual(interfaceFields("ContactLookup"), [
     "id", "handle", "display_name", "kind", "image_url", "image_color", "verified",
     "name", "subtitle", "description", "category", "skills", "visibility", "creator",
@@ -163,7 +167,7 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 56);
+      assert.equal(RELAY_V1_OPERATIONS.length, 57);
       assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 24);
       const allowedOperations = new Set([
         "POST /v1/chats",
@@ -214,6 +218,7 @@ try {
         "PUT /v1/webhook-subscriptions/{subscriptionId}",
         "DELETE /v1/webhook-subscriptions/{subscriptionId}",
         "POST /v1/contacts/lookup",
+        "GET /v1/directory",
         "GET /v1/contact_card",
         "POST /v1/contact_card",
         "PATCH /v1/contact_card",
@@ -257,6 +262,7 @@ try {
           .filter((name) => name !== "constructor")
           .sort();
       assert.equal("createAgent" in Relay, false);
+      assert.deepEqual(methods(client.directory), ["search"]);
       assert.deepEqual(methods(client.access), ["list", "remove", "set"]);
       assert.deepEqual(methods(client.agents), ["delete"]);
       assert.deepEqual(methods(client.me), ["retrieve"]);
