@@ -211,6 +211,26 @@ export const RELAY_V1_OPERATIONS = [
     "operationId": "listAgentAccess"
   },
   {
+    "method": "GET",
+    "path": "/v1/oauth2_client",
+    "operationId": "getOAuth2Client"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/oauth2_client",
+    "operationId": "createOAuth2Client"
+  },
+  {
+    "method": "PATCH",
+    "path": "/v1/oauth2_client",
+    "operationId": "updateOAuth2Client"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/oauth2_client/reset_secret",
+    "operationId": "resetOAuth2ClientSecret"
+  },
+  {
     "method": "PUT",
     "path": "/v1/access/{handle}",
     "operationId": "setAgentAccess"

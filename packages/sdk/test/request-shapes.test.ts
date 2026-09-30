@@ -39,6 +39,7 @@ const responder = (calls: Captured[]) => async (
   );
   if (noContent) return new Response(null, { status: 204 });
   if (method === "POST" && url.pathname === "/v1/agents") return Response.json({}, { status: 201 });
+  if (method === "POST" && url.pathname === "/v1/oauth2_client") return Response.json({}, { status: 201 });
   if (method === "GET" && url.pathname === "/v1/chats") {
     return Response.json({ chats: [], next_cursor: null });
   }
@@ -215,6 +216,10 @@ describe("Relay v1 request shapes", () => {
       artifact: { artifactId: "result", parts: [{ text: "42" }] },
     });
     await client.access.list();
+    await client.oauth2Client.retrieve();
+    await client.oauth2Client.create();
+    await client.oauth2Client.update({ redirect_uris: ["https://site.test/cb"] });
+    await client.oauth2Client.resetSecret();
     await client.access.set("agent", { rule: "allow" });
     await client.access.remove("agent");
     await client.webhookEvents.list();
@@ -409,6 +414,7 @@ describe("Relay v1 request shapes", () => {
       "contacts",
       "me",
       "messages",
+      "oauth2Client",
       "paymentRequests",
       "tasks",
       "webhookEvents",
@@ -417,6 +423,7 @@ describe("Relay v1 request shapes", () => {
       "websocket",
     ]);
     expect(methods(client.access)).toEqual(["list", "remove", "set"]);
+    expect(methods(client.oauth2Client)).toEqual(["create", "resetSecret", "retrieve", "update"]);
     expect(methods(client.agents)).toEqual(["delete"]);
     expect(methods(client.me)).toEqual(["retrieve", "update"]);
     // Communities were removed (2026-09-30): the client has no way to reach them.

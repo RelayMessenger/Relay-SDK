@@ -161,7 +161,7 @@ try {
       import packageJSON from "@relaymessenger/sdk/package.json" with { type: "json" };
       assert.equal(packageJSON.name, "@relaymessenger/sdk");
       assert.equal(packageJSON.version, ${JSON.stringify(packageManifest.version)});
-      assert.equal(RELAY_V1_OPERATIONS.length, 57);
+      assert.equal(RELAY_V1_OPERATIONS.length, 61);
       assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
       const allowedOperations = new Set([
         "POST /v1/chats",
@@ -204,6 +204,10 @@ try {
         "POST /v1/tasks/{taskId}/reply",
         "POST /v1/tasks/{taskId}/artifacts",
         "GET /v1/access",
+        "GET /v1/oauth2_client",
+        "POST /v1/oauth2_client",
+        "PATCH /v1/oauth2_client",
+        "POST /v1/oauth2_client/reset_secret",
         "PUT /v1/access/{handle}",
         "DELETE /v1/access/{handle}",
         "GET /v1/webhook-events",
