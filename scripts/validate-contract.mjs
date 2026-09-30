@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "b4478d218d71b1f0c2bdcc0a90de37503a03ea7c", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "09567a091519b54b7b7ab1c64942327cb21f2634", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -53,10 +53,6 @@ const sourceOnlyOperations = [
   { method: "PUT", path: "/v1/contacts/{handle}/rating", operationId: "rateAgent" },
   { method: "DELETE", path: "/v1/contacts/{handle}/rating", operationId: "deleteAgentRating" },
   { method: "GET", path: "/v1/contacts/{handle}/ratings", operationId: "listAgentRatings" },
-  // POST /v1/tasks is the REST twin of A2A SendMessage; the SDK sends tasks
-  // at the agent's A2A address instead (tasks.send), through the official A2A
-  // client. Always and Never Allow (Server 00093564) is client.access.
-  { method: "POST", path: "/v1/tasks", operationId: "createTask" },
   // Server #467: a person's address-book counts, person token only; an agent
   // SDK has no caller for it.
   { method: "POST", path: "/v1/address_book/agent_counts", operationId: "countAgentsInAddressBook" },
@@ -64,7 +60,6 @@ const sourceOnlyOperations = [
 const allowedOperationSignatures = [
   "DELETE /v1/agents/{handle}",
   "GET /v1/me",
-  "PATCH /v1/me",
   "POST /v1/chats",
   "GET /v1/chats",
   "GET /v1/chats/{chatId}",
@@ -98,10 +93,6 @@ const allowedOperationSignatures = [
   "GET /v1/blocked_handles",
   "POST /v1/blocked_handles",
   "DELETE /v1/blocked_handles",
-  "GET /v1/tasks",
-  "POST /v1/tasks/{taskId}/status",
-  "POST /v1/tasks/{taskId}/reply",
-  "POST /v1/tasks/{taskId}/artifacts",
   "GET /v1/access",
   "PUT /v1/access/{handle}",
   "DELETE /v1/access/{handle}",
@@ -129,14 +120,14 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 57);
-assert.equal(manifest.path_count, 38);
-assert.equal(manifest.source_path_count, 44);
-assert.equal(manifest.source_schema_count, 223);
-assert.equal(manifest.callback_count, 28);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 38);
-assert.equal(operationJSON.length, 57);
-assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
+assert.equal(manifest.operation_count, 52);
+assert.equal(manifest.path_count, 34);
+assert.equal(manifest.source_path_count, 40);
+assert.equal(manifest.source_schema_count, 209);
+assert.equal(manifest.callback_count, 24);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 34);
+assert.equal(operationJSON.length, 52);
+assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 24);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
   true,
@@ -243,7 +234,6 @@ assert.deepEqual(Object.keys(client).sort(), [
   "me",
   "messages",
   "paymentRequests",
-  "tasks",
   "webhookEvents",
   "webhookSubscriptions",
   "webhooks",
@@ -252,10 +242,8 @@ assert.deepEqual(Object.keys(client).sort(), [
 assert.equal("createAgent" in Relay, false);
 assert.deepEqual(publicMethods(client.access), ["list", "remove", "set"]);
 assert.deepEqual(publicMethods(client.agents), ["delete"]);
-assert.deepEqual(publicMethods(client.me), ["retrieve", "update"]);
-assert.deepEqual(publicMethods(client.tasks), [
-  "addArtifact", "cancel", "get", "list", "reply", "send", "updateStatus",
-]);
+assert.deepEqual(publicMethods(client.me), ["retrieve"]);
+assert.equal("tasks" in client, false, "A2A and tasks were removed (Server PR 462).");
 assert.deepEqual(publicMethods(client.calls), [
   "create", "end", "list", "retrieve", "room",
 ]);
@@ -428,14 +416,14 @@ const validateOpenAPI = () => {
     assert.deepEqual(description.type, ["string", "null"]);
     assert.equal(description.maxLength, 2000);
   }
-  // /v1/me is the agent's own: GET reads its owner, PATCH sets only
-  // accepts_tasks. A person's message_requests_from stays out of the contract.
-  assert.deepEqual(Object.keys(document.paths["/v1/me"]), ["get", "patch"]);
-  const meBody = document.paths["/v1/me"].patch.requestBody.content["application/json"].schema;
-  assert.equal(meBody.additionalProperties, false);
-  assert.deepEqual(meBody.required, ["accepts_tasks"]);
-  assert.deepEqual(Object.keys(meBody.properties), ["accepts_tasks"]);
-  assert.match(declaredTypes, /accepts_tasks: boolean/u);
+  // /v1/me is the agent's own and read-only: GET reads its owner. A
+  // person's message_requests_from stays out of the contract.
+  assert.deepEqual(Object.keys(document.paths["/v1/me"]), ["get"]);
+  // A2A and tasks are removed (Server PR 462, owner ruling 2026-09-30): no
+  // task path, schema or event, no a2a field, and no declared type for them.
+  for (const path of Object.keys(document.paths)) assert.doesNotMatch(path, /\/v1\/tasks/u);
+  for (const name of Object.keys(document.components.schemas)) assert.doesNotMatch(name, /^(A2a|Task)/u);
+  assert.doesNotMatch(declaredTypes, /\bA2a|accepts_tasks|"task\.|\bTask[A-Z]|MessageReceivedA2a/u);
   // Communities are removed (Server add9a085, owner decision 2026-09-30),
   // after their feed (3972ba8a): no path, schema, event or declared type.
   for (const path of Object.keys(document.paths)) assert.doesNotMatch(path, /communit/iu);
@@ -524,6 +512,8 @@ const validateOpenAPI = () => {
     "name", "subtitle", "description", "category", "skills", "visibility", "creator",
     // Server 00093564: handle lookups say whether the caller may message now.
     "can_message",
+    // Server 461: a person's IANA time zone.
+    "timezone",
   ]);
   assert.equal(contactLookup.properties.can_message.type, "boolean");
   assert.match(declaredTypes, /can_message\?: boolean/u);
@@ -769,6 +759,8 @@ const validateOpenAPI = () => {
       "verified",
       // Server 972cde2e: an agent's handle names its owner.
       "owner",
+      // Server 461: a person's IANA time zone.
+      "timezone",
       "is_contact",
       "activity_version",
       "activity",
@@ -911,8 +903,10 @@ const validateOpenAPI = () => {
   );
   assert.deepEqual(
     document.components.schemas.ContactEventContact.required,
-    ["id", "handle", "display_name"],
+    // Server 461: a person's IANA time zone, required on the contact event.
+    ["id", "handle", "display_name", "timezone"],
   );
+  assert.match(declaredTypes, /timezone: string \| null;/u);
   assert.equal(
     document["x-relay-webhooks"]["contact.added.v2026-08-30"].post
       .requestBody.content["application/json"].schema.$ref,

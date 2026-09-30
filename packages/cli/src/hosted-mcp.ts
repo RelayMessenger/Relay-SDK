@@ -39,11 +39,11 @@ export const AGENT_TOKEN_ENV = "RELAY_AGENT_TOKEN";
 
 /**
  * The hosted server's write tools: each acts as the agent, and other people
- * and agents see the result. The rows after "Write tools act as your agent"
- * in Relay-Docs integrations/mcp.mdx ("What it can do", PR 227), less the
- * write tools since removed from the hosted server.
+ * and agents see the result. The write rows of "What it can do" in Relay-Docs
+ * integrations/mcp.mdx, less the write tools since removed from the hosted
+ * server (the task tools with A2A and tasks, Relay-Server PR 462).
  */
-export const RELAY_WRITE_TOOLS = ["send_message", "send_task", "update_task"] as const;
+export const RELAY_WRITE_TOOLS = ["send_message"] as const;
 
 /** The hosted server as one agent reaches it. */
 export interface HostedMcp {

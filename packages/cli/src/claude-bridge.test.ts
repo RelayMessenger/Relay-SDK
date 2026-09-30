@@ -230,8 +230,8 @@ describe("Claude Agent SDK bridge", () => {
   });
 
   it("replies to each message it answers, so overlapping callers each get their own answer", async () => {
-    // Two messages in flight at once; the second is answered first. Relay's
-    // A2A door gives each caller only the reply that names its message.
+    // Two messages in flight at once; the second is answered first. Each
+    // reply names the message it answers.
     let releaseFirst!: () => void;
     const first = new Promise<void>((resolve) => { releaseFirst = resolve; });
     const ask = fakeQuery(async function* ({ prompt }) {
@@ -253,8 +253,8 @@ describe("Claude Agent SDK bridge", () => {
   });
 
   it("answers an agent's overlapping messages in one chat in turn, each linked to its own", async () => {
-    // One agent calls twice before the first answer: A2A 1.0 3.1.1, each
-    // Message answers its own request, so neither answer may be dropped.
+    // One agent writes twice before the first answer: each of its messages
+    // gets its own answer, so neither answer may be dropped.
     const order: string[] = [];
     let calls = 0;
     const ask = fakeQuery(async function* ({ prompt }) {

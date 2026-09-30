@@ -31,12 +31,10 @@ const RELAY_THREAD_CONFIG = {
     relay: {
       url: "https://mcp.staging.relayapp.im",
       bearer_token_env_var: "RELAY_AGENT_TOKEN",
-      // Relay's three write tools, and nothing else, run without a question
+      // Relay's one write tool, and nothing else, runs without a question
       // (Codex's `tools.<tool>.approval_mode`).
       tools: {
         send_message: { approval_mode: "approve" },
-        send_task: { approval_mode: "approve" },
-        update_task: { approval_mode: "approve" },
       },
     },
   },
@@ -295,12 +293,12 @@ describe("the app-server the bridge starts", () => {
 
   it("never sends Codex's answer about a Relay tool call it could not make; names the failure instead", async () => {
     const codex = await fakeAppServer({
-      toolCalls: [{ server: "relay", tool: "send_task", status: "failed", error: { message: "MCP tool call requires approval, but approval policy is never" } }],
-      answers: [[{ text: "Sending the task was blocked by the approval policy.", phase: "final_answer" }]],
+      toolCalls: [{ server: "relay", tool: "send_message", status: "failed", error: { message: "MCP tool call requires approval, but approval policy is never" } }],
+      answers: [[{ text: "Sending the message was blocked by the approval policy.", phase: "final_answer" }]],
     });
     const { said, relay } = await runBridge({ ...codex, events: [received("event-1", "chat-1", "Send it")] });
     expect(relay.sent).toEqual([]);
-    expect(said).toContain("Codex could not answer @alice: Relay's send_task: MCP tool call requires approval, but approval policy is never. Nothing was sent.");
+    expect(said).toContain("Codex could not answer @alice: Relay's send_message: MCP tool call requires approval, but approval policy is never. Nothing was sent.");
   });
 
   it("still sends the answer when a Relay tool answered, even with an error of its own, or another server failed", async () => {
@@ -553,8 +551,8 @@ describe("when turns run", () => {
   });
 
   it("answers an agent's overlapping messages in one chat in turn, each linked to its own", async () => {
-    // A2A 1.0 3.1.1: each Message answers its own request, so a calling
-    // agent's older message is never dropped for its newer one.
+    // Each of another agent's messages gets its own answer, so its older
+    // message is never dropped for its newer one.
     const codex = await fakeAppServer({ turnMs: 300 });
     const { said, relay } = await runBridge({
       ...codex,

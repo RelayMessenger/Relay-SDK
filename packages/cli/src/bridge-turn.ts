@@ -21,10 +21,10 @@ export interface BridgeTurn {
    */
   fromAgent: boolean;
   /**
-   * The message the answer replies to: this one, when another agent sent it.
-   * Relay's A2A door gives a calling agent the reply that names its message
-   * (Relay-Server `a2a.ts` `replyTo`), as a bot's reply names the message it
-   * answers (Telegram `reply_parameters.message_id`, Discord `message_reference`).
+   * The message the answer replies to: this one, when another agent sent it,
+   * as a bot's reply names the message it answers (Telegram
+   * `reply_parameters.message_id`, Discord `message_reference`), so an agent
+   * that sent several knows which one it answers.
    * A person's message is not named, so the chat looks as it always has.
    * Absent when the message opens with buttons or a selection: an agent may
    * not reply to those parts, and a reply names part 0 unless it says
@@ -37,8 +37,8 @@ export interface BridgeTurn {
  * Whether a newer message in a chat replaces the answer still being written
  * for an older one. A person's newer message replaces a person's answer, as
  * before. An agent's message waits its turn instead, and an answer to an
- * agent is never dropped: the calling agent is waiting for it, and each
- * message it sent gets its own answer (A2A 1.0, 3.1.1).
+ * agent is never dropped: the other agent is waiting for it, and each
+ * message it sent gets its own answer.
  */
 export const replacesLiveTurn = (
   newer: Pick<BridgeTurn, "fromAgent">,
