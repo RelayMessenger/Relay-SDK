@@ -260,8 +260,17 @@ describe("payment fee documentation", () => {
     const description = document.paths["/v1/payment_requests"].post.description.replace(/\s+/gu, " ");
     expect(description).toContain("Relay takes a 5% fee on every payment");
     expect(description).toContain("in subscription mode it is 5% of every period");
-    expect(description).toContain("when you refund a payment, Relay returns the same share of its fee");
+    expect(description).toContain("when a refund of a payment succeeds, Relay returns the same share of its fee");
     expect(description).not.toContain("Relay takes no fee");
+  });
+
+  it("documents application_fee_amount in both SDK types with the contract's own words", () => {
+    const document = parse(readFileSync(new URL("../../../contracts/relay-v1-openapi.yaml", import.meta.url), "utf8"));
+    const contract = document.components.schemas.PaymentRequest.properties.application_fee_amount.description;
+    for (const path of ["../src/types.ts", "../../chat-sdk-adapter/src/types.ts"]) {
+      const source = readFileSync(new URL(path, import.meta.url), "utf8");
+      expect(source, path).toContain(`/** ${contract} */\n  application_fee_amount: number;`);
+    }
   });
 
   it("tells cookbook users about the 5% application fee and response field", () => {

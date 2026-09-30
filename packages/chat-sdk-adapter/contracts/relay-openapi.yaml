@@ -1443,8 +1443,8 @@ paths:
         fee (`application_fee_amount`); in subscription mode it is 5% of every
         period. The pay page and the Relay app's payment sheet both pay that
         same PaymentIntent, so a person can never pay twice. Refunds and
-        disputes are handled in your own Stripe Dashboard; when you refund a
-        payment, Relay returns the same share of its fee.
+        disputes are handled in your own Stripe Dashboard; when a refund of a
+        payment succeeds, Relay returns the same share of its fee.
 
         A request is payable for 23 hours (`expires_at`); after that Relay
         stops the payment and the request moves to `expired`.
