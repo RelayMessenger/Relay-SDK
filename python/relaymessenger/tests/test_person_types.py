@@ -7,7 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from relaymessenger import ChatHandle, ContactCard, ContactEventContact
+from relaymessenger import (
+    CallContact,
+    ChatHandle,
+    ContactCard,
+    ContactEventContact,
+    OwnerPerson,
+    SystemEventParty,
+    UserOwner,
+)
 
 CONTRACT = Path(__file__).resolve().parents[3] / "contracts" / "relay-v1-openapi.yaml"
 
@@ -18,12 +26,20 @@ def _properties(name: str) -> list[str]:
     start = text.index(f"\n    {name}:\n") + 1
     following = re.search(r"\n    [A-Za-z0-9]+:\n", text[start + 1 :])
     schema = text[start : start + 1 + following.start() + 1] if following else text[start:]
-    return re.findall(r"^        ([a-z_]+):$", schema[schema.index("      properties:\n") :], re.M)
+    return re.findall(r"^        ([a-z_]+):(?: &\w+)?$", schema[schema.index("      properties:\n") :], re.M)
 
 
 @pytest.mark.parametrize(
     ("typed", "schema"),
-    [(ChatHandle, "ChatHandle"), (ContactEventContact, "ContactEventContact"), (ContactCard, "ContactLookup")],
+    [
+        (ChatHandle, "ChatHandle"),
+        (ContactEventContact, "ContactEventContact"),
+        (ContactCard, "ContactLookup"),
+        (CallContact, "CallContact"),
+        (SystemEventParty, "SystemEventParty"),
+        (UserOwner, "UserOwner"),
+        (OwnerPerson, "OwnerPerson"),
+    ],
 )
 def test_a_person_type_names_every_contract_field(typed: type, schema: str) -> None:
     assert "timezone" in _properties(schema)

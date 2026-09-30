@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "b4478d218d71b1f0c2bdcc0a90de37503a03ea7c", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "45052630889ba3e5614bf713753b21e7257b54fc", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -780,11 +780,22 @@ const validateOpenAPI = () => {
   );
   assert.match(declaredTypes, /owner\?: HandleOwner \| null/u);
   // A person's time zone (Server 461) rides every person object the SDK types.
-  for (const name of ["UserChatHandle", "ContactEventContact", "TypingContact", "ContactLookup"]) {
+  for (const name of ["UserChatHandle", "ContactLookup", "CallContact", "SystemEventParty", "OwnerPerson"]) {
     const body = new RegExp(`export interface ${name}\\b[^{]*\\{([^}]*)\\n\\}`, "u").exec(declaredTypes)?.[1] ?? "";
     assert.match(body, /\n {4}timezone\?: string \| null;/u, `${name} must type timezone`);
   }
-  for (const name of ["ChatHandle", "ContactEventContact", "ContactLookup", "TypingContact"]) {
+  // The contract requires it on a contact event's person: required, nullable.
+  assert.match(
+    /export interface ContactEventContact\b[^{]*\{([^}]*)\n\}/u.exec(declaredTypes)?.[1] ?? "",
+    /\n {4}timezone: string \| null;/u,
+    "ContactEventContact must require timezone",
+  );
+  assert.match(declaredTypes, /export type HandleOwner = [^;]*;[^]*?kind: "user";[^}]*\n {4}timezone\?: string \| null;\n\};/u, "HandleOwner user must type timezone");
+  assert.match(declaredTypes, /export type TypingContact = SystemEventParty;/u);
+  for (const name of [
+    "ChatHandle", "ContactEventContact", "ContactLookup", "TypingContact",
+    "CallContact", "SystemEventParty", "UserOwner", "OwnerPerson",
+  ]) {
     const timezone = document.components.schemas[name].properties.timezone;
     assert.deepEqual(timezone.type, ["string", "null"], `${name}.timezone`);
     assert.equal(timezone.maxLength, 64);

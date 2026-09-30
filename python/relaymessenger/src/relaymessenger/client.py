@@ -80,8 +80,9 @@ class ChatHandle(TypedDict, total=False):
     verified: bool
     owner: Optional[Dict[str, Any]]
     #: The person's IANA time zone name ("America/Detroit"), as their Relay
-    #: app last reported it; None until it reports one. Timestamps stay in
-    #: UTC; use this to read them in the person's local time.
+    #: app last reported it; None until it reports one. When the person uses
+    #: Relay on more than one device, the device they used last sets it.
+    #: Timestamps stay in UTC; use this to read them in the person's local time.
     timezone: Optional[str]
     is_contact: bool
     activity_version: str
@@ -95,6 +96,61 @@ class ContactEventContact(TypedDict):
     handle: str
     display_name: str
     #: The person's IANA time zone name, or None until their app reports one.
+    timezone: Optional[str]
+
+
+class _PartyRequired(TypedDict):
+    id: str
+    handle: str
+    kind: Literal["user", "agent"]
+
+
+class CallContact(_PartyRequired, total=False):
+    """A call's caller or callee (contract ``CallContact``); ``timezone`` only for a person."""
+
+    #: The person's IANA time zone name ("America/Detroit"), as their Relay
+    #: app last reported it; None until it reports one. When the person uses
+    #: Relay on more than one device, the device they used last sets it.
+    timezone: Optional[str]
+
+
+class SystemEventParty(_PartyRequired, total=False):
+    """A system event's actor or subject (contract ``SystemEventParty``); ``timezone`` only for a person."""
+
+    #: The person's IANA time zone name ("America/Detroit"), as their Relay
+    #: app last reported it; None until it reports one. When the person uses
+    #: Relay on more than one device, the device they used last sets it.
+    timezone: Optional[str]
+
+
+class _UserOwnerRequired(TypedDict):
+    kind: Literal["user"]
+    handle: Optional[str]
+    display_name: Optional[str]
+
+
+class UserOwner(_UserOwnerRequired, total=False):
+    """The person who owns an agent (contract ``UserOwner``); every field is None
+    when the person has no Relay account."""
+
+    #: The person's IANA time zone name ("America/Detroit"), as their Relay
+    #: app last reported it; None until it reports one. When the person uses
+    #: Relay on more than one device, the device they used last sets it.
+    timezone: Optional[str]
+
+
+class _OwnerPersonRequired(TypedDict):
+    id: str
+    handle: str
+    display_name: str
+
+
+class OwnerPerson(_OwnerPersonRequired, total=False):
+    """A person who administers an agent (contract ``OwnerPerson``)."""
+
+    #: The person's IANA time zone name ("America/Detroit"), as their Relay
+    #: app last reported it; None until it reports one. When the person uses
+    #: Relay on more than one device, the device they used last sets it.
     timezone: Optional[str]
 
 

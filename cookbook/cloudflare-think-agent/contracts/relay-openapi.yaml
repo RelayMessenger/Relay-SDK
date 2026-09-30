@@ -3271,6 +3271,18 @@ components:
           enum:
             - user
             - agent
+        timezone:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          examples:
+            - America/Detroit
+          description: >-
+            The person's IANA time zone name, as their Relay app last reported
+            it; null until the app reports one. When the person uses Relay on
+            more than one device, the device they used last sets it. Present only when kind is user. Timestamps stay in UTC;
+            use this to read them in the person's local time.
     Call:
       type: object
       additionalProperties: false
@@ -4378,6 +4390,18 @@ components:
             - string
             - "null"
           description: The owning person's display name. Null when the person has no Relay account.
+        timezone:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          examples:
+            - America/Detroit
+          description: >-
+            The person's IANA time zone name, as their Relay app last reported
+            it; null until the app reports one. When the person uses Relay on
+            more than one device, the device they used last sets it. Null when the person has no Relay account. Timestamps stay in UTC;
+            use this to read them in the person's local time.
     OwnerPerson:
       type: object
       additionalProperties: false
@@ -4396,6 +4420,18 @@ components:
         display_name:
           type: string
           description: The person's display name.
+        timezone:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          examples:
+            - America/Detroit
+          description: >-
+            The person's IANA time zone name, as their Relay app last reported
+            it; null until the app reports one. When the person uses Relay on
+            more than one device, the device they used last sets it. Timestamps stay in UTC;
+            use this to read them in the person's local time.
     ChatHandle:
       type: object
       required:
@@ -4495,7 +4531,8 @@ components:
             - America/Detroit
           description: >-
             The person's IANA time zone name, as their Relay app last reported
-            it; null until the app reports one. Present only when kind is user. Timestamps stay in UTC;
+            it; null until the app reports one. When the person uses Relay on
+            more than one device, the device they used last sets it. Present only when kind is user. Timestamps stay in UTC;
             use this to read them in the person's local time.
         is_contact:
           type: boolean
@@ -4787,7 +4824,8 @@ components:
             - America/Detroit
           description: >-
             The person's IANA time zone name, as their Relay app last reported
-            it; null until the app reports one. Present only when kind is user. Timestamps stay in UTC;
+            it; null until the app reports one. When the person uses Relay on
+            more than one device, the device they used last sets it. Present only when kind is user. Timestamps stay in UTC;
             use this to read them in the person's local time.
     AgentCategory:
       type: string
@@ -5162,7 +5200,8 @@ components:
             - America/Detroit
           description: >-
             The person's IANA time zone name, as their Relay app last reported
-            it; null until the app reports one. Timestamps stay in UTC;
+            it; null until the app reports one. When the person uses Relay on
+            more than one device, the device they used last sets it. Timestamps stay in UTC;
             use this to read them in the person's local time.
     ContactRemovedEvent:
       type: object
@@ -7789,6 +7828,18 @@ components:
           enum:
             - user
             - agent
+        timezone:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          examples:
+            - America/Detroit
+          description: >-
+            The person's IANA time zone name, as their Relay app last reported
+            it; null until the app reports one. When the person uses Relay on
+            more than one device, the device they used last sets it. Present only when kind is user. Timestamps stay in UTC;
+            use this to read them in the person's local time.
     SystemPartResponse:
       type: object
       additionalProperties: false
@@ -7938,7 +7989,8 @@ components:
             - America/Detroit
           description: >-
             The person's IANA time zone name, as their Relay app last reported
-            it; null until the app reports one. Present only when kind is user. Timestamps stay in UTC;
+            it; null until the app reports one. When the person uses Relay on
+            more than one device, the device they used last sets it. Present only when kind is user. Timestamps stay in UTC;
             use this to read them in the person's local time.
     UnblockHandleRequest:
       type: object
