@@ -542,6 +542,84 @@ export interface SelectionResponsePart {
 /** Metadata only: contributes no visible fallback text. */
 export interface SelectionResponsePartResponse extends SelectionResponsePart {}
 
+/** A card's picture or video, a public https URL, drawn full width at `height` (short 112, medium 168, tall 264 pt). */
+export interface RichCardMedia {
+  type: "image" | "video";
+  url: string;
+  thumbnail_url?: string;
+  height?: "short" | "medium" | "tall";
+}
+
+/**
+ * One suggestion on a card; `label` is 1–25 characters. A `reply` comes back
+ * as the person's text (the label) plus a `suggestion_response` carrying `id`;
+ * every other type is done by the person's phone and sends nothing back.
+ */
+export type RichCardSuggestion =
+  | { type: "reply"; label: string; /** 1–256 characters, unique within the part. */ id: string }
+  | { type: "open_url"; label: string; /** http or https only. */ url: string; application?: "browser" | "webview" }
+  | { type: "dial"; label: string; /** E.164, e.g. +12223334444. */ phone_number: string }
+  | { type: "view_location"; label: string; latitude?: number; longitude?: number; name?: string; query?: string }
+  | { type: "share_location"; label: string }
+  | {
+    type: "create_calendar_event";
+    label: string;
+    start_time: string;
+    end_time: string;
+    /** 1–100 characters. */
+    title: string;
+    /** Up to 500 characters. */
+    description?: string;
+  };
+
+/** One card: at least one of media, title (1–200) or description (1–2000); up to 4 suggestions. */
+export interface CardContent {
+  media?: RichCardMedia;
+  title?: string;
+  description?: string;
+  suggestions?: RichCardSuggestion[];
+}
+
+/**
+ * Agent-only: one card. At most one rich_card or carousel per Message, never
+ * beside a selection; a `buttons` part beside it draws as reply pills that
+ * leave once the person answers. The card's suggestions persist.
+ */
+export interface RichCardPart extends CardContent {
+  type: "rich_card";
+}
+
+export interface RichCardPartResponse extends RichCardPart {
+  reactions: Reaction[] | null;
+}
+
+/** Agent-only: 2–10 cards swiped sideways, each as tall as the tallest. Reply ids are unique across cards. */
+export interface CarouselPart {
+  type: "carousel";
+  /** small is 180 pt, medium (the default) 296 pt. */
+  card_width?: "small" | "medium";
+  cards: CardContent[];
+}
+
+export interface CarouselPartResponse extends CarouselPart {
+  card_width: "small" | "medium";
+  reactions: Reaction[] | null;
+}
+
+/**
+ * User-only, after a text part equal to the reply's label, with reply_to
+ * naming the card part. The person sends only `id`.
+ */
+export interface SuggestionResponsePart {
+  type: "suggestion_response";
+  id: string;
+}
+
+/** The reply the person tapped, as the agent reads it: its `id` and its `label`. */
+export interface SuggestionResponsePartResponse extends SuggestionResponsePart {
+  label: string;
+}
+
 /** What is being paid for (PayPal Orders v2 `items[].category`); App Store rules decide where each is payable. */
 export type PaymentCategory = "physical_goods" | "digital_goods" | "donation";
 
@@ -896,6 +974,9 @@ export type MessagePart =
   | ButtonsPart
   | SelectionPart
   | SelectionResponsePart
+  | RichCardPart
+  | CarouselPart
+  | SuggestionResponsePart
   | PaymentPart
   | DataPart
   | PlacePart;
@@ -990,6 +1071,9 @@ export type MessagePartResponse =
   | ButtonsPartResponse
   | SelectionPartResponse
   | SelectionResponsePartResponse
+  | RichCardPartResponse
+  | CarouselPartResponse
+  | SuggestionResponsePartResponse
   | PaymentPartResponse
   | PaymentReceiptPartResponse
   | DataPartResponse
@@ -1040,6 +1124,9 @@ export interface SentMessage {
     | ButtonsPartResponse
     | SelectionPartResponse
     | SelectionResponsePartResponse
+    | RichCardPartResponse
+    | CarouselPartResponse
+    | SuggestionResponsePartResponse
     | PaymentPartResponse
     | PaymentReceiptPartResponse
     | DataPartResponse
