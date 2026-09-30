@@ -8,7 +8,7 @@
     "openapi_sha256": "baf2839ae8df9d1478f7a8c8457e99f54f4a1563c8439fc7ff05bb2492a7e6f4",
     "public_source": {
       "repository": "https://github.com/RelayMessenger/Relay-SDK",
-      "commit": "5d6580a421de73a78cba54a4acb7f64a063ad8a3",
+      "commit": "6b4e9d0024b28d9ee858a02c6c9af60ab880a5cd",
       "path": "contracts/relay-v1-openapi.yaml"
     }
   },
