@@ -20,6 +20,14 @@ export interface CallContact {
    * Timestamps stay in UTC; use this to read them in the person's local time.
    */
   timezone?: string | null;
+  /**
+   * People only: The person's age range, as their Relay app last reported it: from Apple's
+   * Declared Age Range, or from a birth year the person gave once (only the
+   * range is kept). Null until the app reports one. A person whose range is not
+   * "18_plus" never reaches an agent rated 18_plus, so an agent never needs to
+   * ask anyone their age.
+   */
+  age_range?: AgeRange | null;
 }
 
 export type CallTerminalStatus =
@@ -435,6 +443,14 @@ export interface UserChatHandle extends ChatHandleBase {
    * stay in UTC; use this to read them in the person's local time.
    */
   timezone?: string | null;
+  /**
+   * The person's age range, as their Relay app last reported it: from Apple's
+   * Declared Age Range, or from a birth year the person gave once (only the
+   * range is kept). Null until the app reports one. A person whose range is not
+   * "18_plus" never reaches an agent rated 18_plus, so an agent never needs to
+   * ask anyone their age.
+   */
+  age_range?: AgeRange | null;
 }
 
 /** Who owns an agent: its organization, or the person who owns it. */
@@ -459,6 +475,14 @@ export type HandleOwner =
      * they used last sets it.
      */
     timezone?: string | null;
+    /**
+     * Null when the person has no Relay account. The person's age range, as their Relay app last reported it: from Apple's
+     * Declared Age Range, or from a birth year the person gave once (only the
+     * range is kept). Null until the app reports one. A person whose range is not
+     * "18_plus" never reaches an agent rated 18_plus, so an agent never needs to
+     * ask anyone their age.
+     */
+    age_range?: AgeRange | null;
   };
 
 export interface AgentChatHandle extends ChatHandleBase {
@@ -1048,6 +1072,14 @@ export interface SystemEventParty {
    * Timestamps stay in UTC; use this to read them in the person's local time.
    */
   timezone?: string | null;
+  /**
+   * People only: The person's age range, as their Relay app last reported it: from Apple's
+   * Declared Age Range, or from a birth year the person gave once (only the
+   * range is kept). Null until the app reports one. A person whose range is not
+   * "18_plus" never reaches an agent rated 18_plus, so an agent never needs to
+   * ask anyone their age.
+   */
+  age_range?: AgeRange | null;
 }
 
 export type TypingContact = SystemEventParty;
@@ -1532,6 +1564,19 @@ export type AgentCategory =
  */
 export type AgentVisibility = "public" | "unlisted";
 
+/**
+ * A person's age range: the bands Apple's Declared Age Range answers for the
+ * age gates 13, 16 and 18.
+ */
+export type AgeRange = "under_13" | "13_15" | "16_17" | "18_plus";
+
+/**
+ * Who an agent is for, set in the Relay Console. Relay refuses an 18_plus
+ * agent to every person whose age range is not 18_plus (error code 2035) and
+ * leaves it out of their directory, search and suggestions.
+ */
+export type AgentAgeRating = "everyone" | "18_plus";
+
 /** One thing the agent does, in the A2A AgentSkill shape. */
 export interface AgentSkill {
   id: string;
@@ -1578,6 +1623,16 @@ export interface ContactLookup {
    * stay in UTC; use this to read them in the person's local time.
    */
   timezone?: string | null;
+  /**
+   * People only: The person's age range, as their Relay app last reported it: from Apple's
+   * Declared Age Range, or from a birth year the person gave once (only the
+   * range is kept). Null until the app reports one. A person whose range is not
+   * "18_plus" never reaches an agent rated 18_plus, so an agent never needs to
+   * ask anyone their age.
+   */
+  age_range?: AgeRange | null;
+  /** Who the agent is for: everyone, or only people whose age range is 18_plus. Agents only. */
+  age_rating?: AgentAgeRating;
 }
 
 /** The organization that made an agent. */
@@ -1847,6 +1902,14 @@ export interface ContactEventContact {
    * stay in UTC; use this to read them in the person's local time.
    */
   timezone: string | null;
+  /**
+   * The person's age range, as their Relay app last reported it: from Apple's
+   * Declared Age Range, or from a birth year the person gave once (only the
+   * range is kept). Null until the app reports one. A person whose range is not
+   * "18_plus" never reaches an agent rated 18_plus, so an agent never needs to
+   * ask anyone their age.
+   */
+  age_range: AgeRange | null;
 }
 
 export interface ContactAddedEvent {
@@ -2062,6 +2125,14 @@ export interface OwnerPerson {
    * Timestamps stay in UTC; use this to read them in the person's local time.
    */
   timezone?: string | null;
+  /**
+   * The person's age range, as their Relay app last reported it: from Apple's
+   * Declared Age Range, or from a birth year the person gave once (only the
+   * range is kept). Null until the app reports one. A person whose range is not
+   * "18_plus" never reaches an agent rated 18_plus, so an agent never needs to
+   * ask anyone their age.
+   */
+  age_range?: AgeRange | null;
 }
 
 /** `GET /v1/me`: the agent the Agent Token authenticates, and who owns it (`AgentMe`). */

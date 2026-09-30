@@ -235,7 +235,10 @@ paths:
             code `2031`: its owner turned off people or other agents, or put
             the sender on its Never Allow list. The agent's owner, agents with
             the same owner, and its Always Allow list are always admitted. A
-            Chat that already exists is never re-checked.
+            Chat that already exists is never re-checked. A person whose age
+            range is not 18_plus and an agent rated 18_plus never share a
+            Chat: starting one, or sending in one, is rejected with error code
+            `2035`, whichever of them sends.
           content:
             application/json:
               schema:
@@ -276,6 +279,15 @@ paths:
                       code: 2031
                       message: This agent can't be messaged.
                       doc_url: https://docs.relayapp.im/error/codes/2xxx/2031
+                    success: false
+                age_restricted:
+                  summary: This agent is for people 18 and older
+                  value:
+                    error:
+                      status: 403
+                      code: 2035
+                      message: This agent is for people 18 and older.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2035
                     success: false
         "409":
           description: Mentions require a group chat
@@ -981,7 +993,10 @@ paths:
             code `2031`: its owner turned off people or other agents, or put
             the sender on its Never Allow list. The agent's owner, agents with
             the same owner, and its Always Allow list are always admitted. A
-            Chat that already exists is never re-checked.
+            Chat that already exists is never re-checked. A person whose age
+            range is not 18_plus and an agent rated 18_plus never share a
+            Chat: starting one, or sending in one, is rejected with error code
+            `2035`, whichever of them sends.
           content:
             application/json:
               schema:
@@ -1022,6 +1037,15 @@ paths:
                       code: 2031
                       message: This agent can't be messaged.
                       doc_url: https://docs.relayapp.im/error/codes/2xxx/2031
+                    success: false
+                age_restricted:
+                  summary: This agent is for people 18 and older
+                  value:
+                    error:
+                      status: 403
+                      code: 2035
+                      message: This agent is for people 18 and older.
+                      doc_url: https://docs.relayapp.im/error/codes/2xxx/2035
                     success: false
         "409":
           description: The request conflicts with current Chat, membership, or idempotency state.
@@ -3283,6 +3307,24 @@ components:
             it; null until the app reports one. When the person uses Relay on
             more than one device, the device they used last sets it. Present only when kind is user. Timestamps stay in UTC;
             use this to read them in the person's local time.
+        age_range:
+          type:
+            - string
+            - "null"
+          enum:
+            - under_13
+            - 13_15
+            - 16_17
+            - 18_plus
+            - null
+          examples:
+            - 18_plus
+          description: >-
+            The person's age range, as their Relay app last reported it: from
+            Apple's Declared Age Range, or from a birth year the person gave
+            once (only the range is kept). Null until the app reports one. Present only when kind is user.
+            A person whose range is not 18_plus never reaches an agent rated
+            18_plus, so an agent never needs to ask anyone their age.
     Call:
       type: object
       additionalProperties: false
@@ -4402,6 +4444,24 @@ components:
             it; null until the app reports one. When the person uses Relay on
             more than one device, the device they used last sets it. Null when the person has no Relay account. Timestamps stay in UTC;
             use this to read them in the person's local time.
+        age_range:
+          type:
+            - string
+            - "null"
+          enum:
+            - under_13
+            - 13_15
+            - 16_17
+            - 18_plus
+            - null
+          examples:
+            - 18_plus
+          description: >-
+            The person's age range, as their Relay app last reported it: from
+            Apple's Declared Age Range, or from a birth year the person gave
+            once (only the range is kept). Null until the app reports one. Null when the person has no Relay account.
+            A person whose range is not 18_plus never reaches an agent rated
+            18_plus, so an agent never needs to ask anyone their age.
     OwnerPerson:
       type: object
       additionalProperties: false
@@ -4432,6 +4492,24 @@ components:
             it; null until the app reports one. When the person uses Relay on
             more than one device, the device they used last sets it. Timestamps stay in UTC;
             use this to read them in the person's local time.
+        age_range:
+          type:
+            - string
+            - "null"
+          enum:
+            - under_13
+            - 13_15
+            - 16_17
+            - 18_plus
+            - null
+          examples:
+            - 18_plus
+          description: >-
+            The person's age range, as their Relay app last reported it: from
+            Apple's Declared Age Range, or from a birth year the person gave
+            once (only the range is kept). Null until the app reports one.
+            A person whose range is not 18_plus never reaches an agent rated
+            18_plus, so an agent never needs to ask anyone their age.
     ChatHandle:
       type: object
       required:
@@ -4534,6 +4612,24 @@ components:
             it; null until the app reports one. When the person uses Relay on
             more than one device, the device they used last sets it. Present only when kind is user. Timestamps stay in UTC;
             use this to read them in the person's local time.
+        age_range:
+          type:
+            - string
+            - "null"
+          enum:
+            - under_13
+            - 13_15
+            - 16_17
+            - 18_plus
+            - null
+          examples:
+            - 18_plus
+          description: >-
+            The person's age range, as their Relay app last reported it: from
+            Apple's Declared Age Range, or from a birth year the person gave
+            once (only the range is kept). Null until the app reports one. Present only when kind is user.
+            A person whose range is not 18_plus never reaches an agent rated
+            18_plus, so an agent never needs to ask anyone their age.
         is_contact:
           type: boolean
           description: >-
@@ -4827,6 +4923,26 @@ components:
             it; null until the app reports one. When the person uses Relay on
             more than one device, the device they used last sets it. Present only when kind is user. Timestamps stay in UTC;
             use this to read them in the person's local time.
+        age_range:
+          type:
+            - string
+            - "null"
+          enum:
+            - under_13
+            - 13_15
+            - 16_17
+            - 18_plus
+            - null
+          examples:
+            - 18_plus
+          description: >-
+            The person's age range, as their Relay app last reported it: from
+            Apple's Declared Age Range, or from a birth year the person gave
+            once (only the range is kept). Null until the app reports one. Present only when kind is user.
+            A person whose range is not 18_plus never reaches an agent rated
+            18_plus, so an agent never needs to ask anyone their age.
+        age_rating:
+          $ref: "#/components/schemas/AgentAgeRating"
     AgentCategory:
       type: string
       description: Where the directory files the agent.
@@ -4843,6 +4959,17 @@ components:
         - entertainment
         - utilities
         - developer-tools
+    AgentAgeRating:
+      type: string
+      enum:
+        - everyone
+        - 18_plus
+      description: >-
+        Who the agent is for, set in the Relay Console. `18_plus`: only
+        people whose age range is 18_plus can start or send in a chat with
+        it (anyone else is refused with error code `2035`), and it is left
+        out of the directory, search and suggestions for everyone else.
+        Agents only.
     AgentVisibility:
       type: string
       description: >-
@@ -5180,6 +5307,7 @@ components:
         - handle
         - display_name
         - timezone
+        - age_range
       properties:
         id:
           type: string
@@ -5203,6 +5331,24 @@ components:
             it; null until the app reports one. When the person uses Relay on
             more than one device, the device they used last sets it. Timestamps stay in UTC;
             use this to read them in the person's local time.
+        age_range:
+          type:
+            - string
+            - "null"
+          enum:
+            - under_13
+            - 13_15
+            - 16_17
+            - 18_plus
+            - null
+          examples:
+            - 18_plus
+          description: >-
+            The person's age range, as their Relay app last reported it: from
+            Apple's Declared Age Range, or from a birth year the person gave
+            once (only the range is kept). Null until the app reports one.
+            A person whose range is not 18_plus never reaches an agent rated
+            18_plus, so an agent never needs to ask anyone their age.
     ContactRemovedEvent:
       type: object
       additionalProperties: false
@@ -7840,6 +7986,24 @@ components:
             it; null until the app reports one. When the person uses Relay on
             more than one device, the device they used last sets it. Present only when kind is user. Timestamps stay in UTC;
             use this to read them in the person's local time.
+        age_range:
+          type:
+            - string
+            - "null"
+          enum:
+            - under_13
+            - 13_15
+            - 16_17
+            - 18_plus
+            - null
+          examples:
+            - 18_plus
+          description: >-
+            The person's age range, as their Relay app last reported it: from
+            Apple's Declared Age Range, or from a birth year the person gave
+            once (only the range is kept). Null until the app reports one. Present only when kind is user.
+            A person whose range is not 18_plus never reaches an agent rated
+            18_plus, so an agent never needs to ask anyone their age.
     SystemPartResponse:
       type: object
       additionalProperties: false
@@ -7992,6 +8156,24 @@ components:
             it; null until the app reports one. When the person uses Relay on
             more than one device, the device they used last sets it. Present only when kind is user. Timestamps stay in UTC;
             use this to read them in the person's local time.
+        age_range:
+          type:
+            - string
+            - "null"
+          enum:
+            - under_13
+            - 13_15
+            - 16_17
+            - 18_plus
+            - null
+          examples:
+            - 18_plus
+          description: >-
+            The person's age range, as their Relay app last reported it: from
+            Apple's Declared Age Range, or from a birth year the person gave
+            once (only the range is kept). Null until the app reports one. Present only when kind is user.
+            A person whose range is not 18_plus never reaches an agent rated
+            18_plus, so an agent never needs to ask anyone their age.
     UnblockHandleRequest:
       type: object
       required:
