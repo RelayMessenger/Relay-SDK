@@ -10,7 +10,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "1397e02ed8503bda70e21ad8bfeead3f537c2705938a682688e5a6516a386d95";
+  "e2d47242b1dc469c17b7798446d775998474f1abcd6d8243ca6b4c1d59cc23cb";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -148,7 +148,7 @@ describe("locked Relay Server contract", () => {
     }
     expect(schemas.CreatePaymentRequestRequest).toHaveProperty("required", ["description", "category"]);
     expect(schemas.PaymentRequest).toHaveProperty("required", [
-      "id", "object", "status", "mode", "amount", "currency", "description", "category", "checkout_url",
+      "id", "object", "status", "mode", "amount", "application_fee_amount", "currency", "description", "category", "checkout_url",
       "expires_at", "metadata", "stripe", "created_at", "updated_at",
     ]);
     expect(document.paths["/v1/payment_requests"]).toHaveProperty("post.operationId", "createPaymentRequest");

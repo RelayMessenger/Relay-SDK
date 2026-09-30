@@ -1,13 +1,13 @@
 {
   "source": "contracts/relay-v1-openapi.yaml",
-  "source_openapi_sha256": "1397e02ed8503bda70e21ad8bfeead3f537c2705938a682688e5a6516a386d95",
+  "source_openapi_sha256": "e2d47242b1dc469c17b7798446d775998474f1abcd6d8243ca6b4c1d59cc23cb",
   "upstream": {
     "repository": "https://github.com/RelayMessenger/Relay-Server.git",
-    "commit": "36e433e3896d0046078ec65e5b0fee3a858df720",
+    "commit": "1547eecea1a4fcbab08b17feb73bc913aabc058e",
     "path": "contracts/developer/openapi.yaml",
-    "sha256": "1397e02ed8503bda70e21ad8bfeead3f537c2705938a682688e5a6516a386d95"
+    "sha256": "e2d47242b1dc469c17b7798446d775998474f1abcd6d8243ca6b4c1d59cc23cb"
   },
-  "source_path_count": 39,
+  "source_path_count": 40,
   "source_schema_count": 199,
   "callback_count": 24,
   "transport_decision": {

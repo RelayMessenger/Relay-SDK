@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "36e433e3896d0046078ec65e5b0fee3a858df720", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "1547eecea1a4fcbab08b17feb73bc913aabc058e", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -53,6 +53,9 @@ const sourceOnlyOperations = [
   { method: "PUT", path: "/v1/contacts/{handle}/rating", operationId: "rateAgent" },
   { method: "DELETE", path: "/v1/contacts/{handle}/rating", operationId: "deleteAgentRating" },
   { method: "GET", path: "/v1/contacts/{handle}/ratings", operationId: "listAgentRatings" },
+  // Person only (Server 467): an agent token cannot call it, so the agent SDK
+  // carries no method for it.
+  { method: "POST", path: "/v1/address_book/agent_counts", operationId: "countAgentsInAddressBook" },
 ];
 const allowedOperationSignatures = [
   "DELETE /v1/agents/{handle}",
@@ -119,7 +122,7 @@ const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }))
 assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 52);
 assert.equal(manifest.path_count, 34);
-assert.equal(manifest.source_path_count, 39);
+assert.equal(manifest.source_path_count, 40);
 assert.equal(manifest.source_schema_count, 199);
 assert.equal(manifest.callback_count, 24);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 34);
@@ -515,12 +518,12 @@ const validateOpenAPI = () => {
   assert.equal(contactLookup.additionalProperties, false);
   assert.equal(contactLookup.properties.description.maxLength, 2000);
   assert.equal("about" in contactLookup.properties, false);
-  // Server 414: Relay takes no fee on payments. The business receives the
-  // full amount, less Stripe's own processing fees.
-  assert.equal(document.components.schemas.PaymentRequest.required.includes("application_fee_amount"), false);
-  assert.equal("application_fee_amount" in document.components.schemas.PaymentRequest.properties, false);
-  assert.doesNotMatch(declaredTypes, /application_fee/u);
-  assert.doesNotMatch(document.paths["/v1/payment_requests"].post.description, /Relay takes \d+%|application fee/u);
+  // Server 464 restores Relay's 5% fee (owner, 2026-09-30), after Server 414
+  // removed it: a required integer, declared in the SDK's PaymentRequest.
+  assert.ok(document.components.schemas.PaymentRequest.required.includes("application_fee_amount"));
+  assert.equal(document.components.schemas.PaymentRequest.properties.application_fee_amount.type, "integer");
+  assert.match(declaredTypes, /application_fee_amount: number;/u);
+  assert.match(document.paths["/v1/payment_requests"].post.description, /Relay takes a 5% fee/u);
   assert.deepEqual(contactLookup.properties.kind.enum, ["user", "agent"]);
   assert.equal(
     document.components.schemas.ChatHandle.properties.is_contact.description,
