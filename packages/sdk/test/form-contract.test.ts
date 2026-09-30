@@ -44,7 +44,9 @@ it("keeps the source limits, discriminants and configurable text lengths", () =>
     expect(field.additionalProperties).toBe(false);
     expect(field.properties.required.default).toBe(false);
     expect(field.properties.placeholder.maxLength).toBeUndefined();
-    expect(field.properties.max_length.maximum).toBe(Number.MAX_SAFE_INTEGER);
+    // Only a text answer has a length limit; a choice or a date is fixed by its source.
+    if (type === "text") expect(field.properties.max_length.maximum).toBe(Number.MAX_SAFE_INTEGER);
+    else expect(field.properties.max_length).toBeUndefined();
     expect(schemas.FormField.discriminator.mapping[type!]).toBe(`#/components/schemas/${name}`);
   }
   expect(schemas.FormSelectField.properties.options).toMatchObject({ minItems: 1, maxItems: 20 });
@@ -53,7 +55,9 @@ it("keeps the source limits, discriminants and configurable text lengths", () =>
   expect(schemas.FormPage.properties.fields).toMatchObject({ minItems: 1, maxItems: 50 });
   expect(schemas.FormPart.properties.pages.minItems).toBe(1);
   expect(schemas.FormPart.properties.pages.maxItems).toBeUndefined();
-  expect(schemas.FormDateField.properties.max_length.minimum).toBe(10);
+  expect(schemas.FormDateField.properties.min_date).toMatchObject({ format: "date", default: "1900-01-01" });
+  expect(schemas.FormDateField.properties.max_date).toMatchObject({ format: "date", default: "2100-12-31" });
+  expect(schemas.FormTextField.properties.keyboard.enum).toEqual(["default", "email", "phone", "number", "url"]);
   expect(schemas.FormTextField.properties.max_length.description).toContain("30 for single-line and 300 for multiline");
   expect(schemas.FormReplyMessage.properties.title.enum).toEqual(["Form sent"]);
   expect(schemas.FormAnswers.additionalProperties.oneOf).toEqual([
