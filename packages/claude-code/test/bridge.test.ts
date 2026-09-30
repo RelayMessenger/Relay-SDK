@@ -450,3 +450,27 @@ it("preserves rich parts and a zero-index reply target as channel JSON metadata"
   expect(JSON.parse(action.delivery.meta.reply_to!)).toEqual(input.data.reply_to);
   expect(action.delivery.meta.selection_response).toBeUndefined();
 });
+
+it("forwards a form answer as a form_response tag keyed by field id", () => {
+  const input = event("Form sent");
+  if (input.event_type !== "message.received") throw new Error("fixture");
+  input.data.parts.push({ type: "form_response", answers: { name: "Ada", extras: ["tea"] } });
+  input.data.reply_to = { message_id: MESSAGE_ID, part_index: 1 };
+  const action = classifyRelayEvent({ event: input, sequence: "1", allowedSenders: parseAllowedSenders(USER_ID), redactor: createRedactor("secret") });
+  if (action.kind !== "delivery") throw new Error("not delivered");
+  expect(action.delivery.content).toBe("Form sent");
+  expect(JSON.parse(action.delivery.meta.form_response!)).toEqual({ answers: { name: "Ada", extras: ["tea"] } });
+  expect(JSON.parse(action.delivery.meta.reply_to!)).toEqual(input.data.reply_to);
+});
+
+it("sends a form beside its words and refuses it beside any other control", () => {
+  const form = { type: "form" as const, title: "Visit", pages: [{ id: "p", title: "You", fields: [{ id: "name", type: "text" as const, label: "Name" }] }] };
+  expect(buildReplyMessages("Plan your visit", "stable", undefined, undefined, undefined, undefined, undefined, form)).toEqual([
+    { message: { parts: [{ type: "text", value: "Plan your visit" }, form], idempotency_key: "stable" } },
+  ]);
+  expect(buildReplyMessages("", "stable", undefined, undefined, undefined, undefined, undefined, form)[0]!.message.parts).toEqual([form]);
+  const selection = { type: "selection" as const, title: "Pick", options: [{ value: "a", label: "A" }] };
+  expect(() => buildReplyMessages("x", "stable", undefined, { type: "buttons", items: [{ label: "Yes" }] }, undefined, undefined, undefined, form)).toThrow("beside text only");
+  expect(() => buildReplyMessages("x", "stable", undefined, undefined, "https://example.com", undefined, undefined, form)).toThrow("beside text only");
+  expect(() => buildReplyMessages("x", "stable", undefined, undefined, undefined, selection, undefined, form)).toThrow("beside text only");
+});

@@ -1,14 +1,14 @@
 {
   "source": "contracts/relay-v1-openapi.yaml",
-  "source_openapi_sha256": "1721df340bf291aa1d5a12578fb4918209cba7525622dd5fb3af2ca68cbc77fc",
+  "source_openapi_sha256": "a95379e4f993fe329d589a64e456f59ec9676617eb40d8e57f6dea67cb0bd51e",
   "upstream": {
     "repository": "https://github.com/RelayMessenger/Relay-Server.git",
-    "commit": "349431592ca866731a95407ab8836611989371d2",
+    "commit": "744d715ad95f0064d3392d4cd8e67680d72ea619",
     "path": "contracts/developer/openapi.yaml",
-    "sha256": "1721df340bf291aa1d5a12578fb4918209cba7525622dd5fb3af2ca68cbc77fc"
+    "sha256": "a95379e4f993fe329d589a64e456f59ec9676617eb40d8e57f6dea67cb0bd51e"
   },
-  "source_path_count": 42,
-  "source_schema_count": 219,
+  "source_path_count": 43,
+  "source_schema_count": 234,
   "callback_count": 24,
   "transport_decision": {
     "source": "contracts/agent-transport-decision.md",

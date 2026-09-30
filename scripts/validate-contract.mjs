@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "349431592ca866731a95407ab8836611989371d2", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "744d715ad95f0064d3392d4cd8e67680d72ea619", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -53,6 +53,10 @@ const sourceOnlyOperations = [
   // Server #467: a person's address-book counts, person token only; an agent
   // SDK has no caller for it.
   { method: "POST", path: "/v1/address_book/agent_counts", operationId: "countAgentsInAddressBook" },
+  // Server #470: a person asks for an agent Relay does not have yet; the
+  // bytes arrive with the form carry (Server #465) and its client method
+  // with its own carry.
+  { method: "POST", path: "/v1/agent_requests", operationId: "requestAgent" },
 ];
 const allowedOperationSignatures = [
   "DELETE /v1/agents/{handle}",
@@ -124,8 +128,8 @@ const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }))
 assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 57);
 assert.equal(manifest.path_count, 37);
-assert.equal(manifest.source_path_count, 42);
-assert.equal(manifest.source_schema_count, 219);
+assert.equal(manifest.source_path_count, 43);
+assert.equal(manifest.source_schema_count, 234);
 assert.equal(manifest.callback_count, 24);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 37);
 assert.equal(operationJSON.length, 57);

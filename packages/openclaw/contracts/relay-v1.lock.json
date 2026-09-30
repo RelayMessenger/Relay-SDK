@@ -1,16 +1,16 @@
 {
   "relayServer": {
     "repository": "RelayMessenger/Relay-Server",
-    "commit": "349431592ca866731a95407ab8836611989371d2",
+    "commit": "744d715ad95f0064d3392d4cd8e67680d72ea619",
     "openapiPath": "contracts/developer/openapi.yaml",
-    "sha256": "1721df340bf291aa1d5a12578fb4918209cba7525622dd5fb3af2ca68cbc77fc"
+    "sha256": "a95379e4f993fe329d589a64e456f59ec9676617eb40d8e57f6dea67cb0bd51e"
   },
   "relaySdk": {
     "package": "@relaymessenger/sdk",
     "version": "0.3.7-staging.13",
     "integrity": "sha512-uyAYGPsBxVREvW6E0ku2U2R/emT30rlZjN5Oj6agjaB3wPJrx45rG88jPsyfJcrerA9sk31Gc7JpYD71amaISw==",
     "operationsSha256": "e094bf711e65ec5d37c2ca0203cf589be5747308aef8d590fd7cc5af0ac71564",
-    "workspaceOpenapiSha256": "1721df340bf291aa1d5a12578fb4918209cba7525622dd5fb3af2ca68cbc77fc",
+    "workspaceOpenapiSha256": "a95379e4f993fe329d589a64e456f59ec9676617eb40d8e57f6dea67cb0bd51e",
     "usedOperations": [
       {
         "method": "GET",
