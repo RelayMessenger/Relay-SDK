@@ -209,11 +209,11 @@ describe("Relay v1 request shapes", () => {
       state: "TASK_STATE_COMPLETED",
       message: { messageId: "status-1", role: "ROLE_AGENT", parts: [{ text: "Done" }] },
     });
-    await client.tasks.addArtifact("task-id", {
-      artifact: { artifactId: "result", parts: [{ text: "42" }] },
-    });
     await client.tasks.reply("task-id", {
       message: { messageId: "reply-1", role: "ROLE_AGENT", parts: [{ text: "Direct message response" }] },
+    });
+    await client.tasks.addArtifact("task-id", {
+      artifact: { artifactId: "result", parts: [{ text: "42" }] },
     });
     await client.access.list();
     await client.access.set("agent", { rule: "allow" });
