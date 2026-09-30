@@ -1331,7 +1331,7 @@ paths:
     post:
       operationId: sendReaction
       summary: Add or remove a reaction to a message
-      description: Add or remove a reaction on one Message part. Targeting a `buttons`, `selection`, `selection_response`, or `suggestion_response` part returns 422. Only a person can react to a `payment` part; an agent gets 403 (error code `2003`). A block stops it the way it stops a Message. It never reaches a member who blocked you, nor, in a direct chat, a member you blocked, and the answer is the same either way.
+      description: Add or remove a reaction on one Message part. Targeting a `buttons`, `selection`, `selection_response`, `suggestion_response`, `form`, or `form_response` part returns 422. Only a person can react to a `payment` part; an agent gets 403 (error code `2003`). A block stops it the way it stops a Message. It never reaches a member who blocked you, nor, in a direct chat, a member you blocked, and the answer is the same either way.
       tags:
         - Messages
       security:
@@ -5365,6 +5365,388 @@ components:
           description: Reactions on this message part
           items:
             $ref: "#/components/schemas/Reaction"
+    FormOption:
+      type: object
+      additionalProperties: false
+      required:
+        - value
+        - label
+      properties:
+        value:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Stable case-sensitive value, unique within this field.
+        label:
+          type: string
+          minLength: 1
+          maxLength: 30
+          pattern: '\S'
+    FormTextField:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - label
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Unique across every page of this form. Responses use this id as the answer key.
+        type:
+          type: string
+          enum:
+            - text
+        label:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: '\S'
+        placeholder:
+          type: string
+          description: Text shown before the user enters or chooses a value.
+        required:
+          type: boolean
+          default: false
+        max_length:
+          type: integer
+          maximum: 9007199254740991
+          minimum: 1
+          description: Maximum Unicode scalar characters. Defaults to 30 for single-line and 300 for multiline text; a positive explicit value overrides the default.
+        multiline:
+          type: boolean
+          default: false
+          description: Allow line breaks and a native multiline text field.
+    FormSelectField:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - label
+        - options
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Unique across every page of this form. Responses use this id as the answer key.
+        type:
+          type: string
+          enum:
+            - select
+        label:
+          type: string
+          minLength: 1
+          maxLength: 30
+          pattern: '\S'
+        placeholder:
+          type: string
+          description: Text shown before the user enters or chooses a value.
+        required:
+          type: boolean
+          default: false
+        max_length:
+          type: integer
+          maximum: 9007199254740991
+          minimum: 1
+          description: Maximum characters in each selected option value. Defaults to 100; every offered value must fit.
+        multiple:
+          type: boolean
+          default: false
+          description: Return an array of values in source-option order when true, otherwise one string.
+        options:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/FormOption"
+    FormPickerField:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - label
+        - options
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Unique across every page of this form. Responses use this id as the answer key.
+        type:
+          type: string
+          enum:
+            - picker
+        label:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: '\S'
+        placeholder:
+          type: string
+          description: Text shown before the user enters or chooses a value.
+        required:
+          type: boolean
+          default: false
+        max_length:
+          type: integer
+          maximum: 9007199254740991
+          minimum: 1
+          description: Maximum characters in each selected option value. Defaults to 100; every offered value must fit.
+        options:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/FormOption"
+    FormDateField:
+      type: object
+      additionalProperties: false
+      description: Collect a valid Gregorian calendar date as YYYY-MM-DD, independent of time zone.
+      required:
+        - id
+        - type
+        - label
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Unique across every page of this form. Responses use this id as the answer key.
+        type:
+          type: string
+          enum:
+            - date
+        label:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: '\S'
+        placeholder:
+          type: string
+          description: Text shown before the user enters or chooses a value.
+        required:
+          type: boolean
+          default: false
+        max_length:
+          type: integer
+          maximum: 9007199254740991
+          minimum: 10
+          description: Maximum answer length. A calendar date is ten characters. Defaults to 10.
+    FormField:
+      oneOf:
+        - $ref: "#/components/schemas/FormTextField"
+        - $ref: "#/components/schemas/FormSelectField"
+        - $ref: "#/components/schemas/FormPickerField"
+        - $ref: "#/components/schemas/FormDateField"
+      discriminator:
+        propertyName: type
+        mapping:
+          text: "#/components/schemas/FormTextField"
+          select: "#/components/schemas/FormSelectField"
+          picker: "#/components/schemas/FormPickerField"
+          date: "#/components/schemas/FormDateField"
+    FormPage:
+      type: object
+      additionalProperties: false
+      description: One native form page. Pages appear in array order.
+      required:
+        - id
+        - title
+        - fields
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 19
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Unique page id.
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '\S'
+        fields:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/FormField"
+    FormSplash:
+      type: object
+      additionalProperties: false
+      description: Optional introduction before the first field page.
+      required:
+        - button_title
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '\S'
+        text:
+          type: string
+          minLength: 0
+          maxLength: 4096
+        button_title:
+          type: string
+          minLength: 1
+          maxLength: 35
+          pattern: '\S'
+    FormReceivedMessage:
+      type: object
+      additionalProperties: false
+      description: Optional received card text. Each native page uses its own page title.
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: '\S'
+        subtitle:
+          type: string
+          minLength: 0
+          maxLength: 512
+    FormReplyMessage:
+      type: object
+      additionalProperties: false
+      description: Optional answered card subtitle. The answered title is Form sent.
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          enum:
+            - Form sent
+        subtitle:
+          type: string
+          minLength: 0
+          maxLength: 512
+    FormAnswers:
+      type: object
+      propertyNames:
+        type: string
+        minLength: 1
+        maxLength: 100
+        pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+      additionalProperties:
+        oneOf:
+          - type: string
+          - type: array
+            maxItems: 20
+            uniqueItems: true
+            items:
+              type: string
+              minLength: 1
+              maxLength: 100
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+      description: Answers keyed by source field id. Text, date, picker and single select use a string; multi-select uses unique option values in source order. A one-option multi-select represents opt-in. Optional unanswered fields may be omitted or use an empty value. Source fields enforce required values, max_length and allowed choices.
+    FormPart:
+      type: object
+      additionalProperties: false
+      description: Agent-only form with ordered pages. One form per Message, separate from buttons, selection, rich_card and carousel controls. Optional plain text beside it is an ordinary message. The user advances with Next and Back, reviews a summary when show_summary is true, and sends once. Reopening after Send shows read-only answers. The preview is the text part when present, otherwise received_message.title or title. Page ids and field ids must be unique.
+      required:
+        - type
+        - title
+        - pages
+      properties:
+        type:
+          type: string
+          enum:
+            - form
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '\S'
+        pages:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/FormPage"
+        show_summary:
+          type: boolean
+          default: false
+        splash:
+          $ref: "#/components/schemas/FormSplash"
+        received_message:
+          $ref: "#/components/schemas/FormReceivedMessage"
+        reply_message:
+          $ref: "#/components/schemas/FormReplyMessage"
+    FormPartResponse:
+      type: object
+      required:
+        - type
+        - title
+        - pages
+        - has_responded
+        - answers
+        - reactions
+      properties:
+        type:
+          type: string
+          enum:
+            - form
+        title:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '\S'
+        pages:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/FormPage"
+        show_summary:
+          type: boolean
+          default: false
+        splash:
+          $ref: "#/components/schemas/FormSplash"
+        received_message:
+          $ref: "#/components/schemas/FormReceivedMessage"
+        reply_message:
+          $ref: "#/components/schemas/FormReplyMessage"
+        has_responded:
+          type: boolean
+          readOnly: true
+          description: Whether the authenticated user has durably answered. False for agent viewers. Same-key retries return the original response; a different-key second answer returns 409/1005. Source message.upserted refreshes this user’s devices.
+        answers:
+          anyOf:
+            - $ref: "#/components/schemas/FormAnswers"
+            - type: "null"
+          readOnly: true
+          description: This viewer’s answers, null before answering or when the answer Message no longer exists; always null for agent viewers. Agents receive the form_response in the answer Message instead.
+        reactions:
+          type: "null"
+    FormResponsePart:
+      type: object
+      additionalProperties: false
+      description: User-only metadata, exactly the second part after plain text with value Form sent. Requires reply_to.message_id and explicit part_index targeting a visible form in the same Chat. Source validation rejects unknown ids, invalid dates, wrong answer types, too-long or missing required values, and unknown, duplicate or out-of-order choices. Malformed envelopes return 400/1005, invalid source answers 422/2006, repeated answers with another key 409/1005.
+      required:
+        - type
+        - answers
+      properties:
+        type:
+          type: string
+          enum:
+            - form_response
+        answers:
+          $ref: "#/components/schemas/FormAnswers"
+    FormResponsePartResponse:
+      allOf:
+        - $ref: "#/components/schemas/FormResponsePart"
+      description: Persisted field-keyed answers delivered in normal Message events. Contributes no fallback text and cannot receive reactions.
     SelectionOption:
       type: object
       additionalProperties: false
@@ -6573,6 +6955,8 @@ components:
               - $ref: "#/components/schemas/LinkPartResponse"
               - $ref: "#/components/schemas/ButtonsPartResponse"
               - $ref: "#/components/schemas/SelectionPartResponse"
+              - $ref: "#/components/schemas/FormPartResponse"
+              - $ref: "#/components/schemas/FormResponsePartResponse"
               - $ref: "#/components/schemas/SelectionResponsePartResponse"
               - $ref: "#/components/schemas/RichCardPartResponse"
               - $ref: "#/components/schemas/CarouselPartResponse"
@@ -6657,7 +7041,7 @@ components:
             - type: "null"
     MessageContent:
       type: object
-      description: One message containing 1–100 ordered parts. A link must be the only part. A selection needs no text part; it carries its own `title`, and a text part beside it is an ordinary message. Selection responses contain exactly plain text then selection_response metadata and require an explicit reply target. A message carries at most one rich_card or carousel; a card reply is exactly plain text then suggestion_response, replying to the card part.
+      description: One message containing 1–100 ordered parts. A link must be the only part. A selection needs no text part; it carries its own `title`, and a text part beside it is an ordinary message. Selection responses contain exactly plain text then selection_response metadata and require an explicit reply target. A message carries at most one rich_card or carousel; a card reply is exactly plain text then suggestion_response, replying to the card part. Form responses contain exactly Form sent plain text then form_response metadata with answers keyed by field id, and require an explicit reply target.
       properties:
         metadata:
           $ref: "#/components/schemas/MessageMetadata"
@@ -6775,6 +7159,8 @@ components:
               - $ref: "#/components/schemas/schemas-LinkPartResponse"
               - $ref: "#/components/schemas/ButtonsPartResponse"
               - $ref: "#/components/schemas/SelectionPartResponse"
+              - $ref: "#/components/schemas/FormPartResponse"
+              - $ref: "#/components/schemas/FormResponsePartResponse"
               - $ref: "#/components/schemas/SelectionResponsePartResponse"
               - $ref: "#/components/schemas/RichCardPartResponse"
               - $ref: "#/components/schemas/CarouselPartResponse"
@@ -6793,6 +7179,8 @@ components:
                 link: "#/components/schemas/schemas-LinkPartResponse"
                 buttons: "#/components/schemas/ButtonsPartResponse"
                 selection: "#/components/schemas/SelectionPartResponse"
+                form: "#/components/schemas/FormPartResponse"
+                form_response: "#/components/schemas/FormResponsePartResponse"
                 selection_response: "#/components/schemas/SelectionResponsePartResponse"
                 rich_card: "#/components/schemas/RichCardPartResponse"
                 carousel: "#/components/schemas/CarouselPartResponse"
@@ -6857,6 +7245,8 @@ components:
           link: "#/components/schemas/LinkPart"
           buttons: "#/components/schemas/ButtonsPart"
           selection: "#/components/schemas/SelectionPart"
+          form: "#/components/schemas/FormPart"
+          form_response: "#/components/schemas/FormResponsePart"
           selection_response: "#/components/schemas/SelectionResponsePart"
           rich_card: "#/components/schemas/RichCardPart"
           carousel: "#/components/schemas/CarouselPart"
@@ -6870,6 +7260,8 @@ components:
         - $ref: "#/components/schemas/LinkPart"
         - $ref: "#/components/schemas/ButtonsPart"
         - $ref: "#/components/schemas/SelectionPart"
+        - $ref: "#/components/schemas/FormPart"
+        - $ref: "#/components/schemas/FormResponsePart"
         - $ref: "#/components/schemas/SelectionResponsePart"
         - $ref: "#/components/schemas/RichCardPart"
         - $ref: "#/components/schemas/CarouselPart"
@@ -7484,6 +7876,8 @@ components:
               - $ref: "#/components/schemas/LinkPartResponse"
               - $ref: "#/components/schemas/ButtonsPartResponse"
               - $ref: "#/components/schemas/SelectionPartResponse"
+              - $ref: "#/components/schemas/FormPartResponse"
+              - $ref: "#/components/schemas/FormResponsePartResponse"
               - $ref: "#/components/schemas/SelectionResponsePartResponse"
               - $ref: "#/components/schemas/RichCardPartResponse"
               - $ref: "#/components/schemas/CarouselPartResponse"
