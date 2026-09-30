@@ -29,8 +29,9 @@ card, and `partsWithSelection(undefined, selection)` sends the selection alone.
 
 `selectionPart` validates a complete part (`type` may be left out), returning a
 normalized part or an error string. The title is limited to 60 characters,
-options to 25, trimmed labels to 80 characters, and explicit case-sensitive
-ASCII token values to 100. Unknown fields, duplicate values, a missing or blank
+options to 25 total. Legacy value-only rows allow trimmed labels up to 80
+characters and case-sensitive ASCII tokens up to 100. ID rows and grouped
+inputs are described below. Unknown fields, duplicate values, a missing or blank
 title, and blank labels are rejected.
 
 Selection inherits existing Chat membership rules: at most one human user,
@@ -43,8 +44,8 @@ idempotency keys, without expanding group membership.
 text above the card. It keeps invalid blocks as text with an error and never combines a
 selection with buttons. Existing buttons retain their behavior.
 
-The person opens the prompt, checks any number of options and submits them
-once; checking sends nothing and only the submit does. A person answers a given
+By default, the person opens the prompt, checks any number of options (exactly one
+when `multiple` is false) and submits them once; checking sends nothing and only the submit does. A person answers a given
 selection once, and reopening it afterwards shows what they chose without
 letting them change it.
 
@@ -63,7 +64,38 @@ metadata after narrowing to `message.received`.
 
 The CLI, Pi, OpenClaw, the Claude Code channel, MCP, and the Chat SDK adapter
 include selection guidance and structured inbound discovery.
-`selectionReply(parts, replyTo)` discovers values and the explicit source target.
+`selectionReply(parts, replyTo)` discovers values, IDs, source-owned reply text,
+and the explicit source target.
+
+### List picker sections
+
+```ts
+import { selectionPart, partsWithSelection } from "@relaymessenger/sdk";
+
+const picker = selectionPart({
+  title: "Shipping",
+  subtitle: "Choose a service",
+  multiple: false, // omitted means true
+  sections: [{
+    title: "Fast",
+    options: [{ id: "priority", label: "Priority", subtitle: "Tomorrow", image_url: "https://example.com/priority.png" }],
+  }],
+  reply_message: { title: "Shipping saved", subtitle: "Thank you" },
+});
+if (typeof picker === "string") throw new Error(picker);
+await relay.chats.messages.send(chatId, { message: { parts: partsWithSelection(undefined, picker) } });
+```
+
+Send exactly one of `options` or `sections` (1–10 sections, 1–25 rows total).
+ID rows accept 1–200 characters and labels up to 24 characters. Legacy value-only
+rows keep 100-character ASCII tokens and 80-character labels. If both aliases
+are supplied they must match. Row subtitles allow 72 characters; card subtitles
+and reply titles/subtitles allow 512. Images must be HTTPS URIs, up to 2048 characters; encode spaces and Unicode in URLs.
+Responses include flat options, normalized `id`/`value` aliases, and viewer-scoped
+`selected_ids`. `selectionReply` preserves IDs and server-owned `reply_message`;
+legacy replies still work. Do not send `reply_message` in response metadata.
+
+Optional subtitles may be empty.
 
 ## Payment
 

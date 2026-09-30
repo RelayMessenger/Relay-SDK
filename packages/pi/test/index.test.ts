@@ -104,7 +104,7 @@ it("teaches selection authoring and passes structured inbound values to Pi", asy
   expect(piPrompt("send selections")).toContain("literal '• '");
   const event = makeEvent("selection", "chat");
   if (event.event_type !== "message.received") throw new Error("fixture");
-  event.data.parts = [{ type: "text", value: "• Research", reactions: null }, { type: "selection_response", selected_values: ["research"] }];
+  event.data.parts = [{ type: "text", value: "• Research", reactions: null }, { type: "selection_response", selected_values: ["research"], selected_ids: ["research"] }];
   event.data.reply_to = { message_id: "source", part_index: 1 };
   const process = fakePi(records('Topics?\n```selection\n{"title":"Topics","options":[{"value":"design","label":"Design"}]}\n```'));
   const { relay, send } = relayFor([event]);

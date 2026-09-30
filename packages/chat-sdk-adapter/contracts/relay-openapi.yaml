@@ -5452,24 +5452,136 @@ components:
     SelectionOption:
       type: object
       additionalProperties: false
-      required: [value, label]
+      required: [label]
+      description: A list picker row. Supply id or the legacy value alias. If both are supplied they must match. IDs are case-sensitive and unique across the whole picker. New id-bearing labels have at most 24 characters; value-only inputs retain the legacy 80-character label limit.
+      allOf:
+        - anyOf:
+            - required: [id]
+            - required: [value]
+        - if:
+            required: [id]
+          then:
+            properties:
+              label:
+                maxLength: 24
+          else:
+            properties:
+              value:
+                maxLength: 100
+                pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'
       properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Stable row identifier, returned in selected_ids after the user answers.
         value:
           type: string
           minLength: 1
-          maxLength: 100
-          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'
-          description: Stable case-sensitive value, unique within the selection.
+          maxLength: 200
+          description: Legacy alias for id. Without id, accepts the existing 1 to 100 character ASCII token. When both are supplied, must equal id.
+        label:
+          type: string
+          minLength: 1
+          pattern: '\S'
+          maxLength: 80
+          description: Visible label, trimmed before storage; limits count the label as sent. At most 24 characters when id is supplied, or 80 for a legacy value-only row.
+        subtitle:
+          type: string
+          maxLength: 72
+          description: Optional row description, trimmed before storage; blank after trimming is stored as absent.
+        image_url:
+          type: string
+          format: uri
+          pattern: '^https://'
+          maxLength: 2048
+          description: Optional HTTPS image displayed beside the option inside the picker.
+    SelectionOptionResponse:
+      type: object
+      required: [id, value, label]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Stable row identifier. For a legacy option, equals its value.
+        value:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Compatibility alias, equal to id.
         label:
           type: string
           minLength: 1
           maxLength: 80
-          description: Visible label, trimmed before storage.
+          description: Stored label. Legacy labels can exceed the new 24-character input limit.
+        subtitle:
+          type: string
+          maxLength: 72
+        image_url:
+          type: string
+          format: uri
+          pattern: '^https://'
+          maxLength: 2048
+    SelectionSection:
+      type: object
+      additionalProperties: false
+      required: [title, options]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          pattern: '\S'
+          maxLength: 24
+          description: Section heading, trimmed before storage.
+        options:
+          type: array
+          minItems: 1
+          maxItems: 25
+          items:
+            $ref: "#/components/schemas/SelectionOption"
+    SelectionSectionResponse:
+      type: object
+      required: [title, options]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 24
+        options:
+          type: array
+          minItems: 1
+          maxItems: 25
+          items:
+            $ref: "#/components/schemas/SelectionOptionResponse"
+    SelectionReplyMessage:
+      type: object
+      additionalProperties: false
+      required: [title]
+      description: Source-owned text for the answered bubble. Copied by the server into the answer metadata when supplied on the prompt. Does not replace the portable selected-label text.
+      properties:
+        title:
+          type: string
+          minLength: 1
+          pattern: '\S'
+          maxLength: 512
+          description: Answered bubble title, trimmed before storage.
+        subtitle:
+          type: string
+          maxLength: 512
+          description: Optional answered bubble subtitle, trimmed before storage; blank after trimming is stored as absent.
     SelectionPart:
       type: object
       additionalProperties: false
-      description: Agent-only multiselect prompt. One selection per Message, never with buttons. `title` is the question, shown as the card's title in the chat and the sheet's title. A text part is optional; when present it is an ordinary message shown above the card. Put the question in `title` (1 to 60 characters, a few words, e.g. "Pizza toppings"). Anything else you want to say goes in the text part, which shows as a normal message above the card. The person opens the prompt, checks any number of options and submits them once; checking sends nothing and only the submit does. A person answers a given selection once, and reopening it afterwards shows what they chose without letting them change it. Preview, notification and fallback text is the Message's text part when it has one, else `title`.
-      required: [type, title, options]
+      description: Agent-only list picker. One selection per Message, never with buttons. Supply either flat options or titled sections, with 1 to 25 options total. title is the question shown on the card and sheet. Optional subtitle supplies the card's second line. multiple defaults to true; false permits exactly one selected option. Checking an option sends nothing; only Submit sends the answer. A user answers a given selection once; reopening shows the saved choice without allowing changes. Optional reply_message supplies the answered bubble's title and subtitle; without it, clients show the prompt title and chosen labels. A text part is optional and appears as an ordinary message above the card. Preview, notification and fallback text is the Message's text part when present, otherwise title. Every length limit counts the text as sent, before trimming.
+      required: [type, title]
+      oneOf:
+        - required: [options]
+          not:
+            required: [sections]
+        - required: [sections]
+          not:
+            required: [options]
       properties:
         type:
           type: string
@@ -5477,17 +5589,35 @@ components:
         title:
           type: string
           minLength: 1
+          pattern: '\S'
           maxLength: 60
           description: The question, trimmed before storage. The card's title in the chat and the sheet's title.
+        subtitle:
+          type: string
+          maxLength: 512
+          description: Optional card subtitle, trimmed before storage; blank after trimming is stored as absent.
+        multiple:
+          type: boolean
+          default: true
+          description: Whether the user may choose more than one option before submitting.
         options:
           type: array
           minItems: 1
           maxItems: 25
           items:
             $ref: "#/components/schemas/SelectionOption"
+        sections:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: Titled groups in display order. At most 25 options across all sections.
+          items:
+            $ref: "#/components/schemas/SelectionSection"
+        reply_message:
+          $ref: "#/components/schemas/SelectionReplyMessage"
     SelectionPartResponse:
       type: object
-      required: [type, title, options, has_responded, selected_values, reactions]
+      required: [type, title, options, has_responded, selected_values, selected_ids, reactions]
       properties:
         type:
           type: string
@@ -5495,16 +5625,39 @@ components:
         title:
           type: string
           description: The question, as the agent sent it after trimming.
+        subtitle:
+          type: string
+          maxLength: 512
+        multiple:
+          type: boolean
+          default: true
         options:
           type: array
+          minItems: 1
+          maxItems: 25
+          description: All options in display order, including options from sections. Retained for clients that do not display groups.
           items:
-            $ref: "#/components/schemas/SelectionOption"
+            $ref: "#/components/schemas/SelectionOptionResponse"
+        sections:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/SelectionSectionResponse"
+        reply_message:
+          $ref: "#/components/schemas/SelectionReplyMessage"
         selected_values:
           type: [array, "null"]
           readOnly: true
           items:
             type: string
           description: The values the authenticated viewer chose, in source-option order, identical on every one of that user's devices; null until the viewer answers, when the answer Message no longer exists, and always for an agent viewer.
+        selected_ids:
+          type: [array, "null"]
+          readOnly: true
+          items:
+            type: string
+          description: The authenticated viewer's selected option IDs in source order. Equal to selected_values, including for legacy options; null under the same conditions.
         has_responded:
           type: boolean
           readOnly: true
@@ -5514,7 +5667,7 @@ components:
     SelectionResponsePart:
       type: object
       additionalProperties: false
-      description: User-only metadata, exactly the second part after plain text. Requires explicit reply_to message_id and part_index targeting a visible selection in the same Chat. Values are unique, nonempty, known and in source-option order. Canonical new text is literal '• ' + each selected source label joined with '\n'. The server also accepts exact legacy source labels joined with ', ' only for compatibility; arbitrary label parsing is never accepted. selected_values and source-option order remain authoritative. iOS may draw a checkmark in place of each bullet, and repeat the prompt's `title` above the lines, as presentation only; portable text remains the bullets. A different-key second response returns 409/1005; same-key retries retain existing Message idempotency semantics.
+      description: User-only metadata, exactly the second part after plain text. Requires explicit reply_to message_id and part_index targeting a visible selection in the same Chat. Values are unique, nonempty, known and in source-option order. A prompt with multiple false accepts exactly one value. Optional selected_ids must equal selected_values. Canonical text is literal '• ' plus each selected source label joined with '\n'. Exact legacy source labels joined with ', ' also remain accepted. The server owns the returned selected_ids and reply_message; callers cannot supply answered-bubble text in metadata. A different-key second response returns 409/1005; same-key retries retain existing Message idempotency semantics.
       required: [type, selected_values]
       properties:
         type:
@@ -5528,12 +5681,47 @@ components:
           items:
             type: string
             minLength: 1
-            maxLength: 100
-            pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'
+            maxLength: 200
+        selected_ids:
+          type: array
+          minItems: 1
+          maxItems: 25
+          uniqueItems: true
+          description: Optional ID alias array. When present, must equal selected_values in the same order.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
     SelectionResponsePartResponse:
-      allOf:
-        - $ref: "#/components/schemas/SelectionResponsePart"
-      description: Persisted selection metadata; contributes no fallback text and cannot receive reactions.
+      type: object
+      required: [type, selected_values, selected_ids]
+      description: Persisted selection metadata; contributes no fallback text and cannot receive reactions. selected_ids is source-derived. When the source supplies reply_message, it is copied into this answer so its bubble text remains available independently of the source.
+      properties:
+        type:
+          type: string
+          enum: [selection_response]
+        selected_values:
+          type: array
+          minItems: 1
+          maxItems: 25
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+        selected_ids:
+          type: array
+          minItems: 1
+          maxItems: 25
+          uniqueItems: true
+          readOnly: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+        reply_message:
+          $ref: "#/components/schemas/SelectionReplyMessage"
+          readOnly: true
     RichCardMedia:
       type: object
       additionalProperties: false

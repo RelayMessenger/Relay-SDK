@@ -62,7 +62,9 @@ const selectionMessage: MessageContent = {
 };
 await relay.chats.messages.send("chat-id", { message: selectionMessage });
 const viewerSelection: SelectionPartResponse = {
-  ...topics, has_responded: false, selected_values: null, reactions: null,
+  type: "selection", title: "Topics",
+  options: [{ id: "research", value: "research", label: "Research" }],
+  has_responded: false, selected_values: null, selected_ids: null, reactions: null,
 };
 // @ts-expect-error Viewer state is read-only.
 viewerSelection.has_responded = true;
@@ -566,3 +568,25 @@ sharedCard.url satisfies string | undefined;
 sharedCard.url = null;
 // @ts-expect-error A subtitle is text or null, not a number.
 sharedCard.subtitle = 42;
+// List-picker input and projected output are different wire models.
+const groupedPicker = selectionPart({
+  title: "Shipping", subtitle: "Choose a service", multiple: false,
+  sections: [{ title: "Fast", options: [{ id: "priority / 1", label: "Priority", subtitle: "Tomorrow", image_url: "https://example.test/priority.png" }] }],
+  reply_message: { title: "Shipping saved", subtitle: "Thank you" },
+});
+if (typeof groupedPicker === "string") throw new Error(groupedPicker);
+await relay.chats.messages.send("chat-id", { message: { parts: partsWithSelection(undefined, groupedPicker) } });
+const selectedIds: string[] | null = viewerSelection.selected_ids;
+// @ts-expect-error Viewer-scoped IDs are read-only.
+viewerSelection.selected_ids = [];
+const submittedPicker: import("@relaymessenger/sdk").SelectionResponsePart = {
+  type: "selection_response", selected_values: ["priority / 1"], selected_ids: ["priority / 1"],
+};
+// @ts-expect-error Answered-bubble metadata is server-owned, not reply input.
+submittedPicker.reply_message = { title: "Forged" };
+// @ts-expect-error A prompt cannot send flat options and sections together.
+const mixedPicker: import("@relaymessenger/sdk").SelectionPart = { type: "selection", title: "T", options: [], sections: [] };
+// @ts-expect-error A row needs id or the legacy value alias.
+const missingId: import("@relaymessenger/sdk").SelectionOption = { label: "Not an ID" };
+const storedLegacy: import("@relaymessenger/sdk").SelectionOptionResponse = { id: "legacy", value: "legacy", label: "x".repeat(80) };
+void [selectedIds, submittedPicker, mixedPicker, missingId, storedLegacy];

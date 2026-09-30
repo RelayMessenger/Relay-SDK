@@ -541,51 +541,89 @@ export interface ButtonsPart {
   items: ButtonItem[];
 }
 
-/** Stable machine value and independently editable visible label. */
-export interface SelectionOption {
-  /** Unique case-sensitive ASCII token, 1–100 characters. Never derived from label. */
-  value: string;
-  /** Trimmed visible label, 1–80 characters. */
+/** Stable row identifier, never derived from the visible label. */
+export type SelectionOption = {
+  /** 1–24 characters with id; legacy value-only labels allow 1–80. */
   label: string;
+  /** Optional row description, 0–72 characters. */
+  subtitle?: string;
+  /** HTTPS row image, at most 2048 characters. */
+  image_url?: string;
+} & ({ id: string; value?: string } | { id?: never; value: string });
+
+/** Normalized response aliases are equal; stored legacy labels may have 80 characters. */
+export interface SelectionOptionResponse {
+  id: string;
+  value: string;
+  label: string;
+  subtitle?: string;
+  image_url?: string;
 }
 
-/** Agent-only, 1–25 options; one per Message, never with buttons. A text part is optional and shows as an ordinary bubble above the card. */
-export interface SelectionPart {
-  type: "selection";
-  /** The question: the card's title in the chat and the sheet's title. Trimmed, 1–60 characters. */
+export interface SelectionSection {
+  /** Trimmed section heading, 1–24 characters. */
   title: string;
-  /** The person checks any number of options and submits them once; checking sends nothing. */
   options: SelectionOption[];
 }
+export interface SelectionSectionResponse {
+  title: string;
+  options: SelectionOptionResponse[];
+}
 
-export interface SelectionPartResponse extends SelectionPart {
-  /** Durable response state for this viewer across devices. Existing Chat rules allow at most one human user; only that user can respond, once; reopening an answered selection shows what they chose without letting them change it. */
+/** Source-owned answered-bubble text; does not replace portable selected-label text. */
+export interface SelectionReplyMessage {
+  /** Trimmed text, 1–512 characters. */
+  title: string;
+  /** Trimmed text, 0–512 characters. */
+  subtitle?: string;
+}
+
+interface SelectionPresentation {
+  type: "selection";
+  /** The question: trimmed, 1–60 characters. */
+  title: string;
+  /** Card second line, trimmed, 0–512 characters. */
+  subtitle?: string;
+  /** Defaults to true when omitted. False permits exactly one chosen option. */
+  multiple?: boolean;
+  reply_message?: SelectionReplyMessage;
+}
+
+/** Agent-only; exactly one of options or sections, 1–25 total options, up to 10 sections. */
+export type SelectionPart = SelectionPresentation & (
+  { options: SelectionOption[]; sections?: never }
+  | { sections: SelectionSection[]; options?: never }
+);
+
+export interface SelectionPartResponse extends SelectionPresentation {
+  /** All rows in display order, retained for old clients even when sections are supplied. */
+  options: SelectionOptionResponse[];
+  sections?: SelectionSectionResponse[];
+  /** Durable viewer state; a user answers once. */
   readonly has_responded: boolean;
-  /** The values the authenticated viewer chose, in source-option order, identical on every one of that user's devices; null until the viewer answers, when the answer Message no longer exists, and always for an agent viewer. */
+  /** Viewer-scoped; null before answering, after answer deletion, and for agents. */
   readonly selected_values: string[] | null;
+  /** Equal to selected_values, including for legacy options. */
+  readonly selected_ids: string[] | null;
   reactions: null;
 }
 
-/**
- * User-only metadata after canonical text (literal '• ' + each source
- * label, joined with '\n'), with explicit reply_to. Exact legacy comma-joined
- * labels are accepted by the server only for compatibility, never parsed for IDs.
- */
+/** User-only metadata after canonical bullet text, with explicit reply_to. */
 export interface SelectionResponsePart {
   type: "selection_response";
-  /**
-   * Unique known values, nonempty and in source-option order, authoritative with
-   * reply_to. New preceding text is literal '• ' + each source label joined with
-   * '\n'. The server accepts exact legacy comma-joined labels for compatibility
-   * only, never arbitrary label parsing. iOS may draw a checkmark in place of
-   * each bullet and repeat the prompt's title, as presentation only; portable
-   * text remains bullets.
-   */
+  /** Unique known identifiers (1–200 characters), in source-option order. */
   selected_values: string[];
+  /** When supplied, must equal selected_values in the same order. */
+  selected_ids?: string[];
 }
 
 /** Metadata only: contributes no visible fallback text. */
-export interface SelectionResponsePartResponse extends SelectionResponsePart {}
+export interface SelectionResponsePartResponse extends SelectionResponsePart {
+  /** Source-derived, including for replies sent by legacy clients. */
+  readonly selected_ids: string[];
+  /** Copied by the server from the prompt, never supplied by the replying client. */
+  readonly reply_message?: SelectionReplyMessage;
+}
 
 /** A card's picture or video, a public https URL, drawn full width at `height` (short 112, medium 168, tall 264 pt). */
 export interface RichCardMedia {

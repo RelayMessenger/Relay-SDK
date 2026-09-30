@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "bf085edc35814d4c991f94e6b430aab5df3fd686", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "349431592ca866731a95407ab8836611989371d2", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -125,7 +125,7 @@ assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 57);
 assert.equal(manifest.path_count, 37);
 assert.equal(manifest.source_path_count, 42);
-assert.equal(manifest.source_schema_count, 215);
+assert.equal(manifest.source_schema_count, 219);
 assert.equal(manifest.callback_count, 24);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 37);
 assert.equal(operationJSON.length, 57);
@@ -360,15 +360,39 @@ const validateOpenAPI = () => {
 
   const option = schemas.SelectionOption;
   assert.equal(option.additionalProperties, false);
-  assert.deepEqual(option.required, ["value", "label"]);
-  assert.equal(option.properties.value.maxLength, 100);
-  assert.equal(option.properties.value.pattern, "^[A-Za-z0-9][A-Za-z0-9._:-]*$");
+  assert.deepEqual(option.required, ["label"]);
+  assert.equal(option.properties.id.maxLength, 200);
+  assert.deepEqual(option.allOf[0].anyOf, [{ required: ["id"] }, { required: ["value"] }]);
+  assert.equal(option.allOf[1].then.properties.label.maxLength, 24);
+  assert.equal(option.allOf[1].else.properties.value.maxLength, 100);
+  assert.equal(option.properties.value.maxLength, 200);
+  assert.equal(option.allOf[1].else.properties.value.pattern, "^[A-Za-z0-9][A-Za-z0-9._:-]*$");
   assert.equal(option.properties.label.maxLength, 80);
   const selection = schemas.SelectionPart;
   assert.doesNotMatch(selection.description, /Coming soon/u);
   assert.doesNotMatch(selection.description, /Clear/u);
   assert.equal(selection.additionalProperties, false);
-  assert.deepEqual(selection.required, ["type", "title", "options"]);
+  assert.deepEqual(selection.required, ["type", "title"]);
+  assert.deepEqual(selection.oneOf, [
+    { required: ["options"], not: { required: ["sections"] } },
+    { required: ["sections"], not: { required: ["options"] } },
+  ]);
+  assert.equal(selection.properties.multiple.default, true);
+  assert.equal(selection.properties.subtitle.maxLength, 512);
+  assert.equal(selection.properties.sections.maxItems, 10);
+  assert.equal(schemas.SelectionSection.properties.title.maxLength, 24);
+  assert.equal(option.properties.subtitle.maxLength, 72);
+  assert.equal(option.properties.image_url.maxLength, 2048);
+  assert.equal(option.properties.image_url.pattern, "^https://");
+  assert.equal(schemas.SelectionReplyMessage.properties.title.maxLength, 512);
+  assert.equal(schemas.SelectionReplyMessage.properties.subtitle.maxLength, 512);
+  assert.deepEqual(schemas.SelectionOptionResponse.required, ["id", "value", "label"]);
+  assert.equal(schemas.SelectionOptionResponse.properties.label.maxLength, 80);
+  assert.equal(schemas.SelectionPartResponse.properties.options.items.$ref, "#/components/schemas/SelectionOptionResponse");
+  assert.equal(schemas.SelectionSectionResponse.properties.options.items.$ref, "#/components/schemas/SelectionOptionResponse");
+  assert.equal(schemas.SelectionPartResponse.properties.sections.items.$ref, "#/components/schemas/SelectionSectionResponse");
+  assert.ok(schemas.SelectionPartResponse.required.includes("selected_ids"));
+  assert.equal(schemas.SelectionPartResponse.properties.selected_ids.readOnly, true);
   assert.deepEqual(selection.properties.type.enum, ["selection"]);
   assert.equal(selection.properties.title.type, "string");
   assert.equal(selection.properties.title.minLength, 1);
@@ -393,16 +417,19 @@ const validateOpenAPI = () => {
   assert.equal(response.properties.selected_values.uniqueItems, true);
   assert.equal(response.properties.selected_values.minItems, 1);
   assert.equal(response.properties.selected_values.maxItems, 25);
-  assert.equal(response.properties.selected_values.items.pattern, option.properties.value.pattern);
+  assert.equal(response.properties.selected_values.items.maxLength, 200);
+  assert.equal(response.properties.selected_ids.items.maxLength, 200);
+  assert.equal(response.properties.reply_message, undefined);
   assert.equal(response.properties.value, undefined, "metadata must not add visible fallback text");
   assert.match(response.description, /User-only metadata, exactly the second part after plain text/u);
   assert.match(response.description, /source-option order/u);
   assert.ok(response.description.includes("literal '• '"));
   assert.ok(response.description.includes("joined with '\\n'"));
-  assert.match(response.description, /exact legacy source labels/u);
-  assert.match(response.description, /arbitrary label parsing is never accepted/u);
+  assert.match(response.description, /exact legacy source labels/iu);
   assert.match(response.description, /409\/1005/u);
-  assert.deepEqual(schemas.SelectionResponsePartResponse.allOf, [{ $ref: "#/components/schemas/SelectionResponsePart" }]);
+  assert.deepEqual(schemas.SelectionResponsePartResponse.required, ["type", "selected_values", "selected_ids"]);
+  assert.equal(schemas.SelectionResponsePartResponse.properties.selected_ids.readOnly, true);
+  assert.equal(schemas.SelectionResponsePartResponse.properties.reply_message.readOnly, true);
   for (const name of ["SelectionPart", "SelectionResponsePart", "ButtonsPart"]) {
     assert.ok(schemas.MessagePart.oneOf.some((part) => part.$ref === `#/components/schemas/${name}`));
   }
@@ -415,7 +442,7 @@ const validateOpenAPI = () => {
     }
   }
   assert.match(declaredTypes, /type: "selection"/u);
-  assert.match(declaredTypes, /interface SelectionPart \{\s+type: "selection";\s+\/\*\*[^\n]*\*\/\s+title: string;/u);
+  assert.match(declaredTypes, /type SelectionPart = SelectionPresentation/u);
   assert.match(declaredTypes, /type: "selection_response"/u);
   assert.match(declaredTypes, /selected_values: string\[\]/u);
 

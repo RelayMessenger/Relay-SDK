@@ -10,7 +10,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "baf2839ae8df9d1478f7a8c8457e99f54f4a1563c8439fc7ff05bb2492a7e6f4";
+  "1721df340bf291aa1d5a12578fb4918209cba7525622dd5fb3af2ca68cbc77fc";
 
 interface PackageIdentity {
   bugs: { url: string };
@@ -104,8 +104,17 @@ describe("locked Relay Server contract", () => {
     const document = parse(await readFile(new URL("../contracts/relay-openapi.yaml", import.meta.url), "utf8")) as OpenApiDocument;
     const schemas = document.components.schemas;
     expect(schemas.SelectionPart).toHaveProperty("additionalProperties", false);
-    expect(schemas.SelectionPart).toHaveProperty("required", ["type", "title", "options"]);
+    expect(schemas.SelectionPart).toHaveProperty("required", ["type", "title"]);
     expect(schemas.SelectionPart).toHaveProperty("properties.title.maxLength", 60);
+    expect(schemas.SelectionPart).toHaveProperty("oneOf", [
+      { required: ["options"], not: { required: ["sections"] } },
+      { required: ["sections"], not: { required: ["options"] } },
+    ]);
+    expect(schemas.SelectionPart).toHaveProperty("properties.multiple.default", true);
+    expect(schemas.SelectionPart).toHaveProperty("properties.sections.maxItems", 10);
+    expect(schemas.SelectionPartResponse).toHaveProperty("properties.selected_ids.readOnly", true);
+    expect(schemas.SelectionOptionResponse).toHaveProperty("required", ["id", "value", "label"]);
+    expect(schemas.SelectionResponsePartResponse).toHaveProperty("properties.reply_message.readOnly", true);
     expect(schemas.SelectionPartResponse).toHaveProperty("required", expect.arrayContaining(["title"]));
     expect(schemas.SelectionPart).toHaveProperty("properties.options.minItems", 1);
     expect(schemas.SelectionPart).toHaveProperty("properties.options.maxItems", 25);
