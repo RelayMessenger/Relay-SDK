@@ -1,4 +1,6 @@
 import type { RELAY_WEBHOOK_EVENT_TYPES } from "./operations.js";
+import type { FormPart, FormPartResponse, FormResponsePart, FormResponsePartResponse } from "./form-types.js";
+export type * from "./form-types.js";
 
 export type UUID = string;
 
@@ -1059,6 +1061,8 @@ export type MessagePart =
   | RichCardPart
   | CarouselPart
   | SuggestionResponsePart
+  | FormPart
+  | FormResponsePart
   | PaymentPart
   | DataPart
   | PlacePart;
@@ -1179,6 +1183,8 @@ export type MessagePartResponse =
   | RichCardPartResponse
   | CarouselPartResponse
   | SuggestionResponsePartResponse
+  | FormPartResponse
+  | FormResponsePartResponse
   | PaymentPartResponse
   | PaymentReceiptPartResponse
   | DataPartResponse
@@ -1232,6 +1238,8 @@ export interface SentMessage {
     | RichCardPartResponse
     | CarouselPartResponse
     | SuggestionResponsePartResponse
+    | FormPartResponse
+    | FormResponsePartResponse
     | PaymentPartResponse
     | PaymentReceiptPartResponse
     | DataPartResponse

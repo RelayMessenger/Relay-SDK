@@ -1,3 +1,4 @@
+import { Ajv } from "ajv";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -388,6 +389,19 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     mcp.send({ jsonrpc: "2.0", id: 101, method: "tools/list", params: {} });
     const listed = await mcp.take(message => message.id === 101, "selection reply schema");
     const tools = (listed.result as { tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }> }).tools;
+    // The reply tool's schema is closed (additionalProperties: false), so a
+    // form argument is accepted only because the schema names it.
+    const replySchema = tools.find(tool => tool.name === "reply")!.inputSchema;
+    const checkReply = new Ajv({ strict: false }).compile(replySchema);
+    const formArgs = { chat_id: CHAT_ID, send_id: "form-reply", text: "Plan your visit", form: {
+      title: "Visit", show_summary: true,
+      pages: [{ id: "you", title: "You", fields: [
+        { id: "email", type: "text", label: "Email", keyboard: "email", required: true },
+        { id: "day", type: "date", label: "Day", min_date: "2026-10-01", max_date: "2026-10-31" },
+      ] }],
+    } };
+    expect(checkReply(formArgs), JSON.stringify(checkReply.errors)).toBe(true);
+    expect(checkReply({ ...formArgs, form: { ...formArgs.form, expires_at: "soon" } })).toBe(false);
     // The list the model sees is the schema the channel ships, list picker fields included.
     expect(tools.find(tool => tool.name === "reply")?.inputSchema.properties.selection).toEqual(
       JSON.parse(JSON.stringify(SELECTION_TOOL_SCHEMA)),

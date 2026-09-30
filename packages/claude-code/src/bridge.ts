@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { SELECTION_CONTEXT_MAX_LENGTH, componentParts, indexedIdempotencyKey, partsWithButtons, partsWithSelection, selectionReply, type SelectionPart, type ButtonsPart, type PaymentPart } from "@relaymessenger/sdk";
+import { SELECTION_CONTEXT_MAX_LENGTH, componentParts, formReply, indexedIdempotencyKey, partsWithButtons, partsWithForm, partsWithSelection, selectionReply, type FormPart, type SelectionPart, type ButtonsPart, type PaymentPart } from "@relaymessenger/sdk";
 import type {
   Chat,
   Message,
@@ -16,6 +16,7 @@ const MAX_RELAY_TEXT = 10_000;
 
 function selectionMeta(parts: readonly MessagePartResponse[], replyTo: Message["reply_to"], redactor: Redactor): Record<string, string> {
   const selection = selectionReply(parts, replyTo);
+  const form = formReply(parts, replyTo);
   // Words, links and media are already in `content`; only the parts the
   // channel cannot show as text ride along, and never past the text cap.
   const components = componentParts(parts);
@@ -30,13 +31,17 @@ function selectionMeta(parts: readonly MessagePartResponse[], replyTo: Message["
       selection_response: redactor.text(JSON.stringify({ selected_values: selection.selected_values })),
       reply_to: JSON.stringify(selection.reply_to),
     } : {}),
+    ...(form ? {
+      form_response: redactor.text(JSON.stringify({ answers: form.answers })),
+      reply_to: JSON.stringify(form.reply_to),
+    } : {}),
   };
 }
 
 /** See `DeliveryCandidate.linksReply`. */
 function linksReply(senderKind: string, parts: readonly MessagePartResponse[]): boolean {
   const opening = parts[0]?.type;
-  return senderKind === "agent" && opening !== "buttons" && opening !== "selection";
+  return senderKind === "agent" && opening !== "buttons" && opening !== "selection" && opening !== "form";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -262,14 +267,16 @@ export function buildReply(
   replyTo?: string,
   buttons?: ButtonsPart,
   selection?: SelectionPart,
+  form?: FormPart,
 ): MessageSendParams {
   if (selection && buttons) throw new Error("selection and buttons do not go together");
-  if (text.length > MAX_RELAY_TEXT || (!text && !buttons && !selection)) {
+  if (form && (buttons || selection)) throw new Error("a form sits beside text only");
+  if (text.length > MAX_RELAY_TEXT || (!text && !buttons && !selection && !form)) {
     throw new Error(`text must be 1-${MAX_RELAY_TEXT} UTF-16 code units`);
   }
   return {
     message: {
-      parts: selection ? partsWithSelection(text, selection) : partsWithButtons(text, buttons),
+      parts: form ? partsWithForm(text, form) : selection ? partsWithSelection(text, selection) : partsWithButtons(text, buttons),
       idempotency_key: idempotencyKey,
       ...(replyTo ? { reply_to: { message_id: replyTo } } : {}),
     },
@@ -291,10 +298,12 @@ export function buildReplyMessages(
   link?: string,
   selection?: SelectionPart,
   payment?: PaymentPart,
+  form?: FormPart,
 ): MessageSendParams[] {
   if (selection && (buttons || link)) throw new Error("selection cannot be combined with buttons or link");
   if (payment && (buttons || selection)) throw new Error("a payment cannot be combined with buttons or selection");
-  if (!link && !payment) return [buildReply(text, idempotencyKey, replyTo, buttons, selection)];
+  if (form && (buttons || link || selection || payment)) throw new Error("a form sits beside text only");
+  if (!link && !payment) return [buildReply(text, idempotencyKey, replyTo, buttons, selection, form)];
   const messages: MessageSendParams[] = [];
   if (text || buttons) messages.push(buildReply(text, idempotencyKey, replyTo, buttons));
   const solo = (part: MessagePart): void => {
