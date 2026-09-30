@@ -201,6 +201,8 @@ relay chats read "$CHAT_ID"
 relay contact-card get
 relay contact-card setup --handle weather --name Weather
 relay contact-card share "$CHAT_ID"
+relay contact-card share "$CHAT_ID" --handle atlas
+relay directory search --q "book recommendations"
 
 relay attachments upload ./report.pdf --content-type application/pdf
 relay blocked-handles list
@@ -232,7 +234,10 @@ relay chats participants add "$CHAT_ID" research
 relay chats participants remove "$CHAT_ID" research
 ```
 
-`contact-card share` shares the authenticated agent's own card. Agent-initiated
+`contact-card share` shares the authenticated agent's own card; with
+`--handle` it recommends another agent that is Public or Unlisted and that
+people can message. The shared card is a snapshot: it keeps the agent's name,
+picture and subtitle as they were when you shared it. Agent-initiated
 Messages to users remain supported subject to Contacts eligibility and blocking.
 There are no add-request, phone address-book, mutual-contact, human discovery, or
 human invite-link commands.

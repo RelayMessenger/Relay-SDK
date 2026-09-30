@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import type { RelayMediaStreamTrackLike, RelayPeerConnectionLike } from "../../src/calls/transport.js";
 import { createWeriftWebRTCFactory } from "../../src/calls/engine-werift.js";
+import { loopbackPeer } from "./werift-loopback-peer.js";
 import { loadWebCodecs } from "../../src/calls/engine-werift-video.js";
 import {
   RemoteVideoTrack,
@@ -72,8 +73,8 @@ const colourOf = (frame: VideoFrame): string | undefined => {
 
 const loopback = async (videoCodec: VideoCodec) => {
   const factory = createWeriftWebRTCFactory();
-  const a = factory.createPeerConnection();
-  const b = factory.createPeerConnection();
+  const a = loopbackPeer(factory);
+  const b = loopbackPeer(factory);
   const sender = await factory.createVideoSender!({ videoCodec });
   const transceiver = a.addTransceiver(sender.track, { direction: "sendonly" });
   sender.bind(transceiver, a);

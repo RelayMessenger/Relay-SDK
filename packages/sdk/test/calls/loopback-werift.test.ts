@@ -10,6 +10,7 @@ import {
   WERIFT_SAMPLE_RATE,
   createWeriftWebRTCFactory,
 } from "../../src/calls/engine-werift.js";
+import { loopbackPeer } from "./werift-loopback-peer.js";
 
 /**
  * Real loopback: two werift peer connections on this machine, offer/answer
@@ -108,8 +109,8 @@ const dominantHz = (samples: Int16Array): number => {
 
 it("carries a 1 kHz sine from A to B over werift + Opus on loopback", async () => {
   const factory = createWeriftWebRTCFactory();
-  const a = factory.createPeerConnection();
-  const b = factory.createPeerConnection();
+  const a = loopbackPeer(factory);
+  const b = loopbackPeer(factory);
   const source = factory.createAudioSource();
   const localTrack = source.createTrack();
   expect(localTrack.kind).toBe("audio");
@@ -176,8 +177,8 @@ it("carries a 1 kHz sine from A to B over werift + Opus on loopback", async () =
 
 /** Two werift peers, A sendonly to B, wired by hand. */
 const connectPair = async (factory: ReturnType<typeof createWeriftWebRTCFactory>) => {
-  const a = factory.createPeerConnection();
-  const b = factory.createPeerConnection();
+  const a = loopbackPeer(factory);
+  const b = loopbackPeer(factory);
   const source = factory.createAudioSource();
   const localTrack = source.createTrack();
   a.addTransceiver(localTrack, { direction: "sendonly" });

@@ -95,6 +95,40 @@ const content: MessageContent = {
 
 await relay.chats.messages.send("chat-id", { message: content });
 await relay.chats.shareContactCard("chat-id");
+await relay.chats.shareContactCard("chat-id", { handle: "travel_bot" });
+await relay.chats.shareContactCard("chat-id", {});
+await relay.chats.shareContactCard("chat-id", undefined, { timeout: 1000 });
+await relay.chats.shareContactCard("chat-id", { headers: { "x-fixture": "legacy" } });
+// @ts-expect-error A shared handle must be a string.
+await relay.chats.shareContactCard("chat-id", { handle: 42 });
+// @ts-expect-error Sharing does not accept a task payload.
+await relay.chats.shareContactCard("chat-id", { task: "plan a trip" });
+const directoryParams: import("@relaymessenger/sdk").DirectorySearchParams = {
+  q: "plan a trip", category: "travel", limit: 7, sort: "newest",
+};
+const directory: import("@relaymessenger/sdk").DirectorySearchResponse = await relay.directory.search(directoryParams);
+await relay.directory.search();
+await relay.directory.search({}, { timeout: 1000 });
+const directoryResource: import("@relaymessenger/sdk").Directory = relay.directory;
+const agent: import("@relaymessenger/sdk").DirectoryAgent | undefined = directory.agents[0];
+if (agent) {
+  agent.category satisfies import("@relaymessenger/sdk").AgentCategory;
+  agent.metrics.reply_rate_30d satisfies number | null;
+  agent.rating.average satisfies number | null;
+  agent.provider.name satisfies string | null;
+}
+void directoryResource;
+// @ts-expect-error The directory uses the canonical category enum.
+await relay.directory.search({ category: "invented" });
+// @ts-expect-error Only name and newest are directory sorts.
+await relay.directory.search({ sort: "rating" });
+// @ts-expect-error A limit is numeric.
+await relay.directory.search({ limit: "7" });
+// @ts-expect-error Search text must be a string.
+await relay.directory.search({ q: 42 });
+// @ts-expect-error Directory search uses q, not contacts.lookup's task.
+await relay.directory.search({ task: "plan a trip" });
+
 await relay.chats.startTyping("chat-id");
 await relay.chats.stopTyping("chat-id");
 const activityParams: ChatSetActivityParams = { text: "Generating image", emoji: "🖼️" };
@@ -530,3 +564,16 @@ const browserTap: import("@relaymessenger/sdk").A2uiBrowserActionName = "browser
 // @ts-expect-error A Browser card sends only its three taps.
 const notABrowserTap: import("@relaymessenger/sdk").A2uiBrowserActionName = "browser.pause";
 void [everyBrowserProperty, titledBrowser, browserTap, notABrowserTap];
+
+const sharedCard: import("@relaymessenger/sdk").ContactCardItem = {
+  handle: "travel_bot", first_name: "Travel", last_name: null, image_url: null,
+  kind: "agent", is_active: true, id: "contact-id", subtitle: null,
+  url: "https://relayapp.im/travel_bot",
+};
+sharedCard.id satisfies string | undefined;
+sharedCard.subtitle satisfies string | null | undefined;
+sharedCard.url satisfies string | undefined;
+// @ts-expect-error A shared card URL is a string when present, not null.
+sharedCard.url = null;
+// @ts-expect-error A subtitle is text or null, not a number.
+sharedCard.subtitle = 42;

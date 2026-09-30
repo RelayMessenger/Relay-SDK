@@ -1048,9 +1048,17 @@ export interface CallMarker {
   duration_seconds: number | null;
 }
 
+/** Who did it, with the name and picture a client shows beside the event. */
+export interface SystemEventActor extends SystemEventParty {
+  /** First and last name joined by a space; empty when the Contact has none. */
+  display_name: string;
+  image_url: string | null;
+  image_color: string | null;
+}
+
 export interface SystemEvent {
   type: SystemEventType;
-  actor: SystemEventParty;
+  actor: SystemEventActor;
   subject: SystemEventParty | null;
   value: string | null;
   icon_attachment_id: UUID | null;
@@ -1221,6 +1229,21 @@ export interface ChatCreateResponse {
     Chat,
     "id" | "display_name" | "is_group" | "handles"
   > & { message: SentMessage };
+}
+
+/** Omit handle to share the authenticated agent's own card. */
+export interface ChatShareContactCardParams {
+  /**
+   * The agent to recommend, trimmed and lowercased by the Server. It must be
+   * active, Public or Unlisted, and let people message it; anything else is
+   * the same 404 as an unknown handle.
+   */
+  handle?: string;
+}
+
+export interface ChatShareContactCardOptions extends RequestOptions {
+  /** 1 to 255 characters. The same key and body replay with nothing shared; another body is 409. */
+  idempotencyKey?: string;
 }
 
 export interface ChatUpdateParams {
@@ -1513,6 +1536,47 @@ export interface AgentSkill {
   examples: string[];
 }
 
+export interface DirectorySearchParams {
+  q?: string;
+  category?: AgentCategory;
+  limit?: number;
+  sort?: "name" | "newest";
+}
+
+export interface AgentMetrics {
+  chats_people: number;
+  chats_agents: number;
+  chats_people_30d: number;
+  chats_agents_30d: number;
+  reply_rate_30d: number | null;
+  reply_minutes_30d: number | null;
+  messages_total: number;
+  since: string;
+}
+
+export interface AgentRatingAverage {
+  average: number | null;
+  count: number;
+}
+
+export interface DirectoryAgent {
+  handle: string;
+  name: string;
+  subtitle: string | null;
+  category: AgentCategory;
+  image_url: string | null;
+  image_color: string | null;
+  accent_color: string | null;
+  verified: boolean;
+  provider: { name: string | null; url: string | null; verified: boolean };
+  metrics: AgentMetrics;
+  rating: AgentRatingAverage;
+}
+
+export interface DirectorySearchResponse {
+  agents: DirectoryAgent[];
+}
+
 export interface ContactLookup {
   id: UUID;
   handle: string;
@@ -1561,6 +1625,8 @@ export interface AgentCreator {
 export type ContactLookupParams =
   /** Relay Handle, trimmed and lowercased by the Server before validation. */
   | { handle: string }
+  /** Contact id, such as a shared Contact Card's id; its handle may since have changed. */
+  | { id: UUID }
   /** What you need done, in plain words; at most 200 characters. */
   | { task: string };
 
@@ -1574,6 +1640,18 @@ export type ContactLookupResponse =
   | { contacts: ContactLookup[] };
 
 export interface ContactCardItem {
+  /**
+   * The shared agent's Contact id, only on a card shared by handle. Open the
+   * agent by this id (`contacts.lookup({ id })`); the handle may since have changed.
+   */
+  id?: UUID;
+  /** The shared agent's subtitle when it was shared, only on a card shared by handle. */
+  subtitle?: string | null;
+  /**
+   * Relay link that opens the shared agent's chat, only on a card shared by
+   * handle. Such a card is a snapshot taken when it was shared and never changes.
+   */
+  url?: string;
   /** Detailed agent description, up to 2000 characters. Public agents cannot clear it. */
   description?: string | null;
   handle: string;

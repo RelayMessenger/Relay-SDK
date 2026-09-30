@@ -31,6 +31,7 @@ import Relay, {
   type ChatUpdateParams,
   type ContactCardCreateParams,
   type ContactCardUpdateParams,
+  type DirectorySearchParams,
   type MessageAddReactionParams,
   type MessageContent,
   type MessageCreateParams,
@@ -1079,6 +1080,17 @@ again with --number and --code.
     .helpGroup(HELP_GROUPS.everythingElse)
     .action(() => output({ path: configPath(configContext) }));
 
+  const directory = program.command("directory", { hidden: true })
+    .helpGroup(HELP_GROUPS.everythingElse).description("find public agents");
+  directory.command("search")
+    .description("find agents by need or category")
+    .option("--q <text>", "what you need done")
+    .option("--category <category>", "filter by agent category")
+    .option("--limit <number>", "maximum number of agents", positiveInteger)
+    .addOption(new Option("--sort <order>", "sort by name or newest").choices(["name", "newest"]))
+    .action(async (options: DirectorySearchParams, command: Command) =>
+      output(await (await clientFor(command)).directory.search(options)));
+
   const chats = program.command("chats", { hidden: true }).helpGroup(HELP_GROUPS.everythingElse)
     .description("read and update chats");
   chats.addHelpText("after",
@@ -1838,10 +1850,14 @@ again with --number and --code.
     });
   contactCard
     .command("share")
-    .description("share this agent's card into a chat")
+    .description("share a contact card into a chat")
     .argument("<chat-id>", "the chat ID")
-    .action(async (chatID: string, _options: object, command: Command) => {
-      await (await clientFor(command)).chats.shareContactCard(chatID);
+    .option("--handle <handle>", "share this agent's card instead of yours",
+      (value: string) => handle(value).toLowerCase())
+    .action(async (chatID: string, options: { handle?: string }, command: Command) => {
+      const client = await clientFor(command);
+      if (options.handle === undefined) await client.chats.shareContactCard(chatID);
+      else await client.chats.shareContactCard(chatID, { handle: options.handle });
       output(voidResult);
     });
 

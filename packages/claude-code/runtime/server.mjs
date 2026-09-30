@@ -21890,11 +21890,16 @@ var Chats = class {
       retryable: true
     });
   }
-  shareContactCard(chatID, options) {
+  shareContactCard(chatID, bodyOrOptions = {}, options) {
+    const { handle } = bodyOrOptions;
+    const requestOptions = options ?? (handle === void 0 ? bodyOrOptions : void 0);
+    const idempotencyKey = requestOptions?.idempotencyKey;
     return this.transport.request({
       method: "POST",
       path: `/v1/chats/${pathID(chatID)}/share_contact_card`,
-      options
+      ...handle === void 0 ? {} : { body: { handle } },
+      options: requestOptions,
+      ...idempotencyKey ? { idempotencyKey } : {}
     });
   }
   sendVoicememo(chatID, body, options) {
@@ -22069,6 +22074,20 @@ var WebhookSubscriptions = class {
     return this.transport.request({
       method: "DELETE",
       path: `/v1/webhook-subscriptions/${pathID(subscriptionID)}`,
+      options
+    });
+  }
+};
+var Directory = class {
+  transport;
+  constructor(transport2) {
+    this.transport = transport2;
+  }
+  search(query = {}, options) {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/directory",
+      query,
       options
     });
   }
@@ -22400,6 +22419,7 @@ var Relay = class {
   webhookSubscriptions;
   contactCard;
   contacts;
+  directory;
   blockedHandles;
   me;
   tasks;
@@ -22421,6 +22441,7 @@ var Relay = class {
     this.webhookSubscriptions = new WebhookSubscriptions(transport2);
     this.contactCard = new ContactCard(transport2);
     this.contacts = new Contacts(transport2);
+    this.directory = new Directory(transport2);
     this.blockedHandles = new BlockedHandles(transport2);
     this.me = new Me(transport2);
     this.tasks = new Tasks(transport2);
