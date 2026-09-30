@@ -2725,9 +2725,10 @@ requires-dist = [
     { name = "av", marker = "extra == 'calls'", specifier = ">=14" },
     { name = "httpx", marker = "extra == 'a2a'", specifier = ">=0.28.1" },
     { name = "numpy", marker = "extra == 'calls'", specifier = ">=1.26" },
+    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'login'", specifier = ">=2.8,<3" },
     { name = "websockets", specifier = ">=14" },
 ]
-provides-extras = ["calls", "a2a"]
+provides-extras = ["calls", "a2a", "login"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2735,7 +2736,7 @@ dev = [
     { name = "mypy", specifier = ">=1.13" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
-    { name = "relaymessenger", extras = ["calls", "a2a"] },
+    { name = "relaymessenger", extras = ["calls", "a2a", "login"] },
 ]
 
 [[package]]
