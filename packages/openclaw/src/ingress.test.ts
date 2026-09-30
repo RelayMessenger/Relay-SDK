@@ -20,6 +20,7 @@ function relayEvent(id: string): RelayWebhookEvent {
         id: "00000000-0000-7000-8000-000000000002",
         handle: "alice",
         display_name: "Alice",
+        timezone: null,
       },
       chat_id: "00000000-0000-7000-8000-000000000003",
     },

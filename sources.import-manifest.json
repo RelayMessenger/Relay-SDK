@@ -1185,10 +1185,10 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "src/ingress.test.ts",
       "source_sha256": "1b5e933f2bc04ae2a2fbb84b28b8f255ff25dc5e1949f2b0ee2a1af812503e6c",
-      "destination_sha256": "1b5e933f2bc04ae2a2fbb84b28b8f255ff25dc5e1949f2b0ee2a1af812503e6c",
+      "destination_sha256": "b2ab79088acf20982f464d3ea1268a3439ce23da1e0e222cea063d22dc02f360",
       "source_mode": "100644",
       "destination_mode": "100644",
-      "status": "exact"
+      "status": "canonicalized"
     },
     {
       "destination": "packages/openclaw/src/ingress.ts",
