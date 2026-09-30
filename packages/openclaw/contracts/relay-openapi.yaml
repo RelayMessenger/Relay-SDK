@@ -2459,6 +2459,85 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalServerError"
+  /v1/address_book/agent_counts:
+    post:
+      operationId: countAgentsInAddressBook
+      summary: Count the public agents your contacts use
+      description: >-
+        Person only. Send the SHA-256 of each number in your address book,
+        written in E.164 (`+15555550100`), as lowercase hex. The answer is,
+        per public agent, how many of those numbers belong to Relay people
+        who have an active chat with it. An agent appears only when at least
+        two of your contacts use it, and an upload that matches fewer than two
+        Relay accounts answers an empty list, so no count can point at one
+        person. It never names a person, a number or a match, and nothing you
+        send is stored. Each account may call this 20 times in 24 hours.
+      tags:
+        - Contacts
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - phone_hashes
+              properties:
+                phone_hashes:
+                  type: array
+                  maxItems: 5000
+                  items:
+                    type: string
+                    pattern: "^[0-9a-f]{64}$"
+                    description: Lowercase hex SHA-256 of one E.164 number from the address book.
+      responses:
+        "200":
+          description: Public agents your contacts use, most used first
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - agents
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required:
+                        - handle
+                        - contacts
+                      properties:
+                        handle:
+                          type: string
+                          description: The agent's Relay Handle.
+                        contacts:
+                          type: integer
+                          minimum: 2
+                          description: How many of your contacts have an active chat with this agent; never below 2.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller is an agent (error code `2003`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Twenty checks in 24 hours already (error code `2008`); `retry_after` says when to try again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
   /v1/contacts/lookup:
     post:
       operationId: lookupContact
