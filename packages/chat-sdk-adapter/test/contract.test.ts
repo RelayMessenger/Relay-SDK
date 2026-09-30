@@ -10,7 +10,7 @@ import {
 } from "../src/index.js";
 
 const OPENAPI_SHA =
-  "f7d0bcaff90a2113bce10ab62f5774ae9645d3ced84ac7bd74b53b5272db8ca7";
+  "c22a7fdaf1c87b2109ef5aa5f92ff2223a6b74834dc79e797ebccb51f4bfa22d";
 
 interface PackageIdentity {
   bugs: { url: string };

@@ -15,7 +15,6 @@ class _FieldRequired(TypedDict):
 class _Field(_FieldRequired, total=False):
     placeholder: str
     required: bool
-    max_length: int
 
 
 class _TextField(_Field):
@@ -24,6 +23,9 @@ class _TextField(_Field):
 
 class FormTextField(_TextField, total=False):
     multiline: bool
+    max_length: int
+    #: The keyboard iOS shows; ``email`` and ``phone`` (E.164) answers are checked.
+    keyboard: Literal["default", "email", "phone", "number", "url"]
 
 
 class _SelectField(_Field):
@@ -40,8 +42,15 @@ class FormPickerField(_Field):
     options: List[FormOption]
 
 
-class FormDateField(_Field):
+class _DateField(_Field):
     type: Literal["date"]
+
+
+class FormDateField(_DateField, total=False):
+    #: YYYY-MM-DD; 1900-01-01 when omitted.
+    min_date: str
+    #: YYYY-MM-DD, not before min_date; 2100-12-31 when omitted.
+    max_date: str
 
 
 FormField = Union[FormTextField, FormSelectField, FormPickerField, FormDateField]

@@ -5,8 +5,10 @@ export const FORM_GUIDANCE =
   "Use form for several fields across ordered pages. Give each page and field an explicit stable id. "
   + "Fields are text (single-line or multiline), select (single or multiple), picker, or date (YYYY-MM-DD). "
   + "Text max_length defaults to 30 single-line or 300 multiline; a positive explicit value overrides it. "
+  + "A text field's keyboard is default, email, phone (E.164 answers such as +13135550123), number or url. "
+  + "A date field may set min_date and max_date (YYYY-MM-DD; 1900-01-01 through 2100-12-31 by default). "
   + "Use show_summary for an optional review page. Put any extra words in an optional text part above the card. "
-  + "Send one form, never with buttons, a selection, or a rich card. Only the user answers, once. "
+  + "Send one form; only text may sit beside it. Only the user answers, once. "
   + "The reply contains plain text 'Form sent' and form_response.answers keyed by field id, "
   + "with reply_to naming the source part. Dispatch on those ids, never on labels or visible text.";
 export const FORM_BLOCK_INSTRUCTION =
@@ -24,7 +26,7 @@ const object = (value: unknown, allowed: readonly string[], name: string): Recor
 const text = (value: unknown, max: number, name: string, trim = true): string => {
   if (typeof value !== "string") throw new Error(`${name} needs a string`);
   const result = trim ? value.trim() : value;
-  if ((trim && !result) || [...result].length > max) throw new Error(`${name} exceeds its character limit or is blank`);
+  if ((trim && !/[^\s\p{Cf}]/u.test(result)) || [...result].length > max) throw new Error(`${name} exceeds its character limit or is blank`);
   return result;
 };
 const token = (value: unknown, max: number, name: string): string => {
@@ -46,12 +48,25 @@ const boolean = (value: unknown, name: string): boolean => {
   return value;
 };
 
+const MIN_DATE = "1900-01-01";
+const MAX_DATE = "2100-12-31";
+const calendarDate = (value: unknown, name: string): string => {
+  const parsed = typeof value === "string" && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(value) && !value.startsWith("0000")
+    ? new Date(`${value}T00:00:00Z`) : undefined;
+  if (!parsed || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new Error(`${name} needs a YYYY-MM-DD calendar date`);
+  }
+  return value as string;
+};
+const KEYBOARDS = ["default", "email", "phone", "number", "url"];
+
 const fieldPart = (value: unknown, ids: Set<string>): FormField => {
-  const common = ["id", "type", "label", "placeholder", "required", "max_length"];
-  const raw = object(value, [...common, "multiline", "multiple", "options"], "field");
+  const common = ["id", "type", "label", "placeholder", "required"];
+  const raw = object(value, [...common, "multiline", "max_length", "keyboard", "multiple", "options", "min_date", "max_date"], "field");
   const kind = raw.type;
   if (kind !== "text" && kind !== "select" && kind !== "picker" && kind !== "date") throw new Error("unknown form field type");
-  object(raw, [...common, ...(kind === "text" ? ["multiline"] : kind === "select" ? ["multiple", "options"] : kind === "picker" ? ["options"] : [])], "field");
+  object(raw, [...common, ...(kind === "text" ? ["multiline", "max_length", "keyboard"] : kind === "select" ? ["multiple", "options"]
+    : kind === "picker" ? ["options"] : ["min_date", "max_date"])], "field");
   const id = token(raw.id, 100, "field id");
   unique(ids, id, "field id");
   const field: Record<string, unknown> = {
@@ -59,13 +74,24 @@ const fieldPart = (value: unknown, ids: Set<string>): FormField => {
   };
   if (raw.placeholder !== undefined) field.placeholder = text(raw.placeholder, Infinity, "placeholder", false);
   if (raw.required !== undefined) field.required = boolean(raw.required, "required");
-  if (raw.max_length !== undefined) {
-    if (!Number.isSafeInteger(raw.max_length) || (raw.max_length as number) < (kind === "date" ? 10 : 1)) {
-      throw new Error("max_length needs a positive integer (at least 10 for date)");
+  if (kind === "text") {
+    if (raw.max_length !== undefined) {
+      if (!Number.isSafeInteger(raw.max_length) || (raw.max_length as number) < 1) throw new Error("max_length needs a positive integer");
+      field.max_length = raw.max_length;
     }
-    field.max_length = raw.max_length;
+    if (raw.multiline !== undefined) field.multiline = boolean(raw.multiline, "multiline");
+    if (raw.keyboard !== undefined) {
+      if (!KEYBOARDS.includes(raw.keyboard as string)) throw new Error(`keyboard is one of ${KEYBOARDS.join(", ")}`);
+      field.keyboard = raw.keyboard;
+    }
   }
-  if (kind === "text" && raw.multiline !== undefined) field.multiline = boolean(raw.multiline, "multiline");
+  if (kind === "date") {
+    if (raw.min_date !== undefined) field.min_date = calendarDate(raw.min_date, "min_date");
+    if (raw.max_date !== undefined) field.max_date = calendarDate(raw.max_date, "max_date");
+    if (((field.min_date as string | undefined) ?? MIN_DATE) > ((field.max_date as string | undefined) ?? MAX_DATE)) {
+      throw new Error("min_date must not be after max_date");
+    }
+  }
   if (kind === "select" && raw.multiple !== undefined) field.multiple = boolean(raw.multiple, "multiple");
   if (kind === "select" || kind === "picker") {
     const seen = new Set<string>();
@@ -73,7 +99,6 @@ const fieldPart = (value: unknown, ids: Set<string>): FormField => {
       const option = object(entry, ["value", "label"], "option");
       const optionValue = token(option.value, 100, "option value");
       unique(seen, optionValue, "option value");
-      if (optionValue.length > (raw.max_length as number | undefined ?? 100)) throw new Error("max_length must fit every option value");
       return { value: optionValue, label: text(option.label, 30, "option label") };
     });
   }

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 import math
+import unicodedata
+from datetime import date
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Set, cast
 
 from .form_types import FormPart, FormReply
@@ -35,7 +37,8 @@ def _text(value: Any, maximum: Optional[int], name: str, trim: bool = True) -> s
     if not isinstance(value, str):
         raise ValueError(f"{name} needs a string")
     result = value.strip(_TRIM) if trim else value
-    if (trim and not result) or (maximum is not None and len(result) > maximum):
+    visible = any(character not in _TRIM and unicodedata.category(character) != "Cf" for character in result)
+    if (trim and not visible) or (maximum is not None and len(result) > maximum):
         raise ValueError(f"{name} exceeds its character limit or is blank")
     return result
 
@@ -64,14 +67,29 @@ def _boolean(value: Any, name: str) -> bool:
     return value
 
 
+_MIN_DATE = "1900-01-01"
+_MAX_DATE = "2100-12-31"
+_KEYBOARDS = ("default", "email", "phone", "number", "url")
+
+
+def _calendar_date(value: Any, name: str) -> str:
+    try:
+        if (not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value, re.ASCII)
+                or value.startswith("0000") or date.fromisoformat(value).isoformat() != value):
+            raise ValueError
+    except ValueError:
+        raise ValueError(f"{name} needs a YYYY-MM-DD calendar date") from None
+    return value
+
+
 def _field(value: Any, ids: Set[str]) -> Dict[str, Any]:
-    common = ["id", "type", "label", "placeholder", "required", "max_length"]
-    raw = _object(value, common + ["multiline", "multiple", "options"], "field")
+    common = ["id", "type", "label", "placeholder", "required"]
+    raw = _object(value, common + ["multiline", "max_length", "keyboard", "multiple", "options", "min_date", "max_date"], "field")
     kind = raw.get("type")
     if kind not in ("text", "select", "picker", "date"):
         raise ValueError("unknown form field type")
-    _object(raw, common + {"text": ["multiline"], "select": ["multiple", "options"],
-                          "picker": ["options"], "date": []}[kind], "field")
+    _object(raw, common + {"text": ["multiline", "max_length", "keyboard"], "select": ["multiple", "options"],
+                          "picker": ["options"], "date": ["min_date", "max_date"]}[kind], "field")
     field_id = _token(raw.get("id"), 100, "field id")
     _unique(ids, field_id, "field id")
     field = {"id": field_id, "type": kind,
@@ -80,15 +98,27 @@ def _field(value: Any, ids: Set[str]) -> Dict[str, Any]:
         field["placeholder"] = _text(raw["placeholder"], None, "placeholder", False)
     if "required" in raw:
         field["required"] = _boolean(raw["required"], "required")
-    if "max_length" in raw:
-        maximum = raw["max_length"]
-        if (type(maximum) not in (int, float)
-                or (isinstance(maximum, float) and (not math.isfinite(maximum) or not maximum.is_integer()))
-                or not (10 if kind == "date" else 1) <= maximum <= 9_007_199_254_740_991):
-            raise ValueError("max_length needs a positive integer (at least 10 for date)")
-        field["max_length"] = int(maximum)
-    if kind == "text" and "multiline" in raw:
-        field["multiline"] = _boolean(raw["multiline"], "multiline")
+    if kind == "text":
+        if "max_length" in raw:
+            maximum = raw["max_length"]
+            if (type(maximum) not in (int, float)
+                    or (isinstance(maximum, float) and (not math.isfinite(maximum) or not maximum.is_integer()))
+                    or not 1 <= maximum <= 9_007_199_254_740_991):
+                raise ValueError("max_length needs a positive integer")
+            field["max_length"] = int(maximum)
+        if "multiline" in raw:
+            field["multiline"] = _boolean(raw["multiline"], "multiline")
+        if "keyboard" in raw:
+            if raw["keyboard"] not in _KEYBOARDS:
+                raise ValueError("keyboard is one of " + ", ".join(_KEYBOARDS))
+            field["keyboard"] = raw["keyboard"]
+    if kind == "date":
+        if "min_date" in raw:
+            field["min_date"] = _calendar_date(raw["min_date"], "min_date")
+        if "max_date" in raw:
+            field["max_date"] = _calendar_date(raw["max_date"], "max_date")
+        if field.get("min_date", _MIN_DATE) > field.get("max_date", _MAX_DATE):
+            raise ValueError("min_date must not be after max_date")
     if kind == "select" and "multiple" in raw:
         field["multiple"] = _boolean(raw["multiple"], "multiple")
     if kind in ("select", "picker"):
@@ -98,8 +128,6 @@ def _field(value: Any, ids: Set[str]) -> Dict[str, Any]:
             option = _object(entry, ["value", "label"], "option")
             option_value = _token(option.get("value"), 100, "option value")
             _unique(seen, option_value, "option value")
-            if len(option_value) > raw.get("max_length", 100):
-                raise ValueError("max_length must fit every option value")
             options.append({"value": option_value, "label": _text(option.get("label"), 30, "option label")})
         field["options"] = options
     return field

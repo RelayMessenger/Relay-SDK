@@ -5382,7 +5382,7 @@ components:
           type: string
           minLength: 1
           maxLength: 30
-          pattern: '\S'
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
     FormTextField:
       type: object
       additionalProperties: false
@@ -5405,7 +5405,7 @@ components:
           type: string
           minLength: 1
           maxLength: 20
-          pattern: '\S'
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
         placeholder:
           type: string
           description: Text shown before the user enters or chooses a value.
@@ -5421,6 +5421,17 @@ components:
           type: boolean
           default: false
           description: Allow line breaks and a native multiline text field.
+        keyboard:
+          type: string
+          enum:
+            - default
+            - email
+            - phone
+            - number
+            - url
+          default: default
+          description: 'The keyboard iOS shows. `email` and `phone` also check the answer: an email address, or an E.164 number such as +13135550123. A wrong one is refused with 422/2006. `number` and `url` only choose the keyboard.'
+
     FormSelectField:
       type: object
       additionalProperties: false
@@ -5444,18 +5455,13 @@ components:
           type: string
           minLength: 1
           maxLength: 30
-          pattern: '\S'
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
         placeholder:
           type: string
           description: Text shown before the user enters or chooses a value.
         required:
           type: boolean
           default: false
-        max_length:
-          type: integer
-          maximum: 9007199254740991
-          minimum: 1
-          description: Maximum characters in each selected option value. Defaults to 100; every offered value must fit.
         multiple:
           type: boolean
           default: false
@@ -5489,18 +5495,13 @@ components:
           type: string
           minLength: 1
           maxLength: 20
-          pattern: '\S'
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
         placeholder:
           type: string
           description: Text shown before the user enters or chooses a value.
         required:
           type: boolean
           default: false
-        max_length:
-          type: integer
-          maximum: 9007199254740991
-          minimum: 1
-          description: Maximum characters in each selected option value. Defaults to 100; every offered value must fit.
         options:
           type: array
           minItems: 1
@@ -5530,18 +5531,27 @@ components:
           type: string
           minLength: 1
           maxLength: 40
-          pattern: '\S'
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
         placeholder:
           type: string
           description: Text shown before the user enters or chooses a value.
         required:
           type: boolean
           default: false
-        max_length:
-          type: integer
-          maximum: 9007199254740991
-          minimum: 10
           description: Maximum answer length. A calendar date is ten characters. Defaults to 10.
+        min_date:
+          type: string
+          format: date
+          pattern: ^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}$
+          default: "1900-01-01"
+          description: Earliest date the person can choose, YYYY-MM-DD. An earlier answer is refused. Not after max_date (checked by Relay).
+        max_date:
+          type: string
+          format: date
+          pattern: ^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}$
+          default: "2100-12-31"
+          description: Latest date the person can choose, YYYY-MM-DD. A later answer is refused.
+
     FormField:
       oneOf:
         - $ref: "#/components/schemas/FormTextField"
@@ -5574,7 +5584,7 @@ components:
           type: string
           minLength: 1
           maxLength: 80
-          pattern: '\S'
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
         fields:
           type: array
           minItems: 1
@@ -5592,7 +5602,7 @@ components:
           type: string
           minLength: 1
           maxLength: 80
-          pattern: '\S'
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
         text:
           type: string
           minLength: 0
@@ -5601,7 +5611,7 @@ components:
           type: string
           minLength: 1
           maxLength: 35
-          pattern: '\S'
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
     FormReceivedMessage:
       type: object
       additionalProperties: false
@@ -5613,7 +5623,7 @@ components:
           type: string
           minLength: 1
           maxLength: 512
-          pattern: '\S'
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
         subtitle:
           type: string
           minLength: 0
@@ -5655,7 +5665,7 @@ components:
     FormPart:
       type: object
       additionalProperties: false
-      description: Agent-only form with ordered pages. One form per Message, separate from buttons, selection, rich_card and carousel controls. Optional plain text beside it is an ordinary message. The user advances with Next and Back, reviews a summary when show_summary is true, and sends once. Reopening after Send shows read-only answers. The preview is the text part when present, otherwise received_message.title or title. Page ids and field ids must be unique.
+      description: Agent-only form with ordered pages. One form per Message; only text parts may sit beside it (no media, link, place, data, buttons, selection, rich_card or carousel). Optional plain text beside it is an ordinary message. The user advances with Next and Back, reviews a summary when show_summary is true, and sends once. Reopening after Send shows read-only answers. The preview is the text part when present, otherwise received_message.title or title. Page ids and field ids must be unique.
       required:
         - type
         - title
@@ -5669,7 +5679,7 @@ components:
           type: string
           minLength: 1
           maxLength: 80
-          pattern: '\S'
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
         pages:
           type: array
           minItems: 1
@@ -5702,7 +5712,7 @@ components:
           type: string
           minLength: 1
           maxLength: 80
-          pattern: '\S'
+          pattern: '^(?![\s\p{Cf}]*$)\S(?:[\s\S]*\S)?$'
         pages:
           type: array
           minItems: 1

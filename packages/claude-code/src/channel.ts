@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { RelayAPIError, buttonsPart, createPaymentPart, indexedIdempotencyKey, paymentRequestFields, replyTargetContext, selectionPart, standaloneLink } from "@relaymessenger/sdk";
+import { RelayAPIError, buttonsPart, createPaymentPart, formPart, indexedIdempotencyKey, paymentRequestFields, replyTargetContext, selectionPart, standaloneLink } from "@relaymessenger/sdk";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import Relay, { type Message, type RelayWebhookEvent, type ReplyTo } from "@relaymessenger/sdk";
 import {
@@ -274,6 +274,7 @@ export class RelayChannel {
       reply_to_message_id?: unknown;
       buttons?: unknown;
       selection?: unknown;
+      form?: unknown;
       link?: unknown;
       payment?: unknown;
     } | null;
@@ -294,6 +295,9 @@ export class RelayChannel {
     const payment = args?.payment === undefined ? undefined : paymentRequestFields(args.payment);
     if (typeof payment === "string") return failure(`payment: ${payment}`);
     if (payment && (buttons || selection)) return failure("a payment is a Message of its own; send it without buttons or selection");
+    const form = args?.form === undefined ? undefined : formPart(args.form);
+    if (typeof form === "string") return failure(`form: ${form}`);
+    if (form && (buttons || link || selection || payment)) return failure("a form sits beside text only; send it without buttons, link, selection or payment");
     const sendId = args && typeof args.send_id === "string" ? args.send_id : "";
     const replyTo = args && typeof args.reply_to_message_id === "string"
       ? args.reply_to_message_id
@@ -306,7 +310,7 @@ export class RelayChannel {
       return failure("reply_to_message_id must be a Relay Message UUID");
     }
     const redactedText = this.#redactor.text(text);
-    if ((!redactedText && !buttons && !link && !payment && !selection) || redactedText.length > 10_000) {
+    if ((!redactedText && !buttons && !link && !payment && !selection && !form) || redactedText.length > 10_000) {
       return failure("text must be 1-10000 UTF-16 code units after token redaction");
     }
     const idempotencyKey = `claude-reply-${createHash("sha256")
@@ -317,7 +321,7 @@ export class RelayChannel {
     // model gave, and the card sits on the key the last Message will carry.
     const plannedBodies = payment && !redactedText && !link
       ? []
-      : buildReplyMessages(redactedText, idempotencyKey, replyTo, buttons, link, selection);
+      : buildReplyMessages(redactedText, idempotencyKey, replyTo, buttons, link, selection, undefined, form);
     const body = plannedBodies[0];
     const payloadHash = stableHash(payment
       ? { chatId, bodies: plannedBodies, payment }
@@ -343,7 +347,7 @@ export class RelayChannel {
     const linked = replyTo ?? (origin.linksReply ? origin.messageId : undefined);
     let bodies = plannedBodies.length === 0
       ? plannedBodies
-      : buildReplyMessages(redactedText, idempotencyKey, linked, buttons, link, selection);
+      : buildReplyMessages(redactedText, idempotencyKey, linked, buttons, link, selection, undefined, form);
     if (payment) {
       // Created before anything is sent, on the key its card will carry, so
       // a refusal reaches the model with nothing half-sent, and a retry of
@@ -382,7 +386,9 @@ export class RelayChannel {
       );
     } catch (error) {
       return failure(
-        selection
+        form
+          ? `send failed: ${this.#redactor.text(error)}. Retry with the same send_id, chat_id, text, form, and reply_to_message_id.`
+          : selection
           ? `send failed: ${this.#redactor.text(error)}. Retry with the same send_id, chat_id, text, selection, and reply_to_message_id.`
           : payment
           ? `send failed: ${this.#redactor.text(error)}. Retry with the same send_id, chat_id, text, link, payment, and reply_to_message_id.`
