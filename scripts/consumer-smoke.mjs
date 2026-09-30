@@ -266,7 +266,7 @@ try {
       assert.deepEqual(methods(client.communities.members), ["list"]);
       assert.equal("posts" in client.communities, false);
       assert.deepEqual(methods(client.tasks), [
-        "addArtifact", "cancel", "get", "list", "send", "updateStatus",
+        "addArtifact", "cancel", "get", "list", "reply", "send", "updateStatus",
       ]);
       assert.deepEqual(methods(client.contacts), ["lookup"]);
       assert.deepEqual(methods(client.chats), [
