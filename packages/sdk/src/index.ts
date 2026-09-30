@@ -7,6 +7,7 @@ export {
   Calls,
   ContactCard,
   Contacts,
+  Directory,
   Me,
   Messages,
   PaymentRequests,

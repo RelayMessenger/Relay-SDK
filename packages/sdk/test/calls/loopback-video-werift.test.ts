@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import type { RelayMediaStreamTrackLike, RelayPeerConnectionLike } from "../../src/calls/transport.js";
 import { createWeriftWebRTCFactory } from "../../src/calls/engine-werift.js";
+import { waitForConnected } from "./wait-for-connected.js";
 import { loadWebCodecs } from "../../src/calls/engine-werift-video.js";
 import {
   RemoteVideoTrack,
@@ -43,17 +44,6 @@ const waitForIce = (peer: RelayPeerConnectionLike): Promise<void> =>
     peer.addEventListener("icegatheringstatechange", changed);
   });
 
-const waitForConnected = (peer: RelayPeerConnectionLike): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`peer stuck in ${peer.connectionState}`)), 10_000);
-    peer.onconnectionstatechange = () => {
-      if (peer.connectionState === "connected") {
-        clearTimeout(timer);
-        resolve();
-      }
-    };
-  });
-
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const solid = ([r, g, b]: [number, number, number]): VideoFrame => {
@@ -80,14 +70,14 @@ const loopback = async (videoCodec: VideoCodec) => {
   const remote = new Promise<{ track: RelayMediaStreamTrackLike; transceiver: unknown }>((resolve) => {
     b.ontrack = (event) => resolve({ track: event.track, transceiver: event.transceiver });
   });
-  const connected = Promise.all([waitForConnected(a), waitForConnected(b)]);
+  const watches = [waitForConnected(a), waitForConnected(b)];
   await a.setLocalDescription(await a.createOffer());
   await waitForIce(a);
   await b.setRemoteDescription({ type: "offer", sdp: a.localDescription!.sdp });
   await b.setLocalDescription(await b.createAnswer());
   await waitForIce(b);
   await a.setRemoteDescription({ type: "answer", sdp: b.localDescription!.sdp });
-  await connected;
+  await Promise.all(watches.map((watch) => watch.within()));
 
   const pulled = await remote;
   const track = new RemoteVideoTrack();

@@ -38,18 +38,15 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "11d8b5820c2640a9790f72c01b4d3690b90b8fa4", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "bf085edc35814d4c991f94e6b430aab5df3fd686", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
-// carry. The websocket is a transport, not a client method. The directory
-// and rating routes landed on the Server after the last contract carry; the
-// selection carry pins the Server bytes that include them, and their client
-// methods arrive with their own carry.
+// carry. WebSocket endpoints are transports, not REST resource methods.
+// Rating methods arrive with their own carry.
 const sourceOnlyOperations = [
   { method: "GET", path: "/v1/websocket", operationId: "connectAgentWebSocket" },
   { method: "GET", path: "/v1/calls/{callId}/room", operationId: "connectCallRoom" },
-  { method: "GET", path: "/v1/directory", operationId: "listDirectory" },
   { method: "PUT", path: "/v1/contacts/{handle}/rating", operationId: "rateAgent" },
   { method: "DELETE", path: "/v1/contacts/{handle}/rating", operationId: "deleteAgentRating" },
   { method: "GET", path: "/v1/contacts/{handle}/ratings", operationId: "listAgentRatings" },
@@ -107,6 +104,7 @@ const allowedOperationSignatures = [
   "PUT /v1/webhook-subscriptions/{subscriptionId}",
   "DELETE /v1/webhook-subscriptions/{subscriptionId}",
   "POST /v1/contacts/lookup",
+  "GET /v1/directory",
   "GET /v1/contact_card",
   "POST /v1/contact_card",
   "PATCH /v1/contact_card",
@@ -124,13 +122,13 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 56);
-assert.equal(manifest.path_count, 36);
+assert.equal(manifest.operation_count, 57);
+assert.equal(manifest.path_count, 37);
 assert.equal(manifest.source_path_count, 42);
-assert.equal(manifest.source_schema_count, 213);
+assert.equal(manifest.source_schema_count, 215);
 assert.equal(manifest.callback_count, 24);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 36);
-assert.equal(operationJSON.length, 56);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 37);
+assert.equal(operationJSON.length, 57);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 24);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
@@ -235,6 +233,7 @@ assert.deepEqual(Object.keys(client).sort(), [
   "chats",
   "contactCard",
   "contacts",
+  "directory",
   "me",
   "messages",
   "oauth2Client",
@@ -296,6 +295,7 @@ assert.deepEqual(publicMethods(client.contactCard), [
   "update",
 ]);
 assert.deepEqual(publicMethods(client.contacts), ["lookup"]);
+assert.deepEqual(publicMethods(client.directory), ["search"]);
 assert.deepEqual(publicMethods(client.blockedHandles), [
   "block",
   "list",
@@ -341,6 +341,23 @@ const validateOpenAPI = () => {
   assert.equal(document.paths["/v1/agents"], undefined);
   assert.equal(document.components.schemas.CreateAgentRequest, undefined);
   const schemas = document.components.schemas;
+  const share = document.paths["/v1/chats/{chatId}/share_contact_card"].post;
+  assert.equal(share.requestBody.required, false);
+  assert.equal(share.requestBody.content["application/json"].schema.$ref, "#/components/schemas/ShareContactCardRequest");
+  const shareBody = schemas.ShareContactCardRequest;
+  assert.equal(shareBody.additionalProperties, false);
+  assert.equal(shareBody.required, undefined);
+  assert.deepEqual(Object.keys(shareBody.properties), ["handle"]);
+  assert.equal(shareBody.properties.handle.type, "string");
+  assert.equal(shareBody.properties.handle.minLength, 1);
+  assert.equal(shareBody.properties.handle.maxLength, 255);
+  for (const field of ["id", "subtitle", "url"]) {
+    assert.ok(schemas.ContactCardItem.properties[field]);
+    assert.equal(schemas.ContactCardItem.required.includes(field), false);
+  }
+  assert.match(declaredTypes, /id\?: UUID;/u);
+  assert.match(declaredTypes, /url\?: string;/u);
+
   const option = schemas.SelectionOption;
   assert.equal(option.additionalProperties, false);
   assert.deepEqual(option.required, ["value", "label"]);
@@ -409,7 +426,7 @@ const validateOpenAPI = () => {
     ["EC8A3C", "C85F1C"], ["E0567A", "AD2A52"], ["D05FC6", "93217E"],
     ["8F6CF2", "5F38CF"], ["5B9BFA", "0B52C0"], ["2596A6", "116A79"], ["2FA46A", "137347"],
   ]);
-  assert.equal(Object.hasOwn(document.components.schemas.ContactCardItem.properties, "id"), false);
+  assert.equal(document.components.schemas.ContactCardItem.properties.id.format, "uuid");
   for (const name of [
     "ContactCardItem", "SetContactCardResponse", "UpdateContactCardRequest",
     "SetContactCardRequest", "ContactLookup",
@@ -444,10 +461,11 @@ const validateOpenAPI = () => {
   for (const [path, item] of Object.entries(document.paths)) {
     for (const [method, operation] of Object.entries(item)) {
       if (!["get", "post", "put", "patch", "delete"].includes(method)) continue;
-      // The public directory listing is deliberately unauthenticated on the
-      // Server; this SDK carries no client for it yet, so it is not held to
-      // the agent-token rule that every SDK operation satisfies.
       if (sourceOnly.has(`${method.toUpperCase()} ${path}`)) continue;
+      if (method === "get" && path === "/v1/directory") {
+        assert.deepEqual(operation.security, [], "the public directory needs no credential");
+        continue;
+      }
       assert.deepEqual(operation.security ?? document.security, [{ BearerAuth: [] }], `${method} ${path} still requires authentication`);
     }
   }
@@ -468,14 +486,19 @@ const validateOpenAPI = () => {
   assert.equal(lookup.post.operationId, "lookupContact");
   assert.equal(
     lookup.post.description,
-    "Send a handle to look up one active contact: a person resolves agents; an agent resolves people and agents. Send a task instead to find the public agents whose name, subtitle, description or skills match it, verified agents first; no match is an empty list.",
+    "Send a handle to look up one active contact: a person resolves agents; an agent resolves people and agents. Send id instead to look one up by its Contact id, as a shared Contact Card opens its agent (the card's handle may since have changed). Send a task instead to find the public agents whose name, subtitle, description or skills match it, verified agents first; no match is an empty list.",
   );
-  // The lookup body is one of two closed shapes: the original handle lookup,
-  // unchanged, or the task search the Server added with the agent directory.
+  // The lookup body is one of three closed shapes: the original handle
+  // lookup, unchanged; a Contact id, which a shared Contact Card opens by; or
+  // the task search the Server added with the agent directory.
   const lookupBody = lookup.post.requestBody.content["application/json"].schema;
   assert.equal(lookupBody.properties, undefined);
-  assert.equal(lookupBody.oneOf.length, 2);
-  const [lookupByHandle, lookupByTask] = lookupBody.oneOf;
+  assert.equal(lookupBody.oneOf.length, 3);
+  const [lookupByHandle, lookupByID, lookupByTask] = lookupBody.oneOf;
+  assert.deepEqual(lookupByID.required, ["id"]);
+  assert.deepEqual(Object.keys(lookupByID.properties), ["id"]);
+  assert.equal(lookupByID.additionalProperties, false);
+  assert.equal(lookupByID.properties.id.format, "uuid");
   assert.deepEqual(lookupByHandle.required, ["handle"]);
   assert.deepEqual(Object.keys(lookupByHandle.properties), ["handle"]);
   assert.equal(lookupByHandle.additionalProperties, false);
