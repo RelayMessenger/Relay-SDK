@@ -570,8 +570,6 @@ __all__ = [
     "OAuth2Client",
     "OAuth2ClientResponse",
     "OAuth2Clients",
-    "PrivateCommunity",
-    "PublicCommunity",
     "Relay",
     "RelayAPIError",
     "ReplyTo",

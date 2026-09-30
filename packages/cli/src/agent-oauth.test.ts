@@ -42,9 +42,13 @@ async function fixture() {
     if (path === "/orgs/org_a/agents") return Response.json([{ id: "agent-uuid", handle: "weather" }]);
     const base = "/orgs/org_a/agents/agent-uuid/oauth2";
     if (path === base && method === "GET") {
-      const first = !made;
+      if (!made) return Response.json({ error: "This agent has no OAuth2 client yet." }, { status: 404 });
+      return Response.json({ client });
+    }
+    if (path === base && method === "POST") {
+      if (made) return Response.json({ error: "This agent already has an OAuth2 client." }, { status: 409 });
       made = true;
-      return Response.json({ client, ...(first ? { client_secret: "rel_cs_first" } : {}) });
+      return Response.json({ client, client_secret: "rel_cs_first" }, { status: 201 });
     }
     if (path === base && method === "PATCH") {
       Object.assign(client, body);
@@ -63,16 +67,21 @@ async function fixture() {
   return { run, calls, client };
 }
 
-it("shows the client, with the secret only on the read that made it", async () => {
+it("never makes the client on show; create makes it once and shows the secret once", async () => {
   const f = await fixture();
-  expect((await f.run("oauth", "show", "@Weather")).out).toEqual({
+  const before = await f.run("oauth", "show", "@Weather");
+  expect(before.code).not.toBe(0);
+  expect(JSON.stringify(before.err)).toContain("oauth create");
+  expect((await f.run("oauth", "create", "weather")).out).toEqual({
     handle: "weather", client_id: "agent-uuid", redirect_uris: [], scopes: ["openid", "profile"], client_secret: "rel_cs_first",
   });
   expect((await f.run("oauth", "show", "weather")).out).not.toHaveProperty("client_secret");
+  expect((await f.run("oauth", "create", "weather")).code).not.toBe(0);
 });
 
 it("adds and removes redirects, sets the optional scopes, and resets the secret", async () => {
   const f = await fixture();
+  await f.run("oauth", "create", "weather");
   await f.run("oauth", "redirects", "add", "weather", "https://example.com/cb");
   expect(f.calls.at(-1)).toMatchObject({ method: "PATCH", body: { redirect_uris: ["https://example.com/cb"] } });
   await f.run("oauth", "redirects", "add", "weather", "https://example.com/two");

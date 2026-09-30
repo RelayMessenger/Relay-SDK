@@ -22180,6 +22180,34 @@ var Access = class {
     });
   }
 };
+var OAuth2Client = class {
+  transport;
+  constructor(transport2) {
+    this.transport = transport2;
+  }
+  /**
+   * `GET /v1/oauth2_client`: the client. A read never makes it (404 until
+   * created) and never carries the secret.
+   */
+  retrieve(options) {
+    return this.transport.request({ method: "GET", path: "/v1/oauth2_client", options });
+  }
+  /**
+   * `POST /v1/oauth2_client`: make the client, once (409 when one exists).
+   * This answer carries `client_secret`; only a reset shows another.
+   */
+  create(options) {
+    return this.transport.request({ method: "POST", path: "/v1/oauth2_client", expectedStatus: 201, options });
+  }
+  /** `PATCH /v1/oauth2_client`: replace the redirects, the scopes, or both. */
+  update(body, options) {
+    return this.transport.request({ method: "PATCH", path: "/v1/oauth2_client", body, options });
+  }
+  /** `POST /v1/oauth2_client/reset_secret`: a new secret, returned once; the old one stops working. */
+  resetSecret(options) {
+    return this.transport.request({ method: "POST", path: "/v1/oauth2_client/reset_secret", options });
+  }
+};
 var WebSocket2 = class {
   transport;
   constructor(transport2) {
@@ -22402,6 +22430,7 @@ var Relay = class {
   contacts;
   blockedHandles;
   me;
+  oauth2Client;
   tasks;
   websocket;
   webhooks;
@@ -22411,6 +22440,7 @@ var Relay = class {
     const transport2 = new Transport(options);
     this.baseURL = transport2.baseURL;
     this.access = new Access(transport2);
+    this.oauth2Client = new OAuth2Client(transport2);
     this.agents = new Agents(transport2);
     this.chats = new Chats(transport2);
     this.calls = new Calls(transport2);

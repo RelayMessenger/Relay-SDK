@@ -1070,11 +1070,19 @@ export class OAuth2Client {
   constructor(private readonly transport: Transport) {}
 
   /**
-   * `GET /v1/oauth2_client`: the client, made on first read. Only the read
-   * that makes it carries `client_secret`.
+   * `GET /v1/oauth2_client`: the client. A read never makes it (404 until
+   * created) and never carries the secret.
    */
   retrieve(options?: RequestOptions): Promise<OAuth2ClientResponse> {
     return this.transport.request({ method: "GET", path: "/v1/oauth2_client", options });
+  }
+
+  /**
+   * `POST /v1/oauth2_client`: make the client, once (409 when one exists).
+   * This answer carries `client_secret`; only a reset shows another.
+   */
+  create(options?: RequestOptions): Promise<OAuth2ClientResponse> {
+    return this.transport.request({ method: "POST", path: "/v1/oauth2_client", expectedStatus: 201, options });
   }
 
   /** `PATCH /v1/oauth2_client`: replace the redirects, the scopes, or both. */
