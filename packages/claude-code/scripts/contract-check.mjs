@@ -128,10 +128,10 @@ if (
 ) {
   throw new Error("Relay SDK Contact declarations must expose image_url and subtitle only");
 }
-if (lock.relayServer.commit !== "a184965ad3d70ea543dca623cfb9111b052d0dd9") {
+if (lock.relayServer.commit !== "269da7b573c2caa0a2033935c5c2b8f80071db84") {
   throw new Error("Relay Server commit lock drifted");
 }
-if (lock.relayServer.sha256 !== "414d6cc6ca71ee575b75ca420faafa0059924f10ac481866f14377e0db39c455") {
+if (lock.relayServer.sha256 !== "70dc3dd60859a1bde4dcfae5aed6bfd28c77d05c67b09cfbfc96781262928034") {
   throw new Error("Relay OpenAPI hash lock drifted");
 }
 if (
