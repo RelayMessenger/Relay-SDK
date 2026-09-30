@@ -1379,7 +1379,7 @@ paths:
     post:
       operationId: sendReaction
       summary: Add or remove a reaction to a message
-      description: Add or remove a reaction on one Message part. Targeting a `buttons`, `selection`, or `selection_response` part returns 422. Only a person can react to a `payment` part; an agent gets 403 (error code `2003`). A block stops it the way it stops a Message. It never reaches a member who blocked you, nor, in a direct chat, a member you blocked, and the answer is the same either way.
+      description: Add or remove a reaction on one Message part. Targeting a `buttons`, `selection`, `selection_response`, or `suggestion_response` part returns 422. Only a person can react to a `payment` part; an agent gets 403 (error code `2003`). A block stops it the way it stops a Message. It never reaches a member who blocked you, nor, in a direct chat, a member you blocked, and the answer is the same either way.
       tags:
         - Messages
       security:
@@ -5478,6 +5478,285 @@ components:
       allOf:
         - $ref: "#/components/schemas/SelectionResponsePart"
       description: Persisted selection metadata; contributes no fallback text and cannot receive reactions.
+    RichCardMedia:
+      type: object
+      additionalProperties: false
+      description: A card's picture or video. Drawn across the card's full width at `height` and opened full screen when tapped.
+      required: [type, url]
+      properties:
+        type:
+          type: string
+          enum: [image, video]
+        url:
+          type: string
+          format: uri
+          maxLength: 2048
+          pattern: '^https://'
+          description: A public https URL of the file.
+        thumbnail_url:
+          type: string
+          format: uri
+          maxLength: 2048
+          pattern: '^https://'
+          description: A public https URL of a still shown before a video plays.
+        height:
+          type: string
+          enum: [short, medium, tall]
+          default: medium
+          description: short is 112 pt, medium 168 pt, tall 264 pt.
+    RichCardSuggestionLabel:
+      type: string
+      minLength: 1
+      maxLength: 25
+      pattern: '\S'
+      description: The button's words, 1 to 25 characters after trimming; never only whitespace.
+    RichCardSuggestion:
+      description: |
+        One suggestion on a card. A `reply` is sent back as the person's own message: a `text` part equal to
+        `label`, then a `suggestion_response` part carrying `id`, replying to the card part. Every other type is an
+        action the person's phone does itself and sends nothing back.
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [type, label, id]
+          properties:
+            type: { type: string, enum: [reply] }
+            label: { $ref: "#/components/schemas/RichCardSuggestionLabel" }
+            id:
+              type: string
+              minLength: 1
+              maxLength: 256
+              description: Your identifier for this reply, returned in the person's suggestion_response. Unique within the part, across every card of a carousel (checked by Relay; JSON Schema cannot express it).
+        - type: object
+          additionalProperties: false
+          required: [type, label, url]
+          properties:
+            type: { type: string, enum: [open_url] }
+            label: { $ref: "#/components/schemas/RichCardSuggestionLabel" }
+            url:
+              type: string
+              format: uri
+              maxLength: 2048
+              pattern: '^[hH][tT][tT][pP][sS]?://'
+              description: An http or https URL. Other schemes are refused.
+            application:
+              type: string
+              enum: [browser, webview]
+              description: webview opens the page inside Relay; browser, the default, opens the in-app browser the same way a link does.
+        - type: object
+          additionalProperties: false
+          required: [type, label, phone_number]
+          properties:
+            type: { type: string, enum: [dial] }
+            label: { $ref: "#/components/schemas/RichCardSuggestionLabel" }
+            phone_number: { type: string, pattern: '^\+[1-9]\d{1,14}$', description: 'E.164, for example +12223334444.' }
+        - type: object
+          additionalProperties: false
+          required: [type, label]
+          description: Opens Apple Maps at latitude and longitude (both or neither), or searches for `query`. One of the two is required.
+          dependentRequired:
+            latitude: [longitude]
+            longitude: [latitude]
+          anyOf:
+            - required: [latitude]
+            - required: [query]
+          properties:
+            type: { type: string, enum: [view_location] }
+            label: { $ref: "#/components/schemas/RichCardSuggestionLabel" }
+            latitude: { type: number, minimum: -90, maximum: 90 }
+            longitude: { type: number, minimum: -180, maximum: 180 }
+            name: { type: string, minLength: 1, maxLength: 256, pattern: '\S', description: The pin's name. }
+            query: { type: string, minLength: 1, maxLength: 256, pattern: '\S' }
+        - type: object
+          additionalProperties: false
+          required: [type, label]
+          description: Opens the person's location picker; what they pick arrives as their own `place` message.
+          properties:
+            type: { type: string, enum: [share_location] }
+            label: { $ref: "#/components/schemas/RichCardSuggestionLabel" }
+        - type: object
+          additionalProperties: false
+          required: [type, label, start_time, end_time, title]
+          description: Opens the phone's new-event sheet, filled in; the person saves it. `end_time` is not before `start_time` (checked by Relay; JSON Schema cannot express it).
+          properties:
+            type: { type: string, enum: [create_calendar_event] }
+            label: { $ref: "#/components/schemas/RichCardSuggestionLabel" }
+            start_time: { type: string, format: date-time }
+            end_time: { type: string, format: date-time, description: Not before start_time. }
+            title: { type: string, minLength: 1, maxLength: 100, pattern: '\S' }
+            description: { type: string, maxLength: 500 }
+    CardContent:
+      type: object
+      additionalProperties: false
+      description: One card. Needs at least one of media, title or description.
+      anyOf:
+        - required: [media]
+        - required: [title]
+        - required: [description]
+      properties:
+        media:
+          $ref: "#/components/schemas/RichCardMedia"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: '\S'
+          description: 1 to 200 characters after trimming; never only whitespace.
+        description:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: '\S'
+          description: 1 to 2000 characters after trimming; never only whitespace.
+        suggestions:
+          type: array
+          minItems: 1
+          maxItems: 4
+          description: 1 to 4 suggestions. Every reply `id` is unique within the part (checked by Relay; JSON Schema cannot express it).
+          items:
+            $ref: "#/components/schemas/RichCardSuggestion"
+    RichCardPart:
+      type: object
+      additionalProperties: false
+      description: |
+        Agent-only. One card: a picture or video, a title, a description and up to 4 suggestions, drawn as one
+        balloon. A message carries at most one rich_card or
+        carousel and never a selection beside it; a text part beside it is an ordinary message above the card, and a
+        `buttons` part beside it draws as reply pills under it, which leave once the person answers the card or the
+        pills. The card's own suggestions persist: the person can tap them again. Preview, notification and fallback
+        text is the message's text part when it has one, else the card's title, else its description.
+      required: [type]
+      anyOf:
+        - required: [media]
+        - required: [title]
+        - required: [description]
+      properties:
+        type:
+          type: string
+          enum: [rich_card]
+        media:
+          $ref: "#/components/schemas/RichCardMedia"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: '\S'
+          description: 1 to 200 characters after trimming; never only whitespace.
+        description:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: '\S'
+          description: 1 to 2000 characters after trimming; never only whitespace.
+        suggestions:
+          type: array
+          minItems: 1
+          maxItems: 4
+          description: 1 to 4 suggestions. Every reply `id` is unique within the part (checked by Relay; JSON Schema cannot express it).
+          items:
+            $ref: "#/components/schemas/RichCardSuggestion"
+    RichCardPartResponse:
+      type: object
+      description: A rich_card part as read back.
+      required: [type, reactions]
+      properties:
+        type:
+          type: string
+          enum: [rich_card]
+        media:
+          $ref: "#/components/schemas/RichCardMedia"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: '\S'
+          description: 1 to 200 characters after trimming; never only whitespace.
+        description:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: '\S'
+          description: 1 to 2000 characters after trimming; never only whitespace.
+        suggestions:
+          type: array
+          minItems: 1
+          maxItems: 4
+          description: 1 to 4 suggestions. Every reply `id` is unique within the part (checked by Relay; JSON Schema cannot express it).
+          items:
+            $ref: "#/components/schemas/RichCardSuggestion"
+        reactions:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/Reaction"
+    CarouselPart:
+      type: object
+      additionalProperties: false
+      description: |
+        Agent-only. 2 to 10 cards the person swipes sideways; every card is drawn as tall as the
+        tallest. The rich_card rules apply, and reply ids are unique across all cards (checked by Relay; JSON Schema
+        cannot express it). Fallback text is the first card's title or description.
+      required: [type, cards]
+      properties:
+        type:
+          type: string
+          enum: [carousel]
+        card_width:
+          type: string
+          enum: [small, medium]
+          default: medium
+          description: small is 180 pt, medium 296 pt.
+        cards:
+          type: array
+          minItems: 2
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/CardContent"
+    CarouselPartResponse:
+      type: object
+      description: A carousel part as read back.
+      required: [type, card_width, cards, reactions]
+      properties:
+        type:
+          type: string
+          enum: [carousel]
+        card_width:
+          type: string
+          enum: [small, medium]
+        cards:
+          type: array
+          items:
+            $ref: "#/components/schemas/CardContent"
+        reactions:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/Reaction"
+    SuggestionResponsePart:
+      type: object
+      additionalProperties: false
+      description: User-only, exactly the second part after a plain `text` part equal to the reply's label. Requires reply_to message_id and part_index naming a rich_card or carousel part in the same Chat, and `id` must be one of its reply suggestions. The person sends only `id`; Relay stores the reply's `label` beside it. Reactions to this part return 422.
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [suggestion_response]
+        id:
+          type: string
+          minLength: 1
+          maxLength: 256
+    SuggestionResponsePartResponse:
+      type: object
+      description: The reply the person tapped, as the agent reads it. Contributes no fallback text.
+      required: [type, id, label]
+      properties:
+        type:
+          type: string
+          enum: [suggestion_response]
+        id:
+          type: string
+          description: The reply suggestion's id, as the agent sent it.
+        label:
+          type: string
+          description: The reply suggestion's label, as the card showed it.
     DataPart:
       type: object
       additionalProperties: false
@@ -6287,6 +6566,9 @@ components:
               - $ref: "#/components/schemas/ButtonsPartResponse"
               - $ref: "#/components/schemas/SelectionPartResponse"
               - $ref: "#/components/schemas/SelectionResponsePartResponse"
+              - $ref: "#/components/schemas/RichCardPartResponse"
+              - $ref: "#/components/schemas/CarouselPartResponse"
+              - $ref: "#/components/schemas/SuggestionResponsePartResponse"
               - $ref: "#/components/schemas/PaymentPartResponse"
               - $ref: "#/components/schemas/PaymentReceiptPartResponse"
               - $ref: "#/components/schemas/DataPartResponse"
@@ -6367,7 +6649,7 @@ components:
             - type: "null"
     MessageContent:
       type: object
-      description: One message containing 1–100 ordered parts. A link must be the only part. A selection needs no text part; it carries its own `title`, and a text part beside it is an ordinary message. Selection responses contain exactly plain text then selection_response metadata and require an explicit reply target.
+      description: One message containing 1–100 ordered parts. A link must be the only part. A selection needs no text part; it carries its own `title`, and a text part beside it is an ordinary message. Selection responses contain exactly plain text then selection_response metadata and require an explicit reply target. A message carries at most one rich_card or carousel; a card reply is exactly plain text then suggestion_response, replying to the card part.
       properties:
         metadata:
           $ref: "#/components/schemas/MessageMetadata"
@@ -6486,6 +6768,9 @@ components:
               - $ref: "#/components/schemas/ButtonsPartResponse"
               - $ref: "#/components/schemas/SelectionPartResponse"
               - $ref: "#/components/schemas/SelectionResponsePartResponse"
+              - $ref: "#/components/schemas/RichCardPartResponse"
+              - $ref: "#/components/schemas/CarouselPartResponse"
+              - $ref: "#/components/schemas/SuggestionResponsePartResponse"
               - $ref: "#/components/schemas/PaymentPartResponse"
               - $ref: "#/components/schemas/PaymentReceiptPartResponse"
               - $ref: "#/components/schemas/DataPartResponse"
@@ -6501,6 +6786,9 @@ components:
                 buttons: "#/components/schemas/ButtonsPartResponse"
                 selection: "#/components/schemas/SelectionPartResponse"
                 selection_response: "#/components/schemas/SelectionResponsePartResponse"
+                rich_card: "#/components/schemas/RichCardPartResponse"
+                carousel: "#/components/schemas/CarouselPartResponse"
+                suggestion_response: "#/components/schemas/SuggestionResponsePartResponse"
                 payment: "#/components/schemas/PaymentPartResponse"
                 payment_receipt: "#/components/schemas/PaymentReceiptPartResponse"
                 data: "#/components/schemas/DataPartResponse"
@@ -6562,6 +6850,9 @@ components:
           buttons: "#/components/schemas/ButtonsPart"
           selection: "#/components/schemas/SelectionPart"
           selection_response: "#/components/schemas/SelectionResponsePart"
+          rich_card: "#/components/schemas/RichCardPart"
+          carousel: "#/components/schemas/CarouselPart"
+          suggestion_response: "#/components/schemas/SuggestionResponsePart"
           payment: "#/components/schemas/PaymentPart"
           place: "#/components/schemas/PlacePart"
           data: "#/components/schemas/DataPart"
@@ -6572,6 +6863,9 @@ components:
         - $ref: "#/components/schemas/ButtonsPart"
         - $ref: "#/components/schemas/SelectionPart"
         - $ref: "#/components/schemas/SelectionResponsePart"
+        - $ref: "#/components/schemas/RichCardPart"
+        - $ref: "#/components/schemas/CarouselPart"
+        - $ref: "#/components/schemas/SuggestionResponsePart"
         - $ref: "#/components/schemas/PaymentPart"
         - $ref: "#/components/schemas/PlacePart"
         - $ref: "#/components/schemas/DataPart"
@@ -7208,6 +7502,9 @@ components:
               - $ref: "#/components/schemas/ButtonsPartResponse"
               - $ref: "#/components/schemas/SelectionPartResponse"
               - $ref: "#/components/schemas/SelectionResponsePartResponse"
+              - $ref: "#/components/schemas/RichCardPartResponse"
+              - $ref: "#/components/schemas/CarouselPartResponse"
+              - $ref: "#/components/schemas/SuggestionResponsePartResponse"
               - $ref: "#/components/schemas/PaymentPartResponse"
               - $ref: "#/components/schemas/PaymentReceiptPartResponse"
               - $ref: "#/components/schemas/DataPartResponse"
