@@ -1,12 +1,14 @@
 import { findAgent, type ConsoleRequest } from "./agent-access.js";
+import { ConsoleRefusal } from "./console-auth.js";
 import { CliError } from "./error-codes.js";
 
 /**
  * Log in with Relay: an agent's OAuth2 client, read and changed through the
  * same Relay Console routes its OAuth2 tab uses (Relay-Console
  * apps/api/src/routes/agents.ts: GET and PATCH /orgs/:orgId/agents/:id/oauth2,
- * POST /orgs/:orgId/agents/:id/oauth2/reset-secret). The client ID is the
- * agent's ID. The first read makes the client and shows its secret once.
+ * POST /orgs/:orgId/agents/:id/oauth2 and .../oauth2/reset-secret). The
+ * client ID is the agent's ID. A read never makes the client; `create` does,
+ * and shows its secret once.
  */
 
 export const OAUTH_SCOPES = ["openid", "profile", "email", "phone"] as const;
@@ -29,10 +31,23 @@ const present = (handle: string, response: OAuthClientResponse) => ({
   ...(response.client_secret ? { client_secret: response.client_secret } : {}),
 });
 
+const NO_CLIENT = "This agent has no OAuth2 client yet. Run relaymessenger oauth create first.";
+
 const read = async (request: ConsoleRequest, handle: string) => {
   const { path } = await findAgent(request, handle);
-  return { path, response: await request<OAuthClientResponse>(`${path}/oauth2`) };
+  try {
+    return { path, response: await request<OAuthClientResponse>(`${path}/oauth2`) };
+  } catch (error) {
+    if (error instanceof ConsoleRefusal && error.status === 404) throw new CliError(NO_CLIENT, "not_found");
+    throw error;
+  }
 };
+
+/** Makes the client, once; the only answer besides a reset that shows the secret. */
+export async function createOAuth(request: ConsoleRequest, handle: string) {
+  const { path } = await findAgent(request, handle);
+  return present(handle, await request<OAuthClientResponse>(`${path}/oauth2`, { method: "POST" }));
+}
 
 const patch = (request: ConsoleRequest, path: string, body: { redirect_uris?: string[]; scopes?: string[] }) =>
   request<OAuthClientResponse>(`${path}/oauth2`, {
@@ -68,7 +83,7 @@ export async function removeRedirect(request: ConsoleRequest, handle: string, ur
 export async function setScopes(request: ConsoleRequest, handle: string, scopes: string[]) {
   const unknown = scopes.filter((scope) => !(OAUTH_SCOPES as readonly string[]).includes(scope));
   if (unknown.length) throw new CliError(`Unknown scope ${unknown.join(", ")}. Scopes are ${OAUTH_SCOPES.join(", ")}.`, "usage");
-  const { path } = await findAgent(request, handle);
+  const { path } = await read(request, handle);
   return present(handle, await patch(request, path, { scopes: ["openid", "profile", ...scopes] }));
 }
 

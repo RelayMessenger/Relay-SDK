@@ -75,7 +75,7 @@ import { EXIT_CODES, exitCodesHelp } from "./exit-codes.js";
 import { verboseFetch } from "./verbose.js";
 import { relayHelpHeading, writeRelayHelpHeading } from "./relay-brand.js";
 import { consoleLogin, consoleLoginWithKey, consoleLoginOrReuse, consoleRequest, consoleSignOut, deleteConsoleAgent } from "./console-auth.js";
-import { addRedirect, removeRedirect, resetSecret, setScopes, showOAuth } from "./agent-oauth.js";
+import { addRedirect, createOAuth, removeRedirect, resetSecret, setScopes, showOAuth } from "./agent-oauth.js";
 import { AGENTS_CAN_MESSAGE, peopleSwitch, removeAccess, setAccess, showAccess, updateReach, type AgentsCanMessage } from "./agent-access.js";
 import { setReachPreset } from "./agent-access.js";
 import { linkPhone, phoneLinkSentence } from "./phone-link.js";
@@ -717,6 +717,7 @@ Websites log people in with Relay through standard OpenID Connect. The
 client ID is the agent's ID. Logging in lets the agent message the person.
 
 Examples:
+  relay oauth create weather
   relay oauth show weather
   relay oauth redirects add weather https://example.com/auth/relay/callback
   relay oauth redirects remove weather https://example.com/auth/relay/callback
@@ -727,6 +728,12 @@ Examples:
     .description("let websites log people in with Relay")
     .helpGroup(HELP_GROUPS.everythingElse);
   oauth.addHelpText("after", OAUTH_HELP);
+  oauth.command("create").argument("<handle>", "agent handle", handle)
+    .description("create the client and show its secret once")
+    .option("--json", "JSON output")
+    .action(async (agentHandle: string) => {
+      output(await createOAuth(accessRequest, agentHandle));
+    });
   oauth.command("show").argument("<handle>", "agent handle", handle)
     .description("show the client id, redirects and scopes")
     .option("--json", "JSON output")

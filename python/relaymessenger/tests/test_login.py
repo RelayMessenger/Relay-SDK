@@ -62,6 +62,7 @@ def test_oauth2_client_routes(server: str) -> None:
 
     async def run() -> None:
         await relay.oauth2_client.retrieve()
+        await relay.oauth2_client.create()
         await relay.oauth2_client.update(redirect_uris=["https://youlearn.ai/cb"], scopes=["openid", "profile", "email"])
         await relay.oauth2_client.reset_secret()
         with pytest.raises(ValueError):
@@ -70,10 +71,11 @@ def test_oauth2_client_routes(server: str) -> None:
     asyncio.run(run())
     assert [(method, path) for method, path, _ in _Handler.seen] == [
         ("GET", "/v1/oauth2_client"),
+        ("POST", "/v1/oauth2_client"),
         ("PATCH", "/v1/oauth2_client"),
         ("POST", "/v1/oauth2_client/reset_secret"),
     ]
-    assert _Handler.seen[1][2] == {"redirect_uris": ["https://youlearn.ai/cb"], "scopes": ["openid", "profile", "email"]}
+    assert _Handler.seen[2][2] == {"redirect_uris": ["https://youlearn.ai/cb"], "scopes": ["openid", "profile", "email"]}
 
 
 def test_verify_relay_id_token(server: str) -> None:
