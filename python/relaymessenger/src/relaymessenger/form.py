@@ -8,6 +8,7 @@ target. Read those field ids, never labels or the visible reply text.
 from __future__ import annotations
 
 import re
+import math
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Set, cast
 
 from .form_types import FormPart, FormReply
@@ -16,6 +17,9 @@ if TYPE_CHECKING:
     from .client import Relay, ReplyTo, SendMessageResponse
 
 _TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*", re.ASCII)
+# Match the Server's String.trim(), including FEFF but excluding Python-only
+# separators U+001C–U+001F and U+0085. Do not trim placeholders or answer values.
+_TRIM = "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 
 
 def _object(value: Any, allowed: Sequence[str], name: str) -> Mapping[str, Any]:
@@ -30,7 +34,7 @@ def _object(value: Any, allowed: Sequence[str], name: str) -> Mapping[str, Any]:
 def _text(value: Any, maximum: Optional[int], name: str, trim: bool = True) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{name} needs a string")
-    result = value.strip() if trim else value
+    result = value.strip(_TRIM) if trim else value
     if (trim and not result) or (maximum is not None and len(result) > maximum):
         raise ValueError(f"{name} exceeds its character limit or is blank")
     return result
@@ -78,9 +82,11 @@ def _field(value: Any, ids: Set[str]) -> Dict[str, Any]:
         field["required"] = _boolean(raw["required"], "required")
     if "max_length" in raw:
         maximum = raw["max_length"]
-        if type(maximum) is not int or maximum < (10 if kind == "date" else 1):
+        if (type(maximum) not in (int, float)
+                or (isinstance(maximum, float) and (not math.isfinite(maximum) or not maximum.is_integer()))
+                or not (10 if kind == "date" else 1) <= maximum <= 9_007_199_254_740_991):
             raise ValueError("max_length needs a positive integer (at least 10 for date)")
-        field["max_length"] = maximum
+        field["max_length"] = int(maximum)
     if kind == "text" and "multiline" in raw:
         field["multiline"] = _boolean(raw["multiline"], "multiline")
     if kind == "select" and "multiple" in raw:
@@ -148,7 +154,7 @@ def form_parts(
     """Optional ordinary text followed by the validated form, as selection_parts."""
     part = form_part(title, pages, **options)
     parts: List[Dict[str, Any]] = []
-    if text is not None and text.strip():
+    if text is not None and text.strip(_TRIM):
         parts.append({"type": "text", "value": text})
     parts.append(dict(part))
     return parts

@@ -1,15 +1,21 @@
 {
   "relayServer": {
     "repository": "RelayMessenger/Relay-Server",
-    "commit": "add9a0857f971e2d35f82711206b4b108ed30912",
+    "commit": "5c643259ba61947b12ff9888ca870a285b24a212",
     "openapiPath": "contracts/developer/openapi.yaml",
-    "sha256": "2de73db15c2ad93e0ed72581d1613023a19e66398f82f91ca82aa8f880e71a9c"
+    "sha256": "a3c8fef8a5a6a24ca37dcda8fafcc9aceca755a00de0f59cccc46df54ec73213"
   },
   "relaySdk": {
     "package": "@relaymessenger/sdk",
+<<<<<<< HEAD
     "version": "0.3.7-staging.5",
     "integrity": "sha512-ukBzArAx8XXTCxPEypgB/HMMmj1ikIiqHxwCKtBvBIe11xSsl4UwrGq1reEnIZWwj6jgtgCvZnXdTCe+df5uog==",
     "workspaceOpenapiSha256": "2de73db15c2ad93e0ed72581d1613023a19e66398f82f91ca82aa8f880e71a9c"
+=======
+    "version": "0.3.7-staging.4",
+    "integrity": "sha512-BPbPNzk2nGUKlKb16WvBrQvBWUsm5oLnwRsQXg2Pdd7FeBn/pZrnA9S/QchFmPNWBPuQVjPOHvXYFrLE59TpUA==",
+    "workspaceOpenapiSha256": "a3c8fef8a5a6a24ca37dcda8fafcc9aceca755a00de0f59cccc46df54ec73213"
+>>>>>>> e9c7b9cb (Carry frozen form contract and prove cross-language boundaries)
   },
   "claudeCode": {
     "documentation": [

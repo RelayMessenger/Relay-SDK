@@ -13,8 +13,8 @@ const response: MessageContent = {
 const fence = (value: unknown) => "```form\n" + JSON.stringify(value) + "\n```";
 
 describe("form authoring", () => {
-  it.each(fixture.cases)("validates $name", ({ path, value, valid, remove }: {
-    path: Array<string | number>; value: unknown; valid: boolean; remove?: boolean;
+  it.each(fixture.cases)("validates $name", ({ path, value, valid, remove, normalized }: {
+    path: Array<string | number>; value: unknown; valid: boolean; remove?: boolean; normalized?: unknown;
   }) => {
     const input = structuredClone(form);
     let parent: any = input;
@@ -22,6 +22,7 @@ describe("form authoring", () => {
     if (remove) delete parent[path.at(-1)!];
     else parent[path.at(-1)!] = value;
     const result = sdk.formPart(input);
+    if (normalized !== undefined) parent[path.at(-1)!] = normalized;
     if (valid) expect(result).toEqual({ ...input, type: "form" });
     else expect(typeof result).toBe("string");
   });

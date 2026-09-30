@@ -44,7 +44,10 @@ def test_authoring(case: dict[str, Any]) -> None:
     # Ensure a missing implementation cannot satisfy an expected ValueError/TypeError.
     api()
     if case["valid"]:
-        assert build(value) == value
+        result = build(value)
+        if "normalized" in case:
+            parent[case["path"][-1]] = case["normalized"]
+        assert result == value
     else:
         with pytest.raises((ValueError, TypeError)):
             build(value)
@@ -63,10 +66,11 @@ def test_normalizes_labels_preserves_placeholders_and_copies_nested_options() ->
     assert value["pages"][0]["fields"][2]["options"][0]["label"] == "Fall"
 
 
-@pytest.mark.parametrize("text", [None, "", " \n", " Details please "])
+@pytest.mark.parametrize("text", [None, "", " \n", "\ufeff", "\u00a0", "\u0085", " Details please "])
 def test_optional_text_and_validation_before_send(text: Any) -> None:
     kwargs = {key: value for key, value in FORM.items() if key != "type"}
-    expected = [{"type": "text", "value": text}, FORM] if text and text.strip() else [FORM]
+    has_words = text not in (None, "", " \n", "\ufeff", "\u00a0")
+    expected = [{"type": "text", "value": text}, FORM] if has_words else [FORM]
     assert api().form_parts(**kwargs, text=text) == expected
     with pytest.raises(ValueError):
         api().form_parts("Title", [], text=text)

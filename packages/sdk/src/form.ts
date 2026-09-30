@@ -6,7 +6,7 @@ export const FORM_GUIDANCE =
   + "Fields are text (single-line or multiline), select (single or multiple), picker, or date (YYYY-MM-DD). "
   + "Text max_length defaults to 30 single-line or 300 multiline; a positive explicit value overrides it. "
   + "Use show_summary for an optional review page. Put any extra words in an optional text part above the card. "
-  + "Send one form, never with buttons or selection. Only the human user answers, once. "
+  + "Send one form, never with buttons or selection. Only the user answers, once. "
   + "The reply contains plain text 'Form sent' and form_response.answers keyed by field id, "
   + "with reply_to naming the source part. Dispatch on those ids, never on labels or visible text.";
 export const FORM_BLOCK_INSTRUCTION =
@@ -18,7 +18,7 @@ export const FORM_BLOCK_INSTRUCTION =
 const object = (value: unknown, allowed: readonly string[], name: string): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${name} needs an object`);
   const extra = Object.keys(value).find((key) => !allowed.includes(key));
-  if (extra) throw new Error(`${name} has unknown field ${extra}`);
+  if (extra !== undefined) throw new Error(`${name} has unknown field ${extra}`);
   return value as Record<string, unknown>;
 };
 const text = (value: unknown, max: number, name: string, trim = true): string => {
@@ -60,7 +60,7 @@ const fieldPart = (value: unknown, ids: Set<string>): FormField => {
   if (raw.placeholder !== undefined) field.placeholder = text(raw.placeholder, Infinity, "placeholder", false);
   if (raw.required !== undefined) field.required = boolean(raw.required, "required");
   if (raw.max_length !== undefined) {
-    if (!Number.isInteger(raw.max_length) || (raw.max_length as number) < (kind === "date" ? 10 : 1)) {
+    if (!Number.isSafeInteger(raw.max_length) || (raw.max_length as number) < (kind === "date" ? 10 : 1)) {
       throw new Error("max_length needs a positive integer (at least 10 for date)");
     }
     field.max_length = raw.max_length;
