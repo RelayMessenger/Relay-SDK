@@ -1687,6 +1687,31 @@ export type AgentAccessRule = "allow" | "deny";
  * owner set for people and other agents; a contact on Never Allow may not.
  * The agent's owner is always allowed and is on neither list.
  */
+/** "Log in with Relay" scopes: `openid` and `profile` always, `email` and `phone` optional. */
+export type OAuth2Scope = "openid" | "profile" | "email" | "phone";
+
+/** The agent's OAuth2 client for Log in with Relay. `client_id` is the agent's ID. */
+export interface OAuth2Client {
+  client_id: string;
+  redirect_uris: string[];
+  scopes: OAuth2Scope[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OAuth2ClientResponse {
+  client: OAuth2Client;
+  /** The client secret (`rel_cs_...`), only when the client was just made or its secret was just reset. */
+  client_secret?: string;
+}
+
+export interface OAuth2ClientUpdateParams {
+  /** Replaces every redirect. Up to 10 https URLs (http only on localhost). */
+  redirect_uris?: string[];
+  /** Replaces the scopes. `openid` and `profile` are always kept. */
+  scopes?: OAuth2Scope[];
+}
+
 export interface AgentAccessLists {
   allow: ContactLookup[];
   deny: ContactLookup[];

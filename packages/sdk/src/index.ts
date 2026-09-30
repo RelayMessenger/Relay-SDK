@@ -100,6 +100,12 @@ export {
 
 export { Relay as default } from "./client.js";
 export {
+  RELAY_ISSUER,
+  verifyRelayIdToken,
+  type RelayIdTokenClaims,
+  type VerifyRelayIdTokenOptions,
+} from "./login.js";
+export {
   SELECTION_BLOCK_INSTRUCTION,
   SELECTION_FENCE,
   SELECTION_GUIDANCE,

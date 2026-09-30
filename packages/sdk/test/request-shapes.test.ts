@@ -409,6 +409,7 @@ describe("Relay v1 request shapes", () => {
       "contacts",
       "me",
       "messages",
+      "oauth2Client",
       "paymentRequests",
       "tasks",
       "webhookEvents",
@@ -417,6 +418,7 @@ describe("Relay v1 request shapes", () => {
       "websocket",
     ]);
     expect(methods(client.access)).toEqual(["list", "remove", "set"]);
+    expect(methods(client.oauth2Client)).toEqual(["resetSecret", "retrieve", "update"]);
     expect(methods(client.agents)).toEqual(["delete"]);
     expect(methods(client.me)).toEqual(["retrieve", "update"]);
     // Communities were removed (2026-09-30): the client has no way to reach them.
