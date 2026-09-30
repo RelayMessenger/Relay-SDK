@@ -228,11 +228,19 @@ async function requestPayment(chatId: string): Promise<void> {
     { idempotencyKey: "order-42" },
   );
   request.checkout_url satisfies string;
+  request.application_fee_amount satisfies number;
+  const { application_fee_amount, ...withoutFee } = request;
+  // @ts-expect-error Every PaymentRequest includes its fee, even when it is 0.
+  const missingFee: PaymentRequest = withoutFee;
+  // @ts-expect-error The fee is a number, never a string.
+  const stringFee: PaymentRequest = { ...request, application_fee_amount: "120" };
+  void [application_fee_amount, missingFee, stringFee];
   await relay.chats.messages.send(chatId, {
     message: { parts: [{ type: "payment", checkout_url: request.checkout_url }] },
   });
   (await relay.paymentRequests.list({ status: "requested" })).payment_requests satisfies PaymentRequest[];
   (await relay.paymentRequests.cancel(request.id)).status satisfies PaymentStatus;
+  (await relay.paymentRequests.retrieve(request.id)).application_fee_amount satisfies number;
 }
 void requestPayment;
 

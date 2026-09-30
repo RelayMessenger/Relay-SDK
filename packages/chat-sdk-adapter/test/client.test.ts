@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   RelayApiError,
   RelayClient,
+  type RelayPaymentRequest,
 } from "../src/index.js";
 import { IDS, jsonResponse } from "./helpers.js";
 
@@ -396,6 +397,43 @@ it("sends a typed native selection without losing the existing idempotency ident
 
 const PAYMENT = { type: "payment" as const, checkout_url: "https://pay.relayapp.im/pr_token_123" };
 const PAYMENT_REQUEST_ID = "0199a000-0000-7000-8000-00000000c0de";
+
+it.each([
+  ["one-time", "payment", 2_400, 120],
+  ["subscription first period", "subscription", 1_234, 62],
+  ["rounds to zero", "payment", 9, 0],
+  ["legacy", "payment", 2_400, 0],
+] as const)("preserves the server fee for %s payment requests", async (_, mode, amount, fee) => {
+  const request: RelayPaymentRequest = {
+    id: PAYMENT_REQUEST_ID, object: "payment_request", status: "requested",
+    mode, amount, application_fee_amount: fee, currency: "usd",
+    description: "House blend, 250 g", category: "physical_goods",
+    checkout_url: PAYMENT.checkout_url, expires_at: "2026-09-24T12:00:00.000Z",
+    metadata: {}, stripe: { payment_intent_id: "pi_123" },
+    created_at: "2026-09-23T13:00:00.000Z", updated_at: "2026-09-23T13:00:00.000Z",
+  };
+  const { application_fee_amount, ...withoutFee } = request;
+  // @ts-expect-error The fee is required, including for legacy requests with a 0 fee.
+  const missingFee: RelayPaymentRequest = withoutFee;
+  // @ts-expect-error Fee minor units are numeric.
+  const stringFee: RelayPaymentRequest = { ...request, application_fee_amount: "120" };
+  void [application_fee_amount, missingFee, stringFee];
+  const { calls, fetchMock } = harness(call => jsonResponse(
+    call.method === "GET" && call.url.endsWith("/v1/payment_requests")
+      ? { payment_requests: [request], next_cursor: null } : request,
+  ));
+  const client = new RelayClient({ token: "test", fetch: fetchMock as typeof fetch });
+  const body = { amount, currency: "usd", description: request.description, category: request.category };
+  const created = await client.createPaymentRequest(body);
+  const listed = await client.listPaymentRequests();
+  const retrieved = await client.getPaymentRequest(request.id);
+  const canceled = await client.cancelPaymentRequest(request.id);
+  for (const result of [created, ...listed.payment_requests, retrieved, canceled]) {
+    result.application_fee_amount satisfies number;
+    expect(result.application_fee_amount).toBe(fee);
+  }
+  expect(calls[0]?.body).toEqual(body);
+});
 
 it("sends a typed payment as the only part, unchanged", async () => {
   const requests: RequestInit[] = [];

@@ -251,6 +251,8 @@ export interface PaymentRequest {
   mode: PaymentMode;
   /** What the person is charged at checkout, in minor units. */
   amount: number;
+  /** Relay's 5% fee on `amount`, in minor units, taken from the payment by Stripe; in subscription mode, the first period's fee. 0 when 5% rounds to nothing. */
+  application_fee_amount: number;
   currency: string;
   description: string;
   category: PaymentCategory;

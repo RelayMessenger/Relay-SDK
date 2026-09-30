@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { parse } from "yaml";
 import Relay, { answerMessages, RelayAPIError } from "../src/index.js";
 import { createPaymentPart, parsePaymentBlock, paymentRequestFields, PAYMENT_GUIDANCE, splitPayment } from "../src/payment.js";
 import type { PaymentPartResponse, PaymentReceiptPartResponse, PaymentRequest, PaymentWebhookEvent } from "../src/types.js";
@@ -163,6 +165,7 @@ const request: PaymentRequest = {
   status: "requested",
   mode: "payment",
   amount: 2_400,
+  application_fee_amount: 120,
   currency: "usd",
   description: "House blend, 250 g",
   category: "physical_goods",
@@ -191,6 +194,26 @@ describe("payment transport", () => {
     });
     return { relay, calls };
   };
+
+  it.each([
+    ["one-time", "payment", 2_400, 120],
+    ["subscription first period", "subscription", 1_234, 62],
+    ["rounds to zero", "payment", 9, 0],
+    ["legacy", "payment", 2_400, 0],
+  ] as const)("preserves the server fee for %s requests on create, list, retrieve and cancel", async (_, mode, amount, fee) => {
+    const response = { ...request, mode, amount, application_fee_amount: fee };
+    const { relay, calls } = recorder(response);
+    const created = await relay.paymentRequests.create(fields);
+    const retrieved = await relay.paymentRequests.retrieve(request.id);
+    const canceled = await relay.paymentRequests.cancel(request.id);
+    const listing = recorder({ payment_requests: [response], next_cursor: null });
+    const listed = await listing.relay.paymentRequests.list();
+    for (const result of [created, retrieved, canceled, ...listed.payment_requests]) {
+      expect(result.application_fee_amount).toBe(fee);
+    }
+    // The fee belongs to the response, not to the create request.
+    expect(calls[0]?.body).toEqual(fields);
+  });
 
   it("serializes a payment-only message verbatim", async () => {
     const { relay, calls } = recorder({});
@@ -222,6 +245,39 @@ describe("payment transport", () => {
     const canceled = await relay.paymentRequests.cancel(request.id);
     expect(calls).toEqual([{ path: `/v1/payment_requests/${request.id}/cancel`, method: "POST", body: {}, key: null }]);
     expect(canceled.status).toBe("canceled");
+  });
+});
+
+describe("payment fee documentation", () => {
+  it("requires the integer fee and documents subscription first-period and zero fees", () => {
+    const document = parse(readFileSync(new URL("../../../contracts/relay-v1-openapi.yaml", import.meta.url), "utf8"));
+    const schema = document.components.schemas.PaymentRequest;
+    expect(schema.required).toContain("application_fee_amount");
+    expect(schema.properties.application_fee_amount).toEqual({
+      type: "integer",
+      description: "Relay's 5% fee on `amount`, in minor units, taken from the payment by Stripe; in subscription mode, the first period's fee. 0 when 5% rounds to nothing.",
+    });
+    const description = document.paths["/v1/payment_requests"].post.description.replace(/\s+/gu, " ");
+    expect(description).toContain("Relay takes a 5% fee on every payment");
+    expect(description).toContain("in subscription mode it is 5% of every period");
+    expect(description).toContain("when a refund of a payment succeeds, Relay returns the same share of its fee");
+    expect(description).not.toContain("Relay takes no fee");
+  });
+
+  it("documents application_fee_amount in both SDK types with the contract's own words", () => {
+    const document = parse(readFileSync(new URL("../../../contracts/relay-v1-openapi.yaml", import.meta.url), "utf8"));
+    const contract = document.components.schemas.PaymentRequest.properties.application_fee_amount.description;
+    for (const path of ["../src/types.ts", "../../chat-sdk-adapter/src/types.ts"]) {
+      const source = readFileSync(new URL(path, import.meta.url), "utf8");
+      expect(source, path).toContain(`/** ${contract} */\n  application_fee_amount: number;`);
+    }
+  });
+
+  it("tells cookbook users about the 5% application fee and response field", () => {
+    const readme = readFileSync(new URL("../../../cookbook/cloudflare-think-agent/README.md", import.meta.url), "utf8").replace(/\s+/gu, " ");
+    expect(readme).toContain("Relay takes a 5% fee on every payment as a Stripe application fee");
+    expect(readme).toContain("`application_fee_amount` on the payment request");
+    expect(readme).not.toContain("you receive the full amount");
   });
 });
 
