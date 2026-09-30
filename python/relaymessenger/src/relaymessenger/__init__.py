@@ -14,6 +14,8 @@ the ``calls`` extra (``pip install 'relaymessenger[calls]'``). Importing
 from . import a2ui, rich_cards, selection, websocket
 from .client import (
     DEFAULT_BASE_URL,
+    AgeRange,
+    AgentAgeRating,
     CallContact,
     ChatHandle,
     ContactCard,
@@ -36,6 +38,8 @@ from .websocket import (
 
 __all__ = [
     "DEFAULT_BASE_URL",
+    "AgeRange",
+    "AgentAgeRating",
     "CallContact",
     "ChatHandle",
     "ContactCard",

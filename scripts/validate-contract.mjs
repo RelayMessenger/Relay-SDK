@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "269da7b573c2caa0a2033935c5c2b8f80071db84", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "11d8b5820c2640a9790f72c01b4d3690b90b8fa4", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -127,7 +127,7 @@ assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 56);
 assert.equal(manifest.path_count, 36);
 assert.equal(manifest.source_path_count, 42);
-assert.equal(manifest.source_schema_count, 212);
+assert.equal(manifest.source_schema_count, 213);
 assert.equal(manifest.callback_count, 24);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 36);
 assert.equal(operationJSON.length, 56);
@@ -519,6 +519,9 @@ const validateOpenAPI = () => {
     "can_message",
     // Server 461: a person's IANA time zone.
     "timezone",
+    // Server 468: a person's age range, then an agent's age rating.
+    "age_range",
+    "age_rating",
   ]);
   assert.equal(contactLookup.properties.can_message.type, "boolean");
   assert.match(declaredTypes, /can_message\?: boolean/u);
@@ -766,6 +769,8 @@ const validateOpenAPI = () => {
       "owner",
       // Server 461: a person's handle names their IANA time zone.
       "timezone",
+      // Server 468: and their age range.
+      "age_range",
       "is_contact",
       "activity_version",
       "activity",
@@ -783,7 +788,7 @@ const validateOpenAPI = () => {
     /\n {4}timezone: string \| null;/u,
     "ContactEventContact must require timezone",
   );
-  assert.match(declaredTypes, /export type HandleOwner = [^;]*;[^]*?kind: "user";[^}]*\n {4}timezone\?: string \| null;\n\};/u, "HandleOwner user must type timezone");
+  assert.match(declaredTypes, /export type HandleOwner = [^;]*;[^]*?kind: "user";[^}]*\n {4}timezone\?: string \| null;[^}]*\n\};/u, "HandleOwner user must type timezone");
   assert.match(declaredTypes, /export type TypingContact = SystemEventParty;/u);
   for (const name of [
     "ChatHandle", "ContactEventContact", "ContactLookup", "TypingContact",
@@ -793,6 +798,30 @@ const validateOpenAPI = () => {
     assert.deepEqual(timezone.type, ["string", "null"], `${name}.timezone`);
     assert.equal(timezone.maxLength, 64);
   }
+  // A person's age range (Server 468) rides beside the time zone on every
+  // person object the SDK types; an agent's lookup names its age rating.
+  for (const name of ["UserChatHandle", "ContactLookup", "CallContact", "SystemEventParty", "OwnerPerson"]) {
+    const body = new RegExp(`export interface ${name}\\b[^{]*\\{([^}]*)\\n\\}`, "u").exec(declaredTypes)?.[1] ?? "";
+    assert.match(body, /\n {4}age_range\?: AgeRange \| null;/u, `${name} must type age_range`);
+  }
+  assert.match(
+    /export interface ContactEventContact\b[^{]*\{([^}]*)\n\}/u.exec(declaredTypes)?.[1] ?? "",
+    /\n {4}age_range: AgeRange \| null;/u,
+    "ContactEventContact must require age_range",
+  );
+  assert.match(declaredTypes, /export type HandleOwner = [^;]*;[^]*?kind: "user";[^}]*\n {4}age_range\?: AgeRange \| null;\n\};/u, "HandleOwner user must type age_range");
+  assert.match(declaredTypes, /export type AgeRange = "under_13" \| "13_15" \| "16_17" \| "18_plus";/u);
+  assert.match(declaredTypes, /export type AgentAgeRating = "everyone" \| "18_plus";/u);
+  assert.match(declaredTypes, /\n {4}age_rating\?: AgentAgeRating;/u);
+  for (const name of [
+    "ChatHandle", "ContactEventContact", "ContactLookup", "TypingContact",
+    "CallContact", "SystemEventParty", "UserOwner", "OwnerPerson",
+  ]) {
+    const ageRange = document.components.schemas[name].properties.age_range;
+    assert.deepEqual(ageRange.type, ["string", "null"], `${name}.age_range`);
+    assert.deepEqual(ageRange.enum, ["under_13", "13_15", "16_17", "18_plus", null], `${name}.age_range`);
+  }
+  assert.deepEqual(document.components.schemas.AgentAgeRating.enum, ["everyone", "18_plus"]);
   const activityPath = document.paths["/v1/chats/{chatId}/activity"];
   assert.deepEqual(Object.keys(activityPath), ["parameters", "get", "put", "delete"]);
   assert.equal(activityPath.get.operationId, "getActivity");
@@ -929,7 +958,7 @@ const validateOpenAPI = () => {
   );
   assert.deepEqual(
     document.components.schemas.ContactEventContact.required,
-    ["id", "handle", "display_name", "timezone"],
+    ["id", "handle", "display_name", "timezone", "age_range"],
   );
   assert.equal(
     document["x-relay-webhooks"]["contact.added.v2026-08-30"].post

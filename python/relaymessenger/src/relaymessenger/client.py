@@ -52,6 +52,14 @@ class SendMessageResponse(TypedDict, total=False):
     a2ui_errors: List[A2uiFailure]
 
 
+#: A person's age range: the bands Apple's Declared Age Range answers for the
+#: age gates 13, 16 and 18.
+AgeRange = Literal["under_13", "13_15", "16_17", "18_plus"]
+#: Who an agent is for; Relay refuses an 18_plus agent (error 2035) to every
+#: person whose age range is not 18_plus.
+AgentAgeRating = Literal["everyone", "18_plus"]
+
+
 class ChatHandle(TypedDict, total=False):
     """A chat participant (contract ``ChatHandle``). ``owner`` is an agent's
     own field; ``timezone`` a person's."""
@@ -74,6 +82,11 @@ class ChatHandle(TypedDict, total=False):
     #: Relay on more than one device, the device they used last sets it.
     #: Timestamps stay in UTC; use this to read them in the person's local time.
     timezone: Optional[str]
+    #: The person's age range ("under_13", "13_15", "16_17" or "18_plus"),
+    #: as their Relay app last reported it from Apple's Declared Age Range or
+    #: a birth year given once; None until it reports one. A person whose
+    #: range is not "18_plus" never reaches an agent rated 18_plus.
+    age_range: Optional[AgeRange]
     is_contact: bool
     activity_version: str
     activity: Optional[Dict[str, Any]]
@@ -87,6 +100,11 @@ class ContactEventContact(TypedDict):
     display_name: str
     #: The person's IANA time zone name, or None until their app reports one.
     timezone: Optional[str]
+    #: The person's age range ("under_13", "13_15", "16_17" or "18_plus"),
+    #: as their Relay app last reported it from Apple's Declared Age Range or
+    #: a birth year given once; None until it reports one. A person whose
+    #: range is not "18_plus" never reaches an agent rated 18_plus.
+    age_range: Optional[AgeRange]
 
 
 class _PartyRequired(TypedDict):
@@ -102,6 +120,11 @@ class CallContact(_PartyRequired, total=False):
     #: app last reported it; None until it reports one. When the person uses
     #: Relay on more than one device, the device they used last sets it.
     timezone: Optional[str]
+    #: The person's age range ("under_13", "13_15", "16_17" or "18_plus"),
+    #: as their Relay app last reported it from Apple's Declared Age Range or
+    #: a birth year given once; None until it reports one. A person whose
+    #: range is not "18_plus" never reaches an agent rated 18_plus.
+    age_range: Optional[AgeRange]
 
 
 class SystemEventParty(_PartyRequired, total=False):
@@ -111,6 +134,11 @@ class SystemEventParty(_PartyRequired, total=False):
     #: app last reported it; None until it reports one. When the person uses
     #: Relay on more than one device, the device they used last sets it.
     timezone: Optional[str]
+    #: The person's age range ("under_13", "13_15", "16_17" or "18_plus"),
+    #: as their Relay app last reported it from Apple's Declared Age Range or
+    #: a birth year given once; None until it reports one. A person whose
+    #: range is not "18_plus" never reaches an agent rated 18_plus.
+    age_range: Optional[AgeRange]
 
 
 class _UserOwnerRequired(TypedDict):
@@ -127,6 +155,11 @@ class UserOwner(_UserOwnerRequired, total=False):
     #: app last reported it; None until it reports one. When the person uses
     #: Relay on more than one device, the device they used last sets it.
     timezone: Optional[str]
+    #: The person's age range ("under_13", "13_15", "16_17" or "18_plus"),
+    #: as their Relay app last reported it from Apple's Declared Age Range or
+    #: a birth year given once; None until it reports one. A person whose
+    #: range is not "18_plus" never reaches an agent rated 18_plus.
+    age_range: Optional[AgeRange]
 
 
 class _OwnerPersonRequired(TypedDict):
@@ -142,6 +175,11 @@ class OwnerPerson(_OwnerPersonRequired, total=False):
     #: app last reported it; None until it reports one. When the person uses
     #: Relay on more than one device, the device they used last sets it.
     timezone: Optional[str]
+    #: The person's age range ("under_13", "13_15", "16_17" or "18_plus"),
+    #: as their Relay app last reported it from Apple's Declared Age Range or
+    #: a birth year given once; None until it reports one. A person whose
+    #: range is not "18_plus" never reaches an agent rated 18_plus.
+    age_range: Optional[AgeRange]
 
 
 class _ChatRequired(TypedDict):
@@ -223,10 +261,18 @@ class ContactCard(TypedDict, total=False):
     category: Optional[str]
     skills: List[Dict[str, Any]]
     visibility: str
+    #: Who the agent is for: "everyone", or "18_plus" (only people whose age
+    #: range is 18_plus reach it).
+    age_rating: AgentAgeRating
     creator: Optional[Dict[str, Any]]
     can_message: bool
     #: The person's IANA time zone name, or None until their app reports one.
     timezone: Optional[str]
+    #: The person's age range ("under_13", "13_15", "16_17" or "18_plus"),
+    #: as their Relay app last reported it from Apple's Declared Age Range or
+    #: a birth year given once; None until it reports one. A person whose
+    #: range is not "18_plus" never reaches an agent rated 18_plus.
+    age_range: Optional[AgeRange]
 
 
 class _Transport:

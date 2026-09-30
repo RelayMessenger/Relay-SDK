@@ -48,3 +48,25 @@ def test_a_person_type_names_every_contract_field(typed: type, schema: str) -> N
 
 def test_a_contact_event_contact_always_carries_the_time_zone_key() -> None:
     assert "timezone" in ContactEventContact.__required_keys__
+
+
+@pytest.mark.parametrize(
+    "schema",
+    ["ChatHandle", "ContactEventContact", "ContactLookup", "CallContact", "SystemEventParty", "UserOwner", "OwnerPerson"],
+)
+def test_every_person_object_carries_the_age_range(schema: str) -> None:
+    assert "age_range" in _properties(schema)
+
+
+def test_a_contact_event_contact_always_carries_the_age_range_key() -> None:
+    assert "age_range" in ContactEventContact.__required_keys__
+
+
+def test_the_age_types_name_the_contract_values() -> None:
+    from typing import get_args
+
+    from relaymessenger import AgeRange, AgentAgeRating
+
+    assert get_args(AgeRange) == ("under_13", "13_15", "16_17", "18_plus")
+    assert get_args(AgentAgeRating) == ("everyone", "18_plus")
+    assert "age_rating" in ContactCard.__annotations__
