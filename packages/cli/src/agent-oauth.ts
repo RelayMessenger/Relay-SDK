@@ -56,7 +56,7 @@ const patch = (request: ConsoleRequest, path: string, body: { redirect_uris?: st
     body: JSON.stringify(body),
   });
 
-/** The client, as the OAuth2 tab shows it; the secret only when this read made the client. */
+/** The client, as the OAuth2 tab shows it. A read never makes the client and never shows the secret. */
 export async function showOAuth(request: ConsoleRequest, handle: string) {
   const { response } = await read(request, handle);
   return present(handle, response);
