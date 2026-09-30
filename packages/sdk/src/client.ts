@@ -686,12 +686,12 @@ export class Chats {
     bodyOrOptions: ChatShareContactCardParams & RequestOptions = {},
     options?: RequestOptions,
   ): Promise<void> {
-    const { handle, ...legacyOptions } = bodyOrOptions;
+    const { handle } = bodyOrOptions;
     return this.transport.request({
       method: "POST",
       path: `/v1/chats/${pathID(chatID)}/share_contact_card`,
       ...(handle === undefined ? {} : { body: { handle } }),
-      options: options ?? legacyOptions,
+      options: options ?? bodyOrOptions,
     });
   }
 

@@ -10,11 +10,7 @@ const manifest = JSON.parse(await readFile(join(root, "contracts/relay-v1-operat
 const expected = manifest.source_openapi_sha256;
 assert.match(expected, /^[a-f0-9]{64}$/u);
 assert.equal(manifest.upstream.sha256, expected);
-assert.ok(
-  /^[a-f0-9]{40}$/u.test(manifest.upstream.commit)
-    || (manifest.upstream.commit === "PENDING" && manifest.upstream.publication_status === "local-only"),
-  "Server contract commit must be a durable pin or an explicit local candidate",
-);
+assert.match(manifest.upstream.commit, /^[a-f0-9]{40}$/u, "Server contract commit must be a real source pin");
 const copies = [
   "contracts/relay-v1-openapi.yaml",
   "packages/chat-sdk-adapter/contracts/relay-openapi.yaml",
@@ -48,9 +44,7 @@ const skillLock = JSON.parse(
     "utf8",
   ),
 );
-if (manifest.upstream.publication_status !== "local-only") {
-  assert.equal(skillLock.api.openapi_sha256, expected);
-}
+assert.equal(skillLock.api.openapi_sha256, expected);
 assert.equal(skillLock.api.commit, "add9a0857f971e2d35f82711206b4b108ed30912");
 assert.equal(skillLock.sdk.commit, "79517a1c9fcb1c82b474cd72ba8bc10197ff363f");
 assert.equal(skillLock.sdk.version, "0.3.1-staging.1");

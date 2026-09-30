@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import Relay, { RelayAPIError } from "../src/index.js";
+import Relay, { RelayAPIError, type RequestOptions } from "../src/index.js";
 
 function fixture(status = 204) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -35,6 +35,20 @@ describe("share contact card", () => {
     }
     expect(new Headers(calls[1]!.init?.headers).get("x-fixture")).toBe("legacy");
     expect(new Headers(calls[2]!.init?.headers).get("x-fixture")).toBe("third");
+  });
+
+  it("preserves getter-backed legacy request options", async () => {
+    const { relay, calls } = fixture();
+    const controller = new AbortController();
+    class Options implements RequestOptions {
+      get headers() { return { "x-fixture": "getter" }; }
+      get signal() { return controller.signal; }
+    }
+    await relay.chats.shareContactCard("chat-id", new Options());
+    expect(calls[0]!.init?.body).toBeUndefined();
+    expect(new Headers(calls[0]!.init?.headers).get("x-fixture")).toBe("getter");
+    controller.abort();
+    expect(calls[0]!.init?.signal?.aborted).toBe(true);
   });
 
   it("keeps an empty options object bodyless", async () => {

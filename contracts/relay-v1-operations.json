@@ -3,10 +3,9 @@
   "source_openapi_sha256": "81357730415acd55289b3f82eb7070f24c63ade7d47425ee1329b49d56acce22",
   "upstream": {
     "repository": "https://github.com/RelayMessenger/Relay-Server.git",
-    "commit": "b63bfcd70708c05c1251314acae22e1083549bc3",
+    "commit": "299127592ef5f4eb2a34f70c5d3490d54e186434",
     "path": "contracts/developer/openapi.yaml",
-    "sha256": "81357730415acd55289b3f82eb7070f24c63ade7d47425ee1329b49d56acce22",
-    "publication_status": "local-only"
+    "sha256": "81357730415acd55289b3f82eb7070f24c63ade7d47425ee1329b49d56acce22"
   },
   "source_path_count": 43,
   "source_schema_count": 214,
