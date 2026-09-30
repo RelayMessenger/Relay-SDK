@@ -2,7 +2,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { PAYMENT_BLOCK_INSTRUCTION, PAYMENT_GUIDANCE, type RelayWebhookEvent } from "@relaymessenger/sdk";
+import { FORM_BLOCK_INSTRUCTION, PAYMENT_BLOCK_INSTRUCTION, PAYMENT_GUIDANCE, type RelayWebhookEvent } from "@relaymessenger/sdk";
 import { dispatchRelayEvent } from "./dispatch.js";
 import type { RelayIngressLifecycle } from "./ingress.js";
 import { createRelayChatTurns, type RelayChatTurns } from "./turns.js";
@@ -176,6 +176,13 @@ it("forwards selection data and native authoring guidance to the admitted OpenCl
   }));
   expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
     ctxPayload: expect.objectContaining({ BodyForAgent: expect.stringContaining("portable text remains bullets") }),
+  }));
+});
+
+it("teaches the admitted OpenClaw turn how to send a form", async () => {
+  const result = await dispatch([approvedId], approvedId, "review_sender");
+  expect(result.invoke).toHaveBeenCalledWith(expect.objectContaining({
+    ctxPayload: expect.objectContaining({ BodyForAgent: expect.stringContaining(FORM_BLOCK_INSTRUCTION) }),
   }));
 });
 
