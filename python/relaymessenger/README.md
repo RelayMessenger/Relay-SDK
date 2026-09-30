@@ -2,15 +2,13 @@
 
 The Relay SDK for Python, the twin of the npm package `@relaymessenger/sdk`.
 `relaymessenger.a2ui` sends [A2UI](https://a2ui.org) cards to a chat and reads
-their taps. `relay.tasks` and `relaymessenger.a2a` send and accept tasks between
-agents over [A2A](https://a2a-protocol.org) 1.0. `relaymessenger.calls` joins a Relay Call as the agent and sends
+their taps. `relaymessenger.calls` joins a Relay Call as the agent and sends
 and receives audio and video. It is the framework-neutral core under
 `relaymessenger-livekit` and `relaymessenger-pipecat`; use one of those to
 connect a voice framework.
 
 ```sh
-pip install relaymessenger            # chats, events, cards, accepting tasks
-pip install 'relaymessenger[a2a]'     # and sending tasks to other agents
+pip install relaymessenger            # chats, events and cards
 pip install 'relaymessenger[calls]'   # and calls
 ```
 
@@ -195,81 +193,6 @@ await send_selection(
 anything Relay would refuse. The answer arrives as a `message.received` whose
 `selection_response` part holds the chosen `selected_values`, with `reply_to`
 naming the prompt; dispatch on those values, never on the labels.
-
-## Accept tasks from other agents
-
-A task one agent sends another is an A2A 1.0 Task. An agent accepts tasks only
-after it turns that on itself, with its own token:
-
-```python
-await relay.me.update(accepts_tasks=True)
-```
-
-A new task reaches your agent as `task.created`, through its webhook or the
-Agent WebSocket, with the Task in `data.task`; `data.task.metadata.relay.requester`
-is the verified agent that sent it. Move it through its states and add results;
-the agent that sent the task receives `task.updated` each time:
-
-```python
-async def on_event(event: dict) -> None:
-    if event["event_type"] != "task.created":
-        return
-    task = event["data"]["task"]
-    await relay.tasks.update_status(task["id"], "WORKING")
-    await relay.tasks.add_artifact(task["id"], {"artifactId": "answer", "parts": [{"text": "Bonjour"}]})
-    await relay.tasks.update_status(task["id"], "COMPLETED")
-```
-
-COMPLETED, FAILED, REJECTED and CANCELED are final. `task.message` brings a
-follow-up from the agent that sent the task (the answer to `INPUT_REQUIRED`),
-and `task.canceled` says it canceled. `relay.tasks.list(role="callee")` lists
-the tasks your agent was sent; `role="requester"`, the ones it sent. The
-types, `A2aTask`, `TaskCreatedWebhook` and the rest, are in
-`relaymessenger.tasks`.
-
-## Send another agent a task
-
-Every Relay agent has an A2A address, its own origin
-`https://<handle>.relayagent.im` (each `_` in the handle written `-`), with
-its AgentCard at `<address>/.well-known/agent-card.json`. The `a2a` extra installs the
-official [A2A SDK](https://github.com/a2aproject/a2a-python);
-`connect_agent` returns its `Client` for that address, calling with your
-agent's token:
-
-```python
-from a2a.helpers import new_text_message
-from a2a.types import GetTaskRequest, Role, SendMessageRequest
-from relaymessenger.a2a import connect_agent
-
-client = await connect_agent(os.environ["RELAY_AGENT_TOKEN"], "translator")
-request = SendMessageRequest(message=new_text_message("Say hello in French.", role=Role.ROLE_USER))
-# The Task first, then each status and artifact update, until it finishes.
-async for event in client.send_message(request):
-    if event.HasField("task"):
-        task_id = event.task.id
-task = await client.get_task(GetTaskRequest(id=task_id))
-await client.close()
-```
-
-Staging agents are under `a2a_origin="https://staging.relayagent.im"`, at
-`https://<handle>.staging.relayagent.im`. Who may
-send an agent a task is who may message it.
-
-An agent that does not accept tasks answers the same message with one A2A
-Message instead of a Task, as the A2A SDK's `StreamResponse` carries either.
-The message reaches that agent in the chat between your two agents, and the
-reply is its message there whose `reply_to` names yours (or, naming nothing,
-its next message while yours is the only one open); the reply's `context_id`
-is that chat's id, so send it back on your next message to stay in the same
-chat:
-
-```python
-async for event in client.send_message(request):
-    if event.HasField("message"):
-        reply = event.message
-    elif event.HasField("task"):
-        task_id = event.task.id
-```
 
 ## Answer a Call
 

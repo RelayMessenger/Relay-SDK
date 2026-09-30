@@ -2,13 +2,8 @@ import { RelayAPIError, isAbortError } from "./errors.js";
 import { ChatsPage, MessagesPage } from "./pagination.js";
 import { CallRoom, type CallRoomOptions } from "./calls/call-room.js";
 import type {
-  A2aMessage,
-  A2aSendMessageResult,
-  A2aTask,
   AcceptedResponse,
   AgentMe,
-  AgentMeUpdateParams,
-  AgentMeUpdateResponse,
   AgentAccessEntry,
   AgentAccessLists,
   OAuth2ClientResponse,
@@ -62,15 +57,6 @@ import type {
   PaymentRequestListParams,
   PaymentRequestListResponse,
   RequestOptions,
-  TaskArtifactCreateParams,
-  TaskCancelParams,
-  TaskGetParams,
-  TaskListParams,
-  TaskListResponse,
-  TaskResponse,
-  TaskSendParams,
-  TaskReplyParams,
-  TaskStatusUpdateParams,
   UnblockHandleParams,
   WebhookEventListResponse,
   WebhookSubscription,
@@ -93,16 +79,6 @@ type FetchLike = (
 export interface RelayOptions {
   apiKey: string;
   baseURL?: string;
-  /**
-   * Where other agents' A2A addresses live. An origin is the agent domain:
-   * each agent is its own origin under it, `https://<handle>.relayagent.im`
-   * (each "_" of the handle written "-"). A URL with a path is a local Relay
-   * Server's `<origin>/a2a`, and the address is `<a2aBaseURL>/<handle>`. By
-   * default it follows `baseURL` as Relay serves it: https://relayagent.im
-   * for api.relayapp.im, https://staging.relayagent.im for
-   * api.staging.relayapp.im, and `<baseURL origin>/a2a` for any other host.
-   */
-  a2aBaseURL?: string;
   webhookSecret?: string | null;
   maxRetries?: number;
   timeout?: number;
@@ -145,90 +121,8 @@ const delay = async (milliseconds: number, signal?: AbortSignal): Promise<void> 
 
 const pathID = (value: string): string => encodeURIComponent(value);
 
-/**
- * Relay-Server's A2A_ORIGIN for each API host (wrangler.jsonc env.staging:
- * PUBLIC_ORIGIN api.staging.relayapp.im, A2A_ORIGIN staging.relayagent.im;
- * production drops the "staging" label, scripts/production-config.mjs). With
- * no A2A_ORIGIN the Server serves agents under /a2a/ on its own origin
- * (config.ts, a2a.ts agentInterfaceUrl).
- */
-const defaultA2aBaseURL = (baseURL: string): string => {
-  const url = new URL(baseURL);
-  if (url.hostname === "api.relayapp.im") return "https://relayagent.im";
-  if (url.hostname === "api.staging.relayapp.im") return "https://staging.relayagent.im";
-  return `${url.origin}/a2a`;
-};
-
-/**
- * An agent's A2A address (Relay-Server a2a.ts `agentInterfaceUrl`): its own
- * origin under the agent domain, the handle's "_" written "-" because TLS
- * clients refuse "_" in a name under the *.relayagent.im certificate; or,
- * for a local Relay Server, `<origin>/a2a/<handle>`.
- */
-/**
- * A Relay handle, exactly as Relay-Server a2a.ts `HANDLE` accepts it:
- * `^[a-z][a-z0-9_]{2,31}$`, less the handles whose host label (each "_"
- * written "-") breaks RFC 5891 section 4.2.3.1: "MUST NOT contain "--" in the
- * third and fourth character positions and MUST NOT start or end with a "-""
- * (`xn__abc` would be the invalid A-label `xn--abc`). The handle becomes a DNS
- * label or a path segment of the address the Relay token is sent to, so
- * nothing else is let through: no case folding, no trimming.
- */
-const HANDLE = /^(?!.{2}__)[a-z][a-z0-9_]{1,30}[a-z0-9]$/;
-
-const relayHandle = (to: string): string => {
-  const handle = to.startsWith("@") ? to.slice(1) : to;
-  if (!HANDLE.test(handle)) {
-    throw new TypeError(
-      `${JSON.stringify(to)} is not a Relay handle: 3 to 32 of a-z, 0-9 and _, starting with a letter, not ending with _, and without __ as its 3rd and 4th characters.`,
-    );
-  }
-  return handle;
-};
-
-/**
- * Refuses a card that names an interface off the address's origin. Relay's
- * cards are unsigned, and A2A trusts an unsigned card only as far as the
- * server that served it: a client verifies the server by its TLS certificate
- * (A2A 1.0 section 7.2) and "SHOULD verify at least one signature before
- * trusting an Agent Card" (section 8.4.3). What the card can vouch for is
- * therefore its own origin, the one discovery fetched it from (section 8.2,
- * RFC 8615), and the Relay token is sent nowhere else. `supportedInterfaces`
- * is every endpoint @a2a-js/sdk can pick: without `legacyCompat` its resolver
- * drops a 0.3 card's `url` and `additionalInterfaces`, and the factory then
- * refuses the card.
- */
-const requireSameOrigin = (card: { supportedInterfaces?: Array<{ url: string }> }, address: string): void => {
-  const origin = new URL(address).origin;
-  for (const { url } of card.supportedInterfaces ?? []) {
-    let named: string | undefined;
-    try {
-      named = new URL(url).origin;
-    } catch {
-      named = undefined;
-    }
-    if (named !== origin) {
-      throw new TypeError(
-        `The agent card at ${address} names the interface ${JSON.stringify(url)}, which is not on the agent's own origin; the Relay token is not sent there.`,
-      );
-    }
-  }
-};
-
-const a2aAddress = (a2aBaseURL: string, handle: string): string => {
-  const base = new URL(a2aBaseURL);
-  return base.pathname === "/"
-    ? `${base.protocol}//${handle.replaceAll("_", "-")}.${base.host}`
-    : `${a2aBaseURL.replace(/\/+$/, "")}/${pathID(handle)}`;
-};
-
-type A2aClientModule = typeof import("@a2a-js/sdk/client");
-type A2aClient = Awaited<ReturnType<InstanceType<A2aClientModule["ClientFactory"]>["createFromUrl"]>>;
-
 class Transport {
   readonly baseURL: string;
-  readonly a2aBaseURL: string;
-  readonly #a2aClients = new Map<string, Promise<A2aClient>>();
   readonly #apiKey: string;
   readonly #fetch: FetchLike;
   readonly #maxRetries: number;
@@ -237,7 +131,6 @@ class Transport {
 
   constructor(options: RelayOptions) {
     this.baseURL = (options.baseURL ?? "https://api.relayapp.im").replace(/\/+$/, "");
-    this.a2aBaseURL = (options.a2aBaseURL ?? defaultA2aBaseURL(this.baseURL)).replace(/\/+$/, "");
     this.#apiKey = options.apiKey;
     const selectedFetch = options.fetch ?? globalThis.fetch;
     // Workerd's native fetch validates its receiver. Retaining the bare
@@ -370,60 +263,6 @@ class Transport {
         { status: response.status },
       );
     }
-  }
-
-  /**
-   * The official A2A 1.0 client (@a2a-js/sdk) for one agent's address, made
-   * from its Agent Card at `<address>/.well-known/agent-card.json` and kept
-   * for this Relay instance. Every JSON-RPC call carries this agent's Relay
-   * token as its bearer credential (the card's `relay` HTTP bearer scheme);
-   * the client adds `A2A-Version: 1.0`. Loaded on first use, so an agent
-   * that never sends another agent a task or message there never loads it.
-   */
-  a2a(handle: string): Promise<A2aClient> {
-    let key: string;
-    try {
-      key = relayHandle(handle);
-    } catch (error) {
-      return Promise.reject(error);
-    }
-    let client = this.#a2aClients.get(key);
-    if (!client) {
-      client = this.#createA2aClient(key);
-      this.#a2aClients.set(key, client);
-      client.catch(() => this.#a2aClients.delete(key));
-    }
-    return client;
-  }
-
-  async #createA2aClient(handle: string): Promise<A2aClient> {
-    const {
-      ClientFactory,
-      DefaultAgentCardResolver,
-      JsonRpcTransportFactory,
-      createAuthenticatingFetchWithRetry,
-    } = await import("@a2a-js/sdk/client");
-    const fetchImpl = this.#fetch as typeof fetch;
-    const apiKey = this.#apiKey;
-    // A Relay address answers where it is called and never redirects. Fetch
-    // drops Authorization on a cross-origin redirect, but a caller's own
-    // fetch may not, so a call carrying the token refuses every redirect.
-    const noRedirect: typeof fetch = (input, init) => fetchImpl(input, { ...init, redirect: "error" });
-    // The token is always Authorization: Bearer, the card's relay scheme; a
-    // card cannot name another header for it.
-    const authenticated = createAuthenticatingFetchWithRetry(noRedirect, {
-      headers: async () => ({ authorization: `Bearer ${apiKey}` }),
-      shouldRetryWithHeaders: async () => undefined,
-    });
-    const factory = new ClientFactory({
-      transports: [new JsonRpcTransportFactory({ fetchImpl: authenticated })],
-    });
-    // The card is fetched without the token; the token goes only to an
-    // interface on the address's own origin.
-    const address = a2aAddress(this.a2aBaseURL, handle);
-    const agentCard = await new DefaultAgentCardResolver({ fetchImpl }).resolve(`${address}/.well-known/agent-card.json`, "");
-    requireSameOrigin(agentCard, address);
-    return factory.createFromAgentCard(agentCard);
   }
 
   runWebSocket(options: WebSocketRunOptions): Promise<void> {
@@ -1184,153 +1023,6 @@ export class Me {
       options,
     });
   }
-
-  /**
-   * Turn on or off whether this agent accepts tasks (A2A Tasks) from other
-   * agents. It starts off; only the agent itself sets it. While it is off, a
-   * message to the agent's A2A address arrives as an ordinary message in the
-   * chat with the sender. The reply is the agent's message there whose
-   * `reply_to` names it; a message that names nothing is the reply only when
-   * it is the agent's next message and the sender sent nothing else since
-   * the agent last spoke. So reply with `reply_to`: two overlapping messages
-   * from the same sender get no unnamed reply (Relay-Server `a2a.ts`).
-   */
-  update(
-    body: AgentMeUpdateParams,
-    options?: RequestOptions,
-  ): Promise<AgentMeUpdateResponse> {
-    return this.transport.request({
-      method: "PATCH",
-      path: "/v1/me",
-      body,
-      options,
-    });
-  }
-}
-
-const a2aOptions = (options?: RequestOptions): { signal?: AbortSignal } =>
-  options?.signal ? { signal: options.signal } : {};
-
-/**
- * Tasks between agents: A2A 1.0 Tasks. The agent working on a task moves it
- * with `updateStatus` and adds results with `addArtifact` over Relay's API.
- * The agent that sent the task calls the other agent's A2A address with
- * `send`, `get` and `cancel`, through the official A2A client; its errors
- * are that client's (for example, an agent that does not let yours message
- * it answers with a JSON-RPC error whose message is "This agent can't be
- * messaged.").
- */
-export class Tasks {
-  constructor(private readonly transport: Transport) {}
-
-  /** This agent's Tasks, most recently updated first. */
-  list(
-    query: TaskListParams = {},
-    options?: RequestOptions,
-  ): Promise<TaskListResponse> {
-    return this.transport.request({
-      method: "GET",
-      path: "/v1/tasks",
-      query,
-      options,
-    });
-  }
-
-  /** Set the state of a Task another agent sent this agent. */
-  updateStatus(
-    taskID: string,
-    body: TaskStatusUpdateParams,
-    options?: RequestOptions,
-  ): Promise<TaskResponse> {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/tasks/${pathID(taskID)}/status`,
-      body,
-      options,
-    });
-  }
-
-  /**
-   * Answer a Task another agent sent this agent with one Message instead of
-   * working on it, as an A2A agent answers a simple request with a direct
-   * Message. Only as the first answer: after a status or an artifact it is
-   * refused (409, code 2034). The Task ends COMPLETED with the Message; a
-   * sender still waiting on a blocking SendMessage gets the Message itself.
-   */
-  reply(
-    taskID: string,
-    body: TaskReplyParams,
-    options?: RequestOptions,
-  ): Promise<TaskResponse> {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/tasks/${pathID(taskID)}/reply`,
-      body,
-      options,
-    });
-  }
-
-  /**
-   * Append one whole Artifact to a Task another agent sent this agent. The
-   * same Artifact again changes nothing, so this is retried.
-   */
-  addArtifact(
-    taskID: string,
-    body: TaskArtifactCreateParams,
-    options?: RequestOptions,
-  ): Promise<TaskResponse> {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/tasks/${pathID(taskID)}/artifacts`,
-      body,
-      options,
-      retryable: true,
-    });
-  }
-
-  /**
-   * Send the agent `to` a message: A2A SendMessage at its address. The answer
-   * is what the official A2A client's `sendMessage` answers, a Task or a
-   * Message (@a2a-js/sdk `SendMessageResult`). An agent that accepts tasks
-   * answers with a Task; this waits for it to settle unless
-   * `configuration.returnImmediately` is true. Any other agent answers with a
-   * Message: its reply in the chat between the two agents, whose id is the
-   * Message's `contextId`. That reply is the agent's message whose
-   * `reply_to` names the one sent, or, naming nothing, its next message when
-   * the one sent is the only one open (see `Me.update`). A Message has a
-   * `messageId`; a Task does not.
-   */
-  async send(params: TaskSendParams, options?: RequestOptions): Promise<A2aSendMessageResult> {
-    const { to, ...request } = params;
-    const [client, { Message, SendMessageRequest, Task }] = await Promise.all([
-      this.transport.a2a(to),
-      import("@a2a-js/sdk"),
-    ]);
-    const result = await client.sendMessage(SendMessageRequest.fromJSON(request), a2aOptions(options));
-    // The test @a2a-js/sdk's own Client uses to tell the two apart.
-    if ("messageId" in result) return Message.toJSON(result) as A2aMessage;
-    return Task.toJSON(result) as A2aTask;
-  }
-
-  /** A2A GetTask at the agent `to`: a Task this agent sent it. */
-  async get(params: TaskGetParams, options?: RequestOptions): Promise<A2aTask> {
-    const { to, ...request } = params;
-    const [client, { GetTaskRequest, Task }] = await Promise.all([
-      this.transport.a2a(to),
-      import("@a2a-js/sdk"),
-    ]);
-    return Task.toJSON(await client.getTask(GetTaskRequest.fromJSON(request), a2aOptions(options))) as A2aTask;
-  }
-
-  /** A2A CancelTask at the agent `to`: a Task this agent sent it. */
-  async cancel(params: TaskCancelParams, options?: RequestOptions): Promise<A2aTask> {
-    const { to, ...request } = params;
-    const [client, { CancelTaskRequest, Task }] = await Promise.all([
-      this.transport.a2a(to),
-      import("@a2a-js/sdk"),
-    ]);
-    return Task.toJSON(await client.cancelTask(CancelTaskRequest.fromJSON(request), a2aOptions(options))) as A2aTask;
-  }
 }
 
 export class Relay {
@@ -1349,7 +1041,6 @@ export class Relay {
   readonly blockedHandles: BlockedHandles;
   readonly me: Me;
   readonly oauth2Client: OAuth2Client;
-  readonly tasks: Tasks;
   readonly websocket: WebSocket;
   readonly webhooks: Webhooks;
 
@@ -1371,7 +1062,6 @@ export class Relay {
     this.contacts = new Contacts(transport);
     this.blockedHandles = new BlockedHandles(transport);
     this.me = new Me(transport);
-    this.tasks = new Tasks(transport);
     this.websocket = new WebSocket(transport);
     this.webhooks = new Webhooks(options.webhookSecret ?? null);
   }

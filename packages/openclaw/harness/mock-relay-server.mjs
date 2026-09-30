@@ -17,8 +17,8 @@ if (senderKind !== "user" && senderKind !== "agent") {
   throw new Error("RELAY_OPENCLAW_HARNESS_SENDER_KIND must be user or agent");
 }
 // Overlap mode: a second Message from the same sender arrives while the model
-// is still answering the first, the way two overlapping A2A calls reach an
-// agent. Each Message must get its own answer, naming the Message it answers.
+// is still answering the first, as another agent's two quick messages reach
+// an agent. Each Message must get its own answer, naming the Message it answers.
 const overlap = process.env.RELAY_OPENCLAW_HARNESS_OVERLAP === "1";
 const secondEventId = "00000000-0000-7000-8000-000000000015";
 const secondMessageId = "00000000-0000-7000-8000-000000000016";

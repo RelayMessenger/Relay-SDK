@@ -3,10 +3,8 @@
 It carries the chats (``client.chats.create``, ``list_chats``, ``retrieve``,
 ``messages.list`` and ``messages.send``, as contracts/relay-v1-openapi.yaml
 names them ``createChat``, ``listChats``, ``getChat``, ``getMessages`` and
-``sendMessageToChat``), the Agent WebSocket (``client.websocket.run``), the agent's own
-settings (``client.me``) and the tasks
-between it and other agents (``client.tasks``), with the TypeScript client's request
-rules: bearer token, 15 s timeout, and up to two retries with
+``sendMessageToChat``) and the Agent WebSocket (``client.websocket.run``), with the
+TypeScript client's request rules: bearer token, 15 s timeout, and up to two retries with
 exponential backoff from 250 ms, or ``retry_after``, on a network failure, 408,
 429 or 5xx. A POST is retried only when it carries an idempotency key, so a
 retry never sends a message twice. It uses only the standard library.
@@ -25,14 +23,6 @@ from urllib.parse import quote, urlencode
 from .a2ui import A2uiFailure
 from .errors import RelayAPIError
 from .websocket import WebSocket
-from .tasks import (
-    A2aArtifact,
-    A2aCalleeTaskState,
-    A2aMessage,
-    A2aTaskState,
-    TaskListResponse,
-    TaskResponse,
-)
 
 try:
     _VERSION = version("relaymessenger")
@@ -215,10 +205,6 @@ class MessageListResponse(_MessageListResponseRequired, total=False):
     next_cursor: Optional[str]
 
 
-class UpdateMeResponse(TypedDict):
-    accepts_tasks: bool
-
-
 class ContactCard(TypedDict, total=False):
     """``ContactLookup``: a contact's Card. ``name``, ``subtitle``,
     ``description``, ``category``, ``skills``, ``visibility`` and ``creator``
@@ -389,25 +375,6 @@ class Chats:
         return cast(ChatListResponse, await self._transport.request("GET", path))
 
 
-class Me:
-    def __init__(self, transport: _Transport) -> None:
-        self._transport = transport
-
-    async def update(self, *, accepts_tasks: bool) -> UpdateMeResponse:
-        """``PATCH /v1/me`` (``updateAgentMe``): accept tasks from other
-        agents, or stop. It starts off, and only the agent itself turns it on,
-        with its token. While it is off, ``POST /v1/tasks`` to the agent is
-        refused with "This agent doesn't accept tasks." (409, code 2033), and
-        a message to its A2A address arrives as an ordinary message in the
-        chat with the sender. The answer is the agent's message there whose
-        ``reply_to`` names it; a message that names nothing answers it only
-        when it is the agent's next message and the sender sent nothing else
-        since the agent last spoke. So reply with ``reply_to``: two
-        overlapping messages from the same sender get no unnamed answer."""
-        result = await self._transport.request("PATCH", "/v1/me", {"accepts_tasks": accepts_tasks})
-        return cast(UpdateMeResponse, result)
-
-
 class OAuth2Client(TypedDict):
     """The agent's OAuth2 client for Log in with Relay. ``client_id`` is the agent's ID."""
 
@@ -470,71 +437,6 @@ class OAuth2Clients:
         return cast(OAuth2ClientResponse, await self._transport.request("POST", "/v1/oauth2_client/reset_secret"))
 
 
-class Tasks:
-    """The tasks between this agent and other agents, as A2A 1.0 Tasks."""
-
-    def __init__(self, transport: _Transport) -> None:
-        self._transport = transport
-
-    async def list(
-        self,
-        *,
-        role: Optional[Literal["callee", "requester"]] = None,
-        state: Optional[A2aTaskState] = None,
-        page_size: Optional[int] = None,
-        page_token: Optional[str] = None,
-    ) -> TaskListResponse:
-        """``GET /v1/tasks`` (``listTasks``): this agent's Tasks, most recently
-        updated first: the tasks other agents sent it (``role="callee"``, the
-        server's default) or the tasks it sent (``role="requester"``). Pass
-        ``next_page_token`` back as ``page_token`` for the next page."""
-        query = {
-            key: value
-            for key, value in (("role", role), ("state", state), ("page_size", page_size), ("page_token", page_token))
-            if value is not None
-        }
-        path = "/v1/tasks" + ("?" + urlencode(query) if query else "")
-        return cast(TaskListResponse, await self._transport.request("GET", path))
-
-    async def update_status(
-        self, task_id: str, state: A2aCalleeTaskState, *, message: Optional[A2aMessage] = None
-    ) -> TaskResponse:
-        """``POST /v1/tasks/{taskId}/status`` (``updateTaskStatus``): move a task
-        this agent was sent to WORKING, INPUT_REQUIRED, AUTH_REQUIRED,
-        COMPLETED, FAILED or REJECTED, with an optional status message (role
-        ``ROLE_AGENT``). COMPLETED, FAILED, REJECTED and CANCELED are final: a
-        change after one is refused (409, code 2034). The agent that sent the
-        task receives ``task.updated``."""
-        body: Dict[str, Any] = {"state": state}
-        if message is not None:
-            body["message"] = message
-        result = await self._transport.request("POST", f"/v1/tasks/{quote(task_id, safe='')}/status", body)
-        return cast(TaskResponse, result)
-
-    async def reply(self, task_id: str, message: A2aMessage) -> TaskResponse:
-        """``POST /v1/tasks/{taskId}/reply`` (``replyToTask``): answer a task
-        this agent was sent with one Message (role ``ROLE_AGENT``) instead of
-        working on it, as an A2A agent answers a simple request with a direct
-        Message. Only as the first answer: after a status or an artifact it is
-        refused (409, code 2034). The task ends COMPLETED with the Message; a
-        sender still waiting on a blocking SendMessage gets the Message itself.
-        Not retried: a second reply is refused."""
-        result = await self._transport.request(
-            "POST", f"/v1/tasks/{quote(task_id, safe='')}/reply", {"message": message}
-        )
-        return cast(TaskResponse, result)
-
-    async def add_artifact(self, task_id: str, artifact: A2aArtifact) -> TaskResponse:
-        """``POST /v1/tasks/{taskId}/artifacts`` (``addTaskArtifact``): append one
-        whole Artifact to a task this agent was sent. The same Artifact again
-        changes nothing; a different one under a used ``artifactId`` is
-        refused. The agent that sent the task receives ``task.updated``."""
-        result = await self._transport.request(
-            "POST", f"/v1/tasks/{quote(task_id, safe='')}/artifacts", {"artifact": artifact}
-        )
-        return cast(TaskResponse, result)
-
-
 class Relay:
     """Relay's REST API with an agent token (``RELAY_AGENT_TOKEN``)."""
 
@@ -551,8 +453,6 @@ class Relay:
         self.base_url = transport.base_url
         self.chats = Chats(transport)
         self.websocket = WebSocket(transport.base_url, api_key)
-        self.me = Me(transport)
-        self.tasks = Tasks(transport)
         self.oauth2_client = OAuth2Clients(transport)
 
 
@@ -565,7 +465,6 @@ __all__ = [
     "ContactCard",
     "CreateChatResponse",
     "CreatedChat",
-    "Me",
     "MessageListResponse",
     "OAuth2Client",
     "OAuth2ClientResponse",
@@ -574,6 +473,4 @@ __all__ = [
     "RelayAPIError",
     "ReplyTo",
     "SendMessageResponse",
-    "Tasks",
-    "UpdateMeResponse",
 ]

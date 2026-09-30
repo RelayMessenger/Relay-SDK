@@ -42,7 +42,6 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@a2a-js/sdk": "^1.2.1",
     "jose": "^6.2.12",
     "standardwebhooks": "^1.1.1",
     "ws": "^8.21.3"

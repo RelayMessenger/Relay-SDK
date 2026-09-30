@@ -11,7 +11,6 @@ export {
   Messages,
   PaymentRequests,
   Relay,
-  Tasks,
   WebSocket,
   WebhookEvents,
   WebhookSubscriptions,

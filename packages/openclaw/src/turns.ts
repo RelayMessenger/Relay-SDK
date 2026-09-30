@@ -7,9 +7,8 @@ import type { RelayIngressLifecycle } from "./ingress.js";
  * OpenClaw steers a Message that arrives mid-turn into the running turn by
  * default (`messages.queue.mode` "steer", docs/concepts/queue.md), and that
  * turn's answer names the first Message. With `followup` the queued turn's
- * answer names none. Relay's A2A door gives each calling agent only the answer
- * whose `reply_to` names its Message (Relay-Server `a2a.ts` `replyTo`), so the
- * second of two overlapping calls got no answer. A channel plugin "may
+ * answer names none, so the second of an agent's two overlapping Messages
+ * got no answer of its own. A channel plugin "may
  * preserve ordering ... before a message enters the session queue"
  * (docs/concepts/messages.md, Queueing and followups); this is that ordering,
  * the same rule Relay's CLI bridges follow (`replacesLiveTurn`, PR 366): an

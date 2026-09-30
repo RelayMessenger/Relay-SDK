@@ -1377,13 +1377,6 @@ export class RelayAdapter
       case "location.sharing.started":
       case "location.sharing.stopped":
         return;
-      // Tasks between agents are A2A Tasks, not chat messages; the Chat SDK
-      // has no primitive for them.
-      case "task.created":
-      case "task.message":
-      case "task.canceled":
-      case "task.updated":
-        return;
       default:
         return assertExhaustiveEvent(envelope.event_type);
     }

@@ -20937,11 +20937,7 @@ var RELAY_WEBHOOK_EVENT_TYPES = [
   "payment.canceled",
   "payment.expired",
   "location.sharing.started",
-  "location.sharing.stopped",
-  "task.created",
-  "task.message",
-  "task.canceled",
-  "task.updated"
+  "location.sharing.stopped"
 ];
 
 // node_modules/@relaymessenger/sdk/dist/websocket.js
@@ -21518,44 +21514,8 @@ var delay = async (milliseconds, signal) => {
   });
 };
 var pathID = (value) => encodeURIComponent(value);
-var defaultA2aBaseURL = (baseURL) => {
-  const url = new URL(baseURL);
-  if (url.hostname === "api.relayapp.im")
-    return "https://relayagent.im";
-  if (url.hostname === "api.staging.relayapp.im")
-    return "https://staging.relayagent.im";
-  return `${url.origin}/a2a`;
-};
-var HANDLE = /^(?!.{2}__)[a-z][a-z0-9_]{1,30}[a-z0-9]$/;
-var relayHandle = (to) => {
-  const handle = to.startsWith("@") ? to.slice(1) : to;
-  if (!HANDLE.test(handle)) {
-    throw new TypeError(`${JSON.stringify(to)} is not a Relay handle: 3 to 32 of a-z, 0-9 and _, starting with a letter, not ending with _, and without __ as its 3rd and 4th characters.`);
-  }
-  return handle;
-};
-var requireSameOrigin = (card, address) => {
-  const origin = new URL(address).origin;
-  for (const { url } of card.supportedInterfaces ?? []) {
-    let named;
-    try {
-      named = new URL(url).origin;
-    } catch {
-      named = void 0;
-    }
-    if (named !== origin) {
-      throw new TypeError(`The agent card at ${address} names the interface ${JSON.stringify(url)}, which is not on the agent's own origin; the Relay token is not sent there.`);
-    }
-  }
-};
-var a2aAddress = (a2aBaseURL, handle) => {
-  const base = new URL(a2aBaseURL);
-  return base.pathname === "/" ? `${base.protocol}//${handle.replaceAll("_", "-")}.${base.host}` : `${a2aBaseURL.replace(/\/+$/, "")}/${pathID(handle)}`;
-};
 var Transport = class {
   baseURL;
-  a2aBaseURL;
-  #a2aClients = /* @__PURE__ */ new Map();
   #apiKey;
   #fetch;
   #maxRetries;
@@ -21563,7 +21523,6 @@ var Transport = class {
   #retryBaseDelayMs;
   constructor(options) {
     this.baseURL = (options.baseURL ?? "https://api.relayapp.im").replace(/\/+$/, "");
-    this.a2aBaseURL = (options.a2aBaseURL ?? defaultA2aBaseURL(this.baseURL)).replace(/\/+$/, "");
     this.#apiKey = options.apiKey;
     const selectedFetch = options.fetch ?? globalThis.fetch;
     this.#fetch = selectedFetch.bind(globalThis);
@@ -21663,46 +21622,6 @@ var Transport = class {
     if (!response.ok) {
       throw new RelayAPIError(`Relay attachment upload failed with HTTP ${response.status}.`, { status: response.status });
     }
-  }
-  /**
-   * The official A2A 1.0 client (@a2a-js/sdk) for one agent's address, made
-   * from its Agent Card at `<address>/.well-known/agent-card.json` and kept
-   * for this Relay instance. Every JSON-RPC call carries this agent's Relay
-   * token as its bearer credential (the card's `relay` HTTP bearer scheme);
-   * the client adds `A2A-Version: 1.0`. Loaded on first use, so an agent
-   * that never sends another agent a task or message there never loads it.
-   */
-  a2a(handle) {
-    let key;
-    try {
-      key = relayHandle(handle);
-    } catch (error2) {
-      return Promise.reject(error2);
-    }
-    let client = this.#a2aClients.get(key);
-    if (!client) {
-      client = this.#createA2aClient(key);
-      this.#a2aClients.set(key, client);
-      client.catch(() => this.#a2aClients.delete(key));
-    }
-    return client;
-  }
-  async #createA2aClient(handle) {
-    const { ClientFactory, DefaultAgentCardResolver, JsonRpcTransportFactory, createAuthenticatingFetchWithRetry } = await import("@a2a-js/sdk/client");
-    const fetchImpl = this.#fetch;
-    const apiKey = this.#apiKey;
-    const noRedirect = (input, init) => fetchImpl(input, { ...init, redirect: "error" });
-    const authenticated = createAuthenticatingFetchWithRetry(noRedirect, {
-      headers: async () => ({ authorization: `Bearer ${apiKey}` }),
-      shouldRetryWithHeaders: async () => void 0
-    });
-    const factory = new ClientFactory({
-      transports: [new JsonRpcTransportFactory({ fetchImpl: authenticated })]
-    });
-    const address = a2aAddress(this.a2aBaseURL, handle);
-    const agentCard = await new DefaultAgentCardResolver({ fetchImpl }).resolve(`${address}/.well-known/agent-card.json`, "");
-    requireSameOrigin(agentCard, address);
-    return factory.createFromAgentCard(agentCard);
   }
   runWebSocket(options) {
     if (!this.#apiKey)
@@ -22302,118 +22221,6 @@ var Me = class {
       options
     });
   }
-  /**
-   * Turn on or off whether this agent accepts tasks (A2A Tasks) from other
-   * agents. It starts off; only the agent itself sets it. While it is off, a
-   * message to the agent's A2A address arrives as an ordinary message in the
-   * chat with the sender. The reply is the agent's message there whose
-   * `reply_to` names it; a message that names nothing is the reply only when
-   * it is the agent's next message and the sender sent nothing else since
-   * the agent last spoke. So reply with `reply_to`: two overlapping messages
-   * from the same sender get no unnamed reply (Relay-Server `a2a.ts`).
-   */
-  update(body, options) {
-    return this.transport.request({
-      method: "PATCH",
-      path: "/v1/me",
-      body,
-      options
-    });
-  }
-};
-var a2aOptions = (options) => options?.signal ? { signal: options.signal } : {};
-var Tasks = class {
-  transport;
-  constructor(transport2) {
-    this.transport = transport2;
-  }
-  /** This agent's Tasks, most recently updated first. */
-  list(query = {}, options) {
-    return this.transport.request({
-      method: "GET",
-      path: "/v1/tasks",
-      query,
-      options
-    });
-  }
-  /** Set the state of a Task another agent sent this agent. */
-  updateStatus(taskID, body, options) {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/tasks/${pathID(taskID)}/status`,
-      body,
-      options
-    });
-  }
-  /**
-   * Answer a Task another agent sent this agent with one Message instead of
-   * working on it, as an A2A agent answers a simple request with a direct
-   * Message. Only as the first answer: after a status or an artifact it is
-   * refused (409, code 2034). The Task ends COMPLETED with the Message; a
-   * sender still waiting on a blocking SendMessage gets the Message itself.
-   */
-  reply(taskID, body, options) {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/tasks/${pathID(taskID)}/reply`,
-      body,
-      options
-    });
-  }
-  /**
-   * Append one whole Artifact to a Task another agent sent this agent. The
-   * same Artifact again changes nothing, so this is retried.
-   */
-  addArtifact(taskID, body, options) {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/tasks/${pathID(taskID)}/artifacts`,
-      body,
-      options,
-      retryable: true
-    });
-  }
-  /**
-   * Send the agent `to` a message: A2A SendMessage at its address. The answer
-   * is what the official A2A client's `sendMessage` answers, a Task or a
-   * Message (@a2a-js/sdk `SendMessageResult`). An agent that accepts tasks
-   * answers with a Task; this waits for it to settle unless
-   * `configuration.returnImmediately` is true. Any other agent answers with a
-   * Message: its reply in the chat between the two agents, whose id is the
-   * Message's `contextId`. That reply is the agent's message whose
-   * `reply_to` names the one sent, or, naming nothing, its next message when
-   * the one sent is the only one open (see `Me.update`). A Message has a
-   * `messageId`; a Task does not.
-   */
-  async send(params, options) {
-    const { to, ...request } = params;
-    const [client, { Message, SendMessageRequest, Task }] = await Promise.all([
-      this.transport.a2a(to),
-      import("@a2a-js/sdk")
-    ]);
-    const result = await client.sendMessage(SendMessageRequest.fromJSON(request), a2aOptions(options));
-    if ("messageId" in result)
-      return Message.toJSON(result);
-    return Task.toJSON(result);
-  }
-  /** A2A GetTask at the agent `to`: a Task this agent sent it. */
-  async get(params, options) {
-    const { to, ...request } = params;
-    const [client, { GetTaskRequest, Task }] = await Promise.all([
-      this.transport.a2a(to),
-      import("@a2a-js/sdk")
-    ]);
-    return Task.toJSON(await client.getTask(GetTaskRequest.fromJSON(request), a2aOptions(options)));
-  }
-  /** A2A CancelTask at the agent `to`: a Task this agent sent it. */
-  async cancel(params, options) {
-    const { to, ...request } = params;
-    const [client, { CancelTaskRequest, Task }] = await Promise.all([
-      this.transport.a2a(to),
-      import("@a2a-js/sdk")
-    ]);
-    return Task.toJSON(await client.cancelTask(CancelTaskRequest.fromJSON(request), a2aOptions(options)));
-  }
 };
 var Relay = class {
   access;
@@ -22431,7 +22238,6 @@ var Relay = class {
   blockedHandles;
   me;
   oauth2Client;
-  tasks;
   websocket;
   webhooks;
   constructor(options) {
@@ -22453,7 +22259,6 @@ var Relay = class {
     this.contacts = new Contacts(transport2);
     this.blockedHandles = new BlockedHandles(transport2);
     this.me = new Me(transport2);
-    this.tasks = new Tasks(transport2);
     this.websocket = new WebSocket2(transport2);
     this.webhooks = new Webhooks(options.webhookSecret ?? null);
   }
