@@ -11,6 +11,8 @@ import type {
   AgentMeUpdateResponse,
   AgentAccessEntry,
   AgentAccessLists,
+  OAuth2ClientResponse,
+  OAuth2ClientUpdateParams,
   AgentAccessSetParams,
   Attachment,
   AttachmentCreateParams,
@@ -1058,6 +1060,34 @@ export class Access {
   }
 }
 
+/**
+ * The agent's OAuth2 client for Log in with Relay: websites log people in
+ * with Relay through standard OpenID Connect, and the person's login lets
+ * this agent message them. Discord Developer Portal's OAuth2 page, for the
+ * agent's own token; the Console's OAuth2 tab edits the same client.
+ */
+export class OAuth2Client {
+  constructor(private readonly transport: Transport) {}
+
+  /**
+   * `GET /v1/oauth2_client`: the client, made on first read. Only the read
+   * that makes it carries `client_secret`.
+   */
+  retrieve(options?: RequestOptions): Promise<OAuth2ClientResponse> {
+    return this.transport.request({ method: "GET", path: "/v1/oauth2_client", options });
+  }
+
+  /** `PATCH /v1/oauth2_client`: replace the redirects, the scopes, or both. */
+  update(body: OAuth2ClientUpdateParams, options?: RequestOptions): Promise<OAuth2ClientResponse> {
+    return this.transport.request({ method: "PATCH", path: "/v1/oauth2_client", body, options });
+  }
+
+  /** `POST /v1/oauth2_client/reset_secret`: a new secret, returned once; the old one stops working. */
+  resetSecret(options?: RequestOptions): Promise<OAuth2ClientResponse> {
+    return this.transport.request({ method: "POST", path: "/v1/oauth2_client/reset_secret", options });
+  }
+}
+
 export class WebSocket {
   constructor(private readonly transport: Transport) {}
 
@@ -1310,6 +1340,7 @@ export class Relay {
   readonly contacts: Contacts;
   readonly blockedHandles: BlockedHandles;
   readonly me: Me;
+  readonly oauth2Client: OAuth2Client;
   readonly tasks: Tasks;
   readonly websocket: WebSocket;
   readonly webhooks: Webhooks;
@@ -1319,6 +1350,7 @@ export class Relay {
     const transport = new Transport(options);
     this.baseURL = transport.baseURL;
     this.access = new Access(transport);
+    this.oauth2Client = new OAuth2Client(transport);
     this.agents = new Agents(transport);
     this.chats = new Chats(transport);
     this.calls = new Calls(transport);

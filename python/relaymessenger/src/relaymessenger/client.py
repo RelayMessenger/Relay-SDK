@@ -313,6 +313,68 @@ class Me:
         return cast(UpdateMeResponse, result)
 
 
+class OAuth2Client(TypedDict):
+    """The agent's OAuth2 client for Log in with Relay. ``client_id`` is the agent's ID."""
+
+    client_id: str
+    redirect_uris: List[str]
+    scopes: List[str]
+    created_at: str
+    updated_at: str
+
+
+class _OAuth2ClientResponseRequired(TypedDict):
+    client: OAuth2Client
+
+
+class OAuth2ClientResponse(_OAuth2ClientResponseRequired, total=False):
+    #: ``rel_cs_...``; only when the client was just made or its secret was just reset.
+    client_secret: str
+
+
+class OAuth2Clients:
+    """The agent's OAuth2 client for Log in with Relay: websites log people
+    in with Relay through standard OpenID Connect, and a person's login lets
+    this agent message them. The Console's OAuth2 tab edits the same client."""
+
+    def __init__(self, transport: _Transport) -> None:
+        self._transport = transport
+
+    async def retrieve(self) -> OAuth2ClientResponse:
+        """``GET /v1/oauth2_client``: the client. A read never makes it
+        (``RelayAPIError`` 404 until created) and never carries the secret."""
+        return cast(OAuth2ClientResponse, await self._transport.request("GET", "/v1/oauth2_client"))
+
+    async def create(self) -> OAuth2ClientResponse:
+        """``POST /v1/oauth2_client``: make the client, once (409 when one
+        exists). This answer carries ``client_secret``; only a reset shows
+        another."""
+        return cast(OAuth2ClientResponse, await self._transport.request("POST", "/v1/oauth2_client"))
+
+    async def update(
+        self,
+        *,
+        redirect_uris: Optional[List[str]] = None,
+        scopes: Optional[List[str]] = None,
+    ) -> OAuth2ClientResponse:
+        """``PATCH /v1/oauth2_client``: replace the redirects (https, up to
+        10), the scopes (``openid``, ``profile``, ``email``, ``phone``;
+        ``openid`` and ``profile`` are always kept), or both."""
+        body: Dict[str, Any] = {}
+        if redirect_uris is not None:
+            body["redirect_uris"] = redirect_uris
+        if scopes is not None:
+            body["scopes"] = scopes
+        if not body:
+            raise ValueError("Pass redirect_uris, scopes, or both.")
+        return cast(OAuth2ClientResponse, await self._transport.request("PATCH", "/v1/oauth2_client", body))
+
+    async def reset_secret(self) -> OAuth2ClientResponse:
+        """``POST /v1/oauth2_client/reset_secret``: a new secret, returned
+        once; the old one stops working at once."""
+        return cast(OAuth2ClientResponse, await self._transport.request("POST", "/v1/oauth2_client/reset_secret"))
+
+
 class Tasks:
     """The tasks between this agent and other agents, as A2A 1.0 Tasks."""
 
@@ -396,6 +458,7 @@ class Relay:
         self.websocket = WebSocket(transport.base_url, api_key)
         self.me = Me(transport)
         self.tasks = Tasks(transport)
+        self.oauth2_client = OAuth2Clients(transport)
 
 
 __all__ = [
@@ -409,6 +472,11 @@ __all__ = [
     "CreatedChat",
     "Me",
     "MessageListResponse",
+    "OAuth2Client",
+    "OAuth2ClientResponse",
+    "OAuth2Clients",
+    "PrivateCommunity",
+    "PublicCommunity",
     "Relay",
     "RelayAPIError",
     "ReplyTo",

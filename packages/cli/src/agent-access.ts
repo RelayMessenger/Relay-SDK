@@ -61,7 +61,7 @@ export const peopleSwitch = (value: string): boolean => {
 };
 
 /** The organization and the agent's Console id for a handle the organization owns. */
-const findAgent = async (request: ConsoleRequest, handle: string): Promise<{ path: string }> => {
+export const findAgent = async (request: ConsoleRequest, handle: string): Promise<{ path: string }> => {
   const wanted = accessHandle(handle);
   const me = await request<{ org: { id: string } }>("/me");
   const agents = await request<ConsoleAgentRow[]>(`/orgs/${encodeURIComponent(me.org.id)}/agents`);
