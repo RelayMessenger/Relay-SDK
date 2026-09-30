@@ -15,7 +15,7 @@ the ``calls`` extra (``pip install 'relaymessenger[calls]'``). Importing
 ``relaymessenger`` alone loads no media dependency.
 """
 
-from . import a2ui, selection, tasks, websocket
+from . import a2ui, form, selection, tasks, websocket
 from .client import DEFAULT_BASE_URL, Relay, RelayAPIError, ReplyTo, SendMessageResponse
 from .errors import RelayUnknownEventTypeError, RelayWebhookConfiguredError
 from .websocket import (
@@ -38,6 +38,7 @@ __all__ = [
     "WebSocketProtocolError",
     "WebSocketStoppedError",
     "a2ui",
+    "form",
     "selection",
     "tasks",
     "websocket",
