@@ -103,6 +103,8 @@ try {
   ]);
   assert.deepEqual(interfaceFields("UserChatHandle"), [
     "kind",
+    // Server 461: a person's IANA time zone.
+    "timezone",
   ]);
   assert.deepEqual(interfaceFields("AgentChatHandle"), [
     "kind",
@@ -124,7 +126,7 @@ try {
   assert.deepEqual(interfaceFields("ContactLookup"), [
     "id", "handle", "display_name", "kind", "image_url", "image_color", "verified",
     "name", "subtitle", "description", "category", "skills", "visibility", "creator",
-    "can_message",
+    "can_message", "timezone",
   ]);
   for (const name of ["ContactCardItem", "ContactCardUpdateParams", "ContactCardCreateParams"]) {
     assert.equal(interfaceFields(name).includes("message_requests_from"), false);

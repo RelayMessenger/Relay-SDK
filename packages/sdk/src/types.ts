@@ -13,6 +13,13 @@ export interface CallContact {
   id: UUID;
   handle: string;
   kind: "user" | "agent";
+  /**
+   * People only: the person's IANA time zone name ("America/Detroit"), as their
+   * Relay app last reported it; null until it reports one. When the person
+   * uses Relay on more than one device, the device they used last sets it.
+   * Timestamps stay in UTC; use this to read them in the person's local time.
+   */
+  timezone?: string | null;
 }
 
 export type CallTerminalStatus =
@@ -421,6 +428,13 @@ interface ChatHandleBase {
 
 export interface UserChatHandle extends ChatHandleBase {
   kind: "user";
+  /**
+   * The person's IANA time zone name ("America/Detroit"), as their Relay app
+   * last reported it; null until it reports one. When the person uses Relay
+   * on more than one device, the device they used last sets it. Timestamps
+   * stay in UTC; use this to read them in the person's local time.
+   */
+  timezone?: string | null;
 }
 
 /** Who owns an agent: its organization, or the person who owns it. */
@@ -438,6 +452,13 @@ export type HandleOwner =
     handle: string | null;
     /** The owning person's display name. Null when the person has no Relay account. */
     display_name: string | null;
+    /**
+     * Null when the person has no Relay account; otherwise the person's IANA
+     * time zone name ("America/Detroit"), as their Relay app last reported
+     * it. When the person uses Relay on more than one device, the device
+     * they used last sets it.
+     */
+    timezone?: string | null;
   };
 
 export interface AgentChatHandle extends ChatHandleBase {
@@ -1020,6 +1041,13 @@ export interface SystemEventParty {
   id: UUID;
   handle: string;
   kind: "user" | "agent";
+  /**
+   * People only: the person's IANA time zone name ("America/Detroit"), as their
+   * Relay app last reported it; null until it reports one. When the person
+   * uses Relay on more than one device, the device they used last sets it.
+   * Timestamps stay in UTC; use this to read them in the person's local time.
+   */
+  timezone?: string | null;
 }
 
 export type TypingContact = SystemEventParty;
@@ -1544,6 +1572,12 @@ export interface ContactLookup {
    * contact now, by the same rule a send applies. Reading it changes nothing.
    */
   can_message?: boolean;
+  /**
+   * People only: the person's IANA time zone name ("America/Detroit"), as
+   * their Relay app last reported it; null until it reports one. Timestamps
+   * stay in UTC; use this to read them in the person's local time.
+   */
+  timezone?: string | null;
 }
 
 /** The organization that made an agent. */
@@ -1806,6 +1840,13 @@ export interface ContactEventContact {
   id: UUID;
   handle: string;
   display_name: string;
+  /**
+   * The person's IANA time zone name ("America/Detroit"), as their Relay app
+   * last reported it; null until it reports one. When the person uses Relay
+   * on more than one device, the device they used last sets it. Timestamps
+   * stay in UTC; use this to read them in the person's local time.
+   */
+  timezone: string | null;
 }
 
 export interface ContactAddedEvent {
@@ -2014,6 +2055,13 @@ export interface OwnerPerson {
   handle: string;
   /** The person's display name. */
   display_name: string;
+  /**
+   * the person's IANA time zone name ("America/Detroit"), as their
+   * Relay app last reported it; null until it reports one. When the person
+   * uses Relay on more than one device, the device they used last sets it.
+   * Timestamps stay in UTC; use this to read them in the person's local time.
+   */
+  timezone?: string | null;
 }
 
 /** `GET /v1/me`: the agent the Agent Token authenticates, and who owns it (`AgentMe`). */

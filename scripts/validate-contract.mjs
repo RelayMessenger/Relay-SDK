@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "b4478d218d71b1f0c2bdcc0a90de37503a03ea7c", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "a3e534d474b64007d63b930c54b16f91ca44499f", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -524,6 +524,8 @@ const validateOpenAPI = () => {
     "name", "subtitle", "description", "category", "skills", "visibility", "creator",
     // Server 00093564: handle lookups say whether the caller may message now.
     "can_message",
+    // Server 461: a person's IANA time zone.
+    "timezone",
   ]);
   assert.equal(contactLookup.properties.can_message.type, "boolean");
   assert.match(declaredTypes, /can_message\?: boolean/u);
@@ -769,12 +771,35 @@ const validateOpenAPI = () => {
       "verified",
       // Server 972cde2e: an agent's handle names its owner.
       "owner",
+      // Server 461: a person's handle names their IANA time zone.
+      "timezone",
       "is_contact",
       "activity_version",
       "activity",
     ],
   );
   assert.match(declaredTypes, /owner\?: HandleOwner \| null/u);
+  // A person's time zone (Server 461) rides every person object the SDK types.
+  for (const name of ["UserChatHandle", "ContactLookup", "CallContact", "SystemEventParty", "OwnerPerson"]) {
+    const body = new RegExp(`export interface ${name}\\b[^{]*\\{([^}]*)\\n\\}`, "u").exec(declaredTypes)?.[1] ?? "";
+    assert.match(body, /\n {4}timezone\?: string \| null;/u, `${name} must type timezone`);
+  }
+  // The contract requires it on a contact event's person: required, nullable.
+  assert.match(
+    /export interface ContactEventContact\b[^{]*\{([^}]*)\n\}/u.exec(declaredTypes)?.[1] ?? "",
+    /\n {4}timezone: string \| null;/u,
+    "ContactEventContact must require timezone",
+  );
+  assert.match(declaredTypes, /export type HandleOwner = [^;]*;[^]*?kind: "user";[^}]*\n {4}timezone\?: string \| null;\n\};/u, "HandleOwner user must type timezone");
+  assert.match(declaredTypes, /export type TypingContact = SystemEventParty;/u);
+  for (const name of [
+    "ChatHandle", "ContactEventContact", "ContactLookup", "TypingContact",
+    "CallContact", "SystemEventParty", "UserOwner", "OwnerPerson",
+  ]) {
+    const timezone = document.components.schemas[name].properties.timezone;
+    assert.deepEqual(timezone.type, ["string", "null"], `${name}.timezone`);
+    assert.equal(timezone.maxLength, 64);
+  }
   const activityPath = document.paths["/v1/chats/{chatId}/activity"];
   assert.deepEqual(Object.keys(activityPath), ["parameters", "get", "put", "delete"]);
   assert.equal(activityPath.get.operationId, "getActivity");
@@ -911,7 +936,7 @@ const validateOpenAPI = () => {
   );
   assert.deepEqual(
     document.components.schemas.ContactEventContact.required,
-    ["id", "handle", "display_name"],
+    ["id", "handle", "display_name", "timezone"],
   );
   assert.equal(
     document["x-relay-webhooks"]["contact.added.v2026-08-30"].post

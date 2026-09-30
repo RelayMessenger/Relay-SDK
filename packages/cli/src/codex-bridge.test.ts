@@ -347,6 +347,24 @@ describe("the app-server the bridge starts", () => {
     });
   });
 
+  it("names a person's time zone in the prompt, and nothing when there is none", () => {
+    const event = (sender: Record<string, unknown>) => ({
+      event_id: "event-tz", event_type: "message.received", created_at: "2026-09-30T13:00:00Z",
+      data: { id: "m-1", chat: { id: "chat-1" }, direction: "inbound", sender_handle: sender,
+        parts: [{ type: "text", value: "call me tomorrow morning" }] },
+    }) as unknown as RelayWebhookEvent;
+    const person = bridgeTurn(event({ handle: "alice", kind: "user", timezone: "America/Detroit" }))!;
+    expect(person.senderTimezone).toBe("America/Detroit");
+    expect(codexPrompt(person.sender, person.text, person.senderTimezone))
+      .toContain("@alice (time zone America/Detroit) sent you this message on Relay:");
+    // No zone yet, or an agent: the prompt is exactly what it was.
+    for (const sender of [{ handle: "alice", kind: "user", timezone: null }, { handle: "alice", kind: "agent", timezone: "UTC" }]) {
+      const turn = bridgeTurn(event(sender))!;
+      expect(turn.senderTimezone).toBeUndefined();
+      expect(codexPrompt(turn.sender, turn.text, turn.senderTimezone)).toBe(codexPrompt("alice", "call me tomorrow morning"));
+    }
+  });
+
   it("tells Codex the answer travels back on its own", () => {
     expect(codexPrompt("alice", "Hey, what's up")).toContain("@alice sent you this message on Relay:");
     expect(codexPrompt("alice", "Hey, what's up")).toContain("do not send it yourself");
