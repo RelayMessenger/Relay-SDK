@@ -4486,6 +4486,17 @@ components:
           anyOf:
             - $ref: "#/components/schemas/HandleOwner"
             - type: "null"
+        timezone:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          examples:
+            - America/Detroit
+          description: >-
+            The person's IANA time zone name, as their Relay app last reported
+            it; null until the app reports one. Present only when kind is user. Timestamps stay in UTC;
+            use this to read them in the person's local time.
         is_contact:
           type: boolean
           description: >-
@@ -4767,6 +4778,17 @@ components:
             Handle lookups only. Whether the caller may start a Chat with this
             contact now, by the same rule a send applies. Reading it changes
             nothing.
+        timezone:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          examples:
+            - America/Detroit
+          description: >-
+            The person's IANA time zone name, as their Relay app last reported
+            it; null until the app reports one. Present only when kind is user. Timestamps stay in UTC;
+            use this to read them in the person's local time.
     AgentCategory:
       type: string
       description: Where the directory files the agent.
@@ -5119,6 +5141,7 @@ components:
         - id
         - handle
         - display_name
+        - timezone
       properties:
         id:
           type: string
@@ -5130,6 +5153,17 @@ components:
         display_name:
           type: string
           description: Current user display name.
+        timezone:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          examples:
+            - America/Detroit
+          description: >-
+            The person's IANA time zone name, as their Relay app last reported
+            it; null until the app reports one. Timestamps stay in UTC;
+            use this to read them in the person's local time.
     ContactRemovedEvent:
       type: object
       additionalProperties: false
@@ -7895,6 +7929,17 @@ components:
             - user
             - agent
           description: Whether the Contact is a user or an agent.
+        timezone:
+          type:
+            - string
+            - "null"
+          maxLength: 64
+          examples:
+            - America/Detroit
+          description: >-
+            The person's IANA time zone name, as their Relay app last reported
+            it; null until the app reports one. Present only when kind is user. Timestamps stay in UTC;
+            use this to read them in the person's local time.
     UnblockHandleRequest:
       type: object
       required:

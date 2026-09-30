@@ -250,8 +250,11 @@ export const BUTTONS_INSTRUCTION = `${BUTTONS_BLOCK_INSTRUCTION} ${LINK_LINE_INS
  * the turn, so the prompt says who answers the person: this process sends the
  * final message, and Codex must not send a second one.
  */
-export const codexPrompt = (sender: string, text: string): string => [
-  `@${sender} sent you this message on Relay:`,
+export const codexPrompt = (sender: string, text: string, timezone?: string): string => [
+  // A person's time zone, so "tomorrow morning" means their morning.
+  timezone
+    ? `@${sender} (time zone ${timezone}) sent you this message on Relay:`
+    : `@${sender} sent you this message on Relay:`,
   "",
   // Visible text is bounded before metadata is appended by inboundMediaPrompt.
   text,
@@ -779,7 +782,7 @@ export const runCodexBridge = async (input: CodexBridgeInput): Promise<void> => 
       const threadId = await openThread(server, turn.chatId);
       const media = await inboundMediaPrompt(turn, input.media);
       outcome = await runTurn(server, {
-        threadId, prompt: codexPrompt(turn.sender, media.text), images: media.images,
+        threadId, prompt: codexPrompt(turn.sender, media.text, turn.senderTimezone), images: media.images,
         onStarted: (live) => { mine = live; lane.live = live; lane.liveFromAgent = turn.fromAgent; started(); },
       });
     } catch (error) { failure = error; }

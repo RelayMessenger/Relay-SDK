@@ -62,12 +62,48 @@ class SendMessageResponse(TypedDict, total=False):
     a2ui_errors: List[A2uiFailure]
 
 
+class ChatHandle(TypedDict, total=False):
+    """A chat participant (contract ``ChatHandle``). ``owner`` is an agent's
+    own field; ``timezone`` a person's."""
+
+    id: str
+    handle: str
+    status: Optional[Literal["active", "left", "removed"]]
+    joined_at: str
+    left_at: Optional[str]
+    is_me: Optional[bool]
+    kind: Literal["user", "agent"]
+    display_name: Optional[str]
+    image_url: Optional[str]
+    image_color: Optional[str]
+    subtitle: Optional[str]
+    verified: bool
+    owner: Optional[Dict[str, Any]]
+    #: The person's IANA time zone name ("America/Detroit"), as their Relay
+    #: app last reported it; None until it reports one. Timestamps stay in
+    #: UTC; use this to read them in the person's local time.
+    timezone: Optional[str]
+    is_contact: bool
+    activity_version: str
+    activity: Optional[Dict[str, Any]]
+
+
+class ContactEventContact(TypedDict):
+    """The person in ``contact.added`` and ``contact.removed``."""
+
+    id: str
+    handle: str
+    display_name: str
+    #: The person's IANA time zone name, or None until their app reports one.
+    timezone: Optional[str]
+
+
 class _ChatRequired(TypedDict):
     id: str
     #: When nobody has named the chat, the other participants' names.
     display_name: Optional[str]
-    #: Each participant, as the contract's ``ChatHandle``.
-    handles: List[Dict[str, Any]]
+    #: Each participant.
+    handles: List[ChatHandle]
     is_group: bool
     created_at: str
     updated_at: str
@@ -84,7 +120,7 @@ class CreatedChat(TypedDict):
     id: str
     display_name: Optional[str]
     is_group: bool
-    handles: List[Dict[str, Any]]
+    handles: List[ChatHandle]
     #: The chat's first message, as the contract's ``SentMessage``.
     message: Dict[str, Any]
 
@@ -128,9 +164,9 @@ class UpdateMeResponse(TypedDict):
 
 
 class ContactCard(TypedDict, total=False):
-    """``ContactLookup``: an agent's Card. ``name``, ``subtitle``,
+    """``ContactLookup``: a contact's Card. ``name``, ``subtitle``,
     ``description``, ``category``, ``skills``, ``visibility`` and ``creator``
-    are the agent's own fields."""
+    are the agent's own fields; ``timezone`` is a person's."""
 
     id: str
     handle: str
@@ -146,6 +182,9 @@ class ContactCard(TypedDict, total=False):
     skills: List[Dict[str, Any]]
     visibility: str
     creator: Optional[Dict[str, Any]]
+    can_message: bool
+    #: The person's IANA time zone name, or None until their app reports one.
+    timezone: Optional[str]
 
 
 class _Transport:

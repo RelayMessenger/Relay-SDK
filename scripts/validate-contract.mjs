@@ -524,6 +524,8 @@ const validateOpenAPI = () => {
     "name", "subtitle", "description", "category", "skills", "visibility", "creator",
     // Server 00093564: handle lookups say whether the caller may message now.
     "can_message",
+    // Server 461: a person's IANA time zone.
+    "timezone",
   ]);
   assert.equal(contactLookup.properties.can_message.type, "boolean");
   assert.match(declaredTypes, /can_message\?: boolean/u);
@@ -769,12 +771,24 @@ const validateOpenAPI = () => {
       "verified",
       // Server 972cde2e: an agent's handle names its owner.
       "owner",
+      // Server 461: a person's handle names their IANA time zone.
+      "timezone",
       "is_contact",
       "activity_version",
       "activity",
     ],
   );
   assert.match(declaredTypes, /owner\?: HandleOwner \| null/u);
+  // A person's time zone (Server 461) rides every person object the SDK types.
+  for (const name of ["UserChatHandle", "ContactEventContact", "TypingContact", "ContactLookup"]) {
+    const body = new RegExp(`export interface ${name}\\b[^{]*\\{([^}]*)\\n\\}`, "u").exec(declaredTypes)?.[1] ?? "";
+    assert.match(body, /\n {4}timezone\?: string \| null;/u, `${name} must type timezone`);
+  }
+  for (const name of ["ChatHandle", "ContactEventContact", "ContactLookup", "TypingContact"]) {
+    const timezone = document.components.schemas[name].properties.timezone;
+    assert.deepEqual(timezone.type, ["string", "null"], `${name}.timezone`);
+    assert.equal(timezone.maxLength, 64);
+  }
   const activityPath = document.paths["/v1/chats/{chatId}/activity"];
   assert.deepEqual(Object.keys(activityPath), ["parameters", "get", "put", "delete"]);
   assert.equal(activityPath.get.operationId, "getActivity");
@@ -911,7 +925,7 @@ const validateOpenAPI = () => {
   );
   assert.deepEqual(
     document.components.schemas.ContactEventContact.required,
-    ["id", "handle", "display_name"],
+    ["id", "handle", "display_name", "timezone"],
   );
   assert.equal(
     document["x-relay-webhooks"]["contact.added.v2026-08-30"].post

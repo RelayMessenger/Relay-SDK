@@ -56,7 +56,7 @@ export const CLIENT_NAME = "relaymessenger";
  * The same words as `codexPrompt` (codex-bridge.ts), so both bridges say the
  * same thing.
  */
-export const acpPrompt: (sender: string, text: string) => string = codexPrompt;
+export const acpPrompt: (sender: string, text: string, timezone?: string) => string = codexPrompt;
 
 /** What to run for the agent: the file, and the words that put it in ACP mode. */
 export interface AcpCommand {
@@ -630,7 +630,7 @@ export const runAcpBridge = async (input: AcpBridgeInput): Promise<void> => {
       const sessionId = await openSession(agent, turn.chatId);
       const media = await inboundMediaPrompt(turn, input.media);
       outcome = await runTurn(agent, {
-        sessionId, prompt: acpPrompt(turn.sender, media.text),
+        sessionId, prompt: acpPrompt(turn.sender, media.text, turn.senderTimezone),
         onStarted: (live) => { mine = live; lane.live = live; lane.liveFromAgent = turn.fromAgent; started(); },
       });
     } catch (error) { failure = error; }
