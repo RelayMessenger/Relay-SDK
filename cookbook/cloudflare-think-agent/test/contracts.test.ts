@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { thinkCandidateMode, verifyThinkCandidates } from "./candidate-contract.js";
 
 const RELAY_SERVER_SHA =
-  "cf74b6f40efa022944c01a13f7b17d7270c90a37";
+  "dd2822898440a69bdf2690ae1e7c7382d1c3624f";
 // Relay-SDK commit whose staging release published the adapter below.
 const RELAY_CHAT_SDK_SHA =
   "62b320548d5ba5edf2a9445efdab32122f0257b7";
