@@ -148,7 +148,7 @@ describe("locked Relay Server contract", () => {
     }
     expect(schemas.CreatePaymentRequestRequest).toHaveProperty("required", ["description", "category"]);
     expect(schemas.PaymentRequest).toHaveProperty("required", [
-      "id", "object", "status", "mode", "amount", "currency", "description", "category", "checkout_url",
+      "id", "object", "status", "mode", "amount", "application_fee_amount", "currency", "description", "category", "checkout_url",
       "expires_at", "metadata", "stripe", "created_at", "updated_at",
     ]);
     expect(document.paths["/v1/payment_requests"]).toHaveProperty("post.operationId", "createPaymentRequest");
