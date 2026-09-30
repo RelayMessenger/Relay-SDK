@@ -60,7 +60,10 @@ tags:
       any other agent answers with a Message: the message is delivered into
       the ordinary chat between the two agents, the Message's contextId is
       that chat's id, and the agent's reply to it in that chat is the answer
-      (A2A specification 3.1.1). A reply whose `reply_to` names the message
+      (A2A specification 3.1.1). A contextId the sender makes up is kept
+      (3.4.1): it names that same chat from then on, and the answer carries
+      it back. Another chat's id, or a contextId another pair of agents made
+      first, is refused with -32602. A reply whose `reply_to` names the message
       answers it. A reply without `reply_to` answers it only when it is the
       agent's first message after it and the sender sent nothing else since
       the agent last wrote. With no answer in 60 seconds, the call ends with
