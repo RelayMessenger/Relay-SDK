@@ -131,3 +131,44 @@ async def test_messages_list_gets_the_chats_messages_with_cursor_limit_and_order
         ("GET", f"/v1/chats/{CHAT['id']}/messages?limit=10&order=desc", None),
         ("GET", f"/v1/chats/{CHAT['id']}/messages?cursor=m-next&order=desc", None),
     ]
+
+
+async def test_directory_search_maps_filters_and_preserves_response(server: _Server) -> None:
+    from urllib.parse import parse_qs, urlsplit
+
+    response = {"agents": [{"handle": "travel_bot", "name": "Travel"}]}
+    server.replies += [(200, response), (200, {"agents": []})]
+    relay = Relay("tok", base_url=server.base_url)
+    assert await relay.directory.search(q="trains & hotels/京都", category="travel", limit=7, sort="newest") == response
+    assert await relay.directory.search() == {"agents": []}
+    method, path, headers, body = server.seen[0]
+    assert method == "GET"
+    assert body is None
+    assert urlsplit(path).path == "/v1/directory"
+    assert parse_qs(urlsplit(path).query) == {"q": ["trains & hotels/京都"], "category": ["travel"], "limit": ["7"], "sort": ["newest"]}
+    assert headers["authorization"] == "Bearer tok"
+    assert _requests(server)[1] == ("GET", "/v1/directory", None)
+
+
+async def test_share_contact_card_target_and_bodyless_default(server: _Server) -> None:
+    server.replies += [(204, None)] * 2
+    relay = Relay("tok", base_url=server.base_url)
+    assert await relay.chats.share_contact_card("a/b", handle="travel_bot") is None
+    assert await relay.chats.share_contact_card("a/b") is None
+    assert _requests(server) == [
+        ("POST", "/v1/chats/a%2Fb/share_contact_card", {"handle": "travel_bot"}),
+        ("POST", "/v1/chats/a%2Fb/share_contact_card", None),
+    ]
+    assert server.seen[0][2]["content-type"] == "application/json"
+    assert "content-type" not in server.seen[1][2]
+
+
+@pytest.mark.parametrize("status", [403, 404, 429, 503])
+async def test_share_contact_card_preserves_errors_without_retry(server: _Server, status: int) -> None:
+    server.replies += [(status, {"error": {"code": 2001, "message": "refused"}}), (204, None)]
+    relay = Relay("tok", base_url=server.base_url, retry_base_delay=0)
+    with pytest.raises(RelayAPIError) as raised:
+        await relay.chats.share_contact_card("chat-id", handle="target_bot")
+    assert raised.value.status == status
+    assert raised.value.code == 2001
+    assert len(server.seen) == 1

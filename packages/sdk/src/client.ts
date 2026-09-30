@@ -32,6 +32,7 @@ import type {
   ChatSendVoicememoParams,
   ChatSendVoicememoResponse,
   ChatSetActivityParams,
+  ChatShareContactCardParams,
   ChatUpdateParams,
   ChatUpdateResponse,
   ContactCardItem,
@@ -41,6 +42,8 @@ import type {
   ContactCardUpdateParams,
   ContactLookupParams,
   ContactLookupResponse,
+  DirectorySearchParams,
+  DirectorySearchResponse,
   GetChatLocationResponse,
   LocationRequestResponse,
   Message,
@@ -675,11 +678,20 @@ export class Chats {
     });
   }
 
-  shareContactCard(chatID: string, options?: RequestOptions): Promise<void> {
+  // Preserve the original request-options second argument.
+  shareContactCard(chatID: string, options?: RequestOptions): Promise<void>;
+  shareContactCard(chatID: string, body?: ChatShareContactCardParams, options?: RequestOptions): Promise<void>;
+  shareContactCard(
+    chatID: string,
+    bodyOrOptions: ChatShareContactCardParams & RequestOptions = {},
+    options?: RequestOptions,
+  ): Promise<void> {
+    const { handle, ...legacyOptions } = bodyOrOptions;
     return this.transport.request({
       method: "POST",
       path: `/v1/chats/${pathID(chatID)}/share_contact_card`,
-      options,
+      ...(handle === undefined ? {} : { body: { handle } }),
+      options: options ?? legacyOptions,
     });
   }
 
@@ -916,6 +928,19 @@ export class WebhookSubscriptions {
     return this.transport.request({
       method: "DELETE",
       path: `/v1/webhook-subscriptions/${pathID(subscriptionID)}`,
+      options,
+    });
+  }
+}
+
+export class Directory {
+  constructor(private readonly transport: Transport) {}
+
+  search(query: DirectorySearchParams = {}, options?: RequestOptions): Promise<DirectorySearchResponse> {
+    return this.transport.request({
+      method: "GET",
+      path: "/v1/directory",
+      query,
       options,
     });
   }
@@ -1308,6 +1333,7 @@ export class Relay {
   readonly webhookSubscriptions: WebhookSubscriptions;
   readonly contactCard: ContactCard;
   readonly contacts: Contacts;
+  readonly directory: Directory;
   readonly blockedHandles: BlockedHandles;
   readonly me: Me;
   readonly tasks: Tasks;
@@ -1329,6 +1355,7 @@ export class Relay {
     this.webhookSubscriptions = new WebhookSubscriptions(transport);
     this.contactCard = new ContactCard(transport);
     this.contacts = new Contacts(transport);
+    this.directory = new Directory(transport);
     this.blockedHandles = new BlockedHandles(transport);
     this.me = new Me(transport);
     this.tasks = new Tasks(transport);

@@ -1134,6 +1134,12 @@ export interface ChatCreateResponse {
   > & { message: SentMessage };
 }
 
+/** Omit handle to share the authenticated agent's own card. */
+export interface ChatShareContactCardParams {
+  /** Public or Unlisted agent's handle, without @; ^[a-z][a-z0-9_]{2,31}$. */
+  handle?: string;
+}
+
 export interface ChatUpdateParams {
   display_name?: string;
   /**
@@ -1424,6 +1430,47 @@ export interface AgentSkill {
   examples: string[];
 }
 
+export interface DirectorySearchParams {
+  q?: string;
+  category?: AgentCategory;
+  limit?: number;
+  sort?: "name" | "newest";
+}
+
+export interface AgentMetrics {
+  chats_people: number;
+  chats_agents: number;
+  chats_people_30d: number;
+  chats_agents_30d: number;
+  reply_rate_30d: number | null;
+  reply_minutes_30d: number | null;
+  messages_total: number;
+  since: string;
+}
+
+export interface AgentRatingAverage {
+  average: number | null;
+  count: number;
+}
+
+export interface DirectoryAgent {
+  handle: string;
+  name: string;
+  subtitle: string | null;
+  category: AgentCategory;
+  image_url: string | null;
+  image_color: string | null;
+  accent_color: string | null;
+  verified: boolean;
+  provider: { name: string | null; url: string | null; verified: boolean };
+  metrics: AgentMetrics;
+  rating: AgentRatingAverage;
+}
+
+export interface DirectorySearchResponse {
+  agents: DirectoryAgent[];
+}
+
 export interface ContactLookup {
   id: UUID;
   handle: string;
@@ -1485,6 +1532,12 @@ export type ContactLookupResponse =
   | { contacts: ContactLookup[] };
 
 export interface ContactCardItem {
+  /** Shared agent's Contact ID, present when sharing by handle. */
+  id?: UUID;
+  /** Shared agent's subtitle, present when sharing by handle. */
+  subtitle?: string | null;
+  /** Relay link that opens the shared agent's chat. */
+  url?: string;
   /** Detailed agent description, up to 2000 characters. Public agents cannot clear it. */
   description?: string | null;
   handle: string;

@@ -257,6 +257,11 @@ export const RELAY_V1_OPERATIONS = [
   },
   {
     "method": "GET",
+    "path": "/v1/directory",
+    "operationId": "listDirectory"
+  },
+  {
+    "method": "GET",
     "path": "/v1/contact_card",
     "operationId": "getContactCard"
   },

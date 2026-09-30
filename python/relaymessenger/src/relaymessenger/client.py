@@ -127,6 +127,52 @@ class UpdateMeResponse(TypedDict):
     accepts_tasks: bool
 
 
+AgentCategory = Literal[
+    "productivity", "business", "finance", "shopping", "travel", "health-fitness",
+    "lifestyle", "social", "education", "entertainment", "utilities", "developer-tools",
+]
+
+
+class AgentMetrics(TypedDict):
+    chats_people: int
+    chats_agents: int
+    chats_people_30d: int
+    chats_agents_30d: int
+    reply_rate_30d: Optional[float]
+    reply_minutes_30d: Optional[float]
+    messages_total: int
+    since: str
+
+
+class AgentRatingAverage(TypedDict):
+    average: Optional[float]
+    count: int
+
+
+class DirectoryProvider(TypedDict):
+    name: Optional[str]
+    url: Optional[str]
+    verified: bool
+
+
+class DirectoryAgent(TypedDict):
+    handle: str
+    name: str
+    subtitle: Optional[str]
+    category: AgentCategory
+    image_url: Optional[str]
+    image_color: Optional[str]
+    accent_color: Optional[str]
+    verified: bool
+    provider: DirectoryProvider
+    metrics: AgentMetrics
+    rating: AgentRatingAverage
+
+
+class DirectorySearchResponse(TypedDict):
+    agents: List[DirectoryAgent]
+
+
 class ContactCard(TypedDict, total=False):
     """``ContactLookup``: an agent's Card. ``name``, ``subtitle``,
     ``description``, ``category``, ``skills``, ``visibility`` and ``creator``
@@ -266,6 +312,23 @@ class ChatMessages:
         return cast(SendMessageResponse, result)
 
 
+class Directory:
+    def __init__(self, transport: _Transport) -> None:
+        self._transport = transport
+
+    async def search(
+        self,
+        *,
+        q: Optional[str] = None,
+        category: Optional[AgentCategory] = None,
+        limit: Optional[int] = None,
+        sort: Optional[Literal["name", "newest"]] = None,
+    ) -> DirectorySearchResponse:
+        """Search ``GET /v1/directory`` with only the supplied filters."""
+        path = _query("/v1/directory", (("q", q), ("category", category), ("limit", limit), ("sort", sort)))
+        return cast(DirectorySearchResponse, await self._transport.request("GET", path))
+
+
 class Chats:
     def __init__(self, transport: _Transport) -> None:
         self._transport = transport
@@ -292,6 +355,11 @@ class Chats:
         ``next_cursor`` back as ``cursor`` for the next page."""
         path = _query("/v1/chats", (("cursor", cursor), ("limit", limit)))
         return cast(ChatListResponse, await self._transport.request("GET", path))
+
+    async def share_contact_card(self, chat_id: str, *, handle: Optional[str] = None) -> None:
+        """Share a contact card; omitting ``handle`` shares the caller's own card."""
+        body = None if handle is None else {"handle": handle}
+        await self._transport.request("POST", f"/v1/chats/{quote(chat_id, safe='')}/share_contact_card", body)
 
 
 class Me:
@@ -393,6 +461,7 @@ class Relay:
         transport = _Transport(api_key, base_url, timeout, max_retries, retry_base_delay)
         self.base_url = transport.base_url
         self.chats = Chats(transport)
+        self.directory = Directory(transport)
         self.websocket = WebSocket(transport.base_url, api_key)
         self.me = Me(transport)
         self.tasks = Tasks(transport)
@@ -400,6 +469,13 @@ class Relay:
 
 __all__ = [
     "DEFAULT_BASE_URL",
+    "AgentCategory",
+    "AgentMetrics",
+    "AgentRatingAverage",
+    "Directory",
+    "DirectoryAgent",
+    "DirectoryProvider",
+    "DirectorySearchResponse",
     "Chat",
     "ChatListResponse",
     "ChatMessages",

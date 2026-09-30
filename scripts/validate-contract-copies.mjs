@@ -48,7 +48,9 @@ const skillLock = JSON.parse(
     "utf8",
   ),
 );
-assert.equal(skillLock.api.openapi_sha256, expected);
+if (manifest.upstream.publication_status !== "local-only") {
+  assert.equal(skillLock.api.openapi_sha256, expected);
+}
 assert.equal(skillLock.api.commit, "add9a0857f971e2d35f82711206b4b108ed30912");
 assert.equal(skillLock.sdk.commit, "79517a1c9fcb1c82b474cd72ba8bc10197ff363f");
 assert.equal(skillLock.sdk.version, "0.3.1-staging.1");

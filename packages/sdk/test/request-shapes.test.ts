@@ -229,6 +229,7 @@ describe("Relay v1 request shapes", () => {
     });
     await client.webhookSubscriptions.delete("subscription-id");
     await client.contacts.lookup({ handle: "alice" });
+    await client.directory.search();
     await client.contactCard.retrieve({ handle: "echo" });
     await client.contactCard.create({ handle: "echo", first_name: "Echo" });
     await client.contactCard.update({
@@ -407,6 +408,7 @@ describe("Relay v1 request shapes", () => {
       "chats",
       "contactCard",
       "contacts",
+      "directory",
       "me",
       "messages",
       "paymentRequests",
@@ -416,6 +418,7 @@ describe("Relay v1 request shapes", () => {
       "webhooks",
       "websocket",
     ]);
+    expect(methods(client.directory)).toEqual(["search"]);
     expect(methods(client.access)).toEqual(["list", "remove", "set"]);
     expect(methods(client.agents)).toEqual(["delete"]);
     expect(methods(client.me)).toEqual(["retrieve", "update"]);
