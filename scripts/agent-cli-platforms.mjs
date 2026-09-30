@@ -101,14 +101,15 @@ try {
   for (const section of ['VERSION', 'USAGE', 'TOPICS', 'COMMANDS']) {
     assert.match(help, new RegExp(`^${section}$`, 'm'), `root help must include ${section}`);
   }
-  for (const command of ['connect', 'watch', 'listen', 'doctor', 'agents', 'login', 'whoami', 'logout']) {
+  for (const command of ['connect', 'watch', 'listen', 'doctor', 'agents', 'oauth', 'login', 'whoami', 'logout']) {
     assert.match(help, new RegExp(`^  ${command}(?: \\[|\\n| {2,})`, 'm'), `root help must list ${command} as a row`);
   }
   assert.doesNotMatch(help, /^Everything else:/m);
-  assert.doesNotMatch(help, /^\s+(token|oauth|console)[ \[]/m);
+  // `oauth` is a root row since Log in with Relay (#420); token and console stay out of root help.
+  assert.doesNotMatch(help, /^\s+(token|console)[ \[]/m);
   const hasAgentCommands = /^  agents(?: {2,}|\n)/m.test(help);
   assert.ok(hasAgentCommands, 'Canonical CLI must include agent commands');
-  report.helpShape = { rows: ['connect', 'watch', 'listen', 'doctor', 'agents', 'login', 'whoami', 'logout'], sections: ['VERSION', 'USAGE', 'TOPICS', 'COMMANDS'] };
+  report.helpShape = { rows: ['connect', 'watch', 'listen', 'doctor', 'agents', 'oauth', 'login', 'whoami', 'logout'], sections: ['VERSION', 'USAGE', 'TOPICS', 'COMMANDS'] };
   report.agentCommands = hasAgentCommands ? 'available; tests pending below' : 'pending feature commits: no agent command in root help';
   // --version includes the canonical executable name (program.ts).
   const expectedVersion = `relaymessenger ${cliManifest.version}`;

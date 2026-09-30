@@ -3,7 +3,36 @@
 All notable changes to `@relaymessenger/sdk` are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 0.4.0 (unreleased)
+
+A minor release, because this is 0.x and the release breaks existing code
+(semver 2.0.0 item 4). The version is `0.4.0-staging.N` on staging; the
+release on main publishes `0.4.0`.
+
+### Removed: breaking
+
+Relay removed the matching routes. There is no compatibility stub.
+
+- A2A and tasks (#415, Relay-Server PR 462): `client.tasks` (`send`, `get`,
+  `cancel`, `list`, `updateStatus`, `reply`, `addArtifact`), `me.update`
+  (`accepts_tasks`), the `a2aBaseURL` option and the A2A client transport, the
+  `A2a*` and `Task*` types, the four `task.*` webhook events, and the `a2a`
+  field on `message.received`. `@a2a-js/sdk` is no longer a dependency.
+- Communities (#411, Relay-Server PR 457): `client.communities`,
+  `client.communities.members`, their types and their six operations.
+
+### Changed: breaking types
+
+Required fields that the published 0.3.6 did not have. Code that builds these
+types by hand (fixtures, mocks) must add them.
+
+- `PaymentRequest.application_fee_amount` (#416): Relay's 5% fee
+  in minor units, 0 when 5% rounds to nothing.
+- `ContactEventContact.timezone` (`string | null`, #414) and
+  `ContactEventContact.age_range` (`AgeRange | null`, #421).
+
+The selection unions (#417) can also stop code from compiling; see "Changed:
+compile-time only" below.
 
 ### Added
 
