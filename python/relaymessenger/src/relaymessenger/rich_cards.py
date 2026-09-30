@@ -133,7 +133,7 @@ class _CarouselRequired(TypedDict):
 
 
 class CarouselPart(_CarouselRequired, total=False):
-    #: small is 180 pt, medium (the default) 296 pt.
+    #: small is 180 pt; medium (the default) is as wide as a single card, up to 350 pt.
     card_width: Literal["small", "medium"]
 
 

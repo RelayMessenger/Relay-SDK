@@ -596,7 +596,7 @@ export interface RichCardPartResponse extends RichCardPart {
 /** Agent-only: 2–10 cards swiped sideways, each as tall as the tallest. Reply ids are unique across cards. */
 export interface CarouselPart {
   type: "carousel";
-  /** small is 180 pt, medium (the default) 296 pt. */
+  /** small is 180 pt; medium (the default) is as wide as a single card, up to 350 pt. */
   card_width?: "small" | "medium";
   cards: CardContent[];
 }
