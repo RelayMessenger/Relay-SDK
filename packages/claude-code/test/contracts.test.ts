@@ -65,7 +65,7 @@ describe("published artifact contracts", () => {
       "add9a0857f971e2d35f82711206b4b108ed30912",
     );
     expect(lock.relayServer.sha256).toBe(
-      "2de73db15c2ad93e0ed72581d1613023a19e66398f82f91ca82aa8f880e71a9c",
+      "de009aa448a7f8ef47c66f85802cffbc5a2147d5ebd18370c051175aa83b5ccb",
     );
   });
 

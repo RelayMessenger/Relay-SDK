@@ -527,12 +527,10 @@ const validateOpenAPI = () => {
   assert.equal(contactLookup.additionalProperties, false);
   assert.equal(contactLookup.properties.description.maxLength, 2000);
   assert.equal("about" in contactLookup.properties, false);
-  // Server 414: Relay takes no fee on payments. The business receives the
-  // full amount, less Stripe's own processing fees.
-  assert.equal(document.components.schemas.PaymentRequest.required.includes("application_fee_amount"), false);
-  assert.equal("application_fee_amount" in document.components.schemas.PaymentRequest.properties, false);
-  assert.doesNotMatch(declaredTypes, /application_fee/u);
-  assert.doesNotMatch(document.paths["/v1/payment_requests"].post.description, /Relay takes \d+%|application fee/u);
+  assert.ok(document.components.schemas.PaymentRequest.required.includes("application_fee_amount"));
+  assert.equal(document.components.schemas.PaymentRequest.properties.application_fee_amount.type, "integer");
+  assert.match(declaredTypes, /application_fee_amount: number/u);
+  assert.match(document.paths["/v1/payment_requests"].post.description, /Relay takes a 5% fee/u);
   assert.deepEqual(contactLookup.properties.kind.enum, ["user", "agent"]);
   assert.equal(
     document.components.schemas.ChatHandle.properties.is_contact.description,

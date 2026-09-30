@@ -3,7 +3,7 @@
  *
  * Contract source:
  * Relay Server add9a0857f971e2d35f82711206b4b108ed30912
- * OpenAPI 2de73db15c2ad93e0ed72581d1613023a19e66398f82f91ca82aa8f880e71a9c
+ * OpenAPI de009aa448a7f8ef47c66f85802cffbc5a2147d5ebd18370c051175aa83b5ccb
  */
 
 export const RELAY_API_VERSION = "v1" as const;
@@ -243,6 +243,8 @@ export interface RelayPaymentRequest {
   status: RelayPaymentStatus;
   mode: RelayPaymentMode;
   amount: number;
+  /** Relay's 5% fee in minor units. */
+  application_fee_amount: number;
   currency: string;
   description: string;
   category: RelayPaymentCategory;

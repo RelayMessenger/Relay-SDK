@@ -257,7 +257,7 @@ describe("payment fee documentation", () => {
       type: "integer",
       description: "Relay's 5% fee on `amount`, in minor units, taken from the payment by Stripe; in subscription mode, the first period's fee. 0 when 5% rounds to nothing.",
     });
-    const description = document.paths["/v1/payment_requests"].post.description;
+    const description = document.paths["/v1/payment_requests"].post.description.replace(/\s+/gu, " ");
     expect(description).toContain("Relay takes a 5% fee on every payment");
     expect(description).toContain("in subscription mode it is 5% of every period");
     expect(description).toContain("when you refund a payment, Relay returns the same share of its fee");

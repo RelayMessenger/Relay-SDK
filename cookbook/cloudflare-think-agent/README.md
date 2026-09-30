@@ -64,8 +64,9 @@ is the Action's result, and the turn allows the model one more step to call
 `reply` again, with the payment fixed or without it. Every other turn ends
 after its one `reply`.
 
-The money settles to your own connected Stripe account: you receive the full
-amount, less Stripe's own processing fees. A paid request arrives as a
+The money settles to your own connected Stripe account; Relay takes a 5% fee
+on every payment as a Stripe application fee, shown as
+`application_fee_amount` on the payment request. A paid request arrives as a
 `payment_receipt` Message, which the adapter reads as one line of text.
 
 ## Known limits in Think 0.17.0
