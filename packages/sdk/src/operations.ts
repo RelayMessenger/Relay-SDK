@@ -16,11 +16,6 @@ export const RELAY_V1_OPERATIONS = [
     "operationId": "getMe"
   },
   {
-    "method": "PATCH",
-    "path": "/v1/me",
-    "operationId": "updateAgentMe"
-  },
-  {
     "method": "POST",
     "path": "/v1/chats",
     "operationId": "createChat"
@@ -187,26 +182,6 @@ export const RELAY_V1_OPERATIONS = [
   },
   {
     "method": "GET",
-    "path": "/v1/tasks",
-    "operationId": "listTasks"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/tasks/{taskId}/status",
-    "operationId": "updateTaskStatus"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/tasks/{taskId}/reply",
-    "operationId": "replyToTask"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/tasks/{taskId}/artifacts",
-    "operationId": "addTaskArtifact"
-  },
-  {
-    "method": "GET",
     "path": "/v1/access",
     "operationId": "listAgentAccess"
   },
@@ -317,8 +292,4 @@ export const RELAY_WEBHOOK_EVENT_TYPES = [
   "payment.expired",
   "location.sharing.started",
   "location.sharing.stopped",
-  "task.created",
-  "task.message",
-  "task.canceled",
-  "task.updated",
 ] as const;

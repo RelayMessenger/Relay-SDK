@@ -553,8 +553,8 @@ describe("when turns run", () => {
   });
 
   it("answers an agent's overlapping messages in one chat in turn, each linked to its own", async () => {
-    // A2A 1.0 3.1.1: each Message answers its own request, so a calling
-    // agent's older message is never dropped for its newer one.
+    // Each of another agent's messages gets its own answer, so its older
+    // message is never dropped for its newer one.
     const codex = await fakeAppServer({ turnMs: 300 });
     const { said, relay } = await runBridge({
       ...codex,

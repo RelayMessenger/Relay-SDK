@@ -462,8 +462,8 @@ describe("current Relay WebSocket and claude/channel protocol", () => {
     ["server.ts", "buttons", undefined],
     ["server.ts", "selection", undefined],
   ] as const)("%s: a reply to another agent's %s Message names it only when an agent may reply to it", async (entry, opening, replyTo) => {
-    // Relay's A2A door gives a calling agent only the reply that names its
-    // message; an agent may not reply to buttons or a selection.
+    // A reply names the other agent's message so it knows which one is
+    // answered; an agent may not reply to buttons or a selection.
     const channelDir = mkdtempSync(join(tmpdir(), "relay-agent-reply-"));
     cleanups.push(() => rmSync(channelDir, { recursive: true, force: true }));
     const parts = opening === "text"

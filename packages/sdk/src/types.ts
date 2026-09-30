@@ -826,8 +826,7 @@ export type A2uiClientToServerMessage = A2uiActionMessage | A2uiErrorMessage;
 export type A2uiMessage = A2uiServerToClientMessage | A2uiClientToServerMessage;
 
 /**
- * A data part holding A2UI v0.9.1 messages, in order: Relay's REST shape of
- * A2A's DataPart. A Message may carry any number of data parts beside its
+ * A data part holding A2UI v0.9.1 messages, in order. A Message may carry any number of data parts beside its
  * other parts. Relay applies each A2UI message on its own, checked against
  * A2UI's schemas and the surface's catalog: the ones that fail come back in
  * the response's `a2ui_errors`, and a send that applies nothing is refused
@@ -874,7 +873,7 @@ export interface A2uiClientCapabilities {
 }
 
 /**
- * A2A Message metadata. A tap on a surface that set `sendDataModel` carries
+ * Message metadata. A tap on a surface that set `sendDataModel` carries
  * `a2uiClientDataModel`. Each surface's data model reaches only the sender and
  * the agent that created that surface, unchanged.
  */
@@ -1008,7 +1007,7 @@ export interface MessageContent {
   parts: MessagePart[];
   reply_to?: ReplyTo;
   /**
-   * A2A Message metadata. A tap (an A2UI `action`) on a surface that set
+   * Message metadata. A tap (an A2UI `action`) on a surface that set
    * `sendDataModel` must carry `a2uiClientDataModel`.
    */
   metadata?: MessageMetadata;
@@ -1415,7 +1414,7 @@ export type AgentCategory =
  */
 export type AgentVisibility = "public" | "unlisted";
 
-/** One thing the agent does, in the A2A AgentSkill shape. */
+/** One thing the agent does. */
 export interface AgentSkill {
   id: string;
   name: string;
@@ -1671,28 +1670,12 @@ export interface MessageWebhookData {
   silent?: boolean;
   reply_to?: ReplyTo | null;
   /**
-   * A2A Message metadata. Every `message.received` carries it, with the
+   * Message metadata. Every `message.received` carries it, with the
    * reader's `a2uiClientCapabilities` and, when the sender sent one, its
    * `a2uiClientDataModel` for the surfaces this agent created (see
    * `MessageReceivedMetadata`).
    */
   metadata?: Partial<MessageReceivedMetadata>;
-  /**
-   * On `message.received`: for a message another agent sent to your A2A
-   * address, the request it came from; null for every other message. Answer
-   * with a reply in the chat (the sender gets an A2A Message), or with a Task:
-   * your first `tasks.updateStatus` or `tasks.addArtifact` on `task_id` opens
-   * it. Whichever comes first is the answer.
-   */
-  a2a?: MessageReceivedA2a | null;
-}
-
-/** `message.received` `a2a`: the A2A request a message came from. */
-export interface MessageReceivedA2a {
-  /** The A2A messageId the sender gave the message. */
-  message_id: string;
-  /** The id Relay keeps for the Task, if you answer with one. */
-  task_id: UUID;
 }
 
 /**
@@ -1787,10 +1770,6 @@ type OtherWebhookEventType = Exclude<
   | "payment.expired"
   | "location.sharing.started"
   | "location.sharing.stopped"
-  | "task.created"
-  | "task.message"
-  | "task.canceled"
-  | "task.updated"
 >;
 
 export type RelayWebhookEvent =
@@ -1806,10 +1785,6 @@ export type RelayWebhookEvent =
   | PaymentWebhookEvent
   | LocationSharingStartedWebhookEvent
   | LocationSharingStoppedWebhookEvent
-  | TaskCreatedWebhookEvent
-  | TaskMessageWebhookEvent
-  | TaskCanceledWebhookEvent
-  | TaskUpdatedWebhookEvent
   | RelayWebhookEnvelope<Record<string, unknown>, OtherWebhookEventType>;
 
 /** Existing Relay avatar gradient pairs, ordered top then base. */
@@ -1838,84 +1813,6 @@ export interface AgentPhotoImageRecipe {
   background?: never;
 }
 export type AgentImageRecipe = AgentMonogramImageRecipe | AgentEmojiImageRecipe | AgentPhotoImageRecipe;
-
-// ---------------------------------------------------------------------------
-// Tasks between agents: A2A 1.0 Tasks (a2a.proto, JSON form). Relay-Server
-// server/src/agent-tasks.ts; contract schemas A2aTask, A2aMessage, A2aPart,
-// A2aArtifact, A2aTaskState.
-
-/** a2a.proto `TaskState`, without TASK_STATE_UNSPECIFIED. */
-export type A2aTaskState =
-  | "TASK_STATE_SUBMITTED"
-  | "TASK_STATE_WORKING"
-  | "TASK_STATE_COMPLETED"
-  | "TASK_STATE_FAILED"
-  | "TASK_STATE_CANCELED"
-  | "TASK_STATE_INPUT_REQUIRED"
-  | "TASK_STATE_REJECTED"
-  | "TASK_STATE_AUTH_REQUIRED";
-
-/** a2a.proto `Part`: exactly one of `text`, `raw` (base64), `url` or `data`. */
-export interface A2aPart {
-  text?: string;
-  /** Base64 file bytes. */
-  raw?: string;
-  url?: string;
-  /** Any JSON value. */
-  data?: unknown;
-  metadata?: Record<string, unknown>;
-  filename?: string;
-  mediaType?: string;
-}
-
-/** a2a.proto `Message`. */
-export interface A2aMessage {
-  messageId: string;
-  contextId?: string;
-  taskId?: string;
-  /** ROLE_USER from the agent that sent the task or message, ROLE_AGENT from the agent that answers. */
-  role: "ROLE_USER" | "ROLE_AGENT";
-  /** 1 to 100 parts. */
-  parts: A2aPart[];
-  metadata?: Record<string, unknown>;
-  extensions?: string[];
-  referenceTaskIds?: string[];
-}
-
-/** a2a.proto `Artifact`: a result of a Task. */
-export interface A2aArtifact {
-  /** Unique within the Task. */
-  artifactId: string;
-  name?: string;
-  description?: string;
-  /** 1 to 100 parts. */
-  parts: A2aPart[];
-  metadata?: Record<string, unknown>;
-  extensions?: string[];
-}
-
-/** a2a.proto `TaskStatus`. */
-export interface A2aTaskStatus {
-  state: A2aTaskState;
-  message?: A2aMessage;
-  timestamp: string;
-}
-
-/**
- * a2a.proto `Task`. `metadata.relay.requester` is the verified agent that
- * sent the task: its Card and its `owner`.
- */
-export interface A2aTask {
-  id: UUID;
-  contextId: string;
-  status: A2aTaskStatus;
-  artifacts?: A2aArtifact[];
-  history?: A2aMessage[];
-  metadata: {
-    relay: { requester: Record<string, unknown> };
-    [key: string]: unknown;
-  };
-}
 
 /** A person who administers an agent (`OwnerPerson`, contracts/relay-v1-openapi.yaml). */
 export interface OwnerPerson {
@@ -1949,144 +1846,3 @@ export interface AgentMe {
    */
   calls_enabled: boolean;
 }
-
-/** `PATCH /v1/me`: whether the authenticated agent accepts tasks from other agents. */
-export interface AgentMeUpdateParams {
-  accepts_tasks: boolean;
-}
-
-/** The setting as stored. */
-export interface AgentMeUpdateResponse {
-  accepts_tasks: boolean;
-}
-
-/**
- * The states the agent working on a task may set, by their a2a.proto names or
- * without the TASK_STATE_ prefix. COMPLETED, FAILED and REJECTED are final.
- */
-export type TaskStatusUpdateState =
-  | "TASK_STATE_WORKING"
-  | "TASK_STATE_INPUT_REQUIRED"
-  | "TASK_STATE_AUTH_REQUIRED"
-  | "TASK_STATE_COMPLETED"
-  | "TASK_STATE_FAILED"
-  | "TASK_STATE_REJECTED"
-  | "WORKING"
-  | "INPUT_REQUIRED"
-  | "AUTH_REQUIRED"
-  | "COMPLETED"
-  | "FAILED"
-  | "REJECTED";
-
-/** `POST /v1/tasks/{taskId}/status`. */
-export interface TaskStatusUpdateParams {
-  state: TaskStatusUpdateState;
-  /** Role ROLE_AGENT; kept in the Task's history too. */
-  message?: A2aMessage;
-}
-
-/**
- * `POST /v1/tasks/{taskId}/reply`: answer a Task with one Message (role
- * ROLE_AGENT) instead, as your first answer only.
- */
-export interface TaskReplyParams {
-  message: A2aMessage;
-}
-
-/** `POST /v1/tasks/{taskId}/artifacts`: one whole Artifact, appended. */
-export interface TaskArtifactCreateParams {
-  artifact: A2aArtifact;
-}
-
-export interface TaskResponse {
-  task: A2aTask;
-}
-
-/** `GET /v1/tasks`. */
-export interface TaskListParams {
-  /** `callee` (default): tasks other agents sent you. `requester`: tasks you sent. */
-  role?: "callee" | "requester";
-  state?: A2aTaskState;
-  /** 1 to 100; the Server's default is 50. */
-  page_size?: number;
-  page_token?: string;
-}
-
-export interface TaskListResponse {
-  tasks: A2aTask[];
-  /** Empty on the last page. */
-  next_page_token: string;
-}
-
-/** a2a.proto `SendMessageConfiguration`, the fields Relay reads. */
-export interface A2aSendMessageConfiguration {
-  acceptedOutputModes?: string[];
-  historyLength?: number;
-  /**
-   * Answer at once with the Task instead of waiting for it to settle. No
-   * effect when the agent answers with a Message (A2A specification 3.2.2).
-   */
-  returnImmediately?: boolean;
-}
-
-/** Send another agent a task or a message at its A2A address: A2A `SendMessage`. */
-export interface TaskSendParams {
-  /** The Relay Handle of the agent that receives it. */
-  to: string;
-  /**
-   * Role ROLE_USER. With no taskId it starts a Task at an agent that accepts
-   * tasks, and reaches any other agent as a message in your chat with it;
-   * with a taskId it continues that Task.
-   */
-  message: A2aMessage;
-  configuration?: A2aSendMessageConfiguration;
-  /** Kept on the Task's metadata, beside `relay`. */
-  metadata?: Record<string, unknown>;
-}
-
-/**
- * What `tasks.send` answers, as @a2a-js/sdk's `SendMessageResult` is: a
- * Task from an agent that accepts tasks, or a Message, the reply of any
- * other agent. A Message has a `messageId`; a Task does not.
- */
-export type A2aSendMessageResult = A2aTask | A2aMessage;
-
-/** A2A `GetTask` at the agent's address; only a Task you sent that agent. */
-export interface TaskGetParams {
-  to: string;
-  id: UUID;
-  historyLength?: number;
-}
-
-/** A2A `CancelTask` at the agent's address; only a Task you sent that agent. */
-export interface TaskCancelParams {
-  to: string;
-  id: UUID;
-}
-
-/** `task.created`: another agent sent your agent a task, in TASK_STATE_SUBMITTED. */
-export interface TaskCreatedEvent {
-  task: A2aTask;
-}
-
-/** `task.message`: the agent that sent the task sent more on it. */
-export interface TaskMessageEvent {
-  task_id: UUID;
-  message: A2aMessage;
-}
-
-/** `task.canceled`: the agent that sent the task canceled it. */
-export interface TaskCanceledEvent {
-  task_id: UUID;
-}
-
-/** `task.updated`: the agent working on a task your agent sent changed it. */
-export interface TaskUpdatedEvent {
-  task: A2aTask;
-}
-
-export type TaskCreatedWebhookEvent = RelayWebhookEnvelope<TaskCreatedEvent, "task.created">;
-export type TaskMessageWebhookEvent = RelayWebhookEnvelope<TaskMessageEvent, "task.message">;
-export type TaskCanceledWebhookEvent = RelayWebhookEnvelope<TaskCanceledEvent, "task.canceled">;
-export type TaskUpdatedWebhookEvent = RelayWebhookEnvelope<TaskUpdatedEvent, "task.updated">;
-
