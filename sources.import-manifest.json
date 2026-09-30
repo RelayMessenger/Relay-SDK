@@ -305,7 +305,7 @@
       "commit": "eecf94a4d38bc021917e54dfed57e268657c17af",
       "source": "contracts/relay-openapi.yaml",
       "source_sha256": "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5",
-      "destination_sha256": "55a893586ce4499c258aa62bc964183f3e9f8659a4246ffaed3419bb8155a337",
+      "destination_sha256": "414d6cc6ca71ee575b75ca420faafa0059924f10ac481866f14377e0db39c455",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -921,7 +921,7 @@
       "commit": "ff013f2247adb9360ece63799874024c216d040c",
       "source": "contracts/relay-openapi.yaml",
       "source_sha256": "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5",
-      "destination_sha256": "55a893586ce4499c258aa62bc964183f3e9f8659a4246ffaed3419bb8155a337",
+      "destination_sha256": "414d6cc6ca71ee575b75ca420faafa0059924f10ac481866f14377e0db39c455",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -2307,7 +2307,7 @@
       "commit": "0c7939c935f3c71a1f4c1d5d1b0341aebeab3399",
       "source": "contracts/relay-openapi.yaml",
       "source_sha256": "f62f431fc0daa48500926bf87753f81c3fdda25ab463b130ca97f2896367e0a5",
-      "destination_sha256": "55a893586ce4499c258aa62bc964183f3e9f8659a4246ffaed3419bb8155a337",
+      "destination_sha256": "414d6cc6ca71ee575b75ca420faafa0059924f10ac481866f14377e0db39c455",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
