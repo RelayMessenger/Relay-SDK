@@ -16,7 +16,16 @@ the ``calls`` extra (``pip install 'relaymessenger[calls]'``). Importing
 """
 
 from . import a2ui, selection, tasks, websocket
-from .client import DEFAULT_BASE_URL, Relay, RelayAPIError, ReplyTo, SendMessageResponse
+from .client import (
+    DEFAULT_BASE_URL,
+    ChatHandle,
+    ContactCard,
+    ContactEventContact,
+    Relay,
+    RelayAPIError,
+    ReplyTo,
+    SendMessageResponse,
+)
 from .errors import RelayUnknownEventTypeError, RelayWebhookConfiguredError
 from .websocket import (
     WebSocketEventContext,
@@ -27,6 +36,9 @@ from .websocket import (
 
 __all__ = [
     "DEFAULT_BASE_URL",
+    "ChatHandle",
+    "ContactCard",
+    "ContactEventContact",
     "Relay",
     "RelayAPIError",
     "RelayUnknownEventTypeError",

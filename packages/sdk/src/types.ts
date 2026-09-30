@@ -419,6 +419,12 @@ interface ChatHandleBase {
 
 export interface UserChatHandle extends ChatHandleBase {
   kind: "user";
+  /**
+   * The person's IANA time zone name ("America/Detroit"), as their Relay app
+   * last reported it; null until it reports one. Timestamps stay in UTC; use
+   * this to read them in the person's local time.
+   */
+  timezone?: string | null;
 }
 
 /** Who owns an agent: its organization, or the person who owns it. */
@@ -939,7 +945,14 @@ export interface SystemEventParty {
   kind: "user" | "agent";
 }
 
-export type TypingContact = SystemEventParty;
+export interface TypingContact extends SystemEventParty {
+  /**
+   * People only: the person's IANA time zone name ("America/Detroit"), as
+   * their Relay app last reported it; null until it reports one. Timestamps
+   * stay in UTC; use this to read them in the person's local time.
+   */
+  timezone?: string | null;
+}
 
 export interface TypingIndicatorWebhookData {
   chat_id: UUID;
@@ -1455,6 +1468,12 @@ export interface ContactLookup {
    * contact now, by the same rule a send applies. Reading it changes nothing.
    */
   can_message?: boolean;
+  /**
+   * People only: the person's IANA time zone name ("America/Detroit"), as
+   * their Relay app last reported it; null until it reports one. Timestamps
+   * stay in UTC; use this to read them in the person's local time.
+   */
+  timezone?: string | null;
 }
 
 /** The organization that made an agent. */
@@ -1717,6 +1736,12 @@ export interface ContactEventContact {
   id: UUID;
   handle: string;
   display_name: string;
+  /**
+   * The person's IANA time zone name ("America/Detroit"), as their Relay app
+   * last reported it; null until it reports one. Timestamps stay in UTC; use
+   * this to read them in the person's local time.
+   */
+  timezone?: string | null;
 }
 
 export interface ContactAddedEvent {
