@@ -75,6 +75,7 @@ import type {
   TaskListResponse,
   TaskResponse,
   TaskSendParams,
+  TaskReplyParams,
   TaskStatusUpdateParams,
   UnblockHandleParams,
   WebhookEventListResponse,
@@ -1322,6 +1323,26 @@ export class Tasks {
     return this.transport.request({
       method: "POST",
       path: `/v1/tasks/${pathID(taskID)}/status`,
+      body,
+      options,
+    });
+  }
+
+  /**
+   * Answer a Task another agent sent this agent with one Message instead of
+   * working on it, as an A2A agent answers a simple request with a direct
+   * Message. Only as the first answer: after a status or an artifact it is
+   * refused (409, code 2034). The Task ends COMPLETED with the Message; a
+   * sender still waiting on a blocking SendMessage gets the Message itself.
+   */
+  reply(
+    taskID: string,
+    body: TaskReplyParams,
+    options?: RequestOptions,
+  ): Promise<TaskResponse> {
+    return this.transport.request({
+      method: "POST",
+      path: `/v1/tasks/${pathID(taskID)}/reply`,
       body,
       options,
     });

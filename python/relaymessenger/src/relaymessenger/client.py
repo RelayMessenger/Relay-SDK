@@ -533,6 +533,19 @@ class Tasks:
         result = await self._transport.request("POST", f"/v1/tasks/{quote(task_id, safe='')}/status", body)
         return cast(TaskResponse, result)
 
+    async def reply(self, task_id: str, message: A2aMessage) -> TaskResponse:
+        """``POST /v1/tasks/{taskId}/reply`` (``replyToTask``): answer a task
+        this agent was sent with one Message (role ``ROLE_AGENT``) instead of
+        working on it, as an A2A agent answers a simple request with a direct
+        Message. Only as the first answer: after a status or an artifact it is
+        refused (409, code 2034). The task ends COMPLETED with the Message; a
+        sender still waiting on a blocking SendMessage gets the Message itself.
+        Not retried: a second reply is refused."""
+        result = await self._transport.request(
+            "POST", f"/v1/tasks/{quote(task_id, safe='')}/reply", {"message": message}
+        )
+        return cast(TaskResponse, result)
+
     async def add_artifact(self, task_id: str, artifact: A2aArtifact) -> TaskResponse:
         """``POST /v1/tasks/{taskId}/artifacts`` (``addTaskArtifact``): append one
         whole Artifact to a task this agent was sent. The same Artifact again

@@ -189,8 +189,21 @@ TaskWebhook = Union[TaskCreatedWebhook, TaskMessageWebhook, TaskCanceledWebhook,
 # REST responses ---------------------------------------------------------------
 
 
+class MessageReceivedA2a(TypedDict):
+    """``message.received`` ``data.a2a``: for a message another agent sent to
+    this agent's A2A address, the request it came from (null for every other
+    message). Answer with a reply in the chat, and the sender gets an A2A
+    Message; or answer with a Task: the first ``relay.tasks.update_status`` or
+    ``relay.tasks.add_artifact`` on ``task_id`` opens it. Whichever comes first
+    is the answer."""
+
+    message_id: str
+    task_id: str
+
+
 class TaskResponse(TypedDict):
-    """The Task after ``relay.tasks.update_status`` or ``relay.tasks.add_artifact``."""
+    """The Task after ``relay.tasks.update_status``, ``relay.tasks.add_artifact``
+    or ``relay.tasks.reply``."""
 
     task: A2aTask
 

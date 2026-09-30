@@ -292,6 +292,18 @@ async def test_tasks_update_status_and_add_artifact_post_the_contracts_bodies(se
     assert all("idempotency-key" not in headers for _, _, headers, _ in server.seen)
 
 
+async def test_tasks_reply_posts_the_message_once(server: _Server) -> None:
+    server.replies += [(200, {"task": TASK})]
+    relay = Relay("tok", base_url=server.base_url)
+    message: A2aMessage = {"messageId": "r1", "role": "ROLE_AGENT", "parts": [{"text": "Direct message response"}]}
+    assert (await relay.tasks.reply(TASK["id"], message))["task"] == TASK
+    assert [(m, p, b) for m, p, _, b in server.seen] == [
+        ("POST", f"/v1/tasks/{TASK['id']}/reply", {"message": message}),
+    ]
+    # A second reply is refused, so the first carries no idempotency key.
+    assert all("idempotency-key" not in headers for _, _, headers, _ in server.seen)
+
+
 # A task or a message sent over A2A ---------------------------------------------
 
 

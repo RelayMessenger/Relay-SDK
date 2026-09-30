@@ -212,6 +212,9 @@ describe("Relay v1 request shapes", () => {
     await client.tasks.addArtifact("task-id", {
       artifact: { artifactId: "result", parts: [{ text: "42" }] },
     });
+    await client.tasks.reply("task-id", {
+      message: { messageId: "reply-1", role: "ROLE_AGENT", parts: [{ text: "Direct message response" }] },
+    });
     await client.access.list();
     await client.access.set("agent", { rule: "allow" });
     await client.access.remove("agent");
@@ -340,6 +343,9 @@ describe("Relay v1 request shapes", () => {
     expect(body("POST", "/v1/tasks/task-id/artifacts")).toEqual({
       artifact: { artifactId: "result", parts: [{ text: "42" }] },
     });
+    expect(body("POST", "/v1/tasks/task-id/reply")).toEqual({
+      message: { messageId: "reply-1", role: "ROLE_AGENT", parts: [{ text: "Direct message response" }] },
+    });
     const listTasks = calls.find((call) => call.method === "GET" && call.url.pathname === "/v1/tasks")!;
     expect(Object.fromEntries(listTasks.url.searchParams)).toEqual({
       role: "requester", state: "TASK_STATE_WORKING", page_size: "10", page_token: "task-page",
@@ -437,6 +443,7 @@ describe("Relay v1 request shapes", () => {
       "cancel",
       "get",
       "list",
+      "reply",
       "send",
       "updateStatus",
     ]);

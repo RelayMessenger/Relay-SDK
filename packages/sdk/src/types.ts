@@ -1677,6 +1677,22 @@ export interface MessageWebhookData {
    * `MessageReceivedMetadata`).
    */
   metadata?: Partial<MessageReceivedMetadata>;
+  /**
+   * On `message.received`: for a message another agent sent to your A2A
+   * address, the request it came from; null for every other message. Answer
+   * with a reply in the chat (the sender gets an A2A Message), or with a Task:
+   * your first `tasks.updateStatus` or `tasks.addArtifact` on `task_id` opens
+   * it. Whichever comes first is the answer.
+   */
+  a2a?: MessageReceivedA2a | null;
+}
+
+/** `message.received` `a2a`: the A2A request a message came from. */
+export interface MessageReceivedA2a {
+  /** The A2A messageId the sender gave the message. */
+  message_id: string;
+  /** The id Relay keeps for the Task, if you answer with one. */
+  task_id: UUID;
 }
 
 /**
@@ -1967,6 +1983,14 @@ export interface TaskStatusUpdateParams {
   state: TaskStatusUpdateState;
   /** Role ROLE_AGENT; kept in the Task's history too. */
   message?: A2aMessage;
+}
+
+/**
+ * `POST /v1/tasks/{taskId}/reply`: answer a Task with one Message (role
+ * ROLE_AGENT) instead, as your first answer only.
+ */
+export interface TaskReplyParams {
+  message: A2aMessage;
 }
 
 /** `POST /v1/tasks/{taskId}/artifacts`: one whole Artifact, appended. */

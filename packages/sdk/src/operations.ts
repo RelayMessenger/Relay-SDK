@@ -201,6 +201,11 @@ export const RELAY_V1_OPERATIONS = [
     "operationId": "addTaskArtifact"
   },
   {
+    "method": "POST",
+    "path": "/v1/tasks/{taskId}/reply",
+    "operationId": "replyToTask"
+  },
+  {
     "method": "GET",
     "path": "/v1/access",
     "operationId": "listAgentAccess"
