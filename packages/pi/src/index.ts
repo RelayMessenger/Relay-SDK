@@ -277,10 +277,10 @@ export class PiChannel {
     const messages = answerMessages(answer);
     if (messages[0]?.error) console.error(`Relay: the component block in pi's answer was left as text: ${messages[0].error}.`);
     // An answer to another agent replies to its Message, as a bot's reply
-    // names the message it answers (Telegram `reply_parameters.message_id`); Relay's
-    // A2A door gives a calling agent the reply that names its message. A
-    // person's Message is not named, so the chat looks as it always has. An
-    // agent may not reply to buttons or a selection, and a reply names part 0.
+    // names the message it answers (Telegram `reply_parameters.message_id`), so
+    // an agent that sent several knows which one it answers. A person's
+    // Message is not named, so the chat looks as it always has. An agent may
+    // not reply to buttons or a selection, and a reply names part 0.
     // Turns in one chat already run one after another, so an agent's two
     // messages each get their own answer.
     const opening = data.parts[0]?.type;

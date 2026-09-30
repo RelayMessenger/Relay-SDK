@@ -203,17 +203,6 @@ describe("Relay v1 request shapes", () => {
     await client.blockedHandles.list();
     await client.blockedHandles.block({ handle: "carol", reason: "spam" });
     await client.blockedHandles.unblock({ handle: "carol" });
-    await client.tasks.list({ role: "requester", state: "TASK_STATE_WORKING", page_size: 10, page_token: "task-page" });
-    await client.tasks.updateStatus("task-id", {
-      state: "TASK_STATE_COMPLETED",
-      message: { messageId: "status-1", role: "ROLE_AGENT", parts: [{ text: "Done" }] },
-    });
-    await client.tasks.reply("task-id", {
-      message: { messageId: "reply-1", role: "ROLE_AGENT", parts: [{ text: "Direct message response" }] },
-    });
-    await client.tasks.addArtifact("task-id", {
-      artifact: { artifactId: "result", parts: [{ text: "42" }] },
-    });
     await client.access.list();
     await client.access.set("agent", { rule: "allow" });
     await client.access.remove("agent");
@@ -243,14 +232,12 @@ describe("Relay v1 request shapes", () => {
     await client.calls.end("call-id");
     await client.agents.delete("agent");
     await client.me.retrieve();
-    await client.me.update({ accepts_tasks: true });
 
-    expect([...calls.slice(-3), ...calls.slice(0, -3)].map((call) => [call.method, call.url.pathname])).toEqual(
+    expect([...calls.slice(-2), ...calls.slice(0, -2)].map((call) => [call.method, call.url.pathname])).toEqual(
       RELAY_V1_OPERATIONS.map((operation) => [
         operation.method,
         operation.path
           .replace("{handle}", "agent")
-          .replace("{taskId}", "task-id")
           .replace("{chatId}", "chat-id")
           .replace("{messageId}", "message-id")
           .replace("{attachmentId}", "attachment-id")
@@ -325,22 +312,6 @@ describe("Relay v1 request shapes", () => {
       const call = calls.find((item) => item.method === method && item.url.pathname === path)!;
       return call.body === undefined ? undefined : JSON.parse(String(call.body));
     };
-    expect(body("PATCH", "/v1/me")).toEqual({ accepts_tasks: true });
-    expect(body("POST", "/v1/tasks/task-id/status")).toEqual({
-      state: "TASK_STATE_COMPLETED",
-      message: { messageId: "status-1", role: "ROLE_AGENT", parts: [{ text: "Done" }] },
-    });
-    expect(body("POST", "/v1/tasks/task-id/artifacts")).toEqual({
-      artifact: { artifactId: "result", parts: [{ text: "42" }] },
-    });
-    expect(body("POST", "/v1/tasks/task-id/reply")).toEqual({
-      message: { messageId: "reply-1", role: "ROLE_AGENT", parts: [{ text: "Direct message response" }] },
-    });
-    const listTasks = calls.find((call) => call.method === "GET" && call.url.pathname === "/v1/tasks")!;
-    expect(Object.fromEntries(listTasks.url.searchParams)).toEqual({
-      role: "requester", state: "TASK_STATE_WORKING", page_size: "10", page_token: "task-page",
-    });
-    expect(listTasks.body).toBeUndefined();
 
     // Editing and unsending are retired from the developer API, so the client
     // has no way to reach either verb on a Message.
@@ -410,7 +381,6 @@ describe("Relay v1 request shapes", () => {
       "me",
       "messages",
       "paymentRequests",
-      "tasks",
       "webhookEvents",
       "webhookSubscriptions",
       "webhooks",
@@ -418,18 +388,11 @@ describe("Relay v1 request shapes", () => {
     ]);
     expect(methods(client.access)).toEqual(["list", "remove", "set"]);
     expect(methods(client.agents)).toEqual(["delete"]);
-    expect(methods(client.me)).toEqual(["retrieve", "update"]);
-    // Communities were removed (2026-09-30): the client has no way to reach them.
+    expect(methods(client.me)).toEqual(["retrieve"]);
+    // Communities were removed (2026-09-30), then A2A and tasks: the client
+    // has no way to reach any of them.
     expect(Object.keys(client)).not.toContain("communities");
-    expect(methods(client.tasks)).toEqual([
-      "addArtifact",
-      "cancel",
-      "get",
-      "list",
-      "reply",
-      "send",
-      "updateStatus",
-    ]);
+    expect(Object.keys(client)).not.toContain("tasks");
     expect(methods(client.chats)).toEqual([
       "clearActivity",
       "create",

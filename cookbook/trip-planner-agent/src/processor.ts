@@ -138,8 +138,8 @@ export async function processAcceptedEvent(
     memory.savePlannedTurn(event.event_id, chatId, plan);
   }
 
-  // The plan quotes the Message it answers, which also gives an agent waiting
-  // on Relay's A2A door its own answer. An agent may not reply to buttons or a
+  // The plan quotes the Message it answers, so an agent that sent several
+  // knows which one this answers. An agent may not reply to buttons or a
   // selection, and a reply names part 0, so such a Message is not quoted.
   // Read as a string: this example's pinned SDK types predate buttons and
   // selection parts, which Relay sends all the same.

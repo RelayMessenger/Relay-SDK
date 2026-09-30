@@ -61,10 +61,6 @@ RELAY_WEBHOOK_EVENT_TYPES: Final = (
     "payment.expired",
     "location.sharing.started",
     "location.sharing.stopped",
-    "task.created",
-    "task.message",
-    "task.canceled",
-    "task.updated",
 )
 
 _WEBSOCKET_ERROR_CODES: Final = frozenset(

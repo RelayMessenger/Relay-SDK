@@ -157,8 +157,8 @@ describe("Relay inbound Message mapping", () => {
   });
 
   it("names another agent's own Message as the answer's target, never a person's", () => {
-    // Relay's A2A door gives a calling agent only the answer whose reply_to
-    // names its Message (Relay-Server a2a.ts replyTo; CLI bridges, PR 366).
+    // The answer's reply_to names the other agent's Message, as the CLI
+    // bridges do (PR 366).
     const input = event();
     const data = input.data as RelayMessageReceivedEvent["data"];
     data.sender_handle = { ...sender, kind: "agent" };
