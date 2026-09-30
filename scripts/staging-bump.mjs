@@ -68,6 +68,20 @@ export function parseStagingVersion(version) {
   return { base: `${major}.${minor}.${patch}`, major, minor, patch, prerelease };
 }
 
+/** Orders two plain `X.Y.Z` versions; anything else fails closed. */
+export function compareBase(left, right) {
+  const parts = (value) => {
+    const match = /^(\d+)\.(\d+)\.(\d+)$/u.exec(String(value));
+    if (!match) throw new Error(`${JSON.stringify(value)} is not an X.Y.Z version`);
+    return match.slice(1).map(Number);
+  };
+  const [a, b] = [parts(left), parts(right)];
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
+  }
+  return 0;
+}
+
 /**
  * The decision table. Inputs are facts about one package:
  *
@@ -88,6 +102,13 @@ export function parseStagingVersion(version) {
  *   no        | yes         | (not asked)     | X.Y.(Z+1)-staging.0: main would
  *             |             |                 | derive X.Y.Z and skip it forever
  *
+ * `minimumBase` (the catalog's `minimumBase`, scripts/release-packages.mjs)
+ * comes first: while the tree's base is below it, the next version is
+ * `minimumBase-staging.0`, whether or not content changed. It is how a
+ * breaking 0.x release asks for a minor instead of the table's patch, as a
+ * Changesets `minor` changeset does. Once the base reaches it the floor is
+ * inert. A floor npm already holds as a plain version fails closed.
+ *
  * A candidate npm already has (a prerelease published and then abandoned)
  * moves on to the next N. The base test is existence, not the `latest` tag:
  * semver gives every `X.Y.Z-staging.N` lower precedence than `X.Y.Z`, so any
@@ -99,8 +120,21 @@ export function nextVersion({
   basePublished,
   contentChanged,
   isPublished,
+  minimumBase,
 }) {
   const parsed = parseStagingVersion(version);
+  if (minimumBase !== undefined && compareBase(parsed.base, minimumBase) < 0) {
+    if (isPublished(minimumBase)) {
+      throw new Error(`minimumBase ${minimumBase} is already on npm; raise or remove it`);
+    }
+    let prerelease = 0;
+    while (isPublished(`${minimumBase}-staging.${prerelease}`)) prerelease += 1;
+    return {
+      action: "bump",
+      version: `${minimumBase}-staging.${prerelease}`,
+      reason: `the catalog asks for ${minimumBase} or later`,
+    };
+  }
   if (versionPublished && !contentChanged) {
     return { action: "none", version, reason: "npm holds this content" };
   }
@@ -348,6 +382,7 @@ export async function stagingBump({ write }) {
       basePublished,
       contentChanged,
       isPublished: (candidate) => view(`${name}@${candidate}`, "version").found,
+      minimumBase: entry.minimumBase,
     });
     say(`${name}@${version}: published=${versionPublished} base=${basePublished} changed=${contentChanged} -> ${decision.action} ${decision.version} (${decision.reason})`);
     if (changedFiles.length) say(`  differs in ${changedFiles.join(", ")}`);
