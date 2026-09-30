@@ -5,8 +5,6 @@ export {
   BlockedHandles,
   Chats,
   Calls,
-  Communities,
-  CommunityMembers,
   ContactCard,
   Contacts,
   Me,

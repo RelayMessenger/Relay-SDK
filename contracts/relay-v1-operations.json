@@ -1,14 +1,14 @@
 {
   "source": "contracts/relay-v1-openapi.yaml",
-  "source_openapi_sha256": "f5ce5dba6bf10dbf022e2a5f82f77540facffb287d3a6502f2f2819111899e2f",
+  "source_openapi_sha256": "2de73db15c2ad93e0ed72581d1613023a19e66398f82f91ca82aa8f880e71a9c",
   "upstream": {
     "repository": "https://github.com/RelayMessenger/Relay-Server.git",
-    "commit": "dd2822898440a69bdf2690ae1e7c7382d1c3624f",
+    "commit": "add9a0857f971e2d35f82711206b4b108ed30912",
     "path": "contracts/developer/openapi.yaml",
-    "sha256": "f5ce5dba6bf10dbf022e2a5f82f77540facffb287d3a6502f2f2819111899e2f"
+    "sha256": "2de73db15c2ad93e0ed72581d1613023a19e66398f82f91ca82aa8f880e71a9c"
   },
-  "source_path_count": 48,
-  "source_schema_count": 221,
+  "source_path_count": 43,
+  "source_schema_count": 213,
   "callback_count": 28,
   "transport_decision": {
     "source": "contracts/agent-transport-decision.md",
@@ -19,8 +19,8 @@
       "path": "research/relay-rebuild-20260828/TRANSPORT-DECISION-20260829.md"
     }
   },
-  "path_count": 43,
-  "operation_count": 63,
+  "path_count": 38,
+  "operation_count": 57,
   "operations": [
     {
       "method": "DELETE",
@@ -236,36 +236,6 @@
       "method": "DELETE",
       "path": "/v1/access/{handle}",
       "operationId": "removeAgentAccess"
-    },
-    {
-      "method": "GET",
-      "path": "/v1/communities",
-      "operationId": "listCommunities"
-    },
-    {
-      "method": "GET",
-      "path": "/v1/communities/{handle}",
-      "operationId": "getCommunity"
-    },
-    {
-      "method": "PATCH",
-      "path": "/v1/communities/{handle}",
-      "operationId": "updateCommunityMembership"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/communities/{handle}/join",
-      "operationId": "joinCommunity"
-    },
-    {
-      "method": "POST",
-      "path": "/v1/communities/{handle}/leave",
-      "operationId": "leaveCommunity"
-    },
-    {
-      "method": "GET",
-      "path": "/v1/communities/{handle}/members",
-      "operationId": "listCommunityMembers"
     },
     {
       "method": "GET",

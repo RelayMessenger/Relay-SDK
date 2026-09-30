@@ -25,7 +25,6 @@ const responder = (calls: Captured[]) => async (
       url.pathname.endsWith("/read")
       || url.pathname.endsWith("/share_contact_card")
       || url.pathname.endsWith("/typing")
-      || /^\/v1\/communities\/[^/]+\/leave$/u.test(url.pathname)
     ))
     || (method === "DELETE" && (
       /^\/v1\/messages\/[^/]+$/u.test(url.pathname)
@@ -218,12 +217,6 @@ describe("Relay v1 request shapes", () => {
     await client.access.list();
     await client.access.set("agent", { rule: "allow" });
     await client.access.remove("agent");
-    await client.communities.list();
-    await client.communities.retrieve("agent", { invite: "invite-code" });
-    await client.communities.update("agent", { lets_members_message: false });
-    await client.communities.join("agent", { invite_code: "invite-code" });
-    await client.communities.leave("agent");
-    await client.communities.members.list("agent");
     await client.webhookEvents.list();
     await client.webhookSubscriptions.create({
       target_url: "https://receiver.test/webhook",
@@ -333,9 +326,6 @@ describe("Relay v1 request shapes", () => {
       return call.body === undefined ? undefined : JSON.parse(String(call.body));
     };
     expect(body("PATCH", "/v1/me")).toEqual({ accepts_tasks: true });
-    expect(body("PATCH", "/v1/communities/agent")).toEqual({ lets_members_message: false });
-    expect(body("POST", "/v1/communities/agent/join")).toEqual({ invite_code: "invite-code" });
-    expect(body("POST", "/v1/communities/agent/leave")).toBeUndefined();
     expect(body("POST", "/v1/tasks/task-id/status")).toEqual({
       state: "TASK_STATE_COMPLETED",
       message: { messageId: "status-1", role: "ROLE_AGENT", parts: [{ text: "Done" }] },
@@ -351,11 +341,6 @@ describe("Relay v1 request shapes", () => {
       role: "requester", state: "TASK_STATE_WORKING", page_size: "10", page_token: "task-page",
     });
     expect(listTasks.body).toBeUndefined();
-    const readCommunity = calls.find((call) => call.url.pathname === "/v1/communities/agent")!;
-    expect(Object.fromEntries(readCommunity.url.searchParams)).toEqual({ invite: "invite-code" });
-    for (const path of ["/v1/communities", "/v1/communities/agent", "/v1/communities/agent/members"]) {
-      expect(body("GET", path)).toBeUndefined();
-    }
 
     // Editing and unsending are retired from the developer API, so the client
     // has no way to reach either verb on a Message.
@@ -420,7 +405,6 @@ describe("Relay v1 request shapes", () => {
       "blockedHandles",
       "calls",
       "chats",
-      "communities",
       "contactCard",
       "contacts",
       "me",
@@ -435,9 +419,8 @@ describe("Relay v1 request shapes", () => {
     expect(methods(client.access)).toEqual(["list", "remove", "set"]);
     expect(methods(client.agents)).toEqual(["delete"]);
     expect(methods(client.me)).toEqual(["retrieve", "update"]);
-    expect(methods(client.communities)).toEqual(["join", "leave", "list", "retrieve", "update"]);
-    expect(methods(client.communities.members)).toEqual(["list"]);
-    expect(Object.keys(client.communities)).not.toContain("posts");
+    // Communities were removed (2026-09-30): the client has no way to reach them.
+    expect(Object.keys(client)).not.toContain("communities");
     expect(methods(client.tasks)).toEqual([
       "addArtifact",
       "cancel",

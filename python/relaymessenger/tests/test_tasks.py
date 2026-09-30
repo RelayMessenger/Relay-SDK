@@ -1,9 +1,9 @@
-"""Tasks between agents and communities: Relay's REST routes against a local
+"""Tasks between agents: Relay's REST routes against a local
 HTTP server, and a task or a message sent with the official A2A SDK to a local
 A2A address.
 
 Every path, method and body is Relay Server's (server/src/me.ts,
-communities.ts, agent-tasks.ts); the AgentCard is what a2a.ts ``agentCard``
+agent-tasks.ts); the AgentCard is what a2a.ts ``agentCard``
 builds for an agent, and the JSON-RPC answers are a2a.ts ``runMethod``'s.
 """
 
@@ -13,7 +13,6 @@ import json
 import subprocess
 import sys
 import threading
-from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -160,107 +159,6 @@ async def test_me_update_turns_accepting_tasks_on_with_patch_v1_me(server: _Serv
     assert (method, path, body) == ("PATCH", "/v1/me", {"accepts_tasks": True})
     assert headers["authorization"] == "Bearer tok"
     assert headers["content-type"] == "application/json"
-
-
-async def test_communities_list_members_and_the_public_read(server: _Server) -> None:
-    summary = {
-        "handle": "chess", "name": "Chess", "description": "", "image_url": None,
-        "type": "public", "member_count": 2, "lets_members_message": True,
-        "rules": [], "links": [],
-    }
-    server.replies += [
-        (200, {"communities": [summary]}),
-        (200, {"members": [{"id": "a", "handle": "bishop"}]}),
-        (200, {**summary, "type": "private"}),
-        (200, {"community": {**summary, "lets_members_message": False}}),
-    ]
-    relay = Relay("tok", base_url=server.base_url)
-    assert (await relay.communities.list())["communities"] == [summary]
-    assert (await relay.communities.members.list("chess/club"))["members"][0]["handle"] == "bishop"
-    await relay.communities.retrieve("chess", invite="c0de&x")
-    updated = await relay.communities.update("chess/club", lets_members_message=False)
-    assert updated["community"]["lets_members_message"] is False
-    assert [(m, p, b) for m, p, _, b in server.seen] == [
-        ("GET", "/v1/communities", None),
-        ("GET", "/v1/communities/chess%2Fclub/members", None),
-        ("GET", "/v1/communities/chess?invite=c0de%26x", None),
-        ("PATCH", "/v1/communities/chess%2Fclub", {"lets_members_message": False}),
-    ]
-
-
-async def test_communities_update_takes_only_lets_members_message(server: _Server) -> None:
-    # The community feed is removed: no notifications bell. PATCH
-    # /v1/communities/{handle} takes lets_members_message alone.
-    relay = Relay("tok", base_url=server.base_url)
-    with pytest.raises(TypeError):
-        await relay.communities.update("chess")  # type: ignore[call-arg]
-    with pytest.raises(TypeError):
-        await relay.communities.update("chess", lets_members_message=True, notifications=True)  # type: ignore[call-arg]
-    assert server.seen == []
-
-
-async def test_communities_join_posts_the_invite_code_and_leave_posts_nothing(server: _Server) -> None:
-    # Relay-Server 6645d5f8 (PR 407): POST /v1/communities/{handle}/join with
-    # an optional invite_code answers 200 {community}; POST .../leave answers 204.
-    community = {
-        "handle": "chess", "name": "Chess", "description": "", "image_url": None,
-        "type": "private", "member_count": 3, "lets_members_message": True,
-        "rules": [{"title": "No spam", "description": "One message a day."}],
-        "links": [{"label": "FIDE laws", "url": "https://www.fide.com/laws"}],
-    }
-    server.replies += [(200, {"community": community}), (200, {"community": community}), (204, None)]
-    relay = Relay("tok", base_url=server.base_url)
-    joined = await relay.communities.join("chess/club", invite_code="k3y")
-    assert joined["community"]["rules"][0]["title"] == "No spam"
-    await relay.communities.join("chess")
-    assert await relay.communities.leave("chess/club") is None
-    assert [(m, p, b) for m, p, _, b in server.seen] == [
-        ("POST", "/v1/communities/chess%2Fclub/join", {"invite_code": "k3y"}),
-        ("POST", "/v1/communities/chess/join", {}),
-        ("POST", "/v1/communities/chess%2Fclub/leave", None),
-    ]
-
-
-async def test_communities_join_with_a_wrong_code_is_not_found(server: _Server) -> None:
-    from relaymessenger import RelayAPIError
-
-    server.replies.append((404, {"error": {"status": 404, "code": 2040, "message": "Community was not found."}}))
-    relay = Relay("tok", base_url=server.base_url)
-    with pytest.raises(RelayAPIError) as refused:
-        await relay.communities.join("chess", invite_code="wrong")
-    assert (refused.value.status, refused.value.code) == (404, 2040)
-
-
-def test_a_communitys_membership_has_every_field_the_contract_requires() -> None:
-    from relaymessenger.client import CommunityMembership
-
-    assert "notifications" not in _contract_required("CommunityMembership")
-    assert {"rules", "links"} <= set(_contract_required("CommunityMembership"))
-    assert sorted(CommunityMembership.__required_keys__) == sorted(_contract_required("CommunityMembership"))
-
-
-def _contract_required(schema: str) -> List[str]:
-    """The ``required`` list of one ``components.schemas`` entry in the carried
-    contract (contracts/relay-v1-openapi.yaml), read from its YAML text."""
-    lines = (Path(__file__).resolve().parents[3] / "contracts" / "relay-v1-openapi.yaml").read_text().splitlines()
-    start = lines.index(f"    {schema}:")
-    required = lines.index("      required:", start)
-    names: List[str] = []
-    for line in lines[required + 1 :]:
-        if not line.startswith("        - "):
-            break
-        names.append(line.removeprefix("        - ").strip())
-    return names
-
-
-def test_a_public_communitys_about_box_has_every_field_the_contract_requires() -> None:
-    # Relay-Server 0ccaba4b (PR 394): rules, links and created_at. contributor_count
-    # counted posts and comments, and left with the community feed.
-    from relaymessenger.client import CommunityLink, CommunityRule, PublicCommunity
-
-    assert sorted(PublicCommunity.__required_keys__) == sorted(_contract_required("PublicCommunity"))
-    assert sorted(CommunityRule.__required_keys__) == sorted(_contract_required("CommunityRule"))
-    assert sorted(CommunityLink.__required_keys__) == sorted(_contract_required("CommunityLink"))
 
 
 async def test_tasks_list_sends_only_the_filters_given(server: _Server) -> None:

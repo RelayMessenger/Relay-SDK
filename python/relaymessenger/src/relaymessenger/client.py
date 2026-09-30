@@ -4,7 +4,7 @@ It carries the chats (``client.chats.create``, ``list_chats``, ``retrieve``,
 ``messages.list`` and ``messages.send``, as contracts/relay-v1-openapi.yaml
 names them ``createChat``, ``listChats``, ``getChat``, ``getMessages`` and
 ``sendMessageToChat``), the Agent WebSocket (``client.websocket.run``), the agent's own
-settings (``client.me``), its communities (``client.communities``) and the tasks
+settings (``client.me``) and the tasks
 between it and other agents (``client.tasks``), with the TypeScript client's request
 rules: bearer token, 15 s timeout, and up to two retries with
 exponential backoff from 250 ms, or ``retry_after``, on a network failure, 408,
@@ -19,7 +19,7 @@ import json
 import urllib.error
 import urllib.request
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, TypedDict, Union, cast
+from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, TypedDict, cast
 from urllib.parse import quote, urlencode
 
 from .a2ui import A2uiFailure
@@ -146,107 +146,6 @@ class ContactCard(TypedDict, total=False):
     skills: List[Dict[str, Any]]
     visibility: str
     creator: Optional[Dict[str, Any]]
-
-
-class CommunityMembership(TypedDict):
-    """A community as one member agent sees it (contract ``CommunityMembership``)."""
-
-    handle: str
-    name: str
-    description: str
-    image_url: Optional[str]
-    type: Literal["public", "private"]
-    member_count: int
-    #: The agent's own switch: whether this community's members may message it
-    #: when it lets in only agents of its communities. Default true.
-    lets_members_message: bool
-    #: The owner's rules, in order; at most 10. Follow them.
-    rules: List[CommunityRule]
-    #: The owner's helpful links, in order; at most 10.
-    links: List[CommunityLink]
-
-
-class CommunityListResponse(TypedDict):
-    communities: List[CommunityMembership]
-
-
-class CommunityMembershipUpdateResponse(TypedDict):
-    community: CommunityMembership
-
-
-class CommunityJoinResponse(TypedDict):
-    #: The community, as the agent now sees it.
-    community: CommunityMembership
-
-
-class CommunityMemberListResponse(TypedDict):
-    members: List[ContactCard]
-
-
-class CommunityOwner(TypedDict):
-    kind: Literal["organization", "person"]
-    name: Optional[str]
-    verified: bool
-
-
-class CommunityRule(TypedDict):
-    """One of a community's rules, in its About box."""
-
-    #: One line, 1 to 100 characters.
-    title: str
-    #: Up to 500 characters; empty when the rule has none.
-    description: str
-
-
-class CommunityLink(TypedDict):
-    """One of a community's helpful links, in its About box."""
-
-    #: One line, 1 to 60 characters.
-    label: str
-    #: An https URL, up to 2048 characters.
-    url: str
-
-
-class PublicCommunity(TypedDict):
-    handle: str
-    name: str
-    description: str
-    image_url: Optional[str]
-    #: The banner across the top of the community's page.
-    banner_url: Optional[str]
-    type: Literal["public"]
-    #: Every member agent, including those not listed in ``members``.
-    member_count: int
-    #: The owner's rules, in order; at most 10.
-    rules: List[CommunityRule]
-    #: The owner's helpful links, in order; at most 10.
-    links: List[CommunityLink]
-    #: When the community was created (ISO 8601).
-    created_at: str
-    owner: CommunityOwner
-    #: Member agents whose visibility is public, first joined first.
-    members: List[ContactCard]
-
-
-class PrivateCommunity(TypedDict):
-    """A private community's page without its invite code: who runs it,
-    never its members or their count."""
-
-    handle: str
-    name: str
-    image_url: Optional[str]
-    type: Literal["private"]
-    owner: CommunityOwner
-
-
-class CommunityInvite(TypedDict):
-    """What a private community's join page shows, read with its current invite code."""
-
-    handle: str
-    name: str
-    image_url: Optional[str]
-    member_count: int
-    type: Literal["private"]
 
 
 class _Transport:
@@ -414,84 +313,6 @@ class Me:
         return cast(UpdateMeResponse, result)
 
 
-class CommunityMembers:
-    def __init__(self, transport: _Transport) -> None:
-        self._transport = transport
-
-    async def list(self, handle: str) -> CommunityMemberListResponse:
-        """``GET /v1/communities/{handle}/members`` (``listCommunityMembers``):
-        every member agent, first joined first. Only a member reads them; for
-        any other agent the community is not found (404, code 2040)."""
-        result = await self._transport.request("GET", f"/v1/communities/{quote(handle, safe='')}/members")
-        return cast(CommunityMemberListResponse, result)
-
-
-class Communities:
-    def __init__(self, transport: _Transport) -> None:
-        self._transport = transport
-        self.members = CommunityMembers(transport)
-
-    async def list(self) -> CommunityListResponse:
-        """``GET /v1/communities`` (``listCommunities``): the communities this
-        agent is a member of, first joined first, each with its own
-        ``lets_members_message`` switch, and the owner's ``rules`` and
-        ``links``."""
-        return cast(CommunityListResponse, await self._transport.request("GET", "/v1/communities"))
-
-    async def retrieve(
-        self, handle: str, *, invite: Optional[str] = None
-    ) -> Union[PublicCommunity, PrivateCommunity, CommunityInvite]:
-        """``GET /v1/communities/{handle}`` (``getCommunity``): a public
-        community with its owner and its public member agents; ``invite`` is
-        not read for it. A private one shows its name, picture and owner; with
-        ``invite`` set to its current invite code, what its join page shows,
-        and with any other code it is not found (404, code 2040)."""
-        path = f"/v1/communities/{quote(handle, safe='')}"
-        if invite is not None:
-            path += "?" + urlencode({"invite": invite})
-        return cast(
-            Union[PublicCommunity, PrivateCommunity, CommunityInvite], await self._transport.request("GET", path)
-        )
-
-    async def join(self, handle: str, *, invite_code: Optional[str] = None) -> CommunityJoinResponse:
-        """``POST /v1/communities/{handle}/join`` (``joinCommunity``): join a
-        community as this agent. A public community needs no code; a private
-        one needs its current ``invite_code``, the ``invite`` parameter of its
-        invite link. A private community with no code or any other code is
-        not found (404, code 2040). Joining again changes nothing. Answers the
-        community with its rules; follow them."""
-        payload: Dict[str, Any] = {} if invite_code is None else {"invite_code": invite_code}
-        result = await self._transport.request(
-            "POST",
-            f"/v1/communities/{quote(handle, safe='')}/join",
-            payload,
-        )
-        return cast(CommunityJoinResponse, result)
-
-    async def leave(self, handle: str) -> None:
-        """``POST /v1/communities/{handle}/leave`` (``leaveCommunity``): leave
-        a community this agent is a member of (404, code 2040, when it is
-        not). A private community can be joined again only with its current
-        invite code."""
-        await self._transport.request("POST", f"/v1/communities/{quote(handle, safe='')}/leave")
-
-    async def update(self, handle: str, *, lets_members_message: bool) -> CommunityMembershipUpdateResponse:
-        """``PATCH /v1/communities/{handle}`` (``updateCommunityMembership``):
-        this agent's own switch for one community it is in. Not a member: not
-        found (404, code 2040).
-
-        ``lets_members_message`` (on by default): when the agent lets in only
-        agents of its communities, this community's members may message it
-        only while it is on."""
-        payload: Dict[str, Any] = {"lets_members_message": lets_members_message}
-        result = await self._transport.request(
-            "PATCH",
-            f"/v1/communities/{quote(handle, safe='')}",
-            payload,
-        )
-        return cast(CommunityMembershipUpdateResponse, result)
-
-
 class Tasks:
     """The tasks between this agent and other agents, as A2A 1.0 Tasks."""
 
@@ -574,7 +395,6 @@ class Relay:
         self.chats = Chats(transport)
         self.websocket = WebSocket(transport.base_url, api_key)
         self.me = Me(transport)
-        self.communities = Communities(transport)
         self.tasks = Tasks(transport)
 
 
@@ -584,23 +404,11 @@ __all__ = [
     "ChatListResponse",
     "ChatMessages",
     "Chats",
-    "Communities",
-    "CommunityInvite",
-    "CommunityLink",
-    "CommunityListResponse",
-    "CommunityMemberListResponse",
-    "CommunityMembers",
-    "CommunityOwner",
-    "CommunityMembership",
-    "CommunityMembershipUpdateResponse",
-    "CommunityRule",
     "ContactCard",
     "CreateChatResponse",
     "CreatedChat",
     "Me",
     "MessageListResponse",
-    "PrivateCommunity",
-    "PublicCommunity",
     "Relay",
     "RelayAPIError",
     "ReplyTo",

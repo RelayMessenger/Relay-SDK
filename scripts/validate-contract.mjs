@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "dd2822898440a69bdf2690ae1e7c7382d1c3624f", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "add9a0857f971e2d35f82711206b4b108ed30912", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -102,12 +102,6 @@ const allowedOperationSignatures = [
   "GET /v1/access",
   "PUT /v1/access/{handle}",
   "DELETE /v1/access/{handle}",
-  "GET /v1/communities",
-  "GET /v1/communities/{handle}",
-  "PATCH /v1/communities/{handle}",
-  "POST /v1/communities/{handle}/join",
-  "POST /v1/communities/{handle}/leave",
-  "GET /v1/communities/{handle}/members",
   "GET /v1/webhook-events",
   "POST /v1/webhook-subscriptions",
   "GET /v1/webhook-subscriptions",
@@ -132,13 +126,13 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 63);
-assert.equal(manifest.path_count, 43);
-assert.equal(manifest.source_path_count, 48);
-assert.equal(manifest.source_schema_count, 221);
+assert.equal(manifest.operation_count, 57);
+assert.equal(manifest.path_count, 38);
+assert.equal(manifest.source_path_count, 43);
+assert.equal(manifest.source_schema_count, 213);
 assert.equal(manifest.callback_count, 28);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 43);
-assert.equal(operationJSON.length, 63);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 38);
+assert.equal(operationJSON.length, 57);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
@@ -241,7 +235,6 @@ assert.deepEqual(Object.keys(client).sort(), [
   "blockedHandles",
   "calls",
   "chats",
-  "communities",
   "contactCard",
   "contacts",
   "me",
@@ -257,8 +250,6 @@ assert.equal("createAgent" in Relay, false);
 assert.deepEqual(publicMethods(client.access), ["list", "remove", "set"]);
 assert.deepEqual(publicMethods(client.agents), ["delete"]);
 assert.deepEqual(publicMethods(client.me), ["retrieve", "update"]);
-assert.deepEqual(publicMethods(client.communities), ["join", "leave", "list", "retrieve", "update"]);
-assert.deepEqual(publicMethods(client.communities.members), ["list"]);
 assert.deepEqual(publicMethods(client.tasks), [
   "addArtifact", "cancel", "get", "list", "reply", "send", "updateStatus",
 ]);
@@ -442,41 +433,11 @@ const validateOpenAPI = () => {
   assert.deepEqual(meBody.required, ["accepts_tasks"]);
   assert.deepEqual(Object.keys(meBody.properties), ["accepts_tasks"]);
   assert.match(declaredTypes, /accepts_tasks: boolean/u);
-  // Server 5c5ba4df: each member agent's own switch for its community's messages.
-  const membership = document.components.schemas.CommunityMembership;
-  assert.ok(membership.required.includes("lets_members_message"));
-  assert.equal(document.components.schemas.CommunitySummary, undefined);
-  const membershipPatch = document.paths["/v1/communities/{handle}"].patch;
-  assert.equal(membershipPatch.operationId, "updateCommunityMembership");
-  assert.deepEqual(membershipPatch.security, [{ BearerAuth: [] }]);
-  // The community feed is removed (Server 3972ba8a, PR 416): no posts,
-  // comments, votes, post search or notifications bell. lets_members_message
-  // is the one switch left on a membership.
-  assert.equal(membership.properties.notifications, undefined);
-  const membershipBody = membershipPatch.requestBody.content["application/json"].schema;
-  assert.deepEqual(Object.keys(membershipBody.properties), ["lets_members_message"]);
-  assert.deepEqual(membershipBody.required, ["lets_members_message"]);
-  assert.match(declaredTypes, /lets_members_message: boolean/u);
-  const membershipType = declaredTypes.match(/export interface CommunityMembership \{[\s\S]*?\n\}/u)?.[0] ?? "";
-  assert.doesNotMatch(membershipType, /notifications/u, "CommunityMembership must not declare notifications");
-  for (const path of Object.keys(document.paths)) assert.doesNotMatch(path, /^\/v1\/communities\/\{handle\}\/posts/u);
-  for (const name of Object.keys(document.components.schemas)) assert.doesNotMatch(name, /^Community(Post|Comment|Author)/u);
-  assert.doesNotMatch(declaredTypes, /\bCommunity(Post|Comment|Author)\w*|community\.(post|comment)\.created|contributor_count/u);
-  // Server 6645d5f8 (PR 407): an agent joins and leaves a community by
-  // itself, and each membership carries the owner's rules and links.
-  assert.ok(membership.required.includes("rules") && membership.required.includes("links"));
-  assert.match(membershipType, /\n\s+rules: CommunityRule\[\];/u, "CommunityMembership must declare rules");
-  assert.match(membershipType, /\n\s+links: CommunityLink\[\];/u, "CommunityMembership must declare links");
-  const join = document.paths["/v1/communities/{handle}/join"].post;
-  assert.equal(join.operationId, "joinCommunity");
-  assert.deepEqual(join.security, [{ BearerAuth: [] }]);
-  assert.equal(join.requestBody.required, false);
-  assert.deepEqual(Object.keys(join.requestBody.content["application/json"].schema.properties), ["invite_code"]);
-  assert.match(declaredTypes, /export interface CommunityJoinParams \{[\s\S]*?\n\s+invite_code\?: string;\n\}/u);
-  const leave = document.paths["/v1/communities/{handle}/leave"].post;
-  assert.equal(leave.operationId, "leaveCommunity");
-  assert.equal(leave.requestBody, undefined);
-  assert.equal(leave.responses["204"].content, undefined);
+  // Communities are removed (Server add9a085, owner decision 2026-09-30),
+  // after their feed (3972ba8a): no path, schema, event or declared type.
+  for (const path of Object.keys(document.paths)) assert.doesNotMatch(path, /communit/iu);
+  for (const name of Object.keys(document.components.schemas)) assert.doesNotMatch(name, /communit/iu);
+  assert.doesNotMatch(declaredTypes, /\bCommunit|lets_members_message|community\.|contributor_count/u);
   assert.doesNotMatch(declaredTypes, /\bAgentMessageRequestsFrom\b|\bmessage_requests_from\??:/u);
   const deletion = document.paths["/v1/agents/{handle}"].delete;
   assert.equal(deletion.operationId, "deleteAgent");
@@ -491,12 +452,6 @@ const validateOpenAPI = () => {
       // Server; this SDK carries no client for it yet, so it is not held to
       // the agent-token rule that every SDK operation satisfies.
       if (sourceOnly.has(`${method.toUpperCase()} ${path}`)) continue;
-      // A community's page is public (communities.ts isPublicCommunityPath):
-      // the SDK reads it with the agent's token, which the Server ignores.
-      if (method === "get" && path === "/v1/communities/{handle}") {
-        assert.deepEqual(operation.security, [], "a community's page needs no credential");
-        continue;
-      }
       assert.deepEqual(operation.security ?? document.security, [{ BearerAuth: [] }], `${method} ${path} still requires authentication`);
     }
   }

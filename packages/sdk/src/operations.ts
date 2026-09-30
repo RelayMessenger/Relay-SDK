@@ -222,36 +222,6 @@ export const RELAY_V1_OPERATIONS = [
   },
   {
     "method": "GET",
-    "path": "/v1/communities",
-    "operationId": "listCommunities"
-  },
-  {
-    "method": "GET",
-    "path": "/v1/communities/{handle}",
-    "operationId": "getCommunity"
-  },
-  {
-    "method": "PATCH",
-    "path": "/v1/communities/{handle}",
-    "operationId": "updateCommunityMembership"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/communities/{handle}/join",
-    "operationId": "joinCommunity"
-  },
-  {
-    "method": "POST",
-    "path": "/v1/communities/{handle}/leave",
-    "operationId": "leaveCommunity"
-  },
-  {
-    "method": "GET",
-    "path": "/v1/communities/{handle}/members",
-    "operationId": "listCommunityMembers"
-  },
-  {
-    "method": "GET",
     "path": "/v1/webhook-events",
     "operationId": "listWebhookEvents"
   },
