@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "add9a0857f971e2d35f82711206b4b108ed30912", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "5ccd864c3db2c4ac0e156f6cf528e683481a5e20", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -100,6 +100,10 @@ const allowedOperationSignatures = [
   "POST /v1/tasks/{taskId}/reply",
   "POST /v1/tasks/{taskId}/artifacts",
   "GET /v1/access",
+  "GET /v1/oauth2_client",
+  "POST /v1/oauth2_client",
+  "PATCH /v1/oauth2_client",
+  "POST /v1/oauth2_client/reset_secret",
   "PUT /v1/access/{handle}",
   "DELETE /v1/access/{handle}",
   "GET /v1/webhook-events",
@@ -126,13 +130,13 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 57);
-assert.equal(manifest.path_count, 38);
-assert.equal(manifest.source_path_count, 43);
-assert.equal(manifest.source_schema_count, 213);
+assert.equal(manifest.operation_count, 61);
+assert.equal(manifest.path_count, 40);
+assert.equal(manifest.source_path_count, 45);
+assert.equal(manifest.source_schema_count, 216);
 assert.equal(manifest.callback_count, 28);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 38);
-assert.equal(operationJSON.length, 57);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 40);
+assert.equal(operationJSON.length, 61);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 28);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
@@ -239,6 +243,7 @@ assert.deepEqual(Object.keys(client).sort(), [
   "contacts",
   "me",
   "messages",
+  "oauth2Client",
   "paymentRequests",
   "tasks",
   "webhookEvents",

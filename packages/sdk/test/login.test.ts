@@ -14,15 +14,18 @@ describe("client.oauth2Client: the agent's OAuth2 client for Log in with Relay",
   const client = { client_id: CLIENT_ID, redirect_uris: [], scopes: ["openid", "profile"], created_at: "2026-09-30T00:00:00.000Z", updated_at: "2026-09-30T00:00:00.000Z" };
 
   it("reads, updates and resets the secret with the agent's token", async () => {
-    const fetch = vi.fn(async () => Response.json({ client, client_secret: "rel_cs_x" }));
+    const fetch = vi.fn(async (_input: unknown, init?: RequestInit) =>
+      Response.json({ client, client_secret: "rel_cs_x" }, { status: init?.method === "POST" && !String(_input).includes("reset") ? 201 : 200 }));
     const relay = new Relay({ apiKey: "agent-token", baseURL: "https://server.test", fetch });
     expect((await relay.oauth2Client.retrieve()).client_secret).toBe("rel_cs_x");
+    await relay.oauth2Client.create();
     await relay.oauth2Client.update({ redirect_uris: ["https://youlearn.ai/cb"], scopes: ["openid", "profile", "email"] });
     await relay.oauth2Client.resetSecret();
     expect([call(fetch, 0).init.method, call(fetch, 0).url.pathname]).toEqual(["GET", "/v1/oauth2_client"]);
-    expect([call(fetch, 1).init.method, call(fetch, 1).url.pathname]).toEqual(["PATCH", "/v1/oauth2_client"]);
-    expect(JSON.parse(String(call(fetch, 1).init.body))).toEqual({ redirect_uris: ["https://youlearn.ai/cb"], scopes: ["openid", "profile", "email"] });
-    expect([call(fetch, 2).init.method, call(fetch, 2).url.pathname]).toEqual(["POST", "/v1/oauth2_client/reset_secret"]);
+    expect([call(fetch, 1).init.method, call(fetch, 1).url.pathname]).toEqual(["POST", "/v1/oauth2_client"]);
+    expect([call(fetch, 2).init.method, call(fetch, 2).url.pathname]).toEqual(["PATCH", "/v1/oauth2_client"]);
+    expect(JSON.parse(String(call(fetch, 2).init.body))).toEqual({ redirect_uris: ["https://youlearn.ai/cb"], scopes: ["openid", "profile", "email"] });
+    expect([call(fetch, 3).init.method, call(fetch, 3).url.pathname]).toEqual(["POST", "/v1/oauth2_client/reset_secret"]);
     expect(new Headers(call(fetch, 0).init.headers).get("authorization")).toBe("Bearer agent-token");
   });
 });

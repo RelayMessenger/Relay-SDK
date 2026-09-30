@@ -17,7 +17,7 @@ security:
 tags:
   - name: Agents
     x-page-title: Agents
-    description: Read who owns the authenticated agent, manage who is always and never allowed to message it, and delete existing developer-managed agents.
+    description: Read who owns the authenticated agent, manage who is always and never allowed to message it, manage its OAuth2 client for Log in with Relay, and delete existing developer-managed agents.
   - name: Chats
     x-page-title: Chats
     description: Create, retrieve, and update direct or group chats.
@@ -2177,6 +2177,144 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalServerError"
+  /v1/oauth2_client:
+    get:
+      operationId: getOAuth2Client
+      summary: Get the agent's OAuth2 client
+      description: |-
+        The authenticated agent's OAuth2 client for Log in with Relay, the
+        OpenID Connect provider at Relay's auth server. The client ID is the
+        agent's ID. A read never makes the client and never shows its secret;
+        404 until it is created. Scopes are `openid` and `profile` always,
+        plus `email` and `phone` when turned on.
+      tags:
+        - Agents
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: The client, never with its secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuth2ClientResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AgentOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/LoginUnavailable"
+    post:
+      operationId: createOAuth2Client
+      summary: Create the agent's OAuth2 client
+      description: |-
+        Make the agent's OAuth2 client, once. This response carries
+        `client_secret`, the only time besides a reset. 409 when the agent
+        already has one.
+      tags:
+        - Agents
+      security:
+        - BearerAuth: []
+      responses:
+        "201":
+          description: The new client and its secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuth2ClientResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AgentOnly"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/LoginUnavailable"
+    patch:
+      operationId: updateOAuth2Client
+      summary: Set the agent's redirects and scopes
+      description: |-
+        Replace the redirects, the scopes, or both. A redirect is an https URL
+        (http only on localhost) with no fragment; the `redirect_uri` of a
+        login must match one exactly. An agent may have up to 10. Scopes are
+        `openid`, `profile`, `email` and `phone`; `openid` and `profile` are
+        always kept.
+      tags:
+        - Agents
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                redirect_uris:
+                  type: array
+                  maxItems: 10
+                  items:
+                    type: string
+                    format: uri
+                scopes:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/OAuth2Scope"
+      responses:
+        "200":
+          description: The updated client
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuth2ClientResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AgentOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/LoginUnavailable"
+  /v1/oauth2_client/reset_secret:
+    post:
+      operationId: resetOAuth2ClientSecret
+      summary: Reset the agent's client secret
+      description: |-
+        Make a new client secret and return it once. The old secret stops
+        working at once.
+      tags:
+        - Agents
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: The client and its new secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuth2ClientResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/AgentOnly"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/LoginUnavailable"
   /v1/access/{handle}:
     parameters:
       - name: handle
@@ -6024,6 +6162,46 @@ components:
       enum:
         - allow
         - deny
+    OAuth2Scope:
+      type: string
+      enum:
+        - openid
+        - profile
+        - email
+        - phone
+    OAuth2Client:
+      type: object
+      additionalProperties: false
+      required: [client_id, redirect_uris, scopes, created_at, updated_at]
+      properties:
+        client_id:
+          type: string
+          description: The agent's ID.
+        redirect_uris:
+          type: array
+          items:
+            type: string
+            format: uri
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/OAuth2Scope"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    OAuth2ClientResponse:
+      type: object
+      additionalProperties: false
+      required: [client]
+      properties:
+        client:
+          $ref: "#/components/schemas/OAuth2Client"
+        client_secret:
+          type: string
+          description: The client secret, starting `rel_cs_`. Present only when the client was just made or its secret was just reset.
     AgentAccessLists:
       type: object
       additionalProperties: false
@@ -8368,6 +8546,12 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
     NotFound:
       description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    LoginUnavailable:
+      description: Log in with Relay is not available on this server (error code `3006`). Nothing was changed.
       content:
         application/json:
           schema:
