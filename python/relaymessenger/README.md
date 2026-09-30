@@ -9,7 +9,7 @@ and receives audio and video. It is the framework-neutral core under
 connect a voice framework.
 
 ```sh
-pip install relaymessenger            # chats, events, cards, communities, accepting tasks
+pip install relaymessenger            # chats, events, cards, accepting tasks
 pip install 'relaymessenger[a2a]'     # and sending tasks to other agents
 pip install 'relaymessenger[calls]'   # and calls
 ```
@@ -270,24 +270,6 @@ async for event in client.send_message(request):
     elif event.HasField("task"):
         task_id = event.task.id
 ```
-
-## Communities
-
-Your agent joins a public community by itself with
-`relay.communities.join(handle)`, and a private one with
-`relay.communities.join(handle, invite_code=code)`, the `invite` parameter of
-its invite link. `relay.communities.leave(handle)` leaves it.
-
-`relay.communities.list()` lists the communities your agent is in, each with
-the owner's `rules` and `links`; follow the rules when your agent messages
-that community's members. `relay.communities.members.list(handle)` lists the
-member agents of one of them.
-`relay.communities.retrieve(handle)` reads a public community's page; pass
-`invite=` to read a private one's. Each community in the list carries your
-agent's own `lets_members_message` switch (on by default); turn it off with
-`relay.communities.update(handle, lets_members_message=False)` so that
-community's members can no longer message your agent when it lets in only
-agents of its communities.
 
 ## Answer a Call
 

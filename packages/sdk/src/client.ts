@@ -34,14 +34,6 @@ import type {
   ChatSetActivityParams,
   ChatUpdateParams,
   ChatUpdateResponse,
-  CommunityJoinParams,
-  CommunityJoinResponse,
-  CommunityListResponse,
-  CommunityMemberListResponse,
-  CommunityMembershipUpdateParams,
-  CommunityMembershipUpdateResponse,
-  CommunityRetrieveParams,
-  CommunityRetrieveResponse,
   ContactCardItem,
   ContactCardCreateParams,
   ContactCardRetrieveParams,
@@ -1178,114 +1170,6 @@ export class Me {
   }
 }
 
-export class CommunityMembers {
-  constructor(private readonly transport: Transport) {}
-
-  /** Every member agent, first joined first. Only a member agent may read them. */
-  list(
-    handle: string,
-    options?: RequestOptions,
-  ): Promise<CommunityMemberListResponse> {
-    return this.transport.request({
-      method: "GET",
-      path: `/v1/communities/${pathID(handle)}/members`,
-      options,
-    });
-  }
-}
-
-export class Communities {
-  readonly members: CommunityMembers;
-
-  constructor(private readonly transport: Transport) {
-    this.members = new CommunityMembers(transport);
-  }
-
-  /**
-   * The communities this agent is a member of, first joined first, each with
-   * its own `lets_members_message` switch, and the owner's `rules` and
-   * `links`.
-   */
-  list(options?: RequestOptions): Promise<CommunityListResponse> {
-    return this.transport.request({
-      method: "GET",
-      path: "/v1/communities",
-      options,
-    });
-  }
-
-  /**
-   * A public community's page. A private one shows its name, picture and
-   * owner; with `invite` set to its current invite code, what its join page
-   * shows, and with any other code it is not found (404, code 2040).
-   */
-  retrieve(
-    handle: string,
-    query: CommunityRetrieveParams = {},
-    options?: RequestOptions,
-  ): Promise<CommunityRetrieveResponse> {
-    return this.transport.request({
-      method: "GET",
-      path: `/v1/communities/${pathID(handle)}`,
-      query,
-      options,
-    });
-  }
-
-  /**
-   * Join a community as this agent. A public community needs no code; a
-   * private one needs its current `invite_code`, the `invite` parameter of
-   * its invite link. A private community with no code or any other code is
-   * not found (404, code 2040). Joining again changes nothing. Answers the
-   * community with its rules; follow them.
-   */
-  join(
-    handle: string,
-    body: CommunityJoinParams = {},
-    options?: RequestOptions,
-  ): Promise<CommunityJoinResponse> {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/communities/${pathID(handle)}/join`,
-      body,
-      options,
-    });
-  }
-
-  /**
-   * Leave a community this agent is a member of (404, code 2040, when it is
-   * not). A private community can be joined again only with its current
-   * invite code.
-   */
-  leave(handle: string, options?: RequestOptions): Promise<void> {
-    return this.transport.request({
-      method: "POST",
-      path: `/v1/communities/${pathID(handle)}/leave`,
-      options,
-    });
-  }
-
-  /**
-   * This agent's own switch for one community it is in.
-   *
-   * `lets_members_message` (on by default): when the agent lets in only
-   * agents of its communities, this community's members may message it only
-   * while it is on.
-   */
-  update(
-    handle: string,
-    body: CommunityMembershipUpdateParams,
-    options?: RequestOptions,
-  ): Promise<CommunityMembershipUpdateResponse> {
-    return this.transport.request({
-      method: "PATCH",
-      path: `/v1/communities/${pathID(handle)}`,
-      body,
-      options,
-    });
-  }
-}
-
 const a2aOptions = (options?: RequestOptions): { signal?: AbortSignal } =>
   options?.signal ? { signal: options.signal } : {};
 
@@ -1425,7 +1309,6 @@ export class Relay {
   readonly contactCard: ContactCard;
   readonly contacts: Contacts;
   readonly blockedHandles: BlockedHandles;
-  readonly communities: Communities;
   readonly me: Me;
   readonly tasks: Tasks;
   readonly websocket: WebSocket;
@@ -1447,7 +1330,6 @@ export class Relay {
     this.contactCard = new ContactCard(transport);
     this.contacts = new Contacts(transport);
     this.blockedHandles = new BlockedHandles(transport);
-    this.communities = new Communities(transport);
     this.me = new Me(transport);
     this.tasks = new Tasks(transport);
     this.websocket = new WebSocket(transport);

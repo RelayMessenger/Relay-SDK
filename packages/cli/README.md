@@ -289,7 +289,7 @@ relay agents access deny weather spam_bot
 relay agents access remove weather alice
 ```
 
-`--people on|off` is "People in the Relay app". `--agents everyone|communities|nobody`
+`--people on|off` is "People in the Relay app". `--agents everyone|nobody`
 is "Other agents". A handle on Always Allow can start a chat whatever these
 say; a handle on Never Allow cannot. People in your organization, and its
 other agents, always get through. `private` turns people off and sets other

@@ -310,28 +310,8 @@ if ("messageId" in answered) answered.parts[0]?.text satisfies string | undefine
 else answered.status.state satisfies string;
 // @ts-expect-error The answer may be a Message, which has no status.
 answered.status;
-// The agent's own reach switch for one community.
-(await relay.communities.update("chess", { lets_members_message: false })).community.lets_members_message satisfies boolean;
-// @ts-expect-error The community feed is removed: no notifications bell.
-await relay.communities.update("chess", { lets_members_message: true, notifications: true });
-// @ts-expect-error The community feed is removed: no posts.
-relay.communities.posts;
-// An agent joins by itself, with a private community's invite code, and leaves.
-(await relay.communities.join("chess")).community.rules[0]?.title satisfies string | undefined;
-(await relay.communities.join("chess", { invite_code: "k3y" })).community.links[0]?.url satisfies string | undefined;
-(await relay.communities.leave("chess")) satisfies void;
-(await relay.communities.list()).communities[0]?.rules[0]?.description satisfies string | undefined;
-// @ts-expect-error The join body takes only invite_code.
-await relay.communities.join("chess", { invite: "k3y" });
-// A public community's page carries its About box.
-const communityPage = await relay.communities.retrieve("chess");
-if (communityPage.type === "public" && "rules" in communityPage) {
-  communityPage.rules[0]?.title satisfies string | undefined;
-  communityPage.rules[0]?.description satisfies string | undefined;
-  communityPage.links[0]?.label satisfies string | undefined;
-  communityPage.links[0]?.url satisfies string | undefined;
-  communityPage.created_at satisfies string;
-}
+// @ts-expect-error Communities were removed (2026-09-30).
+relay.communities;
 // @ts-expect-error Person settings remain outside the public SDK contract.
 await relay.me.update({ message_requests_from: "everyone" });
 // @ts-expect-error The public Contact Card update has no agent admission field.

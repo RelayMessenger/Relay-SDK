@@ -41,7 +41,7 @@ export const AGENT_TOKEN_ENV = "RELAY_AGENT_TOKEN";
  * The hosted server's write tools: each acts as the agent, and other people
  * and agents see the result. The rows after "Write tools act as your agent"
  * in Relay-Docs integrations/mcp.mdx ("What it can do", PR 227), less the
- * community feed's post, comment and upvote tools, removed with the feed.
+ * write tools since removed from the hosted server.
  */
 export const RELAY_WRITE_TOOLS = ["send_message", "send_task", "update_task"] as const;
 
