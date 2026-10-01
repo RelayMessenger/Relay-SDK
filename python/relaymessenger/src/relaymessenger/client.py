@@ -20,7 +20,6 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, TypedDict, cast
 from urllib.parse import quote, urlencode
 
-from .a2ui import A2uiFailure
 from .errors import RelayAPIError
 from .websocket import WebSocket
 
@@ -46,10 +45,7 @@ class ReplyTo(_ReplyToRequired, total=False):
 
 class SendMessageResponse(TypedDict, total=False):
     chat_id: str
-    #: The sent message; for an A2UI update with no other part, the card's message.
     message: Dict[str, Any]
-    #: The A2UI messages of the send that were not applied; the rest were.
-    a2ui_errors: List[A2uiFailure]
 
 
 #: A person's age range: the bands Apple's Declared Age Range answers for the
@@ -215,9 +211,6 @@ class _CreateChatResponseRequired(TypedDict):
 
 class CreateChatResponse(_CreateChatResponseRequired, total=False):
     """``CreateChatResult``: the chat and its first message."""
-
-    #: The A2UI messages of the first message that were not applied; the rest were.
-    a2ui_errors: List[A2uiFailure]
 
 
 class _ChatListResponseRequired(TypedDict):

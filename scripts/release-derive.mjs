@@ -196,6 +196,42 @@ export function rewriteReleaseWorkspace(root, plan, options = {}) {
 // A Relay pin in a cookbook that names a staging build: an exact
 // `X.Y.Z-staging.N`, or a `^`/`~` range whose lower bound is one.
 const COOKBOOK_PRERELEASE_PIN = /^([\^~]?)(\d+\.\d+\.\d+-staging\.\d+)$/u;
+// A Relay pin in a cookbook that is a `^`/`~` range over a plain release.
+const COOKBOOK_RELEASE_RANGE = /^([\^~])(\d+)\.(\d+)\.(\d+)$/u;
+
+/**
+ * Whether the `^`/`~` range `operator base` admits the plain `version`, by
+ * npm's rules for both (node-semver): `~X.Y.Z` holds X.Y; `^` holds the
+ * leftmost non-zero part.
+ */
+function rangeAdmits(operator, base, version) {
+  const [low, high] = [base, version].map((value) => value.split(".").map(Number));
+  const atLeast = high[0] !== low[0] ? high[0] > low[0]
+    : high[1] !== low[1] ? high[1] > low[1]
+      : high[2] >= low[2];
+  if (!atLeast) return false;
+  const held = operator === "~" ? 2 : low[0] > 0 ? 1 : low[1] > 0 ? 2 : 3;
+  return low.slice(0, held).every((part, index) => part === high[index]);
+}
+
+/**
+ * The Relay `^`/`~` ranges over a plain release in a cookbook manifest that
+ * do not admit the version the release publishes. An unlocked folder installs
+ * npm's latest only when its range admits it (validate-cookbook-standalone).
+ */
+export function cookbookStaleRanges(manifest, plan) {
+  const found = [];
+  for (const field of DEPENDENCY_FIELDS) {
+    for (const [name, range] of Object.entries(manifest[field] ?? {})) {
+      const row = plan.find((entry) => entry.name === name);
+      const match = row && COOKBOOK_RELEASE_RANGE.exec(range);
+      if (match && !rangeAdmits(match[1], match.slice(2).join("."), row.version)) {
+        found.push({ field, name, range, operator: match[1] });
+      }
+    }
+  }
+  return found;
+}
 // What a copied cookbook never carries (validate-cookbook-standalone.mjs).
 const COOKBOOK_SKIP = new Set([".artifacts", ".dev.vars", ".git", ".wrangler", "coverage", "dist", "node_modules"]);
 
@@ -254,9 +290,15 @@ export function rewriteCookbook(directory, plan, { integrityByName = new Map() }
   const manifestPath = join(directory, "package.json");
   const manifest = readJson(manifestPath);
   const pins = cookbookPrereleasePins(manifest, plan);
-  if (pins.length === 0) return [];
+  const staleRanges = cookbookStaleRanges(manifest, plan);
+  if (pins.length === 0 && staleRanges.length === 0) return [];
   const lockPath = join(directory, "package-lock.json");
   const lock = existsSync(lockPath) ? readJson(lockPath) : null;
+  for (const { field, name, range, operator } of staleRanges) {
+    assert.equal(lock?.packages?.[`node_modules/${name}`], undefined,
+      `${directory} locks ${name} under the range ${range}; pin it exactly so the release can rewrite the lock`);
+    manifest[field][name] = `${operator}${plan.find((entry) => entry.name === name).version}`;
+  }
   const replacements = [];
   for (const { field, name, range } of pins) {
     const match = COOKBOOK_PRERELEASE_PIN.exec(range);
@@ -266,7 +308,8 @@ export function rewriteCookbook(directory, plan, { integrityByName = new Map() }
     if (operator) {
       assert.equal(lock?.packages?.[`node_modules/${name}`], undefined,
         `${directory} locks ${name} under the range ${range}; pin it exactly so the release can rewrite the lock`);
-      manifest[field][name] = `${operator}${deriveVersion(staging)}`;
+      const derived = deriveVersion(staging);
+      manifest[field][name] = `${operator}${rangeAdmits(operator, derived, row.version) ? derived : row.version}`;
       continue;
     }
     manifest[field][name] = row.version;
