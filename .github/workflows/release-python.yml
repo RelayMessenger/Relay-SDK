@@ -120,26 +120,3 @@ jobs:
           password: ${{ env.PYPI_API_TOKEN }}
           attestations: false
           print-hash: true
-
-  # TEMPORARY PROBE, removed before review: proves on this PR that the
-  # Infisical step above loads a non-empty token. Prints only the length class.
-  probe-pypi-token:
-    name: Probe the Infisical PyPI token load (temporary)
-    if: github.event_name == 'pull_request'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
-    permissions:
-      id-token: write
-    steps:
-      - uses: Infisical/secrets-action@8a06c1bdcd5b8635d510c52d4b57a92c1ccef785 # v1.0.9
-        name: Load the PyPI API token from Infisical
-        with:
-          method: oidc
-          identity-id: 35c5afed-649f-4b2d-8e73-cf70338b3994
-          project-slug: relay-yscy
-          env-slug: prod
-          secret-path: /ci/pypi
-      - name: Refuse to publish without a token
-        run: |
-          test -n "$PYPI_API_TOKEN"
-          case "$PYPI_API_TOKEN" in (pypi-*) echo "token loaded, PyPI prefix present";; (*) echo "token lacks the pypi- prefix" >&2; exit 1;; esac
