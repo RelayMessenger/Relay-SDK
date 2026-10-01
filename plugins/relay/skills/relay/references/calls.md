@@ -190,7 +190,10 @@ answers the Call by joining its room with the Agent Token.
   for audio. LiveKit Agents for Node has no `session.input.video`, so the
   caller's camera arrives as `@livekit/rtc-node` I420 `VideoFrame`s on
   `call.videoInput`: read `call.videoInput.latestFrame` when a turn completes,
-  or iterate `call.videoInput`. A reader always gets the newest frame.
+  or iterate `call.videoInput`. Nothing is decoded until the first read, so
+  the first `latestFrame` is usually `undefined`; read it once right after
+  connecting to start decoding. A reader always gets the newest frame, and
+  iterating ends when the call's video ends.
 
 ```typescript
 import { llm, voice } from "@livekit/agents";
@@ -198,6 +201,7 @@ import { VideoBufferType, VideoFrame } from "@livekit/rtc-node";
 import { LocalVideoTrack, RelayLiveKitCall, VideoSource } from "@relaymessenger/livekit";
 
 const call = await RelayLiveKitCall.connect({ relay, callId });
+void call.videoInput.latestFrame; // the first read starts decoding the camera
 
 class Assistant extends voice.Agent {
   override async onUserTurnCompleted(_chatCtx: llm.ChatContext, newMessage: llm.ChatMessage) {

@@ -197,31 +197,38 @@ Every send (`messages send --to`, `chats messages send <chat-id>`,
   or a file path;
 - `--parts <json-or-file>` for the whole parts array instead;
 - `--reply-to <message-id>` and `--reply-part-index <n>`;
-- `--idempotency-key <key>` (reuse it on an uncertain retry) and `--silent`.
+- `--idempotency-key <key>`: one key per send, saved before the request and
+  reused only on an uncertain retry of that same send;
+- `--silent` (delivery without a banner or sound), on `messages send` and
+  `chats messages send` only.
+
+The text, labels and names a person sees are what the model writes for this
+conversation; pass them in shell variables, never fixed strings:
 
 ```sh
-relay chats messages send "$CHAT_ID" --text "Still on?" --button Yes --button No \
-  --idempotency-key "$KEY"
-relay messages send --to "$HANDLE" --text "Which size?" --selection ./sizes.json \
-  --reply-to "$MESSAGE_ID" --idempotency-key "$KEY"
-relay chats messages send "$CHAT_ID" --place 37.4422,-122.1615 \
-  --place-name "Philz Coffee" --idempotency-key "$KEY"
+relay chats messages send "$CHAT_ID" --text "$QUESTION" \
+  --button "$BUTTON_1" --button "$BUTTON_2" --idempotency-key "$QUESTION_KEY"
+relay messages send --to "$HANDLE" --text "$REPLY" --selection "$SELECTION_JSON" \
+  --reply-to "$MESSAGE_ID" --idempotency-key "$REPLY_KEY"
+relay chats messages send "$CHAT_ID" --place "$LATITUDE,$LONGITUDE" \
+  --place-name "$PLACE_NAME" --idempotency-key "$PLACE_KEY"
 ```
 
 Other resources:
 
 ```sh
 relay me                                          # GET /v1/me
-relay contacts lookup --handle "$HANDLE"          # or --id <contact-id>, or --task "plan a trip"
+relay contacts lookup --handle "$HANDLE"          # or --id "$CONTACT_ID", or --task "$TASK"
 relay contact-card share "$CHAT_ID" --user-id "$PERSON_ID"   # or --handle <agent>; none = own card
 relay chats location request "$CHAT_ID"
 relay chats location get "$CHAT_ID"
-relay payment-requests create --description "House blend" \
-  --category physical_goods --amount 2400 --currency usd --idempotency-key "$KEY"
+relay payment-requests create --description "$ITEM_DESCRIPTION" \
+  --category physical_goods --amount "$PRICE_MINOR_UNITS" --currency "$CURRENCY" \
+  --idempotency-key "$PAYMENT_KEY"
 relay payment-requests list --status requested
 relay payment-requests get "$PAYMENT_REQUEST_ID"
 relay payment-requests cancel "$PAYMENT_REQUEST_ID"
-relay calls create "$CHAT_ID" --to "$PERSON_HANDLE" --idempotency-key "$KEY"
+relay calls create "$CHAT_ID" --to "$PERSON_HANDLE" --idempotency-key "$CALL_KEY"
 relay calls list "$CHAT_ID"
 relay calls get "$CALL_ID"
 relay calls end "$CALL_ID"

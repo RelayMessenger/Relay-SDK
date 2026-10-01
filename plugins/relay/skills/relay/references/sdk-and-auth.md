@@ -83,7 +83,15 @@ extras add Calls and ID token checks). Every operation an Agent Token may call
 has an async method named as the TypeScript SDK names it, in snake case:
 `relay.chats.startTyping` is `relay.chats.start_typing`, and
 `relay.paymentRequests` is `relay.payment_requests`. Request fields are keyword
-arguments; answers are the API's JSON as typed dicts.
+arguments, except `chats.create(body)` and `chats.messages.send(chat_id, body)`,
+which take the request body as a dict. Answers are the API's JSON as typed
+dicts.
+
+Every person-visible string below (`reply_text`, `question_text`,
+`button_labels`, a place's `name`) is text the model writes for this
+conversation; never send a fixed string. Every send takes its own idempotency
+key, minted once per logical operation and saved before the request, so a
+retry reuses it and a new send never replays an old one.
 
 ```python
 import os
@@ -97,22 +105,33 @@ relay = Relay(
 )
 
 
-async def tour(chat_id: str, message_id: str, png: bytes) -> None:
+async def tour(
+    chat_id: str,
+    message_id: str,
+    recipient_handle: str,
+    reply_text: str,  # the model writes it
+    question_text: str,  # the model writes it
+    button_labels: list[str],  # the model writes them
+    place: dict,  # latitude, longitude and name the model chose
+    png: bytes,
+    keys: dict[str, str],  # one saved idempotency key per operation
+) -> None:
     me = await relay.me.retrieve()
     await relay.messages.create(
-        to=["atlas"], message={"parts": [parts.text_part("Hello from Relay.")]}, idempotency_key="hello-atlas-1",
+        to=[recipient_handle], message={"parts": [parts.text_part(reply_text)]}, idempotency_key=keys["reply"],
     )
     await relay.chats.messages.send(chat_id, {"message": {
-        "parts": [parts.text_part("Still on?"), parts.buttons_part([{"label": "Yes"}, {"label": "No"}])],
-        "idempotency_key": "still-on-1",
+        "parts": [parts.text_part(question_text), parts.buttons_part([{"label": label} for label in button_labels])],
+        "idempotency_key": keys["question"],
     }})
     await relay.chats.messages.send(chat_id, {"message": {
-        "parts": [parts.place_part(37.4422, -122.1615, name="Philz Coffee")], "idempotency_key": "place-1",
+        "parts": [parts.place_part(place["latitude"], place["longitude"], name=place["name"])],
+        "idempotency_key": keys["place"],
     }})
     upload = await relay.attachments.create(filename="map.png", content_type="image/png", size_bytes=len(png))
     await relay.attachments.upload(upload, png)
     await relay.chats.messages.send(chat_id, {"message": {
-        "parts": [parts.media_part(attachment_id=upload["attachment_id"])], "idempotency_key": "map-1",
+        "parts": [parts.media_part(attachment_id=upload["attachment_id"])], "idempotency_key": keys["image"],
     }})
     await relay.messages.add_reaction(message_id, operation="add", type="love")
     await relay.messages.retrieve(message_id)
@@ -122,7 +141,7 @@ async def tour(chat_id: str, message_id: str, png: bytes) -> None:
     await relay.chats.mark_as_read(chat_id)
     await relay.chats.location.request(chat_id)
     await relay.chats.location.retrieve(chat_id)
-    await relay.contacts.lookup(handle="atlas")  # or id=..., or task="plan a trip"
+    await relay.contacts.lookup(handle=recipient_handle)  # or id=..., or task=...
     await relay.contact_card.retrieve(handle=me["handle"])
     await relay.blocked_handles.list()
     await relay.payment_requests.list(status="requested")

@@ -119,10 +119,11 @@ member.
   handles may carry `activity_version` and `activity`.
 
 ```typescript
-const started = await relay.chats.setActivity(chatId, { text: "Generating image", emoji: "🖼️" });
+// activityText and activityEmoji describe the task as the model words it.
+const started = await relay.chats.setActivity(chatId, { text: activityText, emoji: activityEmoji });
 const activityId = started.activity!.id;
 const renew = setInterval(() => {
-  void relay.chats.setActivity(chatId, { text: "Generating image", emoji: "🖼️", activity_id: activityId });
+  void relay.chats.setActivity(chatId, { text: activityText, emoji: activityEmoji, activity_id: activityId });
 }, 60_000);
 try {
   await generateImage();
@@ -133,9 +134,10 @@ try {
 ```
 
 ```python
-started = await relay.chats.set_activity(chat_id, text="Generating image", emoji="🖼️")
+# activity_text and activity_emoji describe the task as the model words it.
+started = await relay.chats.set_activity(chat_id, text=activity_text, emoji=activity_emoji)
 activity_id = started["activity"]["id"]
-await relay.chats.set_activity(chat_id, text="Generating image", emoji="🖼️", activity_id=activity_id)
+await relay.chats.set_activity(chat_id, text=activity_text, emoji=activity_emoji, activity_id=activity_id)
 await relay.chats.clear_activity(chat_id, activity_id=activity_id)
 current = await relay.chats.get_activity(chat_id)
 ```
@@ -152,10 +154,10 @@ or skills match, verified first; no match is an empty list). A contact carries
 
 ```typescript
 const contact = await relay.contacts.lookup({ handle: "atlas" });
-const helpers = await relay.contacts.lookup({ task: "plan a trip" });
+const helpers = await relay.contacts.lookup({ task: taskWords }); // the need, in the model's words
 ```
 
 ```python
 contact = await relay.contacts.lookup(handle="atlas")
-helpers = await relay.contacts.lookup(task="plan a trip")
+helpers = await relay.contacts.lookup(task=task_words)  # the need, in the model's words
 ```

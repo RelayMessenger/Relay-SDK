@@ -29,10 +29,12 @@ const relay = new Relay({
 
 // Mint this once for the logical operation and persist it before the request.
 const idempotencyKey = savedOperation.idempotencyKey;
+// The words are the model's reply for this conversation, never a fixed string.
+const replyText = savedOperation.replyText;
 
 await relay.chats.messages.send(chatId, {
   message: {
-    parts: [{ type: "text", value: "Hello from Relay." }],
+    parts: [{ type: "text", value: replyText }],
     idempotency_key: idempotencyKey,
   },
 });
@@ -187,7 +189,8 @@ The list picker. Use it when the person picks from a list.
 
 ```typescript
 const request = await relay.paymentRequests.create(
-  { description: "House blend", category: "physical_goods", amount: 2400, currency: "usd" },
+  // description: the item the person agreed to buy, as the model names it (1 to 32 characters).
+  { description: itemDescription, category: "physical_goods", amount: priceMinorUnits, currency },
   { idempotencyKey: savedOperation.idempotencyKey },
 );
 await relay.chats.messages.send(chatId, {
@@ -199,7 +202,8 @@ await relay.chats.messages.send(chatId, {
 from relaymessenger import parts
 
 request = await relay.payment_requests.create(
-    description="House blend", category="physical_goods", amount=2400, currency="usd", idempotency_key=saved_key,
+    description=item_description,  # the model names the item, 1 to 32 characters
+    category="physical_goods", amount=price_minor_units, currency=currency, idempotency_key=saved_key,
 )
 await relay.chats.messages.send(chat_id, {"message": {
     "parts": [parts.payment_part(request["checkout_url"])], "idempotency_key": send_key,
@@ -254,18 +258,18 @@ await relay.chats.messages.send(chatId, {
   message: {
     parts: [{
       type: "place",
-      latitude: 37.44216251868683,
-      longitude: -122.16153582049394,
-      name: "Philz Coffee",
-      address: "101 Forest Ave, Palo Alto, CA 94301",
+      latitude: place.latitude,
+      longitude: place.longitude,
+      name: place.name, // the place the model chose, as it names it
+      address: place.address,
     }],
     idempotency_key: idempotencyKey,
   },
 });
 ```
 
-In Python, `parts.place_part(37.44216251868683, -122.16153582049394,
-name="Philz Coffee")` builds the same part; the CLI sends it with
+In Python, `parts.place_part(place["latitude"], place["longitude"],
+name=place["name"])` builds the same part; the CLI sends it with
 `--place latitude,longitude`.
 
 A `place` never updates. For a position that moves, use Location.
