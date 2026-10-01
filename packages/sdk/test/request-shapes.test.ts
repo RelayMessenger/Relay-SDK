@@ -35,11 +35,13 @@ const responder = (calls: Captured[]) => async (
       || url.pathname.startsWith("/v1/access/")
       || url.pathname.endsWith("/typing")
       || url.pathname.endsWith("/activity")
+      || url.pathname.endsWith("/rating")
     ))
   );
   if (noContent) return new Response(null, { status: 204 });
   if (method === "POST" && url.pathname === "/v1/agents") return Response.json({}, { status: 201 });
   if (method === "POST" && url.pathname === "/v1/oauth2_client") return Response.json({}, { status: 201 });
+  if (method === "POST" && url.pathname === "/v1/agent_requests") return Response.json({}, { status: 201 });
   if (method === "GET" && url.pathname === "/v1/chats") {
     return Response.json({ chats: [], next_cursor: null });
   }
@@ -222,8 +224,14 @@ describe("Relay v1 request shapes", () => {
       is_active: false,
     });
     await client.webhookSubscriptions.delete("subscription-id");
+    await client.addressBook.countAgents({ phone_hashes: ["a".repeat(64)] });
+    await client.agents.listSuggested({ limit: 5, contacts: "lupe:3,derek:2" });
+    await client.agentRequests.create({ query: "tenant lawyer", what: "Read my lease" });
     await client.contacts.lookup({ handle: "alice" });
     await client.directory.search();
+    await client.ratings.set("agent", { stars: 5, review: "Kind and quick." });
+    await client.ratings.delete("agent");
+    await client.ratings.list("agent");
     await client.contactCard.retrieve({ handle: "echo" });
     await client.contactCard.create({ handle: "echo", first_name: "Echo" });
     await client.contactCard.update({
@@ -376,6 +384,8 @@ describe("Relay v1 request shapes", () => {
 
     expect(Object.keys(client).sort()).toEqual([
       "access",
+      "addressBook",
+      "agentRequests",
       "agents",
       "attachments",
       "baseURL",
@@ -389,6 +399,7 @@ describe("Relay v1 request shapes", () => {
       "messages",
       "oauth2Client",
       "paymentRequests",
+      "ratings",
       "webhookEvents",
       "webhookSubscriptions",
       "webhooks",
@@ -397,7 +408,10 @@ describe("Relay v1 request shapes", () => {
     expect(methods(client.directory)).toEqual(["search"]);
     expect(methods(client.access)).toEqual(["list", "remove", "set"]);
     expect(methods(client.oauth2Client)).toEqual(["create", "resetSecret", "retrieve", "update"]);
-    expect(methods(client.agents)).toEqual(["delete"]);
+    expect(methods(client.agents)).toEqual(["delete", "listSuggested"]);
+    expect(methods(client.ratings)).toEqual(["delete", "list", "set"]);
+    expect(methods(client.addressBook)).toEqual(["countAgents"]);
+    expect(methods(client.agentRequests)).toEqual(["create"]);
     expect(methods(client.me)).toEqual(["retrieve"]);
     // Communities were removed (2026-09-30), then A2A and tasks: the client
     // has no way to reach any of them.

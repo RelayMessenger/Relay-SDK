@@ -38,28 +38,12 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "fe702db3e3948f27c764bc6ad1f7605d54eb2148", "SDK contract provenance must identify the exact canonical Server source");
-// The WebSocket upgrade is documented in OpenAPI but is implemented by
-// runWebSocket rather than as a generated REST resource method.
-// Operations the canonical source declares that this SDK does not yet
-// carry. WebSocket endpoints are transports, not REST resource methods.
-// Rating methods arrive with their own carry.
+assert.equal(manifest.upstream.commit, "5befaf6401cbf90bddca9456dffbf1cf99e0e310", "SDK contract provenance must identify the exact canonical Server source");
+// The WebSocket upgrade and the Call room are documented in OpenAPI but are
+// transports (runWebSocket, calls.room), not generated REST resource methods.
 const sourceOnlyOperations = [
   { method: "GET", path: "/v1/websocket", operationId: "connectAgentWebSocket" },
   { method: "GET", path: "/v1/calls/{callId}/room", operationId: "connectCallRoom" },
-  { method: "PUT", path: "/v1/contacts/{handle}/rating", operationId: "rateAgent" },
-  { method: "DELETE", path: "/v1/contacts/{handle}/rating", operationId: "deleteAgentRating" },
-  { method: "GET", path: "/v1/contacts/{handle}/ratings", operationId: "listAgentRatings" },
-  // Server #467: a person's address-book counts, person token only; an agent
-  // SDK has no caller for it.
-  { method: "POST", path: "/v1/address_book/agent_counts", operationId: "countAgentsInAddressBook" },
-  // Server #470: a person asks for an agent Relay does not have yet; the
-  // bytes arrive with the form carry (Server #465) and its client method
-  // with its own carry.
-  { method: "POST", path: "/v1/agent_requests", operationId: "requestAgent" },
-  // Server #473: suggestions ranked for a person, person token only; an agent
-  // SDK has no caller for it.
-  { method: "GET", path: "/v1/agents/suggested", operationId: "listSuggestedAgents" },
 ];
 const allowedOperationSignatures = [
   "DELETE /v1/agents/{handle}",
@@ -110,8 +94,14 @@ const allowedOperationSignatures = [
   "GET /v1/webhook-subscriptions/{subscriptionId}",
   "PUT /v1/webhook-subscriptions/{subscriptionId}",
   "DELETE /v1/webhook-subscriptions/{subscriptionId}",
+  "POST /v1/address_book/agent_counts",
+  "GET /v1/agents/suggested",
+  "POST /v1/agent_requests",
   "POST /v1/contacts/lookup",
   "GET /v1/directory",
+  "PUT /v1/contacts/{handle}/rating",
+  "DELETE /v1/contacts/{handle}/rating",
+  "GET /v1/contacts/{handle}/ratings",
   "GET /v1/contact_card",
   "POST /v1/contact_card",
   "PATCH /v1/contact_card",
@@ -129,13 +119,13 @@ const forbiddenPathPrefixes = [
 ];
 const operationJSON = RELAY_V1_OPERATIONS.map((operation) => ({ ...operation }));
 assert.deepEqual(operationJSON, manifest.operations);
-assert.equal(manifest.operation_count, 57);
-assert.equal(manifest.path_count, 37);
+assert.equal(manifest.operation_count, 63);
+assert.equal(manifest.path_count, 42);
 assert.equal(manifest.source_path_count, 44);
 assert.equal(manifest.source_schema_count, 224);
 assert.equal(manifest.callback_count, 24);
-assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 37);
-assert.equal(operationJSON.length, 57);
+assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 42);
+assert.equal(operationJSON.length, 63);
 assert.equal(RELAY_WEBHOOK_EVENT_TYPES.length, 24);
 assert.equal(
   operationJSON.every((operation) => operation.path.startsWith("/v1/")),
@@ -190,8 +180,13 @@ for (const forbidden of [
 }
 assert.deepEqual(
   operationJSON.filter((operation) => /^\/v1\/contacts(?:\/|$)/u.test(operation.path)),
-  [{ method: "POST", path: "/v1/contacts/lookup", operationId: "lookupContact" }],
-  "Only the approved lookup operation may expose the Contacts route",
+  [
+    { method: "POST", path: "/v1/contacts/lookup", operationId: "lookupContact" },
+    { method: "PUT", path: "/v1/contacts/{handle}/rating", operationId: "rateAgent" },
+    { method: "DELETE", path: "/v1/contacts/{handle}/rating", operationId: "deleteAgentRating" },
+    { method: "GET", path: "/v1/contacts/{handle}/ratings", operationId: "listAgentRatings" },
+  ],
+  "Only lookup and ratings may expose the Contacts route",
 );
 assert.ok(operationJSON.some((operation) =>
   operation.path === "/v1/chats/{chatId}/share_contact_card"));
@@ -232,6 +227,8 @@ const publicMethods = (value) =>
     .sort();
 assert.deepEqual(Object.keys(client).sort(), [
   "access",
+  "addressBook",
+  "agentRequests",
   "agents",
   "attachments",
   "baseURL",
@@ -245,6 +242,7 @@ assert.deepEqual(Object.keys(client).sort(), [
   "messages",
   "oauth2Client",
   "paymentRequests",
+  "ratings",
   "webhookEvents",
   "webhookSubscriptions",
   "webhooks",
@@ -252,7 +250,10 @@ assert.deepEqual(Object.keys(client).sort(), [
 ]);
 assert.equal("createAgent" in Relay, false);
 assert.deepEqual(publicMethods(client.access), ["list", "remove", "set"]);
-assert.deepEqual(publicMethods(client.agents), ["delete"]);
+assert.deepEqual(publicMethods(client.agents), ["delete", "listSuggested"]);
+assert.deepEqual(publicMethods(client.ratings), ["delete", "list", "set"]);
+assert.deepEqual(publicMethods(client.addressBook), ["countAgents"]);
+assert.deepEqual(publicMethods(client.agentRequests), ["create"]);
 assert.deepEqual(publicMethods(client.me), ["retrieve"]);
 assert.equal("tasks" in client, false, "A2A and tasks were removed (Server PR 462).");
 assert.deepEqual(publicMethods(client.calls), [
@@ -503,8 +504,8 @@ const validateOpenAPI = () => {
     for (const [method, operation] of Object.entries(item)) {
       if (!["get", "post", "put", "patch", "delete"].includes(method)) continue;
       if (sourceOnly.has(`${method.toUpperCase()} ${path}`)) continue;
-      if (method === "get" && path === "/v1/directory") {
-        assert.deepEqual(operation.security, [], "the public directory needs no credential");
+      if (method === "get" && (path === "/v1/directory" || path === "/v1/contacts/{handle}/ratings")) {
+        assert.deepEqual(operation.security, [], "the public directory and an agent's ratings need no credential");
         continue;
       }
       assert.deepEqual(operation.security ?? document.security, [{ BearerAuth: [] }], `${method} ${path} still requires authentication`);
