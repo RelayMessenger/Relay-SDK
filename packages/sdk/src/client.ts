@@ -3,6 +3,15 @@ import { ChatsPage, MessagesPage } from "./pagination.js";
 import { CallRoom, type CallRoomOptions } from "./calls/call-room.js";
 import type {
   AcceptedResponse,
+  AddressBookAgentCountParams,
+  AddressBookAgentCountResponse,
+  AgentRatingListResponse,
+  AgentRatingResponse,
+  AgentRatingSetParams,
+  AgentRequest,
+  AgentRequestCreateParams,
+  SuggestedAgentListParams,
+  SuggestedAgentListResponse,
   AgentMe,
   AgentAccessEntry,
   AgentAccessLists,
@@ -991,6 +1000,15 @@ export class WebSocket {
 export class Agents {
   constructor(private readonly transport: Transport) {}
 
+  /**
+   * `GET /v1/agents/suggested`: public agents the person has not added and
+   * does not chat with, best first. Person only: an Agent Token gets 403
+   * (error code 2003).
+   */
+  listSuggested(query: SuggestedAgentListParams = {}, options?: RequestOptions): Promise<SuggestedAgentListResponse> {
+    return this.transport.request({ method: "GET", path: "/v1/agents/suggested", query, options });
+  }
+
   delete(handle: string, options?: RequestOptions): Promise<void> {
     return this.transport.request({
       method: "DELETE",
@@ -1040,6 +1058,67 @@ export class Calls {
 
 }
 
+/**
+ * Star ratings and reviews of agents. One rating per rater per agent; setting
+ * it again replaces the stars and the review.
+ */
+export class Ratings {
+  constructor(private readonly transport: Transport) {}
+
+  /**
+   * `PUT /v1/contacts/{handle}/rating`: rate an agent one to five stars, with
+   * an optional review. Only after a real exchange: one shared chat with at
+   * least ten messages, three of them from the agent (403, error code 1005).
+   */
+  set(handle: string, body: AgentRatingSetParams, options?: RequestOptions): Promise<AgentRatingResponse> {
+    return this.transport.request({ method: "PUT", path: `/v1/contacts/${pathID(handle)}/rating`, body, options });
+  }
+
+  /** `DELETE /v1/contacts/{handle}/rating`: take your rating and review off an agent. */
+  delete(handle: string, options?: RequestOptions): Promise<void> {
+    return this.transport.request({
+      method: "DELETE", path: `/v1/contacts/${pathID(handle)}/rating`, expectedStatus: 204, options,
+    });
+  }
+
+  /**
+   * `GET /v1/contacts/{handle}/ratings`: the average, the count, the five
+   * bars, and the newest twenty reviews that carry words. Public.
+   */
+  list(handle: string, options?: RequestOptions): Promise<AgentRatingListResponse> {
+    return this.transport.request({ method: "GET", path: `/v1/contacts/${pathID(handle)}/ratings`, options });
+  }
+}
+
+/** A person's address book, matched without storing it. */
+export class AddressBook {
+  constructor(private readonly transport: Transport) {}
+
+  /**
+   * `POST /v1/address_book/agent_counts`: per public agent, how many of these
+   * numbers belong to Relay people who chat with it, never below two.
+   * Send each E.164 number as its lowercase hex SHA-256. Person only: an
+   * Agent Token gets 403 (error code 2003); 20 calls in 24 hours.
+   */
+  countAgents(body: AddressBookAgentCountParams, options?: RequestOptions): Promise<AddressBookAgentCountResponse> {
+    return this.transport.request({ method: "POST", path: "/v1/address_book/agent_counts", body, options });
+  }
+}
+
+/** Ask Relay for an agent it does not have yet. */
+export class AgentRequests {
+  constructor(private readonly transport: Transport) {}
+
+  /**
+   * `POST /v1/agent_requests`: what the person searched for and what the
+   * agent should help with. Only Relay reads it. Person only: an Agent Token
+   * gets 403 (error code 2003); 20 requests in 24 hours.
+   */
+  create(body: AgentRequestCreateParams, options?: RequestOptions): Promise<AgentRequest> {
+    return this.transport.request({ method: "POST", path: "/v1/agent_requests", body, expectedStatus: 201, options });
+  }
+}
+
 /** The authenticated agent's own settings. */
 export class Me {
   constructor(private readonly transport: Transport) {}
@@ -1062,6 +1141,8 @@ export class Me {
 
 export class Relay {
   readonly access: Access;
+  readonly addressBook: AddressBook;
+  readonly agentRequests: AgentRequests;
   readonly agents: Agents;
   readonly baseURL: string;
   readonly chats: Chats;
@@ -1077,6 +1158,7 @@ export class Relay {
   readonly blockedHandles: BlockedHandles;
   readonly me: Me;
   readonly oauth2Client: OAuth2Client;
+  readonly ratings: Ratings;
   readonly websocket: WebSocket;
   readonly webhooks: Webhooks;
 
@@ -1085,6 +1167,9 @@ export class Relay {
     const transport = new Transport(options);
     this.baseURL = transport.baseURL;
     this.access = new Access(transport);
+    this.addressBook = new AddressBook(transport);
+    this.agentRequests = new AgentRequests(transport);
+    this.ratings = new Ratings(transport);
     this.oauth2Client = new OAuth2Client(transport);
     this.agents = new Agents(transport);
     this.chats = new Chats(transport);

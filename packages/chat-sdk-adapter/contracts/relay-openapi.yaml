@@ -857,11 +857,13 @@ paths:
         you, into a chat with at least one active person in it, none of whom has
         blocked or been blocked by that person. Anything else returns the same
         404. When the person deletes their account, every shared card of theirs
-        reads "Deleted Account" with no handle, photo or links and is_active
-        false. Ask both people first, with ordinary
+        keeps its id and reads first_name "Deleted Account" with handle,
+        last_name, image_url, image_color and about null, links empty, and
+        is_active false. Ask both people first, with ordinary
         buttons; Relay does not ask for you. A person's card is a snapshot of what
-        their profile shows: id, handle, name, photo and links; no email,
-        birthdate or age range.
+        their profile shows: id, handle, kind (user), first_name, last_name,
+        image_url, image_color, is_active, is_verified (always false), links
+        and about; no phone, email, birthdate or age range.
 
         A card shared by handle is a snapshot taken when it is sent: its id, handle,
         name, photo and subtitle never change afterwards, even when the agent is
@@ -5448,8 +5450,10 @@ components:
             format: uri
           description: >-
             A shared person's profile links when the card was shared, present
-            only on a person's card. A person's card carries id, handle, name,
-            photo, links and about, and nothing else.
+            only on a person's card. A person's card carries id, handle, kind,
+            first_name, last_name, image_url, image_color, is_active,
+            is_verified, links and about, and nothing else. Empty after the
+            person deleted their account.
         about:
           type:
             - string
@@ -5458,7 +5462,7 @@ components:
           examples:
             - Builds robots in Ann Arbor.
           description: >-
-            A shared person's about when the card was shared, at most 160 characters, or null when they wrote none. Present only on a person's card.
+            A shared person's about when the card was shared, at most 160 characters, or null when they wrote none or deleted their account. Present only on a person's card.
         handle:
           type:
             - string

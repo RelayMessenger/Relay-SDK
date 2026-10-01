@@ -1476,6 +1476,110 @@ export interface AgentRatingAverage {
   count: number;
 }
 
+/** `PUT /v1/contacts/{handle}/rating`: one to five stars and an optional review. */
+export interface AgentRatingSetParams {
+  stars: 1 | 2 | 3 | 4 | 5;
+  /** At most 1,000 characters, trimmed; empty, null or absent is a rating with no review. */
+  review?: string | null;
+}
+
+/** The caller's own rating of an agent, as Relay stores it. */
+export interface AgentRating {
+  stars: number;
+  review: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentRatingResponse {
+  rating: AgentRating;
+}
+
+/** The average and count, with how many one- to five-star ratings, in that order. */
+export interface AgentRatingSummary extends AgentRatingAverage {
+  histogram: [number, number, number, number, number];
+}
+
+/** One review with words, and who wrote it. */
+export interface AgentReview {
+  rater: {
+    handle: string;
+    display_name: string;
+    kind: "user" | "agent";
+    image_url: string | null;
+    image_color: string | null;
+    verified: boolean;
+  };
+  stars: number;
+  review: string;
+  updated_at: string;
+}
+
+/** `GET /v1/contacts/{handle}/ratings`: the summary and the newest twenty reviews with words. */
+export interface AgentRatingListResponse {
+  summary: AgentRatingSummary;
+  reviews: AgentReview[];
+}
+
+/** `GET /v1/agents/suggested`. Person only. */
+export interface SuggestedAgentListParams {
+  /** 1 to 50; the server's default is 7. */
+  limit?: number;
+  /**
+   * The counts `addressBook.countAgents` answered, as `handle:count` pairs
+   * separated by commas (`lupe:3,derek:2`), at most 50. Nothing is stored.
+   */
+  contacts?: string;
+}
+
+export interface SuggestedAgent {
+  handle: string;
+  name: string;
+  subtitle: string | null;
+  image_url: string | null;
+  image_color: string | null;
+  verified: boolean;
+  /** How many of your contacts use it, from `contacts`; 0 below 2. */
+  contacts: number;
+  /** What ranked it most. */
+  reason: "contacts" | "similar_to" | "popular";
+}
+
+export interface SuggestedAgentListResponse {
+  agents: SuggestedAgent[];
+}
+
+/** `POST /v1/address_book/agent_counts`. Person only. */
+export interface AddressBookAgentCountParams {
+  /** Lowercase hex SHA-256 of each E.164 number in the address book, at most 5,000. */
+  phone_hashes: string[];
+}
+
+export interface AddressBookAgentCount {
+  handle: string;
+  /** How many of your contacts have an active chat with this agent; never below 2. */
+  contacts: number;
+}
+
+export interface AddressBookAgentCountResponse {
+  agents: AddressBookAgentCount[];
+}
+
+/** `POST /v1/agent_requests`. Person only. */
+export interface AgentRequestCreateParams {
+  /** What you searched for, 1 to 100 characters. */
+  query: string;
+  /** What the agent should help you with, 1 to 1,000 characters. */
+  what: string;
+}
+
+export interface AgentRequest {
+  id: UUID;
+  query: string;
+  what: string;
+  created_at: string;
+}
+
 export interface DirectoryAgent {
   handle: string;
   name: string;

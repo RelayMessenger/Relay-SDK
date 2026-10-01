@@ -1,6 +1,6 @@
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
-import Relay, { verifyRelayIdToken } from "../src/index.js";
+import Relay, { RELAY_USER_ID_CLAIM, verifyRelayIdToken, type RelayIdTokenClaims } from "../src/index.js";
 
 const ISSUER = "https://auth.staging.relayapp.im/api/auth";
 const CLIENT_ID = "019f8e21-6c4a-7b1e-9d52-3f0a8c7e41b9";
@@ -56,6 +56,16 @@ describe("verifyRelayIdToken", () => {
     const { fetch, sign } = await setup(`${ISSUER}/ok`);
     const claims = await verifyRelayIdToken(await sign({ nonce: "n1" }), { clientId: CLIENT_ID, issuer: `${ISSUER}/ok`, nonce: "n1", fetch });
     expect(claims).toMatchObject({ sub: "user-1", aud: CLIENT_ID, preferred_username: "ada", name: "Ada" });
+  });
+
+  it("types the person's Relay id under its namespaced claim", async () => {
+    const { fetch, sign } = await setup(`${ISSUER}/user-id`);
+    const claims: RelayIdTokenClaims = await verifyRelayIdToken(
+      await sign({ "https://relayapp.im/user_id": "0b4a6f3e-1c2d-4e5f-8a9b-7c6d5e4f3a2b" }),
+      { clientId: CLIENT_ID, issuer: `${ISSUER}/user-id`, fetch });
+    expect(RELAY_USER_ID_CLAIM).toBe("https://relayapp.im/user_id");
+    const relayUserId: string | undefined = claims[RELAY_USER_ID_CLAIM];
+    expect(relayUserId).toBe("0b4a6f3e-1c2d-4e5f-8a9b-7c6d5e4f3a2b");
   });
 
   it("refuses another client's token, an expired one, another issuer's, a wrong nonce, and a foreign key", async () => {
