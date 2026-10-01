@@ -124,6 +124,45 @@ jobs:
       - run: node --test scripts/validate-cookbook-standalone.test.mjs
       - run: node scripts/validate-cookbook-standalone.mjs
 
+  # The Python cookbook folders (the Pipecat voice agents) must work when a
+  # developer copies one out of GitHub: each is copied outside the checkout,
+  # installed from its own uv.lock, every script is imported, and its tests
+  # run offline: each folder's conftest.py fails every connection off this
+  # machine, so a test never reaches xAI, ElevenLabs or LiveKit Cloud even if
+  # a key is set. The tests build each bot's services and Pipecat pipeline
+  # with placeholder keys (nothing connects), check the greeting reaches the
+  # model, and check the ElevenLabs Agents bridge against a fake socket. They
+  # do not place a call; the live call is proven by hand on staging.
+  cookbook-python:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: 0.12.8
+          enable-cache: false
+      - name: Copy, install, and import each Python cookbook
+        run: |
+          set -euo pipefail
+          for project in cookbook/*/pyproject.toml; do
+            source="$(dirname "$project")"
+            copy="$(mktemp -d)"
+            cp -R "$source/." "$copy/"
+            (
+              cd "$copy"
+              uv sync --locked --python 3.12
+              for script in *.py; do
+                uv run --locked python -c "import ${script%.py}"
+                echo "$source/$script imports"
+              done
+              uv run --locked pytest -q
+            )
+            rm -rf "$copy"
+          done
+
   # The production release proves itself before it can run: the same
   # derivation, packing, and `npm publish --dry-run` that release.yml performs
   # on a push to main, here on every change. GitHub only dispatches a
