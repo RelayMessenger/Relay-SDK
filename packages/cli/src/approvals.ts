@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   RICH_CARD_DESCRIPTION_MAX_LENGTH,
   RICH_CARD_MAX_SUGGESTIONS,
@@ -169,11 +170,26 @@ export const cardDescription = (request: ApprovalRequest): string | undefined =>
 };
 
 /**
- * The id a choice's reply carries: the harness's own id, unless it is longer
- * than the contract allows, when its place in the list stands in for it.
+ * The prefix of every reply id on an approval card. Relay stores a reply
+ * suggestion's `id` as sent and returns it in the person's
+ * `suggestion_response` (or `selection_response`), so a tap on any approval
+ * card, even one a bridge process no longer holds (sent before a restart),
+ * is known by its id alone and never becomes a person's turn.
  */
-const replyId = (choice: ApprovalChoice, index: number, max: number): string =>
-  choice.id.length <= max ? choice.id : `choice_${index}`;
+export const APPROVAL_REPLY_PREFIX = "relay-approval:";
+
+/** Whether a reply id is one an approval card gave out. */
+export const isApprovalReplyId = (id: string): boolean => id.startsWith(APPROVAL_REPLY_PREFIX);
+
+/**
+ * The id a choice's reply carries: the prefix and the harness's own id, or,
+ * when that is longer than the contract allows, the prefix and the SHA-256 of
+ * the harness's id, which no two different ids share.
+ */
+const replyId = (choice: ApprovalChoice, max: number): string => {
+  const plain = `${APPROVAL_REPLY_PREFIX}${choice.id}`;
+  return plain.length <= max ? plain : `${APPROVAL_REPLY_PREFIX}sha256:${createHash("sha256").update(choice.id).digest("hex")}`;
+};
 
 /** Whether the choices fit on one card's suggestions. */
 const onCard = (request: ApprovalRequest): boolean => request.choices.length <= CARD_LIMITS.suggestions;
@@ -184,6 +200,13 @@ const onCard = (request: ApprovalRequest): boolean => request.choices.length <= 
  * to 25 options.
  */
 export const approvalPart = (request: ApprovalRequest): MessagePart => {
+  if (request.choices.length > CARD_LIMITS.selectionOptions) {
+    throw new Error(`${request.harness} offered ${request.choices.length} choices; a Relay approval list holds at most ${CARD_LIMITS.selectionOptions}, so it was not sent.`);
+  }
+  const ids = request.choices.map((choice) => replyId(choice, onCard(request) ? CARD_LIMITS.replyId : CARD_LIMITS.selectionId));
+  if (new Set(ids).size !== ids.length) {
+    throw new Error(`${request.harness} offered two choices with the same id; the owner's answer could not say which, so it was not sent.`);
+  }
   const description = cardDescription(request);
   if (onCard(request)) {
     return {
@@ -193,7 +216,7 @@ export const approvalPart = (request: ApprovalRequest): MessagePart => {
       suggestions: request.choices.map((choice, index) => ({
         type: "reply" as const,
         label: clip(oneLine(choice.label) || choice.id, CARD_LIMITS.label),
-        id: replyId(choice, index, CARD_LIMITS.replyId),
+        id: ids[index]!,
       })),
     };
   }
@@ -202,8 +225,8 @@ export const approvalPart = (request: ApprovalRequest): MessagePart => {
     title: clip(cardTitle(request), CARD_LIMITS.selectionTitle),
     ...(description !== undefined ? { subtitle: clip(description, CARD_LIMITS.selectionSubtitle) } : {}),
     multiple: false,
-    options: request.choices.slice(0, CARD_LIMITS.selectionOptions).map((choice, index) => ({
-      id: replyId(choice, index, CARD_LIMITS.selectionId),
+    options: request.choices.map((choice, index) => ({
+      id: ids[index]!,
       label: clip(oneLine(choice.label) || choice.id, CARD_LIMITS.selectionLabel),
     })),
   };
@@ -212,7 +235,7 @@ export const approvalPart = (request: ApprovalRequest): MessagePart => {
 /** The choice a reply id names, as `approvalPart` gave it out. */
 export const choiceFor = (request: ApprovalRequest, id: string): ApprovalChoice | undefined => {
   const max = onCard(request) ? CARD_LIMITS.replyId : CARD_LIMITS.selectionId;
-  return request.choices.find((choice, index) => replyId(choice, index, max) === id);
+  return request.choices.find((choice) => replyId(choice, max) === id);
 };
 
 /**
@@ -267,6 +290,14 @@ export class OwnerApprovals {
 
   async ask(request: ApprovalRequest): Promise<ApprovalOutcome> {
     if (request.signal?.aborted) return { reason: "aborted" };
+    // A prompt no card can carry fails loudly to the harness, before anything is sent.
+    let part: MessagePart;
+    try {
+      part = approvalPart(request);
+    } catch (error) {
+      this.#say(error instanceof Error ? error.message : String(error));
+      throw error;
+    }
     // Read fresh each time, so an owner who links a phone while the bridge
     // runs is asked from the next prompt on.
     let me: Awaited<ReturnType<ApprovalClient["me"]["retrieve"]>>;
@@ -284,7 +315,6 @@ export class OwnerApprovals {
     let settle!: (outcome: ApprovalOutcome) => void;
     const done = new Promise<ApprovalOutcome>((resolve) => { settle = resolve; });
     const pending: Pending = { request, owners: new Set(owners.map((owner) => owner.handle)), cards: [], settle };
-    const part = approvalPart(request);
     for (const owner of owners) {
       try {
         // The chat between the agent and this owner: Relay reuses the direct
@@ -339,7 +369,10 @@ export class OwnerApprovals {
     if (!answer || event.event_type !== "message.received") return false;
     if (this.#settled.has(answer.messageId)) return true;
     const pending = this.#pending.get(answer.messageId);
-    if (!pending) return false;
+    // An answer to an approval card this process does not hold (sent before a
+    // restart, or by another bridge of the same agent) is dropped quietly: the
+    // harness that asked is gone, and the tap is not a message to answer.
+    if (!pending) return isApprovalReplyId(answer.id);
     const sender = event.data.sender_handle;
     // Anyone but an owner is not registered, and the card stays open.
     if (sender.kind !== "user" || !pending.owners.has(sender.handle)) return true;

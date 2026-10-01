@@ -1,7 +1,9 @@
 import type { RelayWebhookEvent } from "@relaymessenger/sdk";
 import { describe, expect, it } from "vitest";
 import { acpPermission } from "./acp-bridge.js";
+import { createHash } from "node:crypto";
 import {
+  APPROVAL_REPLY_PREFIX,
   OwnerApprovals,
   approvalPart,
   cardDescription,
@@ -60,7 +62,10 @@ const REQUEST: ApprovalRequest = {
  * plain text, then `suggestion_response` with the reply's id, replying to the
  * card part (Relay-Server contracts/developer/openapi.yaml, `SuggestionResponsePart`).
  */
-const tap = (card: string, from: { handle: string; kind: "user" | "agent" }, id = "proceed_once", label = "Allow once"): RelayWebhookEvent => ({
+/** The reply id an approval card gives a choice: the documented prefix, then the harness's id. */
+const R = (id: string): string => `${APPROVAL_REPLY_PREFIX}${id}`;
+
+const tap = (card: string, from: { handle: string; kind: "user" | "agent" }, id = "proceed_once", label = "Allow once", replyIdOf = R): RelayWebhookEvent => ({
   event_id: `tap-${Math.random()}`,
   event_type: "message.received",
   data: {
@@ -68,7 +73,7 @@ const tap = (card: string, from: { handle: string; kind: "user" | "agent" }, id 
     chat: { id: `chat-with-${from.handle}` },
     direction: "inbound",
     sender_handle: { handle: from.handle, kind: from.kind },
-    parts: [{ type: "text", value: label }, { type: "suggestion_response", id, label }],
+    parts: [{ type: "text", value: label }, { type: "suggestion_response", id: replyIdOf(id), label }],
     reply_to: { message_id: card, part_index: 0 },
   },
 } as unknown as RelayWebhookEvent);
@@ -82,7 +87,7 @@ const pick = (card: string, from: string, id: string): RelayWebhookEvent => ({
     chat: { id: `chat-with-${from}` },
     direction: "inbound",
     sender_handle: { handle: from, kind: "user" },
-    parts: [{ type: "text", value: `• ${id}` }, { type: "selection_response", selected_values: [id], selected_ids: [id] }],
+    parts: [{ type: "text", value: `• ${id}` }, { type: "selection_response", selected_values: [R(id)], selected_ids: [R(id)] }],
     reply_to: { message_id: card, part_index: 0 },
   },
 } as unknown as RelayWebhookEvent);
@@ -108,9 +113,9 @@ describe("owner approvals", () => {
       title: "Gemini CLI asks to run a command.",
       description: "uname -a",
       suggestions: [
-        { type: "reply", label: "Allow once", id: "proceed_once" },
-        { type: "reply", label: "Allow for this session", id: "proceed_always" },
-        { type: "reply", label: "Reject", id: "cancel" },
+        { type: "reply", label: "Allow once", id: "relay-approval:proceed_once" },
+        { type: "reply", label: "Allow for this session", id: "relay-approval:proceed_always" },
+        { type: "reply", label: "Reject", id: "relay-approval:cancel" },
       ],
     }]);
     await asked;
@@ -181,10 +186,33 @@ describe("owner approvals", () => {
     const approvals = new OwnerApprovals({ client: relay.client, say: () => undefined });
     const asked = approvals.ask({ ...REQUEST, timeoutMs: 30 });
     await flush();
-    expect(await approvals.take(tap("ride-1042", { handle: "ada", kind: "user" }))).toBe(false);
+    expect(await approvals.take(tap("ride-1042", { handle: "ada", kind: "user" }, "seat_12a", "12A", (id) => id))).toBe(false);
     expect(await approvals.take({ event_type: "message.received", event_id: "m", data: { parts: [{ type: "text", value: "Allow once" }] } } as unknown as RelayWebhookEvent)).toBe(false);
     expect(await approvals.take({ event_type: "message.received", event_id: "r", data: { parts: [{ type: "text", value: "hi" }], reply_to: { message_id: "card-for-ada", part_index: 0 } } } as unknown as RelayWebhookEvent)).toBe(false);
     expect(await asked).toEqual({ reason: "timeout" });
+  });
+
+  it("after a restart, drops a tap on an approval card it no longer holds instead of starting a turn", async () => {
+    // A fresh process: nothing pending, nothing settled. The card was sent by the process before it.
+    const approvals = new OwnerApprovals({ client: fakeRelay().client, say: () => undefined });
+    expect(await approvals.take(tap("card-sent-before-restart", { handle: "ada", kind: "user" }, "proceed_once"))).toBe(true);
+    expect(await approvals.take(pick("card-sent-before-restart", "ada", "green"))).toBe(true);
+    // Another card's reply, with no approval prefix, is still the bridge's to answer.
+    expect(await approvals.take(tap("card-sent-before-restart", { handle: "ada", kind: "user" }, "seat_12a", "12A", (id) => id))).toBe(false);
+  });
+
+  it("refuses loudly, sending nothing, a prompt with more choices than a list holds", async () => {
+    const relay = fakeRelay();
+    const said: string[] = [];
+    const approvals = new OwnerApprovals({ client: relay.client, say: (line) => said.push(line) });
+    const choices = Array.from({ length: 26 }, (_, index) => ({ id: `option_${index}`, label: `Option ${index}`, decision: "choice" as const }));
+    await expect(approvals.ask({ ...REQUEST, harness: "Pi", choices })).rejects.toThrow("Pi offered 26 choices; a Relay approval list holds at most 25, so it was not sent.");
+    expect(relay.created).toEqual([]);
+    expect(said).toEqual(["Pi offered 26 choices; a Relay approval list holds at most 25, so it was not sent."]);
+    // 25 is still asked.
+    const asked = approvals.ask({ ...REQUEST, harness: "Pi", choices: choices.slice(0, 25), timeoutMs: 10 });
+    await expect(asked).resolves.toEqual({ reason: "timeout" });
+    expect(relay.created).toHaveLength(2);
   });
 
   it("stops waiting when the harness cancels the prompt", async () => {
@@ -204,7 +232,7 @@ describe("owner approvals", () => {
     const request: ApprovalRequest = { ...REQUEST, harness: "Pi", title: "Pick a colour", summary: "", detail: "", choices: options.map((id) => ({ id, label: id, decision: "choice" })) };
     const asked = approvals.ask(request);
     await flush();
-    expect(relay.created[0]?.parts).toEqual([{ type: "selection", title: "Pick a colour", multiple: false, options: options.map((id) => ({ id, label: id })) }]);
+    expect(relay.created[0]?.parts).toEqual([{ type: "selection", title: "Pick a colour", multiple: false, options: options.map((id) => ({ id: R(id), label: id })) }]);
     expect(await approvals.take(pick("card-for-ada", "ada", "green"))).toBe(true);
     expect(await asked).toEqual({ reason: "answered", by: "ada", choice: request.choices[3] });
   });
@@ -215,7 +243,7 @@ const CLAUDE = { harness: "Claude Code", choices: REQUEST.choices };
 const claude = (tool: string, input: Record<string, unknown>): ApprovalRequest => ({ ...CLAUDE, tool, ...inputCard(input) });
 
 describe("the card stays inside the contract's limits", () => {
-  it("cuts a long title, description and reply label, and stands an index in for an over-long id", () => {
+  it("cuts a long title, description and reply label, and stands a hash of an over-long id in for it", () => {
     const request: ApprovalRequest = {
       ...REQUEST,
       title: "t".repeat(300),
@@ -226,7 +254,28 @@ describe("the card stays inside the contract's limits", () => {
     expect(part.title).toHaveLength(200);
     expect(part.description).toHaveLength(2_000);
     expect(part.description.endsWith("…")).toBe(true);
-    expect(part.suggestions).toEqual([{ type: "reply", label: "Allow this one time only…", id: "choice_0" }]);
+    const hash = createHash("sha256").update("x".repeat(300)).digest("hex");
+    expect(part.suggestions).toEqual([{ type: "reply", label: "Allow this one time only…", id: `relay-approval:sha256:${hash}` }]);
+    expect(part.suggestions[0]!.id.length).toBeLessThanOrEqual(256);
+  });
+
+  it("gives over-long ids distinct reply ids that no real id shares, and maps each back to its own choice", async () => {
+    const choices = [
+      { id: `${"x".repeat(299)}a`, label: "First", decision: "choice" as const },
+      { id: `${"x".repeat(299)}b`, label: "Second", decision: "choice" as const },
+      { id: "choice_0", label: "Third", decision: "choice" as const },
+      { id: "choice_1", label: "Fourth", decision: "choice" as const },
+    ];
+    const part = approvalPart({ ...REQUEST, choices }) as { suggestions: { id: string }[] };
+    const ids = part.suggestions.map((suggestion) => suggestion.id);
+    expect(new Set(ids).size).toBe(4);
+    for (const [index, choice] of choices.entries()) {
+      const approvals = new OwnerApprovals({ client: fakeRelay().client, say: () => undefined });
+      const asked = approvals.ask({ ...REQUEST, choices });
+      await flush();
+      await approvals.take(tap("card-for-ada", { handle: "ada", kind: "user" }, ids[index]!, choice.label, (id) => id));
+      expect((await asked).choice).toBe(choice);
+    }
   });
 
   it("leaves the description out when there is nothing to say", () => {

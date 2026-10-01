@@ -27,11 +27,12 @@ export const releasePackages = {
     workspace: "@relaymessenger/sdk",
     validate: "validate:sdk",
     tagPrefix: "sdk-v",
-    // Owner decision 2026-09-30: removing A2A and tasks (#415) and communities
-    // (#411), and the new required types, break existing code, so the next
-    // release is the 0.x minor 0.4.0, not a patch (scripts/staging-bump.mjs,
-    // `minimumBase`). Inert once the tree reaches 0.4.0.
-    minimumBase: "0.4.0",
+    // Removing the A2UI helpers and types (#430) breaks code written against
+    // the published 0.4.0, so the next release is the 0.x minor 0.5.0, not a
+    // patch (semver 2.0.0 item 4; scripts/staging-bump.mjs, `minimumBase`).
+    // Earlier floor: 0.4.0, owner decision 2026-09-30 (A2A, tasks and
+    // communities removed, #415 and #411). Inert once the tree reaches 0.5.0.
+    minimumBase: "0.5.0",
     smoke: {
       imports: [
         {
