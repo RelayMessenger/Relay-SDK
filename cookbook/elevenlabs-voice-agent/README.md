@@ -21,11 +21,10 @@ Call the agent from Relay on your phone.
 | Speech to text | `ElevenLabsRealtimeSTTService` (Scribe) |
 | LLM | `GrokLLMService`, model `grok-4.20-non-reasoning` (`XAI_MODEL`) |
 | Voice | `ElevenLabsTTSService`, model `eleven_flash_v2_5` |
-| Voice ID | `cgSgspJ2msm6clMCkdW9` (`ELEVENLABS_VOICE_ID`) |
+| Voice ID | `SOYHLrjzK2X1ezoPC6cr` (`ELEVENLABS_VOICE_ID`) |
 | Voice settings | stability 0.3, similarity boost 0.75, style 0, speaker boost on, speed 1.2 |
 
-The default voice is Diego's: "Jessica - Playful, Bright, Warm", the highest
-and fastest of ElevenLabs' premade voices, which every ElevenLabs plan can use
-through the API. A voice from the Voice Library or Voice Design needs a paid
+The default voice is Diego's: "Harry", the highest-pitched male premade voice,
+which every ElevenLabs plan can use through the API. A voice from the Voice Library or Voice Design needs a paid
 ElevenLabs plan. `AGENT_PERSONA` replaces the system prompt; `RELAY_BASE_URL`
 selects another Relay API origin, such as `https://api.staging.relayapp.im`.

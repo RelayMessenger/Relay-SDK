@@ -35,10 +35,10 @@ from pipecat.workers.runner import WorkerRunner
 from relaymessenger_pipecat import RelayParams, RelayTransport
 
 BASE_URL = os.environ.get("RELAY_BASE_URL", "https://api.relayapp.im")
-# Diego's voice: "Jessica - Playful, Bright, Warm", the highest and fastest of ElevenLabs'
-# premade voices (median pitch 239 Hz at speed 1.2), which every plan can use through the API.
+# Diego's voice: "Harry", the highest-pitched male premade voice, which every ElevenLabs
+# plan can use through the API.
 # Set ELEVENLABS_VOICE_ID to use another voice.
-VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "cgSgspJ2msm6clMCkdW9")
+VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "SOYHLrjzK2X1ezoPC6cr")
 GROK_MODEL = os.environ.get("XAI_MODEL", "grok-4.20-non-reasoning")
 PERSONA = os.environ.get(
     "AGENT_PERSONA",

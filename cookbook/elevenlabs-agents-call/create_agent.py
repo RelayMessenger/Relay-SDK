@@ -30,8 +30,8 @@ async def main() -> None:
             "tts": {
                 "agent_output_audio_format": "pcm_16000",
                 "model_id": "eleven_flash_v2",
-                # "Jessica - Playful, Bright, Warm", the highest and fastest premade voice.
-                "voice_id": os.environ.get("ELEVENLABS_VOICE_ID", "cgSgspJ2msm6clMCkdW9"),
+                # "Harry", the highest-pitched male premade voice.
+                "voice_id": os.environ.get("ELEVENLABS_VOICE_ID", "SOYHLrjzK2X1ezoPC6cr"),
                 "stability": 0.3,
                 "similarity_boost": 0.75,
                 "speed": 1.2,
