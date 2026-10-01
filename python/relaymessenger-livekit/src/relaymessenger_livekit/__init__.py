@@ -21,6 +21,7 @@ from .agents import (
     RelayLiveKitCall,
     RelayVideoInput,
 )
+from .rive import RelayRive
 from .transport import (
     RelayAudioFrame,
     RelayCallDiagnostics,
@@ -41,6 +42,7 @@ from .video import (
 )
 
 __all__ = [
+    "RelayRive",
     "CallRoom",
     "CallRoomCloseEvent",
     "CallRoomError",

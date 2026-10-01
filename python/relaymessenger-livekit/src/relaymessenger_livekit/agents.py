@@ -169,6 +169,9 @@ class RelayAudioOutput(AudioOutput):
         self._interrupted_event = asyncio.Event()
         self._interrupted_ms = 0.0
         self._closed = False
+        #: Where the open segment's first sample sits on the agent's audio track
+        #: (`RelayCallTransport.audio_time_ms`), for timing Rive messages; None between segments.
+        self.segment_start_ms: Optional[float] = None
 
     async def capture_frame(self, frame: rtc.AudioFrame) -> None:
         if self._closed:
@@ -179,6 +182,10 @@ class RelayAudioOutput(AudioOutput):
             await self._flush_task
         if not self._first_frame_emitted:
             self._first_frame_emitted = True
+            try:
+                self.segment_start_ms = self._transport.audio_time_ms()
+            except Exception:
+                self.segment_start_ms = None
             self.on_playback_started(created_at=time.time())
         self._pushed_duration += frame.duration
         # Returns once the slices are queued; the pacer paces the wire.
