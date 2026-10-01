@@ -539,23 +539,6 @@ const tap: import("@relaymessenger/sdk").MessageContent = {
 };
 void [removedButtonId, removedButtonImage, buttonsResponse, tap];
 
-// Relay's Browser card: every property the contract's A2uiBrowserComponent
-// defines, no more (packages/sdk/test/a2ui.test.ts checks the contract's list).
-const everyBrowserProperty: Required<import("@relaymessenger/sdk").A2uiBrowserComponent> = {
-  id: "root", component: "Browser", status: "Working · united.com", state: "needs_you",
-  watchUrl: "https://live.example.test/watch", controlUrl: { path: "/browser/control" }, imageUrl: "https://live.example.test/still.png",
-  accessibility: { label: "Browser" }, weight: 1,
-};
-const titledBrowser: import("@relaymessenger/sdk").A2uiBrowserComponent = {
-  id: "root", component: "Browser", status: "Working", state: "working", watchUrl: "https://live.example.test/watch",
-  // @ts-expect-error The card's title is always "Browser"; it has no title property.
-  title: "My browser",
-};
-const browserTap: import("@relaymessenger/sdk").A2uiBrowserActionName = "browser.takeControl";
-// @ts-expect-error A Browser card sends only its three taps.
-const notABrowserTap: import("@relaymessenger/sdk").A2uiBrowserActionName = "browser.pause";
-void [everyBrowserProperty, titledBrowser, browserTap, notABrowserTap];
-
 const sharedCard: import("@relaymessenger/sdk").ContactCardItem = {
   handle: "travel_bot", first_name: "Travel", last_name: null, image_url: null,
   kind: "agent", is_active: true, id: "contact-id", subtitle: null,

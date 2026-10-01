@@ -1,12 +1,14 @@
-import { randomUUID } from "node:crypto";
 import {
-  A2UI_VERSION,
-  RELAY_A2UI_CATALOG_ID,
-  a2uiPart,
-  readA2uiAction,
-  updateA2uiSurface,
-  type A2uiComponent,
-  type A2uiServerToClientMessage,
+  RICH_CARD_DESCRIPTION_MAX_LENGTH,
+  RICH_CARD_MAX_SUGGESTIONS,
+  RICH_CARD_TITLE_MAX_LENGTH,
+  SELECTION_MAX_OPTIONS,
+  SELECTION_TITLE_MAX_LENGTH,
+  SUGGESTION_ID_MAX_LENGTH,
+  SUGGESTION_LABEL_MAX_LENGTH,
+  selectionReply,
+  suggestionReply,
+  type MessagePart,
   type OwnerPerson,
   type Relay,
   type RelayWebhookEvent,
@@ -35,8 +37,12 @@ import type { PiApprovals } from "@relaymessenger/pi";
  * names the owners itself: `GET /v1/me` returns `owner_people` for the calling
  * Agent Token (Relay-Server server/src/me.ts, `app.get("/me")`).
  *
- * A tap from anyone else is not registered: nothing is sent into the chat,
- * and the card stays open for an owner to answer.
+ * The card is a `rich_card` whose reply suggestions are the harness's
+ * choices; a tap comes back as the owner's own message, a `suggestion_response`
+ * carrying the choice's id and replying to the card. A Pi select with more
+ * choices than a card holds is a single-choice `selection` instead, answered
+ * by a `selection_response`. A tap from anyone else is not registered, and
+ * the card stays open for an owner to answer.
  */
 
 /**
@@ -60,20 +66,21 @@ export interface ApprovalRequest {
   harness: string;
   /** The tool it wants to use, e.g. "Bash". */
   tool: string;
-  /** The card's first line, one sentence; `<harness> asks to use <tool>.` when absent. */
+  /** The card's title, one sentence; `<harness> asks to use <tool>.` when absent. */
   title?: string;
-  /** The command or file, drawn as code in one line. */
+  /** The command or file the harness wants to use. */
   summary: string;
   /**
    * A plain line under the command: Bash's own description of it, which
    * Claude Code's terminal prompt shows under the command too.
    */
   note?: string;
-  /** The full input as a person reads it, shown under "See more". */
+  /** The full input as a person reads it. */
   detail: string;
   /**
-   * Whether `detail` holds anything the card does not show: an input field
-   * beyond the summarized value and the note. See `seeMore`.
+   * Whether `detail` holds anything `summary` and `note` do not: an input
+   * field beyond the summarized value and the note. The card then shows
+   * `detail` in place of them.
    */
   extra: boolean;
   /** The harness's own choices, allow first. */
@@ -103,16 +110,11 @@ export interface ApprovalOutcome {
  */
 export const APPROVAL_TIMEOUT_MS = 600_000;
 
-/** The Button event every answer on the card carries. */
-export const ANSWER_EVENT = "approval_answer";
-/** The Modal trigger's event: it opens "See more" on the phone and asks nothing. */
-export const SEE_MORE_EVENT = "approval_see_more";
-
 /** The one line the terminal shows when nobody can be asked. */
 export const noOwnerLine = (request: Pick<ApprovalRequest, "harness" | "tool">): string =>
   `${request.harness} was not allowed to use ${request.tool}: nobody who owns this agent has a Relay app account to approve it. Link a phone from Settings in the Relay console, or with \`relay phone link\`.`;
 
-/** What the card says once a prompt has ended. */
+/** What the reply to the card says once a prompt has ended. */
 export const outcomeLine = (outcome: ApprovalOutcome): string => {
   const who = outcome.by ? `@${outcome.by}` : "Someone";
   switch (outcome.choice?.decision) {
@@ -126,105 +128,109 @@ export const outcomeLine = (outcome: ApprovalOutcome): string => {
   return "Not approved.";
 };
 
-const MAX_SUMMARY = 300;
-const MAX_DETAIL = 4_000;
+/**
+ * The contract's limits (Relay-Server contracts/developer/openapi.yaml), the
+ * card's from the SDK; a `SelectionPart` subtitle is 512 characters and an
+ * id-bearing `SelectionOption` has a 24-character label and a 200-character id.
+ */
+export const CARD_LIMITS = {
+  title: RICH_CARD_TITLE_MAX_LENGTH,
+  description: RICH_CARD_DESCRIPTION_MAX_LENGTH,
+  suggestions: RICH_CARD_MAX_SUGGESTIONS,
+  label: SUGGESTION_LABEL_MAX_LENGTH,
+  replyId: SUGGESTION_ID_MAX_LENGTH,
+  selectionTitle: SELECTION_TITLE_MAX_LENGTH,
+  selectionSubtitle: 512,
+  selectionOptions: SELECTION_MAX_OPTIONS,
+  selectionLabel: 24,
+  selectionId: 200,
+} as const;
 
 const clip = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
-/**
- * A command or path as a Markdown code span, which A2UI's Text renders
- * ("simple Markdown formatting is supported", basic catalog `Text.text`), so
- * a `*` or `_` in a command is shown, not read as emphasis. The fence is one
- * backtick longer than the longest run inside (CommonMark, "Code spans").
- */
-export const codeSpan = (text: string): string => {
-  const longest = Math.max(0, ...[...text.matchAll(/`+/gu)].map((run) => run[0].length));
-  const fence = "`".repeat(longest + 1);
-  const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
-  return `${fence}${pad}${text}${pad}${fence}`;
-};
-
-/**
- * Plain text as Markdown that shows every character: each inline marker is
- * backslash-escaped (CommonMark, "Backslash escapes"), so a `*` or `_` in a
- * diff or a description is not read as emphasis. The Relay app parses Text as
- * inline Markdown with whitespace kept (Relay-iOS RelayA2UICatalog.swift,
- * `interpretedSyntax: .inlineOnlyPreservingWhitespace`), where an escaped
- * `**bold**` stays as typed.
- */
-export const literal = (text: string): string => text.replace(/[\\`*_[\]<>~&]/gu, "\\$&");
-
 const oneLine = (text: string): string => text.replace(/\s+/gu, " ").trim();
 
-/** A line as the card draws it: whitespace collapsed to one line, then clipped. */
-const cardLine = (text: string): string => clip(oneLine(text), MAX_SUMMARY);
-
-/** Whether the card had to cut a line: a newline or run of spaces collapsed, or the end clipped. */
-const cut = (text: string): boolean => cardLine(text) !== text.trim();
+/** The card's title: the harness's sentence, or `<harness> asks to use <tool>.` */
+export const cardTitle = (request: ApprovalRequest): string =>
+  oneLine(request.title ?? "") || `${request.harness} asks to use ${request.tool}.`;
 
 /**
- * Whether the card offers "See more": only when the sheet shows something the
- * card does not, because the card cut the command or its note, or because the
- * input holds more than them (approved option B of the internet-of-agents
- * mock mocks/approval-see-more.html, 2026-09-26).
+ * The card's description, plain text as the app draws it (Relay-iOS
+ * RelayRichCardRow.swift, `Text(description)`): the command and its note, or,
+ * when the input holds more than them, the whole input as a person reads it.
+ * Cut at the contract's 2,000 characters with a closing "…".
  */
-export const seeMore = (request: Pick<ApprovalRequest, "summary" | "note" | "extra">): boolean =>
-  request.extra || cut(request.summary) || (request.note !== undefined && cut(request.note));
-
-/** The card's first lines: the sentence, the command or file, and its note. */
-const head = (request: ApprovalRequest): string[] => [
-  "title",
-  ...(oneLine(request.summary) ? ["summary"] : []),
-  ...(request.note !== undefined && oneLine(request.note) ? ["note"] : []),
-];
-
-/** The card's body: its first lines, "See more" when the sheet adds something, then `last`. */
-const bodyChildren = (request: ApprovalRequest, last: string): string[] =>
-  [...head(request), ...(seeMore(request) ? ["more"] : []), last];
-
-/** The card's components, before any answer. */
-export const approvalComponents = (request: ApprovalRequest): A2uiComponent[] => {
-  const buttons = request.choices.map((choice, index) => ({ choice, id: `choice_${index}` }));
-  return [
-    { id: "root", component: "Card", child: "body" },
-    { id: "body", component: "Column", children: bodyChildren(request, "answers") },
-    { id: "title", component: "Text", text: request.title ?? `${request.harness} asks to use ${request.tool}.`, variant: "h4" },
-    ...(oneLine(request.summary) ? [{ id: "summary", component: "Text", text: codeSpan(cardLine(request.summary)) }] : []),
-    ...(request.note !== undefined && oneLine(request.note) ? [{ id: "note", component: "Text", text: literal(cardLine(request.note)) }] : []),
-    ...(seeMore(request) ? [
-      { id: "more", component: "Modal", trigger: "more_button", content: "more_sheet" },
-      { id: "more_button", component: "Button", child: "more_label", variant: "borderless", action: { event: { name: SEE_MORE_EVENT } } },
-      { id: "more_label", component: "Text", text: "See more" },
-      { id: "more_sheet", component: "Column", children: ["more_title", "more_text"] },
-      { id: "more_title", component: "Text", text: request.tool, variant: "h4" },
-      { id: "more_text", component: "Text", text: literal(clip(request.detail, MAX_DETAIL)) },
-    ] : []),
-    { id: "answers", component: "Column", children: buttons.map((button) => button.id) },
-    ...buttons.flatMap(({ choice, id }, index) => [
-      {
-        id,
-        component: "Button",
-        child: `${id}_label`,
-        ...(index === 0 ? { variant: "primary" } : {}),
-        action: { event: { name: ANSWER_EVENT, context: { choice: choice.id } } },
-      },
-      { id: `${id}_label`, component: "Text", text: choice.label },
-    ]),
-  ];
+export const cardDescription = (request: ApprovalRequest): string | undefined => {
+  const text = request.extra
+    ? request.detail.trim()
+    : [request.summary.trim(), request.note?.trim() ?? ""].filter(Boolean).join("\n\n");
+  return text ? clip(text, CARD_LIMITS.description) : undefined;
 };
 
-/** The card after the prompt ended: the buttons give way to what happened. */
-export const settledComponents = (request: ApprovalRequest, outcome: ApprovalOutcome): A2uiComponent[] => [
-  { id: "body", component: "Column", children: bodyChildren(request, "outcome") },
-  { id: "outcome", component: "Text", text: outcomeLine(outcome), variant: "caption" },
-];
+/**
+ * The id a choice's reply carries: the harness's own id, unless it is longer
+ * than the contract allows, when its place in the list stands in for it.
+ */
+const replyId = (choice: ApprovalChoice, index: number, max: number): string =>
+  choice.id.length <= max ? choice.id : `choice_${index}`;
 
-/** The A2UI messages of a new card: `createSurface` then `updateComponents` (Relay-Docs interactions/cards.mdx, "Send a card"). */
-export const approvalMessages = (surfaceId: string, request: ApprovalRequest): A2uiServerToClientMessage[] => [
-  { version: A2UI_VERSION, createSurface: { surfaceId, catalogId: RELAY_A2UI_CATALOG_ID } },
-  { version: A2UI_VERSION, updateComponents: { surfaceId, components: approvalComponents(request) } },
-];
+/** Whether the choices fit on one card's suggestions. */
+const onCard = (request: ApprovalRequest): boolean => request.choices.length <= CARD_LIMITS.suggestions;
+
+/**
+ * The message part that asks: a `rich_card` with one reply suggestion per
+ * choice, or, past the card's 4 suggestions, a single-choice `selection` of up
+ * to 25 options.
+ */
+export const approvalPart = (request: ApprovalRequest): MessagePart => {
+  const description = cardDescription(request);
+  if (onCard(request)) {
+    return {
+      type: "rich_card",
+      title: clip(cardTitle(request), CARD_LIMITS.title),
+      ...(description !== undefined ? { description } : {}),
+      suggestions: request.choices.map((choice, index) => ({
+        type: "reply" as const,
+        label: clip(oneLine(choice.label) || choice.id, CARD_LIMITS.label),
+        id: replyId(choice, index, CARD_LIMITS.replyId),
+      })),
+    };
+  }
+  return {
+    type: "selection",
+    title: clip(cardTitle(request), CARD_LIMITS.selectionTitle),
+    ...(description !== undefined ? { subtitle: clip(description, CARD_LIMITS.selectionSubtitle) } : {}),
+    multiple: false,
+    options: request.choices.slice(0, CARD_LIMITS.selectionOptions).map((choice, index) => ({
+      id: replyId(choice, index, CARD_LIMITS.selectionId),
+      label: clip(oneLine(choice.label) || choice.id, CARD_LIMITS.selectionLabel),
+    })),
+  };
+};
+
+/** The choice a reply id names, as `approvalPart` gave it out. */
+export const choiceFor = (request: ApprovalRequest, id: string): ApprovalChoice | undefined => {
+  const max = onCard(request) ? CARD_LIMITS.replyId : CARD_LIMITS.selectionId;
+  return request.choices.find((choice, index) => replyId(choice, index, max) === id);
+};
+
+/**
+ * A tap on a card, as `message.received` carries it: the card message it
+ * replies to, and the id of the reply the person chose. A card reply is plain
+ * text then `suggestion_response`; a picker answer, plain text then
+ * `selection_response` (Relay-Server contracts/developer/openapi.yaml,
+ * `SuggestionResponsePart` and `SelectionResponsePart`).
+ */
+export const readAnswer = (event: RelayWebhookEvent): { messageId: string; id: string } | undefined => {
+  if (event.event_type !== "message.received") return undefined;
+  const parts = event.data.parts ?? [];
+  const card = suggestionReply(parts, event.data.reply_to);
+  if (card) return { messageId: card.reply_to.message_id, id: card.id };
+  const picked = selectionReply(parts, event.data.reply_to);
+  const id = picked?.selected_ids?.[0] ?? picked?.selected_values[0];
+  return picked && id !== undefined ? { messageId: picked.reply_to.message_id, id } : undefined;
+};
 
 /** The Relay calls this needs: who owns the agent, and the chat with each owner. */
 export type ApprovalClient = Pick<Relay, "chats" | "me">;
@@ -232,26 +238,24 @@ export type ApprovalClient = Pick<Relay, "chats" | "me">;
 interface Pending {
   request: ApprovalRequest;
   owners: Set<string>;
-  /** The chat each owner's card is in. */
-  cards: { chatId: string; owner: string }[];
+  /** Each owner's card: its chat and its message. */
+  cards: { chatId: string; messageId: string; owner: string }[];
   settle(outcome: ApprovalOutcome): void;
 }
 
 export interface OwnerApprovalsOptions {
   client: ApprovalClient;
   say(line: string): void;
-  /** A new surface id; random unless a test pins it. */
-  surfaceId?: () => string;
 }
 
 /**
  * One per bridge process. `ask` sends the card and waits; `take` reads every
- * event first and keeps the taps on its own cards, so they never start a turn.
+ * event first and keeps the answers to its own cards, so they never start a turn.
  */
 export class OwnerApprovals {
   readonly #client: ApprovalClient;
   readonly #say: (line: string) => void;
-  readonly #surfaceId: () => string;
+  /** Open prompts, by the message id of each owner's card. */
   readonly #pending = new Map<string, Pending>();
   /** Cards already settled, so a late tap on one is dropped quietly. */
   readonly #settled = new Set<string>();
@@ -259,7 +263,6 @@ export class OwnerApprovals {
   constructor(options: OwnerApprovalsOptions) {
     this.#client = options.client;
     this.#say = options.say;
-    this.#surfaceId = options.surfaceId ?? (() => `approval-${randomUUID()}`);
   }
 
   async ask(request: ApprovalRequest): Promise<ApprovalOutcome> {
@@ -278,11 +281,10 @@ export class OwnerApprovals {
       this.#say(noOwnerLine(request));
       return { reason: "no_owner" };
     }
-    const surfaceId = this.#surfaceId();
     let settle!: (outcome: ApprovalOutcome) => void;
     const done = new Promise<ApprovalOutcome>((resolve) => { settle = resolve; });
     const pending: Pending = { request, owners: new Set(owners.map((owner) => owner.handle)), cards: [], settle };
-    this.#pending.set(surfaceId, pending);
+    const part = approvalPart(request);
     for (const owner of owners) {
       try {
         // The chat between the agent and this owner: Relay reuses the direct
@@ -290,15 +292,16 @@ export class OwnerApprovals {
         const sent = await this.#client.chats.create({
           from: me.handle,
           to: [owner.handle],
-          message: { parts: [a2uiPart(approvalMessages(surfaceId, request))] },
+          message: { parts: [part] },
         });
-        pending.cards.push({ chatId: sent.chat.id, owner: owner.handle });
+        const card = { chatId: sent.chat.id, messageId: sent.chat.message.id, owner: owner.handle };
+        pending.cards.push(card);
+        this.#pending.set(card.messageId, pending);
       } catch (error) {
         this.#say(`The approval card did not reach @${owner.handle}: ${error instanceof Error ? error.message : String(error)}.`);
       }
     }
     if (!pending.cards.length) {
-      this.#pending.delete(surfaceId);
       this.#say(`${request.harness} was not allowed to use ${request.tool}: no owner could be asked.`);
       return { reason: "unsent" };
     }
@@ -310,34 +313,37 @@ export class OwnerApprovals {
     const outcome = await done;
     clearTimeout(timer);
     request.signal?.removeEventListener("abort", abort);
-    this.#pending.delete(surfaceId);
-    this.#settled.add(surfaceId);
+    for (const card of pending.cards) {
+      this.#pending.delete(card.messageId);
+      this.#settled.add(card.messageId);
+    }
+    // The card cannot change once sent, so what happened is a reply to it in
+    // every owner's chat.
     await Promise.all(pending.cards.map(async (card) => {
       try {
-        await updateA2uiSurface(this.#client, card.chatId, surfaceId, { components: settledComponents(request, outcome) });
-      } catch { /* The harness already has its answer; a stale card is the lesser harm. */ }
+        await this.#client.chats.messages.send(card.chatId, {
+          message: { parts: [{ type: "text", value: outcomeLine(outcome) }], reply_to: { message_id: card.messageId, part_index: 0 } },
+        });
+      } catch { /* The harness already has its answer; an unanswered card is the lesser harm. */ }
     }));
     this.#say(`${request.tool}: ${outcomeLine(outcome)}`);
     return outcome;
   }
 
   /**
-   * Whether this event is a tap on one of this process's approval cards.
+   * Whether this event is an answer to one of this process's approval cards.
    * Such an event is handled here and must not start a turn.
    */
   async take(event: RelayWebhookEvent): Promise<boolean> {
-    if (event.event_type !== "message.received") return false;
-    const tap = readA2uiAction(event);
-    if (!tap) return false;
-    const surfaceId = tap.action.surfaceId;
-    if (this.#settled.has(surfaceId)) return true;
-    const pending = this.#pending.get(surfaceId);
+    const answer = readAnswer(event);
+    if (!answer || event.event_type !== "message.received") return false;
+    if (this.#settled.has(answer.messageId)) return true;
+    const pending = this.#pending.get(answer.messageId);
     if (!pending) return false;
-    if (tap.action.name !== ANSWER_EVENT) return true;
     const sender = event.data.sender_handle;
-    // Anyone but an owner is not registered: no message, and the card stays open.
+    // Anyone but an owner is not registered, and the card stays open.
     if (sender.kind !== "user" || !pending.owners.has(sender.handle)) return true;
-    const choice = pending.request.choices.find((option) => option.id === tap.action.context.choice);
+    const choice = choiceFor(pending.request, answer.id);
     if (!choice) return true;
     pending.settle({ reason: "answered", choice, by: sender.handle });
     return true;
@@ -431,7 +437,7 @@ const isReplacement = (value: unknown): value is Record<string, unknown> & { old
   isRecord(value) && typeof value.old_string === "string" && typeof value.new_string === "string";
 
 /**
- * The whole tool input as a person reads it, for "See more": an Edit is its
+ * The whole tool input as a person reads it, for the card's description: an Edit is its
  * file and a diff (a MultiEdit, a diff per edit), a Write its file and the
  * content, anything else one `name: value` line per field.
  */
