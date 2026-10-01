@@ -22,7 +22,7 @@ export function validateRunnerPolicy(source, text) {
   assert.deepEqual(Object.keys(workflow.on).sort(), ['push', 'workflow_dispatch']);
   assert.deepEqual(workflow.on.push, { branches: ['staging'] });
   assert.ok(workflow.on.workflow_dispatch === null || Object.keys(workflow.on.workflow_dispatch).length === 0);
-  assert.deepEqual(workflow.concurrency, { group: 'agent-cli-native-${{ github.ref }}', 'cancel-in-progress': false });
+  assert.deepEqual(workflow.concurrency, { group: 'agent-cli-native-${{ github.run_id }}', 'cancel-in-progress': false });
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.equal(workflow.env, undefined);
   assert.deepEqual(Object.keys(workflow.jobs), ['native']);

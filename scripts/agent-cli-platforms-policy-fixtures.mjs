@@ -3,6 +3,7 @@ import YAML from 'yaml';
 import { NATIVE_WORKFLOW, validateRunnerPolicy } from './agent-cli-platforms-policy.mjs';
 export const negativePolicyFixtures = [
   ['unapproved feature branch', w => { w.on.push.branches.push('test/unapproved'); }],
+  ['replace a pending push', w => { w.concurrency.group = 'agent-cli-native-${{ github.ref }}'; }],
   ['cancel another run', w => { w.concurrency['cancel-in-progress'] = true; }],
   ['hosted Linux in matrix', w => { w.jobs.native.strategy.matrix.os[0] = 'ubuntu-latest'; }],
   ['extra matrix dimension', w => { w.jobs.native.strategy.matrix.node = [22,24]; }],

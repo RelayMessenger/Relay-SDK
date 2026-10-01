@@ -17,19 +17,13 @@ name: Release the Python packages to PyPI
 # job is unsupported by that guide. PEP 740 attestations need Trusted
 # Publishing, so they are off.
 #
-# Two ways in, and only one of them can publish:
-#   pull_request touching python/ or this file -> test, build, twine check
-#                                                  all three, stop
-#   workflow_dispatch on main, package chosen  -> test, build, check, publish
-#                                                  that one package
+# PRs are tested, built, and twine-checked once by ci.yml's affected Python
+# jobs. This release workflow rechecks the selected package at publication.
+#   workflow_dispatch on main, package chosen -> test, build, check, publish
 # Tags record a release and never start one (scripts/validate-workflows.mjs),
 # so there is no tag trigger.
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/release-python.yml
-      - python/**
   workflow_dispatch:
     inputs:
       package:
@@ -67,7 +61,9 @@ jobs:
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           version: 0.12.8
-          enable-cache: false
+          enable-cache: true
+          cache-dependency-glob: "**/uv.lock"
+          cache-suffix: release-${{ matrix.package }}
       # The same checks as ci.yml's python jobs, on the commit being released.
       - run: uv sync --locked --python 3.12
       - run: uv run --locked mypy

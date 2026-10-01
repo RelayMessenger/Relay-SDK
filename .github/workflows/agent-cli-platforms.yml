@@ -4,7 +4,7 @@ on:
     branches: [staging]
   workflow_dispatch:
 concurrency:
-  group: agent-cli-native-${{ github.ref }}
+  group: agent-cli-native-${{ github.run_id }}
   cancel-in-progress: false
 permissions:
   contents: read
@@ -27,6 +27,7 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version-file: .nvmrc
+          cache: npm
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
       - run: npm ci
       - name: Diagnose native Windows PowerShell ACL support
