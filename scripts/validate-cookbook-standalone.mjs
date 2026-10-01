@@ -147,6 +147,32 @@ export function releaseDeferredPins({ channel, dependencies, tarballs }) {
   return dependencies.filter(({ range }) => STAGING_BUILD.test(range));
 }
 
+/**
+ * On the release channel an unlocked folder installs npm's `latest`, which is
+ * the version this release is about to publish. Before the publish the
+ * registry has no such version: after a minor bump (0.4.x to 0.5.0) the range
+ * the release wrote, `^0.5.0`, resolves to nothing and npm fails ETARGET
+ * (release-dry-run, 2026-10-01). Such a folder installs the release's own
+ * tarball instead, and is held to that tarball's version as `latest`.
+ * `candidates` maps a package name to the `{ version, path }` of its tarball.
+ */
+export function unlockedReleaseCandidates({ channel, locked, dependencies, candidates }) {
+  if (channel !== "release" || locked) return [];
+  return dependencies
+    .filter(({ name }) => candidates.has(name))
+    .map((dependency) => ({ ...dependency, ...candidates.get(dependency.name) }));
+}
+
+/** The package name and version inside each release tarball. */
+function tarballCandidates(tarballs) {
+  const candidates = new Map();
+  for (const path of tarballs) {
+    const manifest = JSON.parse(execFileSync("tar", ["-xzOf", path, "package/package.json"], { encoding: "utf8" }));
+    candidates.set(manifest.name, { version: manifest.version, path });
+  }
+  return candidates;
+}
+
 /** Every `--tarball <path>` argument, resolved. */
 export function tarballArguments(argv) {
   const found = [];
@@ -308,17 +334,27 @@ function standaloneCheck(name, channel, taggedByName, { tarballs = [], cache = n
       for (const { field, name: dependency } of dependencies) manifest[field][dependency] = tag;
       writeFileSync(join(copy, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
     }
+    const unreleased = unlockedReleaseCandidates({
+      channel, locked: hasLock, dependencies, candidates: tarballCandidates(tarballs),
+    });
+    if (unreleased.length > 0) {
+      // Only the copy changes: it installs the bytes this release publishes.
+      for (const { field, name: dependency, path } of unreleased) manifest[field][dependency] = `file:${path}`;
+      writeFileSync(join(copy, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+    }
     run(npm, ["install", "--no-audit", "--no-fund", "--ignore-scripts", ...(cache ? ["--cache", cache, "--prefer-offline"] : [])], copy);
     for (const dependency of dependencies) {
       const installed = readJson(join(copy, "node_modules", ...dependency.name.split("/"), "package.json")).version;
       let tagged;
-      if (!hasLock) {
+      const candidate = unreleased.find(({ name: unreleasedName }) => unreleasedName === dependency.name);
+      if (candidate) tagged = candidate.version;
+      else if (!hasLock) {
         tagged = taggedByName.get(dependency.name) ?? distTag(dependency.name, tag);
         taggedByName.set(dependency.name, tagged);
       }
       const mismatch = installedMismatch({ channel, dependency, installed, locked: hasLock, tagged });
       assert.equal(mismatch, null, `${name} ${mismatch}`);
-      say(`  ${name}: ${dependency.name}@${dependency.range}${channel === "staging" && !hasLock ? ` (as ${tag})` : ""} -> registry ${installed}`);
+      say(`  ${name}: ${dependency.name}@${dependency.range}${channel === "staging" && !hasLock ? ` (as ${tag})` : ""} -> ${candidate ? "release tarball" : "registry"} ${installed}`);
     }
     // --no-install: tsc must come from the folder's own devDependencies.
     run(npx, ["--no-install", "tsc", "--noEmit", "-p", "tsconfig.json"], copy);
