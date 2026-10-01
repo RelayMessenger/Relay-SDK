@@ -1111,13 +1111,6 @@ export interface Message {
   sent_at?: string | null;
   delivered_at?: string | null;
   read_at?: string | null;
-  /** When the Message was last edited, or null if it was never edited. */
-  edited_at?: string | null;
-  /**
-   * When the sender unsent the Message, or null. An unsent Message keeps its
-   * place in the transcript and carries no parts.
-   */
-  unsent_at?: string | null;
   /**
    * Whether the sender sent this Message silently, so the recipient's device
    * showed no banner and played no sound.

@@ -60,6 +60,15 @@ AgeRange = Literal["under_13", "13_15", "16_17", "18_plus"]
 AgentAgeRating = Literal["everyone", "18_plus"]
 
 
+class RiveFile(TypedDict):
+    """Contract ``RiveFile``: the Rive file an agent shows in its calls. A None name means the file's default."""
+
+    file: str
+    artboard: Optional[str]
+    state_machine: Optional[str]
+    view_model: Optional[str]
+
+
 class ChatHandle(TypedDict, total=False):
     """A chat participant (contract ``ChatHandle``). ``owner`` is an agent's
     own field; ``timezone`` a person's."""
@@ -77,6 +86,8 @@ class ChatHandle(TypedDict, total=False):
     subtitle: Optional[str]
     verified: bool
     owner: Optional[Dict[str, Any]]
+    #: An agent's Rive file for calls, or None (Server 488).
+    rive: Optional[RiveFile]
     #: The person's IANA time zone name ("America/Detroit"), as their Relay
     #: app last reported it; None until it reports one. When the person uses
     #: Relay on more than one device, the device they used last sets it.
@@ -129,6 +140,9 @@ class _PartyRequired(TypedDict):
 
 class CallContact(_PartyRequired, total=False):
     """A call's caller or callee (contract ``CallContact``); ``timezone`` only for a person."""
+
+    #: An agent's Rive file for calls, so the app can load it while the call rings; None when it has none.
+    rive: Optional[RiveFile]
 
     #: The person's IANA time zone name ("America/Detroit"), as their Relay
     #: app last reported it; None until it reports one. When the person uses
@@ -921,6 +935,8 @@ class ContactCardItem(TypedDict, total=False):
     is_verified: bool
     links: List[str]
     about: Optional[str]
+    #: An agent's Rive file for calls, or None.
+    rive: Optional[RiveFile]
     kind: Literal["user", "agent"]
 
 
@@ -1272,9 +1288,10 @@ class ContactCards:
     async def update(self, handle: str, **fields: Any) -> SetContactCardResponse:
         """``PATCH /v1/contact_card?handle=`` (``updateContactCard``): send
         any of ``description``, ``subtitle``, ``first_name``, ``last_name``,
-        ``image_url``, ``attachment_id`` and ``image_recipe``; ``None`` clears
-        a nullable field."""
-        allowed = {"description", "subtitle", "first_name", "last_name", "image_url", "attachment_id", "image_recipe"}
+        ``image_url``, ``attachment_id``, ``image_recipe`` and ``rive`` (the
+        call Rive file: ``{"attachment_id"}`` or the current ``{"file"}``, with
+        names); ``None`` clears a nullable field."""
+        allowed = {"description", "subtitle", "first_name", "last_name", "image_url", "attachment_id", "image_recipe", "rive"}
         unknown = sorted(set(fields) - allowed)
         if unknown:
             raise TypeError(f"update got unknown fields: {', '.join(unknown)}")

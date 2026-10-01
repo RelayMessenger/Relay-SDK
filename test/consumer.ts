@@ -493,8 +493,11 @@ const summarize = (event: RelayWebhookEvent): string => {
 void summarize;
 
 declare const message2: Message;
-message2.edited_at satisfies string | null | undefined;
-message2.unsent_at satisfies string | null | undefined;
+// Server 486: Relay has no editing or unsending.
+// @ts-expect-error
+void message2.edited_at;
+// @ts-expect-error
+void message2.unsent_at;
 
 // Existing agents retain authenticated deletion; registration is Console-owned.
 (await relay.agents.delete("brave_cangoo")) satisfies void;

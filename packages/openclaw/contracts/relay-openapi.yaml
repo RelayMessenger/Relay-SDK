@@ -3194,7 +3194,17 @@ paths:
         new PeerConnection: Relay moves it onto a new SFU Session, the Call stays
         in progress, and both directions are pulled again after it sends
         `connected`. The room is scoped to the Call and accepts only its
-        authenticated user or agent Contact.
+        authenticated user or agent Contact. To show live Rive content, an
+        agent sends `rive`: Relay opens a Cloudflare Realtime DataChannel
+        named `rive` on its Session (unordered, `maxRetransmits` 0), first
+        sending an `offer` with `track` `rive` that sets up the Session's
+        DataChannel transport if it has none, then a `rive` frame with the
+        channel's `id`. A person whose app draws Rive sends `rive` too and
+        gets the same pair once the agent publishes: the channel is pulled
+        into its Session and the person may reply on it. Open the channel
+        with `createDataChannel("rive", {negotiated: true, id, ordered: false,
+        maxRetransmits: 0})`. After a restart onto a new Session, Relay opens
+        it again with a new `id`.
       parameters:
         - name: callId
           in: path
@@ -3346,6 +3356,82 @@ components:
             - Builds robots in Ann Arbor.
           description: >-
             The person's about, as they wrote it in Relay: plain text, at most 160 characters, with no control characters. Null when they wrote none. Present only when kind is user.
+        rive:
+          description: >-
+            The Rive file this agent shows in its calls, so the app can load it
+            before the call connects. Null when it has none. Present only when
+            kind is agent.
+          anyOf:
+            - $ref: "#/components/schemas/RiveFile"
+            - type: "null"
+    RiveFile:
+      type: object
+      additionalProperties: false
+      required: [file, artboard, state_machine, view_model]
+      description: >-
+        A Rive file an agent shows in its calls: a character, a quiz, a game,
+        a chart. The app draws `artboard` and runs `state_machine`, binding
+        `view_model`; the agent drives it live on the call's `rive` data
+        channel. Names are Rive's own; a null name means the file's default.
+      properties:
+        file:
+          type: string
+          format: uri
+          description: >-
+            The .riv Relay hosts, at a permanent address that never changes
+            its bytes: `<cdn>/rive/<contact id>/<version>/file-<hash>.riv`.
+          examples:
+            - https://cdn.relayapp.im/rive/0199a000-0000-7000-8000-00000000000b/1790000000000/file-0123456789abcdef.riv
+        artboard:
+          type: ["string", "null"]
+          maxLength: 255
+          examples: [Call]
+        state_machine:
+          type: ["string", "null"]
+          maxLength: 255
+          examples: [Main]
+        view_model:
+          type: ["string", "null"]
+          maxLength: 255
+          examples: [Main]
+    RiveFileInput:
+      type: object
+      additionalProperties: false
+      description: >-
+        Send `attachment_id` for a new file, or `file` with the address the
+        card already holds to change only the names. The names you send
+        replace all three; an omitted or null name means the file's default.
+      oneOf:
+        - required: [attachment_id]
+          not: { required: [file] }
+        - required: [file]
+          not: { required: [attachment_id] }
+      properties:
+        attachment_id:
+          type: string
+          format: uuid
+          description: >-
+            This agent's completed upload from the Attachments API, as for
+            the profile picture: a Rive file (it starts with the bytes
+            `RIVE`) of at most 10 MB. Relay copies it to permanent public
+            storage. Embed every image and font in the file: the app does not
+            fetch Rive's hosted assets.
+        file:
+          type: string
+          format: uri
+          description: The `file` address this card already holds.
+        artboard:
+          type: ["string", "null"]
+          minLength: 1
+          maxLength: 255
+        state_machine:
+          type: ["string", "null"]
+          minLength: 1
+          maxLength: 255
+        view_model:
+          type: ["string", "null"]
+          minLength: 1
+          maxLength: 255
     Call:
       type: object
       additionalProperties: false
@@ -3467,12 +3553,14 @@ components:
           description: "`audio` after this participant has published its local WebRTC audio track."
         tracks:
           type: array
-          maxItems: 2
+          maxItems: 3
           uniqueItems: true
           items:
             type: string
-            enum: [audio, video]
-          description: The local tracks this participant has published, `audio` first.
+            enum: [audio, video, rive]
+          description: >-
+            The local tracks this participant has published, `audio` first,
+            and `rive` once an agent's `rive` DataChannel is open.
         muted:
           type: boolean
         video:
@@ -3483,11 +3571,11 @@ components:
           description: True after this participant reported RTCPeerConnection connectionState `connected` for its initial publication.
         receiving:
           type: array
-          maxItems: 2
+          maxItems: 3
           uniqueItems: true
           items:
             type: string
-            enum: [audio, video]
+            enum: [audio, video, rive]
           description: >-
             The other participant's tracks this participant is receiving now:
             Relay pulled the track into its Session, it answered that `offer`,
@@ -3495,7 +3583,8 @@ components:
             participant restarts, and rebuilt as the tracks are pulled again.
             Relay sends `roomState` each time it changes. Hold generated audio
             until the other participant's `receiving` contains `audio`, then play
-            it from the start.
+            it from the start. `rive` is there once the agent's `rive`
+            DataChannel is pulled into this participant's Session.
     CallRoomJoinFrame:
       type: object
       additionalProperties: false
@@ -3685,8 +3774,38 @@ components:
               maxLength: 65536
         track:
           type: string
-          enum: [audio, video]
-          description: The other participant's track this offer pulls.
+          enum: [audio, video, rive]
+          description: >-
+            The other participant's track this offer pulls. `rive` sets up
+            this Session's DataChannel transport (one SCTP section); answer it
+            like any other.
+    CallRoomRiveFrame:
+      type: object
+      additionalProperties: false
+      required: [type]
+      description: >-
+        Agent: publish the `rive` DataChannel. Person: receive the agent's.
+        Sent again with the channel open, Relay repeats its `id`.
+      properties:
+        type:
+          type: string
+          const: rive
+    CallRoomRiveChannelFrame:
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      description: >-
+        The `rive` DataChannel is open on this participant's Session. Create
+        it with `createDataChannel("rive", {negotiated: true, id, ordered:
+        false, maxRetransmits: 0})`. Messages are JSON text of at most 1 KB.
+      properties:
+        type:
+          type: string
+          const: rive
+        id:
+          type: integer
+          minimum: 0
+          maximum: 65534
     CallRoomEndedFrame:
       type: object
       additionalProperties: false
@@ -4669,6 +4788,14 @@ components:
           anyOf:
             - $ref: "#/components/schemas/HandleOwner"
             - type: "null"
+        rive:
+          description: >-
+            The Rive file this agent shows in its calls, so the app can load it
+            before the call connects. Null when it has none. Present only when
+            kind is agent.
+          anyOf:
+            - $ref: "#/components/schemas/RiveFile"
+            - type: "null"
         timezone:
           type:
             - string
@@ -5392,6 +5519,13 @@ components:
         - image_url
         - image_color
       properties:
+        rive:
+          description: >-
+            The Rive file this agent shows in its calls, or null. Set it with
+            PATCH `rive`.
+          anyOf:
+            - $ref: "#/components/schemas/RiveFile"
+            - type: "null"
         id:
           type: string
           format: uuid
@@ -7373,19 +7507,6 @@ components:
             - "null"
           format: date-time
           description: When the message was read
-        edited_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-          description: When the message was last edited, or null if it was never edited.
-        unsent_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-          description: When the sender unsent the message, or null. An unsent Message keeps its place in the transcript
-            and carries no parts.
         silent:
           type: boolean
           description: Whether the sender sent this Message silently, so the recipient's device showed no banner and played
@@ -8276,6 +8397,13 @@ components:
         - image_url
         - image_color
       properties:
+        rive:
+          description: >-
+            The Rive file this agent shows in its calls, or null. Set it with
+            PATCH `rive`.
+          anyOf:
+            - $ref: "#/components/schemas/RiveFile"
+            - type: "null"
         description:
           type:
             - string
@@ -8850,6 +8978,13 @@ components:
         image_recipe:
           $ref: "#/components/schemas/AgentImageRecipe"
           description: Existing native redraw recipe accompanying image_url or attachment_id.
+        rive:
+          description: >-
+            The Rive file this agent shows in its calls. Null removes it. If
+            omitted, the existing file is kept.
+          anyOf:
+            - $ref: "#/components/schemas/RiveFileInput"
+            - type: "null"
     UpdateWebhookSubscriptionRequest:
       type: object
       properties:
@@ -9516,6 +9651,8 @@ x-relay-call-room-frames:
       $ref: "#/components/schemas/CallRoomEndFrame"
     heartbeat:
       $ref: "#/components/schemas/CallRoomHeartbeatFrame"
+    rive:
+      $ref: "#/components/schemas/CallRoomRiveFrame"
   server:
     ice_servers:
       $ref: "#/components/schemas/CallRoomIceServersFrame"
@@ -9525,6 +9662,8 @@ x-relay-call-room-frames:
       $ref: "#/components/schemas/CallRoomServerAnswerFrame"
     subscription_offer:
       $ref: "#/components/schemas/CallRoomSubscriptionOfferFrame"
+    rive_channel:
+      $ref: "#/components/schemas/CallRoomRiveChannelFrame"
     ended:
       $ref: "#/components/schemas/CallRoomEndedFrame"
     error:

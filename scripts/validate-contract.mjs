@@ -38,7 +38,7 @@ assert.equal(
 assert.equal(manifest.upstream.repository, "https://github.com/RelayMessenger/Relay-Server.git");
 assert.equal(manifest.upstream.path, "contracts/developer/openapi.yaml");
 assert.equal(manifest.upstream.sha256, manifest.source_openapi_sha256);
-assert.equal(manifest.upstream.commit, "5befaf6401cbf90bddca9456dffbf1cf99e0e310", "SDK contract provenance must identify the exact canonical Server source");
+assert.equal(manifest.upstream.commit, "736f112e78703f94751f8e5f36f0ae6fdf18ddd4", "SDK contract provenance must identify the exact canonical Server source");
 // The WebSocket upgrade is documented in OpenAPI but is implemented by
 // runWebSocket rather than as a generated REST resource method.
 // Operations the canonical source declares that this SDK does not yet
@@ -132,7 +132,7 @@ assert.deepEqual(operationJSON, manifest.operations);
 assert.equal(manifest.operation_count, 57);
 assert.equal(manifest.path_count, 37);
 assert.equal(manifest.source_path_count, 44);
-assert.equal(manifest.source_schema_count, 224);
+assert.equal(manifest.source_schema_count, 228);
 assert.equal(manifest.callback_count, 24);
 assert.equal(new Set(operationJSON.map((operation) => operation.path)).size, 37);
 assert.equal(operationJSON.length, 57);
@@ -652,7 +652,7 @@ const validateOpenAPI = () => {
   }
   assert.equal(document.paths["/v1/calls/{callId}/room"].get.operationId, "connectCallRoom");
   assert.deepEqual(document.components.schemas.CallRoomPublishOfferFrame.properties.tracks.items.properties.name.enum, ["audio", "video"]);
-  assert.deepEqual(document.components.schemas.CallRoomSubscriptionOfferFrame.properties.track.enum, ["audio", "video"]);
+  assert.deepEqual(document.components.schemas.CallRoomSubscriptionOfferFrame.properties.track.enum, ["audio", "video", "rive"]);
   assert.equal(document.components.schemas.CallRoomStateFrame.properties.participants.minItems, 2);
   assert.equal(document.components.schemas.CallRoomStateFrame.properties.participants.maxItems, 2);
   assert.equal("call_url" in document.components.schemas.SetContactCardResponse.properties, false);
@@ -836,6 +836,8 @@ const validateOpenAPI = () => {
       "verified",
       // Server 972cde2e: an agent's handle names its owner.
       "owner",
+      // Server 488: and its Rive file for calls.
+      "rive",
       // Server 461: a person's handle names their IANA time zone.
       "timezone",
       // Server 468: and their age range; Server 475: and their profile links.
