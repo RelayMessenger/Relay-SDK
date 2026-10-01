@@ -1,6 +1,6 @@
 {
   "name": "@relaymessenger/elevenlabs",
-  "version": "0.1.0",
+  "version": "0.1.0-staging.0",
   "description": "Put an ElevenLabs Agent on a Relay Call: audio both ways over the ElevenLabs Agents WebSocket, and its alignment as Rive mouth shapes.",
   "type": "module",
   "sideEffects": false,
