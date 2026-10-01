@@ -1,0 +1,18 @@
+[project]
+name = "relay-cookbook-elevenlabs-voice-agent"
+version = "1.0.0"
+description = "Answer a Relay Call with Grok (xAI) and an ElevenLabs voice, on Pipecat."
+requires-python = ">=3.11"
+dependencies = [
+  "pipecat-ai[elevenlabs,grok,silero]>=1.12,<2",
+  "relaymessenger-pipecat",
+  "websockets>=15",
+  "aiohttp>=3.10",
+]
+
+[tool.uv]
+package = false
+
+# relaymessenger-pipecat is not on PyPI yet; uv installs it from this repository.
+[tool.uv.sources]
+relaymessenger-pipecat = { git = "https://github.com/RelayMessenger/Relay-SDK", subdirectory = "python/relaymessenger-pipecat", branch = "staging" }
