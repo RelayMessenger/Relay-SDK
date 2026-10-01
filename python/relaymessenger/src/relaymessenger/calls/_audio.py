@@ -185,6 +185,10 @@ class RelayAudioSource:
         self._stopped = True
         self.clear()
 
+    def media_time_ms(self) -> float:
+        """RTP time of the next packet in milliseconds: the timestamp starts at 0 and advances 960 per 20 ms packet, silence included."""
+        return self._pts * 1_000 / WIRE_SAMPLE_RATE
+
     def queued_ms(self) -> float:
         return len(self._packets) * PACKET_MS + (self._pending.size / WIRE_CHANNEL_COUNT / WIRE_SAMPLE_RATE) * 1_000
 

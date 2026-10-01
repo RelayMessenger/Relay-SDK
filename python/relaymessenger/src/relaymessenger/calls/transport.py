@@ -33,6 +33,7 @@ from ._engine import (
     prefer_h264,
 )
 from ._events import EventEmitter
+from .rive import RIVE_CHANNEL, RIVE_CHANNEL_OPTIONS, RelayRive
 from .room import DEFAULT_BASE_URL, CallRoom, CallRoomCloseEvent, CallRoomError
 from .video import (
     LocalVideoTrack,
@@ -55,6 +56,8 @@ logger = logging.getLogger("relaymessenger.calls")
 #: ``timeoutSeconds = 7``). Backoff 250 ms x1.1 per attempt, capped at 10 s
 #: (PartyTracks ``retryWithBackoff``, rxjs-helpers.ts defaults).
 RESTART_CONNECT_TIMEOUT_MS = 5_000
+#: How long `rive()` waits for the room to open the channel.
+RIVE_OPEN_TIMEOUT_MS = 10_000
 RESTART_DISCONNECTED_MS = 7_000
 RESTART_INITIAL_DELAY_MS = 250
 RESTART_BACKOFF_FACTOR = 1.1
@@ -391,6 +394,11 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         self._add_track_pending = False
         self._deferred_offer: Optional[dict[str, Any]] = None
         self._background: set[asyncio.Task[Any]] = set()
+        #: The agent's Rive handle once `rive()` was called; kept across restarts.
+        self._rive: Optional[RelayRive] = None
+        #: The ``rive`` channel on the current peer.
+        self._rive_channel: Any = None
+        self._rive_waiters: set[asyncio.Future[None]] = set()
         self._candidates_recorded_for: Any = None
 
     # ---- lifecycle ------------------------------------------------------------------
@@ -542,6 +550,110 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         if self._source is not None:
             self._source.clear()
         self._release_playout_waiters()
+
+    def audio_time_ms(self) -> float:
+        """Where the next sample `write_audio` accepts will sit on this agent's audio track.
+
+        Milliseconds since the track's first RTP packet: the RTP time already
+        sent plus everything queued (held audio included). Read it just before
+        `write_audio` and add offsets inside that audio to time Rive messages
+        (``at``). Silence flows whenever nothing is queued, so the clock runs
+        from connect and survives restarts. Audio held before the person
+        receives this track starts later than this estimate, by the hold.
+        """
+        if self._source is None:
+            raise RelayCallTransportError("Relay Call transport is not connected.")
+        return self._source.media_time_ms() + self._source.queued_ms()
+
+    async def rive(self, *, timeout_ms: float = RIVE_OPEN_TIMEOUT_MS) -> RelayRive:
+        """Open this agent's ``rive`` data channel and return its handle.
+
+        Set View Model values, fire triggers and switch files on the Rive the
+        phone draws, timed against this agent's audio, and hear what the phone
+        writes back. The same handle is returned on every call. After a restart
+        the transport asks for the channel again on the new session and
+        replays the scene and the latest values. Requires `connect()`; raises
+        `RelayCallTransportError` (code ``rive_timeout``) when the room opens
+        no channel within ``timeout_ms``.
+        """
+        if self._closed or self._ended:
+            raise RelayCallTransportError("Relay Call transport is closed.")
+        if not self._reported_connected or self._peer is None:
+            raise RelayCallTransportError("Relay Call transport is not connected.")
+        if self._rive is None:
+            self._rive = RelayRive(self._send_rive)
+        rive = self._rive
+        if self._rive_channel is not None and self._rive_channel.readyState == "open":
+            return rive
+        # One request per wait: callers that overlap share it; one after a timeout asks again.
+        if not self._rive_waiters:
+            self.room.send({"type": RIVE_CHANNEL})
+        waiter: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._rive_waiters.add(waiter)
+        try:
+            await asyncio.wait_for(asyncio.shield(waiter), timeout_ms / 1000)
+        except asyncio.TimeoutError:
+            raise RelayCallTransportError("Relay Call room opened no rive channel.", "rive_timeout") from None
+        finally:
+            self._rive_waiters.discard(waiter)
+        return rive
+
+    def _send_rive(self, text: str) -> bool:
+        channel = self._rive_channel
+        if channel is None or channel.readyState != "open":
+            return False
+        try:
+            channel.send(text)
+        except Exception:  # lossy by design: a send that fails is a dropped message
+            return False
+        return True
+
+    def _open_rive_channel(self, frame: dict[str, Any]) -> None:
+        """The room created the channel on this peer's session: open its negotiated end."""
+        peer = self._peer
+        rive = self._rive
+        if peer is None or rive is None or self._closed or self._ended:
+            return
+        self._close_rive_channel()
+        channel = peer.createDataChannel(RIVE_CHANNEL, negotiated=True, id=frame["id"], **RIVE_CHANNEL_OPTIONS)
+        self._rive_channel = channel
+
+        def opened() -> None:
+            if self._rive_channel is not channel:
+                return
+            for text in rive._replay():
+                try:
+                    channel.send(text)
+                except Exception:
+                    pass
+            for waiter in list(self._rive_waiters):
+                if not waiter.done():
+                    waiter.set_result(None)
+
+        def on_message(data: Any) -> None:
+            if self._rive_channel is channel:
+                rive._receive(data)
+
+        channel.on("message", on_message)
+        if channel.readyState == "open":
+            opened()
+        else:
+            channel.on("open", opened)
+
+    def _close_rive_channel(self) -> None:
+        channel, self._rive_channel = self._rive_channel, None
+        if channel is None:
+            return
+        channel.remove_all_listeners()
+        try:
+            channel.close()
+        except Exception:
+            pass
+
+    def _reject_rive(self, error: BaseException) -> None:
+        for waiter in list(self._rive_waiters):
+            if not waiter.done():
+                waiter.set_exception(error)
 
     async def wait_for_peer_audio(self, timeout_ms: float) -> None:
         """Return once ``peer_audio`` has fired; raise after ``timeout_ms`` or when the Call ends first."""
@@ -907,6 +1019,14 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
             self._room_offers += 1
             self._queue_negotiation(lambda: self._server_offer(frame))
 
+        @room.on("rive")
+        def on_rive(frame: dict[str, Any]) -> None:
+            # Queued behind the establish offer's answer, so the SCTP transport exists.
+            async def open_channel() -> None:
+                self._open_rive_channel(frame)
+
+            self._queue_negotiation(open_channel)
+
         @room.on("room_state")
         def on_room_state(frame: dict[str, Any]) -> None:
             self._room_ice_settled.set()
@@ -1050,6 +1170,9 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
                 # Sent for every new session: the room re-pulls a restarted
                 # participant's tracks once it reports `connected` (PROTOCOL.md section 2).
                 self.room.connected()
+                # A new session has no rive channel: ask for it again.
+                if self._rive is not None and self._reported_connected:
+                    self.room.send({"type": RIVE_CHANNEL})
                 if not self._reported_connected:
                     self._reported_connected = True
                     self._resolve_ready()
@@ -1157,6 +1280,7 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
         self._last_answer_sdp = None
         self._add_track_pending = False
         self._deferred_offer = None
+        self._close_rive_channel()
         if self._remote_video_track is not None:
             self._remote_video_track._detach()
         self._remote_video_engine_track = None
@@ -1299,6 +1423,8 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
             self._ready.exception()
 
     def _shutdown_media(self) -> None:
+        self._close_rive_channel()
+        self._reject_rive(RelayCallTransportError("Relay Call ended before the rive channel opened."))
         self._clear_timer("connect")
         self._clear_timer("disconnect")
         if self._wake_restart is not None:
