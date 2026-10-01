@@ -9,8 +9,58 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels that pull request's older run. Pushes to
+# staging and main each get their own group (the run id), so none is ever
+# cancelled or replaced while still pending: the staging and production
+# releases run from those pushes. A shared group would cancel a pending push
+# run even with cancel-in-progress off (GitHub's "queue: single" default).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
+  # A pull request that changes only the contributor notes below skips every
+  # job after this one. Most Markdown here is product (package READMEs,
+  # skills, cookbook pages, the contract decision) and `npm run validate`
+  # checks it, so only files no check reads are listed. The filter is a job
+  # condition, not `paths-ignore`, because `validate` is a required check on
+  # main: a skipped job reports success, a workflow that never starts leaves
+  # the check pending forever. Pushes and manual runs always run everything,
+  # and so does a pull request whose `changes` job fails (fail open: a broken
+  # filter must never turn a required check into a skipped green one).
+  changes:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          code=true
+          if [ "$EVENT" = pull_request ]; then
+            code=false
+            while IFS= read -r file; do
+              case "$file" in
+                AGENTS.md|CLAUDE.md|CONTRIBUTING.md|SECURITY.md|scripts/agent-cli-platforms.md) ;;
+                *) code=true ;;
+              esac
+            done < <(git diff --name-only "$BASE...$HEAD")
+          fi
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+
   validate:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 45
     steps:
@@ -38,6 +88,8 @@ jobs:
   # LiveKit and Pipecat packages): types and unit tests on Linux from the
   # locked environment, then a wheel and sdist build. Nothing is published.
   python-sdk:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 20
     defaults:
@@ -60,6 +112,8 @@ jobs:
   # unit tests on Linux from the locked environment, then a wheel and sdist
   # build. Nothing is published.
   python-pipecat:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 20
     defaults:
@@ -82,6 +136,8 @@ jobs:
   # and unit tests on Linux from the locked environment, then a wheel and sdist
   # build. Nothing is published.
   python-livekit:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 20
     defaults:
@@ -111,6 +167,8 @@ jobs:
   # resolve the workspace sdk inside the monorepo, runs under
   # `npm run validate` above.
   cookbook-standalone:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
@@ -134,6 +192,8 @@ jobs:
   # model, and check the ElevenLabs Agents bridge against a fake socket. They
   # do not place a call; the live call is proven by hand on staging.
   cookbook-python:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
@@ -169,6 +229,8 @@ jobs:
   # workflow that already exists on the default branch, so this is also the
   # only way a change to the release itself is rehearsed before it merges.
   release-dry-run:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 60
     steps:
@@ -207,6 +269,8 @@ jobs:
   # publish-package-staging.yml would write, derived here against the live
   # registry and written nowhere. Its decision table is unit-tested first.
   staging-bump-dry-run:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
