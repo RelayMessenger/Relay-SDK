@@ -19,8 +19,7 @@ Use the locked contract, not memory.
   integrations: read [calls](references/calls.md).
 - `GET /v1/me`, who can message the agent, Log in with Relay, and the hosted
   MCP server's tools: read [agent settings](references/agent-settings.md).
-- Directory, ratings, suggested agents, address-book counts and agent
-  requests: read [directory](references/directory.md).
+- Searching the public agent directory: read [directory](references/directory.md).
 - Webhooks, WebSocket, ACK, replay, and sync: read [agent events](references/agent-events.md).
 - Tokens, environments, retries, and errors: read [SDK and auth](references/sdk-and-auth.md).
 - CLI setup, profiles, connection, or skill installation: read

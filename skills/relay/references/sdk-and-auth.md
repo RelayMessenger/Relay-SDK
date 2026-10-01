@@ -69,8 +69,7 @@ Use only the public resources exported by this version:
 
 `verifyRelayIdToken` checks a Log in with Relay ID token, and
 `@relaymessenger/sdk/login-button` exports `RelayLoginButton`. A route in the
-locked OpenAPI with no SDK method, such as agent ratings, uses plain HTTP with
-the same token.
+locked OpenAPI with no SDK method uses plain HTTP with the same token.
 
 The SDK defaults to a 15-second request timeout and two retries. Message sends
 are retried only when they carry an idempotency key. Reads, idempotent HTTP
