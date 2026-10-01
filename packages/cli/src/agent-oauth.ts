@@ -11,7 +11,7 @@ import { CliError } from "./error-codes.js";
  * and shows its secret once.
  */
 
-export const OAUTH_SCOPES = ["openid", "profile", "email", "phone"] as const;
+export const OAUTH_SCOPES = ["openid", "profile", "email", "phone", "birthdate"] as const;
 export type OAuthScope = (typeof OAUTH_SCOPES)[number];
 
 interface OAuthClient {

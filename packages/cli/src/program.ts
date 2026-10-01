@@ -754,7 +754,7 @@ Examples:
     .action(async (agentHandle: string, url: string) => {
       output(await removeRedirect(accessRequest, agentHandle, url));
     });
-  oauth.command("scopes").argument("<handle>", "agent handle", handle).argument("[scopes...]", "email, phone, or none")
+  oauth.command("scopes").argument("<handle>", "agent handle", handle).argument("[scopes...]", "email, phone, birthdate, or none")
     .description("set the optional scopes; openid and profile stay")
     .option("--json", "JSON output")
     .action(async (agentHandle: string, scopes: string[]) => {

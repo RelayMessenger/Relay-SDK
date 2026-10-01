@@ -87,6 +87,9 @@ class ChatHandle(TypedDict, total=False):
     #: they chose, as Relay normalised them; empty when they set none. Relay
     #: sends no platform name; read the site from the URL.
     links: List[str]
+    #: The person's about, as they wrote it in Relay: plain text, at most 160
+    #: characters; None when they wrote none.
+    about: Optional[str]
     is_contact: bool
     activity_version: str
     activity: Optional[Dict[str, Any]]
@@ -109,6 +112,9 @@ class ContactEventContact(TypedDict):
     #: they chose, as Relay normalised them; empty when they set none. Relay
     #: sends no platform name; read the site from the URL.
     links: List[str]
+    #: The person's about, as they wrote it in Relay: plain text, at most 160
+    #: characters; None when they wrote none.
+    about: Optional[str]
 
 
 class _PartyRequired(TypedDict):
@@ -133,6 +139,9 @@ class CallContact(_PartyRequired, total=False):
     #: they chose, as Relay normalised them; empty when they set none. Relay
     #: sends no platform name; read the site from the URL.
     links: List[str]
+    #: The person's about, as they wrote it in Relay: plain text, at most 160
+    #: characters; None when they wrote none.
+    about: Optional[str]
 
 
 class SystemEventParty(_PartyRequired, total=False):
@@ -151,6 +160,9 @@ class SystemEventParty(_PartyRequired, total=False):
     #: they chose, as Relay normalised them; empty when they set none. Relay
     #: sends no platform name; read the site from the URL.
     links: List[str]
+    #: The person's about, as they wrote it in Relay: plain text, at most 160
+    #: characters; None when they wrote none.
+    about: Optional[str]
 
 
 class _UserOwnerRequired(TypedDict):
@@ -177,6 +189,9 @@ class UserOwner(_UserOwnerRequired, total=False):
     #: sends no platform name; read the site from the URL.
     #: None when the person has no Relay account.
     links: Optional[List[str]]
+    #: The person's about, as they wrote it in Relay: plain text, at most 160
+    #: characters; None when they wrote none.
+    about: Optional[str]
 
 
 class _OwnerPersonRequired(TypedDict):
@@ -201,6 +216,9 @@ class OwnerPerson(_OwnerPersonRequired, total=False):
     #: they chose, as Relay normalised them; empty when they set none. Relay
     #: sends no platform name; read the site from the URL.
     links: List[str]
+    #: The person's about, as they wrote it in Relay: plain text, at most 160
+    #: characters; None when they wrote none.
+    about: Optional[str]
 
 
 class _ChatRequired(TypedDict):
@@ -341,6 +359,9 @@ class ContactCard(TypedDict, total=False):
     #: they chose, as Relay normalised them; empty when they set none. Relay
     #: sends no platform name; read the site from the URL.
     links: List[str]
+    #: The person's about, as they wrote it in Relay: plain text, at most 160
+    #: characters; None when they wrote none.
+    about: Optional[str]
 
 
 class _Transport:
@@ -522,7 +543,7 @@ class Chats:
         with you and has not blocked you, into a chat with an active person
         none of whom has blocked or been blocked by them; anything else is the
         same 404. Ask both people first. The card is a snapshot of their id,
-        handle, name, photo and links. Send ``handle`` or ``user_id``, not
+        handle, name, photo, links and about. Send ``handle`` or ``user_id``, not
         both. The same ``idempotency_key`` and body replay with nothing shared.
         """
         if handle is not None and user_id is not None:
@@ -583,7 +604,7 @@ class OAuth2Clients:
         scopes: Optional[List[str]] = None,
     ) -> OAuth2ClientResponse:
         """``PATCH /v1/oauth2_client``: replace the redirects (https, up to
-        10), the scopes (``openid``, ``profile``, ``email``, ``phone``;
+        10), the scopes (``openid``, ``profile``, ``email``, ``phone``, ``birthdate``;
         ``openid`` and ``profile`` are always kept), or both."""
         body: Dict[str, Any] = {}
         if redirect_uris is not None:

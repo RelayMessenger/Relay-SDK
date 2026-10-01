@@ -36,6 +36,11 @@ export interface CallContact {
    * sends no platform name; read the site from the URL. People only.
    */
   links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
 }
 
 export type CallTerminalStatus =
@@ -465,6 +470,11 @@ export interface UserChatHandle extends ChatHandleBase {
    * sends no platform name; read the site from the URL. People only.
    */
   links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
 }
 
 /** Who owns an agent: its organization, or the person who owns it. */
@@ -504,6 +514,11 @@ export type HandleOwner =
      * Null when the person has no Relay account.
      */
     links?: string[] | null;
+    /**
+     * The person's about, as they wrote it in Relay: plain text, at most 160
+     * characters. Null when they wrote none. People only.
+     */
+    about?: string | null;
   };
 
 export interface AgentChatHandle extends ChatHandleBase {
@@ -912,6 +927,11 @@ export interface SystemEventParty {
    * sends no platform name; read the site from the URL. People only.
    */
   links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
 }
 
 export type TypingContact = SystemEventParty;
@@ -1130,7 +1150,7 @@ export interface ChatShareContactCardParams {
    * message in a chat with you and not blocked you, and the target chat needs
    * an active person none of whom has blocked or been blocked by them;
    * anything else is the same 404. Ask both people first. Their card is a
-   * snapshot: id, handle, name, photo and links.
+   * snapshot: id, handle, name, photo, links and about.
    */
   user_id?: UUID;
 }
@@ -1525,6 +1545,11 @@ export interface ContactLookup {
    * sends no platform name; read the site from the URL. People only.
    */
   links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
   /** Who the agent is for: everyone, or only people whose age range is 18_plus. Agents only. */
   age_rating?: AgentAgeRating;
 }
@@ -1583,10 +1608,33 @@ export interface ContactCardItem {
   is_verified?: boolean;
   /**
    * A shared person's profile links when the card was shared, only on a
-   * person's card. A person's card carries id, handle, name, photo and links,
-   * and nothing else.
+   * person's card. A person's card carries id, handle, name, photo, links and
+   * about, and nothing else.
    */
   links?: string[];
+  /**
+   * A shared person's about when the card was shared, at most 160
+   * characters, or null when they wrote none. Only on a person's card.
+   */
+  about?: string | null;
+  kind: "user" | "agent";
+}
+
+/**
+ * What `POST` and `PATCH /v1/contact_card` return: the agent's own card, whose
+ * handle is never null. (`GET /v1/contact_card` returns `ContactCardItem`, the
+ * contract's one schema for every card, shared ones included.)
+ */
+export interface SetContactCardResponse {
+  /** Detailed agent description, up to 2000 characters. Public agents cannot clear it. */
+  description?: string | null;
+  first_name: string;
+  last_name: string | null;
+  image_url: string | null;
+  /** Dominant colour of the picture, six uppercase hex digits; null when Relay has none. */
+  image_color: string | null;
+  is_active: boolean;
+  handle: string;
   kind: "user" | "agent";
 }
 
@@ -1658,7 +1706,12 @@ export type AgentAccessRule = "allow" | "deny";
  * The agent's owner is always allowed and is on neither list.
  */
 /** "Log in with Relay" scopes: `openid` and `profile` always, `email` and `phone` optional. */
-export type OAuth2Scope = "openid" | "profile" | "email" | "phone";
+/**
+ * An OpenID Connect scope a Log in with Relay client may ask for. `birthdate`
+ * asks for the person's birthday as the OpenID `birthdate` claim (YYYY-MM-DD,
+ * or 0000-MM-DD when they gave no year).
+ */
+export type OAuth2Scope = "openid" | "profile" | "email" | "phone" | "birthdate";
 
 /** The agent's OAuth2 client for Log in with Relay. `client_id` is the agent's ID. */
 export interface OAuth2Client {
@@ -1833,6 +1886,11 @@ export interface ContactEventContact {
    * sends no platform name; read the site from the URL. People only.
    */
   links: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about: string | null;
 }
 
 export interface ContactAddedEvent {
@@ -1976,6 +2034,11 @@ export interface OwnerPerson {
    * sends no platform name; read the site from the URL. People only.
    */
   links?: string[];
+  /**
+   * The person's about, as they wrote it in Relay: plain text, at most 160
+   * characters. Null when they wrote none. People only.
+   */
+  about?: string | null;
 }
 
 /** `GET /v1/me`: the agent the Agent Token authenticates, and who owns it (`AgentMe`). */

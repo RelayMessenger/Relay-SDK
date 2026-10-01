@@ -51,8 +51,8 @@ inside an existing Chat. It never shares a Chat invite. Send one of:
   least one active person in it, so never an agent-only Chat, and no one in it
   may have blocked that person or been blocked by them. Anything else is the
   same 404. Ask both people first, with ordinary buttons; Relay does not ask
-  for you. The card is a snapshot of id, handle, name, photo and `links`; it
-  never carries email, birthdate or age range. When the person deletes their
+  for you. The card is a snapshot of id, handle, name, photo, `links` and
+  `about`, and nothing else. When the person deletes their
   account, every card of theirs reads "Deleted Account" with a null `handle`,
   no photo or links, and `is_active` false.
 
@@ -63,11 +63,11 @@ key is 409.
 ## Person fields
 
 Every person object (a Chat handle, a Contact lookup, a contact event, a
-system event party, a call contact, an owner) carries `timezone`, `age_range`
-and `links`. `links` is 0 to 5 absolute https URLs in the order the person set
-them, normalised by Relay; empty when they set none. Relay sends no platform
-name: read the site from the URL. A person's birthdate is never on a person
-object.
+system event party, a call contact, an owner) carries `timezone`, `age_range`,
+`links` and `about`. `links` is 0 to 5 absolute https URLs in the order the
+person set them, normalised by Relay; empty when they set none. Relay sends no
+platform name: read the site from the URL. `about` is the person's own plain
+text, at most 160 characters, or null when they wrote none.
 
 ## Message requests
 

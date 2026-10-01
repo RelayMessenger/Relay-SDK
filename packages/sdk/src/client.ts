@@ -34,6 +34,7 @@ import type {
   ChatUpdateParams,
   ChatUpdateResponse,
   ContactCardItem,
+  SetContactCardResponse,
   ContactCardCreateParams,
   ContactCardRetrieveParams,
   ContactCardRetrieveResponse,
@@ -818,7 +819,7 @@ export class ContactCard {
   create(
     body: ContactCardCreateParams,
     options?: RequestOptions,
-  ): Promise<ContactCardItem> {
+  ): Promise<SetContactCardResponse> {
     return this.transport.request({
       method: "POST",
       path: "/v1/contact_card",
@@ -842,7 +843,7 @@ export class ContactCard {
   update(
     params: ContactCardUpdateParams,
     options?: RequestOptions,
-  ): Promise<ContactCardItem> {
+  ): Promise<SetContactCardResponse> {
     const { handle, ...body } = params;
     return this.transport.request({
       method: "PATCH",
