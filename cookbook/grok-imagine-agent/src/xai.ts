@@ -8,11 +8,28 @@
 export const XAI_API = "https://api.x.ai/v1";
 
 /**
- * xAI answered, and the answer was a failure (a refused prompt, a failed or
- * late video). The agent tells Grok. A network failure is not an XaiError:
- * it propagates, the event is delivered again, and the work resumes.
+ * An xAI call failed. A passing failure (xAI not reached, or HTTP 408, 429
+ * or 5xx) is retried, after `retryAfterMs` when xAI sent Retry-After. Every
+ * other failure (a refused prompt, a failed or late video) is lasting.
  */
-export class XaiError extends Error {}
+export class XaiError extends Error {
+  readonly status: number | undefined;
+  readonly passing: boolean;
+  readonly retryAfterMs: number | undefined;
+
+  constructor(
+    message: string,
+    options: { status?: number; unreachable?: boolean; retryAfterMs?: number; cause?: unknown } = {},
+  ) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "XaiError";
+    this.status = options.status;
+    const status = options.status;
+    this.passing = options.unreachable === true
+      || (status !== undefined && (status === 408 || status === 429 || status >= 500));
+    this.retryAfterMs = options.retryAfterMs;
+  }
+}
 
 export interface XaiOptions {
   apiKey: string;
@@ -68,17 +85,27 @@ export class Xai {
   }
 
   async #call<T>(path: string, body?: unknown): Promise<T> {
-    const response = await this.#fetch(`${XAI_API}${path}`, {
-      method: body === undefined ? "GET" : "POST",
-      headers: {
-        authorization: `Bearer ${this.#apiKey}`,
-        "content-type": "application/json",
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-    const text = await response.text();
+    let response: Response;
+    let text: string;
+    try {
+      response = await this.#fetch(`${XAI_API}${path}`, {
+        method: body === undefined ? "GET" : "POST",
+        headers: {
+          authorization: `Bearer ${this.#apiKey}`,
+          "content-type": "application/json",
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      text = await response.text();
+    } catch (cause) {
+      throw new XaiError(`xAI ${path} could not be reached.`, { unreachable: true, cause });
+    }
     if (!response.ok) {
-      throw new XaiError(`xAI ${path} answered ${response.status}: ${text.slice(0, 300)}`);
+      const retryAfterMs = retryAfter(response.headers.get("retry-after"));
+      throw new XaiError(`xAI ${path} answered ${response.status}: ${text.slice(0, 300)}`, {
+        status: response.status,
+        ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+      });
     }
     return JSON.parse(text) as T;
   }
@@ -139,17 +166,29 @@ export class Xai {
       await new Promise((resolve) => setTimeout(resolve, this.#pollMs));
       const job = await this.#call<{ status: string; video?: { url: string } }>(`/videos/${id}`);
       if (job.status === "done" && job.video) {
-        const response = await this.#fetch(job.video.url);
-        if (!response.ok) throw new XaiError(`The video download answered ${response.status}.`);
-        return {
-          bytes: new Uint8Array(await response.arrayBuffer()),
-          contentType: "video/mp4",
-          filename: "video.mp4",
-        };
+        let bytes: Uint8Array;
+        let status: number;
+        try {
+          const response = await this.#fetch(job.video.url);
+          status = response.status;
+          bytes = new Uint8Array(await response.arrayBuffer());
+        } catch (cause) {
+          throw new XaiError("The video download could not be reached.", { unreachable: true, cause });
+        }
+        if (status < 200 || status > 299) throw new XaiError(`The video download answered ${status}.`, { status });
+        return { bytes, contentType: "video/mp4", filename: "video.mp4" };
       }
       if (job.status !== "pending") throw new XaiError(`The video ended ${job.status}.`);
     }
   }
+}
+
+/** Retry-After in milliseconds: delay-seconds or an HTTP date (RFC 9110, section 10.2.3). */
+export function retryAfter(header: string | null, now = Date.now()): number | undefined {
+  if (!header) return undefined;
+  if (/^\d+$/u.test(header.trim())) return Number(header.trim()) * 1_000;
+  const date = Date.parse(header);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - now);
 }
 
 /** The text of every assistant message in Grok's output. */

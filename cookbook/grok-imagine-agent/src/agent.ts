@@ -89,12 +89,22 @@ export const MAX_STEPS = 4;
 export const HISTORY_WINDOW = 40;
 
 /**
- * An event is tried on at most this many deliveries. After the last one
- * fails, the agent gives up on it, so a failure that repeats (xAI refusing
- * the request) never blocks the chat: the event is acknowledged and the
- * next message goes through.
+ * An event is given up after this many lasting refusals, one per delivery
+ * (xAI or Relay answering 4xx other than 408 or 429, or any other failure
+ * that is not passing). Giving up means a refusal that repeats never blocks
+ * the chat: the event is acknowledged and the next message goes through.
  */
-export const MAX_DELIVERIES = 3;
+export const MAX_REFUSALS = 3;
+
+/**
+ * A passing failure (xAI or Relay not reached, or answering 408, 429 or 5xx)
+ * is retried in place, never counted as a refusal: after Retry-After when the
+ * service sent one, else after 1, 2, 4, ... seconds up to RETRY_MAX_WAIT_MS.
+ * Once the waits of one delivery would pass RETRY_LIMIT_MS, the event is left
+ * to Relay to deliver again.
+ */
+export const RETRY_LIMIT_MS = 2 * 60_000;
+export const RETRY_MAX_WAIT_MS = 30_000;
 
 /** A video still pending this long after its request is reported to Grok as failed. */
 export const VIDEO_DEADLINE_MS = 10 * 60_000;
@@ -194,6 +204,28 @@ export interface AgentDependencies {
   xai: Xai;
   store: ProgressStore;
   reference: Media;
+  /** Waits between retries; tests pass one that does not wait. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * How long to wait before retrying a passing failure, or undefined for a
+ * lasting one. Relay's SDK errors carry `retryable` and `retryAfter`
+ * (seconds); this recipe's XaiError carries `passing` and `retryAfterMs`.
+ */
+export function retryWait(error: unknown, attempt: number): number | undefined {
+  const backoff = Math.min(1_000 * 2 ** attempt, RETRY_MAX_WAIT_MS);
+  if (error instanceof XaiError) return error.passing ? error.retryAfterMs ?? backoff : undefined;
+  if (error instanceof Error && "retryable" in error && typeof error.retryable === "boolean" && "status" in error) {
+    if (!error.retryable) return undefined;
+    const seconds = "retryAfter" in error ? error.retryAfter : undefined;
+    return typeof seconds === "number" && Number.isFinite(seconds) ? seconds * 1_000 : backoff;
+  }
+  return undefined;
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -208,20 +240,50 @@ export async function answer(deps: AgentDependencies, incoming: Incoming): Promi
   const { eventId, chatId } = incoming;
   if (!store.begin(eventId, chatId, { role: "user", content: incoming.text }, incoming.messageId)) return;
   if (store.event(eventId)?.done !== false) return;
-  const delivery = store.delivered(eventId);
-  try {
-    await run(deps, incoming);
-  } catch (error) {
-    if (delivery < MAX_DELIVERIES) throw error;
-    store.fail(eventId);
-    console.error(JSON.stringify({
-      event: "event_failed",
-      event_id: eventId,
-      deliveries: delivery,
-      error: error instanceof Error ? error.message : String(error),
-    }));
-    await sayItFailed(deps, incoming);
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  let waited = 0;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await run(deps, incoming);
+      return;
+    } catch (error) {
+      const wait = retryWait(error, attempt);
+      if (wait !== undefined && waited + wait <= RETRY_LIMIT_MS) {
+        console.error(JSON.stringify({ event: "retrying", event_id: eventId, wait_ms: wait, error: messageOf(error) }));
+        await sleep(wait);
+        waited += wait;
+        continue;
+      }
+      closeOpenCalls(store, incoming, error);
+      // Still passing after RETRY_LIMIT_MS: Relay delivers the event again; nothing is counted.
+      if (wait !== undefined) throw error;
+      const refusals = store.refused(eventId);
+      if (refusals < MAX_REFUSALS) throw error;
+      store.fail(eventId);
+      console.error(JSON.stringify({ event: "event_failed", event_id: eventId, refusals, error: messageOf(error) }));
+      await sayItFailed(deps, incoming);
+      return;
+    }
   }
+}
+
+/**
+ * Gives every function call of this event still in the chat an output: the
+ * error. The Responses API pairs each `function_call` with a
+ * `function_call_output`; a call left without one would go to Grok with every
+ * later message of the chat.
+ */
+function closeOpenCalls(store: ProgressStore, incoming: Incoming, error: unknown): void {
+  const items = store.items(incoming.chatId);
+  const answered = answeredCalls(items);
+  const ours = new Set(store.steps(incoming.eventId).flatMap((output) => functionCalls(output).map((call) => call.call_id)));
+  const open = functionCalls(items).filter((call) => ours.has(call.call_id) && !answered.has(call.call_id));
+  if (open.length === 0) return;
+  store.append(incoming.chatId, open.map((call) => ({
+    type: "function_call_output",
+    call_id: call.call_id,
+    output: `It did not work: ${messageOf(error)}`,
+  })));
 }
 
 /**
@@ -240,11 +302,7 @@ async function sayItFailed(deps: AgentDependencies, incoming: Incoming): Promise
     await send(deps, incoming.chatId, `${incoming.eventId}:failed`, [{ type: "text", value: text }]);
     deps.store.append(incoming.chatId, [{ role: "assistant", content: text }]);
   } catch (error) {
-    console.error(JSON.stringify({
-      event: "failure_notice_failed",
-      event_id: incoming.eventId,
-      error: error instanceof Error ? error.message : String(error),
-    }));
+    console.error(JSON.stringify({ event: "failure_notice_failed", event_id: incoming.eventId, error: messageOf(error) }));
   }
 }
 
@@ -285,11 +343,22 @@ function answeredCalls(items: ResponseItem[]): Set<string> {
 }
 
 /**
- * Runs one tool. A failure xAI reports becomes the tool's result, so Grok
- * can answer in words; a network or Relay failure throws, so the event is
- * delivered again and resumes here.
+ * Runs one tool. A lasting failure becomes the tool's result, so the call
+ * always gets an output and Grok can answer in words; a passing failure
+ * throws, so `answer` retries and the tool resumes here.
  */
 async function runTool(deps: AgentDependencies, incoming: Incoming, call: FunctionCall): Promise<string> {
+  try {
+    return await useTool(deps, incoming, call);
+  } catch (error) {
+    if (retryWait(error, 0) !== undefined) throw error;
+    const result = `It did not work: ${messageOf(error)}`;
+    console.error(JSON.stringify({ event: "tool_failed", tool: call.name, error: result }));
+    return result;
+  }
+}
+
+async function useTool(deps: AgentDependencies, incoming: Incoming, call: FunctionCall): Promise<string> {
   if (call.name === "stay_silent") return "You sent nothing.";
   let args: Record<string, string>;
   try {
@@ -300,19 +369,11 @@ async function runTool(deps: AgentDependencies, incoming: Incoming, call: Functi
   const key = `${incoming.eventId}:${call.call_id}`;
   let attachmentId = deps.store.upload(key);
   if (!attachmentId) {
-    let media: Media;
-    try {
-      const still = await made(deps, `${key}:still`, () =>
-        deps.xai.picture(deps.reference, picturePrompt(args.scene ?? "", args.caption)));
-      media = call.name === "send_video"
-        ? await made(deps, `${key}:video`, () => video(deps, key, still, `${args.action ?? ""} Static camera. ${SAME_LOOK}`))
-        : still;
-    } catch (error) {
-      if (!(error instanceof XaiError)) throw error;
-      const result = `It did not work: ${error.message}`;
-      console.error(JSON.stringify({ event: "tool_failed", tool: call.name, error: result }));
-      return result;
-    }
+    const still = await made(deps, `${key}:still`, () =>
+      deps.xai.picture(deps.reference, picturePrompt(args.scene ?? "", args.caption)));
+    const media = call.name === "send_video"
+      ? await made(deps, `${key}:video`, () => video(deps, key, still, `${args.action ?? ""} Static camera. ${SAME_LOOK}`))
+      : still;
     attachmentId = await upload(deps.relay, media);
     deps.store.saveUpload(key, attachmentId);
   }

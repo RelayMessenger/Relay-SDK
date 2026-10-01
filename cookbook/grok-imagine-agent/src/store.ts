@@ -26,9 +26,7 @@ export class ProgressStore {
         PRIMARY KEY (chat_id, seq));
       CREATE TABLE IF NOT EXISTS events (
         event_id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, steps INTEGER NOT NULL DEFAULT 0,
-        done INTEGER NOT NULL DEFAULT 0, message_id TEXT,
-        deliveries INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0);
-      CREATE INDEX IF NOT EXISTS events_message ON events (message_id);
+        done INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS videos (
         key TEXT PRIMARY KEY, request_id TEXT NOT NULL, deadline INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS steps (
@@ -41,6 +39,17 @@ export class ProgressStore {
       CREATE TABLE IF NOT EXISTS sent (
         key TEXT PRIMARY KEY, message_id TEXT NOT NULL);
     `);
+    // Columns added after the first release: a state.db from an older version gains them in place.
+    const columns = new Set((this.#db.prepare("PRAGMA table_info(events)").all() as { name: string }[])
+      .map((column) => column.name));
+    for (const [name, definition] of [
+      ["message_id", "TEXT"],
+      ["refusals", "INTEGER NOT NULL DEFAULT 0"],
+      ["failed", "INTEGER NOT NULL DEFAULT 0"],
+    ] as const) {
+      if (!columns.has(name)) this.#db.exec(`ALTER TABLE events ADD COLUMN ${name} ${definition}`);
+    }
+    this.#db.exec("CREATE INDEX IF NOT EXISTS events_message ON events (message_id)");
   }
 
   /**
@@ -65,10 +74,10 @@ export class ProgressStore {
     return started;
   }
 
-  /** Counts one more delivery of an event and returns the count. */
-  delivered(eventId: string): number {
-    this.#db.prepare("UPDATE events SET deliveries = deliveries + 1 WHERE event_id = ?").run(eventId);
-    return (this.#db.prepare("SELECT deliveries FROM events WHERE event_id = ?").get(eventId) as { deliveries: number }).deliveries;
+  /** Counts one more lasting refusal of an event and returns the count. */
+  refused(eventId: string): number {
+    this.#db.prepare("UPDATE events SET refusals = refusals + 1 WHERE event_id = ?").run(eventId);
+    return (this.#db.prepare("SELECT refusals FROM events WHERE event_id = ?").get(eventId) as { refusals: number }).refusals;
   }
 
   /** Marks an event failed: it is done, and Relay may forget it. */
@@ -99,10 +108,10 @@ export class ProgressStore {
       .run(key, requestId, deadline);
   }
 
-  event(eventId: string): { steps: number; done: boolean } | undefined {
-    const row = this.#db.prepare("SELECT steps, done FROM events WHERE event_id = ?").get(eventId) as
-      { steps: number; done: number } | undefined;
-    return row && { steps: row.steps, done: row.done === 1 };
+  event(eventId: string): { steps: number; done: boolean; refusals: number } | undefined {
+    const row = this.#db.prepare("SELECT steps, done, refusals FROM events WHERE event_id = ?").get(eventId) as
+      { steps: number; done: number; refusals: number } | undefined;
+    return row && { steps: row.steps, done: row.done === 1, refusals: row.refusals };
   }
 
   items(chatId: string): ResponseItem[] {

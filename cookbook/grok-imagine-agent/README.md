@@ -39,10 +39,15 @@ pays for the same picture twice. A video's request id is saved before the
 agent waits for it, so a restart waits for the same video; after ten minutes
 Grok is told it failed. Grok gets at most four steps per message, and sees the
 most recent 40 items of a chat. Tool arguments that are not valid JSON go
-back to Grok as an error it can correct. An event is tried on at most three
-deliveries: after the third failure (xAI refusing the request, for example)
-the agent logs it, Grok tells the person in its own words that it couldn't do
-that, and the event is acknowledged so the next message goes through.
+back to Grok as an error it can correct, and so does a tool that fails, so
+every tool call in the history has a result. When xAI or Relay cannot be
+reached, or answers 408, 429 or 5xx, the agent waits (for `Retry-After` when
+it is sent, else 1, 2, 4 ... up to 30 seconds) and tries again, for up to two
+minutes, before Relay delivers the event again. Any other failure (xAI
+refusing the request, for example) counts as a refusal. After the third
+refusal of an event the agent logs it, Grok tells the person in its own words
+that it couldn't do that, and the event is acknowledged so the next message
+goes through.
 
 When Relay sends a FULL sync, the agent rebuilds each Chat's history from
 Relay and answers the newest message it missed, before the sync is
