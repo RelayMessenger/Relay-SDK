@@ -2,7 +2,7 @@ import { beforeAll, expect, it, vi } from "vitest";
 import { AgentSession, initializeLogger } from "@livekit/agents";
 import { AudioFrame } from "@livekit/rtc-node";
 import type { CallRoom, CallRoomEventMap, CallRoomIceServer, CallRoomStateFrame, Relay } from "@relaymessenger/sdk";
-import { RelayAudioInput, RelayAudioOutput, RelayLiveKitCall, createRelayLiveKitAudio } from "../src/livekit.js";
+import { RelayAudioInput, RelayAudioOutput, RelayLiveKitCall, RelayVideoInput, createRelayLiveKitAudio } from "../src/livekit.js";
 import type {
   RelayAudioFrame,
   RelayAudioSinkLike,
@@ -409,6 +409,19 @@ it("exposes the transport's peerAudio wait on RelayLiveKitCall", async () => {
   await waiting;
   expect(resolved).toBe(true);
   await call.close();
+});
+
+it("gives RelayLiveKitCall a video input on the transport's remote track and closes it with the call", async () => {
+  const call = await RelayLiveKitCall.connect({
+    relay: {} as Relay,
+    callId: "01995bc0-0000-7000-8000-000000000001",
+    roomClient: new ConnectingRoom() as unknown as CallRoom,
+    webRTC: new ConnectingWebRTC(),
+  });
+  expect(call.videoInput).toBeInstanceOf(RelayVideoInput);
+  const off = vi.spyOn(call.transport, "off");
+  await call.close();
+  expect(off.mock.calls.some(([event]) => event === "trackSubscribed")).toBe(true);
 });
 
 it("delivers every inbound frame in order when the transport emits faster than the session reads", async () => {

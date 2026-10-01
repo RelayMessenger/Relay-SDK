@@ -101,6 +101,7 @@ export {
 export { Relay as default } from "./client.js";
 export {
   RELAY_ISSUER,
+  RELAY_USER_ID_CLAIM,
   verifyRelayIdToken,
   type RelayIdTokenClaims,
   type VerifyRelayIdTokenOptions,

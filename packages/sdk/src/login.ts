@@ -12,6 +12,9 @@ import { createRemoteJWKSet, customFetch, jwtVerify, type JWTPayload } from "jos
 /** Relay's OpenID Connect issuer. Staging is `https://auth.staging.relayapp.im/api/auth`. */
 export const RELAY_ISSUER = "https://auth.relayapp.im/api/auth";
 
+/** The namespaced ID token claim that carries the person's Relay id. */
+export const RELAY_USER_ID_CLAIM = "https://relayapp.im/user_id";
+
 /** The claims Relay puts in an ID token. `email` and `phone_number` only when the person shared them. */
 export interface RelayIdTokenClaims extends JWTPayload {
   /** The person's Relay user ID, stable for your client. */
@@ -31,6 +34,13 @@ export interface RelayIdTokenClaims extends JWTPayload {
   /** E.164, only with the `phone` scope and when the person shared it. */
   phone_number?: string;
   phone_number_verified?: boolean;
+  /**
+   * The person's Relay id: the `id` your agent sees on person objects in its
+   * chats, so you can link this login to the person who messages your agent.
+   * Only with `openid` and `profile`, and only when the person has a Relay
+   * profile. `sub` is a different id.
+   */
+  [RELAY_USER_ID_CLAIM]?: string;
 }
 
 export interface VerifyRelayIdTokenOptions {
