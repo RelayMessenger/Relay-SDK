@@ -76,6 +76,17 @@ a moving test pattern:
 RELAY_AGENT_TOKEN=... uv run examples/echo_bot.py
 ```
 
+## A talking avatar
+
+`examples/simli_avatar_bot.py` is Pipecat's own Simli example on a Relay
+Call: Deepgram, OpenAI and Cartesia make the voice, and Pipecat's
+`SimliVideoService` turns it into the frames of a talking face, which
+`RelayTransport` sends as the agent's camera.
+
+```sh
+uv run --with 'pipecat-ai[simli,deepgram,cartesia,openai,silero]' examples/simli_avatar_bot.py
+```
+
 ## Use your own TURN servers
 
 Pass `ice_servers` a list of `RTCIceServer` dicts, or an async function that

@@ -565,7 +565,9 @@ async def test_the_camera_encodes_with_relay_h264_encoder_and_the_publish_encodi
 
 
 async def test_the_camera_sends_a_keyframe_when_the_person_starts_receiving_it() -> None:
-    transport, room = make(session_connect_timeout_ms=30)
+    # 250 ms, not 30: the first session must outlive the synchronous checks
+    # below on a loaded machine, or its restart swaps the sender under them.
+    transport, room = make(session_connect_timeout_ms=250)
     await transport.publish_track(LocalVideoTrack.create_video_track("camera", VideoSource(64, 48)))
     task = asyncio.ensure_future(transport.connect())
     await settle()

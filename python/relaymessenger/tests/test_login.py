@@ -17,7 +17,7 @@ jwt = pytest.importorskip("jwt")
 from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: E402
 
 from relaymessenger import Relay  # noqa: E402
-from relaymessenger.login import verify_relay_id_token  # noqa: E402
+from relaymessenger.login import RELAY_USER_ID_CLAIM, verify_relay_id_token  # noqa: E402
 
 CLIENT_ID = "019f8e21-6c4a-7b1e-9d52-3f0a8c7e41b9"
 
@@ -93,8 +93,12 @@ def test_verify_relay_id_token(server: str) -> None:
         claims = {"iss": issuer, "aud": CLIENT_ID, "sub": "user-1", "iat": now, "exp": now + 600, "preferred_username": "ada", **patch}
         return jwt.encode(claims, key, algorithm="RS256", headers={"kid": "k1"})
 
-    claims = verify_relay_id_token(sign(nonce="n1"), client_id=CLIENT_ID, issuer=issuer, nonce="n1")
+    user_id = "0199a3c4-5b6d-7e8f-9a0b-1c2d3e4f5a6b"
+    claims = verify_relay_id_token(sign(nonce="n1", **{RELAY_USER_ID_CLAIM: user_id}), client_id=CLIENT_ID, issuer=issuer, nonce="n1")
     assert claims["sub"] == "user-1" and claims["preferred_username"] == "ada"
+    # Relay-Auth issues the person's chat id under this exact claim name.
+    assert RELAY_USER_ID_CLAIM == "https://relayapp.im/user_id"
+    assert claims[RELAY_USER_ID_CLAIM] == user_id
     with pytest.raises(jwt.InvalidAudienceError):
         verify_relay_id_token(sign(aud="someone-else"), client_id=CLIENT_ID, issuer=issuer)
     with pytest.raises(jwt.ExpiredSignatureError):
