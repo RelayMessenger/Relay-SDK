@@ -73,7 +73,12 @@ jobs:
           cache-suffix: ${{ github.job }}
       - run: npm install --global npm@11.19.1 --no-audit --no-fund
       - run: npm ci
-      - name: Validate affected workspaces (full on every push)
+      # The full gate must still start if the selector cannot parse or import.
+      - name: Validate the full workspace
+        if: github.event_name != 'pull_request' || needs.changes.result != 'success' || needs.changes.outputs.full != 'false'
+        run: npm run validate
+      - name: Validate affected workspaces
+        if: github.event_name == 'pull_request' && needs.changes.result == 'success' && needs.changes.outputs.full == 'false'
         env:
           EVENT: ${{ github.event_name }}
           FORCE_FULL: ${{ needs.changes.result != 'success' || needs.changes.outputs.full != 'false' }}
@@ -237,15 +242,23 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
           cache-suffix: ${{ github.job }}
-      - name: Copy, install, and import affected Python cookbooks
-        env:
-          EVENT: ${{ github.event_name }}
-          FORCE_FULL: ${{ needs.changes.result != 'success' || needs.changes.outputs.full != 'false' }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
+      - name: List all Python cookbooks without the selector
+        if: github.event_name != 'pull_request' || needs.changes.result != 'success' || needs.changes.outputs.full != 'false'
         run: |
           set -euo pipefail
-          node scripts/ci-affected.mjs --python-cookbooks > "$RUNNER_TEMP/python-cookbooks"
+          for project in cookbook/*/pyproject.toml; do
+            dirname "$project"
+          done > "$RUNNER_TEMP/python-cookbooks"
+      - name: List affected Python cookbooks
+        if: github.event_name == 'pull_request' && needs.changes.result == 'success' && needs.changes.outputs.full == 'false'
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ci-affected.mjs --python-cookbooks > "$RUNNER_TEMP/python-cookbooks"
+      - name: Copy, install, and import selected Python cookbooks
+        run: |
+          set -euo pipefail
           while IFS= read -r source; do
             copy="$(mktemp -d)"
             cp -R "$source/." "$copy/"
