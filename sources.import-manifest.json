@@ -1768,7 +1768,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/SKILL.md",
       "source_sha256": "b7158ecddc77ce389cb3ae456ae0b1ab82e0a4ac6c5cd10d16f652ecdfacca84",
-      "destination_sha256": "db3240625e2e43281dbd507547d038151a96f3a784f34f4e6c445f40f330c753",
+      "destination_sha256": "6d489c2b9b88af9667c4754350f4ef173ff951a43e581c9e023c293b297c8832",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1790,7 +1790,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/agent-events.md",
       "source_sha256": "92d19b6f234071bbc70fd0101fb7433b55961e7f7e2e427b057f625d29afe835",
-      "destination_sha256": "04e5d8700ce0de72c8b1146a203f969cdc25a38e6a329d78a50173a6cc7c444e",
+      "destination_sha256": "f8e1fac19e49556e2125f69b80cfe9fde0b2e00b37f81e7a288fe93cdc798de8",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1801,7 +1801,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/chats-and-contacts.md",
       "source_sha256": "1f501d8433e208816c22707f92e734d0639967659691e532b77fab7c48cc9ca6",
-      "destination_sha256": "cde94bada17389ea4f2aaa60e9a8039adfd160dd1e215fca247f7ab0fe2d09fe",
+      "destination_sha256": "8eacc8e54d597be127d914d963d25400a6d826dbdfd045d1cb9ad121ccf6d5e6",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1812,7 +1812,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/messaging.md",
       "source_sha256": "8774b387a354afbc5269a6546ec61eb01009995fa265a40dd973366e126e8b60",
-      "destination_sha256": "b35b1a7dfd963a201a921157397a67a8fb4e5ddaf03cde35ce81253af7fa594d",
+      "destination_sha256": "e523837357a4159467202a52672b13f2dfd6c5f558340e56e3aaa54662ac6a77",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"
@@ -1834,7 +1834,7 @@
       "commit": "f7e4bf28befe1ae20fb314c29a1ea854b9bc4023",
       "source": "skills/relay/references/sdk-and-auth.md",
       "source_sha256": "cd328a6b4d60f932404ce1a30b88e61cc0cb6e5dbdbcdc485f53ad2e0b3b50c4",
-      "destination_sha256": "a9fe1219608b26a37f5c3ebda6df4611eac5b6945a2b629d026984a80c9252e3",
+      "destination_sha256": "9ae5f50fac138737e6988690de348aae1aa6e86753ffe6dd55db901d930025dd",
       "source_mode": "100644",
       "destination_mode": "100644",
       "status": "canonicalized"

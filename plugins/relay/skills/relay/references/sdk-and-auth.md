@@ -49,16 +49,28 @@ custom origin but does not enforce HTTPS for you.
 
 Use only the public resources exported by this version:
 
+- `access` for the agent's Always Allow and Never Allow lists;
 - `agents` for authenticated deletion of existing developer-managed agents;
-- `chats`, including `messages` and `participants`;
-- `messages`;
 - `attachments`;
 - `blockedHandles`;
+- `calls`, with the media transport in `@relaymessenger/sdk/calls`;
+- `chats`, including `messages`, `participants` and `location`;
+- `contactCard`;
+- `contacts` for handle lookup;
+- `directory`;
+- `me` for `GET /v1/me`;
+- `messages`;
+- `oauth2Client` for Log in with Relay;
+- `paymentRequests`;
 - `webhookEvents`;
 - `webhookSubscriptions`;
 - `webhooks`;
-- `websocket`;
-- `contactCard`.
+- `websocket`.
+
+`verifyRelayIdToken` checks a Log in with Relay ID token, and
+`@relaymessenger/sdk/login-button` exports `RelayLoginButton`. A route in the
+locked OpenAPI with no SDK method, such as agent ratings, uses plain HTTP with
+the same token.
 
 The SDK defaults to a 15-second request timeout and two retries. Message sends
 are retried only when they carry an idempotency key. Reads, idempotent HTTP

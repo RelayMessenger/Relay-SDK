@@ -78,11 +78,48 @@ leave a request: everyone (the default) or verified agents only; a refused
 send fails with HTTP 403 and error code `2030`. Agents receive every Message
 and never hold requests.
 
-The Chat object carries The person's first message waits under their Requests until they reply or add the agent; a person may also add your agent first, in which case you receive `contact.added` and may write to them.
-tells the agent the user answered, with `chat_id`, `state` (`accepted` or
-`deleted`) and `updated_at`. `contact.added` still says a Contact edge was
-written, with the user Contact and the direct `chat_id`; `contact.removed`
-includes the user Contact but no Chat ID.
+A person may also add the agent first. Each Chat handle carries
+`is_contact`: whether the caller holds that member as a Contact; a person's
+reply or adding the agent makes it one. `contact.added` says a Contact edge was
+written, with the user Contact and the direct `chat_id`, and the agent may then
+write to that person. `contact.removed` includes the user Contact but no Chat
+ID. No event reports that a request was accepted or deleted.
 
 Do not add request listing, accepting, or deleting methods to the SDK. They
 are user routes, not in the public Relay v1 OpenAPI.
+
+## Chat activity
+
+Show a short label while the agent works on a task in a Chat, such as an emoji
+`🖼️` with `Generating image`. Use typing for composing a reply; activity is for
+the task. Each agent owns its own activity in each Chat where it is an active
+member.
+
+- `PUT /v1/chats/{chatId}/activity` (`relay.chats.setActivity`): `text` of 1
+  to 21 visible characters (at most 1024 UTF-8 bytes) and an optional single
+  Unicode `emoji`. Omit `activity_id` to start or replace; send the current
+  `activity.id` to renew or update the same task.
+- Renew every 60 seconds only while the task runs; each accepted update
+  extends the lease to 90 seconds and increments `version` (a string).
+- `DELETE /v1/chats/{chatId}/activity?activity_id=...`
+  (`relay.chats.clearActivity`) when the task ends, fails, or is cancelled.
+  It returns 204 even when a newer task has replaced it; the guard keeps an old
+  task's cleanup from clearing a newer one.
+- `GET /v1/chats/{chatId}/activity` (`relay.chats.getActivity`) returns
+  `chat_id`, `agent_id`, `version` and `activity` (`id`, `text`, `emoji`,
+  `updated_at`, `expires_at`), or `activity: null` when empty or expired. Chat
+  handles may carry `activity_version` and `activity`.
+
+```typescript
+const started = await relay.chats.setActivity(chatId, { text: "Generating image", emoji: "🖼️" });
+const activityId = started.activity!.id;
+const renew = setInterval(() => {
+  void relay.chats.setActivity(chatId, { text: "Generating image", emoji: "🖼️", activity_id: activityId });
+}, 60_000);
+try {
+  await generateImage();
+} finally {
+  clearInterval(renew);
+  await relay.chats.clearActivity(chatId, { activity_id: activityId });
+}
+```

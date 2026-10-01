@@ -94,3 +94,9 @@ around 90 seconds.
 `chat.typing_indicator.started` and `.stopped` data contain `chat_id` and the
 authenticated `contact` with `id`, `handle`, and `kind`. `trace_id` remains once
 at the event-envelope level.
+
+## Call events
+
+`call.created`, `call.updated` and `call.ended` use the same envelope and path.
+Join the room within 32 seconds of `call.created` to answer; keep the highest
+`revision` per `call.id`. See [calls](calls.md).
