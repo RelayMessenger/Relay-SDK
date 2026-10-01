@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { answer, CHARACTER, type RelayClient } from "../src/agent.js";
+import { answer, CHARACTER, recentWindow, recoverChats, VIDEO_DEADLINE_MS, wordsOf, type RelayClient } from "../src/agent.js";
 import { ProgressStore } from "../src/store.js";
 import { Xai, type Media, type ResponseItem } from "../src/xai.js";
 
@@ -13,8 +13,11 @@ const call = (name: string, args: Record<string, string>, id = "call-1"): Respon
 const say = (text: string): ResponseItem =>
   ({ type: "message", role: "assistant", content: [{ type: "output_text", text }] });
 
+/** A chat's messages, as Relay's REST API lists them for a FULL sync. */
+type Listed = { id: string; is_from_me: boolean; text: string; at: string };
+
 /** A Relay double that records sends and can fail the Nth send once. */
-function relay(failSend?: number) {
+function relay(failSend?: number, history: Record<string, Listed[]> = {}) {
   const sent: { chatId: string; body: unknown }[] = [];
   let sends = 0;
   const client = {
@@ -37,7 +40,17 @@ function relay(failSend?: number) {
           sent.push({ chatId, body });
           return { chat_id: chatId, message: { id: `message-${sends}` } } as never;
         }),
+        list: vi.fn(async (chatId: string) => (history[chatId] ?? []).map((m) => ({
+          id: m.id,
+          chat_id: chatId,
+          is_from_me: m.is_from_me,
+          is_system_message: false,
+          created_at: m.at,
+          from_handle: { handle: m.is_from_me ? "diego" : "sam", display_name: m.is_from_me ? "Diego" : "Sam" },
+          parts: [{ type: "text", value: m.text }],
+        })) as never),
       },
+      listChats: vi.fn(async () => Object.keys(history).map((id) => ({ id, is_group: false })) as never),
     },
     contactCard: {
       retrieve: vi.fn(async () => ({ contact_cards: [] })),
@@ -47,19 +60,35 @@ function relay(failSend?: number) {
   return { client, sent };
 }
 
-/** An xAI double: each /responses call returns the next output; every image edit returns one PNG. */
-function xai(outputs: ResponseItem[][]) {
+/**
+ * An xAI double: each /responses call returns the next output, every image
+ * edit returns one PNG, and a video is done on its second status check.
+ * `failOnce` makes the first request to that path reject as a dropped
+ * connection would.
+ */
+function xai(outputs: ResponseItem[][], options: { failOnce?: string; videoStatus?: string } = {}) {
   const requests: { path: string; body: Record<string, unknown> }[] = [];
-  const fetch = (async (url: string, init: RequestInit) => {
+  let failed = false;
+  let polls = 0;
+  const fetch = (async (url: string, init?: RequestInit) => {
+    if (url === "https://video.example.test/v.mp4") return new Response(PNG, { status: 200 });
     const path = url.replace("https://api.x.ai/v1", "");
-    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    if (path === options.failOnce && !failed) {
+      failed = true;
+      throw new TypeError("fetch failed");
+    }
+    const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
     requests.push({ path, body: structuredClone(body) });
-    const result = path === "/responses"
-      ? { output: outputs.shift() ?? [say("…")] }
-      : { data: [{ b64_json: Buffer.from(PNG).toString("base64") }] };
+    let result: unknown;
+    if (path === "/responses") result = { output: outputs.shift() ?? [say("…")] };
+    else if (path === "/videos/generations") result = { request_id: "video-1" };
+    else if (path === "/videos/video-1") {
+      polls += 1;
+      result = { status: options.videoStatus ?? (polls >= 2 ? "done" : "pending"), video: { url: "https://video.example.test/v.mp4" } };
+    } else result = { data: [{ b64_json: Buffer.from(PNG).toString("base64") }] };
     return new Response(JSON.stringify(result), { status: 200 });
   }) as unknown as typeof globalThis.fetch;
-  return { client: new Xai({ apiKey: "test", fetch }), requests };
+  return { client: new Xai({ apiKey: "test", fetch, pollMs: 1 }), requests };
 }
 
 const stores: ProgressStore[] = [];
@@ -143,5 +172,106 @@ describe("answer", () => {
 
     expect(sent).toEqual([]);
     expect(requests.filter((r) => r.path === "/responses")).toHaveLength(1);
+  });
+
+  it("hands malformed tool arguments back to Grok as an error it can correct", async () => {
+    const store = memory();
+    const { client: relayClient, sent } = relay();
+    const bad: ResponseItem = { type: "function_call", call_id: "call-bad", name: "send_picture", arguments: "{scene: oops" };
+    const { client: xaiClient, requests } = xai([[bad], [say("Let me try that again.")]]);
+
+    await answer(
+      { relay: relayClient, xai: xaiClient, store, reference: REFERENCE },
+      { eventId: "event-json", chatId: "chat", text: "selfie" },
+    );
+
+    const output = store.items("chat").find((item) => "type" in item && item.type === "function_call_output");
+    expect(output).toMatchObject({ call_id: "call-bad" });
+    expect(JSON.stringify(output)).toContain("not valid JSON");
+    expect(requests.filter((r) => r.path === "/responses")).toHaveLength(2);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("resumes a video after a dropped connection without requesting it again, and prunes its bytes", async () => {
+    const store = memory();
+    const { client: relayClient, sent } = relay();
+    const { client: xaiClient, requests } = xai(
+      [[call("send_video", { scene: "The Diag", action: "Digs up an acorn" })], [say("Watch this!")]],
+      { failOnce: "/videos/video-1" },
+    );
+    const deps = { relay: relayClient, xai: xaiClient, store, reference: REFERENCE };
+    const incoming = { eventId: "event-video", chatId: "chat", text: "video please" };
+
+    await expect(answer(deps, incoming)).rejects.toThrow("fetch failed");
+    await answer(deps, incoming);
+
+    expect(requests.filter((r) => r.path === "/videos/generations")).toHaveLength(1);
+    expect(requests.filter((r) => r.path === "/images/edits")).toHaveLength(1);
+    expect(sent.map((s) => (s.body as { message: { idempotency_key: string } }).message.idempotency_key))
+      .toEqual(["event-video:call-1", "event-video:1:text"]);
+    expect(store.mediaCount()).toBe(0);
+  });
+
+  it("tells Grok a video failed once its deadline passes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const store = memory();
+      const { client: relayClient } = relay();
+      const { client: xaiClient } = xai(
+        [[call("send_video", { scene: "The Diag", action: "Waves" })], [say("Sorry, no video this time.")]],
+        { videoStatus: "pending" },
+      );
+      store.saveVideo("event-late:call-1", "video-1", Date.now() - 1);
+      await answer(
+        { relay: relayClient, xai: xaiClient, store, reference: REFERENCE },
+        { eventId: "event-late", chatId: "chat", text: "video" },
+      );
+      const output = store.items("chat").find((item) => "type" in item && item.type === "function_call_output");
+      expect(JSON.stringify(output)).toContain("did not finish in time");
+      expect(VIDEO_DEADLINE_MS).toBe(600_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sends Grok a recent window that starts at a person's message", () => {
+    const items: ResponseItem[] = [];
+    for (let i = 0; i < 30; i++) {
+      items.push({ role: "user", content: `message ${i}` }, call("send_picture", { scene: "x" }, `call-${i}`),
+        { type: "function_call_output", call_id: `call-${i}`, output: "Sent." });
+    }
+    const window = recentWindow(items, 40);
+    expect(window.length).toBeLessThanOrEqual(41);
+    expect(window[0]).toEqual({ role: "developer", content: "Earlier messages in this chat are not shown." });
+    expect(window[1]).toMatchObject({ role: "user" });
+    expect(window.at(-1)).toEqual(items.at(-1));
+  });
+
+  it("on a FULL sync rebuilds the chat from Relay and answers a missed message once", async () => {
+    const store = memory();
+    const history = {
+      chat: [
+        { id: "m1", is_from_me: false, text: "hi", at: "2026-10-01T10:00:00Z" },
+        { id: "m2", is_from_me: true, text: "hey!", at: "2026-10-01T10:00:05Z" },
+        { id: "m3", is_from_me: false, text: "selfie?", at: "2026-10-01T10:05:00Z" },
+      ],
+    };
+    const { client: relayClient, sent } = relay(undefined, history);
+    const { client: xaiClient, requests } = xai([[say("Here I am!")]]);
+    const deps = { relay: relayClient, xai: xaiClient, store, reference: REFERENCE };
+    const describe = (message: { is_from_me: boolean; parts?: unknown }) =>
+      wordsOf((message.parts ?? []) as { type: string; value?: unknown }[], "Sam", false);
+
+    await recoverChats(deps, describe as never);
+    await recoverChats(deps, describe as never);
+    await answer(deps, { eventId: "late-event", chatId: "chat", messageId: "m3", text: "selfie?" });
+
+    expect(requests.filter((r) => r.path === "/responses")).toHaveLength(1);
+    expect(sent).toHaveLength(1);
+    expect(store.items("chat").slice(0, 3)).toEqual([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hey!" },
+      { role: "user", content: "selfie?" },
+    ]);
   });
 });

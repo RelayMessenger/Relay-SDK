@@ -10,7 +10,9 @@ export XAI_API_KEY='<your xAI API key>'
 uv run bot.py
 ```
 
-The bot waits on the Agent WebSocket for `call.created`, joins that Call with
+The bot keeps running and answers every Call. It listens for `call.created`
+with the Relay SDK's Agent WebSocket client (heartbeat and reconnect
+included), joins each Call with
 `RelayTransport` from `relaymessenger-pipecat`, and connects it to Pipecat's
 `GrokRealtimeLLMService` (`wss://api.x.ai/v1/realtime`, model
 `grok-voice-latest`). Call the agent from Relay on your phone.

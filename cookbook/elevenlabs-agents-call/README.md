@@ -12,7 +12,9 @@ export ELEVENLABS_AGENT_ID='<that agent_id>'
 uv run bot.py
 ```
 
-The bot waits on the Agent WebSocket for `call.created`, joins that Call with
+The bot keeps running and answers every Call. It listens for `call.created`
+with the Relay SDK's Agent WebSocket client (heartbeat and reconnect
+included), joins each Call with
 `RelayTransport`, and bridges it to the
 [ElevenLabs Agents WebSocket API](https://elevenlabs.io/docs/eleven-agents/libraries/web-sockets),
 which ElevenLabs lists for custom integrations. It follows ElevenLabs' own

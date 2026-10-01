@@ -1,5 +1,7 @@
 import type {
   AttachmentCreateParams,
+  Chat,
+  Message,
   AttachmentCreateResponse,
   ContactCardRetrieveResponse,
   ContactCardUpdateParams,
@@ -8,7 +10,7 @@ import type {
 } from "@relaymessenger/sdk";
 
 import type { ProgressStore } from "./store.js";
-import { outputText, type FunctionTool, type Media, type ResponseItem, type Xai } from "./xai.js";
+import { outputText, XaiError, type FunctionTool, type Media, type ResponseItem, type Xai } from "./xai.js";
 
 /** The fields this recipe reads from `contactCard.update`. */
 export interface ProfileCard {
@@ -78,6 +80,48 @@ export const TOOLS: FunctionTool[] = [
  */
 export const MAX_STEPS = 4;
 
+/**
+ * Grok sees at most this many recent items of a chat, cut at the start of a
+ * person's message so a tool call never loses its result. This is the
+ * trimming pattern of agent SDK sessions: older turns stay in the store and
+ * are left out of the request.
+ */
+export const HISTORY_WINDOW = 40;
+
+/** A video still pending this long after its request is reported to Grok as failed. */
+export const VIDEO_DEADLINE_MS = 10 * 60_000;
+
+function isPersonTurn(item: ResponseItem): boolean {
+  return "role" in item && !("type" in item) && item.role === "user";
+}
+
+/**
+ * The words Grok reads for one Relay Message: its text and links, prefixed in
+ * a group chat with who said them. Null for a Message with nothing to read.
+ */
+export function wordsOf(
+  parts: readonly { type: string; value?: unknown }[],
+  speaker: string,
+  inGroup: boolean,
+): string | null {
+  const words = parts
+    .map((part) => (part.type === "text" || part.type === "link" ? String(part.value ?? "") : ""))
+    .join("\n")
+    .trim();
+  if (!words) return null;
+  return inGroup ? `${speaker} (in a group chat): ${words}` : words;
+}
+
+export function recentWindow(items: ResponseItem[], limit = HISTORY_WINDOW): ResponseItem[] {
+  if (items.length <= limit) return items;
+  let start = items.length - limit;
+  while (start < items.length && !isPersonTurn(items[start]!)) start += 1;
+  return [
+    { role: "developer", content: "Earlier messages in this chat are not shown." },
+    ...items.slice(start),
+  ];
+}
+
 export function picturePrompt(scene: string, caption?: string): string {
   const meme = caption ? ` Bold white meme text with a black outline reads: "${caption}".` : "";
   return `${CHARACTER}. ${scene}.${meme} ${SAME_LOOK}`;
@@ -90,7 +134,11 @@ export interface RelayClient {
     upload(allocation: AttachmentCreateResponse, data: BodyInit): Promise<void>;
   };
   chats: {
-    messages: { send(chatId: string, body: MessageSendParams): Promise<MessageSendResponse> };
+    messages: {
+      send(chatId: string, body: MessageSendParams): Promise<MessageSendResponse>;
+      list(chatId: string, query?: { limit?: number }): Promise<AsyncIterable<Message>>;
+    };
+    listChats(query?: { limit?: number }): Promise<AsyncIterable<Chat>>;
   };
   contactCard: {
     retrieve(): Promise<ContactCardRetrieveResponse>;
@@ -127,6 +175,8 @@ export async function setProfilePicture(
 export interface Incoming {
   eventId: string;
   chatId: string;
+  /** The Relay Message being answered; one Message is answered once. */
+  messageId?: string;
   /** The person's words; in a group chat, prefixed with who said them. */
   text: string;
 }
@@ -148,7 +198,7 @@ export interface AgentDependencies {
 export async function answer(deps: AgentDependencies, incoming: Incoming): Promise<void> {
   const { store, xai } = deps;
   const { eventId, chatId } = incoming;
-  store.begin(eventId, chatId, { role: "user", content: incoming.text });
+  if (!store.begin(eventId, chatId, { role: "user", content: incoming.text }, incoming.messageId)) return;
   if (store.event(eventId)?.done !== false) return;
 
   for (;;) {
@@ -170,7 +220,7 @@ export async function answer(deps: AgentDependencies, incoming: Incoming): Promi
       store.finish(eventId);
       return;
     }
-    store.step(eventId, chatId, await xai.respond(PERSONA, store.items(chatId), TOOLS));
+    store.step(eventId, chatId, await xai.respond(PERSONA, recentWindow(store.items(chatId)), TOOLS));
   }
 }
 
@@ -185,13 +235,18 @@ function answeredCalls(items: ResponseItem[]): Set<string> {
 }
 
 /**
- * Runs one tool. A Grok Imagine failure becomes the tool's result, so Grok
- * can answer in words; a Relay failure throws, so the event is redelivered
- * and resumes here.
+ * Runs one tool. A failure xAI reports becomes the tool's result, so Grok
+ * can answer in words; a network or Relay failure throws, so the event is
+ * delivered again and resumes here.
  */
 async function runTool(deps: AgentDependencies, incoming: Incoming, call: FunctionCall): Promise<string> {
   if (call.name === "stay_silent") return "You sent nothing.";
-  const args = JSON.parse(call.arguments || "{}") as Record<string, string>;
+  let args: Record<string, string>;
+  try {
+    args = JSON.parse(call.arguments || "{}") as Record<string, string>;
+  } catch {
+    return `Your arguments were not valid JSON: ${call.arguments}. Call ${call.name} again with a JSON object.`;
+  }
   const key = `${incoming.eventId}:${call.call_id}`;
   let attachmentId = deps.store.upload(key);
   if (!attachmentId) {
@@ -200,10 +255,11 @@ async function runTool(deps: AgentDependencies, incoming: Incoming, call: Functi
       const still = await made(deps, `${key}:still`, () =>
         deps.xai.picture(deps.reference, picturePrompt(args.scene ?? "", args.caption)));
       media = call.name === "send_video"
-        ? await made(deps, `${key}:video`, () => deps.xai.video(still, `${args.action ?? ""} Static camera. ${SAME_LOOK}`))
+        ? await made(deps, `${key}:video`, () => video(deps, key, still, `${args.action ?? ""} Static camera. ${SAME_LOOK}`))
         : still;
     } catch (error) {
-      const result = `It did not work: ${error instanceof Error ? error.message : String(error)}`;
+      if (!(error instanceof XaiError)) throw error;
+      const result = `It did not work: ${error.message}`;
       console.error(JSON.stringify({ event: "tool_failed", tool: call.name, error: result }));
       return result;
     }
@@ -212,6 +268,51 @@ async function runTool(deps: AgentDependencies, incoming: Incoming, call: Functi
   }
   await send(deps, incoming.chatId, key, [{ type: "media", attachment_id: attachmentId }]);
   return `Sent the ${call.name === "send_video" ? "video" : "picture"}.`;
+}
+
+/** A video, requested once: the request id is saved before polling, so a restart polls it again. */
+async function video(deps: AgentDependencies, key: string, still: Media, prompt: string): Promise<Media> {
+  let request = deps.store.video(key);
+  if (!request) {
+    const requestId = await deps.xai.startVideo(still, prompt);
+    request = { requestId, deadline: Date.now() + VIDEO_DEADLINE_MS };
+    deps.store.saveVideo(key, request.requestId, request.deadline);
+  }
+  return deps.xai.videoResult(request.requestId, request.deadline);
+}
+
+/**
+ * FULL sync: Relay could not replay every event, so messages may have been
+ * missed. Rebuild each chat's history from Relay, then answer the newest
+ * person's message in each chat that came after the agent's last message and
+ * that no event has taken. Runs before the sync is acknowledged.
+ */
+export async function recoverChats(deps: AgentDependencies, describe: (message: Message, chat: Chat) => string | null): Promise<void> {
+  for await (const chat of await deps.relay.chats.listChats({ limit: 100 })) {
+    const messages: Message[] = [];
+    for await (const message of await deps.relay.chats.messages.list(chat.id, { limit: 100 })) messages.push(message);
+    messages.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+    const items: ResponseItem[] = [];
+    for (const message of messages) {
+      const text = describe(message, chat);
+      if (text === null) continue;
+      items.push(message.is_from_me ? { role: "assistant", content: text } : { role: "user", content: text });
+    }
+    const last = messages.at(-1);
+    const missed = last && !last.is_from_me && describe(last, chat) !== null && !deps.store.hasMessage(last.id)
+      ? last
+      : undefined;
+    // The missed message is added by its own event below, not by the snapshot.
+    deps.store.replaceChat(chat.id, missed ? items.slice(0, -1) : items);
+    if (missed) {
+      await answer(deps, {
+        eventId: `full-sync:${missed.id}`,
+        chatId: chat.id,
+        messageId: missed.id,
+        text: describe(missed, chat)!,
+      });
+    }
+  }
 }
 
 /** Grok Imagine output, made once and kept, so a retry never pays for it again. */

@@ -12,7 +12,9 @@ export ELEVENLABS_API_KEY='<your ElevenLabs API key>'
 uv run bot.py
 ```
 
-The bot waits on the Agent WebSocket for `call.created`, joins that Call with
+The bot keeps running and answers every Call. It listens for `call.created`
+with the Relay SDK's Agent WebSocket client (heartbeat and reconnect
+included), joins each Call with
 `RelayTransport` from `relaymessenger-pipecat`, and leaves when the Call ends.
 Call the agent from Relay on your phone.
 

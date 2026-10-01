@@ -26,7 +26,10 @@ export class ProgressStore {
         PRIMARY KEY (chat_id, seq));
       CREATE TABLE IF NOT EXISTS events (
         event_id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, steps INTEGER NOT NULL DEFAULT 0,
-        done INTEGER NOT NULL DEFAULT 0);
+        done INTEGER NOT NULL DEFAULT 0, message_id TEXT);
+      CREATE INDEX IF NOT EXISTS events_message ON events (message_id);
+      CREATE TABLE IF NOT EXISTS videos (
+        key TEXT PRIMARY KEY, request_id TEXT NOT NULL, deadline INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS steps (
         event_id TEXT NOT NULL, idx INTEGER NOT NULL, output TEXT NOT NULL,
         PRIMARY KEY (event_id, idx));
@@ -39,14 +42,43 @@ export class ProgressStore {
     `);
   }
 
-  /** Starts an event once: its first item joins the chat only on first delivery. */
-  begin(eventId: string, chatId: string, first: ResponseItem): void {
+  /**
+   * Starts an event once: its first item joins the chat only on first
+   * delivery. A Message already answered under another event (a FULL-sync
+   * recovery, then its late delivery) starts nothing; the result says so.
+   */
+  begin(eventId: string, chatId: string, first: ResponseItem, messageId?: string): boolean {
+    let started = false;
     this.#transaction(() => {
       const known = this.#db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(eventId);
-      if (known) return;
-      this.#db.prepare("INSERT INTO events (event_id, chat_id) VALUES (?, ?)").run(eventId, chatId);
+      if (known) {
+        started = true;
+        return;
+      }
+      if (messageId && this.#db.prepare("SELECT 1 FROM events WHERE message_id = ?").get(messageId)) return;
+      this.#db.prepare("INSERT INTO events (event_id, chat_id, message_id) VALUES (?, ?, ?)")
+        .run(eventId, chatId, messageId ?? null);
       this.#append(chatId, [first]);
+      started = true;
     });
+    return started;
+  }
+
+  /** Whether an event has already taken this Message. */
+  hasMessage(messageId: string): boolean {
+    return Boolean(this.#db.prepare("SELECT 1 FROM events WHERE message_id = ?").get(messageId));
+  }
+
+  /** A video request already sent to Grok Imagine, so polling resumes instead of paying again. */
+  video(key: string): { requestId: string; deadline: number } | undefined {
+    const row = this.#db.prepare("SELECT request_id, deadline FROM videos WHERE key = ?").get(key) as
+      { request_id: string; deadline: number } | undefined;
+    return row && { requestId: row.request_id, deadline: row.deadline };
+  }
+
+  saveVideo(key: string, requestId: string, deadline: number): void {
+    this.#db.prepare("INSERT OR REPLACE INTO videos (key, request_id, deadline) VALUES (?, ?, ?)")
+      .run(key, requestId, deadline);
   }
 
   event(eventId: string): { steps: number; done: boolean } | undefined {
@@ -83,8 +115,16 @@ export class ProgressStore {
     this.#transaction(() => this.#append(chatId, items));
   }
 
+  /** Marks the event done and drops the media bytes it kept; its upload ids stay. */
   finish(eventId: string): void {
-    this.#db.prepare("UPDATE events SET done = 1 WHERE event_id = ?").run(eventId);
+    this.#transaction(() => {
+      this.#db.prepare("UPDATE events SET done = 1 WHERE event_id = ?").run(eventId);
+      this.#db.prepare("DELETE FROM media WHERE key LIKE ? ESCAPE '\\'").run(`${likeEscape(eventId)}:%`);
+    });
+  }
+
+  mediaCount(): number {
+    return (this.#db.prepare("SELECT COUNT(*) AS n FROM media").get() as { n: number }).n;
   }
 
   /** A picture or video Grok Imagine already made, so a retry never pays for it twice. */
@@ -117,9 +157,12 @@ export class ProgressStore {
     this.#db.prepare("INSERT OR REPLACE INTO sent (key, message_id) VALUES (?, ?)").run(key, messageId);
   }
 
-  /** A FULL sync means Relay could not replay every event: every chat starts afresh. */
-  clearChats(): void {
-    this.#db.exec("DELETE FROM items");
+  /** Replaces one chat's history with a snapshot rebuilt from Relay (FULL sync). */
+  replaceChat(chatId: string, items: ResponseItem[]): void {
+    this.#transaction(() => {
+      this.#db.prepare("DELETE FROM items WHERE chat_id = ?").run(chatId);
+      this.#append(chatId, items);
+    });
   }
 
   close(): void {
@@ -143,4 +186,8 @@ export class ProgressStore {
       throw error;
     }
   }
+}
+
+function likeEscape(value: string): string {
+  return value.replace(/[\\%_]/gu, (character) => `\\${character}`);
 }

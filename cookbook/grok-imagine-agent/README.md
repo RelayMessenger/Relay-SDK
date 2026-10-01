@@ -35,7 +35,15 @@ The agent saves its progress in SQLite at `RELAY_STATE_PATH` (default
 Grok step, every picture and video it made, and every Message it sent. When
 Relay delivers an event again, the agent resumes from the last saved step. It
 never adds the person's words twice, asks Grok again for a finished step, or
-pays for the same picture twice. Grok gets at most four steps per message.
+pays for the same picture twice. A video's request id is saved before the
+agent waits for it, so a restart waits for the same video; after ten minutes
+Grok is told it failed. Grok gets at most four steps per message, and sees the
+most recent 40 items of a chat. Tool arguments that are not valid JSON go
+back to Grok as an error it can correct.
+
+When Relay sends a FULL sync, the agent rebuilds each Chat's history from
+Relay and answers the newest message it missed, before the sync is
+acknowledged.
 
 `XAI_MODEL` selects the Grok model; `RELAY_API_URL` selects another Relay API
 origin.

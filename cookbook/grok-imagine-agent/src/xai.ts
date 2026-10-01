@@ -7,6 +7,13 @@
 
 export const XAI_API = "https://api.x.ai/v1";
 
+/**
+ * xAI answered, and the answer was a failure (a refused prompt, a failed or
+ * late video). The agent tells Grok. A network failure is not an XaiError:
+ * it propagates, the event is delivered again, and the work resumes.
+ */
+export class XaiError extends Error {}
+
 export interface XaiOptions {
   apiKey: string;
   fetch?: typeof fetch;
@@ -71,7 +78,7 @@ export class Xai {
     });
     const text = await response.text();
     if (!response.ok) {
-      throw new Error(`xAI ${path} answered ${response.status}: ${text.slice(0, 300)}`);
+      throw new XaiError(`xAI ${path} answered ${response.status}: ${text.slice(0, 300)}`);
     }
     return JSON.parse(text) as T;
   }
@@ -110,11 +117,8 @@ export class Xai {
     }));
   }
 
-  /**
-   * A short video that starts from `still` (POST /videos/generations, then
-   * GET /videos/{request_id} until it is done).
-   */
-  async video(still: Media, prompt: string, seconds = 6): Promise<Media> {
+  /** Starts a short video from `still` (POST /videos/generations); returns its request id. */
+  async startVideo(still: Media, prompt: string, seconds = 6): Promise<string> {
     const { request_id: id } = await this.#call<{ request_id: string }>("/videos/generations", {
       model: this.videoModel,
       prompt,
@@ -122,19 +126,28 @@ export class Xai {
       duration: seconds,
       resolution: "480p",
     });
+    return id;
+  }
+
+  /**
+   * Waits for a started video (GET /videos/{request_id}) until it is done or
+   * `deadline` (epoch milliseconds) passes.
+   */
+  async videoResult(id: string, deadline: number): Promise<Media> {
     for (;;) {
+      if (Date.now() > deadline) throw new XaiError("The video did not finish in time.");
       await new Promise((resolve) => setTimeout(resolve, this.#pollMs));
       const job = await this.#call<{ status: string; video?: { url: string } }>(`/videos/${id}`);
       if (job.status === "done" && job.video) {
         const response = await this.#fetch(job.video.url);
-        if (!response.ok) throw new Error(`The video download answered ${response.status}.`);
+        if (!response.ok) throw new XaiError(`The video download answered ${response.status}.`);
         return {
           bytes: new Uint8Array(await response.arrayBuffer()),
           contentType: "video/mp4",
           filename: "video.mp4",
         };
       }
-      if (job.status !== "pending") throw new Error(`The video ended ${job.status}.`);
+      if (job.status !== "pending") throw new XaiError(`The video ended ${job.status}.`);
     }
   }
 }
@@ -150,7 +163,7 @@ export function outputText(output: ResponseItem[]): string {
 
 function decoded(result: { data?: { b64_json?: string }[] }): Media {
   const b64 = result.data?.[0]?.b64_json;
-  if (!b64) throw new Error("Grok Imagine returned no picture.");
+  if (!b64) throw new XaiError("Grok Imagine returned no picture.");
   const bytes = Uint8Array.from(Buffer.from(b64, "base64"));
   const contentType = imageType(bytes);
   return { bytes, contentType, filename: `picture.${contentType.slice(6)}` };
@@ -165,5 +178,5 @@ export function imageType(bytes: Uint8Array): "image/png" | "image/jpeg" | "imag
   if (bytes[0] === 0x89 && bytes[1] === 0x50) return "image/png";
   if (bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
   if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[8] === 0x57) return "image/webp";
-  throw new Error("Grok Imagine returned an image type this recipe does not know.");
+  throw new XaiError("Grok Imagine returned an image type this recipe does not know.");
 }

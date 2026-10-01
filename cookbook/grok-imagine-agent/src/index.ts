@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import Relay, { type RelayWebhookEvent } from "@relaymessenger/sdk";
 
-import { answer, CHARACTER, setProfilePicture } from "./agent.js";
+import { answer, CHARACTER, recoverChats, setProfilePicture, wordsOf } from "./agent.js";
 import { relayApiOrigin } from "./config.js";
 import { ProgressStore } from "./store.js";
 import { imageType, type Media, Xai } from "./xai.js";
@@ -41,6 +41,7 @@ if (referencePath) {
 const card = await setProfilePicture(relay, xai, reference);
 console.log(JSON.stringify({ event: "profile_picture_set", handle: card.handle, image_url: card.image_url }));
 
+const deps = { relay, xai, store, reference };
 const abort = new AbortController();
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => abort.abort());
 
@@ -54,21 +55,23 @@ try {
       if (event.event_type !== "message.received") return;
       const data = event.data;
       if (data.direction !== "inbound") return;
-      const words = data.parts
-        .map((part) => (part.type === "text" || part.type === "link" ? part.value : ""))
-        .join("\n")
-        .trim();
-      if (!words) return;
-      // In a group, Grok reads who said it and decides whether to answer.
       const speaker = data.sender_handle.display_name?.trim() || data.sender_handle.handle;
-      const text = data.chat.is_group ? `${speaker} (in a group chat): ${words}` : words;
+      // In a group, Grok reads who said it and decides whether to answer.
+      const text = wordsOf(data.parts, speaker, data.chat.is_group === true);
+      if (text === null) return;
       await relay.chats.startTyping(data.chat.id).catch(() => undefined);
-      await answer({ relay, xai, store, reference }, { eventId: event.event_id, chatId: data.chat.id, text });
+      await answer(deps, { eventId: event.event_id, chatId: data.chat.id, messageId: data.id, text });
       console.log(JSON.stringify({ event: "answered", event_id: event.event_id, chat_id: data.chat.id }));
     },
-    // A FULL sync means Relay could not replay every event: start each chat afresh.
+    // A FULL sync means Relay could not replay every event: rebuild each chat
+    // from Relay and answer what was missed, before the sync is acknowledged.
     async onFullSync() {
-      store.clearChats();
+      await recoverChats(deps, (message, chat) => {
+        if (message.is_system_message || !message.from_handle) return null;
+        if (message.is_from_me) return wordsOf(message.parts ?? [], "", false);
+        const speaker = message.from_handle.display_name?.trim() || message.from_handle.handle;
+        return wordsOf(message.parts ?? [], speaker, chat.is_group);
+      });
     },
     onError(error) {
       console.error(JSON.stringify({ event: "relay_websocket_reconnect", error: String(error) }));
