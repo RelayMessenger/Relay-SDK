@@ -1,8 +1,8 @@
 /**
- * The three xAI calls this agent makes, on xAI's REST API (https://docs.x.ai):
- * Grok chat completions with tools, Grok Imagine image edits, and Grok Imagine
- * image-to-video. Every call takes the reference picture, so the character
- * looks the same in every picture and video.
+ * The xAI calls this agent makes, on xAI's REST API (https://docs.x.ai):
+ * Grok on the Responses API with function tools, Grok Imagine image edits,
+ * and Grok Imagine image-to-video. Every picture starts from the reference
+ * picture, so the character looks the same in every picture and video.
  */
 
 export const XAI_API = "https://api.x.ai/v1";
@@ -10,7 +10,7 @@ export const XAI_API = "https://api.x.ai/v1";
 export interface XaiOptions {
   apiKey: string;
   fetch?: typeof fetch;
-  /** Chat model. */
+  /** Grok model on the Responses API. */
   model?: string;
   imageModel?: string;
   videoModel?: string;
@@ -18,22 +18,23 @@ export interface XaiOptions {
   pollMs?: number;
 }
 
-export interface ChatMessage {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string | null;
-  tool_calls?: ToolCall[];
-  tool_call_id?: string;
-}
+/**
+ * One Responses API item: a person's or the agent's message, a function call,
+ * a function call's output, or a reasoning item. Grok's output items go back
+ * into the next request's `input` unchanged.
+ */
+export type ResponseItem =
+  | { role: "user" | "assistant" | "developer"; content: string }
+  | { type: "function_call"; call_id: string; name: string; arguments: string; [key: string]: unknown }
+  | { type: "function_call_output"; call_id: string; output: string }
+  | { type: "message"; role: "assistant"; content: { type: string; text?: string }[]; [key: string]: unknown }
+  | { type: "reasoning"; [key: string]: unknown };
 
-export interface ToolCall {
-  id: string;
+export interface FunctionTool {
   type: "function";
-  function: { name: string; arguments: string };
-}
-
-export interface ToolDefinition {
-  type: "function";
-  function: { name: string; description: string; parameters: Record<string, unknown> };
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
 }
 
 export interface Media {
@@ -53,7 +54,7 @@ export class Xai {
   constructor(options: XaiOptions) {
     this.#apiKey = options.apiKey;
     this.#fetch = options.fetch ?? fetch;
-    this.model = options.model ?? "grok-4.20-non-reasoning";
+    this.model = options.model ?? "grok-4.7";
     this.imageModel = options.imageModel ?? "grok-imagine-image-2.0";
     this.videoModel = options.videoModel ?? "grok-imagine-video-1.5";
     this.#pollMs = options.pollMs ?? 5_000;
@@ -75,15 +76,19 @@ export class Xai {
     return JSON.parse(text) as T;
   }
 
-  /** One Grok chat turn. The reply is either text or tool calls. */
-  async chat(messages: ChatMessage[], tools: ToolDefinition[]): Promise<ChatMessage> {
-    const result = await this.#call<{ choices: { message: ChatMessage }[] }>(
-      "/chat/completions",
-      { model: this.model, messages, tools },
-    );
-    const message = result.choices[0]?.message;
-    if (!message) throw new Error("Grok returned no message.");
-    return message;
+  /**
+   * One Grok step (POST /responses). The whole chat goes in `input`, so the
+   * agent keeps its own history and stores nothing on xAI.
+   */
+  async respond(instructions: string, input: ResponseItem[], tools: FunctionTool[]): Promise<ResponseItem[]> {
+    const result = await this.#call<{ output: ResponseItem[] }>("/responses", {
+      model: this.model,
+      instructions,
+      input,
+      tools,
+      store: false,
+    });
+    return result.output;
   }
 
   /** A first picture from words alone (POST /images/generations). */
@@ -92,7 +97,6 @@ export class Xai {
       model: this.imageModel,
       prompt,
       response_format: "b64_json",
-      n: 1,
     }));
   }
 
@@ -101,12 +105,10 @@ export class Xai {
     return decoded(await this.#call("/images/edits", {
       model: this.imageModel,
       prompt,
-      image: { url: dataUrl(reference) },
+      image: { url: dataUrl(reference), type: "image_url" },
       response_format: "b64_json",
-      n: 1,
     }));
   }
-
 
   /**
    * A short video that starts from `still` (POST /videos/generations, then
@@ -135,6 +137,15 @@ export class Xai {
       if (job.status !== "pending") throw new Error(`The video ended ${job.status}.`);
     }
   }
+}
+
+/** The text of every assistant message in Grok's output. */
+export function outputText(output: ResponseItem[]): string {
+  return output
+    .flatMap((item) => ("type" in item && item.type === "message" ? item.content : []))
+    .map((part) => (part.type === "output_text" ? part.text ?? "" : ""))
+    .join("")
+    .trim();
 }
 
 function decoded(result: { data?: { b64_json?: string }[] }): Media {

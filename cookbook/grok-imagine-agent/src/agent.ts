@@ -7,7 +7,8 @@ import type {
   MessageSendResponse,
 } from "@relaymessenger/sdk";
 
-import type { ChatMessage, Media, ToolDefinition, Xai } from "./xai.js";
+import type { ProgressStore } from "./store.js";
+import { outputText, type FunctionTool, type Media, type ResponseItem, type Xai } from "./xai.js";
 
 /** The fields this recipe reads from `contactCard.update`. */
 export interface ProfileCard {
@@ -32,40 +33,50 @@ export const PERSONA =
   + "You text like a friend: one or two short sentences, no lists. You love acorns, campus gossip "
   + "and helping students find their way. You can make pictures of yourself with send_picture "
   + "(selfies, memes, you somewhere on campus) and short videos with send_video. Send one when it "
-  + "makes the chat more fun or when someone asks; never describe a picture you did not send.";
+  + "makes the chat more fun or when someone asks; never describe a picture you did not send. "
+  + "In a group chat, answer only when the message is for you or you have something to add; "
+  + "otherwise call stay_silent.";
 
-export const TOOLS: ToolDefinition[] = [
+export const TOOLS: FunctionTool[] = [
   {
     type: "function",
-    function: {
-      name: "send_picture",
-      description: "Make a picture of yourself (a selfie, a meme, you somewhere) and send it into the chat.",
-      parameters: {
-        type: "object",
-        properties: {
-          scene: { type: "string", description: "What the picture shows, in one sentence." },
-          caption: { type: "string", description: "Meme text drawn on the picture, if it is a meme." },
-        },
-        required: ["scene"],
+    name: "send_picture",
+    description: "Make a picture of yourself (a selfie, a meme, you somewhere) and send it into the chat.",
+    parameters: {
+      type: "object",
+      properties: {
+        scene: { type: "string", description: "What the picture shows, in one sentence." },
+        caption: { type: "string", description: "Meme text drawn on the picture, if it is a meme." },
       },
+      required: ["scene"],
     },
   },
   {
     type: "function",
-    function: {
-      name: "send_video",
-      description: "Make a short video of yourself (about 6 seconds) and send it into the chat. Takes about a minute.",
-      parameters: {
-        type: "object",
-        properties: {
-          scene: { type: "string", description: "Where you are, in one sentence." },
-          action: { type: "string", description: "What you do in the video, in one sentence." },
-        },
-        required: ["scene", "action"],
+    name: "send_video",
+    description: "Make a short video of yourself (about 6 seconds) and send it into the chat. Takes about a minute.",
+    parameters: {
+      type: "object",
+      properties: {
+        scene: { type: "string", description: "Where you are, in one sentence." },
+        action: { type: "string", description: "What you do in the video, in one sentence." },
       },
+      required: ["scene", "action"],
     },
+  },
+  {
+    type: "function",
+    name: "stay_silent",
+    description: "Send nothing for this message. Use it in a group chat when the message is not for you.",
+    parameters: { type: "object", properties: {} },
   },
 ];
+
+/**
+ * A runaway-loop limit, the `max_turns` of agent SDKs: Grok gets at most this
+ * many steps per incoming message, then the turn ends.
+ */
+export const MAX_STEPS = 4;
 
 export function picturePrompt(scene: string, caption?: string): string {
   const meme = caption ? ` Bold white meme text with a black outline reads: "${caption}".` : "";
@@ -113,53 +124,112 @@ export async function setProfilePicture(
   return relay.contactCard.update({ handle: card.handle, attachment_id: await upload(relay, picture) });
 }
 
+export interface Incoming {
+  eventId: string;
+  chatId: string;
+  /** The person's words; in a group chat, prefixed with who said them. */
+  text: string;
+}
+
+export interface AgentDependencies {
+  relay: RelayClient;
+  xai: Xai;
+  store: ProgressStore;
+  reference: Media;
+}
+
 /**
- * Answers one incoming message. Grok reads the chat so far and either
- * replies in text or calls a tool; a tool makes the picture or video with
- * Grok Imagine and sends it into the chat, then Grok continues. Returns the
- * ids of the Messages it sent. `key` makes every send idempotent, so a
- * redelivered event re-sends nothing new.
+ * Answers one incoming message, and resumes it after a failure. Every
+ * finished step is in the store before its side effects run: a redelivered
+ * event never adds the person's words twice, never asks Grok again for a
+ * step it already answered, never pays for a picture or video it already
+ * has, and re-sends a Message only with the same idempotency key and body.
  */
-export async function answer(
-  relay: RelayClient,
-  xai: Xai,
-  reference: Media,
-  chatId: string,
-  history: ChatMessage[],
-  key: string,
-): Promise<string[]> {
-  const sent: string[] = [];
-  const send = async (parts: MessageSendParams["message"]["parts"]): Promise<void> => {
-    const result = await relay.chats.messages.send(chatId, {
-      message: { parts, idempotency_key: `${key}:${sent.length}` },
-    });
-    sent.push(result.message.id);
-  };
-  const messages: ChatMessage[] = [{ role: "system", content: PERSONA }, ...history];
-  for (let step = 0; step < 4; step++) {
-    const reply = await xai.chat(messages, TOOLS);
-    messages.push(reply);
-    if (!reply.tool_calls?.length) {
-      if (reply.content?.trim()) await send([{ type: "text", value: reply.content.trim() }]);
-      break;
-    }
-    for (const call of reply.tool_calls) {
-      const args = JSON.parse(call.function.arguments) as Record<string, string>;
-      let result: string;
-      try {
-        const still = await xai.picture(reference, picturePrompt(args.scene ?? "", args.caption));
-        const media = call.function.name === "send_video"
-          ? await xai.video(still, `${args.action ?? ""} Static camera. ${SAME_LOOK}`)
-          : still;
-        await send([{ type: "media", attachment_id: await upload(relay, media) }]);
-        result = `Sent the ${call.function.name === "send_video" ? "video" : "picture"}.`;
-      } catch (error) {
-        result = `It did not work: ${error instanceof Error ? error.message : String(error)}`;
-        console.error(JSON.stringify({ event: "tool_failed", tool: call.function.name, error: result }));
+export async function answer(deps: AgentDependencies, incoming: Incoming): Promise<void> {
+  const { store, xai } = deps;
+  const { eventId, chatId } = incoming;
+  store.begin(eventId, chatId, { role: "user", content: incoming.text });
+  if (store.event(eventId)?.done !== false) return;
+
+  for (;;) {
+    const steps = store.steps(eventId);
+    // Finish the side effects of every recorded step; each is skipped once done.
+    for (const [index, output] of steps.entries()) {
+      const text = outputText(output);
+      if (text) await send(deps, chatId, `${eventId}:${index}:text`, [{ type: "text", value: text }]);
+      const answered = answeredCalls(store.items(chatId));
+      for (const call of functionCalls(output).filter((call) => !answered.has(call.call_id))) {
+        const result = await runTool(deps, incoming, call);
+        store.append(chatId, [{ type: "function_call_output", call_id: call.call_id, output: result }]);
       }
-      messages.push({ role: "tool", tool_call_id: call.id, content: result });
     }
+    const last = steps.at(-1);
+    const lastCalls = last ? functionCalls(last) : [];
+    const silent = lastCalls.length > 0 && lastCalls.every((call) => call.name === "stay_silent");
+    if ((last && lastCalls.length === 0) || silent || steps.length >= MAX_STEPS) {
+      store.finish(eventId);
+      return;
+    }
+    store.step(eventId, chatId, await xai.respond(PERSONA, store.items(chatId), TOOLS));
   }
-  history.splice(0, history.length, ...messages.slice(1));
-  return sent;
+}
+
+type FunctionCall = Extract<ResponseItem, { type: "function_call" }>;
+
+function functionCalls(output: ResponseItem[]): FunctionCall[] {
+  return output.filter((item): item is FunctionCall => "type" in item && item.type === "function_call");
+}
+
+function answeredCalls(items: ResponseItem[]): Set<string> {
+  return new Set(items.flatMap((item) => ("type" in item && item.type === "function_call_output" ? [item.call_id] : [])));
+}
+
+/**
+ * Runs one tool. A Grok Imagine failure becomes the tool's result, so Grok
+ * can answer in words; a Relay failure throws, so the event is redelivered
+ * and resumes here.
+ */
+async function runTool(deps: AgentDependencies, incoming: Incoming, call: FunctionCall): Promise<string> {
+  if (call.name === "stay_silent") return "You sent nothing.";
+  const args = JSON.parse(call.arguments || "{}") as Record<string, string>;
+  const key = `${incoming.eventId}:${call.call_id}`;
+  let attachmentId = deps.store.upload(key);
+  if (!attachmentId) {
+    let media: Media;
+    try {
+      const still = await made(deps, `${key}:still`, () =>
+        deps.xai.picture(deps.reference, picturePrompt(args.scene ?? "", args.caption)));
+      media = call.name === "send_video"
+        ? await made(deps, `${key}:video`, () => deps.xai.video(still, `${args.action ?? ""} Static camera. ${SAME_LOOK}`))
+        : still;
+    } catch (error) {
+      const result = `It did not work: ${error instanceof Error ? error.message : String(error)}`;
+      console.error(JSON.stringify({ event: "tool_failed", tool: call.name, error: result }));
+      return result;
+    }
+    attachmentId = await upload(deps.relay, media);
+    deps.store.saveUpload(key, attachmentId);
+  }
+  await send(deps, incoming.chatId, key, [{ type: "media", attachment_id: attachmentId }]);
+  return `Sent the ${call.name === "send_video" ? "video" : "picture"}.`;
+}
+
+/** Grok Imagine output, made once and kept, so a retry never pays for it again. */
+async function made(deps: AgentDependencies, key: string, make: () => Promise<Media>): Promise<Media> {
+  const kept = deps.store.media(key);
+  if (kept) return kept;
+  const media = await make();
+  deps.store.saveMedia(key, media);
+  return media;
+}
+
+async function send(
+  deps: AgentDependencies,
+  chatId: string,
+  key: string,
+  parts: MessageSendParams["message"]["parts"],
+): Promise<void> {
+  if (deps.store.sent(key)) return;
+  const result = await deps.relay.chats.messages.send(chatId, { message: { parts, idempotency_key: key } });
+  deps.store.saveSent(key, result.message.id);
 }

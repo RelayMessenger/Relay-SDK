@@ -40,8 +40,8 @@ npm start
 ```
 
 The three Call recipes are Python projects: copy one anywhere and run
-`uv run bot.py`. CI installs each from its own `uv.lock` outside the checkout
-and imports every script.
+`uv run bot.py`. CI installs each from its own `uv.lock` outside the checkout,
+imports every script, and runs its offline tests.
 
 Each Node recipe talks to `https://api.relayapp.im` unless `RELAY_API_URL`
 says otherwise, and needs only an Agent Token. Inside this checkout the same

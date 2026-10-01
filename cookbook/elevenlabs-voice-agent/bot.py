@@ -5,7 +5,7 @@
 The bot waits on the Agent WebSocket for ``call.created``, joins that Call with
 `RelayTransport` (joining answers it) and runs one Pipecat pipeline:
 
-    caller's voice -> ElevenLabs Scribe (speech to text) -> Grok (xAI) -> ElevenLabs (text to speech) -> caller
+    caller's voice -> ElevenLabs Scribe (speech to text) -> Grok (xAI Responses API) -> ElevenLabs (text to speech) -> caller
 
 It greets the caller once their audio arrives and leaves when the Call ends.
 RELAY_BASE_URL selects another Relay API origin.
@@ -29,7 +29,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.services.elevenlabs.stt import ElevenLabsRealtimeSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.services.xai.llm import GrokLLMService
+from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService, OpenAIResponsesReasoningConfig
 from pipecat.workers.runner import WorkerRunner
 
 from relaymessenger_pipecat import RelayParams, RelayTransport
@@ -39,7 +39,9 @@ BASE_URL = os.environ.get("RELAY_BASE_URL", "https://api.relayapp.im")
 # plan can use through the API.
 # Set ELEVENLABS_VOICE_ID to use another voice.
 VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "SOYHLrjzK2X1ezoPC6cr")
-GROK_MODEL = os.environ.get("XAI_MODEL", "grok-4.20-non-reasoning")
+GROK_MODEL = os.environ.get("XAI_MODEL", "grok-4.7")
+# xAI serves the Responses API at this origin; Pipecat's Responses service speaks it.
+XAI_BASE_URL = "https://api.x.ai/v1"
 PERSONA = os.environ.get(
     "AGENT_PERSONA",
     "You are Diego, a chubby, fast-talking squirrel who lives on the University of Michigan Diag. "
@@ -65,25 +67,33 @@ async def next_call(token: str) -> str:
     raise RuntimeError("The Agent WebSocket closed before a call arrived.")
 
 
-async def main() -> None:
-    token = os.environ["RELAY_AGENT_TOKEN"]
-    logger.info("Waiting for a call")
-    call_id = await next_call(token)
-    logger.info(f"Answering call {call_id}")
+# The greeting cue joins the context as a developer message, so the persona
+# stays the one system instruction and Grok greets in its own words.
+GREETING_CUE = {"role": "developer", "content": "The caller just picked up. Greet them."}
 
+
+def build(token: str, call_id: str, xai_key: str, elevenlabs_key: str) -> tuple[RelayTransport, PipelineWorker, LLMContext]:
+    """The transport, pipeline and context for one Call. Nothing connects until the worker runs."""
     transport = RelayTransport(
         api_key=token,
         call_id=call_id,
         base_url=BASE_URL,
         params=RelayParams(audio_in_enabled=True, audio_out_enabled=True),
     )
-    stt = ElevenLabsRealtimeSTTService(api_key=os.environ["ELEVENLABS_API_KEY"])
-    llm = GrokLLMService(
-        api_key=os.environ["XAI_API_KEY"],
-        settings=GrokLLMService.Settings(model=GROK_MODEL, system_instruction=PERSONA),
+    stt = ElevenLabsRealtimeSTTService(api_key=elevenlabs_key)
+    llm = OpenAIResponsesHttpLLMService(
+        api_key=xai_key,
+        base_url=XAI_BASE_URL,
+        settings=OpenAIResponsesHttpLLMService.Settings(
+            model=GROK_MODEL,
+            system_instruction=PERSONA,
+            # grok-4.7 reasons at "high" by default; "low" (its lowest documented
+            # effort) keeps a spoken answer quick.
+            reasoning=OpenAIResponsesReasoningConfig(effort="low"),
+        ),
     )
     tts = ElevenLabsTTSService(
-        api_key=os.environ["ELEVENLABS_API_KEY"],
+        api_key=elevenlabs_key,
         settings=ElevenLabsTTSService.Settings(
             voice=VOICE_ID,
             model="eleven_flash_v2_5",
@@ -107,8 +117,7 @@ async def main() -> None:
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport: RelayTransport, participant_id: str) -> None:
-        # The model greets the caller in its own words.
-        context.add_message({"role": "system", "content": "The caller just picked up. Greet them."})
+        context.add_message(GREETING_CUE)  # type: ignore[arg-type]
         await worker.queue_frame(LLMRunFrame())
 
     @transport.event_handler("on_participant_left")
@@ -116,6 +125,15 @@ async def main() -> None:
         logger.info(f"Call ended: {reason}")
         await worker.cancel()
 
+    return transport, worker, context
+
+
+async def main() -> None:
+    token = os.environ["RELAY_AGENT_TOKEN"]
+    logger.info("Waiting for a call")
+    call_id = await next_call(token)
+    logger.info(f"Answering call {call_id}")
+    _, worker, _ = build(token, call_id, os.environ["XAI_API_KEY"], os.environ["ELEVENLABS_API_KEY"])
     runner = WorkerRunner()
     await runner.add_workers(worker)
     await runner.run()

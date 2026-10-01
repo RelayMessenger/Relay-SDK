@@ -17,6 +17,7 @@ import base64
 import json
 import os
 import sys
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import aiohttp
@@ -27,7 +28,6 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
-    InterruptionFrame,
     OutputAudioRawFrame,
     StartFrame,
 )
@@ -44,14 +44,22 @@ SAMPLE_RATE = 16_000  # pcm_16000 on both sides of the ElevenLabs Agent
 
 
 class ElevenLabsAgentBridge(FrameProcessor):
-    """Sends the caller's audio to an ElevenLabs Agent and plays the agent's audio back into the Call."""
+    """Sends the caller's audio to an ElevenLabs Agent and plays the agent's audio back into the Call.
 
-    def __init__(self, api_key: str, agent_id: str) -> None:
+    It follows ElevenLabs' own Python SDK (elevenlabs.conversational_ai.conversation):
+    audio whose event_id is at or below the last interruption is dropped, every ping
+    is answered with a pong at once, and the session ends when ElevenLabs closes it.
+    """
+
+    def __init__(self, api_key: str, agent_id: str, on_closed: Callable[[], Awaitable[None]]) -> None:
         super().__init__()
         self._api_key = api_key
         self._agent_id = agent_id
+        self._on_closed = on_closed
         self._ws: Any = None
         self._reader: asyncio.Task[None] | None = None
+        self._last_interrupt_id = 0
+        self._closed = False
 
     async def _signed_url(self) -> str:
         async with aiohttp.ClientSession(headers={"xi-api-key": self._api_key}) as http:
@@ -67,31 +75,58 @@ class ElevenLabsAgentBridge(FrameProcessor):
         self._reader = asyncio.create_task(self._read())
 
     async def _read(self) -> None:
-        async for raw in self._ws:
-            message = json.loads(raw)
-            kind = message.get("type")
-            if kind == "conversation_initiation_metadata":
-                event = message["conversation_initiation_metadata_event"]
-                logger.info(
-                    f"ElevenLabs conversation {event['conversation_id']}: in {event['user_input_audio_format']}, "
-                    f"out {event['agent_output_audio_format']}"
-                )
-            elif kind == "audio":
-                audio = base64.b64decode(message["audio_event"]["audio_base_64"])
-                await self.push_frame(OutputAudioRawFrame(audio=audio, sample_rate=SAMPLE_RATE, num_channels=1))
-            elif kind == "interruption":
-                # The caller talked over the agent: drop the agent's queued audio.
-                await self.push_frame(InterruptionFrame())
-            elif kind == "ping":
-                event = message["ping_event"]
-                await asyncio.sleep((event.get("ping_ms") or 0) / 1000)
-                await self._ws.send(json.dumps({"type": "pong", "event_id": event["event_id"]}))
-            elif kind == "user_transcript":
-                logger.info(f"Caller: {message['user_transcription_event']['user_transcript']}")
-            elif kind == "agent_response":
-                logger.info(f"Agent: {message['agent_response_event']['agent_response']}")
+        try:
+            async for raw in self._ws:
+                await self.handle_message(json.loads(raw))
+        except websockets.ConnectionClosed:
+            pass
+        await self._session_ended()
+
+    async def _session_ended(self) -> None:
+        """ElevenLabs closed the conversation: stop sending audio and end the Relay Call."""
+        if self._closed:
+            return
+        self._closed = True
+        logger.info("ElevenLabs ended the conversation")
+        await self._on_closed()
+
+    async def handle_message(self, message: dict[str, Any]) -> None:
+        kind = message.get("type")
+        if kind == "conversation_initiation_metadata":
+            event = message["conversation_initiation_metadata_event"]
+            logger.info(
+                f"ElevenLabs conversation {event['conversation_id']}: in {event['user_input_audio_format']}, "
+                f"out {event['agent_output_audio_format']}"
+            )
+        elif kind == "audio":
+            event = message["audio_event"]
+            # Audio from a response the caller already interrupted is stale.
+            if int(event["event_id"]) <= self._last_interrupt_id:
+                return
+            audio = base64.b64decode(event["audio_base_64"])
+            await self.push_frame(OutputAudioRawFrame(audio=audio, sample_rate=SAMPLE_RATE, num_channels=1))
+        elif kind == "interruption":
+            # The caller talked over the agent: drop the agent's queued audio.
+            self._last_interrupt_id = int(message["interruption_event"]["event_id"])
+            await self.broadcast_interruption()
+        elif kind == "ping":
+            await self._ws.send(json.dumps({"type": "pong", "event_id": message["ping_event"]["event_id"]}))
+        elif kind == "user_transcript":
+            logger.info(f"Caller: {message['user_transcription_event']['user_transcript']}")
+        elif kind == "agent_response":
+            logger.info(f"Agent: {message['agent_response_event']['agent_response']}")
+
+    async def send_audio(self, audio: bytes) -> None:
+        """One chunk of the caller's audio, unless ElevenLabs has ended the conversation."""
+        if self._ws is None or self._closed:
+            return
+        try:
+            await self._ws.send(json.dumps({"user_audio_chunk": base64.b64encode(audio).decode()}))
+        except websockets.ConnectionClosed:
+            await self._session_ended()
 
     async def _close(self) -> None:
+        self._closed = True
         if self._reader is not None:
             self._reader.cancel()
         if self._ws is not None:
@@ -103,13 +138,39 @@ class ElevenLabsAgentBridge(FrameProcessor):
             await self.push_frame(frame, direction)
             await self._connect()
         elif isinstance(frame, InputAudioRawFrame):
-            if self._ws is not None:
-                await self._ws.send(json.dumps({"user_audio_chunk": base64.b64encode(frame.audio).decode()}))
+            await self.send_audio(frame.audio)
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._close()
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
+
+
+def build(token: str, call_id: str, api_key: str, agent_id: str) -> tuple[RelayTransport, PipelineWorker]:
+    """The transport and pipeline for one Call. Nothing connects until the worker runs."""
+    transport = RelayTransport(
+        api_key=token,
+        call_id=call_id,
+        base_url=BASE_URL,
+        params=RelayParams(audio_in_enabled=True, audio_out_enabled=True),
+    )
+
+    async def end_call() -> None:
+        transport.end()
+
+    bridge = ElevenLabsAgentBridge(api_key, agent_id, on_closed=end_call)
+    worker = PipelineWorker(
+        Pipeline([transport.input(), bridge, transport.output()]),
+        params=PipelineParams(audio_in_sample_rate=SAMPLE_RATE, audio_out_sample_rate=SAMPLE_RATE),
+        cancel_on_idle_timeout=False,
+    )
+
+    @transport.event_handler("on_participant_left")
+    async def on_participant_left(transport: RelayTransport, participant_id: str, reason: str) -> None:
+        logger.info(f"Call ended: {reason}")
+        await worker.cancel()
+
+    return transport, worker
 
 
 async def next_call(token: str) -> str:
@@ -134,25 +195,7 @@ async def main() -> None:
     logger.info("Waiting for a call")
     call_id = await next_call(token)
     logger.info(f"Answering call {call_id}")
-
-    transport = RelayTransport(
-        api_key=token,
-        call_id=call_id,
-        base_url=BASE_URL,
-        params=RelayParams(audio_in_enabled=True, audio_out_enabled=True),
-    )
-    bridge = ElevenLabsAgentBridge(os.environ["ELEVENLABS_API_KEY"], os.environ["ELEVENLABS_AGENT_ID"])
-    worker = PipelineWorker(
-        Pipeline([transport.input(), bridge, transport.output()]),
-        params=PipelineParams(audio_in_sample_rate=SAMPLE_RATE, audio_out_sample_rate=SAMPLE_RATE),
-        cancel_on_idle_timeout=False,
-    )
-
-    @transport.event_handler("on_participant_left")
-    async def on_participant_left(transport: RelayTransport, participant_id: str, reason: str) -> None:
-        logger.info(f"Call ended: {reason}")
-        await worker.cancel()
-
+    _, worker = build(token, call_id, os.environ["ELEVENLABS_API_KEY"], os.environ["ELEVENLABS_AGENT_ID"])
     runner = WorkerRunner()
     await runner.add_workers(worker)
     await runner.run()

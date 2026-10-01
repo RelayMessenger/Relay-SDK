@@ -36,7 +36,8 @@ async def main() -> None:
                 "similarity_boost": 0.75,
                 "speed": 1.2,
             },
-            "agent": {"language": "en", "prompt": {"prompt": PROMPT}},
+            # No canned greeting: the agent waits for the caller and answers in its own words.
+            "agent": {"language": "en", "first_message": "", "prompt": {"prompt": PROMPT}},
         },
     }
     async with aiohttp.ClientSession(headers={"xi-api-key": os.environ["ELEVENLABS_API_KEY"]}) as http:

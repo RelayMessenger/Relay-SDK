@@ -54,12 +54,15 @@ async def next_call(token: str) -> str:
     raise RuntimeError("The Agent WebSocket closed before a call arrived.")
 
 
-async def main() -> None:
-    token = os.environ["RELAY_AGENT_TOKEN"]
-    logger.info("Waiting for a call")
-    call_id = await next_call(token)
-    logger.info(f"Answering call {call_id}")
+# The greeting cue joins the context as a developer message. A context
+# "system" message is dropped whenever system_instruction is set (Pipecat's
+# Grok realtime adapter keeps only one system prompt); a developer message
+# reaches Grok as a turn, and Grok greets in its own words.
+GREETING_CUE = {"role": "developer", "content": "The caller just picked up. Greet them."}
 
+
+def build(token: str, call_id: str, api_key: str) -> tuple[RelayTransport, PipelineWorker, LLMContext]:
+    """The transport, pipeline and context for one Call. Nothing connects until the worker runs."""
     transport = RelayTransport(
         api_key=token,
         call_id=call_id,
@@ -67,13 +70,12 @@ async def main() -> None:
         params=RelayParams(audio_in_enabled=True, audio_out_enabled=True),
     )
     llm = GrokRealtimeLLMService(
-        api_key=os.environ["XAI_API_KEY"],
+        api_key=api_key,
         settings=GrokRealtimeLLMService.Settings(
             system_instruction=PERSONA,
             session_properties=events.SessionProperties(voice=os.environ.get("XAI_VOICE", "eve")),
         ),
     )
-
     context = LLMContext()
     aggregators = LLMContextAggregatorPair(context)
     worker = PipelineWorker(
@@ -84,8 +86,7 @@ async def main() -> None:
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport: RelayTransport, participant_id: str) -> None:
-        # Grok greets the caller in its own words.
-        context.add_message({"role": "system", "content": "The caller just picked up. Greet them."})
+        context.add_message(GREETING_CUE)  # type: ignore[arg-type]
         await worker.queue_frame(LLMRunFrame())
 
     @transport.event_handler("on_participant_left")
@@ -93,6 +94,15 @@ async def main() -> None:
         logger.info(f"Call ended: {reason}")
         await worker.cancel()
 
+    return transport, worker, context
+
+
+async def main() -> None:
+    token = os.environ["RELAY_AGENT_TOKEN"]
+    logger.info("Waiting for a call")
+    call_id = await next_call(token)
+    logger.info(f"Answering call {call_id}")
+    _, worker, _ = build(token, call_id, os.environ["XAI_API_KEY"])
     runner = WorkerRunner()
     await runner.add_workers(worker)
     await runner.run()

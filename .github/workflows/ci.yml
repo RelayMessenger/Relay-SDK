@@ -126,8 +126,11 @@ jobs:
 
   # The Python cookbook folders (the Pipecat voice agents) must work when a
   # developer copies one out of GitHub: each is copied outside the checkout,
-  # installed from its own uv.lock, and every script in it is imported, which
-  # proves the locked Pipecat, ElevenLabs and xAI services it names exist.
+  # installed from its own uv.lock, every script is imported, and its tests
+  # run offline. The tests build each bot's services and Pipecat pipeline
+  # with placeholder keys (nothing connects), check the greeting reaches the
+  # model, and check the ElevenLabs Agents bridge against a fake socket. They
+  # do not place a call; the live call is proven by hand on staging.
   cookbook-python:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 20
@@ -153,6 +156,7 @@ jobs:
                 uv run --locked python -c "import ${script%.py}"
                 echo "$source/$script imports"
               done
+              uv run --locked pytest -q
             )
             rm -rf "$copy"
           done

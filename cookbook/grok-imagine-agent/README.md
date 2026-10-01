@@ -13,21 +13,29 @@ npm start
 ```
 
 On start, the agent makes a profile picture from the reference picture and
-sets it on its Contact Card. Then it answers each message in a direct Chat
-through the Agent WebSocket.
+sets it on its Contact Card. Then it answers each message, in direct and group
+Chats, through the Agent WebSocket, with `grok-4.7` on xAI's Responses API.
 
-Grok decides when to send media. It has two tools:
+Grok decides what to do. It has three tools:
 
 - `send_picture` makes a picture with Grok Imagine image edits
   (`grok-imagine-image-2.0`, `POST /v1/images/edits`), uploads it, and sends it.
 - `send_video` makes a picture the same way, turns it into a 6-second video
   (`grok-imagine-video-1.5`, `POST /v1/videos/generations`), and sends it.
+- `stay_silent` sends nothing. Grok uses it in a group Chat when the message
+  is not for it.
 
 Every picture starts from the reference picture and the same character
 description, so the character looks the same each time. Without
 `REFERENCE_IMAGE`, Grok Imagine draws a first portrait from the description.
 Edit `CHARACTER` and `PERSONA` in `src/agent.ts` for your own character.
 
-Chat history lives in memory and starts over after a restart. `XAI_MODEL`
-selects the Grok model (default `grok-4.20-non-reasoning`); `RELAY_API_URL`
-selects another Relay API origin.
+The agent saves its progress in SQLite at `RELAY_STATE_PATH` (default
+`~/.relay/examples/grok-imagine-agent/state.db`): each Chat's history, each
+Grok step, every picture and video it made, and every Message it sent. When
+Relay delivers an event again, the agent resumes from the last saved step. It
+never adds the person's words twice, asks Grok again for a finished step, or
+pays for the same picture twice. Grok gets at most four steps per message.
+
+`XAI_MODEL` selects the Grok model; `RELAY_API_URL` selects another Relay API
+origin.

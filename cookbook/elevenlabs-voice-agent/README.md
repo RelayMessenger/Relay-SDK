@@ -19,7 +19,7 @@ Call the agent from Relay on your phone.
 | Setting | Default |
 | --- | --- |
 | Speech to text | `ElevenLabsRealtimeSTTService` (Scribe) |
-| LLM | `GrokLLMService`, model `grok-4.20-non-reasoning` (`XAI_MODEL`) |
+| LLM | `OpenAIResponsesHttpLLMService` on xAI's Responses API (`https://api.x.ai/v1`), model `grok-4.7` (`XAI_MODEL`), reasoning effort `low` |
 | Voice | `ElevenLabsTTSService`, model `eleven_flash_v2_5` |
 | Voice ID | `SOYHLrjzK2X1ezoPC6cr` (`ELEVENLABS_VOICE_ID`) |
 | Voice settings | stability 0.3, similarity boost 0.75, style 0, speaker boost on, speed 1.2 |
