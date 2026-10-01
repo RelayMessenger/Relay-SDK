@@ -64,3 +64,13 @@ async def test_calls_run_side_by_side_once_each_and_a_failed_call_is_logged(monk
     assert answered == ["c1", "c2"]
     assert overlapped == [True]
     assert any("Call c1 failed" in line for line in logged)
+
+
+def test_tests_never_reach_the_network() -> None:
+    import socket
+
+    import pytest
+
+    # 192.0.2.1 is TEST-NET-1 (RFC 5737): reserved, never a real service.
+    with pytest.raises(RuntimeError, match="never reach the network"):
+        socket.create_connection(("192.0.2.1", 443), timeout=1)

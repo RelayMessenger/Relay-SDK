@@ -127,7 +127,9 @@ jobs:
   # The Python cookbook folders (the Pipecat voice agents) must work when a
   # developer copies one out of GitHub: each is copied outside the checkout,
   # installed from its own uv.lock, every script is imported, and its tests
-  # run offline. The tests build each bot's services and Pipecat pipeline
+  # run offline: each folder's conftest.py fails every connection off this
+  # machine, so a test never reaches xAI, ElevenLabs or LiveKit Cloud even if
+  # a key is set. The tests build each bot's services and Pipecat pipeline
   # with placeholder keys (nothing connects), check the greeting reaches the
   # model, and check the ElevenLabs Agents bridge against a fake socket. They
   # do not place a call; the live call is proven by hand on staging.
