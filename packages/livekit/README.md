@@ -1,9 +1,9 @@
 # `@relaymessenger/livekit`
 
 `@relaymessenger/livekit` connects Relay Calls to TypeScript LiveKit Agents.
-It translates audio between the Relay SDK's call transport
+It translates audio and video between the Relay SDK's call transport
 (`RelayCallTransport` from `@relaymessenger/sdk/calls`) and LiveKit
-`AudioFrame` objects. The transport owns the Node WebRTC peer, so application
+`AudioFrame` and `VideoFrame` objects. The transport owns the Node WebRTC peer, so application
 code does not handle Cloudflare, SDP, ICE, or SFU credentials.
 
 Install it next to the Relay SDK and the LiveKit Agents runtime:
@@ -54,6 +54,46 @@ pump paces the wire. `flush()` closes the segment and reports
 audio that has not reached the wire and reports the segment as interrupted at
 the position that actually played.
 
+## Video
+
+The person's camera arrives as `@livekit/rtc-node` `VideoFrame`s (I420) on
+`call.videoInput`. LiveKit Agents for Node has no `session.input.video`, so
+read the frames yourself: keep `call.videoInput.latestFrame` for an
+`llm.ImageContent` when the user's turn completes, or iterate
+`call.videoInput` into a realtime model that takes video. A reader always gets
+the newest frame; frames it did not read in time are replaced, not queued.
+
+```ts
+import { llm, voice } from "@livekit/agents";
+
+class Assistant extends voice.Agent {
+  override async onUserTurnCompleted(_chatCtx: llm.ChatContext, newMessage: llm.ChatMessage) {
+    const frame = call.videoInput.latestFrame;
+    if (frame) newMessage.content.push(llm.createImageContent({ image: frame }));
+  }
+}
+```
+
+To send the agent's own video, make a `VideoSource`, wrap it in a
+`LocalVideoTrack` and publish it on the transport, with the same names as
+LiveKit's `LocalParticipant.publishTrack`. `captureFrame` takes
+`@livekit/rtc-node` frames; any layout the encoder does not take is converted
+to I420 by LiveKit's own converter first.
+
+```ts
+import { VideoBufferType, VideoFrame } from "@livekit/rtc-node";
+import { LocalVideoTrack, VideoSource } from "@relaymessenger/livekit";
+
+const source = new VideoSource(640, 360);
+const track = LocalVideoTrack.createVideoTrack("camera", source);
+await call.transport.publishTrack(track, { videoEncoding: { maxFramerate: 15 } });
+source.captureFrame(new VideoFrame(rgba, 640, 360, VideoBufferType.RGBA));
+```
+
+`new VideoStream(track)` reads any `RemoteVideoTrack` as LiveKit
+`VideoFrameEvent`s. Video needs `node-webcodecs`, an optional dependency of
+this package.
+
 Use `setMuted(true)` to publish participant mute state, `end()` to end the Relay
 Call, and `close()` for local cleanup. If the signaling connection is replaced,
 `call.transport.reconnect()` keeps the existing media peer and replays the same
@@ -61,7 +101,7 @@ audio publication so Relay can return its cached answer.
 
 `RelayLiveKitCall.connect()` accepts the transport's `iceServers`,
 `iceTransportPolicy` and `sessionConnectTimeoutMs`; `call.waitForPeerAudio()`
-and `call.diagnostics()` read the transport. Video, ICE servers, restarts and
+and `call.diagnostics()` read the transport. Frame rates, ICE servers, restarts and
 diagnostics are documented with the transport in the
 [`@relaymessenger/sdk` README](https://github.com/RelayMessenger/Relay-SDK/tree/main/packages/sdk#join-a-call-as-the-agent).
 `@livekit/agents` and `@livekit/rtc-node` are peer dependencies so the host

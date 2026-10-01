@@ -1,6 +1,7 @@
 export {
   RelayAudioInput,
   RelayAudioOutput,
+  RelayVideoInput,
   LIVEKIT_ROOM_INPUT_AUDIO,
   RelayLiveKitCall,
   createRelayLiveKitAudio,
@@ -8,3 +9,17 @@ export {
   type RelayLiveKitAudioOptions,
   type RelayLiveKitConnectOptions,
 } from "./livekit.js";
+export {
+  LocalVideoTrack,
+  RemoteVideoTrack,
+  VideoCodec,
+  VideoSource,
+  VideoStream,
+  toRelayFrame,
+  toRtcFrame,
+  type RelayVideoReceiverStats,
+  type RelayVideoSenderStats,
+  type TrackPublishOptions,
+  type VideoEncoding,
+  type VideoStreamOptions,
+} from "./video.js";

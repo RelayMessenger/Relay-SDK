@@ -447,7 +447,7 @@ only exchange SDP in the room protocol and never receive Cloudflare
 credentials, session IDs, or ICE-provider configuration. Node agents that want
 this SDP/ICE and PCM plumbing handled for them use `RelayCallTransport` from
 `@relaymessenger/sdk/calls`, below; `@relaymessenger/livekit` plugs it into
-LiveKit Agents audio input and output.
+LiveKit Agents audio and video.
 
 ### Join a Call as the agent
 
