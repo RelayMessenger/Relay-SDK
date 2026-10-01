@@ -801,3 +801,16 @@ async def test_audio_time_is_rtp_time_sent_plus_queued() -> None:
     await transport.write_audio(RelayAudioFrame(samples=np.zeros(4_800, dtype=np.int16), sample_rate=48_000, channel_count=1))
     assert transport.audio_time_ms() == pytest.approx(12_440)
     await transport.aclose()
+
+
+async def test_rive_is_rejected_at_once_when_the_room_refuses_the_channel() -> None:
+    transport, room = make()
+    await (await connected(transport, room))
+    opening = asyncio.ensure_future(transport.rive())
+    await settle()
+    room.emit("error", {"type": "error", "code": "media_unavailable", "message": "The rive channel is unavailable."})
+    with pytest.raises(RelayCallTransportError) as raised:
+        await asyncio.wait_for(opening, 1)
+    assert raised.value.code == "media_unavailable"
+    assert not FakePeer.instances[0].closed
+    await transport.aclose()

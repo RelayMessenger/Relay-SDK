@@ -1,7 +1,7 @@
 import NodeWebSocket from "ws";
 import type {
   Call,
-  CallRoomRiveFrame,
+  CallRoomRiveChannelFrame,
   CallRoomClientFrame,
   CallRoomEndedFrame,
   CallRoomErrorCode,
@@ -91,8 +91,8 @@ export type CallRoomEventMap = {
   roomState: [CallRoomStateFrame];
   offer: [CallRoomSubscriptionOfferFrame];
   answer: [CallRoomServerAnswerFrame];
-  /** The room opened this agent's `rive` data channel; see `CallRoomRiveFrame`. */
-  rive: [CallRoomRiveFrame];
+  /** The room opened this agent's `rive` data channel; see `CallRoomRiveChannelFrame`. */
+  rive: [CallRoomRiveChannelFrame];
   ended: [CallRoomEndedFrame];
   error: [CallRoomErrorFrame | Error];
   /** The room socket closed and the room will not reopen it by itself. */
@@ -215,7 +215,7 @@ export const parseCallRoomServerFrame = (value: unknown): CallRoomServerFrame | 
         || !Number.isInteger(value.id)
         || (value.id as number) < 0
         || (value.id as number) > 65_534) break;
-      return value as unknown as CallRoomRiveFrame;
+      return value as unknown as CallRoomRiveChannelFrame;
     case "ended":
       if (!hasExactKeys(value, ["type", "reason"])
         || !TERMINAL_STATUSES.has(value.reason as CallTerminalStatus)) break;

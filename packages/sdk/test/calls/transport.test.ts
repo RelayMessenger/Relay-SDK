@@ -1555,3 +1555,18 @@ it("reads the audio clock as RTP time sent plus everything queued", async () => 
   expect(transport.audioTimeMs()).toBe(12_500);
   transport.close();
 });
+
+it("rejects rive() at once when the room refuses the channel, and the call goes on", async () => {
+  const room = new FakeRoom();
+  const webRTC = new FakeWebRTC();
+  const transport = makeTransport(room, webRTC);
+  await connectTransport(transport, room);
+  const errors: Error[] = [];
+  transport.on("error", (error) => errors.push(error));
+  const opening = transport.rive();
+  room.emit("error", { type: "error", code: "media_unavailable", message: "The rive channel is unavailable." });
+  await expect(opening).rejects.toMatchObject({ code: "media_unavailable" });
+  expect(webRTC.peers[0]!.closed).toBe(false);
+  expect(errors).toHaveLength(1);
+  transport.close();
+});

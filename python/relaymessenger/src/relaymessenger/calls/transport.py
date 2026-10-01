@@ -1071,6 +1071,9 @@ class RelayCallTransport(EventEmitter[TransportEvent]):
                 return
             self._room_errors.append(error["message"])
             parsed = RelayCallTransportError(error["message"], error["code"])
+            # Relay refuses a rive channel with ``media_unavailable`` and keeps the call (Relay-Server #488).
+            if error["code"] == "media_unavailable":
+                self._reject_rive(parsed)
             self._reject_ready(parsed)
             self.emit("error", parsed)
 

@@ -15,6 +15,8 @@ export interface CallContact {
   id: UUID;
   handle: string;
   kind: "user" | "agent";
+  /** Agents only: the Rive file it shows in its calls, so the app can load it while the call rings; null when none. */
+  rive?: RiveFile | null;
   /**
    * People only: the person's IANA time zone name ("America/Detroit"), as their
    * Relay app last reported it; null until it reports one. When the person
@@ -151,14 +153,18 @@ export interface CallRoomHeartbeatFrame {
   type: "heartbeat";
 }
 
-/** Ask the room to open this agent's `rive` data channel on its current session. */
-export interface CallRoomRiveRequestFrame {
+/**
+ * Contract `CallRoomRiveFrame`. An agent publishes its `rive` data channel; a
+ * person receives the agent's. Sent again while the channel is open, Relay
+ * repeats its `id`.
+ */
+export interface CallRoomRiveFrame {
   type: "rive";
 }
 
 export type CallRoomClientFrame =
   | CallRoomJoinFrame
-  | CallRoomRiveRequestFrame
+  | CallRoomRiveFrame
   | CallRoomPublishOfferFrame
   | CallRoomAnswerFrame
   | CallRoomConnectedFrame
@@ -185,11 +191,12 @@ export interface CallRoomSubscriptionOfferFrame {
 }
 
 /**
- * The room created this agent's `rive` channel on its SFU session. Open it
- * with `createDataChannel("rive", { negotiated: true, id, ordered: false,
- * maxRetransmits: 0 })` (Cloudflare Realtime `datachannels/new`).
+ * Contract `CallRoomRiveChannelFrame`: the `rive` channel is open on this
+ * participant's Session. Open it with `createDataChannel("rive", {
+ * negotiated: true, id, ordered: false, maxRetransmits: 0 })`. After a restart
+ * onto a new Session, Relay opens it again with a new `id`.
  */
-export interface CallRoomRiveFrame {
+export interface CallRoomRiveChannelFrame {
   type: "rive";
   /** The negotiated SCTP stream id Cloudflare returned. */
   id: number;
@@ -233,7 +240,7 @@ export type CallRoomServerFrame =
   | CallRoomStateFrame
   | CallRoomServerAnswerFrame
   | CallRoomSubscriptionOfferFrame
-  | CallRoomRiveFrame
+  | CallRoomRiveChannelFrame
   | CallRoomEndedFrame
   | CallRoomErrorFrame;
 
@@ -544,6 +551,8 @@ export type HandleOwner =
 
 export interface AgentChatHandle extends ChatHandleBase {
   kind: "agent";
+  /** The Rive file this agent shows in its calls, so an app can load it early; null when it has none. */
+  rive?: RiveFile | null;
   /** Who owns this agent. Null for an agent no organization or person owns. */
   owner?: HandleOwner | null;
 }
@@ -1605,28 +1614,30 @@ export type ContactLookupResponse =
   | { contacts: ContactLookup[] };
 
 /**
- * The Rive file an agent shows in calls while it sends no video. Relay hosts
- * the `.riv` (at most 10 MB, embedded assets only), uploaded as an
- * attachment like the profile picture. The phone draws `state_machine` on
- * `artboard` and binds an instance of `view_model`; the agent drives it with
- * `transport.rive()` from `@relaymessenger/sdk/calls`.
+ * Contract `RiveFile`: the Rive file an agent shows in its calls (a
+ * character, a quiz, a game, a chart). The app draws `artboard`, runs
+ * `state_machine` and binds `view_model`; the agent drives it live with
+ * `transport.rive()` from `@relaymessenger/sdk/calls`. A null name means the
+ * file's default.
  */
-export interface AgentRive {
-  /** Relay-hosted `.riv` URL. */
+export interface RiveFile {
+  /** The `.riv` Relay hosts, at a permanent address whose bytes never change. */
   file: string;
-  artboard: string;
-  state_machine: string;
-  view_model: string;
+  artboard: string | null;
+  state_machine: string | null;
+  view_model: string | null;
 }
 
-/** Set the agent's Rive file from a completed `.riv` upload; names default to the file's defaults. */
-export interface AgentRiveUpdate {
-  /** Caller-owned completed `.riv` upload. */
-  attachment_id: UUID;
-  artboard?: string;
-  state_machine?: string;
-  view_model?: string;
-}
+/**
+ * Contract `RiveFileInput`: `attachment_id` for a new file (this agent's
+ * completed upload, a Rive file of at most 10 MB with every image and font
+ * embedded), or `file` with the address the card already holds to change only
+ * the names. The names you send replace all three; omitted or null means the
+ * file's default.
+ */
+export type RiveFileInput =
+  & { artboard?: string | null; state_machine?: string | null; view_model?: string | null }
+  & ({ attachment_id: UUID; file?: never } | { file: string; attachment_id?: never });
 
 export interface ContactCardItem {
   /**
@@ -1663,7 +1674,7 @@ export interface ContactCardItem {
    */
   about?: string | null;
   /** An agent's Rive file for calls, or null when it has none. Only on an agent's card. */
-  rive?: AgentRive | null;
+  rive?: RiveFile | null;
   kind: "user" | "agent";
 }
 
@@ -1681,7 +1692,7 @@ export interface SetContactCardResponse {
   /** Dominant colour of the picture, six uppercase hex digits; null when Relay has none. */
   image_color: string | null;
   /** The agent's Rive file for calls, or null when it has none. */
-  rive?: AgentRive | null;
+  rive?: RiveFile | null;
   is_active: boolean;
   handle: string;
   kind: "user" | "agent";
@@ -1719,8 +1730,8 @@ export interface ContactCardUpdateParams {
   attachment_id?: UUID;
   /** Existing redraw metadata; requires an image URL or completed upload. */
   image_recipe?: AgentImageRecipe;
-  /** Set the Rive file shown in calls from a completed `.riv` upload, or clear it with null. */
-  rive?: AgentRiveUpdate | null;
+  /** Set the Rive file shown in calls, change its names, or clear it with null (which deletes the hosted file). */
+  rive?: RiveFileInput | null;
 }
 
 export interface BlockedHandle {

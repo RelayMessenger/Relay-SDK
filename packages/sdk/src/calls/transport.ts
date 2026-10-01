@@ -1,6 +1,6 @@
 import type {
   CallRoom,
-  CallRoomRiveFrame,
+  CallRoomRiveChannelFrame,
   CallRoomCloseEvent,
   CallRoomEndedFrame,
   CallRoomErrorFrame,
@@ -1097,7 +1097,7 @@ export class RelayCallTransport {
   }
 
   /** The room created the channel on this peer's session: open its negotiated end. */
-  #openRiveChannel(frame: CallRoomRiveFrame): void {
+  #openRiveChannel(frame: CallRoomRiveChannelFrame): void {
     const peer = this.#peer;
     const rive = this.#rive;
     if (!peer?.createDataChannel || !rive || this.#closed || this.#ended) return;
@@ -1433,7 +1433,7 @@ export class RelayCallTransport {
       this.#roomOffers += 1;
       this.#queueNegotiation(() => this.#serverOffer(frame));
     });
-    this.#room.on("rive", (frame: CallRoomRiveFrame) => {
+    this.#room.on("rive", (frame: CallRoomRiveChannelFrame) => {
       // Queued behind the establish offer's answer, so the SCTP transport exists.
       this.#queueNegotiation(async () => this.#openRiveChannel(frame));
     });
@@ -1543,6 +1543,8 @@ export class RelayCallTransport {
   #serverError(frame: CallRoomErrorFrame): void {
     this.#roomErrors.push(frame.message);
     const error = new RelayCallTransportError(frame.message, frame.code);
+    // Relay refuses a rive channel with `media_unavailable` and keeps the call (Relay-Server #488).
+    if (frame.code === "media_unavailable") this.#rejectRive(error);
     this.#rejectReady(error);
     this.#emit("error", error);
   }
