@@ -88,6 +88,14 @@ export const MAX_STEPS = 4;
  */
 export const HISTORY_WINDOW = 40;
 
+/**
+ * An event is tried on at most this many deliveries. After the last one
+ * fails, the agent gives up on it, so a failure that repeats (xAI refusing
+ * the request) never blocks the chat: the event is acknowledged and the
+ * next message goes through.
+ */
+export const MAX_DELIVERIES = 3;
+
 /** A video still pending this long after its request is reported to Grok as failed. */
 export const VIDEO_DEADLINE_MS = 10 * 60_000;
 
@@ -200,7 +208,49 @@ export async function answer(deps: AgentDependencies, incoming: Incoming): Promi
   const { eventId, chatId } = incoming;
   if (!store.begin(eventId, chatId, { role: "user", content: incoming.text }, incoming.messageId)) return;
   if (store.event(eventId)?.done !== false) return;
+  const delivery = store.delivered(eventId);
+  try {
+    await run(deps, incoming);
+  } catch (error) {
+    if (delivery < MAX_DELIVERIES) throw error;
+    store.fail(eventId);
+    console.error(JSON.stringify({
+      event: "event_failed",
+      event_id: eventId,
+      deliveries: delivery,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    await sayItFailed(deps, incoming);
+  }
+}
 
+/**
+ * After giving up, Grok tells the person in its own words that it could not
+ * do that. If Grok cannot answer either, the agent stays silent.
+ */
+async function sayItFailed(deps: AgentDependencies, incoming: Incoming): Promise<void> {
+  try {
+    const cue: ResponseItem = {
+      role: "developer",
+      content: "You could not answer the person's last message because of an error. Tell them briefly that you couldn't do that.",
+    };
+    const output = await deps.xai.respond(PERSONA, [...recentWindow(deps.store.items(incoming.chatId)), cue], []);
+    const text = outputText(output);
+    if (!text) return;
+    await send(deps, incoming.chatId, `${incoming.eventId}:failed`, [{ type: "text", value: text }]);
+    deps.store.append(incoming.chatId, [{ role: "assistant", content: text }]);
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "failure_notice_failed",
+      event_id: incoming.eventId,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+}
+
+async function run(deps: AgentDependencies, incoming: Incoming): Promise<void> {
+  const { store, xai } = deps;
+  const { eventId, chatId } = incoming;
   for (;;) {
     const steps = store.steps(eventId);
     // Finish the side effects of every recorded step; each is skipped once done.

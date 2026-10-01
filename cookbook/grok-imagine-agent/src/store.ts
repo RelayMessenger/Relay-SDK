@@ -26,7 +26,8 @@ export class ProgressStore {
         PRIMARY KEY (chat_id, seq));
       CREATE TABLE IF NOT EXISTS events (
         event_id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, steps INTEGER NOT NULL DEFAULT 0,
-        done INTEGER NOT NULL DEFAULT 0, message_id TEXT);
+        done INTEGER NOT NULL DEFAULT 0, message_id TEXT,
+        deliveries INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0);
       CREATE INDEX IF NOT EXISTS events_message ON events (message_id);
       CREATE TABLE IF NOT EXISTS videos (
         key TEXT PRIMARY KEY, request_id TEXT NOT NULL, deadline INTEGER NOT NULL);
@@ -62,6 +63,23 @@ export class ProgressStore {
       started = true;
     });
     return started;
+  }
+
+  /** Counts one more delivery of an event and returns the count. */
+  delivered(eventId: string): number {
+    this.#db.prepare("UPDATE events SET deliveries = deliveries + 1 WHERE event_id = ?").run(eventId);
+    return (this.#db.prepare("SELECT deliveries FROM events WHERE event_id = ?").get(eventId) as { deliveries: number }).deliveries;
+  }
+
+  /** Marks an event failed: it is done, and Relay may forget it. */
+  fail(eventId: string): void {
+    this.#db.prepare("UPDATE events SET failed = 1 WHERE event_id = ?").run(eventId);
+    this.finish(eventId);
+  }
+
+  failed(eventId: string): boolean {
+    return (this.#db.prepare("SELECT failed FROM events WHERE event_id = ?").get(eventId) as { failed: number } | undefined)
+      ?.failed === 1;
   }
 
   /** Whether an event has already taken this Message. */

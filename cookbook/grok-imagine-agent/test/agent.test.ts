@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { answer, CHARACTER, recentWindow, recoverChats, VIDEO_DEADLINE_MS, wordsOf, type RelayClient } from "../src/agent.js";
+import { answer, CHARACTER, MAX_DELIVERIES, recentWindow, recoverChats, VIDEO_DEADLINE_MS, wordsOf, type RelayClient } from "../src/agent.js";
 import { ProgressStore } from "../src/store.js";
 import { Xai, type Media, type ResponseItem } from "../src/xai.js";
 
@@ -66,7 +66,10 @@ function relay(failSend?: number, history: Record<string, Listed[]> = {}) {
  * `failOnce` makes the first request to that path reject as a dropped
  * connection would.
  */
-function xai(outputs: ResponseItem[][], options: { failOnce?: string; videoStatus?: string } = {}) {
+function xai(
+  outputs: ResponseItem[][],
+  options: { failOnce?: string; videoStatus?: string; refuse?: (body: Record<string, unknown>) => boolean } = {},
+) {
   const requests: { path: string; body: Record<string, unknown> }[] = [];
   let failed = false;
   let polls = 0;
@@ -79,6 +82,9 @@ function xai(outputs: ResponseItem[][], options: { failOnce?: string; videoStatu
     }
     const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
     requests.push({ path, body: structuredClone(body) });
+    if (path === "/responses" && options.refuse?.(body)) {
+      return new Response(JSON.stringify({ error: "invalid request" }), { status: 400 });
+    }
     let result: unknown;
     if (path === "/responses") result = { output: outputs.shift() ?? [say("…")] };
     else if (path === "/videos/generations") result = { request_id: "video-1" };
@@ -273,5 +279,50 @@ describe("answer", () => {
       { role: "assistant", content: "hey!" },
       { role: "user", content: "selfie?" },
     ]);
+  });
+
+  it("gives up on an event after its third failed delivery, says so, and lets the next message through", async () => {
+    const store = memory();
+    const { client: relayClient, sent } = relay();
+    let broken = true;
+    let noticeWorks = true;
+    const { client: xaiClient } = xai([[say("Sorry, I couldn't do that one.")], [say("Hi again!")]], {
+      // xAI refuses every normal turn while broken; the failure notice has no tools.
+      refuse: (body) => (broken && (body.tools as unknown[]).length > 0) || (!noticeWorks && (body.tools as unknown[]).length === 0),
+    });
+    const deps = { relay: relayClient, xai: xaiClient, store, reference: REFERENCE };
+    const first = { eventId: "event-stuck", chatId: "chat", text: "do the impossible" };
+
+    expect(MAX_DELIVERIES).toBe(3);
+    await expect(answer(deps, first)).rejects.toThrow("answered 400");
+    await expect(answer(deps, first)).rejects.toThrow("answered 400");
+    await answer(deps, first); // the third delivery is acknowledged
+    expect(store.failed("event-stuck")).toBe(true);
+    expect(sent.map((s) => s.body)).toEqual([
+      { message: { parts: [{ type: "text", value: "Sorry, I couldn't do that one." }], idempotency_key: "event-stuck:failed" } },
+    ]);
+
+    await answer(deps, first); // a fourth delivery does nothing
+    expect(sent).toHaveLength(1);
+
+    broken = false;
+    noticeWorks = false;
+    await answer(deps, { eventId: "event-next", chatId: "chat", text: "hi" });
+    expect(sent.at(-1)!.body).toEqual(
+      { message: { parts: [{ type: "text", value: "Hi again!" }], idempotency_key: "event-next:0:text" } },
+    );
+  });
+
+  it("acknowledges a failed event even when Grok cannot send the notice", async () => {
+    const store = memory();
+    const { client: relayClient, sent } = relay();
+    const { client: xaiClient } = xai([], { refuse: () => true });
+    const deps = { relay: relayClient, xai: xaiClient, store, reference: REFERENCE };
+    const stuck = { eventId: "event-dead", chatId: "chat", text: "hello?" };
+
+    for (let delivery = 1; delivery < MAX_DELIVERIES; delivery++) await expect(answer(deps, stuck)).rejects.toThrow();
+    await answer(deps, stuck);
+    expect(store.failed("event-dead")).toBe(true);
+    expect(sent).toEqual([]);
   });
 });
